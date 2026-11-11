@@ -88,14 +88,21 @@ LIMITS_TOOL = "add_safety_profile"
 #: The doors that show a code for a yes Kiln's servers wait for: the tool,
 #: and what typing the code does, as the banner says it.
 ACTION_TOOLS: dict[str, str] = {
-    "fulfillment_order": "Type the code in your chat to place this order.",
+    "fulfillment_order": "Type the code in your chat to order.",
     "set_design_public": "Type the code in your chat to make this design public.",
 }
 #: What an action's codes are counted under, where a print's are counted
 #: under its printer.
 ACTION_SCOPE = "kiln account"
-#: Most characters of an action's subject a banner carries.
+#: Most characters of an action's subject a banner carries.  A subject is
+#: what the yes is to (a price, a count, an address); it is shown whole or
+#: no code is shown.
 _SUBJECT_CHARS = 110
+#: Most characters of the line beneath it.
+_DETAIL_CHARS = 60
+#: Most characters of a lead the servers wrote for a banner: one line of a
+#: notification, so it is read without opening anything.
+_LEAD_CHARS = 36
 
 #: Outcomes of :func:`issue`.
 SHOWN = "shown"
@@ -132,6 +139,8 @@ class Issued:
     #: to, in the servers' own words, and the servers' request it answers.
     subject: str = ""
     ticket: str = ""
+    #: The line beneath the subject, as the servers wrote it (a name).
+    detail: str = ""
 
     def live(self, now: float | None = None) -> bool:
         return (now if now is not None else time.time()) < self.expires_at
@@ -211,10 +220,13 @@ def banner_text(issued: Issued) -> tuple[str, str, str]:
     from kiln.print_consent import display_name
 
     if issued.tool in ACTION_TOOLS:
-        subject = " ".join(issued.subject.split())
-        if len(subject) > _SUBJECT_CHARS:
-            subject = subject[: _SUBJECT_CHARS - 1].rstrip() + "…"
-        return f"Kiln code {issued.code}", subject, ACTION_TOOLS[issued.tool]
+        # The subject is never shortened here: a code is only issued for one
+        # that fits (:func:`subject_fits`).
+        detail = _one_line(issued.detail)
+        if len(detail) > _DETAIL_CHARS:
+            detail = detail[: _DETAIL_CHARS - 1].rstrip() + "…"
+        said = ACTION_TOOLS[issued.tool]
+        return f"Kiln code {issued.code}", _one_line(issued.subject), f"{detail} {said}" if detail else said
     printer = issued.printer_label or issued.printer_name or "your printer"
     if issued.tool == LIMITS_TOOL:
         return (
@@ -228,6 +240,19 @@ def banner_text(issued: Issued) -> tuple[str, str, str]:
         "Type the code in your chat to print it. "
         "Add 2h or today to keep printing without asking.",
     )
+
+
+def _one_line(text: str) -> str:
+    return " ".join(str(text or "").split())
+
+
+def subject_fits(subject: str, detail: str = "", *, whole: bool = False) -> bool:
+    """Whether a banner can show what the yes is to, whole.  It is never
+    cut: with no room, no code is shown.  *whole* is for the two banner
+    lines the servers wrote: both are facts, and both must fit."""
+    if not whole:
+        return 0 < len(_one_line(subject)) <= _SUBJECT_CHARS
+    return 0 < len(_one_line(subject)) <= _LEAD_CHARS and 0 < len(_one_line(detail)) <= _DETAIL_CHARS
 
 
 def _applescript_string(text: str) -> str:
@@ -537,7 +562,7 @@ def _prune(now: float) -> None:
 
 def issue(
     *, tool: str, file_name: str, file_sha256: str, printer_name: str | None, host: str = "",
-    printer_label: str = "", subject: str = "", ticket: str = "",
+    printer_label: str = "", subject: str = "", ticket: str = "", detail: str = "", whole: bool = False,
 ) -> dict[str, Any]:
     """Show a code for this print, or say why not.  The result NEVER
     carries the code.  Outcomes: ``shown`` (``again`` when it was already
@@ -550,6 +575,8 @@ def issue(
     question differently (*file_name*), which is a new code."""
     if not screen_available():
         return {"outcome": UNAVAILABLE, "reason": "no_screen"}
+    if tool in ACTION_TOOLS and not subject_fits(subject, detail, whole=whole):
+        return {"outcome": UNAVAILABLE, "reason": "question_too_long"}
     now = time.time()
     key = _key(file_name, printer_name)
     pkey = _printer_key(printer_name)
@@ -582,6 +609,7 @@ def issue(
             file_sha256=file_sha256 or "", printer_name=str(printer_name or ""), host=host,
             issued_at=now, issued_mono=time.monotonic(), expires_at=now + CODE_TTL_S, shown_at=now,
             printer_label=str(printer_label or ""), subject=str(subject or ""), ticket=str(ticket or ""),
+            detail=str(detail or ""),
         )
         if not _show(issued):
             return {"outcome": UNAVAILABLE, "reason": "banner_failed"}

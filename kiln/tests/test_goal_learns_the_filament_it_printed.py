@@ -217,7 +217,7 @@ class TestTheReprintDoor:
         self, tmp_path, monkeypatch, servers,
     ):
         _model, gcode = _sliced(tmp_path, goal=None)
-        result = _reprint(monkeypatch, _Bench(), gcode, brief_id=GOAL, chosen_by="person")
+        result = _reprint(monkeypatch, _Bench(), gcode, goal_id=GOAL, chosen_by="person")
 
         assert result["success"] is True
         assert len(servers.calls) == 1
@@ -235,6 +235,26 @@ class TestTheReprintDoor:
         assert said["recorded"] is True
         assert said["replaced"] == "PEEK"
         assert said["recorded_on"] == "kiln_servers"
+
+    def test_the_goals_safety_notes_for_the_new_filament_reach_the_reprints_reply(
+        self, tmp_path, monkeypatch, servers,
+    ):
+        note = "PLA goes soft near a hot bulb or in a hot car (around 50 °C)."
+        servers.answer = {
+            "status": "success",
+            "material_change": {
+                "brief_id": GOAL, "recorded": True, "material": "PLA", "replaced": "PETG",
+                "why": "", "note": "The goal now records it.", "safety_notes": [note, 7, ""],
+            },
+        }
+        _model, gcode = _sliced(tmp_path, goal=None)
+        result = _reprint(monkeypatch, _Bench(), gcode, goal_id=GOAL, chosen_by="person")
+        assert result["goal_material"]["safety_notes"] == [note]
+
+    def test_a_goal_with_no_note_adds_none_to_the_reprints_reply(self, tmp_path, monkeypatch, servers):
+        _model, gcode = _sliced(tmp_path, goal=None)
+        result = _reprint(monkeypatch, _Bench(), gcode, goal_id=GOAL, chosen_by="person")
+        assert "safety_notes" not in result["goal_material"]
 
     def test_the_goal_beside_the_model_is_found_when_the_door_names_none(
         self, tmp_path, monkeypatch, servers,

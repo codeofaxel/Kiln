@@ -68,8 +68,16 @@ the opener is missing (an older kiln-pro) or fails, the failure is logged and
 the result carries the one-line note saying what was skipped; when the
 person's store does not take the session within the opener's short budget,
 the result says the make was not saved to their history, and no version is
-claimed.  A plain install is untouched, because there ``compile_scad`` IS
-the loop.
+claimed.
+
+On an install without kiln-pro ``compile_scad`` IS the loop, and the goal
+for a make that names none lives in the person's Kiln account
+(:func:`kiln._pro_goal_bridge.open_for`).  A signed-in install tells Kiln's
+servers about the model without sending it -- its fingerprint, and for a
+model Kiln made here the tool and what the call named it -- and the reply
+carries the goal's ``saved_goal`` block and the safety notes the object
+calls for.  A signed-out install says what signing in adds; a make is never
+held back or changed either way.
 """
 
 from __future__ import annotations
@@ -183,37 +191,48 @@ NOT_A_MAKE_DOOR: dict[str, str] = {
     "iterate_decoration": "iterates a decoration, not an object",
 }
 
-#: The parameter a make door takes to join a saved goal: the goal's id, as
-#: ``design_session`` returns it.  Every make door takes it, or says in
+#: The parameter a make door takes to join a saved goal: the goal's id,
+#: under the name ``design_session`` returns it by.  Every make door takes it, or says in
 #: :data:`GOAL_NAMED_ELSEWHERE` where the goal is named instead -- so "an
 #: imported part joins the goal too" is a property of the roster, checked
 #: against the registry, not a sentence.
-GOAL_PARAM = "brief_id"
+GOAL_PARAM = "goal_id"
+
+#: The spelling of :data:`GOAL_PARAM` that make doors declared before they
+#: took the front door's own name.  A call that sends it is read as
+#: :data:`GOAL_PARAM` (:mod:`kiln.goal_argument`), and a reply block keeps it
+#: as a second key (:func:`goal_keys`) for readers of earlier replies.
+EARLIER_GOAL_PARAM = "brief_id"
+
+
+def goal_keys(goal: str) -> dict[str, str]:
+    """A saved goal's id as a reply block carries it."""
+    return {GOAL_PARAM: goal, EARLIER_GOAL_PARAM: goal}
 
 #: Make doors that cannot take the goal themselves, and where it is named.
 #: Two shapes: a door that starts a cloud job (the mesh arrives through
 #: another door, which takes the goal), and a door that makes a BATCH of
 #: variants (one goal per make; the variant kept is made through its own
 #: door).  Each value is the sentence stamped on that door in place of the
-#: ``brief_id`` tail.
+#: ``goal_id`` tail.
 GOAL_NAMED_ELSEWHERE: dict[str, str] = {
     "generate_model": (
         "The model arrives through `download_generated_model`; give that "
-        f"call `{GOAL_PARAM}` set to the goal_id, so the result joins the goal."
+        f"call the goal's `{GOAL_PARAM}`, so the result joins the goal."
     ),
     "generate_model_from_image": (
         "The model arrives through `download_generated_model`; give that "
-        f"call `{GOAL_PARAM}` set to the goal_id, so the result joins the goal."
+        f"call the goal's `{GOAL_PARAM}`, so the result joins the goal."
     ),
     "optimize_template_params": (
         "This makes a batch of variants, so it names no goal; make the one "
         "the person keeps through `generate_from_template` with "
-        f"`{GOAL_PARAM}` set to the goal_id."
+        f"the goal's `{GOAL_PARAM}`."
     ),
     "generate_template_variations": (
         "This makes a batch of variants, so it names no goal; make the one "
         "the person keeps through `generate_from_template` with "
-        f"`{GOAL_PARAM}` set to the goal_id."
+        f"the goal's `{GOAL_PARAM}`."
     ),
 }
 
@@ -296,14 +315,10 @@ ENGINE_CLAUSE_HEAD = (
     f"an object — {_WHAT_IT_KEEPS}."
 )
 
-#: The tail for a door that takes the goal's id itself.  It names both
-#: spellings on purpose: design_session hands back a ``goal_id``, and the
-#: make doors took that id as ``brief_id`` long before this roster, so the
-#: sentence carries the agent from one name to the other.
+#: The tail for a door that takes the goal's id itself.
 ENGINE_CLAUSE_TAIL = (
-    f"Then make here with `{GOAL_PARAM}` set to the goal_id it returned, so "
-    "this result joins the goal; an imported or downloaded part joins the "
-    "same way."
+    f"Then make here with the `{GOAL_PARAM}` it returned, so this result "
+    "joins the goal; an imported or downloaded part joins the same way."
 )
 
 #: The clause as the common case reads (``compile_scad``, every generator,
@@ -336,9 +351,9 @@ FRONT_DOOR_LINE = (
     f"MAKE: a make starts with `{FRONT_DOOR}`, Kiln's front door for making an "
     f"object — {_WHAT_IT_KEEPS}. Every other make tool (the OpenSCAD compile, "
     "the product generators, the template builders, the imports and the "
-    f"marketplace download) is a path it routes to: pass the goal_id it "
-    f"returned as that tool's {GOAL_PARAM}, so the result joins the goal, an "
-    "imported or downloaded part included."
+    "marketplace download) is a path it routes to: give those tools the "
+    f"{GOAL_PARAM} it returned, so the result joins the goal, an imported or "
+    "downloaded part included."
 )
 
 #: The keyless make, in one place: what an agent does after starting a goal
@@ -481,8 +496,7 @@ SAVED_GOAL_KEY = "saved_goal"
 #: next make (or the front door itself) iterates inside it.
 _KEPT_IN_SESSION = (
     "is kept there as version {version}; pass " + GOAL_PARAM + " {brief_id} "
-    "on the next make, or goal_id {brief_id} to `" + FRONT_DOOR + "`, to keep "
-    "iterating inside it."
+    "on the next make, or to `" + FRONT_DOOR + "`, to keep iterating inside it."
 )
 
 #: What the result's ``saved_goal`` block says, per outcome.  Describes what
@@ -533,7 +547,7 @@ GOAL_NOTES = {
     "none_named": (
         f"No saved goal named. Start with `{FRONT_DOOR}` to keep the goal (free) "
         "and, on Kiln Pro, have the result checked against it; then make with "
-        f"{GOAL_PARAM} set to its goal_id."
+        f"its {GOAL_PARAM}."
     ),
     # Kiln's hosted service infers a goal from the request when a make names
     # none and no session could be opened for it, and keeps it: the reply
@@ -541,7 +555,7 @@ GOAL_NOTES = {
     "inferred": (
         "Kiln kept a goal it inferred from this request (goal_id {brief_id}). "
         f"Refine it with `{FRONT_DOOR}(verb=\"update\", goal_id=\"{{brief_id}}\")`, "
-        f"and make the next version with {GOAL_PARAM} set to that goal_id."
+        f"and make the next version with that {GOAL_PARAM}."
     ),
 }
 
@@ -604,7 +618,7 @@ def _session_block(opened: dict[str, Any], named: str = "") -> dict[str, Any]:
     store did not take it in time."""
     if opened.get("saved") is False:
         return {
-            "brief_id": named,
+            **goal_keys(named),
             "joined": False,
             "saved": False,
             "note": GOAL_NOTES["not_saved"],
@@ -612,7 +626,7 @@ def _session_block(opened: dict[str, Any], named: str = "") -> dict[str, Any]:
     brief_id = str(opened["brief_id"])
     if opened.get("opened") is False:
         return {
-            "brief_id": brief_id,
+            **goal_keys(brief_id),
             "joined": True,
             "note": GOAL_NOTES["joined"].format(brief_id=brief_id),
         }
@@ -621,7 +635,7 @@ def _session_block(opened: dict[str, Any], named: str = "") -> dict[str, Any]:
         brief_id=brief_id, version=version, named=named
     )
     return {
-        "brief_id": brief_id,
+        **goal_keys(brief_id),
         "joined": True,
         "opened": True,
         "version": version,
@@ -639,7 +653,7 @@ def record_inferred_goal(result: Any, brief_id: str) -> Any:
     if envelope is None or not brief_id:
         return result
     envelope[SAVED_GOAL_KEY] = {
-        "brief_id": brief_id,
+        **goal_keys(brief_id),
         "joined": True,
         "inferred": True,
         "note": GOAL_NOTES["inferred"].format(brief_id=brief_id),
@@ -664,10 +678,11 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
     make is kept there as the first version and the block names the session
     (``GOAL_NOTES["opened"]``).  When no session can be opened the block
     falls back to saying what was skipped.  On a plain install a make that
-    names no goal leaves the envelope untouched when Kiln made the file; a
+    names no goal opens one in the person's Kiln account
+    (:func:`kiln._pro_goal_bridge.open_for`), or says in one line why not: a
     model that came from outside Kiln (it has a :mod:`kiln.arrival` note)
-    opens a goal in the person's Kiln account
-    (:func:`kiln._pro_goal_bridge.open_for`), or says in one line why not.
+    with where it came from, a model Kiln made here with the tool that made
+    it and the words its call named it by.
 
     A make that joins its goal is also compared with any picture kept on the
     goal (:func:`kiln.reference_compare.compare_with_goal`).  On an install
@@ -694,8 +709,8 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
         if not _was_made(result) or SAVED_GOAL_KEY in result:
             return
         if attach_brief_id_to_result is None:
-            # No kiln-pro here.  A model Kiln made stays as it is; one that
-            # came from outside Kiln gets a goal in the person's account.
+            # No kiln-pro here.  The model gets a goal in the person's
+            # account: from where it came from, or, made here, from its words.
             from kiln._pro_goal_bridge import open_for
 
             open_for(result, mesh_path)
@@ -704,7 +719,7 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
         result[SAVED_GOAL_KEY] = (
             _session_block(opened)
             if opened
-            else {"brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"]}
+            else {**goal_keys(""), "joined": False, "note": GOAL_NOTES["none_named"]}
         )
         return
     if attach_brief_id_to_result is None:
@@ -737,7 +752,7 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
             result[SAVED_GOAL_KEY] = _session_block(opened, named=brief_id)
             return
     result[SAVED_GOAL_KEY] = {
-        "brief_id": brief_id,
+        **goal_keys(brief_id),
         "joined": outcome == "joined",
         "note": GOAL_NOTES[outcome].format(brief_id=brief_id),
     }

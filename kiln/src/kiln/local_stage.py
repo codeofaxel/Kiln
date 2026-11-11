@@ -902,7 +902,9 @@ def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
     # A composed assembly too large to send whole is simplified one part at
     # a time, so the stage can still tell its parts apart.
     if "keep_runs" not in encode:
-        runs = assembly_stage.runs_for(mesh)
+        # A file that plays a mechanism and carries no parts record still
+        # has its parts named by the mechanism.
+        runs = assembly_stage.runs_for(mesh) or mechanism_stage.runs_for(mesh)
         if runs:
             encode = {**encode, "keep_runs": runs}
     payload = joint_stage.attach_to_payload(mesh_to_viewer_payload(mesh, **encode), mesh)

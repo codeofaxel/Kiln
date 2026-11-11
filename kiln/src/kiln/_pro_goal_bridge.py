@@ -9,7 +9,10 @@ here: the model is sent up through the same served tool, as
 ``design_session(verb="join")``, and the goal records it as its next
 version, keeps where it came from, and compares it with the goal's pictures.
 That answer lands in the make's own reply, under the keys a make on Kiln's
-servers carries (``saved_goal``, ``reference_check``).
+servers carries (``saved_goal``, ``reference_check``), with the goal's safety
+notes for the part (``safety_notes``), the notes the person added themselves
+(``owner_safety_notes``, always under their own key) and the one question the
+goal is waiting on (``open_question``) when the answer holds them.
 
 A model that came from OUTSIDE Kiln (a generator, a marketplace download:
 anything with a :mod:`kiln.arrival` note beside it) and names no goal opens
@@ -18,7 +21,15 @@ came from and what was asked for it, with no goal id, and the servers open
 a goal whose first version it is.  Only the goal is kept there -- the idea,
 the source, the version -- never the model, which stays on this computer.
 The goal is noted beside the file, so the next make of the same model adds
-to it instead of opening another.  A file Kiln made here opens nothing.
+to it instead of opening another.
+
+A model Kiln made HERE that names no goal opens one through the same step
+(:func:`_open_for_made_here`).  It has no source to state, so it says the
+tool that made it, its fingerprint and the words its call named it by,
+cleaned and capped (:mod:`kiln.make_words`); never the model, its source or
+a folder.  Its goal is noted beside the file the same way.  This ask waits a
+few seconds at most, and a signed-out install is told once per session what
+signing in adds.
 
 A miss (offline, signed out, no answer, refused) is said once in the reply:
 the make stands as asked, it was not added to the goal, and it was not
@@ -42,8 +53,17 @@ JOIN_VERB = "join"
 #: A join sends a model and may draw a comparison; a person is waiting on
 #: the make's reply.
 CONSULT_TIMEOUT_S: float = 60.0
+#: A join whose make states how it moves also waits on that being checked.
+MOTION_TIMEOUT_S: float = 120.0
 #: The model parameter the step takes (its manifest ``inputs``).
 _MESH_PARAM = "mesh_path"
+#: The goal's safety notes for the part, as sentences.
+SAFETY_NOTES_KEY = "safety_notes"
+#: The safety notes the person added themselves.  Never merged into
+#: :data:`SAFETY_NOTES_KEY`: the two are shown apart.
+OWNER_NOTES_KEY = "owner_safety_notes"
+#: The one question the goal is waiting on the person to answer.
+QUESTION_KEY = "open_question"
 #: Where a make's envelope keeps its file, when the door did not hand it.
 _MESH_KEYS = ("local_path", "stl_path", "output_path", "path", "best_result_path", "produced_file")
 
@@ -132,13 +152,13 @@ def join(
     ``envelope["reference_check"]``.  A miss sets ``reference_check`` to
     "not compared" with the reason.  Never raises.
     """
-    from kiln.front_door import GOAL_NOTES, SAVED_GOAL_KEY
+    from kiln.front_door import GOAL_NOTES, SAVED_GOAL_KEY, goal_keys
     from kiln.reference_compare import REFERENCE_KEY
 
     mesh = _mesh_of(envelope, mesh_path)
     if mesh is None:
         envelope[SAVED_GOAL_KEY] = {
-            "brief_id": brief_id,
+            **goal_keys(brief_id),
             "joined": False,
             "note": GOAL_NOTES["no_file"].format(brief_id=brief_id),
         }
@@ -150,7 +170,7 @@ def join(
         return
     if answer.get("code") == "NOT_FOUND":
         envelope[SAVED_GOAL_KEY] = {
-            "brief_id": brief_id,
+            **goal_keys(brief_id),
             "joined": False,
             "note": GOAL_NOTES["not_in_account"].format(brief_id=brief_id),
         }
@@ -166,7 +186,11 @@ def join(
         for k in ("brief_id", "joined", "saved", "version", "version_id", "came_from", "note")
         if k in block
     }
+    if "brief_id" in block:
+        envelope[SAVED_GOAL_KEY] = {**goal_keys(block["brief_id"]), **envelope[SAVED_GOAL_KEY]}
     envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
+    _carry_notes(answer, envelope)
+    _carry_motion(answer, envelope, mesh)
     compared = answer.get(REFERENCE_KEY)
     if isinstance(compared, dict):
         # The servers' comparison replaces a "not compared" an earlier door
@@ -176,12 +200,100 @@ def join(
             envelope[REFERENCE_KEY] = compared
 
 
+#: The most a statement of how a part moves may weigh to be sent with a make.
+_MAX_MOTION_BYTES = 64 * 1024
+MOTION_KEY = "motion"
+
+
+def _stated_motion() -> dict[str, Any] | None:
+    """How the person said the part moves, from the running make's own
+    ``motion`` argument, as it is sent with the file: their statement, and
+    the ask that what plays it comes back with the answer (the file the
+    servers read is a copy; the one on this computer is what a stage shows).
+    ``None`` when the make states no motion."""
+    import json
+
+    from kiln import tool_context
+
+    theirs = tool_context.current_tool_arguments().get(MOTION_KEY)
+    if isinstance(theirs, str):
+        theirs = theirs.strip()
+    if not theirs or not isinstance(theirs, (dict, str)):
+        return None
+    try:
+        if len(json.dumps(theirs)) > _MAX_MOTION_BYTES:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return {"statement": theirs, "note": "reply"}
+
+
+def _keep_motion_note(mesh: str, note: dict[str, Any]) -> bool:
+    """Keep what plays *mesh* beside it: one mechanism, or the joints of
+    parts that each move on their own.  ``False`` when nothing was kept."""
+    from kiln import joint_stage, mechanism_stage
+
+    try:
+        if note.get("kind") == mechanism_stage.KIND:
+            return mechanism_stage.record(mesh, note) is not None
+        joints = note.get("joints")
+        if isinstance(joints, list) and joints and isinstance(note.get("total_triangles"), int):
+            return joint_stage.record(
+                mesh, joints, total_triangles=note["total_triangles"], upgrade=note.get("upgrade"),
+            ) is not None
+    except Exception:  # noqa: BLE001 -- the make is never lost for its note
+        logger.debug("motion note not kept beside %s", mesh, exc_info=True)
+    return False
+
+
+def _carry_motion(answer: dict[str, Any], envelope: dict[str, Any], mesh: str) -> None:
+    """Put what the servers found about the stated motion into the make's
+    reply, and keep what plays it beside the file on this computer, so the
+    stage here plays it.  The reply carries the sentences only."""
+    said = answer.get(MOTION_KEY)
+    if not isinstance(said, dict) or MOTION_KEY in envelope:
+        return
+    shown = {k: said[k] for k in ("plays", "says", "detail", "still_checking", "upgrade") if k in said}
+    note = said.get("note")
+    if shown.get("plays") is True:
+        kept = isinstance(note, dict) and _keep_motion_note(mesh, note)
+        shown["on_this_computer"] = kept
+        # Only what was kept here is still being read here.
+        shown.pop("still_checking", None)
+    if shown:
+        envelope[MOTION_KEY] = shown
+
+
+def _carry_notes(answer: dict[str, Any], envelope: dict[str, Any]) -> None:
+    """Put the goal's safety notes, the person's own notes and the open
+    question into the make's reply, as the servers sent them: each list
+    under its own key, sentences added once each, and a question only
+    where the reply holds none."""
+    for key in (SAFETY_NOTES_KEY, OWNER_NOTES_KEY):
+        notes = answer.get(key)
+        if isinstance(notes, list):
+            held = envelope.get(key)
+            merged = [n for n in held if isinstance(n, str)] if isinstance(held, list) else []
+            merged.extend(n for n in notes if isinstance(n, str) and n and n not in merged)
+            if merged:
+                envelope[key] = merged
+    question = answer.get(QUESTION_KEY)
+    if (
+        isinstance(question, dict)
+        and isinstance(question.get("question"), str)
+        and question["question"]
+        and QUESTION_KEY not in envelope
+    ):
+        envelope[QUESTION_KEY] = dict(question)
+
+
 def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
     """Open a goal in the person's Kiln account for a make that names none,
     when its model came from outside Kiln; in place.
 
-    A file with no arrival note (Kiln made it here) is left alone, and so
-    is a make with no file.  A model whose note already names the goal
+    A file with no arrival note (Kiln made it here) opens one from its
+    words instead (:func:`_open_for_made_here`); a make with no file is left
+    alone.  A model whose note already names the goal
     opened for it joins that goal.  Otherwise the servers are asked to open
     one, and ``envelope["saved_goal"]`` says what happened: the goal and
     the version (``opened``), the one line about signing in when this
@@ -200,6 +312,7 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
     except Exception:  # noqa: BLE001 -- an unreadable note names no source
         return
     if came_from is None:
+        _open_for_made_here(envelope, mesh)
         return
     if noted:
         join(noted, envelope, mesh, asked_by_user=False, send_file=False)
@@ -227,9 +340,69 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
         if k in block
     }
     envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
+    _carry_notes(answer, envelope)
+    _carry_motion(answer, envelope, mesh)
     opened = block.get("brief_id")
     if block.get("opened") is True and isinstance(opened, str) and opened:
         arrival.note_goal(mesh, opened)
+
+
+def _open_for_made_here(envelope: dict[str, Any], mesh: str) -> None:
+    """Open a goal for a model Kiln made here that names none, in place.
+
+    Only inside a make tool's own call.  Signed out, nothing is sent and the
+    first make of a session says what signing in adds.  Signed in, the step
+    is sent the tool's name, the made file's name, the model's fingerprint
+    and the call's naming words (:func:`kiln.make_words.made_with`), with
+    the goal noted beside the file when an earlier make opened one, so the
+    same model is that goal's version again and never a second goal.  The
+    answer lands under ``saved_goal`` with the goal's safety notes; a miss
+    is said once per session and the make stands.  Never changes the make.
+    """
+    from kiln import arrival, make_words, served_answer, served_public
+    from kiln.front_door import MAKE_DOOR_TOOLS, SAVED_GOAL_KEY
+    from kiln.tool_context import current_tool_arguments, current_tool_name
+
+    door = current_tool_name()
+    if door not in MAKE_DOOR_TOOLS:
+        return
+    import kiln.server as _srv
+
+    bearer, expired = _srv._served_bearer()
+    if not bearer:
+        code = served_answer.SESSION_EXPIRED_CODE if expired is not None else "KILN_ACCOUNT_NOT_PAIRED"
+        make_words.say(envelope, served_answer.Miss("signed_out", code))
+        return
+    if served_public.already_missed() or make_words.servers_quiet():
+        # Kiln's servers were just asked and did not answer: the cause was
+        # said where it was met, and this make is not sent after it.
+        return
+    sha = _fingerprint(mesh)
+    if not sha:
+        return
+    said = make_words.made_with(door, current_tool_arguments(), mesh, envelope, sha)
+    noted = arrival.noted_goal(mesh)
+    answer, miss = _ask(noted, mesh, said, False, send_file=False, timeout=make_words.CONSULT_TIMEOUT_S)
+    if miss is None and noted and answer.get("code") == "NOT_FOUND":
+        # Noted under another account: this one gets a goal of its own.
+        answer, miss = _ask("", mesh, said, False, send_file=False, timeout=make_words.CONSULT_TIMEOUT_S)
+    block = answer.get(SAVED_GOAL_KEY) if miss is None else None
+    if miss is None and not (isinstance(block, dict) and isinstance(block.get("note"), str)):
+        miss = served_answer.Miss("unanswered", detail="no goal in the answer")
+    if miss is not None:
+        make_words.note_miss(miss)
+        make_words.say(envelope, miss)
+        return
+    envelope[SAVED_GOAL_KEY] = {
+        k: block[k]
+        for k in ("brief_id", "joined", "opened", "saved", "version", "version_id", "note")
+        if k in block
+    }
+    envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
+    _carry_notes(answer, envelope)
+    opened = block.get("brief_id")
+    if block.get("opened") is True and isinstance(opened, str) and opened:
+        arrival.note_goal(mesh, opened, made_here=True)
 
 
 def _say_not_opened(envelope: dict[str, Any], miss: Any) -> None:
@@ -270,10 +443,12 @@ def _not_compared_status() -> str:
 
 def _ask(
     brief_id: str, mesh: str, made_with: dict[str, str], asked_by_user: bool, *, send_file: bool = True,
+    timeout: float = CONSULT_TIMEOUT_S,
 ) -> tuple[dict[str, Any], Any]:
     """``(answer, None)`` from the servers, or ``({}, miss)``.  An empty
     *brief_id* asks the step to open a goal for the model.  Without
-    *send_file* nothing but *made_with* leaves this computer."""
+    *send_file* nothing but *made_with* leaves this computer.  *timeout* is
+    how long the make's reply waits on it."""
     from kiln import served_answer, served_makes
 
     try:
@@ -288,9 +463,13 @@ def _ask(
             kwargs, refusal = served_makes.send_inputs(WIRE_TOOL, {_MESH_PARAM: mesh}, {"mesh": _MESH_PARAM})
             if refusal is not None:
                 return {}, served_answer.classify_answer(refusal) or served_answer.Miss("unanswered")
+            stated = _stated_motion()
+            if stated is not None:
+                kwargs["motion"] = stated
         answer = _srv._pro_api_call(
             WIRE_TOOL,
-            _timeout=CONSULT_TIMEOUT_S,
+            # A make that states how it moves also waits on that being checked.
+            _timeout=max(timeout, MOTION_TIMEOUT_S) if MOTION_KEY in kwargs else timeout,
             # A goal the person named on the make is their ask; a goal Kiln
             # opens or finds for a model on its own is not, and what this
             # install read beside the file is then scrubbed on the way out.
@@ -317,7 +496,7 @@ def _ask(
 def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
     """The make stands; the goal and the picture were not reached: said once."""
     from kiln import served_answer
-    from kiln.front_door import SAVED_GOAL_KEY
+    from kiln.front_door import SAVED_GOAL_KEY, goal_keys
     from kiln.reference_compare import NOT_COMPARED, REFERENCE_KEY
 
     said = served_answer.sentence(
@@ -333,7 +512,7 @@ def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
         then="make it again with the same goal",
     )
     envelope[SAVED_GOAL_KEY] = {
-        "brief_id": brief_id,
+        **goal_keys(brief_id),
         "joined": False,
         "note": said,
         **served_answer.fields(miss),
@@ -347,4 +526,13 @@ def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
         }
 
 
-__all__ = ["CONSULT_TIMEOUT_S", "JOIN_VERB", "WIRE_TOOL", "join", "open_for"]
+__all__ = [
+    "CONSULT_TIMEOUT_S",
+    "JOIN_VERB",
+    "OWNER_NOTES_KEY",
+    "QUESTION_KEY",
+    "SAFETY_NOTES_KEY",
+    "WIRE_TOOL",
+    "join",
+    "open_for",
+]

@@ -12,6 +12,9 @@ These pin the guard (:mod:`kiln.outbound_guard`) at every way out:
   made and for the install's own reads on one they did;
 * a printer that leaks everything, read through every fact a served tool may
   ask for, with the bytes checked on their way out;
+* a make that names no goal, told to Kiln's servers in words on an install
+  without kiln-pro: the bytes carry the named words and nothing that locates
+  or identifies anyone, and a signed-out install sends nothing;
 * every module that sends to Kiln's servers, found in the source and named
   in :data:`kiln.outbound_guard.SENDERS` -- a new way out fails here until
   someone decides what it may send.
@@ -30,7 +33,7 @@ from kiln import outbound_guard as guard
 SECRETS = (
     "01P00A000000001", "01p00a000000001", "s3cr3t-access", "10.0.0.5", "192.168.1.40", "voron.local",
     "/dev/serial/by-id/usb-Klipper", "61755fe321ac", "aa:bb:cc:dd:ee:ff", "hooks.example.com",
-    "adamarreola", "jane@example.com", "tok_live_9f8e7d",
+    "adamarreola", "jane@example.com", "tok_live_9f8e7d", "555-010-4477", "7946 0958",
 )
 
 
@@ -49,7 +52,8 @@ class TestTheRule:
             "url": "https://hooks.example.com/x", "api_key": "tok_live_9f8e7d",
             "reading": {"fingerprint": "bambu:serial:01p00a000000001", "material": "brass", "nozzle_diameter_mm": 0.4},
             "error": "HTTPConnectionPool(host='192.168.1.40', port=7125) at voron.local on /dev/serial/by-id/usb-Klipper-if00",
-            "note": "saved to /Users/adamarreola/prints/x.gcode by jane@example.com",
+            "note": "saved to /Users/adamarreola/prints/x.gcode by jane@example.com, "
+                    "reach her on 555-010-4477 or +44 20 7946 0958",
             "mac": "aa:bb:cc:dd:ee:ff", "colour": "#C12E1F", "layer": 12,
             "source_artifact_token": "a1b2c3", "printer_name": "voron",
         })
@@ -135,6 +139,238 @@ class TestTheServedDoor:
         monkeypatch.setattr(server, "_with_local_log_tail", server._with_local_log_tail)
         server._pro_api_call("report_issue", summary="it broke", context={})
         assert _leaks(sent[-1].decode()) == []
+
+
+def _said(body: bytes) -> str:
+    """The bytes sent, as text, without the model's fingerprint: a hash of
+    the file, which may hold any digits by chance and says nothing."""
+    raw = body.decode()
+    return raw.replace(json.loads(raw)["made_with"].get("sha256") or "\x00", "")
+
+
+class TestAMakeToldInWords:
+    """An install without kiln-pro tells Kiln's servers about a make that
+    names no goal (:mod:`kiln.make_words`, sent by :mod:`kiln._pro_goal_bridge`).  Nobody asked for
+    that by name, so what leaves is checked here to the bytes."""
+
+    #: Everything one such ask may say: the door, the model's fingerprint,
+    #: the id the make is kept under, the made file's own name, and the
+    #: call's naming arguments (its ``file_name`` rides as ``filename``).
+    ALLOWED = {
+        "door", "version_id", "sha256", "filename",
+        "name", "title", "description", "prompt", "idea", "notes",
+        "design_id", "template_id", "product_type", "file_name",
+    }
+
+    @pytest.fixture
+    def make(self, wire, monkeypatch, tmp_path):
+        import sys
+
+        from kiln import make_words as bridge
+        from kiln import served_public, tool_context
+        from kiln.front_door import join_goal
+
+        for name in [n for n in sys.modules if n == "kiln_pro" or n.startswith("kiln_pro.")]:
+            monkeypatch.setitem(sys.modules, name, None)
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        served_public._reset_for_tests()
+        bridge._reset_for_tests()
+        folder = tmp_path / "adamarreola" / "secret client work"
+        folder.mkdir(parents=True)
+        made = folder / "pendant_lamp_shade.stl"
+        made.write_text("solid FILE-CONTENTS-MARKER\nendsolid\n")
+        server, sent = wire
+
+        def run(door: str, arguments: dict, envelope: dict | None = None) -> dict:
+            envelope = envelope if envelope is not None else {"success": True, "local_path": str(made)}
+            token = tool_context.enter_tool(door, arguments)
+            try:
+                join_goal("", envelope, str(made))
+            finally:
+                tool_context.leave_tool(token)
+            return envelope
+
+        yield run, sent, made
+        served_public._reset_for_tests()
+        bridge._reset_for_tests()
+
+    def test_what_locates_or_identifies_anyone_never_leaves(self, make):
+        run, sent, made = make
+        run("generate_and_print", {
+            "name": "/Users/adamarreola/Desktop/secret client work/lamp shade.stl",
+            "description": (
+                "a pendant lamp shade for the hall; the printer is voron.local at 192.168.1.40 on "
+                "/dev/serial/by-id/usb-Klipper_rp2040, source in /Users/adamarreola/Documents/lamps/shade.scad"
+            ),
+            "prompt": (
+                "lamp shade, 200 mm wide; questions to jane@example.com, 555-010-4477 or +44 20 7946 0958; "
+                r"old copy at C:\Users\adamarreola\lamps\old.stl, token=tok_live_9f8e7d"
+            ),
+        })
+        assert len(sent) == 1
+        raw = _said(sent[0])
+        assert _leaks(raw) == [], raw
+        for folder in ("Desktop", "Documents", "secret client work", "lamps", str(made.parent)):
+            assert folder not in raw, folder
+        words = json.loads(raw)["made_with"]
+        # The words themselves arrive: the object is still named.
+        assert words["name"] == "lamp shade.stl"
+        assert "a pendant lamp shade for the hall" in words["description"]
+        assert "lamp shade, 200 mm wide" in words["prompt"]
+
+    _PLANTED = {
+        "name": "lamp for adamarreola at voron.local",
+        "description": "printer 192.168.1.40 on /dev/serial/by-id/usb-Klipper_rp2040, mail jane@example.com",
+        "prompt": "a pendant lamp shade; kept as /Users/adamarreola/lamps/shade.scad, ring 555-010-4477",
+    }
+
+    def test_the_served_door_scrubs_it_whatever_the_sender_did(self, make, monkeypatch):
+        """Two layers, each proven alone.  With the sender's own cleaning
+        off, the door still scrubs every value of an ask nobody made."""
+        from kiln import make_words as bridge
+
+        run, sent, _made = make
+        monkeypatch.setattr(bridge, "_word", lambda value, limit=bridge.MAX_WORD_CHARS: value[:limit])
+        run("generate_and_print", dict(self._PLANTED, name="a lamp at voron.local"))
+        raw = _said(sent[0])
+        assert _leaks(raw) == [], raw
+        assert "a pendant lamp shade" in raw
+
+    def test_the_sender_cleans_it_before_the_door_does(self, make, monkeypatch):
+        """With the door's scrub off, what the sender hands over is already
+        clean."""
+        run, sent, _made = make
+        server = __import__("kiln.server", fromlist=["x"])
+        monkeypatch.setattr(server, "_guarded_for_the_wire", lambda kwargs, asked_by_user: kwargs)
+        run("generate_and_print", dict(self._PLANTED, name="a lamp at voron.local"))
+        raw = _said(sent[0])
+        assert _leaks(raw) == [] and "lamps" not in raw, raw
+        assert "a pendant lamp shade" in raw
+
+    def test_a_network_share_and_a_country_coded_number_never_leave(self, make):
+        run, sent, _made = make
+        run("generate_and_print", {
+            "description": r"a pendant lamp shade kept on \\fileserver01\designs\lamps\shade.stl, 200 x 300 x 1500 mm",
+            "prompt": "lamp shade 120-80-4000; ring 1-555-010-4477, 1 555 010 9988 or 0044 20 7946 0958, "
+                      "write jane+kiln@mail.example.co.uk, see file:///Users/adamarreola/lamps/shade.stl",
+        })
+        raw = _said(sent[0])
+        for never in ("fileserver01", "designs", "lamps", "555", "7946", "example", "adamarreola", "file:"):
+            assert never not in raw, (never, raw)
+        words = json.loads(raw)["made_with"]
+        # The object's own words arrive, and sizes written with a times sign.
+        assert "a pendant lamp shade kept on shade.stl, 200 x 300 x 1500 mm" == words["description"]
+        assert words["prompt"].startswith("lamp shade ; ring [a phone number]")
+
+    def test_no_long_run_of_digits_leaves_whatever_surrounds_it(self, make):
+        """The words are read for what the object is, never for its numbers:
+        this sender drops every run of seven or more digits itself, so a
+        number no shared rule knows as a phone number still does not leave."""
+        import re
+
+        run, sent, made = make
+        run("generate_and_print", {
+            "name": "lamp 5550104477",
+            "title": "shade for 020 7946 0958",
+            "description": "a pendant lamp shade, 60 mm wide, 200 x 300; ring 06 12 34 56 78 or Tel.+44 20 7946 0958",
+            "prompt": "lamp shade, order 5550104477x12, id (555)0104477, made 2026-11-10, ext 555-010-4477 x 12",
+            "notes": "fits bulb E27, 3 parts, M4 x 12 screws, serial 0015550104477",
+            "file_name": str(made.parent / "lamp_5550104477.stl"),
+        }, {"success": True, "local_path": str(made), "version_id": "v-5550104477"})
+        raw = _said(sent[0])
+        words = json.loads(raw)["made_with"]
+        for key, value in words.items():
+            if key != "sha256":
+                assert not re.search(r"\d(?:[ .()\-]*\d){6,}", value), value
+        for never in ("5550104477", "7946", "0958", "12 34 56", "0104477", "2026-11-10"):
+            assert never not in raw, (never, raw)
+        # What the object is still arrives, short numbers included.
+        assert words["name"] == "lamp" and words["title"] == "shade for"
+        assert words["description"].startswith("a pendant lamp shade, 60 mm wide, 200 x 300; ring")
+        assert "fits bulb E27, 3 parts, M4 x 12 screws" in words["notes"]
+        assert words["file_name"] == "pendant_lamp_shade.stl" and words["filename"] == "lamp_.stl"
+        assert words["version_id"] == "v-"
+
+    def test_a_make_kept_under_digits_alone_is_still_kept(self, make):
+        run, sent, made = make
+        run("download_model", {}, {"success": True, "local_path": str(made), "version_id": "5550104477"})
+        words = json.loads(sent[0])["made_with"]
+        assert "version_id" not in words and "5550104477" not in _said(sent[0])
+
+    def test_only_the_made_files_own_name_is_sent(self, make):
+        run, sent, made = make
+        run("download_model", {"file_id": "f-1", "dest_dir": str(made.parent), "file_name": str(made)})
+        body = json.loads(sent[0])
+        fingerprint = body["made_with"].pop("sha256")
+        assert len(fingerprint) == 64 and set(fingerprint) <= set("0123456789abcdef")
+        assert body == {"verb": "join", "goal_id": "", "made_with": {
+            "door": "download_model", "file_name": "pendant_lamp_shade.stl",
+        }}
+        assert str(made.parent) not in sent[0].decode() and "/" not in json.dumps(body["made_with"])
+
+    def test_only_the_named_arguments_go_and_each_is_capped(self, make):
+        from kiln import make_words as bridge
+
+        run, sent, made = make
+        long_text = "a pendant lamp shade " * 400
+        arguments = {key: f"{key} {long_text}" for key in bridge.WORD_ARGUMENTS}
+        arguments.update({
+            "scad_code": "module shade() { cube([10, 10, 10]); } shade();",
+            "scad_path": str(made.parent / "shade.scad"),
+            "file_path": str(made), "output_path": str(made), "dest_dir": str(made.parent),
+            "api_key": "tok_live_9f8e7d", "access_code": "s3cr3t-access", "token": "tok_live_9f8e7d",
+            "printer_name": "garage-voron", "printer_id": "garage-voron", "serial": "01P00A000000001",
+            "material": "PETG-CF", "parameters": {"name": "hidden in a dict"}, "operations": [{"name": "hidden in a list"}],
+            "requirements": "unlisted free text", "brief_id": "",
+        })
+        arguments["title"] = {"not": "a string"}
+        arguments["notes"] = "module shade() { cylinder(h = 30, d = 60); } shade();"
+        run("generate_and_print", arguments)
+        raw = _said(sent[0])
+        body = json.loads(raw)
+        assert set(body) == {"verb", "goal_id", "made_with"} and body["goal_id"] == ""
+        words = body["made_with"]
+        assert set(words) <= self.ALLOWED and len(words) <= bridge.MAX_WORDS + 3
+        assert "title" not in words and "notes" not in words
+        assert all(isinstance(v, str) and len(v) <= bridge.MAX_WORD_CHARS for v in words.values())
+        assert len(raw) < 8000
+        for never in (
+            "cube(", "cylinder(", "module ", "FILE-CONTENTS-MARKER", "tok_live_9f8e7d", "s3cr3t-access",
+            "garage-voron", "01P00A000000001", "PETG-CF", "hidden in a", "unlisted free text", str(made.parent),
+        ):
+            assert never not in raw, never
+
+    def test_the_number_of_texts_is_capped_however_long_the_list_grows(self, make, monkeypatch):
+        from kiln import make_words as bridge
+
+        run, sent, _made = make
+        many = tuple(f"word_{n}" for n in range(40))
+        monkeypatch.setattr(bridge, "WORD_ARGUMENTS", many)
+        run("generate_and_print", {key: f"a lamp shade {key}" for key in many})
+        words = json.loads(sent[0])["made_with"]
+        texts = {k: v for k, v in words.items() if k not in ("door", "version_id", "sha256")}
+        assert len(texts) == bridge.MAX_WORDS, sorted(texts)
+
+    def test_the_named_arguments_are_the_ones_the_sender_reads(self):
+        from kiln import make_words as bridge
+
+        assert set(bridge.WORD_ARGUMENTS) | {"door", "version_id", "sha256", "filename"} == self.ALLOWED
+
+    def test_a_signed_out_install_sends_nothing_at_all(self, make, monkeypatch):
+        from kiln import auth_session
+
+        run, sent, _made = make
+
+        class _NoBearer:
+            token = ""
+            state = "signed_out"
+            detail = ""
+
+        monkeypatch.setattr(auth_session, "resolve_api_bearer", lambda: _NoBearer())
+        first = run("generate_and_print", {"prompt": "a pendant lamp shade", "name": "lamp"})
+        second = run("generate_and_print", {"prompt": "a pendant lamp shade", "name": "lamp"})
+        assert sent == [], "a signed-out make reached the network"
+        assert first["saved_goal"]["why"] == "signed_out" and "saved_goal" not in second
 
 
 class _Honeypot:

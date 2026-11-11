@@ -122,6 +122,46 @@ def test_the_servers_comparison_replaces_a_not_compared_an_earlier_door_left(pla
     assert env[REFERENCE_KEY] == {"status": "compared"}
 
 
+def test_the_goals_safety_notes_and_its_question_reach_the_makes_reply(plain_install, servers, made):
+    note = "Keep the flame in a metal or glass cup and never leave it burning unattended."
+    asked = {"question": "Will a real flame burn in or next to this?", "goal_id": "goal-1"}
+    servers(_joined(safety_notes=[note], open_question=asked))
+    env = {"success": True, "safety_notes": ["Wash by hand."]}
+    join_goal("goal-1", env, made)
+    assert env["safety_notes"] == ["Wash by hand.", note]
+    assert env["open_question"] == asked
+    # Said once, however often the same goal is joined.
+    join_goal("goal-1", env, made)
+    assert env["safety_notes"] == ["Wash by hand.", note]
+
+
+def test_the_persons_own_notes_arrive_under_their_own_key(plain_install, servers, made):
+    servers(_joined(safety_notes=["Keep the flame in a glass cup."], owner_safety_notes=["Keep away from curtains"]))
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert env["safety_notes"] == ["Keep the flame in a glass cup."]
+    assert env["owner_safety_notes"] == ["Keep away from curtains"]
+
+
+def test_a_goal_with_no_notes_adds_none_and_a_malformed_answer_is_left_out(plain_install, servers, made):
+    servers(_joined())
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert "safety_notes" not in env and "open_question" not in env
+    servers(_joined(safety_notes="not a list", open_question={"question": ""}))
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert "safety_notes" not in env and "open_question" not in env
+
+
+def test_a_miss_invents_no_safety_note(plain_install, servers, made):
+    servers(ConnectionError("no route"), signed_in=True)
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert env[SAVED_GOAL_KEY]["joined"] is False
+    assert "safety_notes" not in env and "open_question" not in env
+
+
 def test_a_goal_with_no_picture_says_nothing_about_pictures(plain_install, servers, made):
     servers(_joined())
     env = {"success": True}
@@ -135,7 +175,7 @@ def test_a_goal_not_in_this_account_is_said(plain_install, servers, made):
     env = {"success": True}
     join_goal("goal-1", env, made)
     assert env[SAVED_GOAL_KEY] == {
-        "brief_id": "goal-1", "joined": False,
+        "goal_id": "goal-1", "brief_id": "goal-1", "joined": False,
         "note": GOAL_NOTES["not_in_account"].format(brief_id="goal-1"),
     }
 
@@ -205,10 +245,90 @@ def test_the_download_door_joins_through_the_servers(plain_install, servers, mad
             return deco
 
     plugin.register(_MCP())
-    out = captured["download_generated_model"](job_id="job1", brief_id="goal-1")
+    out = captured["download_generated_model"](job_id="job1", goal_id="goal-1")
     out = next(x for x in out if isinstance(x, dict)) if isinstance(out, list) else out
     assert out["success"] is True, out
     joins = [sent for tool, sent in s.asks if tool == "design_session"]
     assert len(joins) == 1 and joins[0]["verb"] == "join" and joins[0]["goal_id"] == "goal-1"
     assert out[SAVED_GOAL_KEY]["joined"] is True
     assert out[REFERENCE_KEY] == {"status": "compared"}
+
+
+def _in_a_make(motion):
+    from kiln import tool_context
+
+    return tool_context.enter_tool("compile_scad", {"motion": motion})
+
+
+def test_a_make_that_says_how_it_moves_is_played_on_this_computer_too(plain_install, servers, made):
+    """The statement rides the join; what the servers found reaches the
+    reply as sentences, and the stage on this computer plays the same file."""
+    from kiln import mechanism_stage, tool_context
+
+    statement = {"parts": {"frame": [0, 0, 1], "crank": [6, 0, 5]},
+                 "joints": [{"parts": ["frame", "crank"], "kind": "hinge", "axis_point": [0, 0, 0],
+                             "axis_direction": [0, 0, 1], "continuous": True}], "driver": "crank"}
+    block = {"kind": mechanism_stage.KIND, "playable": True, "why_not": None, "poses": [0.0, 360.0],
+             "summary": "One turn moves 1 part.", "headline": "Nothing meets.", "clashes": [],
+             "parts": {"frame": {"spans": [[0, 1]], "moves": False, "frames": [[0, 0, 0, 1, 0, 0, 0]] * 2}}}
+    s = servers(_joined(motion={"plays": True, "says": "Nothing meets.", "detail": "One turn moves 1 part.",
+                                "still_checking": True, "note": block}))
+    env = {"success": True}
+    token = _in_a_make(statement)
+    try:
+        join_goal("goal-1", env, made)
+    finally:
+        tool_context.leave_tool(token)
+    (_tool, sent), = s.asks
+    assert sent["motion"] == {"statement": statement, "note": "reply"}
+    assert env["motion"] == {"plays": True, "says": "Nothing meets.", "detail": "One turn moves 1 part.",
+                             "on_this_computer": True}
+    assert mechanism_stage.block_for(made) == block
+
+
+def test_a_make_that_states_no_motion_sends_none_and_a_miss_keeps_nothing(plain_install, servers, made):
+    from kiln import mechanism_stage, tool_context
+
+    s = servers(_joined())
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert "motion" not in s.asks[0][1] and "motion" not in env
+    # Stated, and the servers say it does not play: said, and nothing is kept to play.
+    s = servers(_joined(motion={"plays": False, "says": "The motion as stated does not fit the made file."}))
+    env = {"success": True}
+    token = _in_a_make('{"parts": {}}')
+    try:
+        join_goal("goal-1", env, made)
+    finally:
+        tool_context.leave_tool(token)
+    assert s.asks[0][1]["motion"] == {"statement": '{"parts": {}}', "note": "reply"}
+    assert env["motion"] == {"plays": False, "says": "The motion as stated does not fit the made file."}
+    assert mechanism_stage.block_for(made) is None
+    # Played on the servers, and nothing came back to play it here: said so.
+    servers(_joined(motion={"plays": True, "says": "Nothing meets."}))
+    env = {"success": True}
+    token = _in_a_make({"parts": {"a": [0, 0, 0]}})
+    try:
+        join_goal("goal-1", env, made)
+    finally:
+        tool_context.leave_tool(token)
+    assert env["motion"] == {"plays": True, "says": "Nothing meets.", "on_this_computer": False}
+
+
+def test_parts_that_each_move_on_their_own_are_kept_as_joints_here(plain_install, servers, made):
+    from kiln import joint_stage, tool_context
+
+    joint = {"part_a": "case", "part_b": "drawer",
+             "motion": {"kind": "slider", "axis_point_mm": [0.0, 0.0, 0.0], "axis_direction": [0.0, -1.0, 0.0],
+                        "range": [0.0, 25.0], "unit": "mm", "swing_axis": None},
+             "moving": {"spans": [[0, 1]], "parts": ["drawer"]}, "sweep": None, "sweep_why_not": "x"}
+    servers(_joined(motion={"plays": True, "says": "1 part moves.",
+                            "note": {"kind": "kiln.joints.v1", "joints": [joint], "total_triangles": 1}}))
+    env = {"success": True}
+    token = _in_a_make({"parts": {"case": [0, 0, 0], "drawer": [1, 1, 1]}})
+    try:
+        join_goal("goal-1", env, made)
+    finally:
+        tool_context.leave_tool(token)
+    assert env["motion"] == {"plays": True, "says": "1 part moves.", "on_this_computer": True}
+    assert joint_stage.note_path_for(made) and Path(joint_stage.note_path_for(made)).exists()

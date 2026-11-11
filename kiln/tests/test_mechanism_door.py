@@ -429,3 +429,55 @@ def test_a_missed_ask_sends_no_mechanism_and_says_why(tools, tmp_path, monkeypat
     assert said["playable"] is False and said["says"].startswith("Kiln plays a mechanism's motion from Kiln's servers.")
     assert stage_link._mechanism_sidecar(composed) is None
     assert "mechanism" not in local_stage._payload_for_mesh(str(composed))
+
+
+def test_a_file_with_only_its_mechanism_note_is_still_sent_part_by_part(tools, tmp_path, served, monkeypatch):
+    """A file that plays and carries no parts record still has its parts told
+    apart when the stage must simplify it; one that does not play asks nothing."""
+    import os
+
+    from kiln import assembly_stage
+
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    whole = mechanism_stage.block_for(str(composed))
+    os.remove(assembly_stage.note_path_for(str(composed)))
+    assert assembly_stage.runs_for(str(composed)) is None
+    runs = mechanism_stage.runs_for(str(composed))
+    assert runs == sorted((run[0], run[1]) for part in whole["parts"].values() for run in part["spans"])
+
+    asked: dict = {}
+    real = local_stage.mesh_to_viewer_payload
+
+    def encode(mesh, **kwargs):
+        asked.update(kwargs)
+        return real(mesh, **kwargs)
+
+    monkeypatch.setattr(local_stage, "mesh_to_viewer_payload", encode)
+    payload = local_stage._payload_for_mesh(str(composed))
+    assert asked["keep_runs"] == runs and payload["mechanism"]["playable"] is True
+
+    note = Path(mechanism_stage.note_path_for(str(composed)))
+    note.write_text(json.dumps({**whole, "playable": False, "why_not": "x"}))
+    assert mechanism_stage.runs_for(str(composed)) is None
+    assert mechanism_stage.runs_for(str(tmp_path / "nothing.stl")) is None
+
+
+def test_the_compile_door_takes_how_the_part_moves():
+    import inspect
+
+    from kiln.plugins.design_tools import plugin
+
+    captured: dict = {}
+
+    class FakeMCP:
+        def tool(self, **_kwargs):
+            def decorator(fn):
+                captured[fn.__name__] = fn
+                return fn
+            return decorator
+
+    plugin.register(FakeMCP())
+    motion = inspect.signature(captured["compile_scad"]).parameters["motion"]
+    assert motion.default is None

@@ -291,3 +291,30 @@ def test_the_download_door_opens_a_goal_through_the_servers(plain_install, serve
     assert len(opens) == 1 and opens[0]["verb"] == "join" and opens[0]["goal_id"] == ""
     assert opens[0]["made_with"]["prompt"] == "a small fox knight holding a lantern"
     assert out[SAVED_GOAL_KEY]["opened"] is True and out[SAVED_GOAL_KEY]["brief_id"] == "goal-9"
+
+
+def test_the_opened_goals_safety_notes_come_back_with_the_make(plain_install, servers, generated):
+    """When the servers' answer for the opened goal carries safety notes or
+    an open question, the make's reply carries them: the sentences only,
+    each once, and nothing else from the answer."""
+    answer = _opened()
+    answer["safety_notes"] = ["Keep any flame in a glass cup.", {"not": "a sentence"}, ""]
+    answer["owner_safety_notes"] = ["Mine: keep it off the stove."]
+    answer["open_question"] = {"question": "Will a real flame burn in or next to this?"}
+    answer["anything_else"] = {"left": "behind"}
+    servers(answer)
+    env = {"success": True, "local_path": generated}
+    join_goal("", env, generated)
+
+    assert env[SAVED_GOAL_KEY]["opened"] is True
+    assert env["safety_notes"] == ["Keep any flame in a glass cup."]
+    assert env["owner_safety_notes"] == ["Mine: keep it off the stove."]
+    assert env["open_question"] == {"question": "Will a real flame burn in or next to this?"}
+    assert "anything_else" not in env
+
+
+def test_an_opened_goal_with_no_notes_adds_no_note_keys(plain_install, servers, generated):
+    servers(_opened())
+    env = {"success": True, "local_path": generated}
+    join_goal("", env, generated)
+    assert not {"safety_notes", "owner_safety_notes", "open_question"} & set(env)

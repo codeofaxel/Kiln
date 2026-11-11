@@ -1065,6 +1065,27 @@ def _served_public_tools_stay_here(monkeypatch):
         monkeypatch.setattr(module, "_tools", {})
 
 
+#: The test modules that run a goal-less make's session path for real: its
+#: own tests, and the check of the bytes it sends.
+_MAKE_SESSION_TESTS = ("test_goalless_make_on_a_plain_install", "test_outbound_guard")
+
+
+@pytest.fixture(autouse=True)
+def _goalless_makes_tell_no_servers(request, monkeypatch):
+    """Default every test to "a make that names no goal tells nobody".
+
+    On an install without kiln-pro (public CI is one) such a make is told to
+    Kiln's servers, and a signed-out one says once per process what signing
+    in adds.  Left on, whichever test first ran a make door through the MCP
+    dispatch would carry that line.  The tests of that path run it for real
+    (``tests/test_goalless_make_on_a_plain_install.py``), and so does the
+    check of what it sends (``tests/test_outbound_guard.py``).
+    """
+    if request.module.__name__.rsplit(".", 1)[-1] in _MAKE_SESSION_TESTS:
+        return
+    monkeypatch.setattr("kiln._pro_goal_bridge._open_for_made_here", lambda *_a, **_k: None)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_decoration_quota(tmp_path_factory, monkeypatch):
     """Give every test its own decoration-quota file and a fresh singleton.

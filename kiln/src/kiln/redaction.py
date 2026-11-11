@@ -20,7 +20,9 @@ touched home directories):
   printer (:mod:`kiln.outbound_guard`) and a report's log tail
   (:func:`kiln.log_config.read_log_tail`) — the report rules plus every
   place (:func:`redact_places`): web, network and hardware addresses, local
-  host names, device paths and email addresses.
+  host names, device paths, email addresses and phone numbers;
+* words about a file that leave without the file (:func:`without_folders`):
+  a path keeps its last name and loses where it sits.
 
 The surfaces intentionally differ in WHAT they redact; this module makes
 them share HOW, so a pattern added here reaches all of them and the sets
@@ -107,19 +109,80 @@ _LOCAL_HOST_RE = re.compile(
     r"\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:local|lan|home|internal|localdomain)\b", re.IGNORECASE,
 )
 _DEVICE_PATH_RE = re.compile(r"/dev/[\w./-]+")
+# A phone number written the way people write one: with a leading "+" (or
+# "00") and its groups, or as three-three-four digits with one separator
+# between them, with or without a country code in front (an area code may
+# sit in brackets).  A bare run of digits is not taken: it reads the same as
+# a serial, a count or a time stamp.
+#
+# Where a run of numbers could be a phone number or an object's sizes, it is
+# taken: a lost dimension costs nothing, a phone number that leaves cannot
+# come back.  A size is left only where nothing else could be meant: a real
+# unit follows it, or it follows a number and a times sign ("18 x ...").
+# A "+" number is taken after any character; only the "00" form, which a
+# plain number can open with, needs a clean start.
+_PHONE_INTL_RE = re.compile(r"(?:\+|(?<![\w+.,])00)\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,6}(?!\w)")
+_A_UNIT_FOLLOWS = r"(?![\w-])(?!\.\d)(?! ?(?:mm|cm|inch(?:es)?)\b)"
+_PHONE_GROUPED_RE = re.compile(
+    r"(?<![\w.+-])(?<!\d x )(?<!\d by )(?<!\d \u00d7 )(?:\d{1,3}[ .-])?"
+    r"(?:\(\d{3}\) ?|\d{3}(?P<sep>[ .-]))\d{3}(?(sep)(?P=sep)|[ .-])\d{4}" + _A_UNIT_FOLLOWS
+)
+_PHONE_DIGITS = (8, 15)
+
+
+def _phone(match: re.Match[str]) -> str:
+    """The marker for an international number that holds a phone's worth
+    of digits; anything shorter or longer is left as written."""
+    digits = sum(ch.isdigit() for ch in match.group(0))
+    return "[a phone number]" if _PHONE_DIGITS[0] <= digits <= _PHONE_DIGITS[1] else match.group(0)
 
 
 def redact_places(text: str) -> str:
     """Replace what locates a machine or a person in *text*: web addresses,
-    email addresses, network and hardware addresses, local host names and
-    device paths, each by a word saying what was there."""
+    email addresses, network and hardware addresses, local host names, phone
+    numbers and device paths, each by a word saying what was there."""
     text = _URL_RE.sub("[a web address]", text)
     text = _EMAIL_RE.sub("[an email address]", text)
     text = _MAC_RE.sub("[a hardware address]", text)
     text = _ANY_IPV4_RE.sub("[a network address]", text)
     text = _IPV6_RE.sub("[a network address]", text)
     text = _LOCAL_HOST_RE.sub("[a network address]", text)
+    text = _PHONE_INTL_RE.sub(_phone, text)
+    text = _PHONE_GROUPED_RE.sub("[a phone number]", text)
     return _DEVICE_PATH_RE.sub("[a device]", text)
+
+
+# A file path inside a sentence: it starts at a slash, a home mark, a dot
+# folder, a drive letter or a network share's double slash, never in the
+# middle of a word ("and/or").  A share's host goes with its folders.
+_POSIX_PATH_RE = re.compile(r"(?<![\w/\\.~\]])(?:~|\.{1,2})?/(?:[^\s/\\\"\x27]+/)+[^\s/\\\"\x27]*")
+_WINDOWS_PATH_RE = re.compile(r"(?<![\w\\/])(?:[A-Za-z]:|\\)?\\(?:[^\s/\\\"\x27]+\\)+[^\s/\\\"\x27]*")
+# A network share written with forward slashes (never the tail of a link).
+_SHARE_PATH_RE = re.compile(r"(?<![\w/\\.~\]:])//(?:[^\s/\\\"\x27]+/)+[^\s/\\\"\x27]*")
+_WHOLE_PATH_RE = re.compile(r"^(?:/[^\s/]|~[\w.-]*[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/]|\\\\?[^\s\\])")
+
+
+def _last_name(match: re.Match[str]) -> str:
+    return re.split(r"[\\/]", match.group(0).rstrip("\\/"))[-1]
+
+
+def without_folders(text: str) -> str:
+    """*text* with every file path in it cut to its last name, so what
+    leaves names a file and never where it sits.
+
+    A value that is a path from its first character is cut whole, spaces in
+    its folders included.  A path inside a sentence is taken up to its first
+    space, so a folder with a space in its name written mid-sentence keeps
+    the words after that space.
+    """
+    if not text:
+        return text
+    stripped = text.strip()
+    if _WHOLE_PATH_RE.match(stripped) and ("/" in stripped or "\\" in stripped):
+        return re.split(r"[\\/]", stripped.rstrip("\\/"))[-1]
+    text = _WINDOWS_PATH_RE.sub(_last_name, text)
+    text = _SHARE_PATH_RE.sub(_last_name, text)
+    return _POSIX_PATH_RE.sub(_last_name, text)
 
 
 # Addresses that only mean something on a home or office network.  Narrower

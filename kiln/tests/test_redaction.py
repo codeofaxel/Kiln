@@ -268,3 +268,128 @@ def test_a_machine_credential_is_redacted_but_named():
     assert "abcdefghijklmnop" not in out and "eyJzdWIi" not in out
     assert "kms_[REDACTED]" in out and "kmt_[REDACTED]" in out
     assert redact_secrets("kms_short and skms_notatoken") == "kms_short and skms_notatoken"
+
+
+class TestPhoneNumbers:
+    """A phone number in text leaving for Kiln's servers goes, in the forms
+    people write one; numbers that are not phone numbers stay."""
+
+    def test_the_forms_people_write(self):
+        for written in (
+            "+1 555 010 4477", "+1 (555) 010-4477", "+44 20 7946 0958", "+49-170-1234567",
+            "555-010-4477", "(555) 010-4477", "555 010 4477", "555.010.4477",
+        ):
+            out = redaction.redact_places(f"call me on {written} after six")
+            assert out == "call me on [a phone number] after six", (written, out)
+
+    def test_a_machines_text_goes_through_it(self):
+        out = redaction.redact_machine_text("owner jane, 555-010-4477, printer in the garage")
+        assert "555" not in out and "printer in the garage" in out
+
+    def test_numbers_that_are_not_phone_numbers_stay(self):
+        for kept in (
+            "made 2026-11-10 at 15:20:06", "a shelf 120 mm by 80 mm, 6 mm thick", "nozzle 0.4, bed 60, hotend 215",
+            "serial 01P00A000000001", "moved +5 mm on X and +10 on Y", "job 1731268806 done", "M3x10 screws, 4 of them",
+            "layers 120.500 200.300", "width = 60; height = 120;",
+        ):
+            assert redaction.redact_places(kept) == kept, kept
+
+
+class TestWithoutFolders:
+    """Words about a file that leave without the file name it, and never
+    say where it sits."""
+
+    def test_a_value_that_is_a_path_keeps_only_its_last_name(self):
+        assert redaction.without_folders("/Users/jane/My Projects/lamp shade.stl") == "lamp shade.stl"
+        assert redaction.without_folders("~/designs/lamp.scad") == "lamp.scad"
+        assert redaction.without_folders("../out/lamp.stl") == "lamp.stl"
+        assert redaction.without_folders(r"C:\Users\jane\lamps\shade.stl") == "shade.stl"
+        assert redaction.without_folders("/tmp/kiln/job-81f3/") == "job-81f3"
+
+    def test_a_path_inside_a_sentence_is_cut_where_it_stands(self):
+        out = redaction.without_folders(r"the shade, saved as /Users/jane/lamps/shade.stl and C:\work\lamps\old.stl today")
+        assert out == "the shade, saved as shade.stl and old.stl today"
+
+    def test_words_with_a_slash_in_them_stay(self):
+        for kept in (
+            "a lamp and/or a shade", "1/2 inch thick, w/ a lid", "M3/M4 screws", "made 11/10/2026",
+            "~20 mm cube w/ lid", "a pendant lamp shade", "", "/ on its own",
+        ):
+            assert redaction.without_folders(kept) == kept, kept
+
+
+class TestWhatAReviewAskedNext:
+    """The neighbours of the two rules above: a network share, a country
+    code with no plus, other groupings, tagged and nested email addresses, a
+    file link -- and the sizes of an object, which must survive all of it."""
+
+    def test_a_network_share_inside_a_sentence_loses_its_host_and_folders(self):
+        out = redaction.without_folders(r"the shade is at \\fileserver01\designs\lamps\shade.stl for now")
+        assert out == "the shade is at shade.stl for now"
+        out = redaction.without_folders("copied from //fileserver01/designs/lamps/shade.stl today")
+        assert out == "copied from shade.stl today"
+        assert redaction.without_folders(r"\\fileserver01\designs\lamps\shade.stl") == "shade.stl"
+
+    def test_a_country_code_with_or_without_a_plus(self):
+        for written in ("1-555-010-4477", "1 555 010 4477", "+1 555 010 4477", "1.555.010.4477", "1 (555) 010-4477"):
+            out = redaction.redact_places(f"ring {written} tomorrow")
+            assert out == "ring [a phone number] tomorrow", (written, out)
+
+    def test_an_international_number_in_other_groupings(self):
+        for written in (
+            "+33 1 23 45 67 89", "+91 98765 43210", "+358 40 123 4567", "+61 4 1234 5678", "+44 (0)20 7946 0958",
+            "0044 20 7946 0958",
+        ):
+            out = redaction.redact_places(f"ring {written} tomorrow")
+            assert out == "ring [a phone number] tomorrow", (written, out)
+
+    def test_an_email_with_a_tag_or_a_subdomain(self):
+        for written in ("jane+kiln@example.com", "jane.doe@mail.example.co.uk", "j_d-1@sub.domain.example.org"):
+            assert redaction.redact_places(f"write to {written} please") == "write to [an email address] please", written
+
+    def test_a_file_link_goes_whole(self):
+        out = redaction.redact_machine_text("opened file:///Users/jane/lamps/shade.stl and file://fileserver01/designs/x.stl")
+        assert out == "opened [a web address] and [a web address]"
+
+    def test_an_objects_sizes_survive(self):
+        for kept in (
+            "120-80-4000", "3.5 x 10", "200 x 300 x 1500", "200x300x1500 mm", "200 300 1500 mm", "200-300-1500 mm",
+            "120.5 80.25 4000.0", "a shelf 600 by 250 by 18 mm", "M8 x 1.25, 40 long", "width 120, depth 300, height 1500",
+            "0.4 nozzle, 0.2 layers, 215 and 60 degrees", "version 1.5.1 of the bracket", "scale 1 200 300 1500 mm",
+            "bore 6.35, 8 holes on a 100 pitch circle", "2 off, 150 250 1000 cm each",
+        ):
+            assert redaction.redact_places(kept) == kept, kept
+            assert redaction.without_folders(kept) == kept, kept
+
+
+class TestAPhoneNumberBeatsASize:
+    """When a run of numbers could be a phone number or a size, it goes: a
+    lost dimension costs nothing, a phone number that leaves cannot come
+    back.  A size is kept only where nothing else could be meant."""
+
+    def test_a_number_followed_by_a_word_or_a_times_sign_goes(self):
+        for written in (
+            "ring 555-010-4477 in the morning", "reach me by 555 010 4477", "555-010-4477 x 12 is the desk",
+            "555 010 4477 m is the mobile", "call 1 555 010 4477 by noon", "it is 555.010.4477 in the office",
+        ):
+            out = redaction.redact_places(written)
+            assert "4477" not in out and "[a phone number]" in out, (written, out)
+
+    def test_a_plus_number_goes_after_any_punctuation(self):
+        for written in (
+            "Tel.+44 20 7946 0958", "tel:+44 20 7946 0958", "numbers: +44 20 7946 0958,+33 1 23 45 67 89",
+            "(+44 20 7946 0958)", "Tel+44 20 7946 0958", "home,+1 555 010 4477",
+        ):
+            out = redaction.redact_places(written)
+            assert "7946" not in out and "4477" not in out and "45 67" not in out, (written, out)
+            assert "[a phone number]" in out, (written, out)
+
+    def test_a_bare_triple_with_no_unit_goes(self):
+        assert redaction.redact_places("the box is 200 300 1500") == "the box is [a phone number]"
+
+    def test_a_size_nothing_else_could_be_is_kept(self):
+        for kept in (
+            "200 300 1500 mm", "200-300-1500 mm", "150 250 1000 cm each", "100 200 3000 inches of pipe",
+            "18 x 555 010 4477", "600 by 250 by 18 mm",
+        ):
+            assert redaction.redact_places(kept) == kept, kept

@@ -4190,6 +4190,33 @@ def remove_floating_regions(
 # ---------------------------------------------------------------------------
 
 
+#: What ``bed_check.note`` says when no bed is known.
+BED_NOT_CHECKED_NOTE = (
+    "Bed fit was not checked: no bed size was given and Kiln has no printer on record to take one "
+    "from. Give printer_id or the three bed dimensions to check it."
+)
+
+
+def _install_printer_bed() -> tuple[float, float, float] | None:
+    """The bed of this install's printer (:func:`kiln.stage_plate.resolve_stage_plate`), or ``None`` when Kiln has none."""
+    try:
+        from kiln.stage_plate import resolve_stage_plate
+
+        plate = resolve_stage_plate()
+        if plate.get("source") != "printer":
+            return None
+        return (float(plate["x_mm"]), float(plate["y_mm"]), float(plate["z_mm"]))
+    except Exception:  # noqa: BLE001 - a bed that cannot be read is no bed
+        return None
+
+
+def _bed_check_block(bed_mm: tuple[float, float, float] | None, source: str | None) -> dict[str, Any]:
+    """``bed_check`` for :func:`can_print_now`: the bed the part was held to and whose it is."""
+    if bed_mm is None:
+        return {"checked": False, "bed_mm": None, "source": None, "note": BED_NOT_CHECKED_NOTE}
+    return {"checked": True, "bed_mm": [float(v) for v in bed_mm], "source": source}
+
+
 def can_print_now(
     file_path: str,
     *,
@@ -4221,7 +4248,15 @@ def can_print_now(
     - ``needs_fixes``: the mesh has a fault to fix first; ``issues`` says
       which.
     - ``unprintable`` / ``unknown_printer_bed``: there is no part to judge,
-      or no bed to judge it against.
+      or ``printer_id`` names no printer Kiln has a bed for.
+
+    The bed the part is held to is, in order: ``printer_bed_mm``; the bed of
+    ``printer_id``; the bed of this install's printer.  With none of the
+    three the fit is not checked: no size is assumed, no ``too_large`` issue
+    is raised, and ``bed_check`` says so.  Every answer that judged a part
+    carries ``bed_check``: ``checked``, ``bed_mm``, ``source`` (``"stated"``,
+    ``"printer"``, ``"install_printer"`` or ``None``) and, when unchecked,
+    ``note``.
 
     When ``auto_fix=True``, attempts to fix issues in-place:
     - Removes degenerate triangles
@@ -4232,9 +4267,8 @@ def can_print_now(
         file_path: Path to mesh file.
         auto_fix: Whether to attempt automatic repairs.
         output_path: Where to write the fixed file (only used with auto_fix).
-        printer_bed_mm: Build volume as (x, y, z) in mm.
-            Defaults to a legacy 256mm cube only when no printer_id or
-            explicit bed is provided.
+        printer_bed_mm: The bed to hold the part to, as (x, y, z)
+            millimetres; ``None`` when the caller states none.
         printer_id: Optional supported printer model id.  When provided and
             ``printer_bed_mm`` is omitted, printer intelligence supplies the
             build volume.
@@ -4244,9 +4278,11 @@ def can_print_now(
     Returns:
         Dict with pass/fail verdict, issues found, and actions taken.
     """
+    bed_source: str | None = "stated" if printer_bed_mm is not None else None
     if printer_bed_mm is None and printer_id:
         from kiln.printers.bed_fit import get_build_volume
 
+        bed_source = "printer"
         printer_bed_mm = get_build_volume(printer_id)
         if printer_bed_mm is None:
             return {
@@ -4263,7 +4299,8 @@ def can_print_now(
                 "actions_taken": [],
             }
     if printer_bed_mm is None:
-        printer_bed_mm = (256.0, 256.0, 256.0)
+        printer_bed_mm = _install_printer_bed()
+        bed_source = "install_printer" if printer_bed_mm is not None else None
 
     issues: list[dict[str, str]] = []
     actions_taken: list[str] = []
@@ -4374,7 +4411,7 @@ def can_print_now(
         })
 
     # Check bed fit
-    if analysis.dimensions_mm:
+    if analysis.dimensions_mm and printer_bed_mm is not None:
         w = analysis.dimensions_mm["width_mm"]
         d = analysis.dimensions_mm["depth_mm"]
         h = analysis.dimensions_mm["height_mm"]
@@ -4436,6 +4473,7 @@ def can_print_now(
         "mesh_check_score": analysis.mesh_check_score,
         "triangle_count": analysis.triangle_count,
         "dimensions_mm": analysis.dimensions_mm,
+        "bed_check": _bed_check_block(printer_bed_mm, bed_source),
     }
 
     if auto_fix and working_path != file_path:

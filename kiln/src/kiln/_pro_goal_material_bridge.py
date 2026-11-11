@@ -292,6 +292,12 @@ def _ask(goal: str, change: dict[str, str], *, waited: bool) -> dict[str, Any]:
         return _missed(goal, change["material"], miss)
     block = {k: said[k] for k in ("brief_id", "recorded", "material", "replaced", "why", "note") if k in said}
     block["recorded_on"] = "kiln_servers"
+    # The goal's safety notes for the part in the filament it is now made in.
+    notes = said.get("safety_notes")
+    if isinstance(notes, list):
+        kept = [n for n in notes if isinstance(n, str) and n]
+        if kept:
+            block["safety_notes"] = kept
     return block
 
 

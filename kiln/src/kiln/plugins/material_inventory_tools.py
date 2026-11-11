@@ -144,6 +144,12 @@ class _MaterialInventoryToolsPlugin:
         ) -> dict:
             """Check if a printer has enough material for a print job.
 
+            ``check.sufficient`` is ``true`` or ``false`` when Kiln holds a
+            weight for what is loaded (a linked spool's count), and ``null``
+            when it holds none.  ``null`` is not a shortfall: the check was
+            not made, and ``check.unknown`` says what to record.  Relay that
+            sentence; never report an unknown weight as running out.
+
             When material is insufficient, says what the person can do with
             what they have: a spool on the shelf, a pause-and-swap.  Only
             when nothing they have will do does it end with one offer of
@@ -190,7 +196,7 @@ class _MaterialInventoryToolsPlugin:
                         material_type=material_type, other_machines=[],
                     )
                     others = []
-                    if not first.sufficient and first.material_type:
+                    if first.sufficient is False and first.material_type:
                         others, miss = inventory_answer(
                             "alternatives", db, feature="Alternative printers",
                             material_type=first.material_type, min_grams=required_grams,
@@ -205,7 +211,7 @@ class _MaterialInventoryToolsPlugin:
                     other_machines=others,
                 )
                 payload = check.to_dict()
-                if unanswered is not None and not payload.get("sufficient"):
+                if unanswered is not None and payload.get("sufficient") is False:
                     payload["fleet_alternatives"] = {
                         k: unanswered[k] for k in ("error", "code", "why", "why_code", "why_detail") if k in unanswered
                     }

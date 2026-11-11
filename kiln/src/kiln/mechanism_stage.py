@@ -109,6 +109,20 @@ def block_for(file_path: str) -> dict[str, Any] | None:
         return None
 
 
+def runs_for(file_path: str) -> list[tuple[int, int]] | None:
+    """Each part's runs of triangles in *file_path*, in the file's order,
+    for a payload that must simplify the mesh and keep the parts apart, or
+    ``None`` when the file carries no mechanism that plays."""
+    block = block_for(file_path)
+    parts = block.get("parts") if isinstance(block, dict) and block.get("playable") else None
+    if not isinstance(parts, dict) or not parts:
+        return None
+    try:
+        return sorted((int(run[0]), int(run[1])) for part in parts.values() for run in part["spans"])
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
 def sidecar_for_mesh(file_path: str) -> bytes | None:
     """The block as the bytes a hosted stage page is handed, or ``None``."""
     block = block_for(file_path)
