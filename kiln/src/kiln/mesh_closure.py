@@ -5,7 +5,8 @@ The answers are trimesh's, by its own definitions, so a check that switches
 here keeps its verdicts:
 
 - vertices merge when their coordinates agree once scaled by 1e8 and rounded
-  (``trimesh.grouping.merge_vertices`` at ``tol.merge``);
+  (``trimesh.grouping.merge_vertices`` at ``tol.merge``), so a triangle two of
+  whose corners merge is a line or a point (:func:`collapsed_triangles`);
 - two triangles join one piece across an edge exactly two triangles share
   (``trimesh.graph.face_adjacency``), and a piece of under four triangles is
   no piece (``graph.split``);
@@ -76,6 +77,14 @@ def _merged(triangles: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     # lexsort is stable, so a group's first entry is its first occurrence.
     coordinates = corners[order[starts]]
     return ids.reshape(-1, 3), coordinates
+
+
+def collapsed_triangles(triangles: np.ndarray) -> np.ndarray:
+    """Which of *triangles* ``(N, 3, 3)`` have two corners the merge makes one
+    vertex (:func:`_merged`): each is a line or a point."""
+    rounded = (np.asarray(triangles, dtype=np.float64) * _MERGE_SCALE).round()
+    first, second, third = rounded[:, 0], rounded[:, 1], rounded[:, 2]
+    return (first == second).all(axis=1) | (second == third).all(axis=1) | (first == third).all(axis=1)
 
 
 def _edges(faces: np.ndarray, vertex_count: int) -> tuple[np.ndarray, np.ndarray]:

@@ -76,6 +76,10 @@ _PERSONS_OWN_ASK = {
         "the start is refused without the check, so a signed-out refusal is the "
         "person meeting the sign-in wall"
     ),
+    "_pro_mechanism_bridge": (
+        "runs only when the person composes an assembly whose record declares a "
+        "mechanism; the played mechanism is what that compose was asked to keep"
+    ),
     "_pro_relief_bridge": (
         "runs only when the person presses a photo into a part in a photo style; "
         "the sculpted relief is the decoration they asked for"
