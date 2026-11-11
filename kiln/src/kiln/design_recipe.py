@@ -352,7 +352,12 @@ def create_new_version(
         e.g. ``{"portrait.color": "white -> black"}``.
     :param notes: Free-text notes for this version.
     """
-    from kiln.version_numbers import holds_a_version, numbers_in_store, reserve_version_number
+    from kiln.version_numbers import (
+        holds_a_version,
+        next_version_number,
+        numbers_in_store,
+        reserve_version_number,
+    )
 
     new = copy.deepcopy(parent)
     # One past every number the design has given, not one past the parent:
@@ -362,9 +367,19 @@ def create_new_version(
     is_version = not os.path.isfile(parent_path) or holds_a_version(parent_path)
     # A recipe from before designs wrote their id inside is the design its
     # folder is named for.
-    design_id = parent.design_id or _library_design_id(folder)
-    taken = [*numbers_in_store(design_id), *([parent.version] if is_version else [])]
-    new.version = reserve_version_number(folder, taken)
+    library_id = _library_design_id(folder)
+    design_id = parent.design_id or library_id
+    taken = [parent.version] if is_version else []
+
+    def recorded() -> set[int]:
+        return numbers_in_store(design_id)
+
+    if library_id is not None:
+        # Taken for good, with the history record read under the same lock.
+        new.version = reserve_version_number(folder, taken, also=recorded)
+    else:
+        # A recipe kept outside the library: numbered, nothing written there.
+        new.version = next_version_number(folder, [*taken, *recorded()])
     new.parent_version = os.path.abspath(parent_path)
     new.changes = changes
     new.created = datetime.now(timezone.utc).isoformat()

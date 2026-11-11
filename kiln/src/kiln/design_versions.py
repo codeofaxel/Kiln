@@ -359,7 +359,11 @@ class DesignVersionStore:
         with self._lock:
             # One transaction from reading the design's numbers to writing
             # the row: another process waits here rather than read the same
-            # highest number.
+            # highest number.  A caller's own uncommitted writes on this
+            # connection are committed first, as this save's commit always
+            # committed them.
+            if self._conn.in_transaction:
+                self._conn.commit()
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 # Find the latest existing version for this design.
@@ -384,6 +388,19 @@ class DesignVersionStore:
                     version_number = next_version_number(None, [*self._numbers(design_id), *past])
                 elif isinstance(version_number, bool) or not isinstance(version_number, int) or version_number < 1:
                     raise ValueError("version_number must be a whole number from 1")
+                from kiln.version_numbers import _MOST
+
+                if version_number > _MOST:
+                    raise ValueError(f"version number {version_number} is past any real design's history")
+                held_by = self._conn.execute(
+                    "SELECT version_id FROM design_versions WHERE design_id = ? AND version_number = ? LIMIT 1",
+                    (design_id, version_number),
+                ).fetchone()
+                if held_by is not None:
+                    raise ValueError(
+                        f"version number {version_number} of {design_id!r} is already held by version "
+                        f"{held_by[0]}; a number is given once"
+                    )
 
                 self._conn.execute(
                     "INSERT INTO design_versions "
@@ -463,13 +480,16 @@ class DesignVersionStore:
         """Save a version that has no recipe file of its own, numbered past
         the design's recipes too, and note the number in its library folder
         so a later save there is numbered past it."""
-        from kiln.version_numbers import note_number_given, numbers_in_folder
+        from kiln.version_numbers import numbers_in_folder, numbers_lock, raise_mark
 
         folder = _library_folder(design_id)
-        past = numbers_in_folder(folder) if folder is not None else ()
-        saved = self.save_version(design_id, scad_source, past=past, **fields)
-        if folder is not None:
-            note_number_given(folder, saved.version_number)
+        if folder is None or not folder.is_dir():
+            return self.save_version(design_id, scad_source, **fields)
+        # The folder's numbers lock is held from reading them to writing the
+        # number down, as every door that gives a number holds it.
+        with numbers_lock(folder):
+            saved = self.save_version(design_id, scad_source, past=numbers_in_folder(folder), **fields)
+            raise_mark(folder, saved.version_number)
         return saved
 
     def get_version(self, version_id: str) -> DesignVersion | None:

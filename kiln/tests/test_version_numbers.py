@@ -282,3 +282,128 @@ class TestTheStoreNeverRepeatsANumber:
         elsewhere.mkdir(parents=True)
         head = _write(elsewhere, ".kiln_recipe.json", version=1)
         assert create_new_version(load_recipe(str(head)), str(head)).version == 2
+
+
+# --- each test below fails on the code before the lock every door holds ---
+
+
+class TestOneLockForEveryDoor:
+    def test_a_recipe_door_and_a_store_only_door_never_share_a_number(self, tmp_path):
+        """A command-line save (store only) racing a save that writes a
+        recipe gave two versions one number: each door read the other's
+        numbers outside the lock the other held."""
+        import os
+        import subprocess
+        import sys
+
+        designs = tmp_path / "designs"
+        (designs / "part").mkdir(parents=True)
+        db = str(tmp_path / "v.db")
+        DesignVersionStore(db_path=db).close()
+        common = (
+            "import sys, json\n"
+            "from kiln import design_versions\n"
+            "from kiln.plugins import version_tools\n"
+            "version_tools._DESIGNS_ROOT = sys.argv[1]\n"
+            "design_versions._DEFAULT_DB_PATH = sys.argv[2]\n"
+        )
+        recipe_door = common + (
+            "from pathlib import Path\n"
+            "from kiln.version_numbers import reserve_version_number, numbers_in_store\n"
+            "folder = Path(sys.argv[1]) / 'part'\n"
+            "got = []\n"
+            "for _ in range(8):\n"
+            "    n = reserve_version_number(folder, also=lambda: numbers_in_store('part'))\n"
+            "    s = design_versions.DesignVersionStore()\n"
+            "    s.save_version('part', 'cube(1);', version_number=n)\n"
+            "    s.close(); got.append(n)\n"
+            "print(*got)\n"
+        )
+        store_door = common + (
+            "s = design_versions.DesignVersionStore()\n"
+            "print(*[s.save_without_recipe('part', 'cube(2);').version_number for _ in range(8)])\n"
+        )
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+        procs = [
+            subprocess.Popen([sys.executable, "-c", code, str(designs), db], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, env=env)
+            for code in (recipe_door, store_door, recipe_door, store_door)
+        ]
+        outs = [p.communicate() for p in procs]
+        assert all(p.returncode == 0 for p in procs), [o[1][-400:] for o in outs]
+        got = sorted(int(n) for out, _err in outs for n in out.split())
+        assert got == list(range(1, 33))
+        store = DesignVersionStore(db_path=db)
+        try:
+            rows = store.list_versions("part", limit=100)
+        finally:
+            store.close()
+        assert sorted(v.version_number for v in rows) == list(range(1, 33))
+
+    def test_a_save_that_cannot_get_the_lock_is_refused_not_let_through(self, tmp_path, monkeypatch):
+        """After a bounded wait a save went ahead without the lock, took the
+        same number as the stalled holder and wrote over its kept file."""
+        import fcntl
+
+        from kiln import version_numbers
+
+        monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.2)
+        _write(tmp_path, ".kiln_recipe.v1.json", version=1)
+        holder = open(tmp_path / ".kiln_numbers.lock", "a+")
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            with pytest.raises(version_numbers.NumbersBusy):
+                version_numbers.reserve_version_number(tmp_path)
+        finally:
+            holder.close()
+        assert not (tmp_path / ".kiln_numbers.json").exists(), "a refused save takes no number"
+        assert version_numbers.reserve_version_number(tmp_path) == 2
+
+
+class TestTheStoreRefusesANumberAlreadyHeld:
+    def test_a_held_number_is_refused(self, tmp_path):
+        store = DesignVersionStore(db_path=str(tmp_path / "v.db"))
+        try:
+            first = store.save_version("part", "cube(1);")
+            with pytest.raises(ValueError, match="already held"):
+                store.save_version("part", "cube(2);", version_number=first.version_number)
+            with pytest.raises(ValueError):
+                store.save_version("part", "cube(3);", version_number=10**12)
+            assert [v.version_number for v in store.list_versions("part", limit=10)] == [1]
+        finally:
+            store.close()
+
+
+class TestDamageNeverCarriesAnAbsurdNumber:
+    def test_a_huge_number_in_a_file_name_is_ignored(self, tmp_path):
+        _write(tmp_path, ".kiln_recipe.v99999999999999999999.json", version=3)
+        _write(tmp_path, ".kiln_recipe.v2.json", version=2)
+        assert numbers_in_folder(tmp_path) == {2, 3}
+        assert next_version_number(tmp_path) == 4
+
+
+class TestNothingIsWrittenOutsideTheLibrary:
+    def test_a_recipe_outside_the_library_is_numbered_without_writing_beside_it(self, tmp_path, monkeypatch):
+        from kiln.plugins import version_tools
+
+        monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path / "designs"))
+        project = tmp_path / "my-project"
+        project.mkdir()
+        head = _write(project, ".kiln_recipe.json", version=1, design_id="part")
+        _write(project, ".kiln_recipe.v1.json", version=1, design_id="part")
+        assert create_new_version(load_recipe(str(head)), str(head)).version == 2
+        assert sorted(p.name for p in project.iterdir()) == [".kiln_recipe.json", ".kiln_recipe.v1.json"]
+
+
+class TestASaveAfterTheCallersOwnWrite:
+    def test_an_open_transaction_on_the_connection_does_not_fail_the_save(self, tmp_path):
+        """A caller that wrote on the store's connection without committing
+        made the next save fail: a transaction cannot start inside one."""
+        store = DesignVersionStore(db_path=str(tmp_path / "v.db"))
+        try:
+            first = store.save_version("part", "cube(1);")
+            store._conn.execute("UPDATE design_versions SET notes = 'edited' WHERE version_id = ?", (first.version_id,))
+            assert store.save_version("part", "cube(2);").version_number == 2
+            assert store.get_version(first.version_id).notes == "edited"
+        finally:
+            store.close()

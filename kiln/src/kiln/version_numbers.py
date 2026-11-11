@@ -11,7 +11,8 @@ of its own) is not a version and takes no number.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,9 @@ _PREFIX = ".kiln_recipe"
 #: not again after the version that held it is removed.
 _GIVEN = ".kiln_numbers.json"
 _LOCK = ".kiln_numbers.lock"
-_LOCK_WAIT_SECONDS = 10.0
+#: How long a save waits for another save of the same design to take its
+#: number before it is refused.
+_LOCK_WAIT_SECONDS = 30.0
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -64,7 +67,7 @@ def holds_a_version(path: str | Path) -> bool:
 def _number_in_name(path: Path) -> int | None:
     """The N of ``.kiln_recipe.vN.json``; ``None`` for any other name."""
     stem = path.name[len(_PREFIX) : -len(".json")]
-    return int(stem[2:]) if stem[:2] == ".v" and stem[2:].isdigit() and int(stem[2:]) > 0 else None
+    return _number(int(stem[2:])) if stem[:2] == ".v" and stem[2:].isdigit() else None
 
 
 def numbers_in_folder(folder: str | Path) -> set[int]:
@@ -136,23 +139,36 @@ def next_version_number(folder: str | Path | None, taken: Iterable[Any] = ()) ->
     return max(known, default=0) + 1
 
 
-def _with_numbers_lock(root: Path, action: Any) -> Any:
-    """Run *action* holding the design folder's numbers lock.
+class NumbersBusy(RuntimeError):
+    """Another save of this design is still taking its number."""
 
-    Waits a bounded time for another save: a process stuck while holding
-    the lock must not stop every later save, so after the wait the action
-    runs anyway.
+
+@contextmanager
+def numbers_lock(folder: str | Path) -> Iterator[None]:
+    """Hold the numbers lock of the design kept in *folder*.
+
+    Every door that gives a number holds it from reading the numbers already
+    given to writing down the one it takes, so two saves of one design never
+    take the same number, whichever doors they come through.  A save that
+    cannot get it within :data:`_LOCK_WAIT_SECONDS` is refused
+    (:class:`NumbersBusy`), never let through without it: two saves holding
+    one number is how a kept file gets written over.  The lock is released
+    by the system when its holder ends, however it ends.  Not re-entrant: a
+    holder never asks for it again.
     """
     import time
 
+    root = Path(folder)
     try:
         import fcntl
     except ImportError:  # no file locks on this system: the count alone
-        return action()
+        yield
+        return
     try:
         lock = open(root / _LOCK, "a+")  # noqa: SIM115 -- held across the read and the write
-    except OSError:
-        return action()
+    except OSError:  # a folder this process cannot write: nothing to write a number into either
+        yield
+        return
     try:
         deadline = time.monotonic() + _LOCK_WAIT_SECONDS
         while True:
@@ -161,9 +177,12 @@ def _with_numbers_lock(root: Path, action: Any) -> Any:
                 break
             except OSError:
                 if time.monotonic() >= deadline:
-                    break
+                    raise NumbersBusy(
+                        "Another save of this design is still running, so nothing was saved. "
+                        "Try again in a moment."
+                    ) from None
                 time.sleep(0.02)
-        return action()
+        yield
     finally:
         lock.close()
 
@@ -179,37 +198,42 @@ def _write_given(root: Path, number: int) -> None:
         pass
 
 
-def reserve_version_number(folder: str | Path, taken: Iterable[Any] = ()) -> int:
+def raise_mark(folder: str | Path, number: Any) -> None:
+    """Write down that the design kept in *folder* gave *number*, when it is
+    past every number written down so far.  The caller holds
+    :func:`numbers_lock`."""
+    root = Path(folder)
+    given = _number(number)
+    if given is not None and root.is_dir() and given > max(numbers_in_folder(root), default=0):
+        _write_given(root, given)
+
+
+def reserve_version_number(
+    folder: str | Path, taken: Iterable[Any] = (), *, also: Callable[[], Iterable[Any]] | None = None
+) -> int:
     """Take the next number for the design kept in *folder*, for good.
 
-    :func:`next_version_number`, made safe for two saves at once and for a
-    version removed later: the number is written down in the folder before
-    it is returned, under a lock, so no other save is handed it.  A save
-    that takes a number and then fails leaves a gap, never a repeat.
+    :func:`next_version_number` over the folder, *taken*, and what *also*
+    returns (the design's history record, read while the lock is held so a
+    version recorded there by another door a moment ago is counted).  The
+    number is written down in the folder before it is returned, so no other
+    save is handed it.  A save that takes a number and then fails leaves a
+    gap, never a repeat.
     """
     root = Path(folder)
     if not root.is_dir():
-        return next_version_number(None, taken)
-    known = list(taken)
-
-    def take() -> int:
-        number = next_version_number(root, known)
+        return next_version_number(None, [*taken, *(also() if also else ())])
+    with numbers_lock(root):
+        number = next_version_number(root, [*taken, *(also() if also else ())])
         _write_given(root, number)
         return number
-
-    return _with_numbers_lock(root, take)
 
 
 def note_number_given(folder: str | Path, number: Any) -> None:
     """Record that the design kept in *folder* gave *number* to a version
     that has no recipe file here, so no later save is handed it."""
     root = Path(folder)
-    given = _number(number)
-    if given is None or not root.is_dir():
+    if not root.is_dir():
         return
-
-    def note() -> None:
-        if given > max(numbers_in_folder(root), default=0):
-            _write_given(root, given)
-
-    _with_numbers_lock(root, note)
+    with numbers_lock(root):
+        raise_mark(root, number)

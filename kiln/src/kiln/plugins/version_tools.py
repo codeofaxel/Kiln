@@ -134,6 +134,20 @@ def _after_save_here(design_id: str, missing: ImportError) -> dict:
     return after_local_save(design_id)
 
 
+#: Said when a version was kept on this computer but its history record did
+#: not take it, so nothing would ever push it.
+NOT_IN_HISTORY = (
+    "This version is kept on this computer, but it could not be added to the "
+    "design's history, so a push will not carry it. Save it again to try once more."
+)
+
+
+def _note_not_in_history(result: dict, registration: dict | None) -> None:
+    """Say so in *result* when a version did not reach its history record."""
+    if registration is None:
+        result["warnings"] = [*(result.get("warnings") or []), NOT_IN_HISTORY]
+
+
 def _register_on_branch(pro_features: Any, design_id: str, recipe: Any, scad_source: str | None) -> dict | None:
     """Hand a version just saved here to the branch record, with its number.
 
@@ -300,7 +314,7 @@ class _VersionToolsPlugin:
                     from kiln.version_numbers import numbers_in_store, reserve_version_number
 
                     recipe.version = reserve_version_number(
-                        design_directory, numbers_in_store(design_id)
+                        design_directory, also=lambda: numbers_in_store(design_id)
                     )
                     recipe.prompt = prompt or None
                     recipe.provenance = provenance or None
@@ -396,6 +410,7 @@ class _VersionToolsPlugin:
                     registration = _register_on_branch(
                         pro_features, design_id, recipe, scad_source
                     )
+                    _note_not_in_history(result, registration)
                     if registration is not None:
                         if registration:
                             result["version"]["branch"] = registration
@@ -610,6 +625,7 @@ class _VersionToolsPlugin:
                     registration = _register_on_branch(
                         pro_features, design_id, new_recipe, new_recipe.source_scad
                     )
+                    _note_not_in_history(result, registration)
                     if registration:
                         result["version"]["branch"] = registration
                     from kiln_pro.plugins.git_render_tools import (
