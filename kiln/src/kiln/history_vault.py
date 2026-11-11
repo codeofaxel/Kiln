@@ -1541,21 +1541,16 @@ class HistoryVault:
     def _point_head(self, design_id: str) -> None:
         """Make the library's head recipe the checked-out branch's head.
 
-        Numbered after every version in the library, because the version
-        tools number a save one past the head: a head numbered lower would
-        have the next save written over another version's file.
+        The head copy carries the version's own number, the same one its
+        kept file carries; the next save is numbered past every version in
+        the library by :func:`kiln.version_numbers.next_version_number`.
         """
         folder = _design_folder(design_id)
         branch = self.checked_out(design_id)
         head = self.version(branch["head_version_id"]) if branch and branch.get("head_version_id") else None
         if folder is None or head is None:
             return
-        numbers = [
-            n for n in (_read(p).get("version") for p in folder.glob(".kiln_recipe*.json") if p.name != _RECIPE_HEAD)
-            if isinstance(n, int)
-        ]
         recipe = _library_recipe(head, design_id)
-        recipe["version"] = max([*numbers, int(recipe.get("version") or 0)])
         mesh = self.mesh_path(head.get("mesh_sha256"))
         if mesh is not None:
             local = folder / f"mesh-{head['mesh_sha256'][:16]}{mesh.suffix}"

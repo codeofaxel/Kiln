@@ -252,11 +252,17 @@ class TestWhatComesBack:
         assert branch["head_version_id"] == "f" * 32
         assert vault.mesh_path(vault.version("f" * 32)["mesh_sha256"]).read_bytes().startswith(b"solid three")
         # The version is in the library, but the library's head is still main's,
-        # numbered past every version so the next save takes a free number.
+        # under main's own number; the next save takes a number past every
+        # version in the library, the branch's included.
         assert any(json.loads(p.read_text()).get("version_id") == "f" * 32 for p in folder.glob(".kiln_recipe.*.json"))
         head = json.loads((folder / ".kiln_recipe.json").read_text())
         assert head["version_id"] == vault.branch_named("mug", "main")["head_version_id"]
-        assert head["version"] == 3
+        assert head["version"] == 2
+        from kiln.design_recipe import create_new_version, load_recipe
+        from kiln.version_numbers import numbers_in_folder
+
+        head_path = str(folder / ".kiln_recipe.json")
+        assert create_new_version(load_recipe(head_path), head_path).version == max(numbers_in_folder(folder)) + 1
 
     def test_a_branch_moved_here_meanwhile_is_left_as_it_is(self, home):
         _library(home, "mug", [MESH_V1])

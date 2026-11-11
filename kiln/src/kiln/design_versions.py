@@ -284,8 +284,15 @@ class DesignVersionStore:
         prompt: str = "",
         parameters: dict[str, Any] | None = None,
         notes: str = "",
+        *,
+        version_number: int | None = None,
     ) -> DesignVersion:
         """Save a new version for *design_id*.
+
+        *version_number* is the number the version was given when it was
+        made (:mod:`kiln.version_numbers`); a caller that already wrote the
+        version's recipe passes that number so this record keeps it.  Left
+        out, the version takes one past the design's highest number here.
 
         Automatically computes a unified diff from the previous version
         (if any), assigns a UUID version_id, and records the timestamp.
@@ -332,11 +339,19 @@ class DesignVersionStore:
             if prev is not None:
                 diff_text = self._compute_diff(prev["scad_source"], scad_source)
                 parent_id: str | None = prev["version_id"]
-                version_number = prev["version_number"] + 1
             else:
                 diff_text = None
                 parent_id = None
-                version_number = 1
+            if version_number is None:
+                from kiln.version_numbers import next_version_number
+
+                held = self._conn.execute(
+                    "SELECT MAX(version_number) FROM design_versions WHERE design_id = ?",
+                    (design_id,),
+                ).fetchone()[0]
+                version_number = next_version_number(None, [held])
+            elif isinstance(version_number, bool) or not isinstance(version_number, int) or version_number < 1:
+                raise ValueError("version_number must be a whole number from 1")
 
             self._conn.execute(
                 "INSERT INTO design_versions "

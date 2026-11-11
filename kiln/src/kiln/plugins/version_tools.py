@@ -270,23 +270,28 @@ class _VersionToolsPlugin:
                     recipe.intent_hash = intent_hash or None
                     diff_text: str | None = None
                 else:
+                    from kiln.version_numbers import holds_a_version
+
                     parent = load_recipe(existing_path)
-                    prev_scad = parent.source_scad or ""
-                    diff_lines = list(
-                        difflib.unified_diff(
-                            prev_scad.splitlines(keepends=True),
-                            scad_source.splitlines(keepends=True),
-                            fromfile=f"v{parent.version}",
-                            tofile=f"v{parent.version + 1}",
+                    # A slot made before anything was saved is not a
+                    # version: the save into it is the design's first.
+                    first = not holds_a_version(existing_path)
+                    recipe = create_new_version(parent, existing_path, notes=notes)
+                    if first:
+                        diff_text = None
+                        recipe.parent_version = None
+                    else:
+                        prev_scad = parent.source_scad or ""
+                        diff_lines = list(
+                            difflib.unified_diff(
+                                prev_scad.splitlines(keepends=True),
+                                scad_source.splitlines(keepends=True),
+                                fromfile=f"v{parent.version}",
+                                tofile=f"v{recipe.version}",
+                            )
                         )
-                    )
-                    diff_text = "".join(diff_lines) if diff_lines else ""
-                    recipe = create_new_version(
-                        parent,
-                        existing_path,
-                        changes={"scad_source": "updated"} if diff_text else None,
-                        notes=notes,
-                    )
+                        diff_text = "".join(diff_lines) if diff_lines else ""
+                        recipe.changes = {"scad_source": "updated"} if diff_text else None
                     recipe.source_scad = scad_source
                     recipe.parameters = parameters or parent.parameters
                     recipe.design_id = design_id
@@ -352,6 +357,17 @@ class _VersionToolsPlugin:
                         pro_features, "register_saved_version", None
                     )
                     if register is not None:
+                        # The version keeps the number it was just given:
+                        # the branch record is handed it, never counts its
+                        # own.  (A kiln-pro from before that argument takes
+                        # the call without it.)
+                        import inspect
+
+                        number = (
+                            {"version_number": recipe.version}
+                            if "version_number" in inspect.signature(register).parameters
+                            else {}
+                        )
                         registration = register(
                             design_id=design_id,
                             scad_source=scad_source,
@@ -359,6 +375,7 @@ class _VersionToolsPlugin:
                             prompt=recipe.prompt or "",
                             parameters=recipe.parameters,
                             notes=recipe.notes or "",
+                            **number,
                         )
                         if registration:
                             result["version"]["branch"] = registration

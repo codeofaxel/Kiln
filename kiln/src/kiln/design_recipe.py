@@ -322,9 +322,10 @@ def create_new_version(
     changes: dict[str, str] | None = None,
     notes: str = "",
 ) -> DesignRecipe:
-    """Create a new version of *parent*, incrementing the version number.
+    """Create a new version of *parent*, numbered by
+    :func:`kiln.version_numbers.next_version_number`.
 
-    Returns a deep copy with ``version`` incremented, ``parent_version``
+    Returns a deep copy with the design's next ``version``, ``parent_version``
     set to *parent_path*, ``changes`` recording the delta, and a fresh
     timestamp.  The caller should mutate the returned recipe (e.g., update
     part colors) before saving.
@@ -335,8 +336,15 @@ def create_new_version(
         e.g. ``{"portrait.color": "white -> black"}``.
     :param notes: Free-text notes for this version.
     """
+    from kiln.version_numbers import holds_a_version, next_version_number
+
     new = copy.deepcopy(parent)
-    new.version = parent.version + 1
+    # One past every number the design has given, not one past the parent:
+    # a slot that holds no version yet takes no number, so the first version
+    # saved into it is 1.
+    folder = os.path.dirname(os.path.abspath(parent_path))
+    is_version = not os.path.isfile(parent_path) or holds_a_version(parent_path)
+    new.version = next_version_number(folder, [parent.version] if is_version else [])
     new.parent_version = os.path.abspath(parent_path)
     new.changes = changes
     new.created = datetime.now(timezone.utc).isoformat()
