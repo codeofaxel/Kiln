@@ -391,6 +391,41 @@ def test_the_check_sees_each_way_of_opening_a_mesh(source, expected):
     assert mesh_frame.unrouted_loads(source) == expected
 
 
+def test_no_module_can_hand_a_3mf_to_trimeshs_reader():
+    """A 3MF is read by Kiln's own reader, at load_mesh, on every install:
+    trimesh's needs packages a plain install does not have."""
+    around = {
+        str(path.relative_to(_SRC)): lines
+        for path in sorted(_SRC.rglob("*.py"))
+        if path.name != "mesh_frame.py" and (lines := mesh_frame.threemf_reads_around_the_door(path.read_text()))
+    }
+    assert around == {}, (
+        "These could hand a 3MF to trimesh's own reader, which a plain install cannot run.  "
+        f"Read the file with kiln.mesh_frame.load_mesh: {around}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("import trimesh\nm = trimesh.load(p)\n", [2]),
+        ("import trimesh\nm = trimesh.load(p)  # raw frame: hashing the bytes\n", [2]),
+        ("import trimesh as tm\ns = tm.load_scene(p)\n", [2]),
+        ('import trimesh\nm = trimesh.load(p, file_type="stl")\n', []),
+        ('import trimesh\nm = trimesh.load(p, file_type="3mf")\n', [2]),
+        ("from trimesh.exchange.threemf import load_3MF\n", [1]),
+        ("import trimesh.exchange.threemf\n", [1]),
+        ("from trimesh.exchange import load as tl\nf = tl.mesh_loaders['3mf']\n", [1, 2]),
+        ("x = load_3MF(f)\n", [1]),
+        ("from kiln.mesh_frame import load_mesh\nm = load_mesh(p)\n", []),
+        ('"""Never call trimesh.load(p) or load_3MF here."""\n', []),
+        ("import trimesh\npath = trimesh.load_path(segments)\n", []),
+    ],
+)
+def test_the_3mf_check_sees_each_way_to_trimeshs_reader(source, expected):
+    assert mesh_frame.threemf_reads_around_the_door(source) == expected
+
+
 # --- regressions pinned by review (each fails at af14eac8) ---
 
 

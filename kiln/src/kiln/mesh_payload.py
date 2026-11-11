@@ -543,7 +543,7 @@ def _3mf_transform(attr: str | None) -> Any:
     return matrix
 
 
-def _load_3mf_stdlib(path: Path) -> Any:
+def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False) -> Any:
     """A 3MF read into a trimesh ``Scene`` with the standard library alone.
 
     trimesh's own 3MF loader needs ``lxml`` and ``networkx``, which a plain
@@ -574,6 +574,11 @@ def _load_3mf_stdlib(path: Path) -> Any:
     trouble with a fallback is that the machine running the tests has the
     extras and the user's machine does not, so the path users run was the
     one the suite never exercised.  One reader everywhere ends that.
+
+    *process* and *validate* reach each geometry's constructor, as they do
+    through trimesh's loader.  The scene's ``metadata["units"]`` is the
+    model's ``unit`` attribute as written (the specification's default,
+    ``millimeter``, when absent); the numbers are left in that unit.
 
     Raises ``ValueError`` for an archive with no model XML or unparsable
     XML — the same refusals the loader makes.
@@ -611,6 +616,8 @@ def _load_3mf_stdlib(path: Path) -> Any:
         return trimesh.Trimesh(
             vertices=np.array(info.vertices, dtype=np.float64),
             faces=np.asarray(faces, dtype=np.int64),
+            process=process,
+            validate=validate,
         )
 
     try:
@@ -717,6 +724,7 @@ def _load_3mf_stdlib(path: Path) -> Any:
                 return key
 
             scene = trimesh.Scene()
+            scene.metadata["units"] = (root.get("unit") or "millimeter").strip()
             for name, mesh in geometry.items():
                 scene.geometry[name] = mesh
             base = scene.graph.base_frame
