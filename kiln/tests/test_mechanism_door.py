@@ -222,6 +222,171 @@ def test_a_stage_that_does_not_draw_the_files_triangles_plays_nothing(tools, tmp
     assert block["playable"] is False and "too large" in block["why_not"]
 
 
+def test_a_stage_sent_a_simplified_mesh_still_plays_part_by_part(tools, tmp_path, served):
+    """A payload simplified one part at a time says where each part's
+    triangles are now; the mechanism follows them and plays.  One simplified
+    any other way plays nothing, and says why."""
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    whole = mechanism_stage.block_for(str(composed))
+    runs = sorted((run[0], run[1]) for part in whole["parts"].values() for run in part["spans"])
+    # Each run keeps half its triangles, packed in the file's order.
+    kept, at = [], 0
+    for first, count in runs:
+        now = max(1, count // 2)
+        kept.append([first, count, at, now])
+        at += now
+    payload = {"counts": {"triangles": at}, "decimated_from": sum(count for _, count in runs), "kept_runs": kept}
+    block = mechanism_stage.attach_to_payload(payload, str(composed))["mechanism"]
+    assert block["playable"] is True and block["poses"] == whole["poses"]
+    where = {(row[0], row[1]): [row[2], row[3]] for row in kept}
+    for part_id, part in whole["parts"].items():
+        assert block["parts"][part_id]["spans"] == [where[(run[0], run[1])] for run in part["spans"]]
+        assert block["parts"][part_id]["frames"] == part["frames"]
+    assert sum(run[1] for part in block["parts"].values() for run in part["spans"]) == at
+    # The note beside the file is as it was written.
+    assert mechanism_stage.block_for(str(composed)) == whole
+    # A run nobody accounts for, or runs that are not the payload's triangles: nothing plays.
+    for broken in ({**payload, "kept_runs": kept[1:]}, {**payload, "counts": {"triangles": at + 1}},
+                   {"counts": {"triangles": at}, "decimated_from": payload["decimated_from"]}):
+        block = mechanism_stage.attach_to_payload(dict(broken), str(composed))["mechanism"]
+        assert block["playable"] is False and "simplified" in block["why_not"]
+        assert "parts" not in block and "poses" not in block
+
+
+def test_a_kept_copy_of_the_file_keeps_how_it_moves(tools, tmp_path, served):
+    """The notes that say how a composed file moves follow it wherever it is
+    kept, so the kept copy plays as the composed file did."""
+    import hashlib
+
+    from kiln import assembly_stage, asset_store, joint_stage
+
+    for module in (joint_stage, mechanism_stage, assembly_stage):
+        assert module.NOTE_SUFFIX in asset_store._COMPANION_SUFFIXES
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    saved = kept / "mesh.stl"
+    saved.write_bytes(composed.read_bytes())
+    asset_store.carry_companions(str(composed), str(saved))
+    assert mechanism_stage.block_for(str(saved)) == mechanism_stage.block_for(str(composed))
+    assert joint_stage.stage_block(str(saved)) == joint_stage.stage_block(str(composed))
+    assert assembly_stage.stage_block(str(saved)) == assembly_stage.stage_block(str(composed))
+    assert local_stage._payload_for_mesh(str(saved))["mechanism"]["playable"] is True
+
+    # Away from its folder, a copy is shown from the notes' own bytes and its SHA-256.
+    sha = hashlib.sha256(saved.read_bytes()).hexdigest()
+    for module, block in ((mechanism_stage, mechanism_stage.block_for(str(saved))),
+                          (joint_stage, joint_stage.stage_block(str(saved))),
+                          (assembly_stage, assembly_stage.stage_block(str(saved)))):
+        note = kept / f"mesh.stl{module.NOTE_SUFFIX}"
+        if not note.exists():
+            assert block is None
+            continue
+        raw = note.read_bytes()
+        assert module.block_from_note(raw, sha) == block
+        # Another file's note, or no note at all, is nothing.
+        assert module.block_from_note(raw, hashlib.sha256(b"another file").hexdigest()) is None
+        assert module.block_from_note(b"not a note", sha) is None
+    raw = (kept / f"mesh.stl{mechanism_stage.NOTE_SUFFIX}").read_bytes()
+    assert mechanism_stage.block_from_note(raw, sha)["playable"] is True
+
+
+def _whole_answer_kept() -> None:
+    """Wait for the whole answer a compose asked for behind the reply."""
+    import threading
+
+    for thread in threading.enumerate():
+        if thread.name == "kiln-mechanism-whole-answer":
+            thread.join(timeout=30)
+
+
+def test_compose_keeps_the_soonest_answer_then_the_whole_one(tools, tmp_path, monkeypatch):
+    """The stage has something to play as soon as the first answer is in;
+    the whole answer is written over it when it arrives."""
+    import kiln.server as server
+
+    asked: list = []
+
+    def door(tool, **kwargs):
+        if tool != bridge.MECHANISM_TOOL:
+            raise ConnectionRefusedError()
+        asked.append(kwargs.get("check"))
+        block = _served_block(kwargs)
+        block["check"] = "frames" if kwargs.get("check") == "frames" else "cycle"
+        block["summary"] = f"answered for the {block['check']}"
+        return {"schema": "mechanism_answer/1", "mechanism": block}
+
+    monkeypatch.setattr(bridge, "_here", lambda: False)
+    monkeypatch.setattr(server, "_pro_api_call", door)
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    reply = _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    said = reply["data"]["mechanism"]
+    assert said["playable"] is True and said["says"] == "answered for the frames" and said["still_checking"] is True
+    _whole_answer_kept()
+    assert asked == ["frames", "cycle"]
+    assert mechanism_stage.block_for(str(composed))["check"] == "cycle"
+
+
+def test_a_door_that_does_not_know_the_choice_is_asked_as_before(tools, tmp_path, monkeypatch):
+    import kiln.server as server
+
+    asked: list = []
+
+    def door(tool, **kwargs):
+        if tool != bridge.MECHANISM_TOOL:
+            raise ConnectionRefusedError()
+        asked.append(kwargs.get("check"))
+        if "check" in kwargs:
+            return {"success": False, "error": "unexpected argument: check", "code": "VALIDATION_ERROR"}
+        return {"schema": "mechanism_answer/1", "mechanism": _served_block(kwargs)}
+
+    monkeypatch.setattr(bridge, "_here", lambda: False)
+    monkeypatch.setattr(server, "_pro_api_call", door)
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    reply = _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    said = reply["data"]["mechanism"]
+    assert said["playable"] is True and "still_checking" not in said
+    assert asked == ["frames", None]
+    assert mechanism_stage.block_for(str(composed))["playable"] is True
+
+
+def test_a_whole_answer_for_a_file_composed_again_is_not_kept(tools, tmp_path, monkeypatch):
+    import threading
+
+    import kiln.server as server
+
+    release = threading.Event()
+
+    def door(tool, **kwargs):
+        if tool != bridge.MECHANISM_TOOL:
+            raise ConnectionRefusedError()
+        block = _served_block(kwargs)
+        if kwargs.get("check") == "cycle":
+            release.wait(timeout=30)
+            block["check"] = "cycle"
+        else:
+            block["check"] = "frames"
+        return {"schema": "mechanism_answer/1", "mechanism": block}
+
+    monkeypatch.setattr(bridge, "_here", lambda: False)
+    monkeypatch.setattr(server, "_pro_api_call", door)
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    # The file changes before the whole answer arrives: that answer is for other bytes.
+    composed.write_bytes(composed.read_bytes() + b" ")
+    release.set()
+    _whole_answer_kept()
+    assert mechanism_stage.block_for(str(composed)) is None
+    assert json.loads((tmp_path / "automaton.stl.mechanism.json").read_text())["mechanism"]["check"] == "frames"
+
+
 def test_the_hosted_stage_upload_sends_the_block_as_mechanism(tools, tmp_path, served, monkeypatch):
     state = _declared(tools, tmp_path)
     composed = tmp_path / "automaton.stl"
