@@ -363,9 +363,11 @@ class TestMeshyImageTo3D:
             json={"result": "img-job-002"},
             status=200,
         )
+        from kiln.generation.meshy import _BASE_URL_V1
+
         responses.add(
             responses.GET,
-            f"{_BASE_URL}/image-to-3d/img-job-002",
+            f"{_BASE_URL_V1}/image-to-3d/img-job-002",
             json={"status": "IN_PROGRESS", "progress": 50},
             status=200,
         )
@@ -1591,51 +1593,6 @@ class TestFailurePrediction:
             f, min_wall_mm=5.0, max_bridge_mm=1.0, max_overhang_deg=10.0
         )
         assert isinstance(result["risk_score"], int)
-
-
-class TestMeshSimplification:
-    """Tests for simplify_mesh()."""
-
-    def test_simplify_reduces_triangles(self, tmp_path):
-        from kiln.generation.validation import simplify_mesh
-
-        f = str(tmp_path / "cube.stl")
-        _write_cube_stl(f, 20.0)
-        result = simplify_mesh(f, target_ratio=0.5, output_path=str(tmp_path / "simple.stl"))
-
-        assert result["simplified_triangles"] <= result["original_triangles"]
-        assert result["reduction_pct"] >= 0.0
-        assert os.path.isfile(result["path"])
-
-    def test_ratio_1_no_change(self, tmp_path):
-        from kiln.generation.validation import simplify_mesh
-
-        f = str(tmp_path / "cube.stl")
-        _write_cube_stl(f, 20.0)
-        result = simplify_mesh(f, target_ratio=1.0, output_path=str(tmp_path / "same.stl"))
-
-        assert result["simplified_triangles"] == result["original_triangles"]
-        assert result["reduction_pct"] == 0.0
-
-    def test_extreme_simplification(self, tmp_path):
-        from kiln.generation.validation import simplify_mesh
-
-        f = str(tmp_path / "cube.stl")
-        _write_cube_stl(f, 20.0)
-        result = simplify_mesh(f, target_ratio=0.01, output_path=str(tmp_path / "tiny.stl"))
-
-        # Even extreme simplification should produce a valid file
-        assert os.path.isfile(result["path"])
-        assert result["simplified_triangles"] <= result["original_triangles"]
-
-    def test_default_output_path(self, tmp_path):
-        from kiln.generation.validation import simplify_mesh
-
-        f = str(tmp_path / "model.stl")
-        _write_cube_stl(f, 10.0)
-        result = simplify_mesh(f, target_ratio=0.5)
-
-        assert "_simplified" in result["path"]
 
 
 # A stand-in scorecard overlay with the same shape as the real one and
@@ -3414,31 +3371,6 @@ class TestRescaleEdgeCases:
 
         with pytest.raises(ValueError, match="near-zero height"):
             rescale_stl(flat, target_height_mm=50.0)
-
-
-class TestSimplifyMeshClamping:
-    """Tests for simplify_mesh target_ratio clamping."""
-
-    def test_zero_ratio_clamps_to_min(self, tmp_path):
-        """target_ratio=0 should be clamped, not crash."""
-        from kiln.generation.validation import simplify_mesh
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 20.0)
-
-        result = simplify_mesh(stl, target_ratio=0.0, output_path=str(tmp_path / "out.stl"))
-        # Should not crash, and should produce fewer triangles.
-        assert result["simplified_triangles"] <= result["original_triangles"]
-
-    def test_ratio_above_one_clamps(self, tmp_path):
-        """target_ratio > 1.0 should be clamped to 1.0 (no simplification)."""
-        from kiln.generation.validation import simplify_mesh
-
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 20.0)
-
-        result = simplify_mesh(stl, target_ratio=5.0, output_path=str(tmp_path / "out.stl"))
-        assert result["simplified_triangles"] == result["original_triangles"]
 
 
 class TestEstimateMaterialCostEdgeCases:

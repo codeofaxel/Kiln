@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 
 #: Which of a service's endpoints holds a job, for a provider with more than
 #: one.  ``""`` for a provider with one.
-ROUTES = frozenset({"", "text", "image", "refine", "retexture"})
+ROUTES = frozenset({"", "text", "image", "multi_image", "refine", "retexture", "remesh"})
 
 #: What a ``made_from`` reference may name: the part a job started from.
 #: ``mesh_sha256`` is the SHA-256 of the exact bytes the job was handed; the

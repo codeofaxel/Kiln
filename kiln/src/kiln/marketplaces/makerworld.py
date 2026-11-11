@@ -213,6 +213,8 @@ class MakerWorldAdapter(MarketplaceAdapter):
        open models directly.
     """
 
+    listing_hosts = ("makerworld.com",)
+
     @property
     def name(self) -> str:
         return "makerworld"

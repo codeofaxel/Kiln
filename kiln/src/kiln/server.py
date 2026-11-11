@@ -306,8 +306,11 @@ from kiln.thingiverse import (
 )
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
+    AGENT_ORDERING_LINE,
     NO_REVERSE_ENGINEERING_LINE,
     OFFER_FIRST_LINE,
+    ORDERING_LINE,
+    ORDERING_STEPS,
     TIERS_AND_TERMS,
     UPGRADE_NUDGE_SCHEMA_VERSION,
     account_required_message,
@@ -824,6 +827,10 @@ def _build_instructions() -> str:
             "5. Optionally ask if they want to search for 3D models online "
             "(needs a free Thingiverse token — guide them to get one if interested).\n"
             "Keep it casual and brief. Most users just need steps 1-4."
+            # No printer at all is a real answer to step 1, so the fact is
+            # said here, above the cut some clients make; the tools follow
+            # in ORDERING, after CONSENT, so this stays one short sentence.
+            + ("" if _CRAFTCLOUD_API_KEY else f"\nNo printer? {ORDERING_LINE}")
         )
     else:
         # --- Printer status ---
@@ -871,6 +878,8 @@ def _build_instructions() -> str:
         pass  # No slicer — omit rather than add noise
 
     # --- Fulfillment ---
+    # An install with its own print-service key orders directly; every other
+    # install orders through Kiln's servers, said in ORDERING below.
     if _CRAFTCLOUD_API_KEY:
         parts.append("FULFILLMENT: Craftcloud connected. Use `fulfillment_quote` to outsource prints.")
 
@@ -917,6 +926,14 @@ def _build_instructions() -> str:
         f"the person at a terminal (`{kiln_command('print')}`, or "
         f"`{kiln_command('consent window --for 2h --printer NAME')}`)."
     )
+
+    # --- Ordering from a print service, with no key of its own ---
+    # After CONSENT on purpose: it must never push the consent paragraph past
+    # a client's cut.  A fresh install already said the fact in FIRST-TIME
+    # SETUP, so it reads only the tools here; get_started carries the whole
+    # line for clients that cut before this.
+    if not _CRAFTCLOUD_API_KEY:
+        parts.append("ORDERING: " + (ORDERING_STEPS if is_fresh else AGENT_ORDERING_LINE))
 
     # --- Monitoring & reporting ---
     parts.append(
@@ -17147,7 +17164,14 @@ def compare_print_options(
             it holds depends on the tier.
         fulfillment_material_id: Material ID from ``fulfillment_materials``
             for the outsourced quote.  If omitted, the fulfillment quote
-            is skipped.
+            is skipped.  A model that arrived with no real size is not
+            sent to be priced: ``fulfillment`` then carries ``code``
+            ``SIZE_NOT_CHOSEN`` and ``next_call`` (set its size with
+            ``rescale_model``).  A priced model's size is in
+            ``fulfillment.priced_size_mm``.  A model that arrived lying
+            down is priced standing up, from a turned copy of the file
+            (never the file itself); ``fulfillment.pose`` says so, and its
+            ``said`` line is for the person.
         quantity: Number of copies for fulfillment (default 1).
         electricity_rate: Cost per kWh in USD (default 0.12).
         printer_wattage: Printer power consumption in watts (default 200).
@@ -17189,15 +17213,26 @@ def compare_print_options(
     # --- Fulfillment quote ------------------------------------------------
     fulfillment_quote_data = None
     fulfillment_error = None
-    from kiln.fulfillment_service import order_service
+    from kiln.arrival import size_not_chosen
+    from kiln.fulfillment_service import file_to_price, order_service
 
-    if fulfillment_material_id and order_service() is None:
+    # A model whose size nobody chose is never sent to be priced.
+    size_refusal = size_not_chosen(file_path) if fulfillment_material_id else None
+    # A model that arrived lying down is priced standing up, from a turned
+    # copy; the file named is never rewritten.
+    priced = file_to_price(file_path) if fulfillment_material_id and size_refusal is None else None
+    if size_refusal is not None:
+        fulfillment_error = size_refusal["message"]
+    elif priced is not None and order_service() is None:
         # No order service on this install: the quote comes through Kiln's
         # servers (kiln._pro_order_bridge), and a miss is said as one.
         from kiln import _pro_order_bridge as served
 
         try:
-            answer = served.quote(file_path, fulfillment_material_id, quantity, shipping_country)
+            answer = served.quote(
+                priced.path, fulfillment_material_id, quantity, shipping_country,
+                sent_file=priced.sent, as_sent=True,
+            )
         except (FileNotFoundError, ValueError) as exc:
             fulfillment_error = str(exc)
         else:
@@ -17207,12 +17242,12 @@ def compare_print_options(
                 fulfillment_error = answer.miss.detail
             else:
                 fulfillment_error = served.words(answer.miss, "quote")
-    elif fulfillment_material_id:
+    elif priced is not None:
         try:
             provider = _get_fulfillment()
             quote = provider.get_quote(
                 QuoteRequest(
-                    file_path=file_path,
+                    file_path=priced.path,
                     material_id=fulfillment_material_id,
                     quantity=quantity,
                     shipping_country=shipping_country,
@@ -17235,6 +17270,17 @@ def compare_print_options(
         "quote": fulfillment_quote_data,
         "error": fulfillment_error,
     }
+    if size_refusal is not None:
+        result["fulfillment"].update(
+            {k: size_refusal[k] for k in ("code", "extents", "next_call") if k in size_refusal}
+        )
+    elif fulfillment_quote_data is not None and priced is not None:
+        from kiln.arrival import priced_size
+
+        if priced.pose:
+            result["fulfillment"]["pose"] = priced.block()
+        if (said := priced_size(priced.path)) is not None:
+            result["fulfillment"]["priced_size_mm"], result["fulfillment"]["priced_size"] = said
 
     # --- Comparison summary -----------------------------------------------
     if local_estimate and fulfillment_quote_data:
@@ -21238,7 +21284,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                         )
                     return _pro_api_call(_name, **call)
 
-                answer = ask()
+                # An order or a publish the servers hold for the person's
+                # yes: on this computer a code on the screen answers it too.
+                from kiln import action_yes
+
+                answer = action_yes.with_offer(_name, ask(), host=_host_label(None))
                 if _history == "served":
                     from kiln.history_courier import take_delta
 

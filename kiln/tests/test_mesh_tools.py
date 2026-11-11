@@ -220,6 +220,7 @@ class TestRescaleModel:
             scale_x=None,
             scale_y=None,
             scale_z=None,
+            longest_side_mm=None,
         )
 
     @patch("kiln.server._check_auth", return_value=None)
@@ -731,36 +732,56 @@ class TestRemoveMeshFloatingRegions:
 
 
 class TestSimplifyMeshModel:
-    """Tests for the simplify_mesh_model tool."""
+    """Tests for the simplify_mesh_model tool: it hands the call to the
+    bridge and words what comes back (``test_simplify_is_served.py`` covers
+    the bridge itself)."""
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.generation.validation.simplify_mesh")
+    @patch("kiln._pro_simplify_bridge.simplify")
     def test_happy_path(self, mock_simplify, _auth, mesh_tools) -> None:
         mock_simplify.return_value = {
+            "success": True,
+            "path": "/tmp/model_simplified.stl",
             "original_triangles": 10000,
             "simplified_triangles": 5000,
             "reduction_pct": 50.0,
-            "output_path": "/tmp/model_simplified.stl",
         }
         result = mesh_tools["simplify_mesh_model"](file_path="/tmp/model.stl")
 
         assert result["success"] is True
         assert result["reduction_pct"] == 50.0
+        assert result["path"] == "/tmp/model_simplified.stl"
         mock_simplify.assert_called_once_with(
-            "/tmp/model.stl", target_ratio=0.5, output_path=None,
+            "/tmp/model.stl", target_ratio=0.5, output_path="",
         )
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.generation.validation.simplify_mesh")
+    @patch("kiln._pro_simplify_bridge.simplify")
     def test_custom_ratio(self, mock_simplify, _auth, mesh_tools) -> None:
-        mock_simplify.return_value = {"output_path": "/tmp/out.stl"}
+        mock_simplify.return_value = {"success": True, "path": "/tmp/out.stl"}
         mesh_tools["simplify_mesh_model"](
-            file_path="/tmp/m.stl", target_ratio=0.25,
+            file_path="/tmp/m.stl", target_ratio=0.25, output_path="/tmp/out.stl",
         )
 
         mock_simplify.assert_called_once_with(
-            "/tmp/m.stl", target_ratio=0.25, output_path=None,
+            "/tmp/m.stl", target_ratio=0.25, output_path="/tmp/out.stl",
         )
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln._pro_simplify_bridge.simplify")
+    def test_a_refusal_is_an_error_with_its_code(self, mock_simplify, _auth, mesh_tools) -> None:
+        mock_simplify.return_value = {
+            "success": False,
+            "code": "EDIT_WOULD_DAMAGE",
+            "message": "Kiln did not simplify m.stl: nothing could be removed. Your file is unchanged.",
+            "attempts": [{"triangles": 12, "problems": ["its surface is no longer closed"]}],
+        }
+        result = mesh_tools["simplify_mesh_model"](file_path="/tmp/m.stl")
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "EDIT_WOULD_DAMAGE"
+        assert "Your file is unchanged" in result["error"]["message"]
+        assert result["attempts"][0]["triangles"] == 12
 
     def test_auth_failure(self, mesh_tools) -> None:
         with patch("kiln.server._check_auth", return_value=_auth_error()):
@@ -771,7 +792,7 @@ class TestSimplifyMeshModel:
 
     @patch("kiln.server._check_auth", return_value=None)
     @patch(
-        "kiln.generation.validation.simplify_mesh",
+        "kiln._pro_simplify_bridge.simplify",
         side_effect=RuntimeError("decimation failed"),
     )
     def test_exception(self, _simplify, _auth, mesh_tools) -> None:
