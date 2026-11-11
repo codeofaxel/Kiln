@@ -578,3 +578,15 @@ class TestInstallSkill:
         assert "installed_path" in result
         assert "source_path" in result
         assert str(source) == result["source_path"]
+
+
+def test_agents_are_told_to_show_every_safety_note():
+    """The keys the rule names are read from the code that carries them."""
+    from kiln._pro_goal_bridge import OWNER_NOTES_KEY, QUESTION_KEY, SAFETY_NOTES_KEY
+    from kiln.skill_manifest import SkillManifest
+
+    rules = [r for r in SkillManifest().agent_rules if f"`{SAFETY_NOTES_KEY}`" in r]
+    assert len(rules) == 1, "one rule, said once"
+    (rule,) = rules
+    assert f"`{OWNER_NOTES_KEY}`" in rule and f"`{QUESTION_KEY}`" in rule
+    assert "as written" in rule and "never as Kiln's" in rule

@@ -197,6 +197,7 @@ class SkillManifest:
             "Saving something reusable has three kinds with different homes: a whole printable object is a design, a reusable mechanical edit or attachable part is a feature, a reusable visual layer (logo / photo / pattern) is a decoration — choose the kind before saving and ask the user if it's ambiguous.",
             "Use recommend_design_material() for material selection. When a user wants a FUNCTIONAL PART to their own dimensions, call find_design_templates(use_case) FIRST and offer a match unprompted — the parametric parts render locally for free through generate_from_template, no AI provider needed, and beat writing OpenSCAD from scratch.",
             "Run preflight_check() before every print job.",
+            "When any result carries `safety_notes`, show EVERY one to the user as written, before anything else about the part: never summarize, soften or leave one out. Notes under `owner_safety_notes` are the designer's own: show them under the designer's name, never as Kiln's. Ask an `open_question` once, as it is worded.",
             "Never guess on physical operations — ask the user when uncertain.",
             "For print failures: analyze_print_failure_smart() → get_recovery_plan() → retry_print_with_fix().",
             "Use build_generation_prompt() to enhance generation prompts with design intelligence before calling generate_model().",
