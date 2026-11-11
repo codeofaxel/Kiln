@@ -68,8 +68,16 @@ the opener is missing (an older kiln-pro) or fails, the failure is logged and
 the result carries the one-line note saying what was skipped; when the
 person's store does not take the session within the opener's short budget,
 the result says the make was not saved to their history, and no version is
-claimed.  A plain install is untouched, because there ``compile_scad`` IS
-the loop.
+claimed.
+
+On an install without kiln-pro ``compile_scad`` IS the loop, and the goal
+for a make that names none lives in the person's Kiln account
+(:func:`kiln._pro_goal_bridge.open_for`).  A signed-in install tells Kiln's
+servers about the model without sending it -- its fingerprint, and for a
+model Kiln made here the tool and what the call named it -- and the reply
+carries the goal's ``saved_goal`` block and the safety notes the object
+calls for.  A signed-out install says what signing in adds; a make is never
+held back or changed either way.
 """
 
 from __future__ import annotations
@@ -664,10 +672,11 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
     make is kept there as the first version and the block names the session
     (``GOAL_NOTES["opened"]``).  When no session can be opened the block
     falls back to saying what was skipped.  On a plain install a make that
-    names no goal leaves the envelope untouched when Kiln made the file; a
+    names no goal opens one in the person's Kiln account
+    (:func:`kiln._pro_goal_bridge.open_for`), or says in one line why not: a
     model that came from outside Kiln (it has a :mod:`kiln.arrival` note)
-    opens a goal in the person's Kiln account
-    (:func:`kiln._pro_goal_bridge.open_for`), or says in one line why not.
+    with where it came from, a model Kiln made here with the tool that made
+    it and the words its call named it by.
 
     A make that joins its goal is also compared with any picture kept on the
     goal (:func:`kiln.reference_compare.compare_with_goal`).  On an install
@@ -694,8 +703,8 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
         if not _was_made(result) or SAVED_GOAL_KEY in result:
             return
         if attach_brief_id_to_result is None:
-            # No kiln-pro here.  A model Kiln made stays as it is; one that
-            # came from outside Kiln gets a goal in the person's account.
+            # No kiln-pro here.  The model gets a goal in the person's
+            # account: from where it came from, or, made here, from its words.
             from kiln._pro_goal_bridge import open_for
 
             open_for(result, mesh_path)

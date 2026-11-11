@@ -232,13 +232,20 @@ def read_pose(file_path: str) -> dict[str, Any] | None:
     return dict(pose) if isinstance(pose, dict) and pose.get("status") else None
 
 
-def note_goal(file_path: str, brief_id: str) -> None:
+def note_goal(file_path: str, brief_id: str, *, made_here: bool = False) -> None:
     """Keep, in the note beside *file_path*, the goal Kiln opened for this
     model in the person's account, so the next make of the same model adds
     to that goal instead of opening another.  Only a file with a note about
-    its own bytes takes one.  Never raises."""
+    its own bytes takes one, unless Kiln made the file here (*made_here*):
+    then a note holding the goal alone is laid beside it, bound to its
+    bytes.  Such a note says nothing of where the file came from, so the
+    file still reads as made here (:func:`read` gives ``None``).  Never
+    raises."""
     try:
         body = _body(file_path)
+        if not body and made_here and brief_id:
+            identity = _identity(file_path)
+            body = {"schema": SCHEMA_VERSION, "file": identity} if identity else None
         if not body or not brief_id:
             return
         body["goal"] = {"brief_id": str(brief_id)}
