@@ -1635,7 +1635,7 @@ class _DesignToolsPlugin:
             scad_path: str = "",
             timeout: int = 300,
             fastener: str = "",
-            brief_id: str = "",
+            goal_id: str = "",
             color: str = "",
             motion: dict | str | None = None,
         ) -> dict:
@@ -1699,7 +1699,7 @@ class _DesignToolsPlugin:
             its ``agent_instruction`` before repeating any of it.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``, so this make
+                goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
                 scad_code: Valid OpenSCAD source code (provide this OR scad_path).
@@ -1829,7 +1829,7 @@ class _DesignToolsPlugin:
                 shown = attach_declared_color(response, color, scad_code=code)
                 from kiln.front_door import join_goal
 
-                join_goal(brief_id, response, stl_path)
+                join_goal(goal_id, response, stl_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -1852,7 +1852,7 @@ class _DesignToolsPlugin:
             parameter_name: str,
             new_value: float,
             material: str | None = None,
-            brief_id: str = "",
+            goal_id: str = "",
             color: str = "",
         ) -> dict:
             """Update a parameter in OpenSCAD code and recompile to STL.
@@ -1867,7 +1867,7 @@ class _DesignToolsPlugin:
             asked for, as on ``compile_scad``.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``, so this make
+                goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
                 scad_code: OpenSCAD source code.
@@ -1912,7 +1912,7 @@ class _DesignToolsPlugin:
                 )
                 from kiln.front_door import join_goal
 
-                join_goal(brief_id, response, response.get("stl_path"))
+                join_goal(goal_id, response, response.get("stl_path"))
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,

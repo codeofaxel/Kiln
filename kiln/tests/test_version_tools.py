@@ -197,7 +197,7 @@ class TestSaveDesignVersion:
         result = mcp["save_design_version"](
             design_id="goal-coaster",
             scad_source="cube([80, 80, 3]);",
-            brief_id="abc123",
+            goal_id="abc123",
             intent_hash="ih-deadbeef",
         )
         assert result["ok"] is True
@@ -213,7 +213,7 @@ class TestSaveDesignVersion:
         mcp["save_design_version"](
             design_id="iter-coaster",
             scad_source="cube([80, 80, 3]);",
-            brief_id="parent-brief-id",
+            goal_id="parent-brief-id",
             intent_hash="parent-intent",
         )
         # Second version omits brief_id — must inherit from parent
@@ -232,12 +232,12 @@ class TestSaveDesignVersion:
         mcp["save_design_version"](
             design_id="reassign-coaster",
             scad_source="cube([80, 80, 3]);",
-            brief_id="original-brief",
+            goal_id="original-brief",
         )
         result = mcp["save_design_version"](
             design_id="reassign-coaster",
             scad_source="cube([90, 90, 3]);",
-            brief_id="new-brief",
+            goal_id="new-brief",
         )
         assert result["version"]["brief_id"] == "new-brief"
 

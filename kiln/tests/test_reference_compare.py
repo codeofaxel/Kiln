@@ -165,7 +165,7 @@ def test_iterate_design_says_its_make_was_not_compared(plain_install, signed_out
 
     out = _envelope(
         _tools_of(plugin)["iterate_design"](
-            prompt="cube(10);", provider="openscad", max_iterations=1, brief_id="goal-1",
+            prompt="cube(10);", provider="openscad", max_iterations=1, goal_id="goal-1",
         )
     )
     assert out["success"] is True, out
