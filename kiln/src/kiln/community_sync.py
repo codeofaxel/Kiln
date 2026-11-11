@@ -103,9 +103,9 @@ def _away_from_the_real_home() -> bool:
     cannot read the account's home leaves the decision to the checks after
     it."""
     try:
-        from kiln.dev_home_guard import MOVED_ENV, SANDBOX_ENV, _flag, account_home
+        from kiln.dev_home_guard import account_home, sandboxed
 
-        if _flag(SANDBOX_ENV) or os.environ.get(MOVED_ENV):
+        if sandboxed():
             return True
         real = account_home()
         if not real:
