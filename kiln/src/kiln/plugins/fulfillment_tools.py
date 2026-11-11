@@ -42,6 +42,8 @@ from kiln.fulfillment_service import (
     NOT_INCLUDED,
     NOT_INCLUDED_CODE,
     WORDED_CANCEL_REFUSALS,
+    PricedFile,
+    file_to_price,
     order_service,
 )
 from kiln.preview_gate import get_preview_gate
@@ -80,6 +82,43 @@ def _served_miss(door: str, answer: _served.Answer) -> dict[str, Any]:
     )
 
 
+def _size_not_chosen(file_path: str) -> dict[str, Any] | None:
+    """The refusal every quote door gives before uploading a model whose
+    size nobody chose (:func:`kiln.arrival.size_not_chosen`), or ``None``."""
+    from kiln.arrival import size_not_chosen
+
+    refusal = size_not_chosen(file_path)
+    if refusal is None:
+        return None
+    import kiln.server as _srv
+
+    extra = {k: refusal[k] for k in ("extents", "next_call") if k in refusal}
+    return _srv._error_dict(refusal["message"], code=refusal["code"], extra=extra)
+
+
+def _said_about_the_model(reply: dict[str, Any], priced: PricedFile) -> dict[str, Any]:
+    """Add to a successful quote *reply* what the person is told about the
+    model that was priced: which way up it stands (``pose``, its line FIRST
+    in ``tell_the_person``, since a price on a model lying down is a price
+    on a different print) and the size it was priced at
+    (``priced_size_mm``, its line last).  A file that cannot be measured
+    gets no size line."""
+    from kiln.arrival import priced_size
+
+    tell = list(reply.get("tell_the_person") or [])
+    if priced.pose:
+        reply["pose"] = priced.block()
+        if line := priced.line():
+            tell.insert(0, line)
+    said = priced_size(priced.path)
+    if said is not None:
+        reply["priced_size_mm"], size_line = said
+        tell.append(size_line)
+    if tell:
+        reply["tell_the_person"] = tell
+    return reply
+
+
 def _material_matches(materials: list[dict[str, Any]], search: str | None, technology: str | None,
                       limit: int) -> list[dict[str, Any]]:
     """The same word-boundary filters the local materials door applies."""
@@ -114,15 +153,16 @@ def _served_materials(search: str | None, technology: str | None, limit: int) ->
 
 
 def _served_quote(
-    file_path: str, material_id: str, quantity: int, shipping_country: str,
+    priced: PricedFile, material_id: str, quantity: int, shipping_country: str,
     jurisdiction: str = "", business_tax_id: str = "",
 ) -> dict[str, Any]:
     import kiln.server as _srv
 
     try:
         answer = _served.quote(
-            file_path, material_id, quantity, shipping_country,
+            priced.path, material_id, quantity, shipping_country,
             jurisdiction=jurisdiction, business_tax_id=business_tax_id,
+            sent_file=priced.sent, as_sent=True,
         )
     except FileNotFoundError as exc:
         return _srv._error_dict(f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND")
@@ -138,7 +178,7 @@ def _served_quote(
     # Beside the quote too, so a caller that keeps only the token can place
     # the order with it (``fulfillment_order(quote_token=...)``).
     reply["quote_token"] = str(answer.body.get("quote_token") or "")
-    return reply
+    return _said_about_the_model(reply, priced)
 
 
 def _served_order_checks(*, quote_id: str, quote_token: str, preview_file_path: str) -> tuple[str, dict[str, Any] | None]:
@@ -184,6 +224,14 @@ def _served_order(*, token: str, quote_id: str, shipping_option_id: str, shippin
     takes them on a served install), so they are not sent again here."""
     answer = _served.place(token, quote_id, shipping_option_id, shipping_address)
     if not answer.ok:
+        if answer.waiting:
+            return _served_waiting(answer)
+        if answer.next_step:
+            import kiln.server as _srv
+
+            return _srv._error_dict(
+                answer.said, code=answer.miss.code, extra={"placed": False, **_served.refusal_fields(answer, "order")},
+            )
         return _served_miss("order", answer)
     reply: dict[str, Any] = {"success": True}
     tell = answer.body.get("tell_the_person")
@@ -191,6 +239,40 @@ def _served_order(*, token: str, quote_id: str, shipping_option_id: str, shippin
         reply["tell_the_person"] = tell
     reply["order"] = _served.folded(answer.body, "order")
     return reply
+
+
+def _served_waiting(answer: _served.Answer) -> dict[str, Any]:
+    """The order door's answer while the order waits for the person's own
+    yes: nothing was placed, the question and the page where they answer
+    beside the sentence, and what the agent does next."""
+    import kiln.server as _srv
+
+    from kiln import action_yes
+
+    waiting = dict(answer.waiting or {})
+    # On this computer the person can also answer with a code on the screen.
+    code = action_yes.offer("fulfillment_order", waiting, host=_srv._host_label(None))
+    tell = _served.waiting_lines(waiting)
+    if code.get("code_shown") == "shown":
+        tell.insert(-1, "Or type the code Kiln just showed on this computer's screen here in the chat.")
+    shown = code.get("code_shown") == "shown"
+    extra: dict[str, Any] = {
+        "placed": False,
+        **(action_yes.without_request(waiting) if shown else waiting),
+        "tell_the_person": tell,
+        "next": (
+            "Show the person tell_the_person word for word, with the approve_at link. When they have "
+            "said yes, call fulfillment_order again with the same arguments. The preview and shipping "
+            "approvals they gave here stay valid until they run out; if one has, show that step again."
+        ),
+        **code,
+        **(action_yes.without_request(_served.refusal_fields(answer, "order")) if shown
+           else _served.refusal_fields(answer, "order")),
+    }
+    return _srv._error_dict(
+        _served.waiting_words(waiting, again="call fulfillment_order again with the same arguments"),
+        code=_served.APPROVAL_REQUIRED_CODE, extra=extra,
+    )
 
 
 def _served_order_status(order_id: str) -> dict[str, Any]:
@@ -366,6 +448,36 @@ def _validate_preview_confirmation(
     )
 
 
+def _spend_local_approvals(
+    *,
+    preview_token: str,
+    preview_file_path: str,
+    shipping_confirmation_token: str,
+    quote_id: str,
+    shipping_option_id: str,
+    shipping_address: dict[str, str],
+) -> None:
+    """Spend the person's two local approvals for an order the servers placed.
+    The order stands whatever this finds: an approval that ran out or was
+    spent meanwhile is logged, never turned into an error."""
+    try:
+        preview_ok, preview_reason = _validate_preview_confirmation(
+            preview_token=preview_token, preview_file_path=preview_file_path, consume=True,
+        )
+        shipping_ok, shipping_reason = _validate_shipping_confirmation_token(
+            shipping_confirmation_token, quote_id=quote_id, shipping_option_id=shipping_option_id,
+            shipping_address=shipping_address, consume=True,
+        )
+    except Exception:  # noqa: BLE001 -- the order is placed
+        _logger.warning("order %s placed; its local approvals were not spent", quote_id, exc_info=True)
+        return
+    if not (preview_ok and shipping_ok):
+        _logger.info(
+            "order %s placed; local approvals not spent (preview: %s, shipping: %s)",
+            quote_id, preview_reason, shipping_reason,
+        )
+
+
 class _FulfillmentToolsPlugin:
     """External manufacturing (Craftcloud) fulfillment tools.
 
@@ -474,6 +586,7 @@ class _FulfillmentToolsPlugin:
             shipping_country: str = "US",
             jurisdiction: str = "",
             business_tax_id: str = "",
+            keep_as_sent: bool = False,
         ) -> dict:
             """Get a manufacturing quote for a 3D model from Craftcloud.
 
@@ -489,6 +602,8 @@ class _FulfillmentToolsPlugin:
                     takes it at ``fulfillment_order`` instead.
                 business_tax_id: The buyer's business tax id (EU VAT, AU ABN)
                     for a reverse-charge order; pinned the same way.
+                keep_as_sent: Price the file exactly as it is, without
+                    standing it up first.  Only when the person asks for it.
 
             Uploads the model, returns pricing from Craftcloud's network of 150+
             print services, including unit price, total, lead time, and shipping
@@ -505,7 +620,22 @@ class _FulfillmentToolsPlugin:
             service's order terms with a link to them, already worded for
             the person. Pass every line on to them word for word, in order,
             before they decide; do not summarise, shorten or drop any.
-            ``quote.price_sheet`` holds the same numbers as data.
+            ``quote.price_sheet`` holds the same numbers as data, and
+            ``priced_size_mm`` the size of the model that was priced.
+
+            A model whose note says it arrived with no real size (a generator
+            asked for a shape, not a size) is refused with
+            ``SIZE_NOT_CHOSEN`` before anything is uploaded: ask the person
+            how big it should be, set it with ``rescale_model(file_path,
+            longest_side_mm=...)``, then quote again.
+
+            A model that arrived lying down is priced standing up: Kiln
+            prices a turned copy and never rewrites the file named.  The
+            reply's ``pose`` says what Kiln did, and its line opens
+            ``tell_the_person``.  When ``pose.priced_file`` is present it is
+            the file that was priced: show and preview THAT file before an
+            order (``issue_preview_token(file_path=pose.priced_file)``, then
+            ``preview_file_path=pose.priced_file``).
 
             Use the returned ``quote_id`` with ``fulfillment_order`` to place the
             order.  On an install that orders through Kiln's servers the
@@ -514,10 +644,13 @@ class _FulfillmentToolsPlugin:
             """
             import kiln.server as _srv
 
+            if (refusal := _size_not_chosen(file_path)) is not None:
+                return refusal
+            priced = file_to_price(file_path, keep_as_sent=keep_as_sent)
             service = order_service()
             if service is None:
                 return _served_quote(
-                    file_path, material_id, quantity, shipping_country,
+                    priced, material_id, quantity, shipping_country,
                     jurisdiction=jurisdiction, business_tax_id=business_tax_id,
                 )
             FulfillmentError = service.FulfillmentError
@@ -531,7 +664,7 @@ class _FulfillmentToolsPlugin:
                 provider = _srv._get_fulfillment()
                 quote = provider.get_quote(
                     QuoteRequest(
-                        file_path=file_path,
+                        file_path=priced.path,
                         material_id=material_id,
                         file_name=Path(file_path).name,
                         quantity=quantity,
@@ -586,8 +719,11 @@ class _FulfillmentToolsPlugin:
                         metadata={
                             # Absolute, so the quote is found again from
                             # another working directory: the reader
-                            # compares absolute paths.
-                            "file_path": os.path.abspath(file_path),
+                            # compares absolute paths.  The file priced
+                            # (Kiln's standing copy when the model arrived
+                            # lying down) and the one named both find it.
+                            "file_path": priced.path,
+                            "sent_file_path": priced.sent,
                             "shipping_country": shipping_country,
                             "shipping_options": [
                                 option.to_dict() for option in quote.shipping_options
@@ -625,7 +761,7 @@ class _FulfillmentToolsPlugin:
                 if tell:
                     reply["tell_the_person"] = tell
                 reply["quote"] = quote_data
-                return reply
+                return _said_about_the_model(reply, priced)
             except FileNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND"
@@ -1012,31 +1148,23 @@ class _FulfillmentToolsPlugin:
                 )
                 if refused is not None:
                     return refused
-                # Both approvals checked here, as above; the servers then
-                # mint their own two confirmations for the quote and place
-                # the order (kiln._pro_order_bridge.place).  The local
-                # tokens are consumed first, as the local path consumes
-                # them before it reaches the print service.
-                for ok, why in (
-                    _validate_preview_confirmation(
-                        preview_token=preview_token, preview_file_path=preview_file_path, consume=True,
-                    ),
-                    _validate_shipping_confirmation_token(
-                        shipping_confirmation_token, quote_id=quote_id,
-                        shipping_option_id=shipping_option_id,
-                        shipping_address=normalized_shipping_address, consume=True,
-                    ),
-                ):
-                    if not ok:
-                        return _srv._error_dict(
-                            f"A confirmation is no longer valid: {why}. Show the preview and the "
-                            "shipping details again before placing the order.",
-                            code="PREVIEW_NOT_CONFIRMED",
-                        )
-                return _served_order(
+                # Both approvals were checked above without being spent.  The
+                # servers then mint their own two confirmations for the quote
+                # and place the order (kiln._pro_order_bridge.place).  The
+                # local approvals are spent only once the order exists, so an
+                # order that waits for the person's yes, or is refused, keeps
+                # them for the retry.
+                placed = _served_order(
                     token=token, quote_id=quote_id, shipping_option_id=shipping_option_id,
                     shipping_address=normalized_shipping_address,
                 )
+                if placed.get("success"):
+                    _spend_local_approvals(
+                        preview_token=preview_token, preview_file_path=preview_file_path,
+                        shipping_confirmation_token=shipping_confirmation_token, quote_id=quote_id,
+                        shipping_option_id=shipping_option_id, shipping_address=normalized_shipping_address,
+                    )
+                return placed
 
             if err := _srv._check_billing_auth("print"):
                 return err

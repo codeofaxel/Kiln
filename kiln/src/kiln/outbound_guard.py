@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SENDERS",
     "machine_code",
+    "is_listing_link",
     "redact_text",
     "scrub",
 ]
@@ -111,6 +112,34 @@ def redact_text(text: str) -> str:
     return redact_machine_text(text)
 
 
+#: The one key a link to a model's public listing page travels under.
+LISTING_LINK_KEY = "listing_url"
+
+
+def is_listing_link(value: Any) -> bool:
+    """Whether *value* is an https link to a public listing page on a site a
+    marketplace Kiln downloads from declares
+    (``MarketplaceAdapter.listing_hosts``).  Such a page is public by
+    nature; any other link says where something is, and is not sent."""
+    if not isinstance(value, str) or len(value) > 500:
+        return False
+    try:
+        from urllib.parse import urlsplit
+
+        from kiln.marketplaces.base import listing_hosts
+        import kiln.marketplaces  # noqa: F401 -- the adapters declare their sites as they load
+
+        parts = urlsplit(value.strip())
+        return (
+            parts.scheme == "https"
+            and not parts.username
+            and not parts.password
+            and (parts.hostname or "").lower() in listing_hosts()
+        )
+    except Exception:  # noqa: BLE001 -- a link that cannot be judged is not sent
+        return False
+
+
 def scrub(value: Any, _depth: int = 0) -> Any:
     """*value* with nothing that locates, identifies or unlocks a machine.
 
@@ -125,6 +154,12 @@ def scrub(value: Any, _depth: int = 0) -> Any:
         for key, item in value.items():
             name = str(key)
             if _SECRET_OR_PLACE.match(name):
+                continue
+            if name == LISTING_LINK_KEY:
+                # Judged by key AND value: a marketplace's public page goes
+                # as it is, anything else under this key goes nowhere.
+                if is_listing_link(item):
+                    out[key] = item.strip()
                 continue
             if _IDENTITY.match(name):
                 out[key] = machine_code(item) if isinstance(item, (str, int)) and not isinstance(item, bool) else None

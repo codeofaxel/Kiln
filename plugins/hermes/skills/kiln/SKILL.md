@@ -173,9 +173,9 @@ printer over USB. Every supported model: https://kiln3d.com/printers
 
 ## No printer?
 
-Designing, checking, slicing and estimating all work without one, and Kiln can
-quote and order a print from an outside print service. An order always needs
-the person's confirmation.
+Designing, checking, slicing and estimating all work without one.
+
+No printer needed: this install of Kiln can get a price from a print service and place and follow an order for the part, once the person is signed in to Kiln (a free account). No other Kiln connector is needed. In order: `kiln_signin`, `fulfillment_materials`, `fulfillment_quote`, then `issue_preview_token` and `issue_shipping_confirmation_token` once the person has seen the part and confirmed where it ships, then `fulfillment_order` and `fulfillment_order_status`. An order is placed only after the person's own confirmation.
 
 ## Plans
 

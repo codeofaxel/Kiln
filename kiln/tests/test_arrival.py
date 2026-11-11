@@ -279,7 +279,8 @@ class TestTheSizeCheck:
     def test_a_shape_with_no_size_is_told_to_get_one(self):
         check = arrival.size_check(Arrival(kind=GENERATED, by="Tripo3D", real_size=False), (1.0, 0.924, 0.932))
         assert "Tripo3D was asked for a shape, not a size" in check
-        assert "1 x 0.924 x 0.932" in check and "rescale_model(" in check
+        assert "1 x 0.924 x 0.932" in check and "rescale_model(file_path, longest_side_mm=" in check
+        assert "max_dimension_mm" not in check and "Ask the person how big it should be" in check
 
     def test_a_generator_told_to_draw_in_millimetres_still_gets_the_units_reading(self):
         drawn_in_mm = Arrival(kind=GENERATED, by="Gemini Deep Think", real_size=True)
@@ -317,7 +318,7 @@ class TestAGltfIsReadInMetresFirst:
         )
         assert "bigger than any printer in Kiln's catalog" in check
         assert "Kiln read it as millimetres: 1.2 mm" in check
-        assert "max_dimension_mm=" in check and "split_mesh_to_fit" in check
+        assert "rescale_model(file_path, longest_side_mm=" in check and "split_mesh_to_fit" in check
         assert "centimeters" not in check and "inches" not in check
 
     def test_a_size_in_the_thousands_is_said_as_a_number(self):

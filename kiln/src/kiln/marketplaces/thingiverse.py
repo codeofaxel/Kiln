@@ -66,6 +66,8 @@ class ThingiverseAdapter(MarketplaceAdapter):
         API.  Prefer the MyMiniFactory adapter for new integrations.
     """
 
+    listing_hosts = ("www.thingiverse.com", "thingiverse.com")
+
     def __init__(self, client: ThingiverseClient) -> None:
         global _deprecation_warned  # noqa: PLW0603
         if not _deprecation_warned:

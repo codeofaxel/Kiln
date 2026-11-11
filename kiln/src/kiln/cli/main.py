@@ -6142,6 +6142,25 @@ def _echo_words(lines: list[str]) -> None:
         click.echo()
 
 
+def _echo_order_waits(refusal: Any, *, json_mode: bool) -> None:
+    """Print an order that waits for the person's own yes: nothing was
+    ordered yet, the question, and the page where they say yes, each on a
+    line of its own so the link prints whole."""
+    from kiln._pro_order_bridge import waiting_lines
+
+    waiting = dict(refusal.waiting)
+    if json_mode:
+        click.echo(format_response(
+            "error",
+            error={"code": refusal.code, "message": str(refusal), "placed": False, **waiting},
+            json_mode=True,
+        ))
+        return
+    click.echo("\n".join(waiting_lines(waiting)))
+    click.echo()
+    click.echo(str(refusal))
+
+
 @order.command("materials")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_materials(json_mode: bool) -> None:
@@ -6176,13 +6195,25 @@ def order_materials(json_mode: bool) -> None:
 @click.option("--material", "-m", required=True, help="Material ID (from 'kiln order materials').")
 @click.option("--quantity", "-q", default=1, help="Number of copies (default 1).")
 @click.option("--country", default="US", help="Shipping country code (default US).")
+@click.option("--as-sent", "as_sent", is_flag=True, help="Price the file exactly as it is, without standing it up.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def order_quote(file_path: str, material: str, quantity: int, country: str, json_mode: bool) -> None:
+def order_quote(file_path: str, material: str, quantity: int, country: str, as_sent: bool, json_mode: bool) -> None:
     """Get a manufacturing quote for a 3D model.
 
     Upload a model file (STL, 3MF, OBJ) and receive pricing, lead time,
     and shipping options from Craftcloud's network of 150+ print services.
+    A model that arrived with no real size is refused before it is uploaded;
+    set its size with ``rescale_model(file_path, longest_side_mm=...)`` first.
+    A model that arrived lying down is priced standing up, from a turned
+    copy; the file named is never rewritten (``--as-sent`` prices it as is).
     """
+    from kiln.arrival import priced_size, size_not_chosen
+    from kiln.fulfillment_service import file_to_price
+
+    if (refusal := size_not_chosen(file_path)) is not None:
+        click.echo(format_error(refusal["message"], code=refusal["code"], json_mode=json_mode))
+        sys.exit(1)
+    priced = file_to_price(file_path, keep_as_sent=as_sent)
     service = _require_order_service(json_mode)
     try:
         from kiln.billing import BillingLedger
@@ -6193,7 +6224,7 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
         provider = _get_fulfillment_provider(service)
         quote = provider.get_quote(
             service.QuoteRequest(
-                file_path=file_path,
+                file_path=priced.path,
                 material_id=material,
                 file_name=Path(file_path).name,
                 quantity=quantity,
@@ -6228,7 +6259,16 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             logger.warning("Could not read the print service's terms", exc_info=True)
             routing = {}
         quote_data.update(routing)
+        if priced.pose:
+            quote_data["pose"] = priced.block()
+        said = priced_size(priced.path)
+        if said is not None:
+            quote_data["priced_size_mm"] = said[0]
+        if not json_mode and priced.line():
+            click.echo(priced.line())
         click.echo(format_quote(quote_data, json_mode=json_mode))
+        if not json_mode and said is not None:
+            click.echo(said[1])
         if not json_mode:
             tax = routing.get("provider_tax_note")
             terms = [tax] if tax else []
@@ -6639,6 +6679,9 @@ def order_place(
     except click.ClickException:
         raise
     except FulfillmentError as exc:
+        if getattr(exc, "waiting", None):
+            _echo_order_waits(exc, json_mode=json_mode)
+            sys.exit(1)
         click.echo(
             format_error(
                 f"Failed to place order: {exc}. Verify the quote ID from 'kiln order quote'.",
@@ -8456,8 +8499,22 @@ def compare_cost(
 
     # Fulfillment quote (optional): the order service kiln-pro installs, else
     # the one that quotes through Kiln's servers.
-    service = _order_service_or_served() if fulfillment_material else None
-    if fulfillment_material:
+    from kiln.arrival import size_not_chosen
+
+    size_refusal = size_not_chosen(file_path) if fulfillment_material else None
+    service = _order_service_or_served() if fulfillment_material and size_refusal is None else None
+    if size_refusal is not None:
+        result["fulfillment"] = {
+            "available": False,
+            "error": size_refusal["message"],
+            **{k: size_refusal[k] for k in ("code", "extents", "next_call") if k in size_refusal},
+        }
+    elif fulfillment_material:
+        from kiln.fulfillment_service import file_to_price
+
+        # A model that arrived lying down is priced standing up, from a
+        # turned copy; the file named is never rewritten.
+        priced = file_to_price(file_path)
         try:
             QR = service.QuoteRequest
             get_provider = service.get_provider
@@ -8493,7 +8550,7 @@ def compare_cost(
                 try:
                     return fulfillment_provider.get_quote(
                         QR(
-                            file_path=file_path,
+                            file_path=priced.path,
                             material_id=resolved_material,
                             quantity=quantity,
                             shipping_country=country,
@@ -8506,7 +8563,7 @@ def compare_cost(
                         cc = get_provider("craftcloud")
                         return cc.get_quote(
                             QR(
-                                file_path=file_path,
+                                file_path=priced.path,
                                 material_id=resolved_material,
                                 quantity=quantity,
                                 shipping_country=country,
@@ -8516,6 +8573,8 @@ def compare_cost(
 
             quote = _get_quote_with_fallback()
             result["fulfillment"] = {"available": True, "quote": quote.to_dict()}
+            if priced.pose:
+                result["fulfillment"]["pose"] = priced.block()
         except FulfillmentError as exc:
             result["fulfillment"] = {"available": False, "error": str(exc)}
         except Exception as exc:
@@ -8543,6 +8602,8 @@ def compare_cost(
         click.echo("=== Outsourced Manufacturing ===")
         if result["fulfillment"]["available"]:
             q = result["fulfillment"]["quote"]
+            if said := (result["fulfillment"].get("pose") or {}).get("said"):
+                click.echo(f"  {said}")
             click.echo(f"  Material:   {q['material']}")
             click.echo(f"  Unit price: ${q['unit_price']:.2f}")
             click.echo(f"  Total:      ${q['total_price']:.2f}")
@@ -10605,6 +10666,11 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
     """Check the status of a generation job.
 
     JOB_ID is the ID returned by 'kiln generate'.
+
+    JOB_ID may also be a task id from the provider's own app (Meshy or
+    Tripo3D): Kiln finds what kind of task it is and handles it like its
+    own.  It needs that person's own provider key (KILN_MESHY_API_KEY for
+    Meshy).
     """
     from kiln.generation import (
         GenerationAuthError,
@@ -10666,6 +10732,11 @@ def generate_download(
     """Download a completed generated model.
 
     JOB_ID is the ID returned by 'kiln generate'.
+
+    JOB_ID may also be a task id from the provider's own app (Meshy or
+    Tripo3D): Kiln finds what kind of task it is and handles it like its
+    own.  It needs that person's own provider key (KILN_MESHY_API_KEY for
+    Meshy).
     """
     from kiln.format_conversion import convert_generated_result
     from kiln.generation import (
