@@ -1684,9 +1684,7 @@ class _MeshToolsPlugin:
 
             :param file_path: Path to the mesh.
             :param target_ratio: Fraction of the triangles to keep (0.01-1.0).
-            :param output_path: Where to write the result.  Left empty, it
-                is named ``<name>_simplified`` and ``path`` says where it
-                was saved (Kiln's own files folder when the servers made it).
+            :param output_path: Output path (defaults to ``<name>_simplified.stl``).
             :returns: ``path``; ``original_triangles``, ``asked_triangles``,
                 ``simplified_triangles`` and ``reduction_pct``; whether the
                 surface was closed before and after (``watertight_before`` /
