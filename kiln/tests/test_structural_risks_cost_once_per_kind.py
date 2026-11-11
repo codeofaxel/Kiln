@@ -115,7 +115,7 @@ def test_more_of_the_same_risk_costs_nothing_more(fewer, more, tmp_path):
 
     audit_a, audit_b = _audit(a), _audit(b)
     # The readiness score starts from printability, which the pair shares.
-    assert audit_a["printability"]["score"] == audit_b["printability"]["score"]
+    assert audit_a["printability"].get("printable") == audit_b["printability"].get("printable")
     assert audit_b["readiness_score"] == audit_a["readiness_score"], (counts_a, counts_b)
 
 

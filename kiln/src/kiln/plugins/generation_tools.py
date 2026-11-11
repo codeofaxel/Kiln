@@ -359,7 +359,6 @@ class _GenerationToolsPlugin:
             printer_id: str = "",
             auto_repair: bool = True,
             auto_scale: bool = False,
-            min_printability_score: int | None = None,
         ) -> dict:
             """Full validation pipeline: validate, repair, analyze, and prepare a mesh for printing.
 
@@ -401,11 +400,11 @@ class _GenerationToolsPlugin:
                     provided, printer intelligence supplies the build volume.
                 auto_repair: Auto-repair non-manifold meshes (default True).
                 auto_scale: Auto-scale if mesh exceeds build volume (default False).
-                min_printability_score: A lowest score (0-100) you require,
-                    for every part.  Leave unset and the verdict decides: a
-                    part that prints, as it is or with supports, passes;
-                    one that won't print fails; one with no single cause
-                    named is judged against Kiln's own floor.
+
+            The verdict decides whether the part passes: a part that prints,
+            as it is or with supports, passes; one that won't print fails;
+            one with no single cause named is judged against Kiln's own
+            floor.  Tell the person the verdict.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
@@ -465,7 +464,6 @@ class _GenerationToolsPlugin:
                     build_volume=build_volume,
                     auto_repair=auto_repair,
                     auto_scale=auto_scale,
-                    min_printability_score=min_printability_score,
                     # Forwarded even though the bed is usually resolved
                     # above: the pipeline's placement check falls back to
                     # its own catalogue lookup for ids this door could

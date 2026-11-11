@@ -179,27 +179,26 @@ def no_auth(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-class TestOnePrintabilityScore:
-    def test_orientation_reports_the_score_analyze_printability_gives(self, enclosure, free_tier):
+class TestOnePrintabilityVerdict:
+    def test_orientation_reports_the_verdict_analyze_printability_gives(self, enclosure, free_tier):
         from kiln.generation.validation import optimize_orientation
-        from kiln.printability import analyze_printability
+        from kiln.printability import analyze_printability, verdict
 
         result = optimize_orientation(enclosure)
-        report = analyze_printability(result["path"])
+        key, _ = verdict(analyze_printability(result["path"]))
 
         assert (result["rotation_x_deg"], result["rotation_y_deg"]) == (0.0, 0.0)
-        assert result["printability_score"] == report.score
-        assert result["printability_grade"] == report.grade
+        assert result["printability_verdict"] == key
 
-    def test_the_material_the_score_was_judged_for_is_the_callers(self, enclosure, free_tier):
+    def test_the_material_the_verdict_was_judged_for_is_the_callers(self, enclosure, free_tier):
         from kiln.generation.validation import optimize_orientation
-        from kiln.printability import analyze_printability
+        from kiln.printability import analyze_printability, verdict
 
         result = optimize_orientation(enclosure, material="abs")
-        report = analyze_printability(result["path"], material="abs")
+        key, _ = verdict(analyze_printability(result["path"], material="abs"))
 
         assert result["printability_material"] == "abs"
-        assert result["printability_score"] == report.score
+        assert result["printability_verdict"] == key
 
     def test_the_tool_doors_agree(self, enclosure, free_tier, no_auth):
         from kiln.plugins.design_reasoning_tools import _DesignReasoningToolsPlugin
@@ -212,27 +211,29 @@ class TestOnePrintabilityScore:
         graded = analyze(file_path=oriented["path"], material="petg")
 
         assert oriented["success"] and graded["success"], (oriented, graded)
-        assert oriented["printability_score"] == graded["report"]["score"]
-        assert oriented["printability_grade"] == graded["report"]["grade"]
+        assert oriented["printability_verdict"] == graded["verdict"]
 
-    def test_the_scorecard_printability_factor_is_the_printability_score(self, enclosure, free_tier):
+    def test_the_scorecard_printability_factor_is_the_printability_verdict(self, enclosure, free_tier):
         from kiln.generation.validation import design_scorecard
-        from kiln.printability import analyze_printability
+        from kiln.printability import analyze_printability, verdict
 
         factor = design_scorecard(enclosure, material="petg")["printability"]
-        report = analyze_printability(enclosure, material="petg")
+        key, text = verdict(analyze_printability(enclosure, material="petg"))
 
-        assert (factor["score"], factor["grade"]) == (report.score, report.grade)
+        assert (factor["printability_verdict"], factor["printability_verdict_text"]) == (key, text)
         assert factor["material"] == "petg"
 
-    def test_the_quick_mesh_check_is_never_called_a_printability_score(self, enclosure, free_tier):
+    def test_no_door_carries_a_rating(self, enclosure, free_tier):
+        # The printability rating and the quick mesh check's 0-100 stay in
+        # the process (kiln.printability.RATING_KEYS): no door hands either
+        # back, under any name.
         from kiln.generation.validation import (
             analyze_mesh,
             can_print_now,
             compare_meshes,
             predict_print_failures,
         )
-        from kiln.printability import analyze_printability
+        from kiln.printability import RATING_KEYS
 
         doors = {
             "analyze_mesh": analyze_mesh(enclosure).to_dict(),
@@ -240,14 +241,9 @@ class TestOnePrintabilityScore:
             "predict_print_failures": predict_print_failures(enclosure),
             "compare_meshes": compare_meshes(enclosure, enclosure),
         }
-        expected = analyze_printability(enclosure).score
         for door, out in doors.items():
-            # The one printability score a door may carry is the analyzer's.
-            named = {k: v for k, v in out.items() if k.startswith("printability_score") or k == "printability_delta"}
-            assert all(k == "printability_score" and v == expected for k, v in named.items()), (
-                f"{door} calls something other than analyze_printability's score a printability score: {named}"
-            )
-            assert any(k.startswith("mesh_check_score") for k in out), f"{door} dropped the mesh check entirely"
+            rated = [k for k in out if k in RATING_KEYS or k.startswith("mesh_check_score")]
+            assert rated == [], f"{door} carries a rating: {rated}"
 
 
 class TestAnOverlayAddsFindingsNotAGrade:
@@ -618,7 +614,9 @@ class TestReadinessSupports:
         result = can_print_now(enclosure, material="petg")
 
         assert result["verdict"] == "ready_to_print", result["issues"]
-        assert (result["printability_score"], result["printability_grade"]) == (report.score, report.grade)
+        from kiln.printability import verdict
+
+        assert result["printability_verdict"] == verdict(report)[0]
 
     def test_a_real_cantilever_still_needs_supports(self, tmp_path, free_tier):
         from kiln.generation.validation import can_print_now
@@ -633,30 +631,26 @@ class TestReadinessSupports:
         assert [i["type"] for i in result["issues"]] == ["needs_supports"]
 
 
-class TestValidateAndPrepareScores:
-    """validate_and_prepare's ``printability_score`` is analyze_printability's.
+class TestValidateAndPrepareVerdict:
+    """validate_and_prepare's ``printability_verdict`` is analyze_printability's.
 
-    Not the tally of the pipeline's own checks, which reads 100 for the
-    enclosure beside the score analyze_printability gives the same part.
-    The tally is still there, as ``readiness_score``.
+    The rating it was read from stays in the process; the pipeline's own
+    tally of its checks is still there, as ``readiness_score``.
     """
 
-    def test_the_score_is_the_analyzers_for_the_material_and_printer(self, enclosure, free_tier, no_auth):
+    def test_the_verdict_is_the_analyzers_for_the_material_and_printer(self, enclosure, free_tier, no_auth):
         from kiln.plugins.validation_pipeline_tools import _ValidationPipelinePlugin
-        from kiln.printability import analyze_printability
+        from kiln.printability import analyze_printability, verdict
 
         validate = _register(_ValidationPipelinePlugin)["validate_and_prepare"]
         report = analyze_printability(enclosure, material="petg", printer_id=_OPEN_FRAME)
 
         result = validate(input_path=enclosure, printer_id=_OPEN_FRAME, material="petg")
 
-        assert (result["printability_score"], result["printability_grade"]) == (report.score, report.grade)
-        assert isinstance(result["readiness_score"], int) and result["score_breakdown"] is not None
-        # The scores stay on the result for comparing versions; the summary
-        # says the verdict and no number (never "printability 89/100").
-        from kiln.printability import verdict
-
         assert result["printability_verdict"] == verdict(report)[0]
+        assert "printability_score" not in result and "printability_grade" not in result
+        assert isinstance(result["readiness_score"], int) and result["score_breakdown"] is not None
+        # The summary says the verdict and no number (never "printability 89/100").
         assert "/100" not in result["summary"], result["summary"]
 
     def test_a_pass_says_print_ready_and_the_supports_it_needs(self):

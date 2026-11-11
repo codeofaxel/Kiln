@@ -2172,7 +2172,7 @@ class _DesignToolsPlugin:
             if _refusal:
                 return _refusal
 
-            from kiln.printability import adhesion_advice, analyze_printability
+            from kiln.printability import adhesion_advice, analyze_printability, verdict_block
 
             try:
                 report = analyze_printability(
@@ -2191,8 +2191,9 @@ class _DesignToolsPlugin:
                     if report.adhesion is not None:
                         result["adhesion"] = report.adhesion.to_dict()
                     result["success"] = True
-                    result["overall_score"] = report.score
-                    result["overall_grade"] = report.grade
+                    # The part's verdict, never its rating
+                    # (kiln.printability.RATING_KEYS).
+                    result.update(verdict_block(report))
                     return result
                 return {
                     "success": False,

@@ -327,31 +327,11 @@ class TestValidationPipelineRepair:
 class TestValidationPipelinePrintability:
     """Printability score thresholds, analysis failure, recommendation pass-through."""
 
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_low_printability_score_fails(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(score=30, grade="D")
-
-        result = run_validation_pipeline(stl_file, min_printability_score=40)
-
-        assert result.passed is False
-        assert result.printability_score == 30
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_custom_min_score_threshold(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(score=30, grade="D")
-
-        result = run_validation_pipeline(stl_file, min_printability_score=20)
-
-        assert result.passed is True
-        assert result.printability_score == 30
+    def test_no_caller_sets_the_bar(self, stl_file):
+        # A bar a caller could move would read the score back one pass or
+        # fail at a time; the verdict decides, and no caller sets a bar.
+        with pytest.raises(TypeError):
+            run_validation_pipeline(stl_file, min_printability_score=40)
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
@@ -537,7 +517,9 @@ class TestValidationPipelineEdgeCases:
         serialized = json.dumps(result_dict)
         assert isinstance(serialized, str)
         assert "passed" in result_dict
-        assert "printability_score" in result_dict
+        # The verdict rides; the rating stays in the process.
+        assert "verdict" in result_dict
+        assert "printability_score" not in result_dict
 
 
 # ---------------------------------------------------------------------------
@@ -609,7 +591,8 @@ class TestValidationPipelineResult:
         assert isinstance(d, dict)
         assert "passed" in d
         assert "file_path" in d
-        assert "printability_score" in d
+        assert "printability_score" not in d
+        assert "printability_grade" not in d
         assert "errors" in d
         assert "summary" in d
 
@@ -657,55 +640,6 @@ class TestHelperFunctions:
 
 class TestEdgeCasesExpanded:
     """Extended edge case coverage: boundary values, degenerate inputs, temp files."""
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_printability_score_exactly_at_threshold_passes(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(score=40, grade="C")
-
-        result = run_validation_pipeline(stl_file, min_printability_score=40)
-
-        assert result.passed is True
-        assert result.printability_score == 40
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_printability_score_one_below_threshold_fails(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(score=39, grade="D")
-
-        result = run_validation_pipeline(stl_file, min_printability_score=40)
-
-        assert result.passed is False
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_min_printability_score_zero_always_passes(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(score=0, grade="F")
-
-        result = run_validation_pipeline(stl_file, min_printability_score=0)
-
-        assert result.passed is True
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_min_printability_score_100_requires_perfect(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(score=99, grade="A")
-
-        result = run_validation_pipeline(stl_file, min_printability_score=100)
-
-        assert result.passed is False
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
@@ -928,22 +862,6 @@ class TestParametrizedScenarios:
         )
 
         assert result.passed is True
-
-    @pytest.mark.parametrize("threshold", [0, 20, 40, 60, 80, 100])
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_min_printability_thresholds(
-        self, mock_validate, mock_printability, stl_file, threshold,
-    ):
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(score=50, grade="C")
-
-        result = run_validation_pipeline(stl_file, min_printability_score=threshold)
-
-        if threshold <= 50:
-            assert result.passed is True
-        else:
-            assert result.passed is False
 
     @pytest.mark.parametrize(
         "build_vol,should_fit",
@@ -1455,11 +1373,11 @@ class TestValidationPipelinePlacementCheck:
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
-    def test_low_score_bar_does_not_rescue_an_oversized_part(
+    def test_a_high_rating_does_not_rescue_an_oversized_part(
         self, mock_validate, mock_printability, stl_file,
     ):
-        """min_printability_score says how ROUGH a mesh the caller will
-        take, not whether they will take one that cannot print."""
+        """A part that cannot sit on the bed fails, whatever the bundle's
+        rating says about its shape."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OVERSIZED_BBOX,
         )
@@ -1468,7 +1386,7 @@ class TestValidationPipelinePlacementCheck:
         )
 
         result = run_validation_pipeline(
-            stl_file, inspection_bundle=bundle, min_printability_score=0,
+            stl_file, inspection_bundle=bundle,
             build_volume=(256.0, 256.0, 256.0),
         )
 

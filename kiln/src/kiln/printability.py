@@ -46,13 +46,56 @@ logger = logging.getLogger(__name__)
 
 #: The score's own arithmetic: how many points each check took off, and the
 #: factor the thermal check scaled its charge by.  Never served, at any
-#: tier.  The score and the grade are the answer; a reply says what each
-#: check found and what to do, and nothing reads the points behind it.
-#: The in-process report keeps them for the checks that reconcile the
-#: score (``tests/test_printability_score_is_its_stated_deductions.py``).
+#: tier: a reply says what each check found and what to do, and nothing
+#: reads the points behind it.  The in-process report keeps them for the
+#: checks that reconcile the score
+#: (``tests/test_printability_score_is_its_stated_deductions.py``).
 _SCORE_ARITHMETIC: frozenset[str] = frozenset({
     "score_deduction", "stop_deduction", "material_stress_factor",
 })
+
+#: The report's rating, under every name a reply could carry it by: the
+#: 0-100 score and the letter grade read from it.  The rating stays in the
+#: process, where Kiln compares versions of a part and gates a part with no
+#: named cause; a reply carries the verdict (:func:`verdict_block`) and the
+#: reasons behind it, never the rating, at any tier.  Every door that
+#: builds its own reply drops these keys through :func:`without_rating`.
+RATING_KEYS: frozenset[str] = frozenset({
+    "score", "grade", "printability_score", "printability_grade",
+    # The quick mesh check's own 0-100 (MeshAnalysis.mesh_check_score): a
+    # second rating of the same part, kept in the process the same way.
+    "mesh_check_score",
+})
+
+
+def without_rating(reply: dict[str, Any]) -> dict[str, Any]:
+    """*reply* with the printability rating (:data:`RATING_KEYS`) left out.
+
+    Returns a new dict; nested dicts are not walked, so a door that carries
+    a printability block under its own key passes that block through here
+    too.
+    """
+    return {key: value for key, value in reply.items() if key not in RATING_KEYS}
+
+
+def bundle_without_rating(bundle: dict[str, Any]) -> dict[str, Any]:
+    """An inspection bundle with its printability findings' rating left out.
+
+    The bundle's ``channels.printability.findings`` are a printability
+    reply like any other.  Returns a copy; *bundle* is left as it was.
+    """
+    channels = bundle.get("channels")
+    printability = channels.get("printability") if isinstance(channels, dict) else None
+    findings = printability.get("findings") if isinstance(printability, dict) else None
+    if not isinstance(findings, dict):
+        return dict(bundle)
+    return {
+        **bundle,
+        "channels": {
+            **channels,
+            "printability": {**printability, "findings": without_rating(findings)},
+        },
+    }
 
 
 def _served(analysis: Any) -> dict[str, Any]:
@@ -704,14 +747,16 @@ class PrintabilityReport:
     # pieces could not be read, and on reports built directly by a client.
     pieces: PiecesAnalysis | None = None
     #: Whether Kiln Pro tuned this report (:func:`_mark_tuned`).  A tuned
-    #: report's reply keeps the verdict, the score and grade, every check's
-    #: risk and reasons, and what to do; see :func:`_served`.
+    #: report's reply keeps the verdict, every check's risk and reasons, and
+    #: what to do; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
     _WORKED_OUT: ClassVar[tuple[str, ...]] = ("stop_deduction", "overhang_threshold_deg")
 
     def to_dict(self) -> dict[str, Any]:
-        out = _served(self)
+        # The rating stays in the process (RATING_KEYS); the reply says the
+        # verdict and the reasons.
+        out = without_rating(_served(self))
         # Each check is served as itself, never as asdict's copy of it.
         for name, check in _checks(self):
             out[name] = check.to_dict()
@@ -756,9 +801,9 @@ class BundlePrintabilityFindings:
     ``score``, ``grade``, ``recommendations``, and ``to_dict()``.  Field
     names and types match :class:`PrintabilityReport` exactly, so
     callers can branch on which one they got without changing how they
-    read.  ``to_dict()`` returns the raw bundle-channel findings so the
-    audit's ``details`` payload stays bundle-faithful rather than
-    flattening to the adapter's narrower view.
+    read.  ``to_dict()`` returns the bundle-channel findings, less the
+    rating (:data:`RATING_KEYS`), so the audit's ``details`` payload stays
+    bundle-faithful rather than flattening to the adapter's narrower view.
     """
 
     printable: bool
@@ -783,7 +828,7 @@ class BundlePrintabilityFindings:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(self._findings)
+        return without_rating(self._findings)
 
 
 # ---------------------------------------------------------------------------
@@ -9350,7 +9395,9 @@ def _analyze_printability_here(
         if pro_features.is_available("printability_overlay"):
             try:
                 enriched = pro_features.printability_overlay.enrich_printability_report(
-                    report.to_dict(),
+                    # In process, with the rating, so a lower score the
+                    # overlay finds can reach the verdict below.
+                    {**report.to_dict(), "score": report.score, "grade": report.grade},
                     material=material,
                     printer_id=printer_id,
                     nozzle_diameter_mm=nozzle_diameter,
@@ -9383,7 +9430,9 @@ def _analyze_printability_here(
                 ):
                     try:
                         enriched = pro_features.printability_overlay.enrich_printability_report(
-                            report.to_dict(),
+                            # In process, with the rating, so a lower score
+                            # the overlay finds can reach the verdict below.
+                            {**report.to_dict(), "score": report.score, "grade": report.grade},
                             **kwargs,
                         )
                         break
@@ -9732,7 +9781,7 @@ def verdict_block(report: PrintabilityReport | BundlePrintabilityFindings) -> di
 PRINTS: frozenset[str] = frozenset({"ready", "prints_with_supports"})
 
 
-def passes(verdict_key: str, score: int, *, bar: int, required: int | None = None) -> bool:
+def passes(verdict_key: str, score: int, *, bar: int) -> bool:
     """Whether a gate passes a part :func:`verdict` called *verdict_key*.
 
     The verdict decides.  A part that prints, as it is or with supports,
@@ -9740,16 +9789,12 @@ def passes(verdict_key: str, score: int, *, bar: int, required: int | None = Non
     judged) fails whatever its score: the score is for comparing versions
     of a part, not for telling a person whether it prints.  Only ``check``
     (under the printable line with no single cause to name) has nothing but
-    the score to go on, so there the gate's own *bar* decides.
-
-    *required* is a minimum the CALLER asked for, a quality bar of their
-    own: it holds for every part, one that prints included.  One rule for
-    every gate, so no door fails a part another door told the person prints
-    unless the person asked for more.
+    the score to go on, so there the gate's own *bar* decides.  One rule
+    for every gate, so no door fails a part another door told the person
+    prints.  No caller sets the bar: a bar a caller could move would read
+    the score back to them one pass or fail at a time.
     """
     if verdict_key == "wont_print" or not verdict_key:
-        return False
-    if required is not None and score < required:
         return False
     if verdict_key in PRINTS:
         return True

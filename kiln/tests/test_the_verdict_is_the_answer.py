@@ -102,8 +102,9 @@ def test_no_door_says_the_score(part, request, tmp_path):
     for door, reply in replies.items():
         said = reply.get("message", "")
         assert said and not _SCORE_SAID.search(said), f"{door}: {said}"
+    # The rating stays in the process: the report says the verdict's reasons.
     report = replies["analyze_printability"]["report"]
-    assert isinstance(report["score"], int) and report["grade"] in "ABCDF"
+    assert "score" not in report and "grade" not in report
 
 
 def test_a_part_that_prints_with_supports_passes_every_gate_whatever_it_scores(mushroom):
@@ -296,7 +297,7 @@ def test_the_readiness_check_carries_the_verdict(part, request, monkeypatch):
         assert reply.get("printability_verdict") == key, (door, reply)
         assert reply.get("printability_verdict_text") == text, (door, reply)
         assert (reply["verdict"], reply["can_print"]) == _READINESS[part], (door, reply)
-        assert isinstance(reply["printability_score"], int)
+        assert "printability_score" not in reply
 
 
 @pytest.fixture()

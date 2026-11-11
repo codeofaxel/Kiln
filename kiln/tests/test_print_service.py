@@ -106,12 +106,14 @@ class TestPrintServiceQuote:
             reasoning="test",
             total_cost_usd=1.0,
             estimated_time_hours=2.0,
-            printability_score=90,
+            printability_verdict="ready",
+            printability_verdict_text="Ready to print.",
         )
         d = q.to_dict()
         assert d["order_id"] == "pso_test123"
         assert d["recommended"] == "local"
-        assert d["printability_score"] == 90
+        assert d["printability_verdict"] == "ready"
+        assert "printability_score" not in d
 
 
 class TestPrintServiceOrder:
@@ -289,35 +291,35 @@ class TestCreatePrintOrder:
         with patch("kiln.persistence.get_db", return_value=db), pytest.raises(ValueError):
             create_print_order(req)
 
-    def test_printability_score_is_the_analyzers(self, db, tmp_path):
-        """The quote scores the model as analyze_printability does, for the
-        order's material, never one fixed score for any STL."""
+    def test_the_printability_verdict_is_the_analyzers(self, db, tmp_path):
+        """The quote judges the model as analyze_printability does, for the
+        order's material, and says the verdict, never a rating."""
         trimesh = pytest.importorskip("trimesh")
-        from kiln.printability import analyze_printability
+        from kiln.printability import analyze_printability, verdict
 
         tower = trimesh.creation.box(extents=(8.0, 8.0, 60.0))
         tower.apply_translation((0, 0, 30.0))
         path = str(tmp_path / "tower.stl")
         tower.export(path)
-        expected = analyze_printability(path, material="petg").score
-        assert expected != 90  # the premise: the old guess cannot pass
+        expected = verdict(analyze_printability(path, material="petg"))
 
         req = _make_request(model_path=path, material="petg")
         with patch("kiln.persistence.get_db", return_value=db):
             quote = create_print_order(req)
-        assert quote.printability_score == expected
+        assert (quote.printability_verdict, quote.printability_verdict_text) == expected
+        assert "printability_score" not in quote.to_dict()
 
-    def test_a_model_that_cannot_be_read_has_no_score(self, db, model_file):
+    def test_a_model_that_cannot_be_read_has_no_verdict(self, db, model_file):
         req = _make_request(model_path=model_file)  # an STL with no triangles
         with patch("kiln.persistence.get_db", return_value=db):
             quote = create_print_order(req)
-        assert quote.printability_score is None
+        assert quote.printability_verdict is None
 
-    def test_a_prompt_has_no_score_yet(self, db):
+    def test_a_prompt_has_no_verdict_yet(self, db):
         req = _make_request(prompt="a cube")
         with patch("kiln.persistence.get_db", return_value=db):
             quote = create_print_order(req)
-        assert quote.printability_score is None
+        assert quote.printability_verdict is None
 
     def test_order_saved_to_db(self, db, model_file):
         req = _make_request(model_path=model_file)

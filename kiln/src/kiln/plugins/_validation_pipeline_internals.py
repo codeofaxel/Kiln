@@ -76,8 +76,8 @@ class _PipelineReport:
     score_breakdown: list[str] = field(default_factory=list)
     # analyze_printability's own score and grade for the pipeline's material
     # and printer, from the printability check; ``None`` when that check
-    # could not run.  Never the tally above: under this name it would make
-    # one part read 100 here and something else everywhere else.
+    # could not run.  Kept in the process: :meth:`to_dict` carries the
+    # verdict below, never the rating (kiln.printability.RATING_KEYS).
     printability_score: int | None = None
     printability_grade: str | None = None
     # The printability check's verdict (kiln.printability.verdict) and its
@@ -100,8 +100,6 @@ class _PipelineReport:
             "recommendations": self.recommendations,
             "ready_to_print": self.ready_to_print,
             "model_info": self.model_info,
-            "printability_score": self.printability_score,
-            "printability_grade": self.printability_grade,
             "printability_verdict": self.printability_verdict,
             "printability_verdict_text": self.printability_verdict_text,
             "readiness_score": self.readiness_score,

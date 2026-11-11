@@ -89,8 +89,10 @@ def reports(tmp_path_factory) -> dict[str, dict]:
 
 
 def _in_process(report) -> dict:
-    """The report as a dict that still carries the score's arithmetic."""
+    """The report as a dict that still carries the score and its arithmetic,
+    which a reply never does (``RATING_KEYS``, ``_SCORE_ARITHMETIC``)."""
     out = report.to_dict()
+    out["score"] = report.score
     out["stop_deduction"] = report.stop_deduction
     for key in _CHARGED:
         check = getattr(report, key, None)

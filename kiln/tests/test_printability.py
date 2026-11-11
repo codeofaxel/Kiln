@@ -1423,8 +1423,9 @@ class TestAnalyzePrintability:
             path = _write_stl(tmpdir, _cube_triangles())
             report = analyze_printability(path)
             d = report.to_dict()
-            assert "score" in d
-            assert "grade" in d
+            # The rating stays in the process (RATING_KEYS).
+            assert "score" not in d
+            assert "grade" not in d
             assert "overhangs" in d
             assert "thin_walls" in d
 
@@ -2279,17 +2280,19 @@ class TestBundlePrintabilityFindings:
         }
         f = BundlePrintabilityFindings.from_bundle_findings(findings)
         out = f.to_dict()
-        assert out["score"] == 88
+        # The rating stays on the adapter, never in what it hands out.
+        assert f.score == 88 and "score" not in out
         assert out["channel_specific_evidence"] == {"overhangs_total_mm2": 4.2}
 
     def test_to_dict_returns_a_copy_not_an_alias(self):
         """Caller mutations to the returned dict must NOT propagate into
         the adapter's stored findings."""
-        findings = {"score": 60, "grade": "D"}
+        findings = {"score": 60, "grade": "D", "recommendations": ["lower nozzle"]}
         f = BundlePrintabilityFindings.from_bundle_findings(findings)
         out = f.to_dict()
-        out["score"] = 0
-        assert f.to_dict()["score"] == 60
+        out["recommendations"] = []
+        assert f.to_dict()["recommendations"] == ["lower nozzle"]
+        assert f.score == 60
 
     def test_recommendations_default_empty_when_field_missing(self):
         f = BundlePrintabilityFindings.from_bundle_findings(

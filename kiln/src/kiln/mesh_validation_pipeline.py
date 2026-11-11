@@ -84,7 +84,16 @@ class ValidationPipelineResult:
     inspection_bundle: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        # The rating stays in the process (kiln.printability.RATING_KEYS);
+        # ``verdict`` and ``verdict_text`` carry the answer.
+        from kiln.printability import bundle_without_rating, without_rating
+
+        out = without_rating(asdict(self))
+        if isinstance(out.get("printability_details"), dict):
+            out["printability_details"] = without_rating(out["printability_details"])
+        if isinstance(out.get("inspection_bundle"), dict):
+            out["inspection_bundle"] = bundle_without_rating(out["inspection_bundle"])
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +209,6 @@ def run_validation_pipeline(
     build_volume: tuple[float, float, float] | None = None,
     auto_repair: bool = True,
     auto_scale: bool = False,
-    min_printability_score: int | None = None,
     inspection_bundle: dict[str, Any] | None = None,
     printer_id: str | None = None,
 ) -> ValidationPipelineResult:
@@ -218,12 +226,11 @@ def run_validation_pipeline(
     :param build_volume: Optional ``(x, y, z)`` build volume in mm.
     :param auto_repair: Attempt automatic repair of non-manifold meshes.
     :param auto_scale: Scale mesh down to fit build volume if too large.
-    :param min_printability_score: A lowest score the caller requires, for
-        every part.  Left unset, the verdict decides
-        (:func:`kiln.printability.passes`): a part that prints, as it is or
-        with supports, passes whatever it scores, one that won't print fails,
-        and one the check names no single cause for needs
-        :data:`_CHECK_BAR`.
+    The verdict decides whether a part passes
+    (:func:`kiln.printability.passes`): a part that prints, as it is or with
+    supports, passes, one that won't print fails, and one the check names no
+    single cause for needs :data:`_CHECK_BAR`.
+
     :param inspection_bundle: Optional pre-built inspection-bundle dict
         (the ``result["inspection_bundle"]`` field produced by
         ``attach_inspect_bundle`` in kiln-pro).  When the bundle carries
@@ -570,45 +577,29 @@ def run_validation_pipeline(
             passed = False
 
         # The verdict decides (kiln.printability.passes): a part that prints
-        # with supports passes whatever it scores, unless the caller set a
-        # minimum of their own.
+        # with supports passes whatever it scores.
         from kiln.printability import passes as _passes
 
-        if not _passes(verdict_key, printability_score, bar=_CHECK_BAR, required=min_printability_score):
+        if not _passes(verdict_key, printability_score, bar=_CHECK_BAR):
             passed = False
-            if (
-                verdict_key not in ("", "wont_print")
-                and min_printability_score is not None
-                and printability_score < min_printability_score
-            ):
+            if verdict_key == "check":
                 warnings.append(
-                    "The part scores under the minimum this check was asked to hold "
-                    f"(min_printability_score={min_printability_score}).",
-                )
-            elif verdict_key == "check":
-                warnings.append(
-                    "No single cause is named, and the part scores under the bar for "
-                    "a part with no named cause.",
+                    "No single cause is named, and the part is not clear to print "
+                    "as it is: check it before printing.",
                 )
 
         if fits_build_volume is False:
             passed = False
 
-        # Placement is feasibility, not quality, so it is deliberately not
-        # filtered through min_printability_score — that setting says how
-        # rough a mesh the caller will accept, not whether they will take
-        # one that cannot print at all.  This is the same reasoning that
-        # already lets fits_build_volume fail a run on its own; without it
-        # the two placement faults were graded alike but gated differently.
+        # Placement is feasibility, not quality: a part that cannot sit on
+        # the bed fails the run on its own, as fits_build_volume does.
         if placement_faults:
             passed = False
             warnings.extend(placement_faults)
 
         # A part the analysis says will not print as it is (smaller than any
         # printer makes, resting on a point, a wall the nozzle cannot lay)
-        # fails here too, whatever its score: the bar above says how rough
-        # a part the caller accepts, not whether they take one that cannot
-        # print.
+        # fails here too, whatever its score.
         unsaid = [stop for stop in hard_stops if stop not in placement_faults]
         if unsaid:
             passed = False

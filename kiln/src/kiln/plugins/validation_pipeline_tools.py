@@ -194,7 +194,7 @@ def run_full_validation_pipeline(
     auto-repair, printability analysis, support assessment, structural check,
     bed-fit, material check, and estimation.  Returns the same dict shape as
     ``validate_and_prepare`` — including ``ready_to_print``, ``validated_path``,
-    ``printability_score`` (analyze_printability's, for ``material`` and
+    ``printability_verdict`` (analyze_printability's, for ``material`` and
     ``printer_id``), ``readiness_score`` (the tally of the checks),
     ``next_action``, and ``summary``.
 
@@ -504,7 +504,7 @@ class PrintGate:
             key: self.report.get(key)
             for key in (
                 "printability_verdict", "printability_verdict_text",
-                "printability_score", "readiness_score", "ready_to_print", "repaired", "summary",
+                "readiness_score", "ready_to_print", "repaired", "summary",
             )
         }
 
@@ -593,11 +593,11 @@ class _ValidationPipelinePlugin:
                 "asa", "tpu").  When provided, adds a material-specific check
                 for known print-quality risks.  If empty, material check is skipped.
             :returns: Dict with pass/fail status, per-check details, recommendations,
-                ``printability_score`` and ``printability_grade``
+                ``printability_verdict`` and its sentence
                 (analyze_printability's, for ``material`` and ``printer_id``;
                 ``None`` when the analysis could not run), and
                 ``readiness_score`` (0-100, the tally of the checks) with its
-                ``score_breakdown``.
+                ``score_breakdown``.  Tell the person the verdict.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
@@ -664,7 +664,7 @@ class _ValidationPipelinePlugin:
             original_info: dict[str, Any] = {
                 "dimensions_mm": baseline.get("model_info", {}).get("dimensions_mm", {}),
                 "triangles": baseline.get("model_info", {}).get("triangles", 0),
-                "printability_score": baseline.get("printability_score"),
+                "printability_verdict": baseline.get("printability_verdict"),
                 "readiness_score": baseline.get("readiness_score", 0),
             }
 
@@ -840,7 +840,7 @@ class _ValidationPipelinePlugin:
             prepared_info: dict[str, Any] = {
                 "dimensions_mm": prepared_dims,
                 "triangles": prepared_report.get("model_info", {}).get("triangles", 0),
-                "printability_score": prepared_report.get("printability_score"),
+                "printability_verdict": prepared_report.get("printability_verdict"),
                 "readiness_score": prepared_report.get("readiness_score", 0),
                 "stl_path": working_path,
                 "pose": {k: v for k, v in pose.items() if k not in ("schema", "judged_at", "path")},

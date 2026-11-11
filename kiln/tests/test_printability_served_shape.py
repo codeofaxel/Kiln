@@ -234,8 +234,10 @@ def test_a_tuned_reply_keeps_the_verdict(tuned):
     served = reply["report"]
     assert reply["verdict"] == P.verdict_of(report)[0]
     assert reply["message"].startswith(P.verdict_of(report)[1])
-    for key in ("printable", "score", "grade", "recommendations"):
+    for key in ("printable", "recommendations"):
         assert served[key] == getattr(report, key), key
+    # The rating stays in the process (RATING_KEYS).
+    assert "score" not in served and "grade" not in served
     for block in ("warping", "thermal_stress", "adhesion_force"):
         assert served[block]["risk_level"] == getattr(report, block).risk_level, block
         assert served[block]["recommendations"] == getattr(report, block).recommendations, block
@@ -338,7 +340,11 @@ def test_the_floor_is_served_whole_but_for_the_scores_arithmetic(floor):
     on any tier, is how the score was added up."""
     report = floor["report"]
     assert not getattr(report, "tuned", False)
-    expected = _without_arithmetic(_without_tuned(asdict(report)))
+    expected = {
+        key: value
+        for key, value in _without_arithmetic(_without_tuned(asdict(report))).items()
+        if key not in P.RATING_KEYS
+    }
     assert report.to_dict() == expected
     served = floor["reply"]["report"]
     for block, key in WORKED_OUT:
@@ -348,8 +354,8 @@ def test_the_floor_is_served_whole_but_for_the_scores_arithmetic(floor):
             assert key in _block(served, block), f"{block or 'report'}.{key} left the floor's reply"
     assert not (_keys_at_any_depth(floor["reply"]) & SCORE_ARITHMETIC)
     assert not (_keys_at_any_depth(floor["warping"]) & SCORE_ARITHMETIC)
-    # The verdict, the score and the reasons are all still there.
-    assert served["score"] == report.score and served["grade"] == report.grade
+    # The verdict and the reasons are all still there; the rating is not.
+    assert "score" not in served and "grade" not in served
     assert floor["warping"]["risk_level"] == report.warping.risk_level
 
 

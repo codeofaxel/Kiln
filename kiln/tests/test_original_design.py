@@ -828,10 +828,10 @@ class TestAuditInspectionBundleConsumer:
                     inspection_bundle=bundle,
                 )
                 mock_printability.assert_not_called()
-        # The printability gate read the BUNDLE's score, not the
-        # (mocked-and-never-called) analyze_printability output.
-        assert audit.printability.get("score") == 44
-        assert audit.printability.get("grade") == "F"
+        # The printability gate read the BUNDLE, not the (mocked-and-never-
+        # called) analyze_printability output; its rating stays out of the reply.
+        assert "score" not in audit.printability
+        assert "grade" not in audit.printability
 
     def test_bundle_rides_along_on_audit_result(self):
         """The bundle dict appears on the audit result so downstream
