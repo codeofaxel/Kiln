@@ -243,9 +243,12 @@ class TestScaledAndCyclic3mf:
         }
         assert result.volume_mm3 == pytest.approx(8 * _PYRAMID_VOLUME, rel=1e-3)
 
-    def test_component_cycle_terminates_and_counts_each_object_once(
+    def test_a_component_cycle_is_refused_in_words(
         self, tmp_path: Path
     ) -> None:
+        """A component that contains itself describes a model that never
+        ends; it is refused, as Kiln's mesh loader refuses it, rather than
+        cut at some point and measured as if that were the part."""
         resources = (
             f'<object id="1" type="model">{_PYRAMID_MESH}\n'
             '  <components><component objectid="2" /></components>\n'
@@ -258,7 +261,8 @@ class TestScaledAndCyclic3mf:
             _write_3mf(tmp_path, _model_xml(resources, '<item objectid="1" />'))
         )
 
-        assert result.triangle_count == 2 * _PYRAMID_TRIANGLES
+        assert result.triangle_count == 0
+        assert any("contains itself" in issue for issue in result.printability_issues)
 
 
 class TestProductionExtension3mf:

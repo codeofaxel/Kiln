@@ -543,7 +543,7 @@ def _3mf_transform(attr: str | None) -> Any:
     return matrix
 
 
-def _load_3mf_stdlib(path: Path) -> Any:
+def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False) -> Any:
     """A 3MF read into a trimesh ``Scene`` with the standard library alone.
 
     trimesh's own 3MF loader needs ``lxml`` and ``networkx``, which a plain
@@ -575,8 +575,20 @@ def _load_3mf_stdlib(path: Path) -> Any:
     extras and the user's machine does not, so the path users run was the
     one the suite never exercised.  One reader everywhere ends that.
 
+    *process* and *validate* reach each geometry's constructor, as they do
+    through trimesh's loader.  The scene's ``metadata["units"]`` is the
+    model's ``unit`` attribute as written (the specification's default,
+    ``millimeter``, when absent); the numbers are left in that unit.
+
+    The build is expanded under the limits Kiln's 3MF readers share
+    (:class:`kiln.threemf_parser._PlacementBudget`): a component that
+    contains itself, components nested too deep, too many placements, or
+    more mesh than one read holds once every copy is counted is refused
+    before the copy that would pass it is made.
+
     Raises ``ValueError`` for an archive with no model XML or unparsable
-    XML — the same refusals the loader makes.
+    XML — the same refusals the loader makes — and for a build past those
+    limits.
     """
     import xml.etree.ElementTree as ET
     import zipfile
@@ -591,6 +603,7 @@ def _load_3mf_stdlib(path: Path) -> Any:
         _PATH_ATTR,
         _EntityDeclarationRefused,
         _find_model_xml,
+        _PlacementBudget,
         _RetainedBudget,
         _stream_part,
         open_untrusted_zip,
@@ -599,6 +612,10 @@ def _load_3mf_stdlib(path: Path) -> Any:
 
     ns = f"{{{_CORE_NS}}}"
     budget = _RetainedBudget()
+    # Bounds the build's expansion before any of it is made: every object a
+    # build item or component reaches, how deep they nest, and the mesh each
+    # copy adds, the same limits Kiln's other 3MF readers walk under.
+    placing = _PlacementBudget(count_entries=True)
 
     def _mesh(info: Any) -> Any:
         """A Trimesh of one object's kept mesh, or None without a valid face."""
@@ -611,6 +628,8 @@ def _load_3mf_stdlib(path: Path) -> Any:
         return trimesh.Trimesh(
             vertices=np.array(info.vertices, dtype=np.float64),
             faces=np.asarray(faces, dtype=np.int64),
+            process=process,
+            validate=validate,
         )
 
     try:
@@ -717,6 +736,7 @@ def _load_3mf_stdlib(path: Path) -> Any:
                 return key
 
             scene = trimesh.Scene()
+            scene.metadata["units"] = (root.get("unit") or "millimeter").strip()
             for name, mesh in geometry.items():
                 scene.geometry[name] = mesh
             base = scene.graph.base_frame
@@ -731,19 +751,25 @@ def _load_3mf_stdlib(path: Path) -> Any:
                 seen: frozenset[tuple[str, str]],
                 holder: str | None,
             ) -> None:
+                # The visit was charged by the caller, before any of this.
                 if (part, oid) in seen:
-                    return  # a component cycle — the file is malformed, not infinite
+                    placing.refuse_cycle()
+                if (part, oid) not in objects and part != root_name:
+                    _load(part)
+                if (part, oid) not in objects:
+                    return  # names an object the file does not define
                 name = _geometry_key(part, oid, holder)
                 if name is not None:
+                    placed = scene.geometry[name]
+                    placing.place(len(placed.vertices) + len(placed.faces))
                     node = unique_name(partnumber or name, used, used_counts)
                     used.add(node)
                     scene.graph.update(
                         frame_from=base, frame_to=node, matrix=matrix, geometry=name
                     )
-                if part != root_name:
-                    _load(part)
                 obj = objects.get((part, oid))
                 for child, child_matrix, child_part in components.get((part, oid), ()):
+                    placing.visit(len(seen) + 1)
                     _place(
                         child_part,
                         child,
@@ -760,9 +786,11 @@ def _load_3mf_stdlib(path: Path) -> Any:
                 # already uses for the same file, so colors and geometry agree.
                 for oid in id_name:
                     if geom_of.get((root_name, oid)) is not None:
+                        placing.visit(0)
                         _place(root_name, oid, np.eye(4), None, frozenset(), None)
             else:
                 for item in build.findall(f"{ns}item"):
+                    placing.visit(0)
                     oid = item.get("objectid")
                     if oid:
                         _place(

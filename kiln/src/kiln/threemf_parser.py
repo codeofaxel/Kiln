@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import math
 import re
+import struct
 import xml.etree.ElementTree as ET
 import zipfile
 from array import array
@@ -127,6 +128,88 @@ _STRUCTURE = "structure"
 _TriangleSig = tuple[str | None, str | None, str | None]
 
 
+#: Meshes one build may place, every copy its components make counted.  A
+#: build past it is refused in words, whatever the file's size.
+_MAX_PLACEMENTS = 25_600
+
+#: Vertices one bounding-box measure of a build may fold, each mesh counted
+#: once per distinct turn it is placed at (copies that differ only by an
+#: offset share one fold).  A build past it is refused in words.
+_MAX_FOLDED_VERTICES = 300_000_000
+
+#: How deep components may nest under one build item.  The walks recurse, so
+#: this also keeps them inside the interpreter's own depth.
+_MAX_COMPONENT_NESTING = 32
+
+
+class ModelBudgetExceeded(UntrustedArchiveError):
+    """A 3MF asks for more than one read may hold: more mesh than the limit
+    (each copy a build places counted), more placements, components nested
+    too deep, or a component that contains itself."""
+
+
+class _PlacementBudget:
+    """Counts what one walk of a build takes on, and refuses past the limits.
+
+    Every build item and component the walk visits -- whether or not it names
+    an object that exists -- counts toward :data:`_MAX_RETAINED_ELEMENTS`
+    (the work), every placed mesh toward :data:`_MAX_PLACEMENTS` (what a
+    plate can be), and, for a walk that keeps the mesh, every placed copy's
+    vertices and triangles toward :data:`_MAX_KEPT_MESH_ENTRIES` (the
+    memory)."""
+
+    __slots__ = ("entries_left", "placed_left", "walked_left")
+
+    def __init__(self, *, count_entries: bool) -> None:
+        self.walked_left = _MAX_RETAINED_ELEMENTS
+        self.placed_left = _MAX_PLACEMENTS
+        self.entries_left = _MAX_KEPT_MESH_ENTRIES if count_entries else None
+
+    def visit(self, depth: int) -> None:
+        """One more build item or component visited, *depth* components below
+        its build item.  Charged before the visit does anything -- before its
+        object is looked up or its transform read -- so a component naming
+        nothing costs the walk as much as one that names a part."""
+        if depth > _MAX_COMPONENT_NESTING:
+            raise ModelBudgetExceeded(
+                f"this 3MF nests components more than {_MAX_COMPONENT_NESTING} deep, "
+                "more than Kiln reads"
+            )
+        self.walked_left -= 1
+        if self.walked_left < 0:
+            raise ModelBudgetExceeded(
+                f"this 3MF names more than {_MAX_RETAINED_ELEMENTS:,} parts once every "
+                "copy its components make is counted, more than Kiln reads"
+            )
+
+    @staticmethod
+    def refuse_cycle() -> None:
+        """A component names an object that holds it."""
+        raise ModelBudgetExceeded(
+            "a component in this 3MF contains itself, so the model never "
+            "ends. Export it again from the program that made it"
+        )
+
+    def place(self, entries: int) -> None:
+        """A mesh of *entries* vertices and triangles placed once more."""
+        self.placed_left -= 1
+        if self.placed_left < 0:
+            raise ModelBudgetExceeded(
+                f"this 3MF places more than {_MAX_PLACEMENTS:,} meshes once every copy "
+                "is counted, more than the largest bed Kiln knows can hold; split it "
+                "into plates"
+            )
+        if self.entries_left is None:
+            return
+        self.entries_left -= entries
+        if self.entries_left < 0:
+            raise ModelBudgetExceeded(
+                f"this 3MF places more than {_MAX_KEPT_MESH_ENTRIES:,} vertices and "
+                "triangles once every copy is counted, more than Kiln reads at once. "
+                "Simplify the part, or place fewer copies"
+            )
+
+
 class _EntityDeclarationRefused(ValueError):
     """The member carries an ``<!ENTITY`` declaration the reader refuses."""
 
@@ -146,7 +229,7 @@ class _RetainedBudget:
     def take_mesh(self) -> None:
         self.mesh_left -= 1
         if self.mesh_left < 0:
-            raise UntrustedArchiveError(
+            raise ModelBudgetExceeded(
                 f"3MF mesh is too large to hold whole (more than {self.mesh_limit} "
                 "vertices and triangles)"
             )
@@ -1024,34 +1107,77 @@ def _placed_vertex_bounds(
     if not any(n for _part, _ordinal, _t, n in placements):
         return None
 
+    # Placements of one object that share a rotation-and-scale (the same nine
+    # numbers, bit for bit) and a finite offset fold its vertices once: the
+    # offset is the last addition each coordinate takes, and adding one
+    # number is monotone, so the running first-occurrence extremes of the
+    # un-offset coordinates, plus the offset, are the placement's own,
+    # bit for bit.  Any other placement folds alone, offset included.
+    groups: dict[tuple[str, int, bytes | int], dict[str, Any]] = {}
+    member: list[tuple[str, int, bytes | int]] = []
+    for i, (part, ordinal, m, n) in enumerate(placements):
+        shared = all(math.isfinite(v) for v in m[9:12])
+        key = (part, ordinal, struct.pack("<9d", *m[:9]) if shared else i)
+        member.append(key)
+        if key not in groups:
+            groups[key] = {"m": m, "shared": shared, "n": n, "raw_first": None,
+                           "lows": [None, None, None], "highs": [None, None, None]}
+    folded = sum(group["n"] for group in groups.values())
+    if folded > _MAX_FOLDED_VERTICES:
+        raise ModelBudgetExceeded(
+            f"this 3MF places its meshes at more than {_MAX_FOLDED_VERTICES:,} vertices "
+            "once every differently turned copy is counted, more than Kiln measures "
+            "at once; place fewer copies"
+        )
+    by_part: dict[str, dict[int, list[tuple[str, int, bytes | int]]]] = {}
+    for key in groups:
+        by_part.setdefault(key[0], {}).setdefault(key[1], []).append(key)
+
+    def fold_into(keys_of: dict[int, list[tuple[str, int, bytes | int]]]) -> Any:
+        def fold(ordinal: int, kind: str, chunk: Any) -> None:
+            if kind != "vertices":
+                return
+            for key in keys_of.get(ordinal, ()):
+                group = groups[key]
+                m = group["m"]
+                if group["raw_first"] is None and len(chunk):
+                    group["raw_first"] = (float(chunk[0, 0]), float(chunk[0, 1]), float(chunk[0, 2]))
+                if group["shared"]:
+                    x, y, z = chunk[:, 0], chunk[:, 1], chunk[:, 2]
+                    cols = (
+                        x * m[0] + y * m[3] + z * m[6],
+                        x * m[1] + y * m[4] + z * m[7],
+                        x * m[2] + y * m[5] + z * m[8],
+                    )
+                else:
+                    cols = _transform_columns(m, chunk)
+                lows, highs = group["lows"], group["highs"]
+                for axis, col in enumerate(cols):
+                    low = _first_extreme(col, want_max=False)
+                    high = _first_extreme(col, want_max=True)
+                    if low is not None and (lows[axis] is None or low < lows[axis]):
+                        lows[axis] = low
+                    if high is not None and (highs[axis] is None or high > highs[axis]):
+                        highs[axis] = high
+        return fold
+
+    for part, keys_of in by_part.items():
+        archive.fold(part, fold_into(keys_of), want_vertices=True)
+
     # Per placement: its first transformed vertex, and per axis the running
     # first-occurrence min and max of its non-NaN coordinates.
     first: list[tuple[float, float, float] | None] = [None] * len(placements)
     lows: list[list[float | None]] = [[None, None, None] for _ in placements]
     highs: list[list[float | None]] = [[None, None, None] for _ in placements]
-    by_part: dict[str, dict[int, list[int]]] = {}
-    for i, (part, ordinal, _t, _n) in enumerate(placements):
-        by_part.setdefault(part, {}).setdefault(ordinal, []).append(i)
-
-    def fold_into(indices: dict[int, list[int]]) -> Any:
-        def fold(ordinal: int, kind: str, chunk: Any) -> None:
-            if kind != "vertices":
-                return
-            for i in indices.get(ordinal, ()):
-                cols = _transform_columns(placements[i][2], chunk)
-                if first[i] is None:
-                    first[i] = (float(cols[0][0]), float(cols[1][0]), float(cols[2][0]))
-                for axis, col in enumerate(cols):
-                    low = _first_extreme(col, want_max=False)
-                    high = _first_extreme(col, want_max=True)
-                    if low is not None and (lows[i][axis] is None or low < lows[i][axis]):
-                        lows[i][axis] = low
-                    if high is not None and (highs[i][axis] is None or high > highs[i][axis]):
-                        highs[i][axis] = high
-        return fold
-
-    for part, indices in by_part.items():
-        archive.fold(part, fold_into(indices), want_vertices=True)
+    for i, (_part, _ordinal, m, _n) in enumerate(placements):
+        group = groups[member[i]]
+        if group["raw_first"] is not None:
+            first[i] = _apply_3mf_transform(m, group["raw_first"])
+        offset = m[9:12] if group["shared"] else (None, None, None)
+        for axis in range(3):
+            for source, target in ((group["lows"], lows[i]), (group["highs"], highs[i])):
+                value = source[axis]
+                target[axis] = value if value is None or offset[axis] is None else value + offset[axis]
 
     start = next(i for i, (_p, _o, _t, n) in enumerate(placements) if n)
     mins: list[float] = []
@@ -1304,8 +1430,12 @@ class _ModelArchive:
 
         An object placed twice is yielded twice — this is the plate as a
         slicer sees it.  A reader that describes objects rather than
-        placements dedupes on ``(part, object_id)``.  Components that
-        loop back onto an ancestor are cut there.
+        placements dedupes on ``(part, object_id)``.
+
+        :raises ModelBudgetExceeded: a component that contains itself,
+            components nested too deep, more placements than one read makes,
+            or (for an archive keeping its mesh) more placed mesh than one
+            read holds.
 
         *keep* is asked about each build item by its place in the build
         (0 for the first ``<item>``); an item it turns down is not walked.
@@ -1314,21 +1444,19 @@ class _ModelArchive:
         if root is None:
             return
         build_el = root.model_el.find(f"{{{_CORE_NS}}}build")
-        if build_el is not None:
-            items = [
-                (
-                    self.resolve_part(item, self.root_part),
-                    item.get("objectid", ""),
-                    item.get("transform"),
-                )
-                for item in build_el.findall(f"{{{_CORE_NS}}}item")
-            ]
-        else:
-            items = [(self.root_part, str(oid), None) for oid in root.objects]
-
-        for index, (part, object_id, transform_attr) in enumerate(items):
+        items: list[ET.Element | int] = (
+            build_el.findall(f"{{{_CORE_NS}}}item") if build_el is not None else list(root.objects)
+        )
+        budget = _PlacementBudget(count_entries=self._mode == _KEEP)
+        for index, item in enumerate(items):
             if keep is not None and not keep(index):
                 continue
+            budget.visit(0)
+            if isinstance(item, int):
+                part, object_id, transform_attr = self.root_part, str(item), None
+            else:
+                part = self.resolve_part(item, self.root_part)
+                object_id, transform_attr = item.get("objectid", ""), item.get("transform")
             try:
                 root_id = int(object_id)
             except ValueError:
@@ -1340,6 +1468,7 @@ class _ModelArchive:
                 None,
                 _compose_3mf_transforms(placement, root_transform),
                 (),
+                budget,
             )
 
     def _walk(
@@ -1349,13 +1478,19 @@ class _ModelArchive:
         name: str | None,
         transform: _Transform3mf,
         ancestry: tuple[tuple[str, int], ...],
+        budget: _PlacementBudget,
     ) -> Iterator[_PlacedObject]:
+        if (part, object_id) in ancestry:
+            budget.refuse_cycle()
         loaded = self.part(part)
         if loaded is None:
             return
         obj_el = loaded.objects.get(object_id)
-        if obj_el is None or (part, object_id) in ancestry:
+        if obj_el is None:
             return
+        info = loaded.meshes.get(obj_el)
+        if info is not None and info.has_mesh:
+            budget.place(info.n_vertices + info.n_triangles)
         if name is None:
             name = obj_el.get("name") or None
 
@@ -1373,6 +1508,7 @@ class _ModelArchive:
             return
         child_ancestry = ancestry + ((part, object_id),)
         for comp in components_el.findall(f"{{{_CORE_NS}}}component"):
+            budget.visit(len(child_ancestry))
             try:
                 child_id = int(comp.get("objectid", ""))
             except ValueError:
@@ -1387,6 +1523,7 @@ class _ModelArchive:
                 (obj_el.get("name") or None) if child_part != part else None,
                 _compose_3mf_transforms(local, transform),
                 child_ancestry,
+                budget,
             )
 
 

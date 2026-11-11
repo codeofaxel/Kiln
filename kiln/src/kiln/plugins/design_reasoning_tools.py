@@ -1213,9 +1213,9 @@ class _DesignReasoningToolsPlugin:
             file_path: str,
             auto_fix: bool = False,
             output_path: str = "",
-            bed_x_mm: float = 256.0,
-            bed_y_mm: float = 256.0,
-            bed_z_mm: float = 256.0,
+            bed_x_mm: float = 0.0,
+            bed_y_mm: float = 0.0,
+            bed_z_mm: float = 0.0,
             printer_id: str = "",
             material: str = "pla",
         ) -> dict:
@@ -1233,15 +1233,22 @@ class _DesignReasoningToolsPlugin:
             ``needs_fixes`` (a mesh fault, named in ``issues``).
             ``validate_and_prepare`` runs the full pre-print pipeline.
 
+            ``bed_check`` says which bed the part was held to: ``printer_id``'s,
+            else the three bed dimensions, else this install's printer.  With
+            none of those ``bed_check.checked`` is false and no bed size is
+            assumed: relay ``bed_check.note``, and never say the part fits a
+            bed that was not checked.
+
             With ``auto_fix=True``, automatically repairs degenerate triangles,
             closes holes, and removes floating regions.
 
             :param file_path: Path to mesh file.
             :param auto_fix: Attempt automatic repairs (default False).
             :param output_path: Where to write the fixed file.
-            :param bed_x_mm: Build plate X dimension (default 256).
-            :param bed_y_mm: Build plate Y dimension (default 256).
-            :param bed_z_mm: Build plate Z dimension (default 256).
+            :param bed_x_mm: Build plate X dimension in mm.  Give all three
+                bed dimensions, or none (0).
+            :param bed_y_mm: Build plate Y dimension in mm.
+            :param bed_z_mm: Build plate Z dimension in mm.
             :param printer_id: Optional supported printer model id, or the
                 name of a printer set up in Kiln.  When provided, printer
                 intelligence supplies the build volume.
@@ -1255,11 +1262,20 @@ class _DesignReasoningToolsPlugin:
             try:
                 from kiln.generation.validation import can_print_now
 
+                stated = (bed_x_mm, bed_y_mm, bed_z_mm)
+                if any(v < 0 for v in stated) or (any(stated) and not all(stated)):
+                    return _srv._error_dict(
+                        "Give all three bed dimensions in mm (bed_x_mm, bed_y_mm, bed_z_mm), or none of them.",
+                        code="INVALID_ARGS",
+                    )
+                printer_bed_mm = stated if all(stated) else None
+
                 resolved_model_id = None
                 resolved_volume = _resolve_tool_build_volume(printer_id)
                 if resolved_volume:
                     resolved_model_id, build_volume = resolved_volume
                     bed_x_mm, bed_y_mm, bed_z_mm = build_volume
+                    printer_bed_mm = build_volume
 
                 response = {
                     "success": True,
@@ -1267,11 +1283,13 @@ class _DesignReasoningToolsPlugin:
                         file_path,
                         auto_fix=auto_fix,
                         output_path=output_path or None,
-                        printer_bed_mm=(bed_x_mm, bed_y_mm, bed_z_mm),
+                        printer_bed_mm=printer_bed_mm,
                         printer_id=resolved_model_id,
                         material=material or "pla",
                     ),
                 }
+                if resolved_model_id and isinstance(response.get("bed_check"), dict):
+                    response["bed_check"]["source"] = "printer"
                 if resolved_model_id:
                     response["bed_size_source"] = "printer_intelligence"
                     response["bed_size_model_id"] = resolved_model_id
