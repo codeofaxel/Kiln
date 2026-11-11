@@ -20,7 +20,9 @@ touched home directories):
   printer (:mod:`kiln.outbound_guard`) and a report's log tail
   (:func:`kiln.log_config.read_log_tail`) — the report rules plus every
   place (:func:`redact_places`): web, network and hardware addresses, local
-  host names, device paths and email addresses.
+  host names, device paths, email addresses and phone numbers;
+* words about a file that leave without the file (:func:`without_folders`):
+  a path keeps its last name and loses where it sits.
 
 The surfaces intentionally differ in WHAT they redact; this module makes
 them share HOW, so a pattern added here reaches all of them and the sets
@@ -107,19 +109,66 @@ _LOCAL_HOST_RE = re.compile(
     r"\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:local|lan|home|internal|localdomain)\b", re.IGNORECASE,
 )
 _DEVICE_PATH_RE = re.compile(r"/dev/[\w./-]+")
+# A phone number written the way people write one: with a leading "+" and
+# its groups, or as three-three-four digits with one separator between them
+# (an area code may sit in brackets).  A bare run of digits is not taken:
+# it reads the same as a serial, a count or a time stamp.
+_PHONE_INTL_RE = re.compile(r"(?<![\w+])\+\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,6}(?!\w)")
+_PHONE_GROUPED_RE = re.compile(
+    r"(?<![\w.+-])(?:\(\d{3}\) ?|\d{3}(?P<sep>[ .-]))\d{3}(?(sep)(?P=sep)|[ .-])\d{4}(?![\w-])"
+)
+_PHONE_DIGITS = (8, 15)
+
+
+def _phone(match: re.Match[str]) -> str:
+    """The marker for an international number that holds a phone's worth
+    of digits; anything shorter or longer is left as written."""
+    digits = sum(ch.isdigit() for ch in match.group(0))
+    return "[a phone number]" if _PHONE_DIGITS[0] <= digits <= _PHONE_DIGITS[1] else match.group(0)
 
 
 def redact_places(text: str) -> str:
     """Replace what locates a machine or a person in *text*: web addresses,
-    email addresses, network and hardware addresses, local host names and
-    device paths, each by a word saying what was there."""
+    email addresses, network and hardware addresses, local host names, phone
+    numbers and device paths, each by a word saying what was there."""
     text = _URL_RE.sub("[a web address]", text)
     text = _EMAIL_RE.sub("[an email address]", text)
     text = _MAC_RE.sub("[a hardware address]", text)
     text = _ANY_IPV4_RE.sub("[a network address]", text)
     text = _IPV6_RE.sub("[a network address]", text)
     text = _LOCAL_HOST_RE.sub("[a network address]", text)
+    text = _PHONE_INTL_RE.sub(_phone, text)
+    text = _PHONE_GROUPED_RE.sub("[a phone number]", text)
     return _DEVICE_PATH_RE.sub("[a device]", text)
+
+
+# A file path inside a sentence: it starts at a slash, a home mark, a dot
+# folder or a drive letter, never in the middle of a word ("and/or").
+_POSIX_PATH_RE = re.compile(r"(?<![\w/\\.~\]])(?:~|\.{1,2})?/(?:[^\s/\\\"\x27]+/)+[^\s/\\\"\x27]*")
+_WINDOWS_PATH_RE = re.compile(r"(?<![\w\\/])(?:[A-Za-z]:)?\\(?:[^\s/\\\"\x27]+\\)+[^\s/\\\"\x27]*")
+_WHOLE_PATH_RE = re.compile(r"^(?:/[^\s/]|~[\w.-]*[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/]|\\\\?[^\s\\])")
+
+
+def _last_name(match: re.Match[str]) -> str:
+    return re.split(r"[\\/]", match.group(0).rstrip("\\/"))[-1]
+
+
+def without_folders(text: str) -> str:
+    """*text* with every file path in it cut to its last name, so what
+    leaves names a file and never where it sits.
+
+    A value that is a path from its first character is cut whole, spaces in
+    its folders included.  A path inside a sentence is taken up to its first
+    space, so a folder with a space in its name written mid-sentence keeps
+    the words after that space.
+    """
+    if not text:
+        return text
+    stripped = text.strip()
+    if _WHOLE_PATH_RE.match(stripped) and ("/" in stripped or "\\" in stripped):
+        return re.split(r"[\\/]", stripped.rstrip("\\/"))[-1]
+    text = _WINDOWS_PATH_RE.sub(_last_name, text)
+    return _POSIX_PATH_RE.sub(_last_name, text)
 
 
 def redact_secrets(text: str, marker: str = DEFAULT_MARKER) -> str:

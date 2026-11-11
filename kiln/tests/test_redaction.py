@@ -268,3 +268,51 @@ def test_a_machine_credential_is_redacted_but_named():
     assert "abcdefghijklmnop" not in out and "eyJzdWIi" not in out
     assert "kms_[REDACTED]" in out and "kmt_[REDACTED]" in out
     assert redact_secrets("kms_short and skms_notatoken") == "kms_short and skms_notatoken"
+
+
+class TestPhoneNumbers:
+    """A phone number in text leaving for Kiln's servers goes, in the forms
+    people write one; numbers that are not phone numbers stay."""
+
+    def test_the_forms_people_write(self):
+        for written in (
+            "+1 555 010 4477", "+1 (555) 010-4477", "+44 20 7946 0958", "+49-170-1234567",
+            "555-010-4477", "(555) 010-4477", "555 010 4477", "555.010.4477",
+        ):
+            out = redaction.redact_places(f"call me on {written} after six")
+            assert out == "call me on [a phone number] after six", (written, out)
+
+    def test_a_machines_text_goes_through_it(self):
+        out = redaction.redact_machine_text("owner jane, 555-010-4477, printer in the garage")
+        assert "555" not in out and "printer in the garage" in out
+
+    def test_numbers_that_are_not_phone_numbers_stay(self):
+        for kept in (
+            "made 2026-11-10 at 15:20:06", "a shelf 120 mm by 80 mm, 6 mm thick", "nozzle 0.4, bed 60, hotend 215",
+            "serial 01P00A000000001", "moved +5 mm on X and +10 on Y", "job 1731268806 done", "M3x10 screws, 4 of them",
+            "layers 120.500 200.300", "width = 60; height = 120;",
+        ):
+            assert redaction.redact_places(kept) == kept, kept
+
+
+class TestWithoutFolders:
+    """Words about a file that leave without the file name it, and never
+    say where it sits."""
+
+    def test_a_value_that_is_a_path_keeps_only_its_last_name(self):
+        assert redaction.without_folders("/Users/jane/My Projects/lamp shade.stl") == "lamp shade.stl"
+        assert redaction.without_folders("~/designs/lamp.scad") == "lamp.scad"
+        assert redaction.without_folders("../out/lamp.stl") == "lamp.stl"
+        assert redaction.without_folders(r"C:\Users\jane\lamps\shade.stl") == "shade.stl"
+        assert redaction.without_folders("/tmp/kiln/job-81f3/") == "job-81f3"
+
+    def test_a_path_inside_a_sentence_is_cut_where_it_stands(self):
+        out = redaction.without_folders(r"the shade, saved as /Users/jane/lamps/shade.stl and C:\work\lamps\old.stl today")
+        assert out == "the shade, saved as shade.stl and old.stl today"
+
+    def test_words_with_a_slash_in_them_stay(self):
+        for kept in (
+            "a lamp and/or a shade", "1/2 inch thick, w/ a lid", "M3/M4 screws", "made 11/10/2026",
+            "~20 mm cube w/ lid", "a pendant lamp shade", "", "/ on its own",
+        ):
+            assert redaction.without_folders(kept) == kept, kept
