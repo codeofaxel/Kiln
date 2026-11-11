@@ -385,7 +385,7 @@ def refuse_an_oversized_mesh(path: Any, file_type: str | None = None) -> None:
         raise MeshTooLargeError(
             f"{os.path.basename(text)} declares {declared} vertices and "
             f"triangles, more than the {MAX_MESH_ENTRIES} Kiln reads at once. "
-            "Simplify it, or split it into parts, in the program that made it."
+            "Simplify it (simplify_mesh_model), or split it into parts."
         )
 
 
