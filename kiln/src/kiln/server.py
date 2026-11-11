@@ -7594,6 +7594,15 @@ def printer_status(
                 }
         except Exception:  # noqa: BLE001 — never break a status read
             logger.debug("engagement note unavailable", exc_info=True)
+        # The printers set up on this computer, by name and model, so "what
+        # printers do I have?" is answered by the read someone already makes.
+        # Both detail levels; no printer is contacted for it.
+        try:
+            from kiln.printer_roster import known_printers
+
+            response["known_printers"] = known_printers(_get_registry())
+        except Exception:  # noqa: BLE001 — never break a status read
+            logger.debug("printer list unavailable", exc_info=True)
         # Always allow, shown where someone already looks: on this printer
         # prints start without asking.  Present only when it is on, or for
         # the day after it turned itself off; both detail levels, because
@@ -7645,6 +7654,13 @@ def printer_status(
             _offline_name = _reported_printer_name(printer_name)
             if _offline_name:
                 offline["printer_name"] = _offline_name
+            # A printer that is switched off is still one the person has.
+            try:
+                from kiln.printer_roster import known_printers
+
+                offline["known_printers"] = known_printers(_get_registry())
+            except Exception:  # noqa: BLE001 — never break a status read
+                logger.debug("printer list unavailable", exc_info=True)
             return offline
         return _error_dict(
             f"Failed to get printer status: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."

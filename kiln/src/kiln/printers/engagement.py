@@ -259,8 +259,13 @@ def current() -> Engagement | None:
 
 def engage(
     adapter: Any, job: Any = None, *, reason: str, label: str = "", announce: bool = False,
+    stepped_away: bool = True,
 ) -> None:
-    """Record that Kiln is now driving *adapter*."""
+    """Record that Kiln is now driving *adapter*.
+
+    *stepped_away*: the printer is known busy, so prints handed back before
+    this were stepped away from; a command to an unread printer passes False.
+    """
     try:
         machine = machine_id(adapter)
         if not machine:
@@ -283,10 +288,22 @@ def engage(
             since=time.time(),
             reason=reason,
         ).to_dict()
+        if stepped_away:
+            _mark_stepped_away(store, machine)
         _write_store(store)
         _verify_cache.pop(machine, None)
     except Exception:  # noqa: BLE001 — bookkeeping never breaks a print
         logger.debug("could not record engagement", exc_info=True)
+
+
+def _mark_stepped_away(store: dict[str, Any], machine: str) -> None:
+    """Kiln took up *machine*: taking up any other handed-back print is now a return."""
+    handbacks = store.get("handbacks")
+    if not isinstance(handbacks, dict):
+        return
+    for other, entry in handbacks.items():
+        if other != machine and isinstance(entry, dict):
+            entry["away"] = True
 
 
 def _record_hand_back(store: dict[str, Any], engagement: Engagement) -> None:
@@ -310,6 +327,8 @@ def _record_hand_back(store: dict[str, Any], engagement: Engagement) -> None:
         "label": engagement.label,
         "at": time.time(),
         "returns_used": used,
+        # Not stepped away from until Kiln takes up another printer.
+        "away": False,
     }
 
 
@@ -334,6 +353,25 @@ def hand_back(adapter: Any) -> dict[str, Any]:
                 "reason": f"Kiln is working with {engagement.label}, not this printer.",
                 "engaged_with": engagement.label,
             }
+        if engagement.job is None:
+            # Which print is handed back, to tell a return from a new print.
+            try:
+                with internal_read():
+                    live = resolve_job_identity(adapter.get_job())
+            except Exception:  # noqa: BLE001 — unknown stays unknown
+                live = None
+            if live is not None:
+                engagement = Engagement(
+                    machine=engagement.machine, label=engagement.label, job=live,
+                    since=engagement.since, reason=engagement.reason,
+                )
+        try:
+            with internal_read():
+                busy = getattr(adapter.get_state(), "is_occupied", False) is True
+        except Exception:  # noqa: BLE001 — unknown is not busy
+            busy = False
+        if busy:
+            _mark_stepped_away(store, engagement.machine)
         _record_hand_back(store, engagement)
         store["engaged"] = None
         _forget_unknown_machines(store)
@@ -623,6 +661,8 @@ def _consume_return(adapter: Any, machine: str) -> bool:
         since=time.time(),
         reason="returned",
     ).to_dict()
+    entry["away"] = False
+    _mark_stepped_away(store, machine)
     _write_store(store)
     _verify_cache.pop(machine, None)
     return True
@@ -689,7 +729,104 @@ def _held_elsewhere(adapter: Any, action: str) -> tuple[Engagement, str] | None:
     if not _still_engaged(engagement):
         _expire(engagement.machine)
         return None
+    _stepped_away_from(machine)
     return engagement, machine
+
+
+def _with_nothing_engaged(adapter: Any, action: str, *, spend: bool) -> dict[str, Any] | None:
+    """Verdict for *action* while Kiln is working with no printer.
+
+    A hand-back empties the slot, not the count: a print stepped away from
+    is taken up again once.  A printer nobody stepped away from is free, so
+    the one just handed back is never shut out.  *spend* counts the return.
+    """
+    if not is_gated(action) or _in_internal_read() or _multi_machine_tier():
+        return None
+    if current() is not None:
+        return None
+    machine = machine_id(adapter)
+    if not machine:
+        return None
+    store = _read_store()
+    handbacks = store.get("handbacks")
+    entry = handbacks.get(machine) if isinstance(handbacks, dict) else None
+    if isinstance(entry, dict) and entry.get("away"):
+        recorded = JobIdentity.from_dict(entry.get("job"))
+        try:
+            with internal_read():
+                # A printer may go on naming a job it has finished: only a
+                # busy one has a print to come back to.
+                busy = getattr(adapter.get_state(), "is_occupied", False) is True
+                live = resolve_job_identity(adapter.get_job()) if busy else None
+        except Exception:  # noqa: BLE001 — a print that cannot be read is allowed
+            return None
+        if busy and recorded is not None and same_job(recorded, live):
+            spent = _returns_used(store, machine) >= _RETURNS_PER_JOB
+            # Spent, and Kiln was last on another print still running:
+            # that is taking turns.
+            go_on_with = _last_running_hand_back(store, machine) if spent else ""
+            if go_on_with:
+                return _refusal(None, action, machine, adapter, go_on_with=go_on_with)
+            if spend:
+                if not spent:
+                    entry["returns_used"] = _returns_used(store, machine) + 1
+                entry["away"] = False
+                _write_store(store)
+                engage(
+                    adapter, None, reason="returned",
+                    label=str(entry.get("label") or ""), announce=action in _LOOKS,
+                )
+            return None
+        if spend:
+            # No print here to come back to.
+            handbacks.pop(machine, None)
+            _write_store(store)
+    if spend and action not in _LOOKS:
+        # Doing something to a printer is working with it.
+        engage(adapter, None, reason="commanded", stepped_away=False)
+    elif spend and action in _WATCH_ACTIONS and action != "get_state":
+        # Watching a print is working with it; a status read says so itself.
+        engage(adapter, None, reason="commanded", stepped_away=False)
+    return None
+
+
+def _last_running_hand_back(store: dict[str, Any], machine: str) -> str:
+    """The name of a busy printer handed back more recently than *machine*,
+    or ``""``.  Of the prints still running, the one Kiln was on last is
+    always free to take up again, so they are never all refused."""
+    handbacks = store.get("handbacks")
+    if not isinstance(handbacks, dict):
+        return ""
+
+    def _at(entry: Any) -> float:
+        try:
+            return float(entry.get("at") or 0.0)
+        except (AttributeError, TypeError, ValueError):
+            return 0.0
+
+    mine = _at(handbacks.get(machine))
+    later = [
+        (other, entry) for other, entry in handbacks.items()
+        if other != machine and isinstance(entry, dict) and _at(entry) > mine
+    ]
+    for other, entry in sorted(later, key=lambda pair: -_at(pair[1])):
+        peer = _peer_for(other)
+        if peer is None:
+            continue
+        held = Engagement(machine=other, label=str(entry.get("label") or ""), job=None, since=0.0, reason="commanded")
+        if _ask_peer_bounded(peer, held):
+            return held.label or "another printer"
+    return ""
+
+
+def _stepped_away_from(machine: str) -> None:
+    """Kiln is busy elsewhere: *machine*'s handed-back print was stepped away from."""
+    store = _read_store()
+    handbacks = store.get("handbacks")
+    entry = handbacks.get(machine) if isinstance(handbacks, dict) else None
+    if isinstance(entry, dict) and not entry.get("away"):
+        entry["away"] = True
+        _write_store(store)
 
 
 def check_look(adapter: Any, action: str) -> dict[str, Any] | None:
@@ -697,7 +834,7 @@ def check_look(adapter: Any, action: str) -> dict[str, Any] | None:
     try:
         held = _held_elsewhere(adapter, action)
         if held is None:
-            return None
+            return _with_nothing_engaged(adapter, action, spend=True)
         engagement, machine = held
         return _refusal(engagement, action, machine, adapter)
     except Exception:  # noqa: BLE001 — a licensing rule never breaks a printer
@@ -712,7 +849,7 @@ def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
     try:
         held = _held_elsewhere(adapter, action)
         if held is None:
-            return None
+            return _with_nothing_engaged(adapter, action, spend=True)
         engagement, machine = held
         if _consume_return(adapter, machine):
             return None
@@ -727,7 +864,7 @@ def refusal_ahead(adapter: Any, action: str) -> dict[str, Any] | None:
     try:
         held = _held_elsewhere(adapter, action)
         if held is None:
-            return None
+            return _with_nothing_engaged(adapter, action, spend=False)
         engagement, machine = held
         if action not in _LOOKS and _return_open(adapter, machine, _read_store()) is not None:
             return None
@@ -859,13 +996,33 @@ def _waiting_at_a_stop(engagement: Engagement) -> dict[str, Any] | None:
         return None
 
 
+def _last_handed_back(store: dict[str, Any], machine: str) -> str:
+    """The printer most recently handed back that is not *machine*, by name."""
+    handbacks = store.get("handbacks")
+    if not isinstance(handbacks, dict):
+        return ""
+    others = [
+        entry for key, entry in handbacks.items()
+        if key != machine and isinstance(entry, dict) and entry.get("label")
+    ]
+    if not others:
+        return ""
+    try:
+        return str(max(others, key=lambda entry: float(entry.get("at") or 0.0))["label"])
+    except (TypeError, ValueError):
+        return str(others[-1]["label"])
+
+
 def _refusal(
-    engagement: Engagement, action: str, machine: str, adapter: Any = None,
+    engagement: Engagement | None, action: str, machine: str, adapter: Any = None,
+    *, go_on_with: str = "",
 ) -> dict[str, Any]:
     from kiln.tiers_and_terms import upgrade_nudge_block
 
-    other = engagement.label
     store = _read_store()
+    if engagement is None:
+        return _refusal_with_nothing_engaged(store, action, machine, adapter, go_on_with)
+    other = engagement.label
     spent = _returns_used(store, machine) >= _RETURNS_PER_JOB
     # Name the machine being refused
     handbacks = store.get("handbacks")
@@ -943,6 +1100,69 @@ def _refusal(
             "pause and stop reach all of them without handing anything back."
         ),
         free_included=" ".join(part for part in (free_included, way_on) if part),
+        moment="resource_threshold",
+        context={"action": action, "plan": _plan_phrase()},
+    )
+    return verdict
+
+
+def _refusal_with_nothing_engaged(
+    store: dict[str, Any], action: str, machine: str, adapter: Any = None, go_on_with: str = "",
+) -> dict[str, Any]:
+    """The refusal for a print whose one return is spent, with no printer engaged."""
+    from kiln.tiers_and_terms import upgrade_nudge_block
+
+    handbacks = store.get("handbacks")
+    entry = handbacks.get(machine) if isinstance(handbacks, dict) else None
+    this_one = str(entry["label"]) if isinstance(entry, dict) and entry.get("label") else ""
+    if not this_one and adapter is not None:
+        this_one = _label_for(adapter)
+    this_one = this_one or "that printer"
+    other = go_on_with or _last_handed_back(store, machine)
+
+    headline = (
+        f"Kiln has already come back to {this_one} once during this print, after working "
+        f"with another printer, and with one printer at a time {_plan_phrase()}."
+    )
+    not_watching = f"Kiln is not watching {this_one}. Nothing here is keeping an eye on it."
+    carry_on = (
+        f"Kiln can go on with {other}; {this_one} is free again when this print ends."
+        if other else f"{_starts_sentence(this_one)} is free again when this print ends."
+    )
+    if action == "emergency_stop":
+        free_included = (
+            f"To stop {this_one} right now, use the printer's own controls or "
+            f"its power switch. {carry_on}"
+        )
+    elif action in _READ_ACTIONS:
+        free_included = (
+            f"{_starts_sentence(this_one)}'s own screen still shows its spools, files and settings. {carry_on}"
+        )
+    elif action not in _WATCH_ACTIONS:
+        free_included = f"{_starts_sentence(this_one)}'s own controls work as always. {carry_on}"
+    else:
+        free_included = f"{_starts_sentence(this_one)} still shows its own status on the printer. {carry_on}"
+
+    verdict: dict[str, Any] = {
+        "blocked": True,
+        "code": "TIER_SINGLE_PRINTER_LIMIT",
+        "reason": f"{headline} {not_watching}",
+        "engaged_with": None,
+        "engaged_since": None,
+        "action": action,
+        "returns_left": 0,
+        "suggestions": [free_included],
+    }
+    verdict["upgrade_nudge"] = upgrade_nudge_block(
+        variant="single_printer_engagement",
+        tier="business",
+        feature="Working several printers at once",
+        headline=headline,
+        outcome_preview=(
+            "Kiln Business drives every printer at the same time, so status, "
+            "pause and stop reach all of them without handing anything back."
+        ),
+        free_included=free_included,
         moment="resource_threshold",
         context={"action": action, "plan": _plan_phrase()},
     )
