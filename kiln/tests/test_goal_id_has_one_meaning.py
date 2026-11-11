@@ -134,5 +134,10 @@ class TestTheReplySaysSo:
 class TestTheInstructionNamesWhichToolTakesWhich:
     def test_the_front_door_is_told_apart_from_the_make_tools(self):
         assert "as that tool's" not in FRONT_DOOR_LINE
-        assert f"`{FRONT_DOOR}` itself takes it as `goal_id`" in FRONT_DOOR_LINE
-        assert f"`{GOAL_PARAM}`" in FRONT_DOOR_LINE
+        assert f"`{FRONT_DOOR}` itself takes it as goal_id" in FRONT_DOOR_LINE
+        assert f"their {GOAL_PARAM} argument" in FRONT_DOOR_LINE
+
+    def test_only_tool_names_are_quoted_in_the_instruction(self):
+        import re
+
+        assert set(re.findall(r"`([a-z_]+)`", FRONT_DOOR_LINE)) == {FRONT_DOOR}
