@@ -1153,8 +1153,8 @@ def test_openclaw_gets_a_server_it_starts_not_a_skill(home: Path, kiln_bin: Path
 def test_apps_that_send_every_tool_to_the_model_are_left_alone(home: Path, kiln_bin: Path) -> None:
     """Cline CLI, LM Studio and Goose send every tool Kiln has to their model
     on every message, more than most models can read, so the installer does
-    not connect them: their files stay byte for byte, the plan never names
-    them, and asking for one by name is refused."""
+    not connect them: their files stay byte for byte, the plan never lists
+    them as apps it will change, and asking for one by name is refused."""
     cline = home / ".cline" / "data" / "settings" / "cline_mcp_settings.json"
     cline.parent.mkdir(parents=True)
     cline.write_text('{"mcpServers": {}}', encoding="utf-8")
@@ -1167,8 +1167,13 @@ def test_apps_that_send_every_tool_to_the_model_are_left_alone(home: Path, kiln_
     result = _install("--command", str(kiln_bin))
 
     assert result.exit_code == 0, result.output
+    plan_rows = [
+        line for line in result.output.splitlines()
+        if line.lstrip().startswith(("+", "~", "-", "·", "!"))
+    ]
     for name in ("Cline", "LM Studio", "Goose"):
-        assert name not in result.output
+        assert not any(name in row for row in plan_rows)
+    assert "Found Cline CLI, LM Studio and Goose too" in result.output
     assert {k: v for k, v in _snapshot(home).items() if not k.startswith(".kiln")} == before
     for app_id in ("cline", "lmstudio", "goose"):
         assert _install("--command", str(kiln_bin), "--only", app_id).exit_code != 0
@@ -1193,3 +1198,32 @@ def test_held_apps_still_spell_kiln_their_own_way(home: Path, kiln_bin: Path) ->
         "cmd": str(kiln_bin), "args": ["serve"], "timeout": 300,
     }
     assert json.loads((home / ".lmstudio" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"] == {"kiln": entry}
+
+
+def test_a_held_app_found_here_is_named_and_left_alone(home: Path, kiln_bin: Path) -> None:
+    """Someone with Goose or LM Studio is told Kiln skipped it, never left guessing."""
+    (home / ".lmstudio").mkdir()
+    (home / ".config" / "goose").mkdir(parents=True)
+    before = _snapshot(home)
+
+    result = _install("--dry-run", "--command", str(kiln_bin))
+
+    assert result.exit_code == 0
+    assert "Found LM Studio and Goose too. Kiln doesn't connect to them yet" in result.output
+    assert "Cline" not in result.output
+    assert _snapshot(home) == before
+
+
+def test_no_held_app_here_means_no_note(home: Path, kiln_bin: Path) -> None:
+    result = _install("--dry-run", "--command", str(kiln_bin))
+
+    assert result.exit_code == 0
+    assert "doesn't connect to" not in result.output
+
+
+def test_one_held_app_is_named_alone(home: Path, kiln_bin: Path) -> None:
+    (home / ".lmstudio").mkdir()
+
+    result = _install("--dry-run", "--command", str(kiln_bin))
+
+    assert "Found LM Studio too. Kiln doesn't connect to it yet" in result.output

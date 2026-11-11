@@ -840,6 +840,16 @@ def install_mcp(
             "  load that one as well, so turn it off at claude.ai/customize/connectors to keep one Kiln."
         )
 
+    held_here = [a.display for a in app_wiring.HELD_APPS if a.is_present()] if not only else []
+    if held_here:
+        names = " and ".join(filter(None, [", ".join(held_here[:-1]), held_here[-1]]))
+        them = "it" if len(held_here) == 1 else "them"
+        click.echo("")
+        click.echo(
+            f"  Found {names} too. Kiln doesn't connect to {them} yet;\n"
+            "  that's coming with a smaller tool set."
+        )
+
     if not only:
         click.echo("")
         click.echo("  Web apps keep Kiln in your account, so no installer can reach them.")
