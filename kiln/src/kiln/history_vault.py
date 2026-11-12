@@ -1308,6 +1308,8 @@ class HistoryVault:
                 numbers = {**numbers, "arrived_as": new_arrivals(arrivals), "said": said_arrivals(arrivals)}
         account = {str(v["version_id"]): v.get("version_number") for v in _rows(bundle_like["versions"], "version_id")}
         written = []
+        heads_kept: dict[str, str] = {}
+        another_way: set[str] = set()
         with self._lock:
             for v in _rows(bundle_like["versions"], "version_id"):
                 if not self._is_designs("versions", v["version_id"], design_id):
@@ -1328,9 +1330,25 @@ class HistoryVault:
                 # two branches are joined for sharing a name.
                 if b.get("name") == _MAIN and b.get("status") != "retired":
                     self._take_account_branch_id(design_id, _main_branch_id(design_id), b["branch_id"])
+                # The head here moves only forward.  Where this computer
+                # holds versions the account does not, the branch stays on
+                # them and the answer says so.
+                here = (self.branch(b["branch_id"]) or {}).get("head_version_id")
+                there = b.get("head_version_id")
+                if here and there and here != there and not self._grows_from(there, here):
+                    heads_kept[str(b.get("name") or b["branch_id"])] = (
+                        "this computer is ahead" if self._grows_from(here, there) else "went another way"
+                    )
+                    if not self._grows_from(here, there):
+                        another_way.add(b["branch_id"])
+                    b = {**b, "head_version_id": here}
                 self._put_branch({**b, "design_id": design_id})
             for m in _rows(bundle_like["memberships"], "branch_id", "version_id"):
                 if self.design_of_branch(m["branch_id"]) != design_id:
+                    continue
+                if m["branch_id"] in another_way:
+                    # The account's line is kept as versions, not laid onto
+                    # a branch that went another way here.
                     continue
                 if self.design_of_version(m["version_id"]) not in (None, design_id):
                     continue
@@ -1349,7 +1367,22 @@ class HistoryVault:
         }
         if numbers:
             out["numbers_here"] = numbers
+        if heads_kept:
+            out["heads_kept_here"] = heads_kept
         return out
+
+    def _grows_from(self, head: Any, base: Any) -> bool:
+        """Whether the version *head* is *base* or is reached from it by
+        following each version's parent, among the versions kept here."""
+        seen: set[Any] = set()
+        at = head
+        while at and at not in seen:
+            if at == base:
+                return True
+            seen.add(at)
+            row = self._conn.execute("SELECT parent_version_id FROM versions WHERE version_id = ?", (at,)).fetchone()
+            at = row["parent_version_id"] if row else None
+        return False
 
 
     # -- saved features and decoration presets --------------------------------

@@ -1566,11 +1566,28 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any, *, doing: str) 
         out["tie"] = tie
         if tie.get("said"):
             out["said_tie"] = tie["said"]
+    kept_heads = applied.get("heads_kept_here") if isinstance(applied, dict) else None
+    if kept_heads:
+        out["said_heads"] = " ".join(_said_head_kept(design_id, name, why) for name, why in sorted(kept_heads.items()))
     if models is not None:
         out["models"] = models
     if notes:
         out["notes"] = notes
     return out
+
+
+def _said_head_kept(design_id: str, name: str, why: str) -> str:
+    """What a person is told when a pull left a branch here where it was."""
+    if why == "went another way":
+        return (
+            f"{name} of {design_id} on this computer and in your Kiln account went different ways, so "
+            "this computer's branch stayed as it is and nothing was merged. The account's versions "
+            "are kept here. Push the branch and Kiln keeps this computer's work as a branch of its own."
+        )
+    return (
+        f"{name} of {design_id} on this computer has versions your Kiln account does not, so it stayed "
+        "on them. Push the branch to send them."
+    )
 
 
 def _notes_carried(answer: dict[str, Any]) -> dict[str, dict[str, bytes]]:
