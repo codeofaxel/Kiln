@@ -332,6 +332,7 @@ _OWN_PIECE_MIN = 6
 #: when :func:`version_text` accepts it, and is dropped otherwise.
 VERSION_FIELDS: dict[str, frozenset[str]] = {
     "kiln/outcome_courier.py": frozenset({"firmware"}),
+    "kiln/served_steps.py": frozenset({"firmware"}),
 }
 
 
@@ -421,7 +422,13 @@ SENDERS: dict[str, tuple[str, str]] = {
     "kiln/server.py": (
         "scrubbed",
         "the served door: machine-read call arguments, the facts and answers a "
-        "served step sends, and a bug report's log tail pass through scrub; so "
+        "served step sends, and a bug report's log tail pass through scrub; the "
+        "print records kiln/served_steps.py reads for a served learning tool ride "
+        "it too (what was printed in, how it went, settings and conditions, and "
+        "when held: set_aside, a one-way code of the sliced settings, the spool as "
+        "spool_code(), how far the print got, and the firmware version, declared in "
+        "VERSION_FIELDS so it leaves only when version_text() accepts it; never a "
+        "file, a spool id or a note); so "
         "does every value of an ask the person never made, which is how the words "
         "of a model Kiln made here that names no goal leave (kiln/make_words.py, "
         "sent by kiln/_pro_goal_bridge.py: the tool, the model's fingerprint, the "

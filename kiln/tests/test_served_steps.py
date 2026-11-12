@@ -527,6 +527,60 @@ class TestPrintHistoryStep:
         for private in ("private-name", "fingerprint-", "a private note", "someone", "job-"):
             assert private not in sent
 
+    def test_a_record_carries_the_evidence_this_computer_holds_and_no_raw_id(self, history):
+        history._conn.execute(
+            "UPDATE print_outcomes SET settings_code = ?, spool_id = ?, firmware_version = ?, "
+            "progress_at_end = ? WHERE job_id = 'job-3'",
+            ("ab" * 16, "spool-raw-id-77", "01.07.00.00", 0.42),
+        )
+        history._conn.commit()
+        from kiln.outbound_guard import spool_code
+
+        facts = self._read(printer_name="garage")[0]["print_history"]["data"]
+        by_start = {r["created_at"]: r for r in facts["outcomes"]}
+        record = by_start[1_700_000_003.0]
+        assert record["settings_code"] == "ab" * 16
+        assert record["spool_code"] == spool_code("spool-raw-id-77")
+        assert record["firmware"] == "01.07.00.00" and record["progress_at_end"] == 0.42
+        assert "spool-raw-id-77" not in json.dumps(facts)
+        # A record with none of it carries none of the keys.
+        assert set(by_start[1_700_000_002.0]) == set(served_steps._HISTORY_FIELDS)
+        assert set(record) <= set(served_steps._HISTORY_FIELDS) | set(served_steps._HISTORY_EVIDENCE)
+
+    def test_a_bad_print_the_repair_record_sets_aside_is_sent_and_marked(self, history):
+        history._conn.execute("UPDATE print_outcomes SET machine_fingerprint = 'fp-garage' WHERE printer_name = 'garage'")
+        history._conn.commit()
+        # Marked needs repair between the second and the fourth print.
+        history.add_machine_repair("fp-garage", "garage", "needed", marked_at=1_700_000_002.5)
+        facts = self._read(printer_name="garage")[0]["print_history"]["data"]
+        by_start = {r["created_at"]: r for r in facts["outcomes"]}
+        assert len(by_start) == 5
+        assert by_start[1_700_000_003.0]["set_aside"] is True
+        # A bad print before the mark, and a print that came out after it, are not.
+        assert "set_aside" not in by_start[1_700_000_001.0]
+        assert "set_aside" not in by_start[1_700_000_004.0] and "set_aside" not in by_start[1_700_000_002.0]
+        for row in history.list_print_outcomes(include_stops=True):
+            assert bool(by_start[row["created_at"]].get("set_aside")) is history.excused_by_repair(row)
+
+    def test_the_firmware_version_reaches_the_wire_as_written(self, history, monkeypatch):
+        import kiln.server as server
+        from kiln import outbound_guard
+
+        monkeypatch.setattr(outbound_guard, "_own_printer_values", lambda: [("a printer's serial number", "01P00A000000001")])
+        history._conn.execute(
+            "UPDATE print_outcomes SET firmware_version = '01.07.00.00' WHERE job_id = 'job-3'"
+        )
+        history._conn.execute(
+            "UPDATE print_outcomes SET firmware_version = 'fw 01P00A000000001' WHERE job_id = 'job-1'"
+        )
+        history._conn.commit()
+        done, _ = self._read(printer_name="garage")
+        # The reader offers only a bare version; the door judges it again.
+        assert [r.get("firmware") for r in done["print_history"]["data"]["outcomes"]].count(None) == 4
+        sent = json.dumps(server._guarded_for_the_wire({"step_results": done, "note": "x"}, asked_by_user=True))
+        assert '"firmware": "01.07.00.00"' in sent
+        assert "01P00A000000001" not in sent and sent.count('"firmware"') == 1
+
     @pytest.mark.parametrize("asked", ["default", "", "active"])
     def test_my_printer_is_named_for_the_server(self, history, asked):
         done, _ = self._read(printer_name=asked)
