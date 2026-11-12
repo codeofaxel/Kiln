@@ -71,6 +71,64 @@ class TestTheRule:
         assert "01P00A" not in a.upper()
 
 
+class TestADeclaredVersionField:
+    """A sender may declare a field as a version (``VERSION_FIELDS``).  The
+    guard keeps such a field as written only when it is nothing but a
+    version and holds none of this computer's printer values, and drops it
+    otherwise; every other field is scrubbed as before."""
+
+    @pytest.fixture
+    def own(self, monkeypatch):
+        monkeypatch.setattr(guard, "_own_printer_values", lambda: [
+            ("the printer's serial number", "01P00A123456789"),
+            ("the printer's network address", "10.0.0.51"),
+            ("the printer's access code", "87654321"),
+        ])
+
+    @pytest.mark.parametrize("version", [
+        "01.07.00.00", "Marlin 2.1.2.1", "v0.12.0-85-gd785b396", "Klipper v0.12.0-85-gd785b396",
+        "3.13.2", "2.0.9.7-bugfix", "1.2",
+    ])
+    def test_a_bare_version_passes_as_written(self, own, version):
+        assert guard.version_text(version) == version
+        assert guard.scrub({"firmware": version}, version_keys=frozenset({"firmware"})) == {"firmware": version}
+
+    @pytest.mark.parametrize("not_a_version", [
+        "", "   ", "garage-printer.local", "voron", "12345678", "1.2.3 (Jan 1 2026)", "1.2.3; rm -rf",
+        "1.2.3 /dev/ttyACM0", "http://10.0.0.9/1.2.3", "v1.2.3 jane@example.com", "1." + "2." * 30 + "3",
+        "1.2.3-" + "a" * 13, "10.0.0.51", "1.0-87654321", "2.1 01P00A123456789", "2.1-01p00a123456", None, 7,
+    ])
+    def test_anything_else_is_dropped_not_cleaned(self, own, not_a_version):
+        assert guard.version_text(not_a_version) is None
+        out = guard.scrub({"firmware": not_a_version, "layer": 3}, version_keys=frozenset({"firmware"}))
+        assert out == {"layer": 3}
+
+    def test_a_value_that_cannot_be_checked_is_dropped(self, monkeypatch):
+        def unreadable():
+            raise OSError("no config")
+
+        monkeypatch.setattr(guard, "_own_printer_values", unreadable)
+        assert guard.version_text("1.2.3") is None
+
+    def test_only_a_declared_field_is_judged_as_a_version(self, own):
+        # The same text under any other key, or with no field declared, goes
+        # through the text rules like everything else.
+        plain = guard.scrub({"firmware": "10.0.0.9", "note": "10.0.0.9"})
+        assert "10.0.0.9" not in json.dumps(plain)
+        out = guard.scrub({"rows": [{"firmware": "01.07.00.00", "note": "at 10.0.0.9"}]},
+                          version_keys=frozenset({"firmware"}))
+        assert out["rows"][0]["firmware"] == "01.07.00.00" and "10.0.0.9" not in out["rows"][0]["note"]
+
+    def test_every_declared_field_belongs_to_a_named_sender(self):
+        from kiln import outcome_courier
+
+        for sender in guard.VERSION_FIELDS:
+            assert any(sender == path or sender in why for path, (_kind, why) in guard.SENDERS.items()), sender
+            assert (Path(guard.__file__).resolve().parent / sender.removeprefix("kiln/")).is_file(), sender
+
+        assert guard.VERSION_FIELDS[outcome_courier.SENDER] == frozenset({"firmware"})
+
+
 @pytest.fixture
 def wire(monkeypatch):
     """The served door with a sign-in, and the bytes it would send."""

@@ -44,12 +44,14 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "SENDERS",
+    "VERSION_FIELDS",
     "machine_code",
     "spool_code",
     "is_listing_link",
     "redact_text",
     "scrub",
     "scrub_relayed",
+    "version_text",
 ]
 
 #: Keys whose value is a secret, or where a machine is: dropped.  Exact
@@ -313,8 +315,66 @@ def scrub_relayed(value: Any) -> Any:
     return _relayed(value, own, 0)
 
 
-def scrub(value: Any, _depth: int = 0) -> Any:
+#: A version as firmware states one: an optional short word, an optional
+#: ``v``, two to five dot-separated numbers, and up to three short suffixes
+#: each led by a dash, an underscore or a space (``01.07.00.00``,
+#: ``Marlin 2.1.2.1``, ``v0.12.0-85-gd785b396``).
+_VERSION_TEXT = re.compile(
+    r"(?:[A-Za-z]{1,12}[ _-])?[vV]?\d{1,6}(?:\.\d{1,6}){1,4}(?:[-_ ][A-Za-z0-9]{1,12}){0,3}"
+)
+_VERSION_MAX_CHARS = 40
+#: A run of letters and digits this long inside a version is checked for
+#: being a piece of one of this computer's printer values.
+_OWN_PIECE_MIN = 6
+
+#: The fields a sender may pass through :func:`scrub` as a version, by the
+#: sender's module: named here, and nowhere else.  Such a field is sent only
+#: when :func:`version_text` accepts it, and is dropped otherwise.
+VERSION_FIELDS: dict[str, frozenset[str]] = {
+    "kiln/outcome_courier.py": frozenset({"firmware"}),
+}
+
+
+def version_text(value: Any) -> str | None:
+    """*value* as a version that may leave as written, or ``None``.
+
+    It must be nothing but a version (:data:`_VERSION_TEXT`, at most
+    :data:`_VERSION_MAX_CHARS` characters) and must hold none of the
+    addresses, serials or codes this computer keeps for its printers.  A
+    value that fails either test, or one that cannot be checked against this
+    computer's printers, is ``None``: it is dropped, never cleaned.  A piece
+    of one of those values (:data:`_OWN_PIECE_MIN` characters or more) inside
+    the version fails it too.
+    """
+    text = value.strip() if isinstance(value, str) else ""
+    if not text or len(text) > _VERSION_MAX_CHARS or _VERSION_TEXT.fullmatch(text) is None:
+        return None
+    try:
+        own = _own_printer_values()
+    except Exception:  # noqa: BLE001 -- a value that cannot be checked is not sent
+        logger.debug("outbound guard: own printer values unreadable", exc_info=True)
+        return None
+    lowered = text.lower()
+    squeezed = re.sub(r"[^a-z0-9]", "", lowered)
+    pieces = [run for run in re.findall(r"[a-z0-9]+", lowered) if len(run) >= _OWN_PIECE_MIN]
+    for _phrase, held in own:
+        mine = str(held).strip().lower()
+        mine_squeezed = re.sub(r"[^a-z0-9]", "", mine)
+        if mine and (mine in lowered or (mine_squeezed and mine_squeezed in squeezed)):
+            return None
+        if any(piece in mine_squeezed for piece in pieces):
+            return None
+    return text
+
+
+def scrub(value: Any, _depth: int = 0, *, version_keys: frozenset[str] = frozenset()) -> Any:
     """*value* with nothing that locates, identifies or unlocks a machine.
+
+    *version_keys* names the fields a sender declared in
+    :data:`VERSION_FIELDS`: each is kept as written when
+    :func:`version_text` accepts it and dropped with its value otherwise, at
+    any depth.  A version of four numbers reads as a network address to the
+    text rules, so it is judged whole here and never passed through them.
 
     Never raises.  Numbers, flags and ordinary words pass unchanged.
     """
@@ -328,6 +388,11 @@ def scrub(value: Any, _depth: int = 0) -> Any:
             name = str(key)
             if _SECRET_OR_PLACE.match(name):
                 continue
+            if name in version_keys:
+                version = version_text(item)
+                if version is not None:
+                    out[key] = version
+                continue
             if name == LISTING_LINK_KEY:
                 # Judged by key AND value: a marketplace's public page goes
                 # as it is, anything else under this key goes nowhere.
@@ -337,10 +402,10 @@ def scrub(value: Any, _depth: int = 0) -> Any:
             if _IDENTITY.match(name):
                 out[key] = machine_code(item) if isinstance(item, (str, int)) and not isinstance(item, bool) else None
                 continue
-            out[key] = scrub(item, _depth + 1)
+            out[key] = scrub(item, _depth + 1, version_keys=version_keys)
         return out
     if isinstance(value, (list, tuple)):
-        return [scrub(item, _depth + 1) for item in value]
+        return [scrub(item, _depth + 1, version_keys=version_keys) for item in value]
     return value
 
 
@@ -408,8 +473,10 @@ SENDERS: dict[str, tuple[str, str]] = {
         "(a random id, version ids, the machine as machine_code(), model and material "
         "words, nozzle, ending, who settled it, a failure word, two times, a one-way code "
         "of the sliced file's settings, how far the print got, the spool as spool_code() "
-        "and the firmware version text) and scrubbed, the firmware text passing as "
-        "written once it holds only letters, digits, dots, dashes and spaces; "
+        "and the firmware version) and scrubbed; the firmware field is declared in "
+        "VERSION_FIELDS, so it leaves only when version_text() accepts it (a bare "
+        "version holding none of this computer's printer addresses, serials or codes) "
+        "and is dropped otherwise; "
         "and kiln/machine_repair_courier.py's repair marks and printer announcements "
         "(a random id, the machine as machine_code(), a status word, a kind word, two "
         "times; per printer its code, model word and a one-way shared code -- never the "

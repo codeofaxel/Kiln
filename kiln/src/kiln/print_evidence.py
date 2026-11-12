@@ -30,7 +30,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "FIRMWARE_WIRE",
     "note_progress_at_end",
     "note_start_firmware",
     "note_start_settings",
@@ -70,9 +69,6 @@ _CODE_CHARS = 32
 
 #: The longest firmware text kept on a row.
 _FIRMWARE_KEPT_CHARS = 64
-#: A firmware version as it may go to the person's account.
-FIRMWARE_WIRE = re.compile(r"[A-Za-z0-9._ -]{1,40}")
-
 #: The longest a start waits for a printer to say its firmware version.
 _FIRMWARE_WAIT_S = 1.0
 
@@ -135,10 +131,12 @@ def settings_code(lines: Iterable[str] | None) -> str | None:
 
 def wire_firmware(value: Any) -> str | None:
     """*value* as a firmware version that may go to the person's account, or
-    ``None`` when it is empty or carries anything outside
-    :data:`FIRMWARE_WIRE`."""
-    text = value.strip() if isinstance(value, str) else ""
-    return text if text and FIRMWARE_WIRE.fullmatch(text) else None
+    ``None``: the outbound guard's own test of a version
+    (:func:`kiln.outbound_guard.version_text`), so nothing but a bare version
+    is ever offered to the courier."""
+    from kiln.outbound_guard import version_text
+
+    return version_text(value)
 
 
 def progress_reading(job: Any) -> tuple[float | None, int | None]:
