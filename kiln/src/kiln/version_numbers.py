@@ -588,6 +588,101 @@ def account_numbers_in(answer: Any) -> tuple[dict[str, int], int]:
     return numbers, _whole(answer.get("version_number_mark")) or 0
 
 
+def settle_arrivals(answer: Any, local: dict[str, int], past: Iterable[Any] = ()) -> dict[str, dict[str, Any]]:
+    """The versions in a pull's or clone's *answer* that cannot keep, on this
+    computer, the number they arrive with: ``{version_id: {"from", "to"}}``.
+
+    Only for an account that keeps no version numbers (when it keeps them,
+    they are taken instead: :func:`plan_numbers`).  A version arrives with
+    the number in its recipe.  *local* is every version kept here, with its
+    number, as :func:`plan_numbers` takes it.
+
+    A version this computer does not keep yet: when another version here
+    holds its number, or an arrival made before it does, it takes the next
+    number past every number here, in the answer and in *past*.  A version
+    this computer already keeps (``"kept": True``) stays under the number it
+    holds here.  Nothing this computer keeps is renumbered: with no number
+    from the account there is nothing to renumber it to.  So two versions
+    never hold one number here, whatever the account keeps.
+    """
+    if not isinstance(answer, dict) or account_numbers_in(answer)[0]:
+        return {}
+    made = {
+        str(v["version_id"]): v.get("created_at")
+        for v in answer.get("versions") or () if isinstance(v, dict) and v.get("version_id")
+    }
+    arriving: dict[str, int] = {}
+    moves: dict[str, dict[str, Any]] = {}
+    for sidecar in answer.get("provenance_sidecars") or ():
+        if not isinstance(sidecar, dict) or not sidecar.get("version_id"):
+            continue
+        recipe = sidecar.get("recipe_dict")
+        number = _whole(recipe.get("version")) if isinstance(recipe, dict) else None
+        vid = str(sidecar["version_id"])
+        if number is None:
+            continue
+        here = _whole(local.get(vid))
+        if vid not in local:
+            arriving[vid] = number
+        elif here is not None and here != number:
+            moves[vid] = {"from": number, "to": here, "kept": True}
+    if not arriving:
+        return moves
+    held = {n for n in (_whole(v) for v in local.values()) if n is not None}
+    ceiling = max([*held, *arriving.values(), *(n for n in (_whole(p) for p in past) if n is not None)], default=0)
+
+    def when(vid: str) -> tuple[float, str]:
+        try:
+            return float(made.get(vid) or 0.0), vid
+        except (TypeError, ValueError):
+            return 0.0, vid
+
+    for vid in sorted(arriving, key=when):
+        number = arriving[vid]
+        if number in held:
+            ceiling += 1
+            moves[vid] = {"from": number, "to": ceiling}
+            number = ceiling
+        held.add(number)
+    return moves
+
+
+def with_arrivals_settled(answer: dict[str, Any], moves: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """*answer*, each version in *moves* (:func:`settle_arrivals`) saying in
+    its recipe the number it holds on this computer.  A copy: the answer as
+    it came is not changed."""
+    if not moves:
+        return answer
+    sidecars = []
+    for sidecar in answer.get("provenance_sidecars") or ():
+        move = moves.get(str(sidecar.get("version_id"))) if isinstance(sidecar, dict) else None
+        if move and isinstance(sidecar.get("recipe_dict"), dict):
+            sidecar = {**sidecar, "recipe_dict": {**sidecar["recipe_dict"], "version": move["to"]}}
+        sidecars.append(sidecar)
+    return {**answer, "provenance_sidecars": sidecars}
+
+
+def new_arrivals(moves: dict[str, dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """The entries of *moves* (:func:`settle_arrivals`) for versions this
+    computer did not keep before: ``{version_id: {"from", "to"}}``."""
+    return {vid: {"from": m["from"], "to": m["to"]} for vid, m in moves.items() if not m.get("kept")}
+
+
+def said_arrivals(moves: dict[str, dict[str, Any]]) -> str | None:
+    """One plain sentence for the versions that arrived under a number
+    already held on this computer, or ``None`` when none did."""
+    moves = new_arrivals(moves)
+    if not moves:
+        return None
+    items = [f"version {m['from']} from your Kiln account is version {m['to']}" for _vid, m in sorted(moves.items())]
+    listed = items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+    return (
+        f"On this computer {listed}: another version here already holds "
+        f"{'that number' if len(items) == 1 else 'those numbers'}, and your account keeps no "
+        "version numbers yet to say which is which."
+    )
+
+
 def said_here(changes: Iterable[dict[str, Any]], account: dict[str, int]) -> str | None:
     """One plain sentence for the versions whose number changed on this
     computer to take the account's, or ``None`` when none did."""

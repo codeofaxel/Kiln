@@ -1057,26 +1057,38 @@ class HistoryVault:
         except (ValueError, OSError) as exc:
             raise NumbersNotTaken(str(exc)) from exc
 
-    def _take_numbers_held(
-        self, design_id: str, here: Path | None, account: dict[str, int], mark: int,
-    ) -> dict[str, Any]:
-        """:meth:`take_account_numbers`, the numbers lock held: the plan, then
-        every record moved whole or none of them (the store's numbers first,
-        in one transaction it can refuse, then these records and the files
-        together, the store put back when they fail)."""
-        from kiln.version_numbers import (
-            kept_numbers,
-            numbers_in_folder,
-            plan_numbers,
-            raise_mark,
-            renumber_folder,
-            said_here,
-        )
+    def _settle_arrivals(self, design_id: str, answer: dict[str, Any]) -> dict[str, dict[str, int]]:
+        """:func:`kiln.version_numbers.settle_arrivals` for *answer*, over
+        every version this computer keeps of *design_id* (its records, its
+        library files and its version store).  The caller holds the numbers
+        lock.  The folder's mark is raised past each number given."""
+        from kiln.version_numbers import account_numbers_in, raise_mark, settle_arrivals
 
-        if here is not None:
-            # The next version saved here is numbered past every number the
-            # account has given, other computers' included.
-            raise_mark(here, max([mark, *account.values()]))
+        if account_numbers_in(answer)[0]:
+            return {}
+        folder = _design_folder(design_id)
+        here = folder if folder is not None and folder.is_dir() else None
+        store = _open_version_store()
+        try:
+            _mine, _rows_here, local, past = self._numbers_here(design_id, here, store)
+        finally:
+            if store is not None:
+                store.close()
+        moves = settle_arrivals(answer, local, past)
+        if moves and here is not None:
+            raise_mark(here, max(m["to"] for m in moves.values()))
+        return moves
+
+    def _numbers_here(
+        self, design_id: str, here: Path | None, store: Any,
+    ) -> tuple[dict[str, Any], dict[str, int], dict[str, int], list[Any]]:
+        """Every number this computer holds for *design_id*: ``(mine, rows,
+        local, past)``.  *mine* is these records' recipes by version, *rows*
+        the version store's numbers, *local* each kept version's number
+        (files, then the store, then these records), *past* every number
+        given before."""
+        from kiln.version_numbers import kept_numbers, numbers_in_folder
+
         with self._lock:
             mine = {
                 str(r["version_id"]): json.loads(r["recipe"])
@@ -1085,22 +1097,39 @@ class HistoryVault:
                 )
             }
         local: dict[str, int] = {}
-        past: list[Any] = [mark]
+        past: list[Any] = []
         if here is not None:
             local.update(kept_numbers(here))
             past += list(numbers_in_folder(here))
+        rows: dict[str, int] = {}
+        if store is not None:
+            for v in store.list_versions(design_id, limit=100000):
+                rows[v.version_id] = v.version_number
+                local.setdefault(v.version_id, v.version_number)
+            past += list(store.numbers(design_id))
+        for vid, recipe in mine.items():
+            number = recipe.get("version") if isinstance(recipe, dict) else None
+            if isinstance(number, int) and not isinstance(number, bool) and number > 0:
+                local[vid] = number
+        return mine, rows, local, past
+
+    def _take_numbers_held(
+        self, design_id: str, here: Path | None, account: dict[str, int], mark: int,
+    ) -> dict[str, Any]:
+        """:meth:`take_account_numbers`, the numbers lock held: the plan, then
+        every record moved whole or none of them (the store's numbers first,
+        in one transaction it can refuse, then these records and the files
+        together, the store put back when they fail)."""
+        from kiln.version_numbers import plan_numbers, raise_mark, renumber_folder, said_here
+
+        if here is not None:
+            # The next version saved here is numbered past every number the
+            # account has given, other computers' included.
+            raise_mark(here, max([mark, *account.values()]))
         store = _open_version_store()
         try:
-            rows: dict[str, int] = {}
-            if store is not None:
-                for v in store.list_versions(design_id, limit=100000):
-                    rows[v.version_id] = v.version_number
-                    local.setdefault(v.version_id, v.version_number)
-                past += list(store.numbers(design_id))
-            for vid, recipe in mine.items():
-                number = recipe.get("version") if isinstance(recipe, dict) else None
-                if isinstance(number, int) and not isinstance(number, bool) and number > 0:
-                    local[vid] = number
+            mine, rows, local, past = self._numbers_here(design_id, here, store)
+            past = [mark, *past]
             final = plan_numbers(local, account, past=past)
             changes = [
                 {"key": key, "from": local[key], "to": final[key]}
@@ -1163,6 +1192,16 @@ class HistoryVault:
             "releases": payload.get("releases") or [],
         }
         design_id = str(bundle_like["design_id"] or "")
+        # An account that keeps no version numbers: a version arriving under
+        # a number already held here takes the next one free here, before
+        # anything of it is recorded.
+        arrivals = self._settle_arrivals(design_id, payload) if design_id else {}
+        if arrivals:
+            from kiln.version_numbers import with_arrivals_settled
+
+            bundle_like["provenance_sidecars"] = with_arrivals_settled(
+                {"provenance_sidecars": bundle_like["provenance_sidecars"]}, arrivals,
+            )["provenance_sidecars"]
         recipes = {
             r["version_id"]: r.get("recipe_dict") if isinstance(r.get("recipe_dict"), dict) else {}
             for r in _rows(bundle_like["provenance_sidecars"], "version_id")
@@ -1175,6 +1214,11 @@ class HistoryVault:
         # The account's numbers first, so a version only this computer keeps
         # is out of the way before a pulled version takes its number.
         numbers = self.take_account_numbers(design_id, payload) if design_id else {}
+        if arrivals:
+            from kiln.version_numbers import new_arrivals, said_arrivals
+
+            if new_arrivals(arrivals):
+                numbers = {**numbers, "arrived_as": new_arrivals(arrivals), "said": said_arrivals(arrivals)}
         account = {str(v["version_id"]): v.get("version_number") for v in _rows(bundle_like["versions"], "version_id")}
         written = []
         with self._lock:

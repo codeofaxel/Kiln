@@ -447,3 +447,67 @@ def test_every_door_that_takes_a_number_and_writes_a_file_holds_the_lock_across_
         if "numbers_lock" not in {getattr(n, "id", getattr(n, "attr", None)) for n in ast.walk(func)}
     ]
     assert not unheld, f"these take a version's number and never hold the design's numbers lock: {unheld}"
+
+
+# ---------------------------------------------------------------------------
+# An account that keeps no version numbers
+# ---------------------------------------------------------------------------
+
+
+class _NoNumbers(_Accounts):
+    """The same accounts, answering as one that keeps no version numbers."""
+
+    def request(self, tool, method, path, body=None, **kw):
+        answer = super().request(tool, method, path, body, **kw)
+        if isinstance(answer, dict):
+            for key in ("account_numbers", "version_number_mark", "version_numbers"):
+                answer.pop(key, None)
+            answer["versions"] = [
+                {k: v for k, v in row.items() if k != "version_number"} for row in answer.get("versions") or ()
+            ] if "versions" in answer else answer.get("versions")
+            if answer.get("versions") is None:
+                answer.pop("versions", None)
+        return answer
+
+
+@pytest.mark.parametrize("doing", ["pull", "clone"])
+def test_with_no_numbers_from_the_account_two_versions_never_share_one_here(home, monkeypatch, doing):
+    """This computer and another each made version 4.  The account keeps no
+    numbers.  The other's version arrives: it takes the next number free
+    here, this computer's own keeps its 4, and bringing it again moves
+    nothing."""
+    accounts = _NoNumbers()
+    monkeypatch.setattr(courier, "_request", accounts.request)
+    assert courier.clone("cloud_clone_design", "vase")["status"] == "success"
+    folder = _folder(home)
+    mine, other = "e" * 32, "f" * 32
+    (folder / ".kiln_recipe.v4.json").write_text(json.dumps({
+        "name": "vase", "design_id": "vase", "version": 4, "version_id": mine,
+        "source_scad": "sphere(4);", "notes": "made here", "created": "2026-11-03T00:00:00+00:00",
+    }))
+    accounts.designs["X"]["versions"].append((other, 4))
+
+    def bring() -> dict:
+        if doing == "pull":
+            return courier.pull("cloud_pull_branch", "vase")
+        return courier.clone("cloud_clone_design", "vase")
+
+    first = bring()
+    assert first["status"] == "success", first
+    kept = _kept(folder)
+    _numbers_agree(folder)
+    assert kept[4]["version_id"] == mine, "this computer's own version was moved with no number from the account"
+    assert kept[5]["version_id"] == other and len(kept) == 5, sorted(kept)
+    assert "version 4 from your Kiln account is version 5" in (first.get("said_numbers") or ""), first
+    assert version_numbers.next_version_number(folder) == 6
+
+    again = bring()
+    assert again["status"] == "success" and not again.get("said_numbers"), again
+    assert _kept(folder) == kept, "bringing it again moved a number"
+    from kiln.history_vault import HistoryVault
+
+    vault = HistoryVault()
+    try:
+        assert (vault.version(other) or {}).get("recipe", {}).get("version") == 5
+    finally:
+        vault.close()
