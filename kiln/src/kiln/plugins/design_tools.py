@@ -246,6 +246,11 @@ class _DesignToolsPlugin:
             "Is this genuinely ready to print, and if not, what exact changes
             should the agent make next?"
 
+            The report says whether the design is ready
+            (``ready_for_print``), what stops it (``blockers``), each thing
+            that counts against it, in words (``readiness_reasons``), and
+            what to do next (``next_actions``).
+
             Args:
                 file_path: Path to STL or OBJ file.
                 requirements: Functional requirements the design must satisfy.
@@ -294,22 +299,24 @@ class _DesignToolsPlugin:
                 result = audit.to_dict()
                 result["success"] = True
                 # The printability verdict leads, and a design that is not
-                # ready says why.  The readiness score stays in the result
-                # for comparing attempts.
+                # ready says why: the one thing that stops it, or, when no
+                # one thing does, everything that counts against it.
                 gates = getattr(audit, "gates", None) or []
                 blockers = getattr(audit, "blockers", None) or []
                 said = next((g.message for g in gates if g.name == "printability"), "")
                 other = next((b for b in blockers if b != said), None)
+                rest = [
+                    r for r in getattr(audit, "readiness_reasons", None) or [] if r != said
+                ]
                 if audit.ready_for_print:
                     outcome = "The design passes the audit."
                 elif other:
                     outcome = f"Not ready for print: {other}"
-                elif blockers:
+                elif blockers or not rest:
                     outcome = "Not ready for print."
                 else:
-                    outcome = (
-                        "Not ready for print: it falls short of the bar this audit "
-                        "holds a design to, on the warnings in the report."
+                    outcome = "Not ready for print. Together these count against it: " + " ".join(
+                        r if r.endswith((".", "!", "?")) else f"{r}." for r in rest
                     )
                 result["message"] = f"{said}  {outcome}".strip()
                 return result

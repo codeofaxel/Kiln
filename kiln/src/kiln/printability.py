@@ -82,26 +82,6 @@ def without_rating(reply: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in reply.items() if key not in RATING_KEYS}
 
 
-def bundle_without_rating(bundle: dict[str, Any]) -> dict[str, Any]:
-    """An inspection bundle with its printability findings' rating left out.
-
-    The bundle's ``channels.printability.findings`` are a printability
-    reply like any other.  Returns a copy; *bundle* is left as it was.
-    """
-    channels = bundle.get("channels")
-    printability = channels.get("printability") if isinstance(channels, dict) else None
-    findings = printability.get("findings") if isinstance(printability, dict) else None
-    if not isinstance(findings, dict):
-        return dict(bundle)
-    return {
-        **bundle,
-        "channels": {
-            **channels,
-            "printability": {**printability, "findings": without_rating(findings)},
-        },
-    }
-
-
 def _served(analysis: Any) -> dict[str, Any]:
     """*analysis* as a reply carries it: what every ``to_dict`` below returns.
 
@@ -789,55 +769,6 @@ def _mark_tuned(report: PrintabilityReport) -> None:
     report.tuned = True
     for _name, check in _checks(report):
         check.tuned = True
-
-
-@dataclass
-class BundlePrintabilityFindings:
-    """The minimal printability surface readable from an inspection bundle.
-
-    :class:`PrintabilityReport` carries detail-rich sub-analyses
-    (overhangs, thin walls, bridging, bed adhesion, supports, warping,
-    thermal stress, adhesion force, cost) produced by running
-    :func:`analyze_printability` against a mesh.  When a caller already
-    has an inspection bundle attached upstream (the
-    ``inspection_bundle`` field from ``attach_inspect_bundle`` in
-    kiln-pro), it can read the printability summary out of the bundle's
-    channels without re-running those analyses — same answer, near-zero
-    marginal cost.
-
-    This adapter exposes only the summary fields that downstream
-    consumers (audit, validation pipelines) actually read: ``printable``,
-    ``score``, ``grade``, ``recommendations``, and ``to_dict()``.  Field
-    names and types match :class:`PrintabilityReport` exactly, so
-    callers can branch on which one they got without changing how they
-    read.  ``to_dict()`` returns the bundle-channel findings, less the
-    rating (:data:`RATING_KEYS`), so the audit's ``details`` payload stays
-    bundle-faithful rather than flattening to the adapter's narrower view.
-    """
-
-    printable: bool
-    score: int  # 0-100
-    grade: str  # A/B/C/D/F
-    recommendations: list[str] = field(default_factory=list)
-    _findings: dict[str, Any] = field(default_factory=dict, repr=False)
-
-    @classmethod
-    def from_bundle_findings(
-        cls, findings: dict[str, Any]
-    ) -> BundlePrintabilityFindings:
-        score = int(findings.get("score") or 0)
-        return cls(
-            printable=bool(
-                findings.get("printable", score >= _PRINTABLE_SCORE_MIN)
-            ),
-            score=score,
-            grade=str(findings.get("grade") or "F"),
-            recommendations=list(findings.get("recommendations") or []),
-            _findings=dict(findings),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return without_rating(self._findings)
 
 
 # ---------------------------------------------------------------------------
@@ -7457,9 +7388,8 @@ def _score_to_grade(score: int) -> str:
 # Shape analysis (overhangs, walls, bridging) grades how a part is
 # built; it says nothing about WHERE the part sits.  A model hanging
 # below the bed or wider than the machine can score an untroubled A and
-# still be impossible to print.  Both the direct analysis path and the
-# pipeline's bundle-sourced path route through the one helper below so
-# they cannot drift apart on that verdict.
+# still be impossible to print.  Every placement verdict goes through the
+# one helper below.
 # ---------------------------------------------------------------------------
 
 #: Score deducted per placement failure, and per hard stop
@@ -9307,9 +9237,6 @@ def _analyze_printability_here(
         time_mod += 0.05
 
     # Placement check — where the part sits, not only how it is shaped.
-    # The validation pipeline's bundle-sourced path calls this same
-    # helper, so a report read from a bundle cannot reach a different
-    # placement verdict than one analyzed here.
     # Read before the clamp: this is the verdict on the part's SHAPE,
     # which the floor is about to overwrite with a verdict on its shape
     # AND its placement.  Recomputing it afterwards is impossible.
@@ -9732,36 +9659,13 @@ def verdict(report: PrintabilityReport) -> tuple[str, str]:
     return "check", " ".join(filter(None, (f"Check before printing: {first}", *notes)))
 
 
-def verdict_from_findings(findings: dict[str, Any]) -> tuple[str, str]:
-    """:func:`verdict` for a part known only by its summary findings (an
-    inspection bundle's printability channel, a
-    :class:`BundlePrintabilityFindings`).
-
-    The findings carry the verdict when their producer read it
-    (``verdict`` / ``verdict_text``).  Older findings have only the summary
-    fields, so it is rebuilt from them in the order :func:`verdict` takes,
-    after whatever stops the part, which a caller that can see the part's
-    placement says first.
-    """
-    if findings.get("verdict") and findings.get("verdict_text"):
-        return str(findings["verdict"]), str(findings["verdict_text"])
-    if findings.get("needs_supports"):
-        return "prints_with_supports", "Prints with supports."
-    if findings.get("printable"):
-        return "ready", "Ready to print."
-    recs = findings.get("recommendations") or []
-    return "check", f"Check before printing: {recs[0] if recs else 'see the report'}"
-
-
-def verdict_of(report: PrintabilityReport | BundlePrintabilityFindings) -> tuple[str, str]:
-    """:func:`verdict` for either kind of report a door may hold.
+def verdict_of(report: PrintabilityReport) -> tuple[str, str]:
+    """:func:`verdict` that never raises.
 
     The verdict is a reading of the report, never a reason to lose it: a
     report it cannot read (a field missing or of the wrong kind) falls back
     to the report's own printable flag, and the debug log says why.
     """
-    if isinstance(report, BundlePrintabilityFindings):
-        return verdict_from_findings(report.to_dict())
     try:
         if not isinstance(report, PrintabilityReport):
             raise TypeError(f"not a printability report: {type(report).__name__}")
@@ -9773,7 +9677,7 @@ def verdict_of(report: PrintabilityReport | BundlePrintabilityFindings) -> tuple
         return "check", "Check before printing: see the report."
 
 
-def verdict_block(report: PrintabilityReport | BundlePrintabilityFindings) -> dict[str, str]:
+def verdict_block(report: PrintabilityReport) -> dict[str, str]:
     """The two keys every door that judges a part carries in its reply.
 
     ``printability_verdict`` is the key (``ready``, ``prints_with_supports``,

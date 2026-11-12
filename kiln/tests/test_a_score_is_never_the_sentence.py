@@ -110,16 +110,25 @@ class TestTheTurnIsSaidInItsOwnUnits:
 
     def test_the_audit_warns_exactly_when_the_turn_it_names_gains_something(self, pillar, plate):
         """The gate's verdict is its own message's: a turn that gains
-        something measurable is a warning, costs the readiness score its five
-        points and is the next action, said the same way, so a pillar the
-        message told to lie down does not pass."""
+        something measurable is a warning, costs the readiness tally its five
+        points, is one of the reasons the reply gives and is the next action,
+        said the same way, so a pillar the message told to lie down does not
+        pass."""
+        from kiln.original_design import audit_original_design
+
         audit = _call("audit_original_design", file_path=pillar, requirements="holds a pen")
         gate = next(g for g in audit["gates"] if g["name"] == "orientation_efficiency")
         assert gate["passed"] is False and gate["severity"] == "warning", gate
         assert gate["message"] in audit["next_actions"], audit["next_actions"]
+        assert gate["message"] in audit["readiness_reasons"], audit["readiness_reasons"]
         with patch("kiln.original_design.worth_turning", return_value=False):
             unturned = _call("audit_original_design", file_path=pillar, requirements="holds a pen")
-        assert unturned["readiness_score"] - audit["readiness_score"] == 5, (unturned["readiness_score"], audit["readiness_score"])
+            with rx.without_kiln_pro():
+                unturned_tally = audit_original_design(pillar, "holds a pen").readiness_score
+        assert gate["message"] not in unturned["readiness_reasons"], unturned["readiness_reasons"]
+        with rx.without_kiln_pro():
+            turned_tally = audit_original_design(pillar, "holds a pen").readiness_score
+        assert unturned_tally - turned_tally == 5, (unturned_tally, turned_tally)
 
         flat = _call("audit_original_design", file_path=plate, requirements="holds a pen")
         flat_gate = next(g for g in flat["gates"] if g["name"] == "orientation_efficiency")

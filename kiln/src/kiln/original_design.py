@@ -87,7 +87,15 @@ class AuditGate:
 
 @dataclass
 class OriginalDesignAudit:
-    """Complete audit output for an original 3D design."""
+    """Complete audit output for an original 3D design.
+
+    ``readiness_score`` and ``readiness_grade`` are the audit's tally: it
+    ranks attempts against each other and, with the critical gates, decides
+    ``ready_for_print``.  The tally starts from the printability rating, so
+    like that rating it stays in the process (:data:`kiln.printability
+    .RATING_KEYS`): :meth:`to_dict` leaves both out, and the reply says
+    ``ready_for_print`` and ``readiness_reasons`` instead.
+    """
 
     file_path: str
     requirements_text: str
@@ -109,11 +117,10 @@ class OriginalDesignAudit:
     structural_analysis: dict[str, Any] | None = None
     gates: list[AuditGate] = field(default_factory=list)
     feedback: list[dict[str, Any]] = field(default_factory=list)
-    # Inspection bundle (when provided) — source-of-truth manifest
-    # whose printability findings drove the audit's printability gate.
-    # Consumers can read all channel evidence from here without
-    # re-running anything.  None on the legacy path.
-    inspection_bundle: dict[str, Any] | None = None
+    # Each thing that counts against the design being ready, in words, in
+    # the order the tally weighs them: one line for everything the tally
+    # takes off.  Empty when nothing does.
+    readiness_reasons: list[str] = field(default_factory=list)
     # Printability remedies surfaced by the kiln-pro overlay.  When the
     # overlay is available (Pro+) it inspects the printability findings
     # and emits a structured list of fixes (design-side: thicken walls,
@@ -130,9 +137,16 @@ class OriginalDesignAudit:
     applied_remedies: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        data = asdict(self)
+        data = {key: value for key, value in asdict(self).items() if key not in _TALLY_KEYS}
         data["gates"] = [gate.to_dict() for gate in self.gates]
         return data
+
+
+#: The audit's tally under every name a record carries it by; each record's
+#: :meth:`to_dict` leaves these out (see :class:`OriginalDesignAudit`).
+_TALLY_KEYS: frozenset[str] = frozenset({
+    "readiness_score", "readiness_grade", "best_readiness_score", "best_readiness_grade",
+})
 
 
 @dataclass
@@ -155,7 +169,7 @@ class OriginalDesignGenerationAttempt:
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {key: value for key, value in asdict(self).items() if key not in _TALLY_KEYS}
 
 
 @dataclass
@@ -183,7 +197,7 @@ class OriginalDesignGeneration:
     attempts: list[OriginalDesignGenerationAttempt] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        data = asdict(self)
+        data = {key: value for key, value in asdict(self).items() if key not in _TALLY_KEYS}
         data["attempts"] = [attempt.to_dict() for attempt in self.attempts]
         return data
 
@@ -452,18 +466,10 @@ def audit_original_design(
     nozzle_diameter: float | None = None,
     layer_height: float | None = None,
     max_overhang_angle: float | None = None,
-    inspection_bundle: dict[str, Any] | None = None,
     apply_remedies: bool = False,
 ) -> OriginalDesignAudit:
     """Run a harsh audit of an original design from intent to printability.
 
-    :param inspection_bundle: Optional pre-built inspection-bundle dict
-        (the ``result["inspection_bundle"]`` field produced by
-        ``attach_inspect_bundle`` in kiln-pro).  When the bundle carries
-        printability findings, the audit reads them instead of running
-        a redundant :func:`analyze_printability` pass.  Same answer,
-        half the cost when the caller already ran inspection upstream.
-        Legacy callers (no bundle) get the unchanged behavior.
     :param apply_remedies: When True AND the kiln-pro printability
         overlay is installed, dispatch the overlay's structured
         remediation hints — design-side fixes (wall thickening, base
@@ -503,41 +509,19 @@ def audit_original_design(
     )
     mesh_validation = validate_mesh(file_path)
 
-    # Prefer pre-computed bundle printability over a fresh re-run.  The
-    # bundle is the bundle-as-lingua-franca contract: producers emit it
-    # once, consumers read it instead of re-deriving.  Same answer at
-    # zero marginal cost when the caller already ran inspection upstream.
-    bundle_printability_findings: dict[str, Any] | None = None
-    if inspection_bundle is not None:
-        bundle_printability_findings = (
-            inspection_bundle.get("channels", {})
-            .get("printability", {})
-            .get("findings")
-        )
+    from kiln.assumed_nozzle import assumed_nozzle
 
-    if (
-        bundle_printability_findings
-        and bundle_printability_findings.get("score") is not None
-    ):
-        from kiln.printability import BundlePrintabilityFindings
-
-        printability = BundlePrintabilityFindings.from_bundle_findings(
-            bundle_printability_findings
-        )
-    else:
-        from kiln.assumed_nozzle import assumed_nozzle
-
-        nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
-        printability = analyze_printability(
-            file_path,
-            nozzle_diameter=nozzle.diameter_mm,
-            layer_height=layer_height,
-            max_overhang_angle=max_overhang_angle,
-            build_volume=build_volume_tuple,
-        )
-        # The engine was handed a size, not the printer: say where the size
-        # really came from.
-        printability.nozzle = nozzle.to_dict()
+    nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
+    printability = analyze_printability(
+        file_path,
+        nozzle_diameter=nozzle.diameter_mm,
+        layer_height=layer_height,
+        max_overhang_angle=max_overhang_angle,
+        build_volume=build_volume_tuple,
+    )
+    # The engine was handed a size, not the printer: say where the size
+    # really came from.
+    printability.nozzle = nozzle.to_dict()
     design_validation = validate_design(
         file_path,
         requirements_text,
@@ -751,6 +735,7 @@ def audit_original_design(
     # for tier details.
     intent_critical_count = 0
     intent_warning_count = 0
+    intent_reasons: list[str] = []
     intent_verification_ran = False
     try:
         from kiln_pro.bridge import pro_features
@@ -777,8 +762,10 @@ def audit_original_design(
                 if not ig.passed:
                     if ig.severity == "critical":
                         intent_critical_count += 1
+                        intent_reasons.append(ig.message)
                     elif ig.severity == "warning":
                         intent_warning_count += 1
+                        intent_reasons.append(ig.message)
             failed_intent_gates = [g for g in intent_gates if not g.passed]
             if failed_intent_gates:
                 try:
@@ -872,13 +859,27 @@ def audit_original_design(
     else:
         next_actions_intent = ""
 
+    # The tally ranks attempts against each other and, with the critical
+    # gates, decides ready_for_print.  It starts from the printability
+    # rating, so like that rating it stays in the process; the reply says
+    # why instead: every deduction below is taken with the words that name
+    # it (readiness_reasons).
+    reasons: list[str] = []
     score = int(printability.score)
+    if verdict_key != "ready":
+        reasons.append(verdict_text)
+    elif printability.score < 100 and printability.recommendations:
+        reasons.append(printability.recommendations[0])
     if not mesh_validation.valid:
         score = min(score, 20)
+        reasons.append("; ".join(mesh_validation.errors) or "The mesh did not pass validation.")
     if not mesh_validation.is_manifold:
         score -= 20
-    score -= design_validation.critical_count * 12
-    score -= design_validation.warning_count * 4
+        reasons.append("Mesh is non-manifold or open.")
+    if design_validation.critical_count or design_validation.warning_count:
+        score -= design_validation.critical_count * 12
+        score -= design_validation.warning_count * 4
+        reasons.append(design_validation.summary)
     if diagnostics is not None:
         severity_penalty = {
             "clean": 0,
@@ -886,9 +887,16 @@ def audit_original_design(
             "moderate": 8,
             "severe": 20,
         }
-        score -= severity_penalty.get(diagnostics.severity, 0)
+        penalty = severity_penalty.get(diagnostics.severity, 0)
+        if penalty:
+            score -= penalty
+            reasons.append(
+                "; ".join(diagnostics.defects[:3])
+                or f"Mesh diagnostics found {diagnostics.severity} defects."
+            )
     if turn_it:
         score -= 5
+        reasons.append(describe_orientation_change(orientation))
     # Structural risk penalty, once per KIND of risk at its worst severity:
     # six identical peg roots are one thing to round, and one narrow neck
     # read at twenty heights is one neck.  Different kinds add up, so a part
@@ -898,12 +906,17 @@ def audit_original_design(
     warning_kinds = {r.risk_type for r in structural_risks if r.severity == "warning"} - critical_kinds
     score -= len(critical_kinds) * 15
     score -= len(warning_kinds) * 5
+    if critical_kinds or warning_kinds:
+        reasons.append(
+            next((g.message for g in gates if g.name == "structural_integrity"), "")
+        )
     # Intent-verification penalty (kiln-pro Pro+ overlay) — declared
     # geometric assertions that the mesh failed to satisfy.  Mirrors
     # the structural_integrity contribution shape; each declared assertion
     # is a kind of its own.
     score -= intent_critical_count * 15
     score -= intent_warning_count * 5
+    reasons.extend(intent_reasons)
     score = max(0, min(100, score))
     grade = _score_to_grade(score)
 
@@ -1032,7 +1045,7 @@ def audit_original_design(
         structural_analysis=structural_plan,
         gates=gates,
         feedback=feedback,
-        inspection_bundle=inspection_bundle,
+        readiness_reasons=_dedupe_strings([reason for reason in reasons if reason]),
         recommended_remedies=recommended_remedies,
         applied_remedies=applied_remedies,
     )

@@ -1037,180 +1037,11 @@ class TestMCPToolIntegration:
 
 
 # ---------------------------------------------------------------------------
-# TestValidationPipelineInspectionBundle
-#
-# Consumer-proof for the bundle-as-lingua-franca rollout.  When a
-# pre-built inspection bundle is provided, the pipeline reads
-# printability findings from it instead of re-running
-# analyze_printability.  Same answer, half the cost.
-# ---------------------------------------------------------------------------
-
-
-def _make_inspection_bundle(
-    *, printability_score: int = 75, printability_grade: str = "B",
-    recommendations: list[str] | None = None,
-) -> dict[str, Any]:
-    """Build a synthetic inspection-bundle dict shaped like what
-    ``attach_inspect_bundle`` emits, with just the printability channel
-    populated (the only channel the validation pipeline reads)."""
-    return {
-        "schema_version": "1.0",
-        "source_path": "/tmp/synthetic.stl",
-        "source_sha": "deadbeef" * 8,
-        "bundle_dir": "/tmp/synthetic-bundle",
-        "channels_requested": ["printability"],
-        "channels_emitted": ["printability"],
-        "channels": {
-            "printability": {
-                "name": "printability",
-                "tier": "pro",
-                "status": "ok",
-                "images": [],
-                "findings": {
-                    "score": printability_score,
-                    "grade": printability_grade,
-                    "printable": printability_score >= 50,
-                    "recommendations": list(recommendations or []),
-                },
-                "summary": f"grade {printability_grade}",
-                "error": None,
-                "elapsed_ms": 0,
-            },
-        },
-        "scene": {},
-    }
-
-
-class TestValidationPipelineInspectionBundle:
-    """When ``inspection_bundle`` is provided, the pipeline reads
-    printability findings from it rather than re-running analysis."""
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_bundle_skips_analyze_printability_call(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """analyze_printability MUST NOT be called when the bundle has
-        printability findings — that's the whole point of the
-        consumer-proof refactor."""
-        mock_validate.return_value = _make_mesh_validation_result()
-        # If this gets called, the regression has happened.
-        mock_printability.return_value = _make_printability_report(
-            score=99, grade="A",
-        )
-
-        bundle = _make_inspection_bundle(
-            printability_score=72, printability_grade="C",
-        )
-        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
-
-        mock_printability.assert_not_called()
-        assert result.printability_score == 72
-        assert result.printability_grade == "C"
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_bundle_findings_drive_the_score(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """The score field on the result reflects what the BUNDLE said,
-        not what the (unused) analyze_printability would have said."""
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(
-            score=99, grade="A",  # ignored — bundle wins
-        )
-
-        bundle = _make_inspection_bundle(
-            printability_score=42,
-            printability_grade="F",
-            recommendations=["increase wall count", "add brim"],
-        )
-        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
-
-        assert result.printability_score == 42
-        assert result.printability_grade == "F"
-        assert "increase wall count" in result.recommendations
-        assert "add brim" in result.recommendations
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_no_bundle_legacy_path_unchanged(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """When ``inspection_bundle`` is None, behavior is identical to
-        before the refactor — analyze_printability runs, its result is
-        used."""
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(
-            score=80, grade="B",
-        )
-
-        result = run_validation_pipeline(stl_file)  # no inspection_bundle
-
-        mock_printability.assert_called_once()
-        assert result.printability_score == 80
-        assert result.printability_grade == "B"
-        assert result.inspection_bundle is None
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_bundle_rides_along_on_result(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """The bundle dict appears on the result so downstream
-        consumers can read other channels (e.g. rgb evidence PNGs)
-        without re-running anything."""
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report()
-
-        bundle = _make_inspection_bundle()
-        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
-
-        assert result.inspection_bundle is bundle
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_bundle_without_printability_findings_falls_through(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """A bundle with no printability channel (e.g. ``level="quick"``
-        which only ran rgb + measurements) falls through to the legacy
-        analyze_printability path — graceful degradation."""
-        mock_validate.return_value = _make_mesh_validation_result()
-        mock_printability.return_value = _make_printability_report(
-            score=80, grade="B",
-        )
-
-        # Bundle without printability channel — only rgb ran.
-        partial_bundle = {
-            "schema_version": "1.0",
-            "channels": {
-                "rgb": {
-                    "name": "rgb",
-                    "tier": "free",
-                    "status": "ok",
-                    "findings": {"view_count": 4},
-                },
-            },
-            "channels_emitted": ["rgb"],
-        }
-        result = run_validation_pipeline(
-            stl_file, inspection_bundle=partial_bundle,
-        )
-
-        mock_printability.assert_called_once()
-        assert result.printability_score == 80
-        # Bundle still rides along on the result for downstream readers.
-        assert result.inspection_bundle is partial_bundle
-
-
-# ---------------------------------------------------------------------------
 # TestValidationPipelinePlacementCheck
 #
-# The bundle short-circuit skips the analyze_printability re-run, and so
-# also skipped the placement check that runs at the end of it.  A part
-# hanging below the bed or wider than the machine came back graded on
-# shape alone.  Both paths now call the one shared helper.
+# Where the part sits, not only how it is shaped: a part hanging below the
+# bed or wider than the machine is judged on its placement too, against the
+# bed the pipeline resolves.
 # ---------------------------------------------------------------------------
 
 
@@ -1228,75 +1059,7 @@ _OVERSIZED_BBOX = {
 
 
 class TestValidationPipelinePlacementCheck:
-    """A bundle-sourced report must reach the same placement verdict as
-    a directly-analyzed one."""
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_bundle_part_below_the_plate_keeps_its_grade(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """Geometry below z=0 does not drop a bundle-sourced 'A' below
-        printable.  Kiln's slice step sets such a part on the plate, so the
-        part is judged resting there and the drop is said once, last."""
-        mock_validate.return_value = _make_mesh_validation_result(
-            bounding_box=_OFF_BED_BBOX,
-        )
-        bundle = _make_inspection_bundle(
-            printability_score=95, printability_grade="A",
-        )
-
-        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
-
-        mock_printability.assert_not_called()  # still the short-circuit path
-        assert "40.00 mm below the build plate" in result.recommendations[-1]
-        assert result.printability_score == 95
-        assert result.printability_grade == "A"
-        assert result.passed is True
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_bundle_oversized_mesh_is_flagged(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """A part larger than an explicit bed is flagged on the bundle path."""
-        mock_validate.return_value = _make_mesh_validation_result(
-            bounding_box=_OVERSIZED_BBOX,
-        )
-        bundle = _make_inspection_bundle(
-            printability_score=95, printability_grade="A",
-        )
-
-        result = run_validation_pipeline(
-            stl_file,
-            inspection_bundle=bundle,
-            build_volume=(256.0, 256.0, 256.0),
-        )
-
-        assert any("exceeds build volume" in r for r in result.recommendations)
-        assert result.printability_score < 50
-        assert result.passed is False
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_bundle_oversized_flagged_against_resolved_bed(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """No explicit build_volume — the bed resolves from printer_id."""
-        mock_validate.return_value = _make_mesh_validation_result(
-            bounding_box=_OVERSIZED_BBOX,
-        )
-        bundle = _make_inspection_bundle(
-            printability_score=95, printability_grade="A",
-        )
-
-        result = run_validation_pipeline(
-            stl_file, inspection_bundle=bundle, printer_id="bambu_a1",
-        )
-
-        assert any("exceeds build volume" in r for r in result.recommendations)
-        assert result.printability_score < 50
-        assert result.passed is False
+    """The pipeline's placement verdict, against the bed it resolves."""
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
@@ -1307,87 +1070,37 @@ class TestValidationPipelinePlacementCheck:
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OVERSIZED_BBOX,
         )
-        bundle = _make_inspection_bundle(
-            printability_score=95, printability_grade="A",
+        mock_printability.return_value = _make_printability_report(
+            score=95, grade="A",
         )
 
         result = run_validation_pipeline(
-            stl_file,
-            inspection_bundle=bundle,
-            printer_id="definitely_not_a_printer_9000",
+            stl_file, printer_id="definitely_not_a_printer_9000",
         )
 
+        assert mock_printability.call_args.kwargs["build_volume"] is None
         assert not any(
-            "exceeds build volume" in r for r in result.recommendations
+            "exceeds build volume" in r
+            for r in [*result.recommendations, *result.warnings]
         )
-        assert result.printability_score == 95  # untouched
         assert result.fits_build_volume is None
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_bundle_details_track_the_placement_verdict(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """The ride-along findings report the verdict the pipeline
-        reports, and the caller's own bundle dict is left untouched."""
-        mock_validate.return_value = _make_mesh_validation_result(
-            bounding_box=_OVERSIZED_BBOX,
-        )
-        bundle = _make_inspection_bundle(
-            printability_score=95, printability_grade="A",
-        )
-
-        result = run_validation_pipeline(
-            stl_file, inspection_bundle=bundle, build_volume=(256.0, 256.0, 256.0),
-        )
-
-        details = result.printability_details
-        assert details["score"] == result.printability_score
-        assert details["grade"] == "F"
-        assert details["printable"] is False
-
-        # The input bundle is the caller's — never mutated in place.
-        findings = bundle["channels"]["printability"]["findings"]
-        assert findings["score"] == 95
-        assert findings["grade"] == "A"
-        assert findings["printable"] is True
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_well_placed_bundle_mesh_is_untouched(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """A part sitting on the bed and inside it keeps its bundle score."""
-        mock_validate.return_value = _make_mesh_validation_result()
-        bundle = _make_inspection_bundle(
-            printability_score=88, printability_grade="B",
-        )
-
-        result = run_validation_pipeline(
-            stl_file, inspection_bundle=bundle, printer_id="bambu_a1",
-        )
-
-        assert result.printability_score == 88
-        assert result.printability_grade == "B"
-        assert result.passed is True
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
     def test_a_high_rating_does_not_rescue_an_oversized_part(
         self, mock_validate, mock_printability, stl_file,
     ):
-        """A part that cannot sit on the bed fails, whatever the bundle's
-        rating says about its shape."""
+        """A part that cannot sit on the bed fails, whatever its shape's
+        rating: the faults are read from the mesh."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OVERSIZED_BBOX,
         )
-        bundle = _make_inspection_bundle(
-            printability_score=95, printability_grade="A",
+        mock_printability.return_value = _make_printability_report(
+            score=95, grade="A",
         )
 
         result = run_validation_pipeline(
-            stl_file, inspection_bundle=bundle,
-            build_volume=(256.0, 256.0, 256.0),
+            stl_file, build_volume=(256.0, 256.0, 256.0),
         )
 
         assert result.passed is False
@@ -1397,28 +1110,11 @@ class TestValidationPipelinePlacementCheck:
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
-    def test_direct_branch_oversized_also_fails(
+    def test_a_part_below_the_plate_passes(
         self, mock_validate, mock_printability, stl_file,
     ):
-        """The no-bundle branch reaches the same verdict — the faults are
-        read from the mesh, not from whichever path produced the score."""
-        mock_validate.return_value = _make_mesh_validation_result(
-            bounding_box=_OVERSIZED_BBOX,
-        )
-        mock_printability.return_value = _make_printability_report(
-            score=95, grade="A",
-        )
-
-        result = run_validation_pipeline(stl_file, build_volume=(256.0, 256.0, 256.0))
-
-        assert result.passed is False
-
-    @patch(_PRINTABILITY)
-    @patch(_VALIDATE)
-    def test_direct_branch_below_the_plate_passes(
-        self, mock_validate, mock_printability, stl_file,
-    ):
-        """See test_bundle_part_below_the_plate_keeps_its_grade."""
+        """Geometry below z=0 does not fail a part: Kiln's slice step sets
+        it on the plate, so it is judged resting there."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OFF_BED_BBOX,
         )
@@ -1432,12 +1128,11 @@ class TestValidationPipelinePlacementCheck:
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)
-    def test_direct_branch_gets_the_same_resolved_bed(
+    def test_the_printability_check_gets_the_resolved_bed(
         self, mock_validate, mock_printability, stl_file,
     ):
-        """With no bundle, the placement check runs inside
-        analyze_printability — so the pipeline must hand it the same bed
-        the bundle branch measures against, or the two paths drift."""
+        """The placement check runs inside analyze_printability, so the
+        pipeline hands it the bed it resolved from the printer."""
         mock_validate.return_value = _make_mesh_validation_result()
         mock_printability.return_value = _make_printability_report(
             score=95, grade="A",
@@ -1454,12 +1149,13 @@ class TestValidationPipelinePlacementCheck:
         self, mock_validate, mock_printability, stl_file,
     ):
         """With auto_scale on, step 4 shrinks an oversized mesh to fit —
-        so step 3 must not dock the score for a size about to be fixed."""
+        so step 3 must not dock the score for a size about to be fixed:
+        the printability check is handed no bed to fit against."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OVERSIZED_BBOX,
         )
-        bundle = _make_inspection_bundle(
-            printability_score=95, printability_grade="A",
+        mock_printability.return_value = _make_printability_report(
+            score=95, grade="A",
         )
 
         with patch(_SCALE) as mock_scale:
@@ -1470,12 +1166,11 @@ class TestValidationPipelinePlacementCheck:
             }
             result = run_validation_pipeline(
                 stl_file,
-                inspection_bundle=bundle,
                 build_volume=(256.0, 256.0, 256.0),
                 auto_scale=True,
             )
 
-        assert result.printability_score == 95  # not double-penalised
+        assert mock_printability.call_args.kwargs["build_volume"] is None
         assert not any(
             "exceeds build volume" in r for r in result.recommendations
         )
@@ -1545,7 +1240,7 @@ def test_a_real_drop_below_the_plate_is_said_with_its_depth():
     """A real drop below the plate is said with its depth, never fatal.
 
     Half a millimetre under the plate is no fault: the slicer sets the part
-    on the plate (see test_bundle_part_below_the_plate_keeps_its_grade).  It
+    on the plate (see test_a_part_below_the_plate_passes).  It
     is still said, with a depth a reader can act on — at one decimal place
     every drop shallower than 0.05mm printed as "0.0 mm below the build
     plate", a sentence that argues against itself.

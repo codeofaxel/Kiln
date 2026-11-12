@@ -258,3 +258,76 @@ def test_iterate_design_says_no_rating_of_its_best_round(server, parts, monkeypa
     assert reply.get("success") is True, reply
     assert "best_score" not in reply, reply.get("best_score")
     assert ratings_in(reply) == [], ratings_in(reply)
+
+
+# --- the design audit: its tally stays in the process, its reasons go out ---
+
+#: The design audit's tally under every name a record carried it by.  It
+#: starts from the printability rating, so it stays in the process too.
+_TALLY = frozenset({
+    "readiness_score", "readiness_grade", "best_readiness_score", "best_readiness_grade",
+})
+_REQUIREMENTS = "a sturdy desk part"
+
+
+@pytest.fixture
+def pillar(tmp_path):
+    """A pillar 80 mm tall on a 10 mm square: nothing stops it outright, and
+    the audit still holds it back (it may tip, it would lie down, it needs a
+    brim)."""
+    post = trimesh.creation.box(extents=(10.0, 10.0, 80.0))
+    post.apply_translation((0, 0, 40.0))
+    path = tmp_path / "pillar.stl"
+    post.export(path)
+    return str(path)
+
+
+@pytest.mark.parametrize("which", ["block", "pillar"])
+def test_the_design_audit_says_its_reasons_never_its_tally(server, parts, pillar, which):
+    path = parts[0] if which == "block" else pillar
+
+    reply = _call(server, "audit_original_design", {"file_path": path, "requirements": _REQUIREMENTS})
+
+    assert reply.get("success") is True, reply
+    assert not _TALLY & _keys_at_any_depth(reply), sorted(_TALLY & _keys_at_any_depth(reply))
+    assert ratings_in(reply) == [], ratings_in(reply)
+    assert all(isinstance(r, str) and r for r in reply["readiness_reasons"]), reply["readiness_reasons"]
+    if which == "block":
+        assert reply["ready_for_print"] is True and reply["readiness_reasons"] == [], reply
+
+
+def test_a_design_held_back_with_no_blocker_is_told_why(server, pillar):
+    """No one thing stops the pillar and it is not ready: the reply names
+    each thing that counts against it, in words, and the message says them."""
+    reply = _call(server, "audit_original_design", {"file_path": pillar, "requirements": _REQUIREMENTS})
+
+    assert reply["ready_for_print"] is False and reply["blockers"] == [], reply["blockers"]
+    reasons = reply["readiness_reasons"]
+    turn = next(g["message"] for g in reply["gates"] if g["name"] == "orientation_efficiency")
+    assert turn in reasons, reasons
+    assert "Not ready for print. Together these count against it:" in reply["message"], reply["message"]
+    for reason in reasons:
+        assert reason.rstrip(".") in reply["message"], (reason, reply["message"])
+
+
+def test_the_generation_record_carries_no_tally():
+    """generate_model_with_provider replies with this record's to_dict(): the
+    best attempt's tally and each attempt's stay in the process."""
+    from kiln.original_design import OriginalDesignGeneration, OriginalDesignGenerationAttempt
+
+    attempt = OriginalDesignGenerationAttempt(
+        attempt_number=1, prompt_used="a desk part", provider="gemini", status="audited",
+        ready_for_print=True, readiness_score=94, readiness_grade="A",
+        audit={"ready_for_print": True, "readiness_reasons": []},
+    )
+    record = OriginalDesignGeneration(
+        requirements_text="a desk part", provider_requested="auto", provider_used="gemini",
+        provider_selection_reason="", material=None, printer_model=None, style=None,
+        max_attempts=1, attempts_made=1, ready_for_print=True, best_attempt_number=1,
+        best_readiness_score=94, best_readiness_grade="A", best_result_path=None,
+        summary="Best of 1 attempt(s), via gemini.", next_actions=[], design_requirements={},
+        initial_prompt={}, attempts=[attempt],
+    )
+
+    assert not _TALLY & _keys_at_any_depth(record.to_dict())
+    assert record.best_readiness_score == 94 and attempt.readiness_score == 94  # kept in the process
