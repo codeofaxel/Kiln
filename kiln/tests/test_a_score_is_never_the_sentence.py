@@ -110,10 +110,9 @@ class TestTheTurnIsSaidInItsOwnUnits:
 
     def test_the_audit_warns_exactly_when_the_turn_it_names_gains_something(self, pillar, plate):
         """The gate's verdict is its own message's: a turn that gains
-        something measurable is a warning, costs the readiness tally its five
-        points, is one of the reasons the reply gives and is the next action,
-        said the same way, so a pillar the message told to lie down does not
-        pass."""
+        something measurable is a warning, lowers the readiness tally, is one
+        of the reasons the reply gives and is the next action, said the same
+        way, so a pillar the message told to lie down does not pass."""
         from kiln.original_design import audit_original_design
 
         audit = _call("audit_original_design", file_path=pillar, requirements="holds a pen")
