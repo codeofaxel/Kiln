@@ -13932,8 +13932,24 @@ def fleet_status(by_site: bool = False) -> dict:
 
 def _names_asked_for(printer_names: list[str] | str) -> list[str] | None:
     """The printers a several-printer read names, in the order given and
-    once each; ``None`` for every printer (``"all"``)."""
-    given = [printer_names] if isinstance(printer_names, str) else list(printer_names)
+    once each; ``None`` for every printer (``"all"``).
+
+    A list sent as text is read as the list it spells: a JSON array, or
+    names separated by commas.
+    """
+    if isinstance(printer_names, str):
+        given: list[Any] = printer_names.split(",")
+        if printer_names.strip().startswith("["):
+            import json
+
+            try:
+                spelled = json.loads(printer_names)
+            except ValueError:
+                spelled = None
+            if isinstance(spelled, list):
+                given = spelled
+    else:
+        given = list(printer_names)
     names: list[str] = []
     for item in given:
         name = str(item).strip()
@@ -13991,15 +14007,29 @@ def _several_printers_read(
                 return listed
 
         if wanted is not None:
-            unknown = [name for name in wanted if name not in set_up]
+            # Each name as the one its machine is listed under: a printer
+            # asked for by another of its names is the same printer.
+            listed_as: list[str] = []
+            unknown: list[str] = []
+            for name in wanted:
+                same_machine = [name] if name in set_up else [n for n in registry.aliases_of(name) if n in set_up]
+                if not same_machine:
+                    unknown.append(name)
+                elif same_machine[0] not in listed_as:
+                    listed_as.append(same_machine[0])
             if unknown:
                 return _error_dict(
                     f"No printer named {', '.join(repr(n) for n in unknown)} is set up here. "
                     f"Set up: {', '.join(set_up)}.",
                     code="PRINTER_NOT_FOUND",
                 )
+            wanted = listed_as
 
         status = registry.get_fleet_status(names=wanted)
+        # Printers reply in any order; the answer keeps the order asked
+        # for, or the list's own order for every printer.
+        place = {name: at for at, name in enumerate(set_up if wanted is None else wanted)}
+        status.sort(key=lambda row: place.get(str(row.get("name", "")), len(place)))
         if wanted is None:
             idle = registry.get_idle_printers()
         else:

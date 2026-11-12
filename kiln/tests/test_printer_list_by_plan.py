@@ -338,6 +338,52 @@ class TestSeveralPrintersThroughPrinterStatus:
         assert [row["name"] for row in twice["printers"]] == ["garage"]
         assert sorted(row["name"] for row in every["printers"]) == ["a1", "garage"]
 
+    @pytest.mark.parametrize("spelled", ["garage, a1", '["garage", "a1"]', " garage ,a1 "])
+    def test_a_list_sent_as_text_is_read_as_the_list_it_spells(self, bench, on_plan, spelled):
+        on_plan("business")
+
+        out = _ask("printer_status", printer_names=spelled)
+
+        assert [row["name"] for row in out["printers"]] == ["garage", "a1"]
+
+    @pytest.mark.parametrize(
+        ("given", "names"),
+        [
+            ("all", None),
+            (" ALL ", None),
+            (["a1", "all"], None),
+            ("garage", ["garage"]),
+            ("garage, a1", ["garage", "a1"]),
+            ('["garage", "a1"]', ["garage", "a1"]),
+            ("[garage", ["[garage"]),
+            (["a1", " a1 ", "garage", ""], ["a1", "garage"]),
+            ([], []),
+            ("", []),
+        ],
+    )
+    def test_the_names_asked_for_are_read_once_each_in_the_order_given(self, given, names):
+        assert server._names_asked_for(given) == names
+
+    def test_the_answer_keeps_the_order_asked_for_and_the_lists_order_for_all(self, bench, on_plan):
+        on_plan("business")
+
+        for _ in range(5):
+            asked = _ask("printer_status", printer_names=["garage", "a1"])
+            every = _ask("printer_status", printer_names="all")
+            assert [row["name"] for row in asked["printers"]] == ["garage", "a1"]
+            assert asked["busy_printers"] == ["garage", "a1"]
+            assert [row["name"] for row in every["printers"]] == ["a1", "garage"]
+
+    def test_a_printer_asked_for_by_another_of_its_names_is_the_same_printer(self, bench, on_plan, monkeypatch):
+        a, b = bench
+        on_plan("business")
+        # A second name for the first machine, as the "default" alias is.
+        server._get_registry().register("default", a)
+
+        out = _ask("printer_status", printer_names=["default", "a1", "garage"])
+
+        assert [row["name"] for row in out["printers"]] == ["a1", "garage"] and out["count"] == 2
+
     def test_a_name_that_is_not_set_up_is_said_with_the_names_that_are(self, bench, on_plan):
         a, b = bench
         on_plan("business")
