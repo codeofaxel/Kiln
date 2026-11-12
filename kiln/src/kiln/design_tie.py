@@ -16,11 +16,17 @@ key Kiln's servers name the design by (:data:`KEY_FIELD` in every push, pull
 and clone answer).  The key is opaque and names no account; the file and
 every refusal say "a different Kiln account" and nothing else about it.
 
-A folder with no tie is tied by its next sync whose answer names a key.  When
-the folder already held versions and the account's design held others, none
-of them shared, the answer says the folder is now tied to this account's
-design.  A tie file that cannot be read is no tie.  An answer that names no
-key (a server that keeps none) ties nothing and refuses nothing.
+A folder with no tie is tied by its next sync whose answer names a key, when
+the two histories are one: the folder and the account's design share a
+version (by id, or by the id an older Kiln wrote into a kept file's name), or
+one side holds no version yet (an empty folder pulls or clones freely; a new
+design's first push makes the account's design).  Two histories that share no
+version are never joined: the pull or clone is refused before anything here
+changes (:func:`judge`), and Kiln's servers refuse the push before they keep
+anything (:func:`push_fields` carries the folder's history for that, and
+:func:`related` is the rule they judge it by).  A tie file that cannot be read
+is no tie.  An answer that names no key (a server that keeps none) ties
+nothing and refuses nothing.
 
 Nothing here runs on Kiln's servers: there each request works in a workspace
 of one account's own, so nothing is judged and no tie is written.
@@ -47,6 +53,14 @@ TIE_FILE = ".kiln_tie.json"
 KEY_FIELD = "design_key"
 #: The code of the refusal :func:`refusal` words.
 REFUSED_CODE = "TIED_TO_ANOTHER_ACCOUNT"
+#: The code of the refusal of two histories that share no version.
+UNRELATED_CODE = "UNRELATED_HISTORIES"
+#: The field of a push's request that names the versions the folder holds,
+#: when it is tied to no design yet.
+HISTORY_FIELD = "design_history"
+#: A kept recipe file an older Kiln named by the first 12 hex of its
+#: version's id, writing no id inside it.
+_NAMED_BY_ID = re.compile(r"^\.kiln_recipe\.([0-9a-f]{12})\.json$")
 #: The HTTP status Kiln's servers answer a refused push with.
 REFUSED_STATUS = 412
 
@@ -88,11 +102,17 @@ def tied_key(folder: str | Path | None) -> str | None:
     return key if well_formed(key) else None
 
 
-def push_fields(folder: str | Path | None) -> dict[str, str]:
+def push_fields(folder: str | Path | None, here: Iterable[Any] = ()) -> dict[str, Any]:
     """The fields a push of the design kept in *folder* carries: its tie,
-    when it has one."""
-    key = None if _hosted() else tied_key(folder)
-    return {KEY_FIELD: key} if key else {}
+    when it has one; else the versions the folder holds (*here*, and the
+    recipe files read here), so Kiln's servers can refuse joining it with a
+    design of the account that shares none of them."""
+    if _hosted():
+        return {}
+    key = tied_key(folder)
+    if key:
+        return {KEY_FIELD: key}
+    return {HISTORY_FIELD: sorted(history_kept_in(folder) | {str(v) for v in here if v})}
 
 
 def versions_kept_in(folder: str | Path | None) -> set[str]:
@@ -102,6 +122,44 @@ def versions_kept_in(folder: str | Path | None) -> set[str]:
     from kiln.version_numbers import FILE_KEY, kept_numbers
 
     return {key for key in kept_numbers(folder) if not key.startswith(FILE_KEY)}
+
+
+def history_kept_in(folder: str | Path | None) -> set[str]:
+    """The versions the recipe files in *folder* are: each id a file names,
+    and the 12-hex start of an id an older Kiln wrote only into a file's name
+    (:func:`related` matches it against whole ids)."""
+    found = versions_kept_in(folder)
+    if folder is not None and Path(folder).is_dir():
+        for path in Path(folder).iterdir():
+            m = _NAMED_BY_ID.match(path.name)
+            if m and not any(v.startswith(m.group(1)) for v in found):
+                found.add(m.group(1))
+    return found
+
+
+def holds_versions(folder: str | Path | None, here: Iterable[Any] = ()) -> bool:
+    """Whether this computer keeps any version of the design in *folder*:
+    a record (*here*) or a kept recipe file, whether or not it names one."""
+    if any(here):
+        return True
+    if folder is None:
+        return False
+    from kiln.version_numbers import kept_numbers
+
+    return bool(kept_numbers(folder)) or bool(history_kept_in(folder))
+
+
+def related(history: Iterable[Any], held: Iterable[Any]) -> bool:
+    """Whether a folder's *history* and an account design's *held* versions
+    share a version: an id in both, or an id of *held* that starts with a
+    12-hex start in *history*."""
+    held_ids = {str(v) for v in held if v}
+    for entry in (str(v) for v in history if v):
+        if entry in held_ids:
+            return True
+        if len(entry) == 12 and any(h.startswith(entry) for h in held_ids):
+            return True
+    return False
 
 
 def _versions_in(answer: dict[str, Any]) -> set[str]:
@@ -120,29 +178,43 @@ def _versions_in(answer: dict[str, Any]) -> set[str]:
     return ids
 
 
-def refusal(design_id: str, doing: str, *, tool: str | None = None) -> dict[str, Any]:
+def refusal(
+    design_id: str, doing: str, *, tool: str | None = None, code: str = REFUSED_CODE,
+) -> dict[str, Any]:
     """The refusal of a *doing* (``pull``, ``clone`` or ``push``) of
-    *design_id* whose design in the account is not the one this computer's
-    folder is synced with.  Nothing changed, here or in the account."""
+    *design_id*: its design in the account is not the one this computer's
+    folder is synced with (*code* :data:`REFUSED_CODE`), or the folder and
+    the account's design are two histories that share no version
+    (:data:`UNRELATED_CODE`).  Nothing changed, here or in the account."""
     verb = _DOING.get(doing, f"{doing} it with")
-    said = (
-        f"{design_id} on this computer is synced with a design of that name in a different "
-        f"Kiln account, so Kiln did not {verb} this account, and nothing changed. To keep "
-        f"working with this folder, sign in to the Kiln account it is synced with. To have "
-        f"this account's {design_id} on this computer as well, use another user on this "
-        f"computer: Kiln keeps one design of each name for each user."
-    )
+    elsewhere = f"Use another user on this computer for this account's {design_id}."
+    if code == UNRELATED_CODE:
+        said = (
+            f"{design_id} on this computer and {design_id} in this Kiln account are two "
+            f"different histories: they share no version, so Kiln did not {verb} this account, "
+            f"and nothing changed. This folder keeps its own work. To have this account's "
+            f"{design_id} on this computer as well, use another user on this computer: Kiln "
+            f"keeps one design of each name for each user."
+        )
+        ways = ["Keep working in this folder: nothing of it was changed or sent.", elsewhere]
+    else:
+        code = REFUSED_CODE
+        said = (
+            f"{design_id} on this computer is synced with a design of that name in a different "
+            f"Kiln account, so Kiln did not {verb} this account, and nothing changed. To keep "
+            f"working with this folder, sign in to the Kiln account it is synced with. To have "
+            f"this account's {design_id} on this computer as well, use another user on this "
+            f"computer: Kiln keeps one design of each name for each user."
+        )
+        ways = ["Sign in to the Kiln account this folder is synced with, then run it again.", elsewhere]
     out: dict[str, Any] = {
         "status": "error",
         "success": False,
-        "code": REFUSED_CODE,
+        "code": code,
         "error": said,
         "design_id": design_id,
         "changed": False,
-        "ways_forward": [
-            "Sign in to the Kiln account this folder is synced with, then run it again.",
-            f"Use another user on this computer for this account's {design_id}.",
-        ],
+        "ways_forward": ways,
     }
     if tool:
         out["tool"] = tool
@@ -163,7 +235,6 @@ class Verdict:
     doing: str
     refused: dict[str, Any] | None = None
     ties: bool = False
-    said: str | None = None
 
 
 def judge(
@@ -192,27 +263,25 @@ def judge(
             return Verdict(design_id, path, key, doing)
         return Verdict(design_id, path, key, doing, refused=refusal(design_id, doing, tool=tool))
     kept = here() if callable(here) else here
-    held_here = {str(v) for v in kept or () if v} | versions_kept_in(path)
+    records = [str(v) for v in kept or () if v]
     in_account = _versions_in(answer)
     if doing == "push":
         # What the account held before this push: what it holds now, less
         # the versions this push added.
         in_account -= {str(v) for v in answer.get("pushed_versions") or () if v}
-    said = None
-    if held_here and in_account and not (held_here & in_account):
-        said = (
-            f"{design_id} on this computer is now synced with {design_id} in this Kiln account. "
-            f"None of the versions here were in this account's {design_id}, and Kiln had no record "
-            f"of which account's design this folder was; from now on a pull, clone or push of "
-            f"{design_id} with a different Kiln account is refused here, so the two are never mixed."
-        )
-    return Verdict(design_id, path, key, doing, ties=True, said=said)
+    if in_account and holds_versions(path, records) and not related(
+        set(records) | history_kept_in(path), in_account,
+    ):
+        # Two histories that share no version are never joined.
+        return Verdict(design_id, path, key, doing,
+                       refused=refusal(design_id, doing, tool=tool, code=UNRELATED_CODE))
+    return Verdict(design_id, path, key, doing, ties=True)
 
 
 def keep(verdict: Verdict) -> dict[str, Any] | None:
     """After a sync judged by :func:`judge` succeeded, write the folder's tie
-    when it had none.  Returns ``{"tied": True, "said": ...}`` when a tie was
-    written, else ``None``."""
+    when it had none.  Returns ``{"tied": True}`` when a tie was written, else
+    ``None``."""
     if not verdict.ties or verdict.refused is not None or verdict.key is None or _hosted():
         return None
     folder = verdict.folder
@@ -230,10 +299,7 @@ def keep(verdict: Verdict) -> dict[str, Any] | None:
     except OSError:
         part.unlink(missing_ok=True)
         return None
-    out: dict[str, Any] = {"tied": True}
-    if verdict.said:
-        out["said"] = verdict.said
-    return out
+    return {"tied": True}
 
 
 def numbers_may_be_taken(folder: str | Path | None, answer: Any) -> bool:
@@ -259,6 +325,11 @@ __all__ = [
     "NUMBERS_NOT_FOR_THIS_FOLDER",
     "REFUSED_CODE",
     "REFUSED_STATUS",
+    "UNRELATED_CODE",
+    "HISTORY_FIELD",
+    "history_kept_in",
+    "holds_versions",
+    "related",
     "TIE_FILE",
     "Verdict",
     "judge",

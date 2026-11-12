@@ -46,8 +46,8 @@ class _Accounts:
     def __init__(self) -> None:
         self.signed_in = "X"
         self.designs = {
-            "X": {"key": KEY_X, "versions": [("x" * 31 + str(n), n) for n in (1, 2, 3)]},
-            "Y": {"key": KEY_Y, "versions": [("y" * 31 + str(n), n) for n in (1, 2)]},
+            "X": {"key": KEY_X, "versions": [(f"{n:012x}" + "a" * 20, n) for n in (1, 2, 3)]},
+            "Y": {"key": KEY_Y, "versions": [(f"{n + 100:012x}" + "b" * 20, n) for n in (1, 2)]},
         }
         self.kept: list[dict] = []
         self.models_sent: list[dict] = []
@@ -56,7 +56,7 @@ class _Accounts:
         own = self.designs[self.signed_in]
         ids = [vid for vid, _n in own["versions"]]
         branch = {"branch_id": f"{self.signed_in}-main", "design_id": "vase", "name": "main",
-                  "head_version_id": ids[-1]}
+                  "head_version_id": ids[-1] if ids else None}
         versions = [{"version_id": vid, "parent_version_id": ids[i - 1] if i else None,
                      "created_at": 10.0 + i, "version_number": n}
                     for i, (vid, n) in enumerate(own["versions"])]
@@ -71,7 +71,7 @@ class _Accounts:
                 "created": "2026-11-01T00:00:00+00:00"}} for vid, n in own["versions"]],
             "releases": [],
             "account_numbers": {vid: n for vid, n in own["versions"]},
-            "version_number_mark": max(n for _vid, n in own["versions"]),
+            "version_number_mark": max((n for _vid, n in own["versions"]), default=0),
             "design_key": own["key"],
         }
         if single:
@@ -80,6 +80,19 @@ class _Accounts:
             answer["branches"] = [branch]
         return answer
 
+    def _judged(self, body: dict):
+        """The account's judgment of a push, as Kiln's servers make it: a tie
+        that is another design's, or a history sharing no version with a
+        design that holds some, is refused (HTTP 412) before anything is kept."""
+        own = self.designs[self.signed_in]
+        held = {vid for vid, _n in own["versions"]}
+        carried, history = body.get(design_tie.KEY_FIELD), body.get(design_tie.HISTORY_FIELD)
+        if carried and carried != own["key"]:
+            return {**design_tie.refusal("vase", "push"), "http_status": 412}
+        if not carried and isinstance(history, list) and held and not design_tie.related(history, held):
+            return {**design_tie.refusal("vase", "push", code=design_tie.UNRELATED_CODE), "http_status": 412}
+        return None
+
     def request(self, tool, method, path, body=None, **_kw):
         own = self.designs[self.signed_in]
         if path.endswith("/clone"):
@@ -87,9 +100,9 @@ class _Accounts:
         if path.endswith("/branches/pull"):
             return self._bundle(single=True)
         if path.endswith("/branches/push"):
-            carried = (body or {}).get("design_key")
-            if carried and carried != own["key"]:
-                return {**design_tie.refusal("vase", "push"), "http_status": 412}
+            refused = self._judged(body or {})
+            if refused is not None:
+                return refused
             self.kept.append({"account": self.signed_in, "body": body})
             ids = [v["version_id"] for v in body["versions"]]
             held = {vid for vid, _n in own["versions"]}
@@ -108,9 +121,9 @@ class _Accounts:
         if path.endswith("/proven/push"):
             return {"kept": 0}
         if path.endswith("/meshes/stored"):
-            carried = (body or {}).get("design_key")
-            if carried and carried != own["key"]:
-                return {**design_tie.refusal("vase", "push"), "http_status": 412}
+            refused = self._judged(body or {}) if (body or {}).get("design_id") else None
+            if refused is not None:
+                return refused
             return {"stored": []}
         if method == "PUT" and "/api/cloud/meshes/" in path:
             self.models_sent.append({"account": self.signed_in, "path": path})
@@ -194,6 +207,7 @@ class TestTwoAccountsWithOneDesignName:
         assert set(tie) == {design_tie.KEY_FIELD, "tied_by", "tied_at"}
         accounts.signed_in = "Y"
         said = json.dumps(courier.pull("cloud_pull_branch", "vase"))
+        said += json.dumps(design_tie.refusal("vase", "push", code=design_tie.UNRELATED_CODE))
         for detail in (KEY_X, KEY_Y, "X v", "Y v", *(vid for d in accounts.designs.values()
                                                        for vid, _n in d["versions"])):
             assert detail not in said, f"the refusal names {detail!r}"
@@ -213,14 +227,14 @@ class TestAFolderTiedToNoDesignYet:
         accounts.signed_in = "Y"
         assert courier.pull("cloud_pull_branch", "vase")["code"] == design_tie.REFUSED_CODE
 
-    def test_versions_the_account_does_not_hold_tie_it_and_the_answer_says_so(self, home, accounts):
+    def test_versions_the_account_does_not_hold_are_two_histories_and_are_refused(self, home, accounts):
         folder = _folder(home)
         for n in (1, 2):
             _recipe(folder, n, "here" + str(n) * 28)
-        pulled = courier.pull("cloud_pull_branch", "vase")
-        assert pulled["status"] == "success", pulled
-        assert design_tie.tied_key(folder) == KEY_X
-        assert "now synced with vase in this Kiln account" in pulled["said_tie"]
+        before = _snapshot(folder)
+        refused = courier.pull("cloud_pull_branch", "vase")
+        assert refused["code"] == design_tie.UNRELATED_CODE, refused
+        assert _snapshot(folder) == before and design_tie.tied_key(folder) is None
 
     def test_a_push_from_an_untied_folder_ties_it_to_the_design_the_account_kept(self, home, accounts):
         folder = _folder(home)
@@ -291,3 +305,41 @@ class TestNumbersFollowTheTie:
             vault.close()
         assert _records() == before
         assert design_tie.numbers_may_be_taken(folder, {"design_key": KEY_X})
+
+
+class TestTwoHistories:
+    def test_files_an_older_kiln_named_by_id_are_the_accounts_versions(self, home, accounts):
+        folder = _folder(home)
+        folder.mkdir(parents=True)
+        for vid, n in accounts.designs["X"]["versions"]:
+            (folder / f".kiln_recipe.{vid[:12]}.json").write_text(json.dumps({
+                "name": "vase", "design_id": "vase", "version": n, "source_scad": f"cube({n});"}))
+        pulled = courier.pull("cloud_pull_branch", "vase")
+        assert pulled["status"] == "success", pulled
+        assert design_tie.tied_key(folder) == KEY_X
+
+    def test_an_account_design_that_holds_no_version_joins_a_folder_with_work(self, home, accounts):
+        folder = _folder(home)
+        _recipe(folder, 1, "here" + "1" * 28)
+        accounts.designs["X"]["versions"] = []
+        assert courier.pull("cloud_pull_branch", "vase")["status"] == "success"
+        accounts.designs["X"]["versions"] = []
+        assert courier.push("cloud_push_branch", "vase")["status"] == "success"
+
+    def test_a_push_of_two_histories_is_refused_and_the_account_keeps_nothing(self, home, accounts):
+        folder = _folder(home)
+        _recipe(folder, 1, "here" + "1" * 28)
+        refused = courier.push("cloud_push_branch", "vase")
+        assert refused["code"] == design_tie.UNRELATED_CODE, refused
+        assert not accounts.kept and not accounts.models_sent
+        assert design_tie.tied_key(folder) is None
+
+    def test_the_cloud_pull_command_refuses_two_histories(self, home, accounts):
+        from click.testing import CliRunner
+
+        from kiln.cli.history_commands import cloud_group
+
+        _recipe(_folder(home), 1, "here" + "1" * 28)
+        result = CliRunner().invoke(cloud_group, ["pull", "vase", "--json"])
+        assert result.exit_code == 1, result.output
+        assert json.loads(result.output)["code"] == design_tie.UNRELATED_CODE

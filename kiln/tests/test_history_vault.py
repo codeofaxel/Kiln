@@ -454,10 +454,15 @@ class TestAPushSendsEachModelOnce:
         answer, calls = _account([_sha(MESH_V1)])
         monkeypatch.setattr(courier, "_request", answer)
         assert courier.push("cloud_push_branch", "mug")["status"] == "success"
-        assert calls[0][:3] == (
-            "POST", "/api/cloud/meshes/stored",
-            {"sha256s": sorted([_sha(MESH_V1), _sha(MESH_V2)]), "notes": True},
-        )
+        method, path, asked = calls[0][:3]
+        assert (method, path) == ("POST", "/api/cloud/meshes/stored")
+        assert {k: asked[k] for k in ("sha256s", "notes")} == {
+            "sha256s": sorted([_sha(MESH_V1), _sha(MESH_V2)]), "notes": True,
+        }
+        # A folder tied to no design carries its history, so the account can
+        # refuse joining it with a design that shares none of it.
+        assert asked["design_id"] == "mug"
+        assert set(asked["design_history"]) >= {v["version_id"] for v in calls[-1][2]["versions"]}
         assert [(m, p, c) for m, p, _, c in calls if m == "PUT"] == [
             ("PUT", f"/api/cloud/meshes/{_sha(MESH_V2)}", MESH_V2),
         ]
