@@ -48,6 +48,10 @@ logger = logging.getLogger(__name__)
 STATUSES = ("needed", "done", "clear")
 #: What was repaired.  A label for the person; Kiln never reasons from it.
 KINDS = ("nozzle", "hotend", "extruder", "bed", "belts", "other")
+#: The parts a recorded nozzle swap repairs.  A standing "needs repair" about
+#: one of these, or naming no part, is closed by the swap; one about any
+#: other part stands until the person says it is repaired.
+SWAP_CLOSES = ("", "nozzle", "hotend")
 #: How far back a repair may be dated.
 BACKDATE_LIMIT_S = 30 * 86400
 #: The longest note kept.
@@ -426,7 +430,9 @@ def start_warning(adapter: Any, *, db: Any = None) -> str | None:
 
 def mark_nozzle_swap(printer_id: Any, install_date: Any = None, *, db: Any = None) -> dict[str, Any] | None:
     """A nozzle swap Kiln recorded is a repair of that printer: ``done`` /
-    ``nozzle``, never ``needed``, and no second question.  The one helper
+    ``nozzle``, never ``needed``, and no second question.  A printer
+    standing marked needs repair for another part (:data:`SWAP_CLOSES`)
+    keeps that mark, and the reply says so.  The one helper
     every door that records a swap calls, on the computer the printer is
     connected to.
 
@@ -446,6 +452,18 @@ def mark_nozzle_swap(printer_id: Any, install_date: Any = None, *, db: Any = Non
         if found is None:
             return None
         _adapter, name, _how = found
+        standing = condition(name, db=db)
+        if standing.get("state") == "needs_repair" and (standing.get("kind") or "") not in SWAP_CLOSES:
+            return {
+                "marked": False,
+                "printer": name,
+                "status": "needs_repair",
+                "kind": standing.get("kind"),
+                "next": (
+                    f"{name} stays marked needs repair ({standing.get('kind')}): a nozzle swap "
+                    "does not close that. Say when it is repaired."
+                ),
+            }
         day = str(install_date or "").strip()
         when = day if day and day[:10] != datetime.now().date().isoformat() else None
         out = mark(name, "done", kind="nozzle", when=when, db=db)
