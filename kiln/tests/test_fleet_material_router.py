@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import types
 from typing import Any
 
@@ -322,3 +323,178 @@ def test_only_the_two_questions_a_printer_answers_for_itself_take_a_name(db):
     assert {"summary", "assign"} == ONE_PRINTER_QUESTIONS
     with pytest.raises(ValueError, match="one named printer"):
         inventory_answer("restock", db, feature="x", printer_name="a1")
+
+
+# ---------------------------------------------------------------------------
+# The plan is named in the plan check's own words, at every door
+# ---------------------------------------------------------------------------
+
+
+#: The doors that hand the across-machines refusal back as it is.
+REFUSES = [(door, kwargs) for door, kwargs, _q in DOORS
+           if door not in ASKS_WHICH_PRINTER and door != "check_material_sufficiency"]
+#: The doors that ask which printer instead.
+ASKS = [(door, kwargs) for door, kwargs, _q in DOORS if door in ASKS_WHICH_PRINTER]
+#: What a reply may carry only when it sells a plan.
+PITCH_KEYS = {"upgrade_url", "upgrade_hint", "upgrade_nudge"}
+
+
+class TestThePlanIsNamedInThePlanChecksOwnWords:
+    """Several printers below the plan that covers them, decided by the plan
+    check of an install with no kiln-pro (``kiln.account_plan``) in each
+    state a sign-in can be in.  Every door says what is true of the caller,
+    and only words that point at the pricing page come with the pricing
+    link or the nudge."""
+
+    @pytest.fixture(autouse=True)
+    def _account_plan_decides(self, tools, servers, monkeypatch, tmp_path):
+        import kiln.licensing  # noqa: F401 -- the name every gate imports
+        from kiln import account_plan
+
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        monkeypatch.setattr(account_plan, "_last_ask_at", 0.0)
+        monkeypatch.setattr(account_plan, "_last_ask_answered", True)
+        plan_module = sys.modules["kiln.licensing"]
+        for name in ("LicenseTier", "check_tier", "get_tier", "max_printers_for_tier"):
+            monkeypatch.setattr(plan_module, name, getattr(account_plan, name), raising=False)
+        self.tools, self.servers, self.monkeypatch, self.home = tools, servers, monkeypatch, tmp_path
+        self._printers(3)
+
+    def _printers(self, count: int) -> None:
+        import kiln.registry as registry_mod
+
+        names = [f"p{n:02d}" for n in range(1, count + 1)]
+        self.monkeypatch.setattr(registry_mod, "get_registry", lambda: _Registry(names))
+
+    def _sign_in(self, **record: Any) -> None:
+        from tests.test_account_plan import _sign_in
+
+        _sign_in(self.home, **record)
+
+    def _every_door(self) -> dict[str, dict[str, Any]]:
+        return {door: self.tools[door](**kwargs) for door, kwargs in REFUSES + ASKS}
+
+    @staticmethod
+    def _words(door: str, out: dict[str, Any]) -> str:
+        return out["note"] if door in ASKS_WHICH_PRINTER else out["error"]
+
+    def _sold_the_plan(self, answers: dict[str, dict[str, Any]], plan: str, machines: int = 3) -> None:
+        for door, _kwargs in REFUSES:
+            out = answers[door]
+            assert out["code"] == "TIER_FLEET_SCOPE" and out["machines"] == machines, door
+            assert "kiln3d.com/pricing" in out["upgrade_hint"], door
+            assert out["upgrade_nudge"]["cta"]["tier"] == plan, door
+        for door, _kwargs in ASKS:
+            assert answers[door]["ask"] == "Which printer?" and answers[door]["count"] == machines, door
+            assert answers[door]["upgrade_url"].endswith(f"tool={door}"), door
+
+    def _never_sold(self, answers: dict[str, dict[str, Any]]) -> None:
+        for door, out in answers.items():
+            assert not PITCH_KEYS & set(out), (door, sorted(PITCH_KEYS & set(out)))
+            assert "pricing" not in json.dumps(out), door
+        for door, _kwargs in REFUSES:
+            assert answers[door]["code"] == "TIER_FLEET_SCOPE" and answers[door]["machines"] == 3, door
+        for door, _kwargs in ASKS:
+            assert answers[door]["ask"] == "Which printer?" and answers[door]["count"] == 3, door
+
+    def test_signed_out_is_told_how_a_subscriber_connects_and_where_the_plan_is(self):
+        answers = self._every_door()
+
+        for door, out in answers.items():
+            words = self._words(door, out)
+            assert "across all 3 of your machines needs Kiln Business" in words, door
+            assert "Already subscribed?" in words, door
+        self._sold_the_plan(answers, "business")
+        # The recommender words the one-machine half its own way.
+        assert "printer_id" in answers["recommend_material"]["upgrade_hint"]
+        assert self.servers == []
+
+    def test_signed_in_on_a_smaller_plan_is_told_which_account_and_plan_kiln_sees(self):
+        from tests.test_account_plan import _account_says
+
+        self._sign_in(tier="pro")
+        with _account_says("pro"):
+            answers = self._every_door()
+
+        for door, out in answers.items():
+            words = self._words(door, out)
+            assert "needs Kiln Business" in words, door
+            assert "signed in as maker@example.com, on the Pro plan" in words, door
+            assert "Already subscribed?" not in words, door
+        self._sold_the_plan(answers, "business")
+
+    def test_a_refused_sign_in_is_told_to_sign_back_in_and_never_to_buy(self):
+        self._sign_in(tier="business", refresh_token="", refresh_rejected_at=int(time.time()))
+
+        answers = self._every_door()
+
+        for door, out in answers.items():
+            words = self._words(door, out)
+            assert "has expired" in words and "Signing in again" in words, door
+        self._never_sold(answers)
+        assert self.servers == []
+
+    def test_an_unconfirmed_fleet_plan_is_told_to_get_online_and_never_to_buy(self):
+        from tests.test_account_plan import _account_unreachable
+
+        self._sign_in(tier="business", checked_ago_s=8 * 24 * 3600)
+        with _account_unreachable():
+            answers = self._every_door()
+
+        for door, out in answers.items():
+            words = self._words(door, out)
+            assert "is part of your Business plan" in words and "online" in words, door
+        self._never_sold(answers)
+        assert self.servers == []
+
+    def test_more_machines_than_business_covers_is_asked_about_enterprise(self):
+        from kiln.account_plan import BUSINESS_TIER_MAX_PRINTERS
+        from tests.test_account_plan import _account_says
+
+        self._sign_in(tier="business")
+        with _account_says("business"):
+            self._printers(BUSINESS_TIER_MAX_PRINTERS)
+            covered = self.tools["get_restock_suggestions"]()
+            self._printers(BUSINESS_TIER_MAX_PRINTERS + 1)
+            answers = self._every_door()
+
+        # As many machines as the plan covers: Kiln's servers answer.
+        assert covered["success"] is True and [a["question"] for a in self.servers] == ["restock"]
+        over = BUSINESS_TIER_MAX_PRINTERS + 1
+        for door, out in answers.items():
+            words = self._words(door, out)
+            assert f"across all {over} of your machines needs Kiln Enterprise" in words, door
+            assert "on the Business plan" in words, door
+        self._sold_the_plan(answers, "enterprise", machines=over)
+
+    def test_a_plan_check_that_takes_no_subject_has_the_feature_said_first(self):
+        """A plan check that takes the plan alone speaks of "this feature"."""
+        lapsed = "This feature is part of your Kiln Business plan. Signing in again takes a few seconds."
+        self.monkeypatch.setattr(sys.modules["kiln.licensing"], "check_tier", lambda required: (False, lapsed))
+
+        out = self.tools["get_restock_suggestions"]()
+        ask = self.tools["material_on_hand"]()
+
+        assert out["error"] == f"Fleet restock suggestions answers across all 3 of your machines. {lapsed}"
+        assert ask["note"].endswith(f"Fleet material summary answers across all 3 of your machines. {lapsed}")
+        assert not PITCH_KEYS & (set(out) | set(ask))
+
+    def test_a_plan_module_with_no_plan_check_keeps_the_standing_refusal(self):
+        """A plan module holding only the tier and the cap gives no words: the
+        refusal stands, as the Business refusal with its link, and is never
+        turned into an answer."""
+        stand_in = types.ModuleType("kiln.licensing")
+        stand_in.get_tier = lambda: "free"
+        stand_in.max_printers_for_tier = lambda _tier: 1
+        self.monkeypatch.setitem(sys.modules, "kiln.licensing", stand_in)
+
+        out = self.tools["get_restock_suggestions"]()
+        ask = self.tools["material_on_hand"]()
+
+        assert out["success"] is False and out["code"] == "TIER_FLEET_SCOPE"
+        assert out["error"].endswith("fleet views are a Kiln Business feature.")
+        assert "kiln3d.com/pricing" in out["upgrade_hint"] and out["upgrade_nudge"]["cta"]["tier"] == "business"
+        assert ask["note"].endswith("fleet views are a Kiln Business feature.") and "summary" not in ask
+        assert ask["upgrade_url"].endswith("tool=material_on_hand")
+        assert self.servers == []

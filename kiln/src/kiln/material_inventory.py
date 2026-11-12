@@ -251,8 +251,17 @@ def _get_purchase_urls(
     return {"amazon": f"https://www.amazon.com/s?k={query}"}
 
 
+def _points_at_pricing(*words: object) -> bool:
+    """Whether any of *words* sends the person to the pricing page."""
+    from kiln.tiers_and_terms import PRICING_URL
+
+    page = PRICING_URL.split("://", 1)[-1]
+    return any(page in str(text or "") for text in words)
+
+
 def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
-    """Refuse a FLEET-WIDE material answer below Business; ``None`` allows.
+    """Refuse a FLEET-WIDE material answer below the plan that covers the
+    machines; ``None`` allows.
 
     Every tool here that answers ACROSS machines calls this one helper —
     a per-door branch is how the drift starts.
@@ -266,6 +275,16 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
     refused here even when it drives them one at a time.  Per-machine
     questions stay open at every tier — scope to one printer and this
     gate never fires.
+
+    The refusal is worded by the plan check (``kiln.licensing.check_tier``),
+    asked about the smallest plan whose printer cap covers every machine,
+    so it says what is true of this caller: signed out, how a subscriber
+    connects this machine; signed in on a smaller plan, which account and
+    plan Kiln sees; a sign-in the server refused, to sign back in; a paid
+    plan Kiln has not confirmed for too long, to get online.  The pricing
+    link (``upgrade_hint``) and the nudge are attached only when those
+    words point at the pricing page.  A plan check that gives no words
+    leaves the standing Business refusal, link and nudge included.
 
     Two failure modes, deliberately opposite:
 
@@ -294,19 +313,54 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
         if cap is None or cap <= 0 or machines <= cap:
             return None
 
-        verdict = {
+        plan, said, sells = "business", "", True
+        try:
+            from kiln.account_plan import LicenseTier as SoldPlan
+            from kiln.licensing import LicenseTier, check_tier, max_printers_for_tier
+
+            # The plans Kiln sells, lowest first: ask about the first whose
+            # printer cap covers every machine.
+            for sold in SoldPlan:
+                sold_cap = max_printers_for_tier(sold.value)
+                if sold_cap is None or sold_cap >= machines:
+                    plan = sold.value
+                    break
+            subject = f"{feature} across all {machines} of your machines"
+            try:
+                covered, words = check_tier(LicenseTier(plan), subject=subject)
+                lead = ""
+            except TypeError:
+                # A plan check that takes no subject speaks of "this
+                # feature", so the feature and the count are said first.
+                covered, words = check_tier(LicenseTier(plan))
+                lead = f"{feature} answers across all {machines} of your machines. "
+            words = str(words or "").strip()
+            if not covered and words:
+                said = lead + words
+                sells = _points_at_pricing(said)
+        except Exception:  # noqa: BLE001 — no words: the standing refusal
+            logger.debug("fleet-scope plan check gave no words", exc_info=True)
+            said, sells = "", True
+        if not said:
+            plan = "business"
+
+        verdict: dict[str, Any] = {
             "success": False,
-            "error": (
+            "error": said or (
                 f"{feature} answers across all {machines} of your machines, "
                 f"and fleet views are a Kiln Business feature."
             ),
             "code": "TIER_FLEET_SCOPE",
             "machines": machines,
-            "upgrade_hint": (
-                "Ask about one printer to stay on your current plan, or see "
-                "https://kiln3d.com/pricing for fleet-wide answers."
-            ),
         }
+        if not sells:
+            # Words that do not point at the pricing page (sign back in, get
+            # online) carry no pitch.
+            return verdict
+        verdict["upgrade_hint"] = (
+            "Ask about one printer to stay on your current plan, or see "
+            "https://kiln3d.com/pricing for fleet-wide answers."
+        )
         # Structured twin of the sentences above, for a surface that renders
         # rather than prints.  Additive: the per-printer free path stays the
         # first thing named, and every door that funnels here inherits the
@@ -318,16 +372,16 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
                 "upgrade_nudge",
                 upgrade_nudge_block(
                     variant="cross_machine_inventory",
-                    tier="business",
+                    tier=plan,
                     feature="Cross-machine material inventory",
                     headline=(
                         "Answer this material question across every machine "
                         "at once."
                     ),
                     outcome_preview=(
-                        "Kiln Business would compare spools and capability "
-                        "across the registered machines and prepare one "
-                        "cross-machine answer."
+                        f"Kiln {plan.title()} would compare spools and "
+                        "capability across the registered machines and "
+                        "prepare one cross-machine answer."
                     ),
                     free_included="The per-printer answer stays available.",
                     moment="resource_threshold",
@@ -990,7 +1044,9 @@ def _one_named_printer(question: str, db: Any, printer_name: str, params: dict[s
 def ask_which_printer(refused: dict[str, Any], *, tool: str, what: str) -> dict[str, Any]:
     """What a door that can answer for one printer says in place of the
     across-machines refusal *refused*: the printers set up here and the
-    question, with the plan that answers for all of them named once.  Any
+    question, with the plan that answers for all of them named once, in
+    the refusal's own words (:func:`fleet_scope_verdict`).  The pricing
+    link is attached only when those words point at the pricing page.  Any
     other refusal comes back as it is."""
     if refused.get("code") != "TIER_FLEET_SCOPE":
         return refused
@@ -1006,17 +1062,17 @@ def ask_which_printer(refused: dict[str, Any], *, tool: str, what: str) -> dict[
         logger.debug("printer list unavailable", exc_info=True)
         rows = []
     count = len(rows) or int(refused.get("machines") or 0)
-    return {
+    said = str(refused.get("error") or "").strip()
+    answer: dict[str, Any] = {
         "success": True,
         "ask": "Which printer?",
         "known_printers": rows,
         "count": count,
-        "note": (
-            f"{count} printers are set up here. Name one (printer_name=...) for {what}. "
-            "Checking all of them at once is part of Kiln Business."
-        ),
-        "upgrade_url": upgrade_link(tool),
+        "note": f"{count} printers are set up here. Name one (printer_name=...) for {what}. {said}".rstrip(),
     }
+    if _points_at_pricing(said, refused.get("upgrade_hint")):
+        answer["upgrade_url"] = upgrade_link(tool)
+    return answer
 
 
 def registered_machines() -> int:

@@ -774,10 +774,13 @@ class _IntelligenceToolsPlugin:
                         on_hand = [m.to_dict() for m in get_on_hand_materials(get_db(), printer_name=printer_id)]
                     else:
                         on_hand, refused = inventory_answer(
-                            "on_hand", get_db(), feature="Recommending across every machine you own",
+                            "on_hand", get_db(), feature="Recommending from your material on hand",
                         )
                         if refused is not None:
-                            if refused.get("code") == "TIER_FLEET_SCOPE":
+                            # The refusal carries a hint only when its words
+                            # point at the pricing page; this door rewords the
+                            # one-machine half of that hint, never adds one.
+                            if refused.get("code") == "TIER_FLEET_SCOPE" and refused.get("upgrade_hint"):
                                 refused["upgrade_hint"] = (
                                     "Pass printer_id to answer for one machine on "
                                     "your current plan, or see "
