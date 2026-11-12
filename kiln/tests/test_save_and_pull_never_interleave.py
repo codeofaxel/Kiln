@@ -373,6 +373,31 @@ class TestTheLock:
             pass
         assert not marker.exists()
 
+    def test_a_folder_whose_files_cannot_be_locked_is_locked_by_the_file_only_one_can_make(
+        self, tmp_path, monkeypatch,
+    ):
+        """A mount with no file locks: the lock call fails for a reason that
+        is not "another holder has it".  A save is not refused as busy; it
+        holds the folder's lock the other way."""
+        import errno
+        import fcntl
+
+        def unsupported(_handle, _flags):
+            raise OSError(errno.ENOTSUP, "Operation not supported")
+
+        monkeypatch.setattr(fcntl, "flock", unsupported)
+        monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 2.0)
+        marker = tmp_path / f"{version_numbers._LOCK}.held"
+        started = time.monotonic()
+        with version_numbers.numbers_lock(tmp_path):
+            assert time.monotonic() - started < 1.0, "the save waited on a lock nobody holds"
+            assert marker.is_file()
+            assert version_numbers._take_by_file(tmp_path) is None
+        assert not marker.exists()
+        recipe = create_recipe(name="vase", parts=[], source_scad="cube(1);")
+        save_recipe(recipe, str(tmp_path))
+        assert (tmp_path / ".kiln_recipe.v1.json").is_file()
+
     def test_a_pull_that_cannot_get_it_says_nothing_changed(self, tmp_path, monkeypatch):
         monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.2)
         refused: list[BaseException] = []
@@ -512,3 +537,135 @@ def test_with_no_numbers_from_the_account_two_versions_never_share_one_here(home
         assert (vault.version(other) or {}).get("recipe", {}).get("version") == 5
     finally:
         vault.close()
+
+
+class _SomeNumbers(_Accounts):
+    """An account whose database keeps numbers for the versions written
+    since it began to, and none yet for the ones before: only the versions
+    in ``numbered`` are answered with one."""
+
+    numbered: frozenset[str] = frozenset()
+
+    def request(self, tool, method, path, body=None, **kw):
+        answer = super().request(tool, method, path, body, **kw)
+        if isinstance(answer, dict):
+            for key in ("account_numbers", "version_numbers"):
+                if isinstance(answer.get(key), dict):
+                    answer[key] = {vid: n for vid, n in answer[key].items() if vid in self.numbered}
+            if "versions" in answer:
+                answer["versions"] = [
+                    row if row.get("version_id") in self.numbered
+                    else {k: v for k, v in row.items() if k != "version_number"}
+                    for row in answer["versions"]
+                ]
+        return answer
+
+
+def test_an_account_that_numbers_only_some_versions_still_leaves_one_number_each(home, monkeypatch):
+    accounts = _SomeNumbers()
+    monkeypatch.setattr(courier, "_request", accounts.request)
+    assert courier.clone("cloud_clone_design", "vase")["status"] == "success"
+    folder = _folder(home)
+    mine, unnumbered, numbered = "e" * 32, "f" * 32, "d" * 32
+    (folder / ".kiln_recipe.v4.json").write_text(json.dumps({
+        "name": "vase", "design_id": "vase", "version": 4, "version_id": mine,
+        "source_scad": "sphere(4);", "notes": "made here", "created": "2026-11-03T00:00:00+00:00",
+    }))
+    accounts.designs["X"]["versions"] += [(unnumbered, 4), (numbered, 5)]
+    accounts.numbered = frozenset({numbered})
+
+    pulled = courier.pull("cloud_pull_branch", "vase")
+
+    assert pulled["status"] == "success", pulled
+    kept = _kept(folder)
+    _numbers_agree(folder)
+    by_id = {data["version_id"]: number for number, data in kept.items()}
+    assert (by_id[mine], by_id[numbered], by_id[unnumbered]) == (4, 5, 6), sorted(by_id.items(), key=lambda kv: kv[1])
+    assert "version 4 from your Kiln account is version 6" in (pulled.get("said_numbers") or ""), pulled
+    again = courier.pull("cloud_pull_branch", "vase")
+    assert again["status"] == "success" and _kept(folder) == kept and not again.get("said_numbers"), again
+
+
+# ---------------------------------------------------------------------------
+# Guards that had no test able to fail
+# ---------------------------------------------------------------------------
+
+
+def test_the_recipe_writer_takes_the_lock_itself_whoever_calls_it(home, monkeypatch):
+    """A door that writes a version again (a rebuild, a goal noted on it)
+    holds no lock of its own: the writer waits for a pull or a save that
+    does, and writes nothing while it cannot."""
+    folder = _folder(home)
+    folder.mkdir(parents=True)
+    recipe = create_recipe(name="vase", parts=[], source_scad="cube(1);")
+    monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.2)
+    outcome: list[object] = []
+
+    def write() -> None:
+        try:
+            outcome.append(save_recipe(recipe, str(folder)))
+        except version_numbers.NumbersBusy as exc:
+            outcome.append(exc)
+
+    with version_numbers.numbers_lock(folder):
+        thread = threading.Thread(target=write)
+        thread.start()
+        thread.join(10)
+        assert not list(folder.glob(".kiln_recipe*.json")), "the writer wrote while another held the lock"
+    assert len(outcome) == 1 and isinstance(outcome[0], version_numbers.NumbersBusy), outcome
+    write()
+    assert (folder / ".kiln_recipe.v1.json").is_file()
+
+
+def test_when_the_files_cannot_move_the_version_store_is_put_back(home, monkeypatch):
+    """The account gives this computer's version 4 another number.  The
+    store's numbers are set first; when the files then fail to move, the
+    store is put back and nothing here changed."""
+    from kiln import design_versions
+    from kiln.history_vault import HistoryVault
+
+    accounts = _Accounts()
+    monkeypatch.setattr(courier, "_request", accounts.request)
+    assert courier.clone("cloud_clone_design", "vase")["status"] == "success"
+    folder = _folder(home)
+    store = design_versions.DesignVersionStore()
+    try:
+        mine = store.save_version("vase", "sphere(4);", version_number=4).version_id
+    finally:
+        store.close()
+    (folder / ".kiln_recipe.v4.json").write_text(json.dumps({
+        "name": "vase", "design_id": "vase", "version": 4, "version_id": mine,
+        "source_scad": "sphere(4);", "created": "2026-11-03T00:00:00+00:00",
+    }))
+    before = {p.name: p.read_bytes() for p in folder.iterdir() if p.name != ".kiln_numbers.lock"}
+    other = "f" * 32
+    answer = {"account_numbers": {other: 4}, "version_number_mark": 4,
+              "design_key": accounts.designs["X"]["key"], "design_line": accounts.designs["X"]["line"]}
+
+    def files_fail(*_a, **_k):
+        raise OSError("the disk is full")
+
+    monkeypatch.setattr(version_numbers, "renumber_folder", files_fail)
+    vault = HistoryVault()
+    try:
+        with pytest.raises(version_numbers.NumbersNotTaken):
+            vault.take_account_numbers("vase", answer)
+    finally:
+        vault.close()
+    store = design_versions.DesignVersionStore()
+    try:
+        assert store.get_version(mine).version_number == 4, "the store kept a number the files never took"
+    finally:
+        store.close()
+    assert {p.name: p.read_bytes() for p in folder.iterdir()
+            if p.name not in (".kiln_numbers.lock", ".kiln_numbers.json")} == {
+        k: v for k, v in before.items() if k != ".kiln_numbers.json"}
+
+    monkeypatch.undo()
+    monkeypatch.setenv("HOME", str(home))
+    vault = HistoryVault()
+    try:
+        taken = vault.take_account_numbers("vase", answer)
+    finally:
+        vault.close()
+    assert taken["renumbered"] == [{"key": mine, "from": 4, "to": 5}], taken

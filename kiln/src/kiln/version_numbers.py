@@ -12,6 +12,7 @@ of its own) is not a version and takes no number.
 
 from __future__ import annotations
 
+import errno
 import json
 import threading
 from collections.abc import Callable, Iterable, Iterator
@@ -215,10 +216,17 @@ _in_process: dict[str, list[Any]] = {}
 _in_process_guard = threading.Lock()
 
 
+#: What a file lock answers when another holder has it.  Any other failure
+#: is a folder whose files cannot be locked at all.
+_HELD_BY_ANOTHER = frozenset({errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES, errno.EDEADLK})
+
+
 def _system_lock() -> tuple[Callable[[Any], bool], Callable[[Any], None]] | None:
     """``(take, release)`` over an open lock file, by the system's own file
     lock, which it releases when the holder ends however it ends; ``None``
-    on a system that has neither kind."""
+    on a system that has neither kind.  *take* answers whether the lock was
+    got, and raises ``OSError`` for a file that cannot be locked at all (a
+    folder on a mount with no file locks)."""
     try:
         import fcntl
     except ImportError:
@@ -227,8 +235,10 @@ def _system_lock() -> tuple[Callable[[Any], bool], Callable[[Any], None]] | None
         def take(handle: Any) -> bool:
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                return False
+            except OSError as exc:
+                if exc.errno in _HELD_BY_ANOTHER:
+                    return False
+                raise
             return True
 
         return take, lambda handle: None  # released when the file is closed
@@ -241,8 +251,10 @@ def _system_lock() -> tuple[Callable[[Any], bool], Callable[[Any], None]] | None
         try:
             handle.seek(0)
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError:
-            return False
+        except OSError as exc:
+            if exc.errno in _HELD_BY_ANOTHER:
+                return False
+            raise
         return True
 
     def release_region(handle: Any) -> None:
@@ -386,7 +398,15 @@ def _take_across_processes(root: Path, deadline: float) -> Callable[[], None] | 
         while True:
             if system is not None:
                 take, give_back = system
-                if take(handle):
+                try:
+                    got = take(handle)
+                except OSError:
+                    # This folder's files cannot be locked by the system:
+                    # the lock here is the file only one holder can make.
+                    handle.close()
+                    system = handle = None
+                    continue
+                if got:
                     def release(handle: Any = handle, give_back: Any = give_back) -> None:
                         give_back(handle)
                         handle.close()
@@ -604,21 +624,25 @@ def settle_arrivals(answer: Any, local: dict[str, int], past: Iterable[Any] = ()
     """The versions in a pull's or clone's *answer* that cannot keep, on this
     computer, the number they arrive with: ``{version_id: {"from", "to"}}``.
 
-    Only for an account that keeps no version numbers (when it keeps them,
-    they are taken instead: :func:`plan_numbers`).  A version arrives with
-    the number in its recipe.  *local* is every version kept here, with its
-    number, as :func:`plan_numbers` takes it.
+    Only for the versions the account gave no number: all of them, for an
+    account that keeps none, and the ones written before it kept any, until
+    it numbers them.  (A version the account numbered takes that number:
+    :func:`plan_numbers`, which the caller runs first.)  Such a version
+    arrives with the number in its recipe.  *local* is every version kept
+    here, with the number it holds now, as :func:`plan_numbers` takes it.
 
     A version this computer does not keep yet: when another version here
     holds its number, or an arrival made before it does, it takes the next
-    number past every number here, in the answer and in *past*.  A version
-    this computer already keeps (``"kept": True``) stays under the number it
-    holds here.  Nothing this computer keeps is renumbered: with no number
-    from the account there is nothing to renumber it to.  So two versions
-    never hold one number here, whatever the account keeps.
+    number past every number here, in the answer (the account's own
+    numbers and its mark included) and in *past*.  A version this computer
+    already keeps (``"kept": True``) stays under the number it holds here.
+    Nothing this computer keeps is renumbered for it: with no number from
+    the account there is nothing to renumber it to.  So two versions never
+    hold one number here, whatever the account keeps.
     """
-    if not isinstance(answer, dict) or account_numbers_in(answer)[0]:
+    if not isinstance(answer, dict):
         return {}
+    account, mark = account_numbers_in(answer)
     made = {
         str(v["version_id"]): v.get("created_at")
         for v in answer.get("versions") or () if isinstance(v, dict) and v.get("version_id")
@@ -631,7 +655,7 @@ def settle_arrivals(answer: Any, local: dict[str, int], past: Iterable[Any] = ()
         recipe = sidecar.get("recipe_dict")
         number = _whole(recipe.get("version")) if isinstance(recipe, dict) else None
         vid = str(sidecar["version_id"])
-        if number is None:
+        if number is None or vid in account:
             continue
         here = _whole(local.get(vid))
         if vid not in local:
@@ -640,8 +664,10 @@ def settle_arrivals(answer: Any, local: dict[str, int], past: Iterable[Any] = ()
             moves[vid] = {"from": number, "to": here, "kept": True}
     if not arriving:
         return moves
-    held = {n for n in (_whole(v) for v in local.values()) if n is not None}
-    ceiling = max([*held, *arriving.values(), *(n for n in (_whole(p) for p in past) if n is not None)], default=0)
+    held = {n for n in (_whole(v) for v in local.values()) if n is not None} | set(account.values())
+    ceiling = max(
+        [mark, *held, *arriving.values(), *(n for n in (_whole(p) for p in past) if n is not None)], default=0,
+    )
 
     def when(vid: str) -> tuple[float, str]:
         try:
@@ -688,10 +714,11 @@ def said_arrivals(moves: dict[str, dict[str, Any]]) -> str | None:
         return None
     items = [f"version {m['from']} from your Kiln account is version {m['to']}" for _vid, m in sorted(moves.items())]
     listed = items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+    one = len(items) == 1
     return (
-        f"On this computer {listed}: another version here already holds "
-        f"{'that number' if len(items) == 1 else 'those numbers'}, and your account keeps no "
-        "version numbers yet to say which is which."
+        f"On this computer {listed}: another version already holds "
+        f"{'that number' if one else 'those numbers'}, and your account has not given "
+        f"{'this version' if one else 'these versions'} a number of {'its' if one else 'their'} own yet."
     )
 
 

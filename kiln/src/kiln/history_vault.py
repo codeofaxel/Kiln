@@ -1062,10 +1062,8 @@ class HistoryVault:
         every version this computer keeps of *design_id* (its records, its
         library files and its version store).  The caller holds the numbers
         lock.  The folder's mark is raised past each number given."""
-        from kiln.version_numbers import account_numbers_in, raise_mark, settle_arrivals
+        from kiln.version_numbers import raise_mark, settle_arrivals
 
-        if account_numbers_in(answer)[0]:
-            return {}
         folder = _design_folder(design_id)
         here = folder if folder is not None and folder.is_dir() else None
         store = _open_version_store()
@@ -1192,9 +1190,12 @@ class HistoryVault:
             "releases": payload.get("releases") or [],
         }
         design_id = str(bundle_like["design_id"] or "")
-        # An account that keeps no version numbers: a version arriving under
-        # a number already held here takes the next one free here, before
+        # The account's numbers first, so a version only this computer keeps
+        # is out of the way before a pulled version takes its number.  Then
+        # the versions the account gave no number: one arriving under a
+        # number already held here takes the next one free here, before
         # anything of it is recorded.
+        numbers = self.take_account_numbers(design_id, payload) if design_id else {}
         arrivals = self._settle_arrivals(design_id, payload) if design_id else {}
         if arrivals:
             from kiln.version_numbers import with_arrivals_settled
@@ -1211,9 +1212,6 @@ class HistoryVault:
             if b.get("design_id") in (None, design_id) and self._is_designs("branches", b["branch_id"], design_id)
         ]
         bundle_like["branches"] = branches
-        # The account's numbers first, so a version only this computer keeps
-        # is out of the way before a pulled version takes its number.
-        numbers = self.take_account_numbers(design_id, payload) if design_id else {}
         if arrivals:
             from kiln.version_numbers import new_arrivals, said_arrivals
 

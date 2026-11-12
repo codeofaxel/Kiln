@@ -150,7 +150,9 @@ def _note_not_in_history(result: dict, registration: dict | None) -> None:
         result["warnings"] = [*(result.get("warnings") or []), NOT_IN_HISTORY]
 
 
-def _register_on_branch(pro_features: Any, design_id: str, recipe: Any, scad_source: str | None) -> dict | None:
+def _register_on_branch(
+    pro_features: Any, design_id: str, recipe: Any, scad_source: str | None, saving: ExitStack | None = None,
+) -> dict | None:
     """Hand a version just saved here to the branch record, with its number.
 
     One call for every door in this module that saves a version, so each
@@ -159,26 +161,43 @@ def _register_on_branch(pro_features: Any, design_id: str, recipe: Any, scad_sou
     Returns the registration, or ``None`` when this install keeps no branch
     record.  (A kiln-pro whose registration takes no number is called
     without it.)
+
+    *saving* is the door's hold of the design's numbers lock.  It is let go
+    once the version is filed, and only then does the branch record do what
+    it left for afterwards (``after_filed``: sending the version to the
+    person's account, when they turned that on), so nothing slow or over a
+    network runs while another save of the design waits.
     """
     import inspect
 
     register = getattr(pro_features, "register_saved_version", None)
     if register is None:
+        if saving is not None:
+            saving.close()
         return None
-    number = (
-        {"version_number": recipe.version}
-        if "version_number" in inspect.signature(register).parameters
-        else {}
-    )
-    return register(
-        design_id=design_id,
-        scad_source=scad_source,
-        stl_path=recipe.stl_path or None,
-        prompt=recipe.prompt or "",
-        parameters=recipe.parameters,
-        notes=recipe.notes or "",
-        **number,
-    )
+    accepts = inspect.signature(register).parameters
+    extra: dict[str, Any] = {}
+    if "version_number" in accepts:
+        extra["version_number"] = recipe.version
+    if "after_filed" in accepts:
+        extra["after_filed"] = True
+    try:
+        registration = register(
+            design_id=design_id,
+            scad_source=scad_source,
+            stl_path=recipe.stl_path or None,
+            prompt=recipe.prompt or "",
+            parameters=recipe.parameters,
+            notes=recipe.notes or "",
+            **extra,
+        )
+    finally:
+        if saving is not None:
+            saving.close()
+    afterwards = registration.pop("after_filed", None) if isinstance(registration, dict) else None
+    if callable(afterwards):
+        afterwards()
+    return registration
 
 
 def _load_versioned_recipe(design_dir: str, version: int) -> Any:
@@ -430,9 +449,8 @@ class _VersionToolsPlugin:
                     # hook degrades to recipe-only, exactly like free tier
                     # (a missing attribute is not an error here).
                     registration = _register_on_branch(
-                        pro_features, design_id, recipe, scad_source
+                        pro_features, design_id, recipe, scad_source, saving
                     )
-                    saving.close()
                     _note_not_in_history(result, registration)
                     if registration is not None:
                         if registration:
@@ -674,9 +692,8 @@ class _VersionToolsPlugin:
                     # A rollback is a new version: it joins the branch the
                     # way a save does, under the number on its recipe.
                     registration = _register_on_branch(
-                        pro_features, design_id, new_recipe, new_recipe.source_scad
+                        pro_features, design_id, new_recipe, new_recipe.source_scad, saving
                     )
-                    saving.close()
                     _note_not_in_history(result, registration)
                     if registration:
                         result["version"]["branch"] = registration
