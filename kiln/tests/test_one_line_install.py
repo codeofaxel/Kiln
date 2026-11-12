@@ -1209,7 +1209,9 @@ def test_a_held_app_found_here_is_named_and_left_alone(home: Path, kiln_bin: Pat
     result = _install("--dry-run", "--command", str(kiln_bin))
 
     assert result.exit_code == 0
-    assert "Found LM Studio and Goose too. Kiln doesn't connect to them yet" in result.output
+    assert "Found LM Studio and Goose too. Kiln doesn't connect to them yet.\n" in result.output
+    # Says what is true today and promises nothing about later.
+    assert "coming" not in result.output
     assert "Cline" not in result.output
     assert _snapshot(home) == before
 
@@ -1226,4 +1228,4 @@ def test_one_held_app_is_named_alone(home: Path, kiln_bin: Path) -> None:
 
     result = _install("--dry-run", "--command", str(kiln_bin))
 
-    assert "Found LM Studio too. Kiln doesn't connect to it yet" in result.output
+    assert "Found LM Studio too. Kiln doesn't connect to it yet.\n" in result.output

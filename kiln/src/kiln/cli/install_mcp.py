@@ -845,10 +845,7 @@ def install_mcp(
         names = " and ".join(filter(None, [", ".join(held_here[:-1]), held_here[-1]]))
         them = "it" if len(held_here) == 1 else "them"
         click.echo("")
-        click.echo(
-            f"  Found {names} too. Kiln doesn't connect to {them} yet;\n"
-            "  that's coming with a smaller tool set."
-        )
+        click.echo(f"  Found {names} too. Kiln doesn't connect to {them} yet.")
 
     if not only:
         click.echo("")
