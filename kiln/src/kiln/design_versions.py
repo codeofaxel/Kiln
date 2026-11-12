@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import difflib
+import functools
 import json
 import logging
 import os
@@ -110,6 +111,19 @@ def _library_folder(design_id: str) -> Any:
         return None
 
 
+def _locked(method: Any) -> Any:
+    """Run a store method under the store's lock: one connection serves
+    every thread, and a read between another thread's statements reads a
+    half-made row or breaks the statement it shares the connection with."""
+
+    @functools.wraps(method)
+    def under_lock(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return under_lock
+
+
 class DesignVersionStore:
     """SQLite-backed store for design version history.
 
@@ -122,7 +136,8 @@ class DesignVersionStore:
 
     def __init__(self, *, db_path: str | None = None) -> None:
         self._db_path = db_path or _DEFAULT_DB_PATH
-        self._lock = threading.Lock()
+        # Re-entrant: a method holding it calls the reads, which take it too.
+        self._lock = threading.RLock()
 
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
 
@@ -543,6 +558,7 @@ class DesignVersionStore:
                 raise
         return changes
 
+    @_locked
     def get_version(self, version_id: str) -> DesignVersion | None:
         """Retrieve a single version by its ID, or ``None``."""
         row = self._conn.execute(
@@ -551,6 +567,7 @@ class DesignVersionStore:
         ).fetchone()
         return self._row_to_version(row) if row else None
 
+    @_locked
     def list_versions(
         self, design_id: str, *, limit: int = 20
     ) -> list[DesignVersion]:
@@ -564,6 +581,7 @@ class DesignVersionStore:
         ).fetchall()
         return [self._row_to_version(r) for r in rows]
 
+    @_locked
     def diff_versions(self, version_id_a: str, version_id_b: str) -> str:
         """Return a unified diff between two arbitrary versions.
 
@@ -608,6 +626,7 @@ class DesignVersionStore:
             notes=f"Rollback to version {version_id}",
         )
 
+    @_locked
     def get_latest(self, design_id: str) -> DesignVersion | None:
         """Return the most recent version for *design_id*, or ``None``."""
         row = self._conn.execute(
@@ -627,6 +646,7 @@ class DesignVersionStore:
             self._conn.commit()
         return cur.rowcount > 0
 
+    @_locked
     def search_versions(
         self, query: str, *, limit: int = 10
     ) -> list[DesignVersion]:
@@ -669,6 +689,7 @@ class DesignVersionStore:
             )
             self._conn.commit()
 
+    @_locked
     def resolve_aliases(self, name: str) -> list[str]:
         """Return all design_ids associated with *name*.
 
@@ -704,6 +725,7 @@ class DesignVersionStore:
                 ids.add(sub[0])
         return sorted(ids)
 
+    @_locked
     def get_ancestry(
         self, version_id: str, *, max_depth: int = 50
     ) -> list[DesignVersion]:
