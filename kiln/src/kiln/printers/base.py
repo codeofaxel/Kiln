@@ -2311,17 +2311,8 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "cutter count recording failed", exc_info=True
                 )
-            try:
-                from kiln.spool_usage import charge_print
-
-                charge_print(self, file_name, kwargs)
-            except Exception:  # noqa: BLE001 — spool bookkeeping never blocks a print
-                import logging as _logging
-
-                _logging.getLogger(__name__).debug(
-                    "spool count not started", exc_info=True
-                )
             # Open the outcome row NOW, while we can still see the print
+            opened = None
             try:
                 from kiln.auto_record_hook import (
                     clear_cancel_intent,
@@ -2345,11 +2336,24 @@ class PrinterAdapter(ABC):
                 from kiln.learned_print_time import note_start_estimate
 
                 note_start_estimate(opened, file_name)
+                from kiln.print_evidence import note_start_firmware
+
+                note_start_firmware(opened, self)
             except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
                 import logging as _logging
 
                 _logging.getLogger(__name__).debug(
                     "pending-outcome open failed", exc_info=True
+                )
+            try:
+                from kiln.spool_usage import charge_print
+
+                charge_print(self, file_name, kwargs, outcome_job_id=opened)
+            except Exception:  # noqa: BLE001 — spool bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "spool count not started", exc_info=True
                 )
             try:
                 from kiln.ending_watch import spawn_ending_watch
@@ -4350,6 +4354,37 @@ def _record_print_duration(
         note_print_seconds(job_label, hours * 3600.0, printer_name)
 
 
+def _record_progress_at_end(
+    *,
+    printer_names: list[str],
+    job_label: str | None,
+    job: Any,
+    state_age_seconds: float | None,
+    observation_gap_seconds: float | None,
+    stale_after_seconds: float | None = None,
+    settled: bool = False,
+) -> bool:
+    """Bank how far this print had got, from an ending Kiln watched; an ending found out afterwards banks nothing."""
+    if job is None or not _ending_was_watched(
+        observation_gap_seconds=observation_gap_seconds,
+        state_age_seconds=state_age_seconds,
+        stale_after_seconds=stale_after_seconds,
+    ):
+        return False
+    from kiln.print_evidence import note_progress_at_end
+
+    return note_progress_at_end(printer_names, job_label, job, settled=settled)
+
+
+def outcome_printer_names(adapter: Any) -> list[str]:
+    """Every name this printer's outcome rows may be filed under: the registered one, then the backend's own."""
+    names = [outcome_printer_name(adapter)]
+    family = getattr(adapter, "name", "") or ""
+    if family and family not in names:
+        names.append(family)
+    return names
+
+
 OWN_COMMAND_SETTLE_SECONDS: float = 180.0
 
 SLOT_OBSERVE_MIN_INTERVAL_S: float = 20.0
@@ -4450,6 +4485,15 @@ def _feed_outcome_lifecycle(
         label = _job_label(job)
         adapter._reconcile_cutter_print(label or "")
         if label:
+            progress = {
+                "printer_names": outcome_printer_names(adapter),
+                "job_label": label,
+                "job": job,
+                "state_age_seconds": getattr(state, "state_age_seconds", None),
+                "stale_after_seconds": getattr(state, "state_stale_after_seconds", None),
+                "observation_gap_seconds": read_gap_seconds,
+            }
+            banked = _record_progress_at_end(**progress)
             fire_terminal_state_hook(
                 prev_state=prev,
                 new_state=value,
@@ -4458,6 +4502,8 @@ def _feed_outcome_lifecycle(
                 job_id=label,
                 file_name=label,
             )
+            if not banked:
+                _record_progress_at_end(**progress, settled=True)
             _record_print_duration(
                 job_label=label,
                 elapsed_seconds=getattr(job, "print_time_seconds", None),

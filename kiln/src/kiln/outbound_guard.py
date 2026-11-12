@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SENDERS",
     "machine_code",
+    "spool_code",
     "is_listing_link",
     "redact_text",
     "scrub",
@@ -102,6 +103,17 @@ def machine_code(value: Any) -> str | None:
     if not text:
         return None
     return "id:" + hmac.new(_key(), text.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+
+
+def spool_code(value: Any) -> str | None:
+    """A stable one-way code for a recorded spool's id on this computer,
+    made as :func:`machine_code` is, under its own label so a spool and a
+    machine never share a code.  The same spool gives the same code every
+    time here; the code reveals nothing about the id."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    return "sp:" + hmac.new(_key(), b"spool|" + text.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
 
 
 def redact_text(text: str) -> str:
@@ -394,7 +406,10 @@ SENDERS: dict[str, tuple[str, str]] = {
         "not kept; its request "
         "helper also carries kiln/outcome_courier.py's print endings, built field by field "
         "(a random id, version ids, the machine as machine_code(), model and material "
-        "words, nozzle, ending, who settled it, a failure word, two times) and scrubbed; "
+        "words, nozzle, ending, who settled it, a failure word, two times, a one-way code "
+        "of the sliced file's settings, how far the print got, the spool as spool_code() "
+        "and the firmware version text) and scrubbed, the firmware text passing as "
+        "written once it holds only letters, digits, dots, dashes and spaces; "
         "and kiln/machine_repair_courier.py's repair marks and printer announcements "
         "(a random id, the machine as machine_code(), a status word, a kind word, two "
         "times; per printer its code, model word and a one-way shared code -- never the "

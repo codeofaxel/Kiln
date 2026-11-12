@@ -722,6 +722,13 @@ class KilnDB:
                 self._conn.execute(
                     f"ALTER TABLE print_outcomes ADD COLUMN {name} TEXT DEFAULT NULL"
                 )
+        # What a print ran with and how far it got (kiln.print_evidence):
+        # each NULL when Kiln had no reading it could vouch for.
+        for name, sql_type in self.PRINT_EVIDENCE_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE print_outcomes ADD COLUMN {name} {sql_type} DEFAULT NULL"
+                )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_print_outcomes_version ON print_outcomes(version_id)"
         )
@@ -1135,7 +1142,12 @@ class KilnDB:
                     account_sync_id     TEXT DEFAULT NULL,
                     account_pushed_state TEXT DEFAULT NULL,
                     note_by             TEXT DEFAULT NULL,
-                    stop_reason_asked   REAL DEFAULT NULL
+                    stop_reason_asked   REAL DEFAULT NULL,
+                    settings_code       TEXT DEFAULT NULL,
+                    progress_at_end     REAL DEFAULT NULL,
+                    layer_at_end        INTEGER DEFAULT NULL,
+                    spool_id            TEXT DEFAULT NULL,
+                    firmware_version    TEXT DEFAULT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
                     ON print_outcomes(printer_name);
@@ -2908,6 +2920,24 @@ class KilnDB:
     #: Which slicer made the printed file, read from it at the start.
     SLICER_COLUMNS = ("slicer_name", "slicer_version")
 
+    #: Evidence about a print, written beside its ending and never read into
+    #: a verdict here: a one-way code of the settings the sent file was
+    #: sliced with, how far the print had got when it ended (a 0..1 share
+    #: and a layer number), the recorded spool that fed it, and the firmware
+    #: version the printer reported.  See :mod:`kiln.print_evidence`.
+    PRINT_EVIDENCE_COLUMNS = {
+        "settings_code": "TEXT",
+        "progress_at_end": "REAL",
+        "layer_at_end": "INTEGER",
+        "spool_id": "TEXT",
+        "firmware_version": "TEXT",
+    }
+    #: The evidence a start writes, by the job id the start opened.
+    START_EVIDENCE_COLUMNS = ("settings_code", "spool_id", "firmware_version")
+    #: How long after an ending a row with no open start still takes that
+    #: ending's progress reading (seconds).
+    PROGRESS_JUST_ENDED_S = 60.0
+
     def save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
 
@@ -3340,6 +3370,85 @@ class KilnDB:
                 "UPDATE print_outcomes SET slicer_name = ?, slicer_version = ? "
                 "WHERE job_id = ? AND slicer_name IS NULL",
                 (name.strip(), version.strip() if isinstance(version, str) and version.strip() else None, job_id),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
+
+    def set_outcome_evidence(self, job_id: str, column: str, value: str) -> bool:
+        """Write one of a start's own facts (:attr:`START_EVIDENCE_COLUMNS`)
+        onto the print *job_id* names, once: a row that already carries the
+        fact keeps it.  Returns whether a row took it."""
+        if column not in self.START_EVIDENCE_COLUMNS or not job_id:
+            return False
+        if not isinstance(value, str) or not value.strip():
+            return False
+        with self._write_lock:
+            cur = self._conn.execute(
+                f"UPDATE print_outcomes SET {column} = ? WHERE job_id = ? AND {column} IS NULL",
+                (value.strip(), job_id),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
+
+    def record_progress_at_end(
+        self,
+        printer_names: list[str],
+        job_label: str | None,
+        *,
+        fraction: float | None,
+        layer: int | None,
+        settled: bool = False,
+    ) -> bool:
+        """Write how far the print ending under *job_label* had got.
+
+        *fraction* is the share complete (0..1) and *layer* the layer number;
+        either may be ``None``.  With *settled* false the row is the open
+        (``pending``) one this ending belongs to on one of *printer_names*,
+        matched as an arriving ending is; with *settled* true it is a row
+        under that label or file that ended within
+        :attr:`PROGRESS_JUST_ENDED_S`.  A row that already carries either
+        figure keeps both.  Returns whether a row took the reading.
+        """
+        names = [n for n in (printer_names or []) if n]
+        if not names:
+            return False
+        share = None
+        if isinstance(fraction, (int, float)) and not isinstance(fraction, bool) and 0.0 <= fraction <= 1.0:
+            share = float(fraction)
+        layer_no = None
+        if isinstance(layer, int) and not isinstance(layer, bool) and 0 <= layer < 10_000_000:
+            layer_no = int(layer)
+        if share is None and layer_no is None:
+            return False
+        with self._write_lock:
+            row_id = None
+            if not settled:
+                for name in names:
+                    match = self._match_pending_locked(name, job_label)
+                    if match is not None:
+                        row_id = match["id"]
+                        break
+            else:
+                target = _file_stem_token(job_label)
+                marks = ", ".join("?" for _ in names)
+                rows = self._conn.execute(
+                    "SELECT id, job_id, file_name FROM print_outcomes "
+                    f"WHERE printer_name IN ({marks}) AND outcome NOT IN ('pending', 'unknown') "
+                    "AND ended_at IS NOT NULL AND ended_at >= ? ORDER BY ended_at DESC LIMIT 5",
+                    (*names, time.time() - self.PROGRESS_JUST_ENDED_S),
+                ).fetchall()
+                for row in rows:
+                    if row[1] == job_label or (target and target in (
+                        _file_stem_token(row[1]), _file_stem_token(row[2]),
+                    )):
+                        row_id = row[0]
+                        break
+            if row_id is None:
+                return False
+            cur = self._conn.execute(
+                "UPDATE print_outcomes SET progress_at_end = ?, layer_at_end = ? "
+                "WHERE id = ? AND progress_at_end IS NULL AND layer_at_end IS NULL",
+                (share, layer_no, row_id),
             )
             self._conn.commit()
             return bool(getattr(cur, "rowcount", 0))
