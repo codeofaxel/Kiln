@@ -292,6 +292,42 @@ def pooled_row_is_about_the_print(outcome: str | None, failure_mode: str | None)
     mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
     return mode not in MACHINE_FAULTS | OUTSIDE_CAUSES
 
+
+#: What a stop that is not a bad print is called, to the person whose print
+#: it was.  Keyed by cause word; the empty key is a stop with no cause.
+STOP_WORDS: dict[str, str] = {
+    "power_loss": "Stopped: power cut",
+    "filament_runout": "Stopped: filament ran out",
+    "thermal_runaway": "Stopped: heating fault",
+    "mechanical": "Stopped: printer fault",
+    "": "Stopped: printer gave no reason",
+}
+
+
+def stop_said(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+) -> str | None:
+    """The words for a failed or partial ending that is a stop, not a bad
+    print ("Stopped: power cut"), or ``None`` for every other ending.  What a
+    person's own history shows in place of "failed".  Never raises."""
+    kind = ending_verdict(outcome, failure_mode, determined_by)
+    if kind not in ("machine_stop", "outside_stop"):
+        return None
+    mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
+    return STOP_WORDS.get(mode or "", STOP_WORDS[""])
+
+
+def stop_wants_a_reason(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+) -> bool:
+    """Whether the ending is a stop only the printer reported, with no cause
+    named: the one stop worth asking the person about, since they may know
+    whether the part came out bad or something outside the print stopped it."""
+    if ending_verdict(outcome, failure_mode, determined_by) != "machine_stop":
+        return False
+    mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
+    return mode not in MACHINE_FAULTS
+
 # Severity ladder normalization — the parallel three-vocabulary problem.
 # kiln.print_recovery uses free-form strings like "low/medium/high/critical".
 # kiln.print_health_monitor uses an enum: "ok/warning/critical".

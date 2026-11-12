@@ -698,6 +698,11 @@ class KilnDB:
         # string with no label; only a labelled note goes to the account.
         if "note_by" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN note_by TEXT DEFAULT NULL")
+        # When the person was asked why a stop with no cause happened and
+        # could not say (``mark_stop_reason_asked``): the row is not asked
+        # about again.
+        if "stop_reason_asked" not in columns:
+            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN stop_reason_asked REAL DEFAULT NULL")
         # How long the print took against what the slicer said it would
         # (kiln.learned_print_time).  ``estimated_seconds`` is the slicer's
         # time for the file, read at the START Kiln sent; ``print_seconds``
@@ -1130,7 +1135,8 @@ class KilnDB:
                     ended_at            REAL DEFAULT NULL,
                     account_sync_id     TEXT DEFAULT NULL,
                     account_pushed_state TEXT DEFAULT NULL,
-                    note_by             TEXT DEFAULT NULL
+                    note_by             TEXT DEFAULT NULL,
+                    stop_reason_asked   REAL DEFAULT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
                     ON print_outcomes(printer_name);
@@ -3435,6 +3441,67 @@ class KilnDB:
             params,
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
+
+    #: How long after a stop the person is still asked why it happened.
+    STOP_ASK_WINDOW_S = 14 * 24 * 3600
+
+    def list_unexplained_stops(
+        self,
+        printer_name: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Recent prints the printer stopped without naming a cause, that
+        nobody has been asked about yet (``kiln.failure_vocabulary
+        .stop_wants_a_reason``).  The person may know whether the part came
+        out bad or something outside the print stopped it."""
+        from kiln.failure_vocabulary import FAILED_OUTCOMES, stop_wants_a_reason
+
+        marks = ", ".join("?" for _ in FAILED_OUTCOMES)
+        clauses = [f"outcome IN ({marks})", "stop_reason_asked IS NULL",
+                   "COALESCE(ended_at, created_at) >= ?"]
+        params: list[Any] = [*sorted(FAILED_OUTCOMES), time.time() - self.STOP_ASK_WINDOW_S]
+        if printer_name:
+            clauses.append("printer_name = ?")
+            params.append(printer_name)
+        rows = self._conn.execute(
+            f"SELECT * FROM print_outcomes WHERE {' AND '.join(clauses)} "
+            "ORDER BY created_at DESC",
+            params,
+        ).fetchall()
+        out = []
+        for raw in rows:
+            row = self._outcome_row_to_dict(raw)
+            if stop_wants_a_reason(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+                out.append(row)
+                if len(out) >= limit:
+                    break
+        return out
+
+    def mark_stop_reason_asked(self, job_id: str) -> dict[str, Any] | None:
+        """Record that the person was asked why *job_id*'s print stopped and
+        could not say, and return the row, or ``None`` when there is no such
+        print or its ending is not a stop with no cause.  The ending is not
+        touched; the row is owed to the account again so the answer follows
+        it there."""
+        from kiln.failure_vocabulary import stop_wants_a_reason
+
+        with self._write_lock:
+            raw = self._conn.execute(
+                "SELECT * FROM print_outcomes WHERE job_id = ? ORDER BY created_at DESC LIMIT 1",
+                (job_id,),
+            ).fetchone()
+            if raw is None:
+                return None
+            row = self._outcome_row_to_dict(raw)
+            if not stop_wants_a_reason(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+                return None
+            self._conn.execute(
+                "UPDATE print_outcomes SET stop_reason_asked = COALESCE(stop_reason_asked, ?), "
+                "account_pushed_state = NULL WHERE id = ?",
+                (time.time(), row["id"]),
+            )
+            self._conn.commit()
+        return self.get_print_outcome(job_id)
 
     def clear_print_note(self, job_id: str) -> dict[str, Any] | None:
         """Delete the note on *job_id*'s print and return the row as it now

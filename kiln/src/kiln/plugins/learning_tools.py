@@ -313,6 +313,53 @@ def _clear_print_note(job_id: str, outcome: str, notes: str | None) -> dict:
     return {"success": True, "job_id": job_id, "outcome": outcome, "note_cleared": True}
 
 
+def _stop_reason_unknown(job_id: str, outcome: str) -> dict:
+    """The person could not say why *job_id*'s print stopped: remember that
+    they were asked, and change nothing else."""
+    import kiln.server as _srv
+    from kiln.persistence import get_db
+
+    db = get_db()
+    row = db.get_print_outcome(job_id)
+    if row is None:
+        return _srv._error_dict(f"No print recorded as {job_id!r}.", code="NOT_FOUND")
+    if row.get("outcome") != outcome:
+        return _srv._error_dict(
+            f"Print {job_id!r} is recorded as {row.get('outcome')}, not {outcome}; nothing was changed.",
+            code="VALIDATION_ERROR",
+        )
+    marked = db.mark_stop_reason_asked(job_id)
+    if marked is None:
+        return {"success": True, "job_id": job_id, "outcome": outcome, "asked_again": False,
+                "message": "This print's ending already says what happened; nothing was changed."}
+    try:
+        from kiln import outcome_courier
+
+        outcome_courier.push_soon()
+    except Exception:  # noqa: BLE001 -- the next push carries it
+        _logger.debug("outcome courier not offered the answer", exc_info=True)
+    return {"success": True, "job_id": job_id, "outcome": outcome, "asked_again": False,
+            "ending_said": _ending_said(marked),
+            "message": "Kept as a stop with no reason given. It will not be asked about again."}
+
+
+def _ending_said(row: dict) -> str | None:
+    """The words for *row*'s ending when it is a stop and not a bad print."""
+    from kiln.failure_vocabulary import stop_said
+
+    return stop_said(row.get("outcome"), row.get("failure_mode"), row.get("determined_by"))
+
+
+def _with_ending_said(rows: list[dict]) -> list[dict]:
+    """*rows* with ``ending_said`` on each stop: what to call the ending to
+    the person in place of "failed"."""
+    out = []
+    for row in rows:
+        said = _ending_said(row)
+        out.append({**row, "ending_said": said} if said else row)
+    return out
+
+
 def record_print_outcome(
     job_id: str,
     outcome: str,
@@ -336,6 +383,7 @@ def record_print_outcome(
     branch_id: str | None = None,
     note_by: str | None = None,
     clear_note: bool = False,
+    stop_reason_unknown: bool = False,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -392,6 +440,11 @@ def record_print_outcome(
             wrong print is never changed); nothing else is recorded and the
             ending stays as it was.  The delete reaches the person's Kiln
             account too.
+        stop_reason_unknown: The person was asked why this print stopped
+            (an entry of ``unexplained_stops`` in ``get_printer_insights``)
+            and could not say.  Send the print's ``job_id`` and the
+            ``outcome`` it is recorded with; the ending stays as it was and
+            the print is not asked about again.
         printer_name: Printer used.  Auto-resolved from job if omitted.
         file_name: File printed.  Auto-resolved from job if omitted.
         file_hash: Optional hash of the file for cross-printer comparison.
@@ -474,6 +527,8 @@ def record_print_outcome(
         )
     if clear_note:
         return _clear_print_note(job_id, outcome, notes)
+    if stop_reason_unknown:
+        return _stop_reason_unknown(job_id, outcome)
 
     if determined_by is None:
         determined_by = "observed" if auto_recorded else "user_reported"
@@ -1346,6 +1401,22 @@ class _LearningToolsPlugin:
             the user's behalf; an unresolved print stays out of all
             success-rate math until someone who knows answers.
 
+            **Agent contract for ``unexplained_stops``**: recent prints the
+            printer stopped without giving a reason.  Ask once, at a natural
+            moment: "Your print stopped and the printer gave no reason. Did
+            it come out bad, or did something stop it?"  Settle what they
+            say with ``record_print_outcome(job_id=..., outcome="failed",
+            determined_by="user_reported")``: add nothing for a part that
+            came out bad (or the defect as ``failure_mode``), or
+            ``failure_mode="power_loss"`` / ``"filament_runout"`` when
+            something outside the print stopped it.  If they cannot say,
+            send ``stop_reason_unknown=True`` with the print's recorded
+            outcome, and it is not asked about again.  Never pick an answer
+            for them.
+
+            A row carrying ``ending_said`` ("Stopped: power cut") is a stop,
+            not a bad print: say those words to the person, never "failed".
+
             **Note**: Insights are advisory.  They do NOT override safety limits
             or preflight checks.
 
@@ -1357,7 +1428,10 @@ class _LearningToolsPlugin:
                 return err
             try:
                 insights = get_db().get_printer_learning_insights(printer_name)
-                recent = get_db().list_print_outcomes(printer_name=printer_name, limit=limit)
+                # The person's own list: every ending, a stop under its own words.
+                recent = get_db().list_print_outcomes(
+                    printer_name=printer_name, limit=limit, include_stops=True,
+                )
                 unresolved = get_db().list_unresolved_outcomes(
                     printer_name=printer_name, limit=limit,
                 )
@@ -1375,8 +1449,11 @@ class _LearningToolsPlugin:
                     "success": True,
                     "printer_name": printer_name,
                     "insights": insights,
-                    "recent_outcomes": recent,
+                    "recent_outcomes": _with_ending_said(recent),
                     "unresolved_prints": unresolved,
+                    "unexplained_stops": _with_ending_said(
+                        get_db().list_unexplained_stops(printer_name=printer_name, limit=limit)
+                    ),
                     "confidence": confidence,
                     "safety_notice": _LEARNING_SAFETY_NOTICE,
                 }
