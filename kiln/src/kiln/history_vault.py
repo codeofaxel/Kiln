@@ -787,6 +787,15 @@ class HistoryVault:
             (account_id, here_id),
         )
         self._conn.execute("DELETE FROM memberships WHERE branch_id = ?", (here_id,))
+        # One place for each version on the branch, in the order they stood.
+        rows = self._conn.execute(
+            "SELECT version_id FROM memberships WHERE branch_id = ? ORDER BY position, added_at", (account_id,)
+        ).fetchall()
+        for position, row in enumerate(rows):
+            self._conn.execute(
+                "UPDATE memberships SET position = ? WHERE branch_id = ? AND version_id = ?",
+                (position, account_id, row["version_id"]),
+            )
         self._conn.execute("DELETE FROM branches WHERE branch_id = ?", (here_id,))
         self._put_branch({**here, "branch_id": account_id})
         self._conn.execute("UPDATE checkouts SET branch_id = ? WHERE branch_id = ?", (account_id, here_id))

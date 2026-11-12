@@ -200,3 +200,66 @@ class TestTheVaultsOwnRule:
             assert [m["version_id"] for m in vault.memberships(made_as)] == IDS
         finally:
             vault.close()
+
+
+class TestTheLapsCases:
+    def test_two_ids_already_here_become_one_branch_with_each_version_in_one_place(self, home):
+        made_as = _made_here(home)
+        vault = HistoryVault()
+        try:
+            vault.keep_branch_copy(
+                {"branch_id": ACCOUNT_ID, "design_id": "vase", "name": "main", "created_at": 1.0, "status": "retired"},
+                [{"version_id": IDS[0]}, {"version_id": "f" * 32}],
+            )
+
+            assert vault.take_account_branch_id("vase", made_as, ACCOUNT_ID) is True
+
+            places = [m["position"] for m in vault.memberships(ACCOUNT_ID)]
+            assert places == list(range(len(places))) and len(places) == 4
+        finally:
+            vault.close()
+
+    def test_a_pull_by_the_id_this_computer_made_for_main_asks_by_name(self, home, monkeypatch):
+        asked: list[dict] = []
+
+        def request(tool, method, path, body=None, **_kw):
+            asked.append(body or {})
+            return {"status": "error", "code": "STOP", "error": "enough"}
+
+        monkeypatch.setattr(courier, "_request", request)
+
+        courier.pull("cloud_pull_branch", "vase", branch_id=_main_branch_id("vase"))
+
+        assert asked[0]["branch_id"] is None and asked[0]["branch_name"] == "main"
+
+    def test_the_automatic_push_reports_the_id_the_branch_is_kept_under(self, home, account):
+        made_as = _made_here(home)
+        vault = HistoryVault()
+        try:
+            rows = courier._auto_push({"vase": [made_as]}, vault)
+        finally:
+            vault.close()
+
+        assert ACCOUNT_ID in str(rows) and made_as not in str(rows)
+
+    def test_a_second_diverged_push_finds_this_computers_copy_by_its_name(self, home, account):
+        _made_here(home)
+        account.diverged_once = True
+        first = courier.push("cloud_push_branch", "vase")
+        vault = HistoryVault()
+        try:
+            main = vault.branch_named("vase", "main")["branch_id"]
+            made_at = vault.branch_named("vase", first["kept_as"])["created_at"]
+        finally:
+            vault.close()
+        account.diverged_once = True
+
+        second = courier.push("cloud_push_branch", "vase", main)
+
+        assert second["kept_as"] == first["kept_as"] and second["branch_id"] == first["branch_id"]
+        assert account.pushes[-1]["branch"]["branch_id"] == first["branch_id"]
+        vault = HistoryVault()
+        try:
+            assert vault.branch_named("vase", first["kept_as"])["created_at"] == made_at
+        finally:
+            vault.close()

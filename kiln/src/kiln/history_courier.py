@@ -1211,9 +1211,11 @@ def _keep_as_this_computers(
         name = str(branch.get("name") or "main")
         if name.endswith(f"@{computer}"):
             return refused
-        own_id = _own_branch_id(branch["branch_id"], computer)
         own_name = f"{name}@{computer}"
-        before = v.branch(own_id) or {}
+        # The copy this computer already keeps under that name, by whichever
+        # id it is kept under; else a new one.
+        before = v.branch_named(design_id, own_name) or {}
+        own_id = before.get("branch_id") or _own_branch_id(branch["branch_id"], computer)
     own = {
         **branch,
         "branch_id": own_id,
@@ -1425,6 +1427,12 @@ def pull(
 ) -> dict[str, Any]:
     """Bring one branch of the person's Kiln account, and the design's proven
     recipes, onto this computer."""
+    from kiln.history_vault import _main_branch_id
+
+    if branch_id == _main_branch_id(design_id):
+        # The id this computer makes for ``main`` before the account has
+        # given one: the account knows the branch by its name.
+        branch_id, branch_name = None, branch_name or "main"
     if not branch_id and not branch_name:
         branch_name = "main"
     body = {"branch_id": branch_id, "branch_name": branch_name, "since_version_id": since_version_id}
@@ -1909,7 +1917,7 @@ def _auto_push(changed: dict[str, list[str]], vault: Any) -> dict[str, Any]:
             name = (vault.branch(branch_id) or {}).get("name") or branch_id
             answer = push(_AUTO_PUSH_TOOL, design_id, branch_id, vault=vault)
             row: dict[str, Any] = {
-                "design_id": design_id, "branch_id": branch_id, "branch": name,
+                "design_id": design_id, "branch_id": answer.get("branch_id") or branch_id, "branch": name,
                 "pushed": answer.get("status") == "success",
             }
             if answer.get("kept_as"):
