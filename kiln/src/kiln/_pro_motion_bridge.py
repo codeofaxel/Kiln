@@ -105,6 +105,39 @@ _UNREACHABLE_CODES = frozenset({"SERVER_UNREACHABLE", "KILN_API_HTTP_ERROR"})
 _misses: dict[tuple[str, str, str, str, bool], Miss] = {}
 
 
+#: The service's word for "this install has not reported that printer".
+_NOT_REPORTED_CODE = "MACHINE_NOT_PAIRED"
+
+
+def _ask_service(model: str, **request: Any) -> Any:
+    """One ask of the hosted door for *model*, made again once when the
+    service has not heard of the printer and this install can tell it now.
+
+    The service answers for a machine the install has reported, and an
+    install reports its printers once a day; a printer added since then is
+    unknown to it until the next report.  So an answer that says exactly
+    that sends the report (:func:`kiln.heartbeat.report_new_printer`) and
+    asks once more.  Nothing was reported (sharing is off, the report did
+    not go out, the model was already named): the first answer stands.
+    """
+    from kiln.server import _pro_api_call
+
+    answer = _pro_api_call("motion_plan", _asked_by_user=False, **request)
+    miss = classify_answer(answer) if isinstance(answer, dict) else None
+    if miss is None or miss.code != _NOT_REPORTED_CODE:
+        return answer
+    try:
+        from kiln.heartbeat import report_new_printer
+
+        reported = report_new_printer(model)
+    except Exception:  # noqa: BLE001 -- the report is a courtesy; the refusal stands without it
+        logger.debug("reporting a new printer failed", exc_info=True)
+        reported = False
+    if not reported:
+        return answer
+    return _pro_api_call("motion_plan", _asked_by_user=False, **request)
+
+
 def _local_pro() -> Any | None:
     """``kiln_pro.motion`` when it is installed, else ``None``.
 
@@ -216,12 +249,12 @@ def _served_plan(request: dict[str, Any]) -> dict[str, Any] | None:
             _misses[key] = _service_down_miss
         return None
     try:
-        from kiln.server import _pro_api_call
+        from kiln.server import _pro_api_call  # noqa: F401 -- the door must open before it is asked
     except Exception:  # noqa: BLE001
         _misses[key] = Miss("unanswered", detail="the served door could not be opened on this install")
         return None
     try:
-        answer = _pro_api_call("motion_plan", _asked_by_user=False, **request)
+        answer = _ask_service(str(request.get("printer_id") or ""), **request)
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a motion
         logger.debug("motion_plan request failed", exc_info=True)
         miss = classify_transport_error(exc)
@@ -277,12 +310,7 @@ def around_plate(
         },
     }
     try:
-        from kiln.server import _pro_api_call
-
-        answer = _pro_api_call(
-            "motion_plan", _asked_by_user=False,
-            printer_id=model, verb=action, plate=plate, clearance_mm=clearance_mm,
-        )
+        answer = _ask_service(model, printer_id=model, verb=action, plate=plate, clearance_mm=clearance_mm)
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a motion
         logger.debug("around-the-plate request failed", exc_info=True)
         miss = classify_transport_error(exc)

@@ -14,11 +14,19 @@ six days would vanish (the daily archive holds only the most recent
 finished day, so they are unrecoverable).  The re-check sends nothing new —
 the same once-a-day row, now from long-running servers too.
 
+One thing sends the day's row again: a printer model the day's row did
+not name.  A printer added after the day's row went out is otherwise
+unreported until tomorrow, and a served answer bound to a machine this
+install has reported (:mod:`kiln._pro_motion_bridge`) would be refused
+for it until then.  The second send is the same row with the same
+fields, written over the first; :func:`report_new_printer` asks for it.
+
 Disable with ``KILN_TELEMETRY=false`` in environment.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -38,6 +46,9 @@ _lock = threading.Lock()
 # boolean: a bool set at first send would block every later day of a
 # long-running server, which is exactly the bug the scheduler fixes.
 _sent_on: str | None = None
+# The models today's sends from this process named: the marker file's twin,
+# for an install whose home directory cannot be written.
+_named_in_process: frozenset[str] = frozenset()
 _scheduler_started = False
 
 # How often the scheduler re-checks whether a new day needs its beat.
@@ -160,24 +171,62 @@ def _is_hosted_multitenant() -> bool:
     return is_hosted_multitenant()
 
 
-def _already_sent_today() -> bool:
-    """File-based guard — avoid duplicate pings on restarts."""
+def _read_marker() -> tuple[str, frozenset[str]]:
+    """The day the last heartbeat went out and the printer models it named.
+
+    The marker's first line is the date; the second, when present, is the
+    JSON list of models that send carried.  A marker with only a date names
+    no models, so every printer here counts as not yet reported.
+    """
     try:
         if _LAST_BEAT_PATH.is_file():
-            stored = _LAST_BEAT_PATH.read_text(encoding="utf-8").strip()
-            return stored == str(date.today())
+            lines = _LAST_BEAT_PATH.read_text(encoding="utf-8").splitlines()
+            day = lines[0].strip() if lines else ""
+            models: frozenset[str] = frozenset()
+            if len(lines) > 1:
+                try:
+                    listed = json.loads(lines[1])
+                except ValueError:
+                    listed = []
+                if isinstance(listed, list):
+                    models = _model_keys(listed)
+            return day, models
     except OSError:
         pass
-    return False
+    return "", frozenset()
 
 
-def _mark_sent() -> None:
-    """Record that today's heartbeat was sent."""
+def _already_sent_today() -> bool:
+    """File-based guard — avoid duplicate pings on restarts."""
+    return _read_marker()[0] == str(date.today())
+
+
+def _mark_sent(models: frozenset[str] = frozenset()) -> None:
+    """Record that today's heartbeat was sent, and the models it named."""
     try:
         _LAST_BEAT_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        _LAST_BEAT_PATH.write_text(str(date.today()), encoding="utf-8")
+        _LAST_BEAT_PATH.write_text(
+            f"{date.today()}\n{json.dumps(sorted(models))}\n", encoding="utf-8"
+        )
     except OSError:
         pass
+
+
+def _model_keys(models: object) -> frozenset[str]:
+    """Model names as compared between sends: trimmed, lower-cased, non-empty."""
+    if not isinstance(models, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(str(m).strip().lower() for m in models if isinstance(m, str) and m.strip())
+
+
+def _named_today() -> frozenset[str]:
+    """The models today's heartbeat has named, or empty when none went out today."""
+    day, models = _read_marker()
+    today = str(date.today())
+    named = models if day == today else frozenset()
+    if _sent_on == today:
+        named = named | _named_in_process
+    return named
 
 
 def _adapter_model(adapter: object) -> str | None:
@@ -489,20 +538,41 @@ def _bridge_running() -> bool | None:
         return None
 
 
-def _send_heartbeat() -> None:
-    """Send a single heartbeat to Supabase."""
-    global _sent_on  # noqa: PLW0603
+def _send_heartbeat(also_model: str = "") -> bool:
+    """Send the day's heartbeat to Supabase; ``True`` when a row went out.
+
+    Sent once a day, and once more whenever this install has a printer
+    model the day's row did not name (see the module docstring).
+    *also_model* is a model the caller knows this install is driving, for
+    an adapter the registry and config.yaml do not list.
+    """
+    global _sent_on, _named_in_process  # noqa: PLW0603
 
     if _is_ephemeral_runner() or _is_hosted_multitenant():
-        return
+        return False
 
+    today = str(date.today())
     with _lock:
-        if _sent_on == str(date.today()) or _already_sent_today():
-            _sent_on = str(date.today())
-            return
+        sent_today = _sent_on == today or _already_sent_today()
+        if sent_today:
+            _sent_on = today
 
+    sent = False
     try:
-        import json
+        printer_model, adapter_type, printer_count = _get_printer_info()
+        models = _get_all_printer_models()
+        also_model = str(also_model or "").strip()[:60]
+        if also_model and len(models) < _MAX_HEARTBEAT_PRINTER_MODELS and (
+            also_model.lower() not in _model_keys(models)
+        ):
+            models.append(also_model)
+        named_now = _model_keys([*models, printer_model or ""])
+        # A second row the same day is for a printer the first did not name,
+        # and for nothing else.
+        follows_first = sent_today
+        if follows_first and named_now <= _named_today():
+            return False
+
         import platform
         import urllib.request
 
@@ -524,7 +594,6 @@ def _send_heartbeat() -> None:
         except Exception:
             pass
 
-        printer_model, adapter_type, printer_count = _get_printer_info()
         stats = _get_daily_counts()
 
         rpc_url = f"{_SUPABASE_URL}/rest/v1/rpc/record_heartbeat"
@@ -710,7 +779,7 @@ def _send_heartbeat() -> None:
                 # names the default machine, which made second printers
                 # invisible in aggregate stats.  Names only: no ids,
                 # addresses, or serials.
-                "printer_models": _get_all_printer_models(),
+                "printer_models": models,
                 # Adapter family of EVERY registered printer — the
                 # top-level adapter_type names only the default machine,
                 # which hid the second family of every mixed fleet.
@@ -738,14 +807,14 @@ def _send_heartbeat() -> None:
 
         with urllib.request.urlopen(req, timeout=5) as resp:
             if resp.status < 300:
-                _mark_sent()
+                named = (_named_today() if follows_first else frozenset()) | named_now
+                _mark_sent(named)
                 with _lock:
-                    _sent_on = str(date.today())
+                    _sent_on = today
+                    _named_in_process = named
                 _logger.debug("Heartbeat sent (install=%s)", installation_id[:8])
                 sent = True
-            else:
-                sent = False
-        if sent:
+        if sent and not follows_first:
             # Once a day, with the heartbeat: how each Klipper-family printer
             # here moves on its own (kiln.printer_motion_report), so Kiln
             # learns from every install.  Same switch, same posture.
@@ -765,13 +834,33 @@ def _send_heartbeat() -> None:
 
     except Exception as exc:
         _logger.debug("Heartbeat failed (non-fatal): %s", exc)
+    return sent
+
+
+def report_new_printer(model: str = "") -> bool:
+    """Send the day's row now if it has not named *model* or another printer
+    here; ``True`` when a row went out.
+
+    For a caller that was just told Kiln's servers have not heard of this
+    install's printer: after ``True`` the same ask is worth making once
+    more.  Blocks for the send (a few seconds at most).  ``False`` when
+    there was nothing new to report, sharing is off, or the send failed.
+    """
+    try:
+        if not _telemetry_enabled():
+            return False
+        return _send_heartbeat(also_model=model)
+    except Exception as exc:  # noqa: BLE001 -- a report is never worth failing its caller
+        _logger.debug("Heartbeat for a new printer failed (non-fatal): %s", exc)
+        return False
 
 
 def _scheduler_loop() -> None:
     """Send now, then re-check on an interval forever.
 
     ``_send_heartbeat`` owns the once-per-day guard, so every iteration
-    after a day's first send is a date comparison and an early return.
+    after a day's first send is a date comparison, a look at which printers
+    are here, and an early return unless one of them is new.
     A failed send (offline, Supabase down) is retried at the next
     iteration for free because nothing was marked sent.
     """
