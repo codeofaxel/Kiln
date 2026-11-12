@@ -21,6 +21,9 @@ from kiln.failure_vocabulary import (
     AUTO_CLASSIFY_MIN_CONFIDENCE as _AUTO_CLASSIFY_MIN_CONFIDENCE,
 )
 from kiln.failure_vocabulary import (
+    CAUSES_A_GUESS_NEVER_NAMES as _CAUSES_A_GUESS_NEVER_NAMES,
+)
+from kiln.failure_vocabulary import (
     VALID_FAILURE_MODES as _VALID_FAILURE_MODES,
 )
 from kiln.failure_vocabulary import (
@@ -134,6 +137,7 @@ def _auto_classify_failure(
     canonical = _to_canonical_failure_mode(raw_type)
     stored = (
         canonical is not None
+        and canonical not in _CAUSES_A_GUESS_NEVER_NAMES
         and classification.confidence >= _AUTO_CLASSIFY_MIN_CONFIDENCE
     )
     return {
@@ -432,7 +436,9 @@ def record_print_outcome(
     key of the response; it is only STORED as ``failure_mode`` when the
     classifier's confidence meets or exceeds
     ``_AUTO_CLASSIFY_MIN_CONFIDENCE`` (0.75).  Lower-confidence guesses
-    are surfaced to the caller without poisoning the learning database.
+    are surfaced to the caller without poisoning the learning database.  A
+    guessed ``clog`` is echoed and never stored: a blocked nozzle counts
+    against the printer, and only the printer or a person names one.
 
     Args:
         job_id: The job ID from the print queue.

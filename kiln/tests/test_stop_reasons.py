@@ -76,6 +76,8 @@ def _record(**kwargs):
         ("filament_runout", "user_reported", "Stopped: filament ran out"),
         ("thermal_runaway", "observed", "Stopped: heating fault"),
         ("mechanical", "observed", "Stopped: printer fault"),
+        ("clog", "user_reported", "Stopped: nozzle clogged"),
+        ("nozzle_clog", "observed", "Stopped: nozzle clogged"),
         (None, "observed", "Stopped: printer gave no reason"),
         ("other", "inferred", "Stopped: printer gave no reason"),
     ],
@@ -104,8 +106,20 @@ def test_a_bad_print_and_every_other_ending_keep_their_own_word(outcome, mode, b
 def test_only_a_stop_with_no_cause_wants_a_reason():
     assert stop_wants_a_reason("failed", None, "observed")
     assert stop_wants_a_reason("partial", "other", "inferred")
-    for named in ("power_loss", "filament_runout", "thermal_runaway", "mechanical"):
+    for named in ("power_loss", "filament_runout", "thermal_runaway", "mechanical", "clog"):
         assert not stop_wants_a_reason("failed", named, "observed"), named
+
+
+def test_every_named_stop_has_its_own_words_and_every_cause_a_person_names_has_an_answer():
+    from kiln import ending_question, failure_vocabulary as fv
+
+    for cause in fv.MACHINE_FAULTS | fv.OUTSIDE_CAUSES:
+        assert fv.STOP_WORDS[cause] != fv.STOP_WORDS[""], cause
+        assert fv.STOP_WORDS[cause].startswith("Stopped: "), cause
+    calls = " ".join(ending_question.ANSWERS["stop"].values())
+    for cause in fv.STOP_CAUSES_A_PERSON_NAMES:
+        assert f'failure_mode="{cause}"' in calls, cause
+    assert "clog" in fv.STOP_CAUSES_A_PERSON_NAMES
 
 
 def test_history_says_stopped_not_failed(db):

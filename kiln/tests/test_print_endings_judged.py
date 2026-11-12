@@ -58,7 +58,10 @@ def test_every_cause_word_is_classified_once():
         ("failed", "thermal_runaway", "inferred", "machine_stop"),
         ("partial", "mechanical", "seen", "machine_stop"),
         ("failed", "adhesion", "inferred", "bad_print"),
-        ("failed", "clog", "observed", "bad_print"),
+        ("failed", "under_extrusion", "observed", "bad_print"),
+        ("failed", "clog", "observed", "machine_stop"),
+        ("failed", "clog", "user_reported", "machine_stop"),
+        ("partial", "nozzle_clog", "seen", "machine_stop"),     # a classifier's spelling
         ("failed", "adhesion_loss", "observed", "bad_print"),   # a classifier's spelling
         ("failed", None, "observed", "machine_stop"),
         ("failed", "other", "inferred", "machine_stop"),
@@ -77,6 +80,21 @@ def test_what_each_ending_counts_as(outcome, mode, by, verdict):
     assert fv.is_judged_ending(outcome, mode, by) is (verdict in ("success", "bad_print"))
     assert fv.is_judged_ending(outcome, mode, by, about=fv.ABOUT_THE_MACHINE) is (
         verdict in ("success", "bad_print", "machine_stop"))
+
+
+def test_a_blocked_nozzle_counts_against_the_printer_and_not_the_print():
+    """Whoever names it.  The pool leaves it out too."""
+    for by in ("observed", "inferred", "seen", "user_reported", None):
+        assert not fv.is_judged_ending("failed", "clog", by), by
+        assert fv.is_judged_ending("failed", "clog", by, about=fv.ABOUT_THE_MACHINE), by
+    assert not fv.pooled_row_is_about_the_print("failed", "clog")
+    assert fv.pooled_row_is_about_the_print("failed", "under_extrusion")
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE print_outcomes (outcome TEXT, failure_mode TEXT, determined_by TEXT)")
+    conn.execute("INSERT INTO print_outcomes VALUES ('failed', 'clog', 'user_reported')")
+    count = "SELECT COUNT(*) FROM print_outcomes WHERE "
+    assert conn.execute(count + fv.judged_ending_sql()).fetchone()[0] == 0
+    assert conn.execute(count + fv.judged_ending_sql(about=fv.ABOUT_THE_MACHINE)).fetchone()[0] == 1
 
 
 def test_the_sql_and_the_python_rule_agree_on_every_row():

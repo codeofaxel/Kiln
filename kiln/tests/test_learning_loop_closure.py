@@ -380,6 +380,30 @@ class TestWireE_AutoClassify:
         assert ac["stored"] is True
         assert ac["confidence"] >= 0.75
 
+    def test_a_guessed_clog_is_echoed_and_never_stored(self, tmp_kiln_env):
+        """A blocked nozzle counts against the printer, so a guess never
+        names one: the row keeps no cause and stays the bad print the
+        person reported."""
+        from kiln.failure_vocabulary import ending_verdict
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        analysis = self._fake_analysis("nozzle_clog", 0.95, ["Error message contains 'under-extrusion'"])
+        with patch("kiln.server._check_auth", return_value=None), patch(
+            "kiln.failure_recovery.classify_failure", return_value=analysis,
+        ):
+            result = record_print_outcome(
+                job_id="job-clog-guess",
+                outcome="failed",
+                printer_name="test-bambu",
+                material_type="PLA",
+                auto_classify=True,
+            )
+        assert result.get("success") is True
+        assert "failure_mode" not in result
+        ac = result["auto_classification"]
+        assert ac["db_mode"] == "clog" and ac["stored"] is False
+        assert ending_verdict("failed", result.get("failure_mode"), result["determined_by"]) == "bad_print"
+
     def test_low_confidence_echoes_but_does_not_store(self, tmp_kiln_env):
         """0.4 confidence < 0.75 → classification echoed but not stored;
         failure_mode stays unset to avoid poisoning the DB."""

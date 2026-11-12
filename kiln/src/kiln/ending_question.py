@@ -52,6 +52,10 @@ ANSWERS: dict[str, dict[str, str]] = {
             'record_print_outcome(job_id="{job_id}", outcome="failed", '
             'failure_mode="mechanical", determined_by="user_reported")'
         ),
+        "the nozzle clogged": (
+            'record_print_outcome(job_id="{job_id}", outcome="failed", '
+            'failure_mode="clog", determined_by="user_reported")'
+        ),
         "they cannot say": 'record_print_outcome(job_id="{job_id}", outcome="{outcome}", ending_asked=True)',
     },
     "cancel": {

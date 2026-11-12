@@ -152,7 +152,7 @@ def normalize_failure_type(value: str | None) -> str | None:
 # out wrong: the part is defective, whether it ran to the end or was stopped
 # because it was going wrong.  A MACHINE STOP is the printer stopping itself:
 # a fault it named (a heater or safety stop, a mechanical or electronics
-# fault), or a failure it reported without a cause that nobody who saw the
+# fault, a blocked nozzle), or a failure it reported without a cause that nobody who saw the
 # part has described.  An OUTSIDE STOP is something outside the print and the
 # printer: the power went out, or the filament ran out.  A print the person
 # stopped is ``cancelled`` and is none of these.
@@ -174,13 +174,13 @@ PRINT_DEFECTS: frozenset[str] = frozenset({
     "stringing",
     "under_extrusion",
     "over_extrusion",
-    "clog",
 })
 
 #: Causes that are the printer stopping itself for a fault.
 MACHINE_FAULTS: frozenset[str] = frozenset({
     "thermal_runaway",
     "mechanical",
+    "clog",
 })
 
 #: Causes outside the print and the printer.
@@ -188,6 +188,10 @@ OUTSIDE_CAUSES: frozenset[str] = frozenset({
     "power_loss",
     "filament_runout",
 })
+
+#: Causes a classifier's guess is never stored as: its evidence does not
+#: tell a blocked nozzle from thin extrusion, which is a print defect.
+CAUSES_A_GUESS_NEVER_NAMES: frozenset[str] = frozenset({"clog"})
 
 #: The cause word that names no cause.
 UNNAMED_CAUSE = "other"
@@ -300,6 +304,7 @@ STOP_WORDS: dict[str, str] = {
     "filament_runout": "Stopped: filament ran out",
     "thermal_runaway": "Stopped: heating fault",
     "mechanical": "Stopped: printer fault",
+    "clog": "Stopped: nozzle clogged",
     "": "Stopped: printer gave no reason",
 }
 
@@ -317,7 +322,7 @@ def ending_wants_a_question(
 
 #: The causes a person can name when asked why a print stopped: something
 #: outside the print, or the printer itself.
-STOP_CAUSES_A_PERSON_NAMES: frozenset[str] = OUTSIDE_CAUSES | {"mechanical"}
+STOP_CAUSES_A_PERSON_NAMES: frozenset[str] = OUTSIDE_CAUSES | {"mechanical", "clog"}
 
 
 def stop_said(
