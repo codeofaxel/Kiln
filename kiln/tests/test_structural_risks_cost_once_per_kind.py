@@ -80,6 +80,15 @@ def _audit(path):
     return _call("audit_original_design", file_path=path, requirements=_REQUIREMENTS)
 
 
+def _tally(path):
+    """The audit's readiness tally, which stays in the process: the reply
+    carries the reasons behind it, never the number."""
+    from kiln.original_design import audit_original_design
+
+    with rx.without_kiln_pro():
+        return audit_original_design(path, _REQUIREMENTS).readiness_score
+
+
 def _plan(path):
     return _call("design_improvement_plan", file_path=path)
 
@@ -114,9 +123,9 @@ def test_more_of_the_same_risk_costs_nothing_more(fewer, more, tmp_path):
     assert plan_b["overall_structural_score"] == plan_a["overall_structural_score"], (counts_a, counts_b)
 
     audit_a, audit_b = _audit(a), _audit(b)
-    # The readiness score starts from printability, which the pair shares.
-    assert audit_a["printability"]["score"] == audit_b["printability"]["score"]
-    assert audit_b["readiness_score"] == audit_a["readiness_score"], (counts_a, counts_b)
+    # The readiness tally starts from printability, which the pair shares.
+    assert audit_a["printability"].get("printable") == audit_b["printability"].get("printable")
+    assert _tally(b) == _tally(a), (counts_a, counts_b)
 
 
 @pytest.mark.parametrize(
@@ -133,7 +142,7 @@ def test_a_longer_neck_is_one_neck_and_costs_the_same(short, long, tmp_path):
     assert counts_a.get("thin_neck") == counts_b.get("thin_neck") == 1, (counts_a, counts_b)
     assert kinds_a == kinds_b, (kinds_a, kinds_b)
     assert plan_b["overall_structural_score"] == plan_a["overall_structural_score"], (counts_a, counts_b)
-    assert _audit(b)["readiness_score"] == _audit(a)["readiness_score"], (counts_a, counts_b)
+    assert _tally(b) == _tally(a), (counts_a, counts_b)
 
 
 def test_a_pegboard_with_six_peg_roots_is_ready_for_print(tmp_path):
@@ -142,7 +151,7 @@ def test_a_pegboard_with_six_peg_roots_is_ready_for_print(tmp_path):
     assert counts.get("sharp_corner") == 6 and "critical" not in kinds.values(), counts
 
     audit = _audit(path)
-    assert audit["ready_for_print"] is True, (audit["readiness_score"], counts)
+    assert audit["ready_for_print"] is True, (audit["readiness_reasons"], counts)
     assert audit["message"].endswith("The design passes the audit."), audit["message"]
     # Every peg root is still named: the score stopped counting repeats, the
     # report did not.
@@ -163,7 +172,7 @@ def test_a_real_fusion_enclosure_is_ready_for_print(tmp_path):
     assert kinds == {"sharp_corner": "warning"} and counts["sharp_corner"] > 1, counts
 
     audit = _audit(path)
-    assert audit["ready_for_print"] is True, (audit["readiness_score"], counts)
+    assert audit["ready_for_print"] is True, (audit["readiness_reasons"], counts)
     gate = next(g for g in audit["gates"] if g["name"] == "structural_integrity")
     assert gate["passed"] is True and gate["severity"] == "warning", gate
 
@@ -179,7 +188,7 @@ def test_a_new_kind_of_risk_always_costs(tmp_path):
     kinds_post, _ = _kinds(plan_post)
     assert set(kinds_board) < set(kinds_post), (kinds_board, kinds_post)
     assert plan_post["overall_structural_score"] < plan_board["overall_structural_score"]
-    assert _audit(with_post)["readiness_score"] < _audit(board)["readiness_score"]
+    assert _tally(with_post) < _tally(board)
 
     warned = _plan(_save(_dumbbell(4, 1.6), tmp_path, "warned_neck"))
     critical = _plan(_save(_dumbbell(4, 1.2), tmp_path, "critical_neck"))

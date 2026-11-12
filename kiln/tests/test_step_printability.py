@@ -122,7 +122,7 @@ class TestTheEstimateDoor:
         mesh = self._estimate(stl, _sliced(stl))
         assert cad["success"] and mesh["printability"] is not None
         assert cad["printability"] is not None, cad
-        assert cad["printability"]["score"] == mesh["printability"]["score"]
+        assert cad["printability"]["printable"] == mesh["printability"]["printable"]
         assert cad["adhesion"] == mesh["adhesion"]
         # The verdict, the same for Kiln's mesh of the STEP file as for the
         # mesh itself, and no score in the sentence.
@@ -185,6 +185,7 @@ def test_the_real_door_estimates_a_step_with_its_printability(tmp_path: Path, mo
         result = _estimate_tool()(input_path=step, printer_id="bambu_a1", material="PLA")
     assert result.get("success"), result
     assert result["estimate"]["estimated_time_seconds"]
-    assert result["printability"]["score"] is not None
+    assert result["printability"]["printable"] is not None
+    assert "score" not in result["printability"]
     assert result["printability"]["model_height_mm"] == pytest.approx(_SIZE[2], abs=0.01)
     assert "Kiln's mesh of this STEP file" in result["printability_note"]

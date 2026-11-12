@@ -59,9 +59,9 @@ class _PrintabilityToolsPlugin:
             surface estimation, and support volume estimation.  Returns one
             ``verdict`` (``ready``, ``prints_with_supports``, ``wont_print``
             or ``check``) with its sentence as ``message``, and the full
-            ``report`` with actionable recommendations.  The report keeps a
-            0-100 score and a letter grade for comparing versions of a part;
-            tell the person the verdict, not the score.
+            ``report`` with actionable recommendations.  The report carries
+            no score and no grade: the verdict is the answer, and the
+            report's findings are the reasons behind it.
 
             Pass ``material`` (and ``printer_id`` when a printer is
             registered) so the warping, thermal-stress, and adhesion checks

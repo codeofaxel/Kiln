@@ -298,9 +298,8 @@ class _MeshToolsPlugin:
 
             Goes beyond basic validation to compute volume, surface area,
             center of mass, overhang detection, connected components (floating
-            parts), degenerate triangles, and ``mesh_check_score`` (0-100), a
-            quick mesh check.  It is not the printability score: call
-            ``analyze_printability`` for that grade.
+            parts), and degenerate triangles.  For whether the part prints,
+            call ``analyze_printability``: its verdict is the answer.
 
             Use this after generating a model to understand its geometry and
             identify printability issues before sending to the slicer.
@@ -536,26 +535,22 @@ class _MeshToolsPlugin:
         def mesh_quality_scorecard(
             file_path: str, material: str = "pla", printer_id: str = "",
         ) -> dict:
-            """Assess a model — a graded scorecard for a mesh, an intake
-            report for a CAD file.
+            """Assess a model — a review in words for a mesh, an intake
+            report for a CAD file.  Neither carries a score or a grade.
 
-            **For a mesh** (.stl, .obj, .glb) it evaluates four dimensions:
-            - **Printability** (35%): ``analyze_printability``'s own score and
-              grade for ``material`` / ``printer_id`` — pass the ones you gave
+            **For a mesh** (.stl, .obj, .glb) it reviews four areas:
+            - **Printability**: ``analyze_printability``'s own verdict for
+              ``material`` / ``printer_id`` — pass the ones you gave
               ``analyze_printability`` and the two match
-            - **Structural** (25%): aspect ratio, base stability, component count
-            - **Efficiency** (20%): fill ratio, support waste
-            - **Quality** (20%): triangle density, degenerate count
+            - **Structural**: aspect ratio, base stability, component count
+            - **Efficiency**: fill ratio, support waste
+            - **Quality**: triangle density, degenerate count
 
-            and returns per-factor scores, an overall 0-100 score, and a
-            letter grade (A-F).  ``subject`` is ``"mesh"``.
+            and returns the printability verdict and each area's notes.
+            ``subject`` is ``"mesh"``.
 
-            **For a CAD file** (.step, .stp) it returns an INTAKE REPORT and
-            deliberately no letter grade.  ``subject`` is ``"cad_file"``,
-            ``grade`` is null, and ``grade_withheld`` says why: 20% of that
-            score measures Kiln's own tessellation, so the identical part
-            would grade differently depending on which converter is installed
-            on the machine that read it.  Instead you get three bands:
+            **For a CAD file** (.step, .stp) it returns an INTAKE REPORT.
+            ``subject`` is ``"cad_file"``, in three bands:
 
             - ``exact`` — read from the user's file by the CAD kernel:
               volume, surface area, envelope, validity, solid/shell/face
@@ -572,12 +567,12 @@ class _MeshToolsPlugin:
 
             :param file_path: Path to a mesh (.stl, .obj, .glb) or a CAD file
                 (.step, .stp).
-            :param material: Material the printability factor is judged for
+            :param material: Material the printability verdict is judged for
                 (default ``"pla"``).
-            :param printer_id: Optional printer the printability factor is
+            :param printer_id: Optional printer the printability verdict is
                 judged for.
-            :returns: Dict with scores and a grade for a mesh; the three-band
-                intake report with ``grade: null`` for a CAD file.
+            :returns: Dict with the printability verdict and each area's notes
+                for a mesh; the three-band intake report for a CAD file.
             """
             from kiln.server import _error_dict
 

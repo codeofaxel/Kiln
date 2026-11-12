@@ -917,7 +917,7 @@ class TestRetryPrintValidationGate:
             result = fn(model_path="/tmp/cube.stl", skip_diagnosis=True)
 
         assert result["success"] is True
-        assert result["validation"]["printability_score"] == 92
+        assert "printability_score" not in result["validation"]
         assert result["validation"]["ready_to_print"] is True
         adapter.start_print.assert_called_once()
 

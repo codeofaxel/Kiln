@@ -1073,7 +1073,6 @@ class _DesignReasoningToolsPlugin:
                         iteration["conversion"] = conversion
                     analysis = analyze_mesh(dl.local_path)
                     iteration["analysis"] = {
-                        "mesh_check_score": analysis.mesh_check_score,
                         "issues": analysis.printability_issues,
                         "triangles": analysis.triangle_count,
                         "volume_mm3": analysis.volume_mm3,
@@ -1134,11 +1133,13 @@ class _DesignReasoningToolsPlugin:
             # honor-gate hook in original_design.py.
             _attach_brief_to_iteration_result(goal_id, best_result)
 
+            # The quick mesh check that picked the best round stays in the
+            # process (kiln.printability.RATING_KEYS); each round's outcome
+            # and issues say how it went.
             response = {
                 "success": True,
                 "iterations": iterations,
                 "iteration_count": len(iterations),
-                "best_score": best_score,
                 "brief_id": goal_id or None,
                 **best_result,
             }
@@ -1179,17 +1180,17 @@ class _DesignReasoningToolsPlugin:
             fewest overhangs and the most bed contact.  Re-orients the mesh
             and places it flat on the build plate (z_min = 0).
 
-            ``printability_score`` / ``printability_grade`` are the chosen
-            orientation's score from ``analyze_printability`` itself, judged
-            for ``material`` and ``printer_id`` — pass the same ones you
-            gave ``analyze_printability`` and the two numbers match.
+            ``printability_verdict`` / ``printability_verdict_text`` are the
+            chosen orientation's verdict from ``analyze_printability`` itself,
+            judged for ``material`` and ``printer_id`` — pass the same ones
+            you gave ``analyze_printability`` and the two match.
 
             :param file_path: Path to the STL file.
             :param output_path: Output path.  Defaults to overwriting the input.
-            :param material: Material the score is judged for (default ``"pla"``).
-            :param printer_id: Optional printer the score is judged for.
+            :param material: Material the verdict is judged for (default ``"pla"``).
+            :param printer_id: Optional printer the verdict is judged for.
             :returns: Dict with rotation angles, overhang stats, the
-                printability score and grade, and new dimensions.
+                printability verdict, and new dimensions.
             """
             if err := _srv._check_auth("generate"):
                 return err
@@ -1267,7 +1268,7 @@ class _DesignReasoningToolsPlugin:
                 name of a printer set up in Kiln.  When provided, printer
                 intelligence supplies the build volume.
             :param material: Material the supports verdict and the
-                ``printability_score`` are judged for (default ``"pla"``) —
+                ``printability_verdict`` are judged for (default ``"pla"``) —
                 ``analyze_printability``'s own, so the two agree.
             :returns: Dict with can_print verdict, issues, and actions taken.
             """

@@ -9,11 +9,7 @@ to print.  The verdict is now read off the same ladder as the letter.
 
 from __future__ import annotations
 
-from kiln.printability import (
-    BundlePrintabilityFindings,
-    _apply_placement_check,
-    _score_to_grade,
-)
+from kiln.printability import _apply_placement_check
 
 # A part well inside a bed, so placement adds no fault and the verdict is the
 # score's alone.
@@ -33,11 +29,3 @@ def test_the_headphone_stand_score_is_not_printable():
     # be called printable by the report.
     _, grade, printable, _ = _apply_placement_check(54, [], dict(_ON_THE_BED), build_volume=_BED)
     assert (grade, printable) == ("F", False)
-
-
-def test_a_bundle_with_no_verdict_reads_it_off_the_grade():
-    for score in (49, 54, 59, 60, 74):
-        findings = BundlePrintabilityFindings.from_bundle_findings(
-            {"score": score, "grade": _score_to_grade(score)}
-        )
-        assert findings.printable == (_score_to_grade(score) != "F"), score

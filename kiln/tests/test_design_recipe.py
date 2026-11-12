@@ -530,26 +530,28 @@ class TestProvenanceFields:
         parent.design_id = "ash-coaster"
         parent.prompt = "embossed portrait"
         parent.generation_provider = "openscad"
-        parent.provenance = {"tools_used": ["rembg"]}
+        parent.provenance = {"tools_used": ["rembg"], "material": "PLA"}
         parent.stl_path = "/tmp/v1.stl"
         parent_path = save_recipe(parent, str(tmp_path))
         new = create_new_version(parent, parent_path, changes={"body.color": "white -> grey"})
-        # Provenance lineage fields carried forward
+        # The design's history is carried forward
         assert new.design_id == "ash-coaster"
         assert new.prompt == "embossed portrait"
         assert new.generation_provider == "openscad"
-        assert new.provenance == {"tools_used": ["rembg"]}
+        # The facts that follow the part are carried; how the parent was
+        # made is the parent's own, so the new version does not show it.
+        assert new.provenance == {"material": "PLA"}
         # stl_path invalidated (output changes per version)
         assert new.stl_path is None
 
     def test_create_new_version_deep_copies_provenance(self, tmp_path):
         """Mutating new.provenance must not affect parent.provenance."""
         parent = _sample_recipe()
-        parent.provenance = {"tools_used": ["rembg"]}
+        parent.provenance = {"material": {"name": "PLA", "colors": ["white"]}}
         parent_path = save_recipe(parent, str(tmp_path))
         new = create_new_version(parent, parent_path)
-        new.provenance["tools_used"].append("openscad")
-        assert parent.provenance["tools_used"] == ["rembg"]
+        new.provenance["material"]["colors"].append("grey")
+        assert parent.provenance["material"]["colors"] == ["white"]
 
 
 class TestListRecipeVersions:

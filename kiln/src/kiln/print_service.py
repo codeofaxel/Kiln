@@ -73,9 +73,11 @@ class PrintServiceQuote:
     reasoning: str
     total_cost_usd: float
     estimated_time_hours: float
-    # analyze_printability's score for the model and material; ``None``
-    # until there is a mesh to judge (see ``_printability_score``).
-    printability_score: int | None
+    # analyze_printability's verdict for the model and material, and its
+    # sentence; ``None`` until there is a mesh to judge (see
+    # ``_printability_verdict``).
+    printability_verdict: str | None
+    printability_verdict_text: str | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -109,25 +111,26 @@ class PrintServiceOrder:
 # ---------------------------------------------------------------------------
 
 
-def _printability_score(model_path: str | None, material: str) -> int | None:
-    """analyze_printability's score for an order's model and material.
+def _printability_verdict(model_path: str | None, material: str) -> tuple[str | None, str | None]:
+    """analyze_printability's verdict and its sentence for an order's model
+    and material.
 
-    ``None`` until there is a mesh to judge — a prompt not yet generated, a
-    URL not yet fetched, a file that cannot be read.  The quote used to
-    guess from the file extension (90 for an STL, 60 for a prompt), a
-    number no analysis produced that read exactly like one.
+    ``(None, None)`` until there is a mesh to judge: a prompt not yet
+    generated, a URL not yet fetched, a file that cannot be read.  Never a
+    guess from the file's extension.
     """
     if not model_path or not os.path.isfile(model_path):
-        return None
+        return None, None
     try:
-        from kiln.printability import analyze_printability
+        from kiln.printability import analyze_printability, verdict_block
         from kiln.step_import import ensure_mesh_path
 
         mesh_path, _note = ensure_mesh_path(model_path)
-        return analyze_printability(mesh_path, material=material).score
-    except Exception:  # noqa: BLE001 — an unreadable model has no score; the quote stands
-        _logger.debug("Could not score %s for a quote", model_path, exc_info=True)
-        return None
+        block = verdict_block(analyze_printability(mesh_path, material=material))
+        return block["printability_verdict"], block["printability_verdict_text"]
+    except Exception:  # noqa: BLE001 — an unreadable model has no verdict; the quote stands
+        _logger.debug("Could not judge %s for a quote", model_path, exc_info=True)
+        return None, None
 
 
 def _generate_order_id() -> str:
@@ -244,7 +247,9 @@ def create_print_order(request: PrintServiceRequest) -> PrintServiceQuote:
         else:
             reasoning += " Warning: both options exceed budget."
 
-    printability_score = _printability_score(request.model_path, request.material)
+    printability_verdict, printability_verdict_text = _printability_verdict(
+        request.model_path, request.material,
+    )
 
     # Save order to DB.
     now = time.time()
@@ -267,7 +272,8 @@ def create_print_order(request: PrintServiceRequest) -> PrintServiceQuote:
         reasoning=reasoning,
         total_cost_usd=round(total_cost, 2),
         estimated_time_hours=round(estimated_time, 1),
-        printability_score=printability_score,
+        printability_verdict=printability_verdict,
+        printability_verdict_text=printability_verdict_text,
     )
 
 

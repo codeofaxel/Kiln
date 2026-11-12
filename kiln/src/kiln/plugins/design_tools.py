@@ -239,12 +239,17 @@ class _DesignToolsPlugin:
             """Run a ruthless audit of an original design before printing.
 
             Combines design briefing, prompt enhancement, mesh validation,
-            printability scoring, orientation analysis, advanced diagnostics,
+            the printability check, orientation analysis, advanced diagnostics,
             and regeneration feedback into a single report.
 
             Use this after generating or modeling a new part to answer:
             "Is this genuinely ready to print, and if not, what exact changes
             should the agent make next?"
+
+            The report says whether the design is ready
+            (``ready_for_print``), what stops it (``blockers``), each thing
+            that counts against it, in words (``readiness_reasons``), and
+            what to do next (``next_actions``).
 
             Args:
                 file_path: Path to STL or OBJ file.
@@ -294,22 +299,24 @@ class _DesignToolsPlugin:
                 result = audit.to_dict()
                 result["success"] = True
                 # The printability verdict leads, and a design that is not
-                # ready says why.  The readiness score stays in the result
-                # for comparing attempts.
+                # ready says why: the one thing that stops it, or, when no
+                # one thing does, everything that counts against it.
                 gates = getattr(audit, "gates", None) or []
                 blockers = getattr(audit, "blockers", None) or []
                 said = next((g.message for g in gates if g.name == "printability"), "")
                 other = next((b for b in blockers if b != said), None)
+                rest = [
+                    r for r in getattr(audit, "readiness_reasons", None) or [] if r != said
+                ]
                 if audit.ready_for_print:
                     outcome = "The design passes the audit."
                 elif other:
                     outcome = f"Not ready for print: {other}"
-                elif blockers:
+                elif blockers or not rest:
                     outcome = "Not ready for print."
                 else:
-                    outcome = (
-                        "Not ready for print: it falls short of the bar this audit "
-                        "holds a design to, on the warnings in the report."
+                    outcome = "Not ready for print. Together these count against it: " + " ".join(
+                        r if r.endswith((".", "!", "?")) else f"{r}." for r in rest
                     )
                 result["message"] = f"{said}  {outcome}".strip()
                 return result
@@ -2172,7 +2179,7 @@ class _DesignToolsPlugin:
             if _refusal:
                 return _refusal
 
-            from kiln.printability import adhesion_advice, analyze_printability
+            from kiln.printability import adhesion_advice, analyze_printability, verdict_block
 
             try:
                 report = analyze_printability(
@@ -2191,8 +2198,9 @@ class _DesignToolsPlugin:
                     if report.adhesion is not None:
                         result["adhesion"] = report.adhesion.to_dict()
                     result["success"] = True
-                    result["overall_score"] = report.score
-                    result["overall_grade"] = report.grade
+                    # The part's verdict, never its rating
+                    # (kiln.printability.RATING_KEYS).
+                    result.update(verdict_block(report))
                     return result
                 return {
                     "success": False,

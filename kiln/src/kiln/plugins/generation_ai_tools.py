@@ -846,7 +846,7 @@ class _GenerationAIToolsPlugin:
                 # AI-generated meshes go through Kiln's full pre-print
                 # validation gate -- format check, mesh analysis, auto-
                 # scale (catches the AI-models-in-meters bug), watertight
-                # check, auto-repair, printability scoring, support
+                # check, auto-repair, the printability check, support
                 # assessment, structural check, bed-fit, and material
                 # check.  Same gate the direct slice_and_print path uses,
                 # so AI users get the same engineering review as user-

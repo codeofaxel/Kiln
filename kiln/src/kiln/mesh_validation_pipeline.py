@@ -76,15 +76,15 @@ class ValidationPipelineResult:
     # Summary
     summary: str = ""  # human-readable one-paragraph summary
 
-    # Inspection bundle (when provided) — source-of-truth manifest whose
-    # printability findings drove the score.  Consumers can read all
-    # channel evidence (PNG paths, raw measurements, view-selection
-    # reasons) from here without re-running anything.  None on the legacy
-    # path; populated when the caller passed a bundle in.
-    inspection_bundle: dict[str, Any] | None = None
-
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        # The rating stays in the process (kiln.printability.RATING_KEYS);
+        # ``verdict`` and ``verdict_text`` carry the answer.
+        from kiln.printability import without_rating
+
+        out = without_rating(asdict(self))
+        if isinstance(out.get("printability_details"), dict):
+            out["printability_details"] = without_rating(out["printability_details"])
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -164,26 +164,9 @@ def _build_summary(result: ValidationPipelineResult) -> str:
 
 
 #: The lowest score that passes a part the check names no single cause for
-#: (verdict ``check``), when the caller sets no minimum of their own: the bar
-#: this pass has always held a rough part to.
+#: (verdict ``check``): the bar this pass holds a rough part to.  No caller
+#: sets it (:func:`kiln.printability.passes`).
 _CHECK_BAR = 40
-
-
-def _bundle_verdict(
-    findings: dict[str, Any],
-    placement_faults: list[str],
-    bounding_box: dict[str, float] | None,
-) -> tuple[str, str]:
-    """The verdict for a part read from an inspection bundle's findings: what
-    stops it where it sits (its size, its placement) first, then the one
-    reading of the findings (:func:`kiln.printability.verdict_from_findings`).
-    """
-    from kiln.printability import units_question, verdict_from_findings
-
-    stop = units_question(bounding_box) if bounding_box else ""
-    if stop or placement_faults:
-        return "wont_print", f"Won't print as it is: {stop or placement_faults[0]}"
-    return verdict_from_findings(findings)
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +183,6 @@ def run_validation_pipeline(
     build_volume: tuple[float, float, float] | None = None,
     auto_repair: bool = True,
     auto_scale: bool = False,
-    min_printability_score: int | None = None,
-    inspection_bundle: dict[str, Any] | None = None,
     printer_id: str | None = None,
 ) -> ValidationPipelineResult:
     """Run the full mesh validation pipeline.
@@ -218,19 +199,11 @@ def run_validation_pipeline(
     :param build_volume: Optional ``(x, y, z)`` build volume in mm.
     :param auto_repair: Attempt automatic repair of non-manifold meshes.
     :param auto_scale: Scale mesh down to fit build volume if too large.
-    :param min_printability_score: A lowest score the caller requires, for
-        every part.  Left unset, the verdict decides
-        (:func:`kiln.printability.passes`): a part that prints, as it is or
-        with supports, passes whatever it scores, one that won't print fails,
-        and one the check names no single cause for needs
-        :data:`_CHECK_BAR`.
-    :param inspection_bundle: Optional pre-built inspection-bundle dict
-        (the ``result["inspection_bundle"]`` field produced by
-        ``attach_inspect_bundle`` in kiln-pro).  When the bundle carries
-        printability findings, the pipeline reads them instead of
-        running a redundant :func:`analyze_printability` pass — same
-        answer, half the cost.  Legacy callers (no bundle) get the
-        unchanged path.
+    The verdict decides whether a part passes
+    (:func:`kiln.printability.passes`): a part that prints, as it is or with
+    supports, passes, one that won't print fails, and one the check names no
+    single cause for needs :data:`_CHECK_BAR`.
+
     :param printer_id: Optional printer whose bed the placement check
         measures against when *build_volume* is not given.  An unknown
         printer resolves to no bed, which skips the fit check rather
@@ -357,11 +330,7 @@ def run_validation_pipeline(
         # ------------------------------------------------------------------
         _logger.info("Step 3/4: Analyzing printability")
 
-        from kiln.printability import (
-            _apply_placement_check,
-            _placement_faults,
-            _resolve_placement_volume,
-        )
+        from kiln.printability import _placement_faults, _resolve_placement_volume
 
         # Resolve the bed once — an explicit build_volume wins, else the
         # printer catalogue answers (or answers None for a machine it
@@ -384,122 +353,50 @@ def run_validation_pipeline(
         # the one helper the verdict reads (kiln.printability.stops).
         hard_stops: list[str] = []
 
-        # Prefer pre-computed bundle findings over a fresh re-run.  The
-        # bundle is the bundle-as-lingua-franca contract: producers emit
-        # it once, consumers read it instead of re-deriving.  Same answer,
-        # half the cost when the caller already ran inspection upstream.
-        bundle_printability: dict[str, Any] | None = None
-        if inspection_bundle is not None:
-            bundle_printability = (
-                inspection_bundle.get("channels", {})
-                .get("printability", {})
-                .get("findings")
-            )
+        try:
+            from kiln.assumed_nozzle import assumed_nozzle
+            from kiln.printability import analyze_printability
 
-        if (
-            bundle_printability
-            and bundle_printability.get("score") is not None
-        ):
-            printability_score = bundle_printability["score"]
-            printability_grade = bundle_printability.get("grade", "F")
-            printability_details = dict(bundle_printability)
-            recommendations.extend(
-                bundle_printability.get("recommendations", [])
-            )
-            _logger.info(
-                "Step 3/4: Printability read from inspection bundle — "
-                "score %d/100 (grade %s); analyze_printability re-run skipped",
-                printability_score,
-                printability_grade,
-            )
-
-            # The bundle's findings describe the mesh's SHAPE; they carry
-            # no verdict on where the part sits.  Skipping the
-            # analyze_printability re-run therefore also skipped the
-            # placement check that runs at the end of it, and a part
-            # hanging below the bed or wider than the machine came back
-            # graded on shape alone.  Run the one shared helper here so
-            # this path lands on the same verdict as the direct one.
-            (
-                printability_score,
-                printability_grade,
-                placement_printable,
-                placement_recs,
-            ) = _apply_placement_check(
-                printability_score,
-                recommendations,
-                bounding_box,
+            nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
+            report = analyze_printability(
+                working_path,
+                nozzle_diameter=nozzle.diameter_mm,
+                layer_height=layer_height,
+                material=material.lower(),
+                # The bed resolved above; none while auto_scale leaves
+                # the fit to step 4.
                 build_volume=placement_volume,
             )
+            # The engine was handed a size, not the printer: say where
+            # the size really came from.
+            report.nozzle = nozzle.to_dict()
+            printability_score = report.score
+            printability_grade = report.grade
+            printability_details = report.to_dict()
+            recommendations.extend(report.recommendations)
+            from kiln.printability import stops as _stops
+            from kiln.printability import verdict_of as _verdict_of
 
-            if placement_recs:
-                # Keep the ride-along findings coherent with the verdict
-                # the pipeline is actually reporting.  This is the local
-                # copy, so the caller's bundle is left untouched.
-                printability_details["score"] = printability_score
-                printability_details["grade"] = printability_grade
-                printability_details["printable"] = placement_printable
-                printability_details["recommendations"] = [
-                    *placement_recs,
-                    *printability_details.get("recommendations", []),
-                ]
-                _logger.warning(
-                    "Placement check overrode bundle findings — "
-                    "score %d/100 (grade %s): %s",
-                    printability_score,
-                    printability_grade,
-                    "; ".join(placement_recs),
-                )
-        else:
-            try:
-                from kiln.assumed_nozzle import assumed_nozzle
-                from kiln.printability import analyze_printability
+            hard_stops = _stops(report)
+            verdict_key, verdict_text = _verdict_of(report)
+            _logger.info(
+                "Printability score: %d/100 (grade %s)", report.score, report.grade,
+            )
+        except ImportError:
+            warnings.append(
+                "Printability analysis unavailable (missing kiln.printability module).",
+            )
+            _logger.warning("kiln.printability not importable — skipping analysis")
+        except Exception as exc:
+            errors.append(f"Printability analysis failed: {exc}")
+            _logger.error("Printability analysis failed: %s", exc, exc_info=True)
 
-                nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
-                report = analyze_printability(
-                    working_path,
-                    nozzle_diameter=nozzle.diameter_mm,
-                    layer_height=layer_height,
-                    material=material.lower(),
-                    # Same bed the bundle branch checks against, so the
-                    # two branches cannot reach different verdicts.
-                    build_volume=placement_volume,
-                )
-                # The engine was handed a size, not the printer: say where
-                # the size really came from.
-                report.nozzle = nozzle.to_dict()
-                printability_score = report.score
-                printability_grade = report.grade
-                printability_details = report.to_dict()
-                recommendations.extend(report.recommendations)
-                from kiln.printability import stops as _stops
-                from kiln.printability import verdict_of as _verdict_of
-
-                hard_stops = _stops(report)
-                verdict_key, verdict_text = _verdict_of(report)
-                _logger.info(
-                    "Printability score: %d/100 (grade %s)", report.score, report.grade,
-                )
-            except ImportError:
-                warnings.append(
-                    "Printability analysis unavailable (missing kiln.printability module).",
-                )
-                _logger.warning("kiln.printability not importable — skipping analysis")
-            except Exception as exc:
-                errors.append(f"Printability analysis failed: {exc}")
-                _logger.error("Printability analysis failed: %s", exc, exc_info=True)
-
-        # Whichever branch produced the score above, the geometry is the
-        # same — so read the faults once, from the mesh, rather than from
-        # whichever path happened to run.  Pure detection: it re-reads the
-        # verdict without deducting a second time.
+        # The placement faults, read once from the mesh for the warnings
+        # below.  Pure detection: analyze_printability already took them
+        # off the score, and this does not deduct a second time.
         placement_faults = _placement_faults(
             bounding_box, build_volume=placement_volume,
         )
-        if printability_details is not None and not verdict_key:
-            verdict_key, verdict_text = _bundle_verdict(
-                printability_details, placement_faults, bounding_box,
-            )
 
         # ------------------------------------------------------------------
         # Step 4: Build volume check (+ optional auto-scale)
@@ -570,45 +467,29 @@ def run_validation_pipeline(
             passed = False
 
         # The verdict decides (kiln.printability.passes): a part that prints
-        # with supports passes whatever it scores, unless the caller set a
-        # minimum of their own.
+        # with supports passes whatever it scores.
         from kiln.printability import passes as _passes
 
-        if not _passes(verdict_key, printability_score, bar=_CHECK_BAR, required=min_printability_score):
+        if not _passes(verdict_key, printability_score, bar=_CHECK_BAR):
             passed = False
-            if (
-                verdict_key not in ("", "wont_print")
-                and min_printability_score is not None
-                and printability_score < min_printability_score
-            ):
+            if verdict_key == "check":
                 warnings.append(
-                    "The part scores under the minimum this check was asked to hold "
-                    f"(min_printability_score={min_printability_score}).",
-                )
-            elif verdict_key == "check":
-                warnings.append(
-                    "No single cause is named, and the part scores under the bar for "
-                    "a part with no named cause.",
+                    "No single cause is named, and the part is not clear to print "
+                    "as it is: check it before printing.",
                 )
 
         if fits_build_volume is False:
             passed = False
 
-        # Placement is feasibility, not quality, so it is deliberately not
-        # filtered through min_printability_score — that setting says how
-        # rough a mesh the caller will accept, not whether they will take
-        # one that cannot print at all.  This is the same reasoning that
-        # already lets fits_build_volume fail a run on its own; without it
-        # the two placement faults were graded alike but gated differently.
+        # Placement is feasibility, not quality: a part that cannot sit on
+        # the bed fails the run on its own, as fits_build_volume does.
         if placement_faults:
             passed = False
             warnings.extend(placement_faults)
 
         # A part the analysis says will not print as it is (smaller than any
         # printer makes, resting on a point, a wall the nozzle cannot lay)
-        # fails here too, whatever its score: the bar above says how rough
-        # a part the caller accepts, not whether they take one that cannot
-        # print.
+        # fails here too, whatever its score.
         unsaid = [stop for stop in hard_stops if stop not in placement_faults]
         if unsaid:
             passed = False
@@ -640,7 +521,6 @@ def run_validation_pipeline(
             verdict=verdict_key,
             verdict_text=verdict_text,
             summary="",
-            inspection_bundle=inspection_bundle,
         )
         result.summary = _build_summary(result)
 

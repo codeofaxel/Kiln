@@ -1193,7 +1193,7 @@ class TestIterateDesign:
 
     @patch("kiln.server._get_generation_provider")
     def test_iteration_stops_on_high_score(self, mock_get_provider, tmp_path):
-        """Loop stops when printability score is >= 80."""
+        """Loop stops when a round passes the quick mesh check."""
         cube_path = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_path, 20.0)
 
@@ -1217,7 +1217,10 @@ class TestIterateDesign:
         result = iterate_design("cube(20);", provider="openscad", max_iterations=3)
 
         assert result["success"] is True
-        assert result["best_score"] >= 0
+        # The check that stops the loop stays in the process; the round says
+        # it passed.
+        assert "best_score" not in result
+        assert result["iterations"][0]["outcome"] == "passed"
         assert len(result["iterations"]) >= 1
 
     @patch("kiln.server._get_generation_provider")
@@ -1252,8 +1255,9 @@ class TestOrientationOptimizer:
 
         assert isinstance(result["rotation_x_deg"], (int, float))
         assert isinstance(result["rotation_y_deg"], (int, float))
-        assert result["printability_score"] >= 0
-        assert result["printability_score"] <= 100
+        # The verdict rides; the rating stays in the process.
+        assert result["printability_verdict"] in {"ready", "prints_with_supports", "wont_print", "check"}
+        assert "printability_score" not in result
         assert os.path.isfile(result["path"])
         # Output file should have the same triangle count.
         vr = validate_mesh(result["path"])
@@ -1572,8 +1576,9 @@ class TestFailurePrediction:
         result = predict_print_failures(f)
 
         for key in ("verdict", "risk_score", "failure_count", "failures",
-                     "dimensions_mm", "triangle_count", "mesh_check_score"):
+                     "dimensions_mm", "triangle_count"):
             assert key in result
+        assert "mesh_check_score" not in result
 
     def test_unsupported_format_raises(self, tmp_path):
         from kiln.generation.validation import predict_print_failures
@@ -1595,38 +1600,33 @@ class TestFailurePrediction:
         assert isinstance(result["risk_score"], int)
 
 
-# A stand-in scorecard overlay with the same shape as the real one and
-# made-up values.  The tests below only need SOME overlay to be present;
-# the shipped weighting and ladder are judged in kiln-pro's suite.
+# A stand-in scorecard overlay with the same shape as the real one: one
+# structural rule that fires on any part, so its note shows it was read.
 _STAND_IN_SCORECARD_OVERLAY = {
-    "overall_weights": {
-        "printability": 0.40,
-        "structural": 0.30,
-        "efficiency": 0.20,
-        "quality": 0.10,
-    },
-    "grade_thresholds": {"A": 95, "B": 85, "C": 70, "D": 55},
+    "structural_deductions": [
+        {"metric": "components", "operator": ">", "threshold": 0, "deduction": -1,
+         "note_template": "Stand-in structural rule"},
+    ],
 }
 
 
 class TestDesignScorecard:
     """Tests for design_scorecard()."""
 
-    def test_cube_gets_good_grade(self, tmp_path):
+    def test_a_cube_reads_in_words(self, tmp_path):
         from kiln.generation.validation import design_scorecard
 
         f = str(tmp_path / "cube.stl")
         _write_cube_stl(f, 20.0)
         result = design_scorecard(f)
 
-        assert result["grade"] in ("A", "B", "C")
-        assert 0 <= result["overall_score"] <= 100
-        assert "printability" in result
-        assert "structural" in result
-        assert "efficiency" in result
-        assert "quality" in result
+        assert result["printability_verdict"] == "ready"
+        for gone in ("grade", "overall_score"):
+            assert gone not in result
+        for area in ("printability", "structural", "efficiency", "quality"):
+            assert area in result
 
-    def test_scorecard_factors_have_scores(self, tmp_path):
+    def test_each_area_says_notes_and_no_score(self, tmp_path):
         from kiln.generation.validation import design_scorecard
 
         f = str(tmp_path / "cube.stl")
@@ -1634,9 +1634,9 @@ class TestDesignScorecard:
         result = design_scorecard(f)
 
         for factor in ("printability", "structural", "efficiency", "quality"):
-            assert "score" in result[factor]
             assert "notes" in result[factor]
-            assert 0 <= result[factor]["score"] <= 100
+            assert "score" not in result[factor]
+            assert "grade" not in result[factor]
 
     def test_unparseable_raises(self, tmp_path):
         from kiln.generation.validation import design_scorecard
@@ -1647,61 +1647,12 @@ class TestDesignScorecard:
             design_scorecard(str(bad))
 
     # ----------------------------------------------------------------
-    # Tier seam — with no overlay the free path blends with the
-    # published weights and reads the published ladder; an overlay may
-    # supply its own, and the engine applies exactly what it is given.
+    # Tier seam — an overlay supplies curated rules, and its notes are
+    # what a caller reads; the shape of the reply stays the same.
     # ----------------------------------------------------------------
 
-    def test_no_licence_uses_the_published_weighting(self, tmp_path, monkeypatch):
-        """With no overlay the blend is still 35/25/20/20 — the same
-        weighting the mesh_quality_scorecard tool docstring publishes
-        to every caller."""
-        from kiln.generation import validation
-
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: {},
-        )
-        f = str(tmp_path / "cube.stl")
-        _write_cube_stl(f, 20.0)
-        result = validation.design_scorecard(f)
-
-        expected = round(
-            result["printability"]["score"] * 0.35
-            + result["structural"]["score"] * 0.25
-            + result["efficiency"]["score"] * 0.20
-            + result["quality"]["score"] * 0.20
-        )
-        assert result["overall_score"] == expected
-
-    def test_no_licence_reads_the_same_grade_ladder(self, tmp_path, monkeypatch):
-        """With no overlay the ladder is still A>=90 / B>=80 / C>=65 /
-        D>=50.  A grade is a claim about the part, so it cannot get
-        easier when nobody is paying.  Uses a shape that lands in the
-        80s, where two ladders would disagree."""
-        from kiln.generation import validation
-
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: {},
-        )
-        f = str(tmp_path / "tower.stl")
-        _write_box_stl(f, 10.0, 10.0, 110.0)
-        result = validation.design_scorecard(f)
-
-        overall = result["overall_score"]
-        if overall >= 90:
-            expected = "A"
-        elif overall >= 80:
-            expected = "B"
-        elif overall >= 65:
-            expected = "C"
-        elif overall >= 50:
-            expected = "D"
-        else:
-            expected = "F"
-        assert result["grade"] == expected
-
-    def test_overlay_weights_are_applied(self, tmp_path, monkeypatch):
-        """An overlay's ``overall_weights`` drive the blend."""
+    def test_overlay_rules_reach_the_notes(self, tmp_path, monkeypatch):
+        """An overlay's rules are read, and what they flag is said."""
         from kiln.generation import validation
 
         monkeypatch.setattr(
@@ -1712,31 +1663,7 @@ class TestDesignScorecard:
         _write_cube_stl(f, 20.0)
         result = validation.design_scorecard(f)
 
-        w = _STAND_IN_SCORECARD_OVERLAY["overall_weights"]
-        expected = round(
-            result["printability"]["score"] * w["printability"]
-            + result["structural"]["score"] * w["structural"]
-            + result["efficiency"]["score"] * w["efficiency"]
-            + result["quality"]["score"] * w["quality"]
-        )
-        assert result["overall_score"] == expected
-
-    def test_overlay_grade_ladder_is_applied(self, tmp_path, monkeypatch):
-        """An overlay-supplied ladder is read and applied verbatim — a
-        ladder nothing can reach turns a good cube into an F."""
-        from kiln.generation import validation
-
-        unreachable = {"A": 101, "B": 101, "C": 101, "D": 101}
-        monkeypatch.setattr(
-            "kiln.design_intelligence.load_pro_overlay_or_empty",
-            lambda kind: {"grade_thresholds": unreachable},
-        )
-        f = str(tmp_path / "cube.stl")
-        _write_cube_stl(f, 20.0)
-        result = validation.design_scorecard(f)
-
-        assert result["overall_score"] >= 50, "fixture should be a decent cube"
-        assert result["grade"] == "F"
+        assert "Stand-in structural rule" in result["structural"]["notes"]
 
     def test_shape_identical_across_tiers(self, tmp_path, monkeypatch):
         """The dict shape must not drift between free and Pro paths —
@@ -3263,36 +3190,32 @@ class TestFailurePredictionEdgeCases:
         assert result["risk_score"] < 50
 
 
-class TestScorecardGrades:
-    """Tests that scorecard assigns meaningful grades.
+class TestScorecardVerdicts:
+    """The scorecard's verdict means what it says.
 
     Covers:
-    - Clean cube gets A or B
-    - Single triangle (non-manifold, zero volume) gets D or F
+    - Clean cube reads ready
+    - Single triangle (non-manifold, zero volume) is refused, not judged
     """
 
-    def test_cube_gets_good_grade(self, tmp_path):
-        """A well-formed cube should get A or B."""
+    def test_cube_reads_ready(self, tmp_path):
+        """A well-formed cube prints as it is."""
         from kiln.generation.validation import design_scorecard
 
         stl = str(tmp_path / "cube.stl")
         _write_cube_stl(stl, 20.0)
         result = design_scorecard(stl)
 
-        assert result["grade"] in ("A", "B"), f"Cube should be A/B, got {result['grade']}"
-        assert result["overall_score"] >= 60
+        assert result["printability_verdict"] == "ready", result
 
-    def test_a_single_triangle_gets_no_grade(self, tmp_path):
-        """A single open triangle is no part, so it gets no grade at all.
-
-        Scored, it lands just below a cube -- an A, at 94 -- which reads as
-        a printable part to anyone looking at the grade.
-        """
+    def test_a_single_triangle_gets_no_verdict(self, tmp_path):
+        """A single open triangle is no part, so it is refused rather than
+        judged."""
         from kiln.generation.validation import design_scorecard
 
         cube_stl = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_stl, 20.0)
-        assert design_scorecard(cube_stl)["overall_score"] > 0
+        assert design_scorecard(cube_stl)["printability_verdict"]
 
         single_stl = str(tmp_path / "single.stl")
         _write_single_triangle_stl(single_stl)

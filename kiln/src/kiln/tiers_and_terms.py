@@ -453,7 +453,7 @@ def free_allowance_phrase(allowance: dict | None) -> str:
 
 
 def account_required_message(
-    subject: str, tier: str = "", allowance: dict | None = None
+    subject: str, tier: str = "", allowance: dict | None = None, *, every_plan: str = ""
 ) -> str:
     """Person-facing copy for "this needs an account before it can run".
 
@@ -472,10 +472,23 @@ def account_required_message(
     tool that genuinely costs money, what it costs is the answer to the
     question being asked; a free-monthly figure alongside it only muddies
     which one applies.
+
+    *every_plan* is the tool's ``floor`` sentence from the pro tool manifest:
+    what a paid tool answers on every plan, free included.  This refusal is
+    decided before the question is read, so a paid tool with a floor leads
+    with that sentence and names its plan only for the rest; calling the
+    whole tool paid would tell a person a free answer costs money.
     """
     tier_name = str(tier or "").strip()
     if tier_name and tier_name.lower() != "free":
         tier_name = tier_name.title()
+        floor = str(every_plan or "").strip()
+        if floor:
+            return (
+                f"{floor} Signing in is free and takes a few seconds. "
+                f"Anything else needs Kiln {tier_name}: see what {tier_name} "
+                "includes at kiln3d.com/pricing"
+            )
         return (
             f"{subject} is part of Kiln {tier_name}. "
             "Signing in is free and takes a few seconds. "

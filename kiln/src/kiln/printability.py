@@ -46,13 +46,40 @@ logger = logging.getLogger(__name__)
 
 #: The score's own arithmetic: how many points each check took off, and the
 #: factor the thermal check scaled its charge by.  Never served, at any
-#: tier.  The score and the grade are the answer; a reply says what each
-#: check found and what to do, and nothing reads the points behind it.
-#: The in-process report keeps them for the checks that reconcile the
-#: score (``tests/test_printability_score_is_its_stated_deductions.py``).
+#: tier: a reply says what each check found and what to do, and nothing
+#: reads the points behind it.  The in-process report keeps them for the
+#: checks that reconcile the score
+#: (``tests/test_printability_score_is_its_stated_deductions.py``).
 _SCORE_ARITHMETIC: frozenset[str] = frozenset({
     "score_deduction", "stop_deduction", "material_stress_factor",
 })
+
+#: The report's rating, under every name a reply could carry it by: the
+#: 0-100 score and the letter grade read from it.  The rating stays in the
+#: process, where Kiln compares versions of a part and gates a part with no
+#: named cause; a reply carries the verdict (:func:`verdict_block`) and the
+#: reasons behind it, never the rating, at any tier.  Every door that
+#: builds its own reply drops these keys through :func:`without_rating`.
+RATING_KEYS: frozenset[str] = frozenset({
+    "score", "grade", "printability_score", "printability_grade",
+    # The rating the part would have where it sits fine
+    # (PlacementAnalysis.score_if_placed): the score and the letter
+    # themselves whenever nothing is wrong with where it sits.
+    "score_if_placed", "grade_if_placed",
+    # The quick mesh check's own 0-100 (MeshAnalysis.mesh_check_score): a
+    # second rating of the same part, kept in the process the same way.
+    "mesh_check_score",
+})
+
+
+def without_rating(reply: dict[str, Any]) -> dict[str, Any]:
+    """*reply* with the printability rating (:data:`RATING_KEYS`) left out.
+
+    Returns a new dict; nested dicts are not walked, so a door that carries
+    a printability block under its own key passes that block through here
+    too.
+    """
+    return {key: value for key, value in reply.items() if key not in RATING_KEYS}
 
 
 def _served(analysis: Any) -> dict[str, Any]:
@@ -544,7 +571,9 @@ class PlacementAnalysis:
     #: end the problem, and the clamped fields cannot answer it.
     #:
     #: ``None`` on a report built before this block existed.  Equal to
-    #: the clamped values when there are no faults.
+    #: the clamped values when there are no faults.  The score and grade
+    #: if placed stay in the process like the report's own
+    #: (:data:`RATING_KEYS`); a reply carries ``printable_if_placed``.
     score_if_placed: int | None = None
     grade_if_placed: str | None = None
     printable_if_placed: bool | None = None
@@ -572,7 +601,7 @@ class PlacementAnalysis:
         return PLACEMENT_FAULT_EXCEEDS_BED in self.fault_names
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return without_rating(asdict(self))
 
 
 @dataclass
@@ -704,17 +733,22 @@ class PrintabilityReport:
     # pieces could not be read, and on reports built directly by a client.
     pieces: PiecesAnalysis | None = None
     #: Whether Kiln Pro tuned this report (:func:`_mark_tuned`).  A tuned
-    #: report's reply keeps the verdict, the score and grade, every check's
-    #: risk and reasons, and what to do; see :func:`_served`.
+    #: report's reply keeps the verdict, every check's risk and reasons, and
+    #: what to do; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
     _WORKED_OUT: ClassVar[tuple[str, ...]] = ("stop_deduction", "overhang_threshold_deg")
 
     def to_dict(self) -> dict[str, Any]:
-        out = _served(self)
-        # Each check is served as itself, never as asdict's copy of it.
+        # The rating stays in the process (RATING_KEYS); the reply says the
+        # verdict and the reasons.
+        out = without_rating(_served(self))
+        # Each check is served as itself, never as asdict's copy of it, and
+        # so is where the part sits, which carries the rating if placed.
         for name, check in _checks(self):
             out[name] = check.to_dict()
+        if self.placement is not None:
+            out["placement"] = self.placement.to_dict()
         return out
 
 
@@ -735,55 +769,6 @@ def _mark_tuned(report: PrintabilityReport) -> None:
     report.tuned = True
     for _name, check in _checks(report):
         check.tuned = True
-
-
-@dataclass
-class BundlePrintabilityFindings:
-    """The minimal printability surface readable from an inspection bundle.
-
-    :class:`PrintabilityReport` carries detail-rich sub-analyses
-    (overhangs, thin walls, bridging, bed adhesion, supports, warping,
-    thermal stress, adhesion force, cost) produced by running
-    :func:`analyze_printability` against a mesh.  When a caller already
-    has an inspection bundle attached upstream (the
-    ``inspection_bundle`` field from ``attach_inspect_bundle`` in
-    kiln-pro), it can read the printability summary out of the bundle's
-    channels without re-running those analyses — same answer, near-zero
-    marginal cost.
-
-    This adapter exposes only the summary fields that downstream
-    consumers (audit, validation pipelines) actually read: ``printable``,
-    ``score``, ``grade``, ``recommendations``, and ``to_dict()``.  Field
-    names and types match :class:`PrintabilityReport` exactly, so
-    callers can branch on which one they got without changing how they
-    read.  ``to_dict()`` returns the raw bundle-channel findings so the
-    audit's ``details`` payload stays bundle-faithful rather than
-    flattening to the adapter's narrower view.
-    """
-
-    printable: bool
-    score: int  # 0-100
-    grade: str  # A/B/C/D/F
-    recommendations: list[str] = field(default_factory=list)
-    _findings: dict[str, Any] = field(default_factory=dict, repr=False)
-
-    @classmethod
-    def from_bundle_findings(
-        cls, findings: dict[str, Any]
-    ) -> BundlePrintabilityFindings:
-        score = int(findings.get("score") or 0)
-        return cls(
-            printable=bool(
-                findings.get("printable", score >= _PRINTABLE_SCORE_MIN)
-            ),
-            score=score,
-            grade=str(findings.get("grade") or "F"),
-            recommendations=list(findings.get("recommendations") or []),
-            _findings=dict(findings),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return dict(self._findings)
 
 
 # ---------------------------------------------------------------------------
@@ -7403,9 +7388,8 @@ def _score_to_grade(score: int) -> str:
 # Shape analysis (overhangs, walls, bridging) grades how a part is
 # built; it says nothing about WHERE the part sits.  A model hanging
 # below the bed or wider than the machine can score an untroubled A and
-# still be impossible to print.  Both the direct analysis path and the
-# pipeline's bundle-sourced path route through the one helper below so
-# they cannot drift apart on that verdict.
+# still be impossible to print.  Every placement verdict goes through the
+# one helper below.
 # ---------------------------------------------------------------------------
 
 #: Score deducted per placement failure, and per hard stop
@@ -9253,9 +9237,6 @@ def _analyze_printability_here(
         time_mod += 0.05
 
     # Placement check — where the part sits, not only how it is shaped.
-    # The validation pipeline's bundle-sourced path calls this same
-    # helper, so a report read from a bundle cannot reach a different
-    # placement verdict than one analyzed here.
     # Read before the clamp: this is the verdict on the part's SHAPE,
     # which the floor is about to overwrite with a verdict on its shape
     # AND its placement.  Recomputing it afterwards is impossible.
@@ -9350,7 +9331,9 @@ def _analyze_printability_here(
         if pro_features.is_available("printability_overlay"):
             try:
                 enriched = pro_features.printability_overlay.enrich_printability_report(
-                    report.to_dict(),
+                    # In process, with the rating, so a lower score the
+                    # overlay finds can reach the verdict below.
+                    {**report.to_dict(), "score": report.score, "grade": report.grade},
                     material=material,
                     printer_id=printer_id,
                     nozzle_diameter_mm=nozzle_diameter,
@@ -9383,7 +9366,9 @@ def _analyze_printability_here(
                 ):
                     try:
                         enriched = pro_features.printability_overlay.enrich_printability_report(
-                            report.to_dict(),
+                            # In process, with the rating, so a lower score
+                            # the overlay finds can reach the verdict below.
+                            {**report.to_dict(), "score": report.score, "grade": report.grade},
                             **kwargs,
                         )
                         break
@@ -9674,36 +9659,13 @@ def verdict(report: PrintabilityReport) -> tuple[str, str]:
     return "check", " ".join(filter(None, (f"Check before printing: {first}", *notes)))
 
 
-def verdict_from_findings(findings: dict[str, Any]) -> tuple[str, str]:
-    """:func:`verdict` for a part known only by its summary findings (an
-    inspection bundle's printability channel, a
-    :class:`BundlePrintabilityFindings`).
-
-    The findings carry the verdict when their producer read it
-    (``verdict`` / ``verdict_text``).  Older findings have only the summary
-    fields, so it is rebuilt from them in the order :func:`verdict` takes,
-    after whatever stops the part, which a caller that can see the part's
-    placement says first.
-    """
-    if findings.get("verdict") and findings.get("verdict_text"):
-        return str(findings["verdict"]), str(findings["verdict_text"])
-    if findings.get("needs_supports"):
-        return "prints_with_supports", "Prints with supports."
-    if findings.get("printable"):
-        return "ready", "Ready to print."
-    recs = findings.get("recommendations") or []
-    return "check", f"Check before printing: {recs[0] if recs else 'see the report'}"
-
-
-def verdict_of(report: PrintabilityReport | BundlePrintabilityFindings) -> tuple[str, str]:
-    """:func:`verdict` for either kind of report a door may hold.
+def verdict_of(report: PrintabilityReport) -> tuple[str, str]:
+    """:func:`verdict` that never raises.
 
     The verdict is a reading of the report, never a reason to lose it: a
     report it cannot read (a field missing or of the wrong kind) falls back
     to the report's own printable flag, and the debug log says why.
     """
-    if isinstance(report, BundlePrintabilityFindings):
-        return verdict_from_findings(report.to_dict())
     try:
         if not isinstance(report, PrintabilityReport):
             raise TypeError(f"not a printability report: {type(report).__name__}")
@@ -9715,7 +9677,7 @@ def verdict_of(report: PrintabilityReport | BundlePrintabilityFindings) -> tuple
         return "check", "Check before printing: see the report."
 
 
-def verdict_block(report: PrintabilityReport | BundlePrintabilityFindings) -> dict[str, str]:
+def verdict_block(report: PrintabilityReport) -> dict[str, str]:
     """The two keys every door that judges a part carries in its reply.
 
     ``printability_verdict`` is the key (``ready``, ``prints_with_supports``,
@@ -9732,7 +9694,7 @@ def verdict_block(report: PrintabilityReport | BundlePrintabilityFindings) -> di
 PRINTS: frozenset[str] = frozenset({"ready", "prints_with_supports"})
 
 
-def passes(verdict_key: str, score: int, *, bar: int, required: int | None = None) -> bool:
+def passes(verdict_key: str, score: int, *, bar: int) -> bool:
     """Whether a gate passes a part :func:`verdict` called *verdict_key*.
 
     The verdict decides.  A part that prints, as it is or with supports,
@@ -9740,16 +9702,12 @@ def passes(verdict_key: str, score: int, *, bar: int, required: int | None = Non
     judged) fails whatever its score: the score is for comparing versions
     of a part, not for telling a person whether it prints.  Only ``check``
     (under the printable line with no single cause to name) has nothing but
-    the score to go on, so there the gate's own *bar* decides.
-
-    *required* is a minimum the CALLER asked for, a quality bar of their
-    own: it holds for every part, one that prints included.  One rule for
-    every gate, so no door fails a part another door told the person prints
-    unless the person asked for more.
+    the score to go on, so there the gate's own *bar* decides.  One rule
+    for every gate, so no door fails a part another door told the person
+    prints.  No caller sets the bar: a bar a caller could move would read
+    the score back to them one pass or fail at a time.
     """
     if verdict_key == "wont_print" or not verdict_key:
-        return False
-    if required is not None and score < required:
         return False
     if verdict_key in PRINTS:
         return True

@@ -365,7 +365,7 @@ class TestQuickPrintValidationStep:
         validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
         assert len(validate_steps) == 1
         assert validate_steps[0].success is True
-        assert validate_steps[0].data["printability_score"] == 92
+        assert "printability_score" not in validate_steps[0].data
         # Pipeline reached slice step (which is mocked to fail — that's fine)
         slice_steps = [s for s in result.steps if s.name == "slice"]
         assert len(slice_steps) == 1
@@ -564,7 +564,7 @@ class TestBenchmarkValidationStep:
         validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
         assert len(validate_steps) == 1
         assert validate_steps[0].success is True
-        assert validate_steps[0].data["printability_score"] == 90
+        assert "printability_score" not in validate_steps[0].data
         # Reached slice
         slice_steps = [s for s in result.steps if s.name == "slice"]
         assert len(slice_steps) == 1
