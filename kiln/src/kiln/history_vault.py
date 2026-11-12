@@ -1329,6 +1329,8 @@ class HistoryVault:
         account = {str(v["version_id"]): v.get("version_number") for v in _rows(bundle_like["versions"], "version_id")}
         written = []
         heads_kept: dict[str, str] = {}
+        follows: set[str] = set()
+        stays: set[str] = set()
         with self._lock:
             for v in _rows(bundle_like["versions"], "version_id"):
                 if not self._is_designs("versions", v["version_id"], design_id):
@@ -1355,21 +1357,39 @@ class HistoryVault:
                 local = self.branch(b["branch_id"]) or {}
                 here, there = local.get("head_version_id"), b.get("head_version_id")
                 if here and there and here != there and not self._grows_from(there, here):
+                    name = str(b.get("name") or b["branch_id"])
                     if self._grows_from(here, there):
                         # This computer is ahead: the branch stays on its
                         # own versions.
-                        heads_kept[str(b.get("name") or b["branch_id"])] = "this computer is ahead"
+                        heads_kept[name] = "this computer is ahead"
                         b = {**b, "head_version_id": here}
+                    elif self._on_another_branch(design_id, b["branch_id"], here):
+                        # The two went different ways, and this computer's
+                        # line is whole on a branch of its own: the branch
+                        # follows the account and lets that line go.
+                        follows.add(b["branch_id"])
                     else:
-                        # The two went different ways.  This computer's line
-                        # is kept as a branch of its own before the branch
-                        # follows the account; nothing is merged or lost.
-                        heads_kept[str(b.get("name") or b["branch_id"])] = self._keep_line_as_this_computers(
-                            design_id, local,
-                        )
+                        # The two went different ways and this computer's
+                        # line is on this branch alone: it stays, and the
+                        # account's line is not laid over it.
+                        heads_kept[name] = "went another way"
+                        stays.add(b["branch_id"])
+                        b = {**b, "head_version_id": here}
                 self._put_branch({**b, "design_id": design_id})
+            for branch_id in follows:
+                # Only the account's line stays on the branch; the rest is
+                # on the branch that keeps this computer's line.
+                head = (self.branch(branch_id) or {}).get("head_version_id")
+                for m in self.memberships(branch_id):
+                    if not self._grows_from(head, m["version_id"]):
+                        self._conn.execute(
+                            "DELETE FROM memberships WHERE branch_id = ? AND version_id = ?",
+                            (branch_id, m["version_id"]),
+                        )
             for m in _rows(bundle_like["memberships"], "branch_id", "version_id"):
                 if self.design_of_branch(m["branch_id"]) != design_id:
+                    continue
+                if m["branch_id"] in stays:
                     continue
                 if self.design_of_version(m["version_id"]) not in (None, design_id):
                     continue
@@ -1392,29 +1412,20 @@ class HistoryVault:
             out["heads_kept_here"] = heads_kept
         return out
 
-    def _keep_line_as_this_computers(self, design_id: str, branch: dict[str, Any]) -> str:
-        """Keep *branch*'s versions here as ``<name>@<this computer>``, a
-        branch of its own, and return what was done in words.  The lock is
-        held; nothing is committed."""
-        own_name = f"{branch.get('name') or _MAIN}@{self.computer_name()}"
-        kept = self.branch_named(design_id, own_name) or {}
-        own = {
-            **branch,
-            "branch_id": kept.get("branch_id") or uuid.uuid4().hex,
-            "name": own_name,
-            "parent_branch_id": branch["branch_id"],
-            "created_at": kept.get("created_at") or time.time(),
-            "status": "active",
-        }
-        members = self.memberships(branch["branch_id"])
-        self._put_branch(own)
-        self._conn.execute("DELETE FROM memberships WHERE branch_id = ?", (own["branch_id"],))
-        for position, m in enumerate(members):
-            self._put_membership({
-                "branch_id": own["branch_id"], "version_id": m["version_id"],
-                "position": position, "added_at": m.get("added_at") or time.time(),
-            })
-        return f"kept as {own_name}"
+    def _on_another_branch(self, design_id: str, branch_id: str, version_id: str) -> bool:
+        """Whether *version_id* is on a live branch of the design other than *branch_id*."""
+        row = self._conn.execute(
+            "SELECT 1 FROM memberships m JOIN branches b ON b.branch_id = m.branch_id "
+            "WHERE b.design_id = ? AND m.branch_id != ? AND m.version_id = ? LIMIT 5",
+            (design_id, branch_id, version_id),
+        ).fetchall()
+        if not row:
+            return False
+        return any(
+            b["branch_id"] != branch_id and b.get("status") != "retired"
+            and any(m["version_id"] == version_id for m in self.memberships(b["branch_id"]))
+            for b in self.branches(design_id)
+        )
 
     def _grows_from(self, head: Any, base: Any) -> bool:
         """Whether the version *head* is *base* or is reached from it by

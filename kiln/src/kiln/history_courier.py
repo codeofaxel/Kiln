@@ -1051,7 +1051,13 @@ def push(
             return locked
         recipes = vault.proven_rows(design_id)
         vault.sync_from_library(design_id)
-        branch = vault.branch(branch_id) if branch_id else vault.branch_named(design_id, "main")
+        if branch_id:
+            branch = vault.branch(branch_id)
+        else:
+            # The main this computer's saves continue, when it holds more
+            # than one branch of that name.
+            saving = vault.checked_out(design_id)
+            branch = saving if (saving or {}).get("name") == "main" else vault.branch_named(design_id, "main")
         if branch is None or branch.get("design_id") != design_id:
             return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id or 'main'} of {design_id} on this computer.")
         members = vault.memberships(branch["branch_id"])
@@ -1122,6 +1128,15 @@ def push(
     else:
         kept_as = _branch_kept_as(design_id, branch["branch_id"], answer, None if own else vault)
         out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": kept_as}
+        if answer.get("behind"):
+            # The account's branch is ahead of this computer's: nothing was
+            # sent, and the answer never reads as a save.
+            pull = kiln_command("cloud pull", design_id)
+            out["behind"] = True
+            out["said"] = (
+                f"Nothing was sent: {branch.get('name') or 'main'} of {design_id} in your Kiln account is "
+                f"ahead of this computer's. Run `{pull}` to bring it here."
+            )
         made_room = answer.get("made_room") if isinstance(answer, dict) else None
         if isinstance(made_room, dict) and made_room.get("note"):
             # Which of their designs was archived to make room, said at the
@@ -1589,15 +1604,14 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any, *, doing: str) 
 
 
 def _said_head_kept(design_id: str, name: str, why: str) -> str:
-    """What a person is told when a pull did not simply move a branch forward."""
-    if why.startswith("kept as "):
-        own = why[len("kept as "):]
-        check = kiln_command("merge check", design_id, own, name)
-        run = kiln_command("merge run", design_id, own, name)
+    """What a person is told when a pull left a branch here where it was."""
+    if why == "went another way":
+        push = kiln_command("cloud push", design_id)
+        pull = kiln_command("cloud pull", design_id)
         return (
-            f"{name} of {design_id} on this computer and in your Kiln account went different ways. "
-            f"This computer's work is kept here as {own}, and {name} now follows your account. Nothing "
-            f"was merged or lost. To bring them together, run `{check}` and `{run}`."
+            f"{name} of {design_id} on this computer and in your Kiln account went different ways, so "
+            f"it stayed as it is here and nothing was merged. Run `{push}` first: your account keeps "
+            f"this computer's work as a branch of its own. Then `{pull}` brings the account's {name} here."
         )
     return (
         f"{name} of {design_id} on this computer has versions your Kiln account does not, so it stayed "

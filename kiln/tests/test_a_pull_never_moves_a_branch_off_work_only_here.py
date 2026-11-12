@@ -82,7 +82,7 @@ def test_a_pull_moves_the_head_forward_when_the_account_is_ahead(home, monkeypat
     assert "heads_kept_here" not in pulled["applied"]
 
 
-def test_a_pull_of_a_branch_that_went_another_way_keeps_this_computers_line_as_its_own_branch(home, monkeypatch):
+def test_a_pull_of_a_branch_that_went_another_way_leaves_it_and_says_to_push_first(home, monkeypatch):
     _here(home, 3)
     _account(monkeypatch, [IDS[0], IDS[1], OTHER])
 
@@ -90,15 +90,35 @@ def test_a_pull_of_a_branch_that_went_another_way_keeps_this_computers_line_as_i
 
     assert pulled["status"] == "success", pulled
     head, members = _main()
-    # main follows the account ...
-    assert head == OTHER and OTHER in members
-    # ... and this computer's line is whole, on a branch of its own.
+    assert head == IDS[2] and members == IDS
+    assert pulled["applied"]["heads_kept_here"]["main"] == "went another way"
+    assert "nothing was merged" in pulled["said_heads"] and "cloud push" in pulled["said_heads"]
+
+
+def test_once_this_computers_line_is_on_a_branch_of_its_own_the_pull_follows_the_account(home, monkeypatch):
+    """After a push kept this computer's work as ``main@<computer>``, a pull
+    moves ``main`` to the account's line and takes the kept versions off
+    ``main``: they are whole on their own branch."""
+    _here(home, 3)
     vault = HistoryVault()
     try:
-        own = next(b for b in vault.branches("vase") if b["name"].startswith("main@"))
-        assert own["head_version_id"] == IDS[2]
-        assert [m["version_id"] for m in vault.memberships(own["branch_id"])] == IDS
+        main = vault.branch_named("vase", "main")
+        vault.keep_branch_copy(
+            {**main, "branch_id": "kept-copy", "name": "main@this-computer", "parent_branch_id": main["branch_id"]},
+            [{"version_id": v} for v in IDS],
+        )
     finally:
         vault.close()
-    assert pulled["applied"]["heads_kept_here"]["main"] == f"kept as {own['name']}"
-    assert "went different ways" in pulled["said_heads"] and "Nothing was merged or lost" in pulled["said_heads"]
+    _account(monkeypatch, [IDS[0], IDS[1], OTHER])
+
+    pulled = courier.pull("cloud_pull_branch", "vase")
+
+    assert pulled["status"] == "success", pulled
+    head, members = _main()
+    assert head == OTHER and members == [IDS[0], IDS[1], OTHER]
+    assert "heads_kept_here" not in pulled["applied"]
+    vault = HistoryVault()
+    try:
+        assert [m["version_id"] for m in vault.memberships("kept-copy")] == IDS
+    finally:
+        vault.close()

@@ -339,3 +339,38 @@ class TestAnIdHandedOutBeforeTheChange:
 
         assert again["status"] == "success" and again["branch_id"] == ACCOUNT_ID
         assert account.pushes[-1]["branch"]["branch_id"] == ACCOUNT_ID
+
+
+class TestWhatAPushSays:
+    def test_a_push_the_account_is_ahead_of_never_reads_as_a_save(self, home, account, monkeypatch):
+        _made_here(home)
+        real = account.request
+
+        def behind(tool, method, path, body=None, **kw):
+            answer = real(tool, method, path, body, **kw)
+            return {**answer, "behind": True, "pushed_versions": []} if path.endswith("/branches/push") else answer
+
+        monkeypatch.setattr(courier, "_request", behind)
+
+        out = courier.push("cloud_push_branch", "vase")
+
+        assert out["behind"] is True
+        assert out["said"].startswith("Nothing was sent") and "cloud pull" in out["said"]
+
+    def test_with_two_branches_named_main_the_one_saves_continue_is_pushed(self, home, account):
+        made_as = _made_here(home)
+        vault = HistoryVault()
+        try:
+            vault.keep_branch_copy(
+                {"branch_id": "an-older-main", "design_id": "vase", "name": "main", "created_at": 0.5,
+                 "status": "active", "head_version_id": IDS[0]},
+                [{"version_id": IDS[0]}],
+            )
+            vault.check_out("vase", made_as)
+        finally:
+            vault.close()
+
+        courier.push("cloud_push_branch", "vase")
+
+        assert account.pushes[0]["branch"]["branch_id"] == made_as
+        assert [m["version_id"] for m in account.pushes[0]["memberships"]] == IDS
