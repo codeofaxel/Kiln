@@ -261,6 +261,46 @@ def test_a_row_without_the_facts_sends_none_of_their_keys(db):
     assert outcome_courier.account_row({**row, "firmware_version": "Marlin 2.1.2"}, "0" * 32)["firmware"] == "Marlin 2.1.2"
 
 
+_OWN_SERIAL = "01P00A123456789"
+_OWN_ADDRESS = "192.168.1.50"
+
+
+@pytest.mark.parametrize("said", [
+    "printer-garage.local",                  # a host name
+    "sarahs-voron",                          # a word, no version
+    _OWN_ADDRESS,                            # this computer's printer's own address
+    f"1.2.3-{_OWN_SERIAL[:12]}",             # a version carrying part of a serial as written
+    f"2.1 {_OWN_SERIAL}",                    # a version beside a whole serial
+    "1.0.0 /dev/ttyUSB0",                    # a device path
+    "v1.2.3 token=abc123",                   # anything after the version that is not a short suffix
+])
+def test_a_firmware_reading_that_is_not_a_bare_version_never_leaves(db, signed_in, sent, monkeypatch, said):  # noqa: F811
+    monkeypatch.setattr(outbound_guard, "_own_printer_values", lambda: [
+        ("the printer's serial number", _OWN_SERIAL),
+        ("the printer's serial number", _OWN_SERIAL[:12]),
+        ("the printer's network address", _OWN_ADDRESS),
+    ])
+    _print(db, outcome="pending")
+    assert db.set_outcome_evidence("start:a1:1", "firmware_version", said)
+    db.save_print_outcome({"job_id": "start:a1:1", "printer_name": "Shop A1", "outcome": "success",
+                           "determined_by": "observed"})
+    assert outcome_courier.push_owed(db=db)["sent"] == 1
+    (row,) = sent[-1]["body"]["rows"]
+    assert "firmware" not in row
+    flat = repr(row)
+    for leak in (_OWN_SERIAL[:12], _OWN_ADDRESS, "garage", "ttyUSB", "abc123", "sarahs"):
+        assert leak not in flat
+
+
+def test_a_field_that_skipped_the_version_test_is_dropped_at_the_guard(monkeypatch):
+    """The guard judges the declared field itself: a sender that offered it
+    something else sends nothing under that key."""
+    keys = outbound_guard.VERSION_FIELDS[outcome_courier.SENDER]
+    out = outbound_guard.scrub([{"firmware": "printer-garage.local", "ending": "success"},
+                                {"firmware": "01.07.00.00"}], version_keys=keys)
+    assert out == [{"ending": "success"}, {"firmware": "01.07.00.00"}]
+
+
 def test_a_row_the_account_holds_is_not_owed_again_for_these_columns(db, signed_in, sent):  # noqa: F811
     _print(db)
     assert outcome_courier.push_owed(db=db)["sent"] == 1

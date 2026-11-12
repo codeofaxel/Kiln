@@ -20,7 +20,8 @@ note deleted here goes up as a delete), and what the row holds of
 :mod:`kiln.print_evidence`: a one-way code of the settings the file was
 sliced with, how far the print got (a share and a layer number), the spool
 as a one-way code (:func:`kiln.outbound_guard.spool_code`) and the firmware
-version text.  No printer name, serial, address, file name, settings, spool
+version, only when it is a bare version
+(:func:`kiln.outbound_guard.version_text`).  No printer name, serial, address, file name, settings, spool
 id, spool name or colour; a system string in ``notes`` with no label (a
 hook's "auto-recorded ...") stays here.
 
@@ -54,6 +55,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 TOOL = "outcome_courier"
+#: This module's name in :data:`kiln.outbound_guard.VERSION_FIELDS`.
+SENDER = "kiln/outcome_courier.py"
 PUSH_PATH = "/api/cloud/outcomes/push"
 SWITCH_ENV = "KILN_OUTCOME_COURIER"
 TEST_OPT_IN_ENV = "KILN_OUTCOME_COURIER_IN_TESTS"
@@ -285,19 +288,6 @@ def _kept_here(rows: list[dict[str, Any]]) -> set[int]:
         vault.close()
 
 
-def _scrubbed(payload: list[dict[str, Any]], scrub: Any) -> list[dict[str, Any]]:
-    """*payload* through the outbound guard, each row's ``firmware`` as
-    :func:`account_row` passed it: a version of four numbers reads as a
-    network address to the guard, and the field holds nothing but the
-    letters, digits, dots, dashes and spaces
-    :data:`kiln.print_evidence.FIRMWARE_WIRE` allows."""
-    rows = scrub(payload)
-    for clean, raw in zip(rows, payload, strict=True):
-        if isinstance(clean, dict) and "firmware" in raw:
-            clean["firmware"] = raw["firmware"]
-    return rows
-
-
 def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -> dict[str, Any]:
     """Send every settled row the account has not taken yet.  Returns what
     happened, in words a caller can show; never raises for the network.
@@ -322,7 +312,7 @@ def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -
         return {"sent": 0, "why": "locked_to_this_computer", "kept_here": len(owed)}
 
     from kiln.history_courier import _request
-    from kiln.outbound_guard import scrub
+    from kiln.outbound_guard import VERSION_FIELDS, scrub
 
     payload: list[dict[str, Any]] = []
     states: list[tuple[int, str]] = []
@@ -333,7 +323,7 @@ def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -
         state = db.account_push_state(row)
         payload.append(note_change(account_row(row, sync_id), row.get("account_pushed_state"), state))
         states.append((row["id"], state))
-    answer = _request(TOOL, "POST", PUSH_PATH, {"rows": _scrubbed(payload, scrub)}, timeout=wait)
+    answer = _request(TOOL, "POST", PUSH_PATH, {"rows": scrub(payload, version_keys=VERSION_FIELDS[SENDER])}, timeout=wait)
     if answer.get("success") is False or answer.get("status") == "error":
         return {"sent": 0, "why": "not_taken", "code": answer.get("code"), "owed": len(payload)}
     # Taken, held (a surer answer is already there) and refused (a row the
