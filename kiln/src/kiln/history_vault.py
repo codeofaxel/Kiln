@@ -642,6 +642,14 @@ class HistoryVault:
                 return path
         return None
 
+    def version_ids(self, design_id: str) -> set[str]:
+        """The ids of the versions these records keep for *design_id*."""
+        with self._lock:
+            return {
+                str(r["version_id"])
+                for r in self._conn.execute("SELECT version_id FROM versions WHERE design_id = ?", (design_id,))
+            }
+
     def version_count(self, design_id: str) -> int:
         """How many versions of *design_id* this computer keeps."""
         row = self._conn.execute(
@@ -1026,12 +1034,17 @@ class HistoryVault:
         """
         from contextlib import nullcontext
 
+        from kiln.design_tie import NUMBERS_NOT_FOR_THIS_FOLDER, numbers_may_be_taken
         from kiln.version_numbers import NumbersBusy, NumbersNotTaken, account_numbers_in, numbers_lock
 
         account, mark = account_numbers_in(answer)
         if not account:
             return {}
         folder = _design_folder(design_id)
+        if not numbers_may_be_taken(folder, answer):
+            # The folder is synced with another design: its versions are
+            # never renumbered for this one.
+            return {"said": NUMBERS_NOT_FOR_THIS_FOLDER}
         here = folder if folder is not None and folder.is_dir() else None
         # Planned and applied under the design's numbers lock, so a save
         # waits for the numbers to be taken instead of landing between the
