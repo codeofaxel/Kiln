@@ -27,8 +27,11 @@ from typing import Any
 # Plain-string mirror of kiln_pro's PatternFamily — duplicated as literals so
 # public Kiln stays dependency-free.  Keep in sync with
 # kiln_pro/design_versions/decoration_presets.py::PatternFamily.
-_EMBOSS_FAMILIES = frozenset({"photo_emboss", "logo_emboss"})
-_DEBOSS_FAMILIES = frozenset({"photo_deboss", "logo_deboss"})
+_EMBOSS_FAMILIES = frozenset({"photo_emboss", "logo_emboss", "text_emboss"})
+_DEBOSS_FAMILIES = frozenset({"photo_deboss", "logo_deboss", "text_deboss"})
+# A typed word: carved as real letters in a font from kiln.text_fonts, with
+# no image behind it.
+_TEXT_FAMILIES = frozenset({"text_emboss", "text_deboss"})
 _IMAGE_FAMILIES = _EMBOSS_FAMILIES | _DEBOSS_FAMILIES | frozenset(
     {"brand_asset", "custom_image"}
 )
@@ -151,6 +154,7 @@ def apply_decoration_spec(
     scale: float | None = None,
     offset_x_mm: float = 0.0,
     offset_y_mm: float = 0.0,
+    font: str = "",
 ) -> dict[str, Any]:
     """Carve a resolved decoration preset onto *host_mesh_path*.
 
@@ -162,14 +166,18 @@ def apply_decoration_spec(
     an unadorned call behaves exactly as before.
 
     :param host_mesh_path: STL/OBJ to decorate.
-    :param pattern_family: One of the seven preset families (see
-        :data:`_IMAGE_FAMILIES` / ``procedural_texture``).
+    :param pattern_family: One of the preset families (see
+        :data:`_IMAGE_FAMILIES`, :data:`_TEXT_FAMILIES` and
+        ``procedural_texture``).
     :param image_asset_path: Concrete path to the preset's image asset (the
         caller resolves this from the preset; the sha256 is for integrity).
     :param content: Alternative content string (e.g. ``"text:KILN"``) when
         the family is not image-backed by a file.
     :param posterization_tier: Maps to ``decorate_surface``'s ``image_style``
         when it names a known style, else ``"auto"``.
+    :param font: Font id for a text family (see :mod:`kiln.text_fonts`);
+        empty carves in the default font.  A text family takes its words
+        from *content* (``"text:KILN"``).
     :returns: ``decorate_surface``'s result dict, augmented with a
         ``decorated_model_path`` key; or ``{"success": False, "error": ...}``.
     """
@@ -191,7 +199,21 @@ def apply_decoration_spec(
             "code": "PROCEDURAL_NOT_SUPPORTED",
         }
 
-    if family not in _IMAGE_FAMILIES:
+    is_text = family in _TEXT_FAMILIES
+    if is_text:
+        words = (content or "").strip()
+        if words.lower().startswith("text:"):
+            words = words.split(":", 1)[1].strip()
+        if not words:
+            return {
+                "success": False,
+                "error": f"text pattern {family!r} requires content='text:YOUR TEXT'",
+                "code": "INVALID_CONTENT",
+            }
+        content = f"text:{words}"
+        # A word has no image behind it, whatever the caller passed along.
+        image_asset_path = None
+    elif family not in _IMAGE_FAMILIES:
         return {"success": False, "error": f"unknown pattern_family: {family!r}"}
 
     resolved_content = content or image_asset_path
@@ -207,7 +229,9 @@ def apply_decoration_spec(
         return {"success": False, "error": f"image asset not found: {image_asset_path!r}"}
 
     tier = (posterization_tier or "").strip().lower()
-    if family in _MARK_FAMILIES:
+    if is_text:
+        image_style = "auto"
+    elif family in _MARK_FAMILIES:
         # Posterize tiers are a photo concept — honoring one for a logo
         # would route the mark through a whole-tile heightmap (background
         # carve + perimeter frame).  Marks always trace.
@@ -228,6 +252,8 @@ def apply_decoration_spec(
         placement["offset_x_mm"] = float(offset_x_mm)
     if offset_y_mm:
         placement["offset_y_mm"] = float(offset_y_mm)
+    if is_text:
+        placement["font"] = font or ""
 
     # decorate_surface invoked in-process may return the FastMCP tool
     # shape ``[Image, payload_dict]`` (inline preview + data).  This
@@ -245,7 +271,7 @@ def apply_decoration_spec(
                 mode=_mode_for_family(family),
                 material=material or "PLA",
                 image_style=image_style,
-                content_type="auto",
+                content_type="text" if is_text else "auto",
                 **placement,
             )
         )

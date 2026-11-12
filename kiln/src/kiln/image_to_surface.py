@@ -2139,7 +2139,11 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
 
 
 def generate_text_image(
-    text: str, output_dir: str, *, font_size: int | None = None
+    text: str,
+    output_dir: str,
+    *,
+    font_size: int | None = None,
+    font: str = "Liberation Sans:style=Bold",
 ) -> dict:
     """Return metadata for OpenSCAD native text() module.
 
@@ -2162,23 +2166,29 @@ def generate_text_image(
         edges of a 90mm coaster.  Pass a size only when the caller owns
         the layout (multi-line typography); even then the generator
         clamps it down if its measured bbox would overflow the face.
+    font : str
+        The face the text is drawn in, as the text engine names it
+        (see :mod:`kiln.text_fonts`).
 
     Returns
     -------
     dict
-        Keys: type, text, openscad_fragment — plus font_size when given.
+        Keys: type, text, font, openscad_fragment — plus font_size when
+        given.
     """
     # Escape quotes for OpenSCAD string literal
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     nominal = font_size if font_size else 48
+    escaped_font = font.replace("\\", "\\\\").replace('"', '\\"')
     fragment = (
         f'text("{escaped}", size={nominal}, '
         f'halign="center", valign="center", '
-        f'font="Liberation Sans:style=Bold");'
+        f'font="{escaped_font}");'
     )
     info: dict = {
         "type": "openscad_text",
         "text": text,
+        "font": font,
         "openscad_fragment": fragment,
     }
     if font_size:

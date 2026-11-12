@@ -25116,6 +25116,7 @@ def decorate_surface(
     svg_id: str = "",
     svg_layer: str = "",
     template_id: str = "",
+    font: str = "",
 ) -> dict:
     """Put any image, text, or pattern onto a 3D model surface.
 
@@ -25211,9 +25212,15 @@ def decorate_surface(
         ``mode``, ``scale``, and ``image_style`` from a template's curated
         decoration profile, call ``resolve_template_decoration()`` first
         (kiln-pro) and pass its results explicitly.
-    :returns: Dict with output STL path, preview info, and metadata.
+    :returns: Dict with output STL path, preview info, and metadata.  A
+        text carve also reports the ``font`` it used.
     :param absolute_size_mm: Exact letter height (text) or mark width (marks)
         in mm, overriding *scale*; ``0`` leaves *scale* in charge.
+    :param font: Font for text content: ``"sans"`` (default) or ``"mono"``.
+        Every font is free on every plan.  When the person names none,
+        carve with the default and tell them which font was used and that
+        they can pick another.  An unknown font is refused naming the
+        accepted list.  Ignored for images.
     """
     if err := _check_auth("design:decorate"):
         return err
@@ -25299,6 +25306,21 @@ def decorate_surface(
             f"decorate_surface requires STL or OBJ, got {model_ext!r}.",
             code="VALIDATION_ERROR",
         )
+
+    from kiln.text_fonts import (
+        DEFAULT_TEXT_FONT,
+        UnknownTextFontError,
+        list_text_fonts,
+        resolve_text_font,
+    )
+
+    try:
+        text_font = resolve_text_font(font)
+    except UnknownTextFontError as exc:
+        _refund_decoration_quota(quota_consumed)
+        font_err = _error_dict(str(exc), code="UNKNOWN_FONT")
+        font_err["fonts"] = list_text_fonts()
+        return font_err
 
     from kiln.output_paths import kiln_output_dir
 
@@ -25433,6 +25455,10 @@ def decorate_surface(
                 # keeps the default scale (0.7) on the engine's own default
                 # band share.
                 wall_kwargs: dict[str, Any] = {}
+                # The default font is left to the wall engine so a call that
+                # names none is unchanged.
+                if text_font.id != DEFAULT_TEXT_FONT:
+                    wall_kwargs["font"] = text_font.spec
                 if absolute_size_mm > 0:
                     wall_kwargs["target_size_mm"] = absolute_size_mm
                 elif scale > 0:
@@ -25604,6 +25630,8 @@ def decorate_surface(
                 record_event("decorations", detail=wall_event)
             except Exception:
                 pass
+            if ctype == "text":
+                result_dict["font"] = text_font.id
             return _finish_decoration_result(result_dict, content=content, before=model_path)
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
@@ -25798,7 +25826,7 @@ def decorate_surface(
             ample_margin = max(4.0, 0.06 * min(fit_w, fit_h))
             if absolute_size_mm <= 0:
                 try:
-                    t_w, t_h, _, _ = measure_text_block_mm(text_content)
+                    t_w, t_h, _, _ = measure_text_block_mm(text_content, text_font.spec)
                     k = t_h / t_w if t_w > 0 else 0.3
                     if is_round:
                         r_use = min(fit_w, fit_h) / 2.0 - ample_margin
@@ -25833,7 +25861,7 @@ def decorate_surface(
                     # inscribed-square factor so corners stay off the rim.
                     usable = min(fit_w, fit_h) - 2.0 * ample_margin
                     absolute_size_mm = max(1.0, usable * (0.71 if is_round else 1.0))
-            content_info = generate_text_image(text_content, work_dir)
+            content_info = generate_text_image(text_content, work_dir, font=text_font.spec)
 
         else:
             _refund_decoration_quota(quota_consumed)
@@ -26170,6 +26198,8 @@ def decorate_surface(
         # sees where they stand ("2 of 3 used") before the wall instead of
         # only hitting it as an error next time. Best-effort — never blocks
         # a decoration that already succeeded.
+        if ctype == "text":
+            result_dict["font"] = text_font.id
         return _finish_decoration_result(result_dict, content=content, before=model_path)
 
     except FileNotFoundError as exc:

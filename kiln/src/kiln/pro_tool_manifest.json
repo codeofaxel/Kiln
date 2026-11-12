@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-11T22:37:57.151129+00:00",
+  "generated": "2026-11-12T17:25:17.262974+00:00",
   "tool_count": 421,
   "categories": {
     "product_generators": {
@@ -3618,6 +3618,12 @@
             "title": "Image Style",
             "type": "string",
             "description": "``face=\"wall\"`` only: ``\"stencil\"`` or ``\"logo\"`` to carve an image as a line-art mark; ``\"auto\"`` (default) tells a mark from a photo by looking."
+          },
+          "font": {
+            "default": "",
+            "title": "Font",
+            "type": "string",
+            "description": "Font for text content: ``\"sans\"`` (default) or ``\"mono\"``, free on every plan.  When the person names none, carve with the default and tell them which font was used and that they can pick another.  An unknown font is refused naming the accepted list.  Ignored for images and QR codes."
           }
         },
         "required": [
@@ -5698,12 +5704,13 @@
           "pattern_family": {
             "title": "Pattern Family",
             "type": "string",
-            "description": "The kind of decoration: ``\"procedural_texture\"``, ``\"photo_emboss\"``, ``\"photo_deboss\"``, ``\"logo_emboss\"``, ``\"logo_deboss\"``, ``\"brand_asset\"`` or ``\"custom_image\"``.  Any other value is refused."
+            "description": "The kind of decoration: ``\"procedural_texture\"``, ``\"photo_emboss\"``, ``\"photo_deboss\"``, ``\"logo_emboss\"``, ``\"logo_deboss\"``, ``\"brand_asset\"``, ``\"custom_image\"``, ``\"text_deboss\"`` (a word cut into the surface) or ``\"text_emboss\"`` (a word raised from it).  Any other value is refused."
           },
           "pattern_id": {
+            "default": "",
             "title": "Pattern Id",
             "type": "string",
-            "description": "Which pattern within the family, e.g. ``\"wave\"`` or ``\"hex_grid\"``, or for an image family a content hash or asset file name.  Must not be empty."
+            "description": "Which pattern within the family, e.g. ``\"wave\"`` or ``\"hex_grid\"``, or for an image family a content hash or asset file name.  Must not be empty, except for a text family, where it is left out and ``text`` is passed instead."
           },
           "depth_mm": {
             "default": 1.2,
@@ -5835,12 +5842,23 @@
             "title": "Notes",
             "type": "string",
             "description": "Free-form editorial note stored on the version.  Omit it for none."
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string",
+            "description": "The words of a text decoration, one line of at most 80 characters.  Required for a text family and refused for any other.  The reply's ``preset`` repeats it as ``text``."
+          },
+          "font": {
+            "default": "",
+            "title": "Font",
+            "type": "string",
+            "description": "Font for a text decoration: ``\"sans\"`` (default) or ``\"mono\"``.  The preset records it, so the word is carved in the same font every time it is applied.  A font not on the list is refused naming the list.  Refused for a family that is not text."
           }
         },
         "required": [
           "name",
-          "pattern_family",
-          "pattern_id"
+          "pattern_family"
         ],
         "title": "create_decoration_presetArguments",
         "type": "object"
