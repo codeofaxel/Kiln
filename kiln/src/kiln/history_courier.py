@@ -99,6 +99,10 @@ _HASH_CHUNK = 1024 * 1024
 #: carried, and the value; Kiln's answer carries the same pair when it did.
 _MESH_TRANSPORT = "mesh_transport"
 _BY_FINGERPRINT = "by_sha256"
+#: The field of a push's request that says whose id this Kiln keeps a branch
+#: under, and the answer it gives: the account's.
+_BRANCH_IDS = "branch_ids"
+_ACCOUNTS = "account"
 #: The longest wait on the API's request rate one model's fetch sits out
 #: (seconds), and how many times it waits for the same model.  A longer wait
 #: is an allowance for the day: said, never sat out.
@@ -1078,6 +1082,8 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
         # synced with none: Kiln's servers refuse a push into another design,
         # or into one sharing no version with it, before they keep anything.
         **design_tie.push_fields(_design_folder(design_id), held_here, design_id=design_id),
+        # This Kiln keeps a branch under the id the account gives it.
+        _BRANCH_IDS: _ACCOUNTS,
     }
     if make_room_for:
         body["make_room_for"] = make_room_for
@@ -1096,7 +1102,8 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     elif answer.get("status") == "error":
         return answer
     else:
-        out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": branch["branch_id"]}
+        kept_as = _branch_kept_as(design_id, branch["branch_id"], answer, None if own else vault)
+        out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": kept_as}
         made_room = answer.get("made_room") if isinstance(answer, dict) else None
         if isinstance(made_room, dict) and made_room.get("note"):
             # Which of their designs was archived to make room, said at the
@@ -1133,6 +1140,16 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     if recipes:
         out["proven_recipes"] = _send_recipes(tool, design_id, recipes)
     return out
+
+
+def _branch_kept_as(design_id: str, sent_id: str, answer: dict[str, Any], vault: Any) -> str:
+    """The id the account keeps the pushed branch under; when it is not the
+    id sent, the branch here is kept under it from now on."""
+    kept = answer.get("branch_id")
+    if not isinstance(kept, str) or not kept or kept == sent_id:
+        return sent_id
+    with _opened(vault) as v:
+        return kept if v.take_account_branch_id(design_id, sent_id, kept) else sent_id
 
 
 def _judged_push(body: dict[str, Any]) -> bool:
@@ -1215,6 +1232,11 @@ def _keep_as_this_computers(
         if _plan_refusal(answer):
             return refused
         return {**refused, "kept_as_refused": {"code": answer.get("code"), "error": answer.get("error")}}
+    kept_id = answer.get("branch_id")
+    if isinstance(kept_id, str) and kept_id and kept_id != own_id:
+        # The account keeps this computer's copy under an id of its own.
+        own, own_id = {**own, "branch_id": kept_id}, kept_id
+        members = [{**m, "branch_id": kept_id} for m in members]
     with _opened(vault) as v:
         v.keep_branch_copy(own, members)
     pull_cmd = kiln_command("cloud pull", design_id, *(() if name == "main" else ("--branch", name)))

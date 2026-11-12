@@ -380,6 +380,18 @@ def _without_local_paths(value: Any) -> Any:
     return value
 
 
+def _with_branch_id(value: Any, old: str, new: str) -> Any:
+    """*value* with every field that names the branch *old* naming *new*."""
+    if isinstance(value, dict):
+        return {
+            k: (new if v == old and k.endswith("branch_id") else _with_branch_id(v, old, new))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_with_branch_id(v, old, new) for v in value]
+    return value
+
+
 def _main_branch_id(design_id: str) -> str:
     return uuid.uuid5(uuid.NAMESPACE_URL, f"kiln-history-main:{design_id}").hex
 
@@ -745,6 +757,60 @@ class HistoryVault:
                     "position": position, "added_at": m.get("added_at") or time.time(),
                 })
             self._conn.commit()
+
+    def take_account_branch_id(self, design_id: str, here_id: str, account_id: Any) -> bool:
+        """Keep *design_id*'s branch *here_id* under *account_id*, the id the
+        person's Kiln account keeps it under.
+
+        Its versions, its place as the checked-out branch, its log and every
+        record naming it follow.  ``False``, and nothing changes, when the
+        two ids are one, *here_id* is not a branch of this design, or
+        *account_id* is a branch of another design here.
+        """
+        with self._lock:
+            moved = self._take_account_branch_id(design_id, here_id, account_id)
+            self._conn.commit()
+        return moved
+
+    def _take_account_branch_id(self, design_id: str, here_id: str, account_id: Any) -> bool:
+        """:meth:`take_account_branch_id`, the lock held and nothing committed."""
+        if not isinstance(account_id, str) or not account_id or account_id == here_id:
+            return False
+        here = self.branch(here_id)
+        if here is None or here.get("design_id") != design_id:
+            return False
+        if not self._is_designs("branches", account_id, design_id):
+            return False
+        self._conn.execute(
+            "INSERT OR IGNORE INTO memberships (branch_id, version_id, position, added_at) "
+            "SELECT ?, version_id, position, added_at FROM memberships WHERE branch_id = ?",
+            (account_id, here_id),
+        )
+        self._conn.execute("DELETE FROM memberships WHERE branch_id = ?", (here_id,))
+        self._conn.execute("DELETE FROM branches WHERE branch_id = ?", (here_id,))
+        self._put_branch({**here, "branch_id": account_id})
+        self._conn.execute("UPDATE checkouts SET branch_id = ? WHERE branch_id = ?", (account_id, here_id))
+        self._conn.execute("UPDATE log_entries SET branch_id = ? WHERE branch_id = ?", (account_id, here_id))
+        # Every other record that names the branch: a branch made from it, a
+        # release cut on it, a log line, a search in progress.
+        for table, key in (
+            ("branches", "branch_id"), ("releases", "release_id"),
+            ("log_entries", "reflog_id"), ("bisect_sessions", "session_id"),
+        ):
+            for row in self._conn.execute(f"SELECT {key} AS k, record FROM {table}").fetchall():  # noqa: S608 -- fixed names
+                if here_id not in row["record"]:
+                    continue
+                try:
+                    record = json.loads(row["record"])
+                except ValueError:
+                    continue
+                renamed = _with_branch_id(record, here_id, account_id)
+                if renamed != record:
+                    self._conn.execute(
+                        f"UPDATE {table} SET record = ? WHERE {key} = ?",  # noqa: S608 -- fixed names
+                        (_canonical(renamed), row["k"]),
+                    )
+        return True
 
     # -- what a call sends ---------------------------------------------------
 
@@ -1241,6 +1307,12 @@ class HistoryVault:
                 )
                 written.append(self.version(v["version_id"]) or {})
             for b in branches:
+                # A live branch here of the same name under another id is
+                # this branch: it takes the account's id before the
+                # account's record is kept.
+                same = self.branch_named(design_id, str(b.get("name") or ""))
+                if same is not None and same["branch_id"] != b["branch_id"] and b.get("status") != "retired":
+                    self._take_account_branch_id(design_id, same["branch_id"], b["branch_id"])
                 self._put_branch({**b, "design_id": design_id})
             for m in _rows(bundle_like["memberships"], "branch_id", "version_id"):
                 if self.design_of_branch(m["branch_id"]) != design_id:
