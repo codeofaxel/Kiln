@@ -38,8 +38,7 @@ TIER_ESSENTIAL: list[str] = [
     # gets, and the multi-machine view is a fleet feature.
     # ``printer_status`` above is the single-printer experience: it takes
     # a printer_name and lists the printers set up, so any machine is
-    # reachable.  ``fleet_status`` stays in TIER_FULL for the strong-model
-    # fleet user.
+    # reachable, and its ``printer_names`` is the several-printer read.
     "submit_job",
     "job_status",
     "queue_summary",

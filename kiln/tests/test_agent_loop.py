@@ -669,7 +669,7 @@ class TestDefaultSystemPrompt:
         assert "3D printing" in prompt
         assert "printer_status" in prompt
         assert "preflight_check" in prompt
-        assert "fleet_status" in prompt
+        assert "printer_names" in prompt
 
 
 
