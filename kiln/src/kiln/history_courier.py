@@ -1105,7 +1105,9 @@ def push(
         # The account keeps another branch under this name.  When that
         # branch is one this computer has since renamed or retired, the
         # account hears of that first, and the push is sent once more.
-        told = _tell_of_rename(tool, design_id, branch, answer.get("held_by"), None if own else vault)
+        told = _tell_of_rename(
+            tool, design_id, branch, answer.get("held_by"), answer.get("held_head"), None if own else vault,
+        )
         if told:
             return push(
                 tool, design_id, branch["branch_id"], make_room_for=make_room_for,
@@ -1158,21 +1160,31 @@ def push(
     return out
 
 
-def _tell_of_rename(tool: str, design_id: str, pushed: dict[str, Any], held_by: Any, vault: Any) -> bool:
-    """Push the branch the account keeps under the pushed branch's name, when
-    this computer has it under another name or retired; whether the account
-    took it.  A branch this computer does not have, or has under that same
-    live name, is another branch: nothing is sent."""
+def _tell_of_rename(
+    tool: str, design_id: str, pushed: dict[str, Any], held_by: Any, held_head: Any, vault: Any,
+) -> bool:
+    """Tell the account that the branch it keeps under the pushed branch's
+    name has been renamed or retired on this computer; whether it took that.
+
+    Only the branch's name and whether it is retired are sent, on the head
+    the account already holds: none of its versions here are pushed.  A
+    branch this computer does not have, or has under that same live name,
+    is another branch, and nothing is sent.
+    """
     if not isinstance(held_by, str) or not held_by or held_by == pushed.get("branch_id"):
         return False
     with _opened(vault) as v:
         other = v.branch(held_by)
-    if other is None or other.get("design_id") != design_id:
+    if other is None or other.get("design_id") != design_id or other.get("branch_id") != held_by:
         return False
     if other.get("name") == pushed.get("name") and other.get("status") != "retired":
         return False
-    told = push(tool, design_id, held_by, vault=vault, _names_settled=True)
-    return told.get("status") == "success"
+    answer = _request(
+        tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push",
+        {"branch": {**other, "head_version_id": held_head}, "versions": [], "memberships": [],
+         "provenance_sidecars": [], _BRANCH_IDS: _ACCOUNTS},
+    )
+    return answer.get("status") != "error"
 
 
 def _branch_kept_as(design_id: str, sent_id: str, answer: dict[str, Any], vault: Any) -> str:
@@ -1577,12 +1589,15 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any, *, doing: str) 
 
 
 def _said_head_kept(design_id: str, name: str, why: str) -> str:
-    """What a person is told when a pull left a branch here where it was."""
-    if why == "went another way":
+    """What a person is told when a pull did not simply move a branch forward."""
+    if why.startswith("kept as "):
+        own = why[len("kept as "):]
+        check = kiln_command("merge check", design_id, own, name)
+        run = kiln_command("merge run", design_id, own, name)
         return (
-            f"{name} of {design_id} on this computer and in your Kiln account went different ways, so "
-            "this computer's branch stayed as it is and nothing was merged. The account's versions "
-            "are kept here. Push the branch and Kiln keeps this computer's work as a branch of its own."
+            f"{name} of {design_id} on this computer and in your Kiln account went different ways. "
+            f"This computer's work is kept here as {own}, and {name} now follows your account. Nothing "
+            f"was merged or lost. To bring them together, run `{check}` and `{run}`."
         )
     return (
         f"{name} of {design_id} on this computer has versions your Kiln account does not, so it stayed "

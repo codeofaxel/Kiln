@@ -511,6 +511,10 @@ class HistoryVault:
                 design_id TEXT PRIMARY KEY,
                 branch_id TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS branch_ids_before (
+                was_id TEXT PRIMARY KEY,
+                branch_id TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS log_entries (
                 reflog_id TEXT PRIMARY KEY,
                 artifact_type TEXT NOT NULL,
@@ -576,9 +580,19 @@ class HistoryVault:
         return sorted(out, key=lambda b: float(b.get("created_at") or 0.0))
 
     def branch(self, branch_id: str) -> dict[str, Any] | None:
+        """The branch *branch_id*, or the branch that was kept under that id
+        before it took the id the account gave it."""
         row = self._conn.execute(
             "SELECT record FROM branches WHERE branch_id = ?", (branch_id,)
         ).fetchone()
+        if row is None:
+            now = self._conn.execute(
+                "SELECT branch_id FROM branch_ids_before WHERE was_id = ?", (branch_id,)
+            ).fetchone()
+            if now is not None:
+                row = self._conn.execute(
+                    "SELECT record FROM branches WHERE branch_id = ?", (now["branch_id"],)
+                ).fetchone()
         return json.loads(row["record"]) if row else None
 
     def branch_named(self, design_id: str, name: str) -> dict[str, Any] | None:
@@ -778,7 +792,7 @@ class HistoryVault:
         if not isinstance(account_id, str) or not account_id or account_id == here_id:
             return False
         here = self.branch(here_id)
-        if here is None or here.get("design_id") != design_id:
+        if here is None or here.get("branch_id") != here_id or here.get("design_id") != design_id:
             return False
         if not self._is_designs("branches", account_id, design_id):
             return False
@@ -805,6 +819,12 @@ class HistoryVault:
         self._conn.execute("DELETE FROM branches WHERE branch_id = ?", (here_id,))
         self._put_branch({**here, "branch_id": account_id})
         self._conn.execute("UPDATE checkouts SET branch_id = ? WHERE branch_id = ?", (account_id, here_id))
+        # The id it had is still an answer: a caller handed it before the
+        # change finds the branch by it.
+        self._conn.execute("UPDATE branch_ids_before SET branch_id = ? WHERE branch_id = ?", (account_id, here_id))
+        self._conn.execute(
+            "INSERT OR REPLACE INTO branch_ids_before (was_id, branch_id) VALUES (?, ?)", (here_id, account_id),
+        )
         self._conn.execute("UPDATE log_entries SET branch_id = ? WHERE branch_id = ?", (account_id, here_id))
         # Every other record that names the branch: a branch made from it, a
         # release cut on it, a log line, a search in progress.
@@ -1309,7 +1329,6 @@ class HistoryVault:
         account = {str(v["version_id"]): v.get("version_number") for v in _rows(bundle_like["versions"], "version_id")}
         written = []
         heads_kept: dict[str, str] = {}
-        another_way: set[str] = set()
         with self._lock:
             for v in _rows(bundle_like["versions"], "version_id"):
                 if not self._is_designs("versions", v["version_id"], design_id):
@@ -1333,22 +1352,24 @@ class HistoryVault:
                 # The head here moves only forward.  Where this computer
                 # holds versions the account does not, the branch stays on
                 # them and the answer says so.
-                here = (self.branch(b["branch_id"]) or {}).get("head_version_id")
-                there = b.get("head_version_id")
+                local = self.branch(b["branch_id"]) or {}
+                here, there = local.get("head_version_id"), b.get("head_version_id")
                 if here and there and here != there and not self._grows_from(there, here):
-                    heads_kept[str(b.get("name") or b["branch_id"])] = (
-                        "this computer is ahead" if self._grows_from(here, there) else "went another way"
-                    )
-                    if not self._grows_from(here, there):
-                        another_way.add(b["branch_id"])
-                    b = {**b, "head_version_id": here}
+                    if self._grows_from(here, there):
+                        # This computer is ahead: the branch stays on its
+                        # own versions.
+                        heads_kept[str(b.get("name") or b["branch_id"])] = "this computer is ahead"
+                        b = {**b, "head_version_id": here}
+                    else:
+                        # The two went different ways.  This computer's line
+                        # is kept as a branch of its own before the branch
+                        # follows the account; nothing is merged or lost.
+                        heads_kept[str(b.get("name") or b["branch_id"])] = self._keep_line_as_this_computers(
+                            design_id, local,
+                        )
                 self._put_branch({**b, "design_id": design_id})
             for m in _rows(bundle_like["memberships"], "branch_id", "version_id"):
                 if self.design_of_branch(m["branch_id"]) != design_id:
-                    continue
-                if m["branch_id"] in another_way:
-                    # The account's line is kept as versions, not laid onto
-                    # a branch that went another way here.
                     continue
                 if self.design_of_version(m["version_id"]) not in (None, design_id):
                     continue
@@ -1370,6 +1391,30 @@ class HistoryVault:
         if heads_kept:
             out["heads_kept_here"] = heads_kept
         return out
+
+    def _keep_line_as_this_computers(self, design_id: str, branch: dict[str, Any]) -> str:
+        """Keep *branch*'s versions here as ``<name>@<this computer>``, a
+        branch of its own, and return what was done in words.  The lock is
+        held; nothing is committed."""
+        own_name = f"{branch.get('name') or _MAIN}@{self.computer_name()}"
+        kept = self.branch_named(design_id, own_name) or {}
+        own = {
+            **branch,
+            "branch_id": kept.get("branch_id") or uuid.uuid4().hex,
+            "name": own_name,
+            "parent_branch_id": branch["branch_id"],
+            "created_at": kept.get("created_at") or time.time(),
+            "status": "active",
+        }
+        members = self.memberships(branch["branch_id"])
+        self._put_branch(own)
+        self._conn.execute("DELETE FROM memberships WHERE branch_id = ?", (own["branch_id"],))
+        for position, m in enumerate(members):
+            self._put_membership({
+                "branch_id": own["branch_id"], "version_id": m["version_id"],
+                "position": position, "added_at": m.get("added_at") or time.time(),
+            })
+        return f"kept as {own_name}"
 
     def _grows_from(self, head: Any, base: Any) -> bool:
         """Whether the version *head* is *base* or is reached from it by

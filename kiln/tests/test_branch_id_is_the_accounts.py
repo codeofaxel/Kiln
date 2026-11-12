@@ -109,7 +109,7 @@ class TestAPushTakesTheAccountsId:
         assert [b["branch_id"] for b in mains] == [ACCOUNT_ID]
         vault = HistoryVault()
         try:
-            assert vault.branch(made_as) is None
+            assert vault.branch(made_as)["branch_id"] != made_as
             assert [m["version_id"] for m in vault.memberships(ACCOUNT_ID)] == IDS
             assert vault.memberships(made_as) == []
             assert vault.checked_out("vase")["branch_id"] == ACCOUNT_ID
@@ -155,7 +155,7 @@ class TestAPullBringsOneBranchOfAName:
         assert [b["branch_id"] for b in _mains()] == ["X-main"]
         vault = HistoryVault()
         try:
-            assert vault.branch(made_as) is None
+            assert vault.branch(made_as)["branch_id"] != made_as
             assert [m["version_id"] for m in vault.memberships("X-main")] == IDS
             assert vault.checked_out("vase")["branch_id"] == "X-main"
         finally:
@@ -176,7 +176,7 @@ class TestTheVaultsOwnRule:
 
             assert vault.take_account_branch_id("vase", made_as, ACCOUNT_ID) is True
 
-            assert vault.branch(made_as) is None
+            assert vault.branch(made_as)["branch_id"] != made_as
             assert vault.branch(ACCOUNT_ID)["name"] == "main"
             assert vault.branch("side")["parent_branch_id"] == ACCOUNT_ID
             assert vault.checked_out("vase")["branch_id"] == ACCOUNT_ID
@@ -316,3 +316,26 @@ class TestTwoBranchesAreNeverJoinedForAName:
             assert [m["version_id"] for m in vault.memberships("side-made-here")] == [IDS[0]]
         finally:
             vault.close()
+
+
+class TestAnIdHandedOutBeforeTheChange:
+    def test_the_id_a_branch_had_still_finds_it(self, home):
+        made_as = _made_here(home)
+        vault = HistoryVault()
+        try:
+            assert vault.take_account_branch_id("vase", made_as, ACCOUNT_ID) is True
+            assert vault.take_account_branch_id("vase", ACCOUNT_ID, "newer" * 6 + "ab") is True
+
+            for was in (made_as, ACCOUNT_ID):
+                assert vault.branch(was)["branch_id"] == "newer" * 6 + "ab"
+        finally:
+            vault.close()
+
+    def test_a_push_named_by_the_old_id_pushes_the_branch(self, home, account):
+        made_as = _made_here(home)
+        courier.push("cloud_push_branch", "vase")
+
+        again = courier.push("cloud_push_branch", "vase", made_as)
+
+        assert again["status"] == "success" and again["branch_id"] == ACCOUNT_ID
+        assert account.pushes[-1]["branch"]["branch_id"] == ACCOUNT_ID

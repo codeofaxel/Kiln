@@ -82,7 +82,7 @@ def test_a_pull_moves_the_head_forward_when_the_account_is_ahead(home, monkeypat
     assert "heads_kept_here" not in pulled["applied"]
 
 
-def test_a_pull_of_a_branch_that_went_another_way_keeps_this_computers_line(home, monkeypatch):
+def test_a_pull_of_a_branch_that_went_another_way_keeps_this_computers_line_as_its_own_branch(home, monkeypatch):
     _here(home, 3)
     _account(monkeypatch, [IDS[0], IDS[1], OTHER])
 
@@ -90,11 +90,15 @@ def test_a_pull_of_a_branch_that_went_another_way_keeps_this_computers_line(home
 
     assert pulled["status"] == "success", pulled
     head, members = _main()
-    assert head == IDS[2] and members == IDS
-    assert pulled["applied"]["heads_kept_here"]["main"] == "went another way"
-    assert "went different ways" in pulled["said_heads"] and "nothing was merged" in pulled["said_heads"]
+    # main follows the account ...
+    assert head == OTHER and OTHER in members
+    # ... and this computer's line is whole, on a branch of its own.
     vault = HistoryVault()
     try:
-        assert vault.version(OTHER) is not None
+        own = next(b for b in vault.branches("vase") if b["name"].startswith("main@"))
+        assert own["head_version_id"] == IDS[2]
+        assert [m["version_id"] for m in vault.memberships(own["branch_id"])] == IDS
     finally:
         vault.close()
+    assert pulled["applied"]["heads_kept_here"]["main"] == f"kept as {own['name']}"
+    assert "went different ways" in pulled["said_heads"] and "Nothing was merged or lost" in pulled["said_heads"]
