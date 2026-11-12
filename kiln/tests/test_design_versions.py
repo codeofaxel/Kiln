@@ -467,9 +467,8 @@ class TestLimitClamping:
 
 
 def test_a_store_shared_by_threads_keeps_every_save_and_every_read_works(tmp_path):
-    """One store, one connection, several threads: reads that skipped the
-    lock broke the statements of saves running beside them, and a save was
-    lost."""
+    """One store, one connection, several threads: reads take the same lock
+    as saves, every read answers, and every save is kept."""
     import threading
     from collections import Counter
 

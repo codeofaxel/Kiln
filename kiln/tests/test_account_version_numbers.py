@@ -236,9 +236,9 @@ class TestAPlainInstall:
 
 class TestHeadsAndFilesThatNameNoVersion:
     def test_a_head_that_names_no_version_follows_the_version_it_copies(self, tmp_path):
-        """A plain save writes a head that names no version.  A push moved
-        that version from 4 to 5 and the head still said 4, so the next save
-        was diffed against a version 4 no file holds."""
+        """A plain save writes a head that names no version.  When that
+        version moves from 4 to 5, the head follows it, so the next save is
+        diffed against version 5."""
         folder = tmp_path / "vase"
         folder.mkdir()
         _recipe(folder, 1, "a", source_scad="cube(1);")
@@ -267,9 +267,8 @@ class TestHeadsAndFilesThatNameNoVersion:
 
     def test_a_kept_file_that_names_no_version_is_never_moved_for_naming_none(self):
         """The account agrees with this computer: version 2 is 2.  Its kept
-        file is from before files named their version, so it counted as a
-        second version holding 2 and was moved past it: a push renamed the
-        version's only record and said the account had given its number away."""
+        file names no version; it stays at 2, and a version moved past the
+        numbers given goes past it too."""
         unnamed = vn.FILE_KEY + ".kiln_recipe.v2.json"
         final = vn.plan_numbers({unnamed: 2, "a": 1, "b": 2, "mine": 3}, {"a": 1, "b": 2, "theirs": 3})
         assert final[unnamed] == 2

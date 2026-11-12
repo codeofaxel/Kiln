@@ -2,11 +2,11 @@
 
 A save takes its version's number, then writes the version's file.  A pull
 plans the account's numbers, then writes the pulled versions' files.  The
-case replayed here: a save took number 4, a pull laid down the account's
-version 4 (made on another computer), and the save then wrote its own
-version over that file.
+case set up here: a save takes number 4 while a pull lays down the account's
+version 4 (made on another computer); the save must not write its version
+over that file.
 
-Three things keep it from happening, each proven below:
+Three things hold that, each proven below:
 
 * every door that makes a version holds the design's numbers lock from
   taking the number until the file is written, and a pull holds it from
