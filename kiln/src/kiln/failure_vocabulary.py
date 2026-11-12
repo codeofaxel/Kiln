@@ -197,9 +197,10 @@ OUTSIDE_CAUSES: frozenset[str] = frozenset({
     "filament_runout",
 })
 
-#: Causes a classifier's guess is never stored as: its evidence does not
-#: tell a blocked nozzle from thin extrusion, which is a print defect.
-CAUSES_A_GUESS_NEVER_NAMES: frozenset[str] = frozenset({"clog"})
+#: Causes a classifier's guess is never stored as: a machine fault or an
+#: outside cause.  Either takes the ending off the print, and only the
+#: printer or a person names one.
+CAUSES_A_GUESS_NEVER_NAMES: frozenset[str] = MACHINE_FAULTS | OUTSIDE_CAUSES
 
 #: The cause word that names no cause.
 UNNAMED_CAUSE = "other"
