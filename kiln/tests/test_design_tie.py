@@ -87,12 +87,20 @@ class _Accounts:
         that is another design's, or a history sharing no version with a
         design that holds some, is refused (HTTP 412) before anything is kept."""
         own = self.designs[self.signed_in]
-        code = design_tie.push_code(
-            body, key=own["key"], line=own["line"], held=lambda: [vid for vid, _n in own["versions"]],
-        )
-        if code is None:
-            return None
-        return {**design_tie.refusal("vase", "push", code=code), "http_status": 412}
+        held = {vid for vid, _n in own["versions"]}
+        carried_key, carried_line = design_tie.named_in(body)
+        if carried_key is not None or carried_line is not None:
+            if carried_key == own["key"]:
+                return None
+            if carried_line != own["line"]:
+                return {**design_tie.refusal("vase", "push"), "http_status": 412}
+            # The folder's own line under another key: judged by history.
+        history = list(body.get(design_tie.HISTORY_FIELD) or ()) + [
+            row[k] for row in body.get("versions") or () for k in ("version_id", "parent_version_id") if row.get(k)
+        ]
+        if held and not design_tie.related(history, held):
+            return {**design_tie.refusal("vase", "push", code=design_tie.UNRELATED_CODE), "http_status": 412}
+        return None
 
     def request(self, tool, method, path, body=None, **_kw):
         own = self.designs[self.signed_in]

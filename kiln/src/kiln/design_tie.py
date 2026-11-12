@@ -226,46 +226,6 @@ def related(history: Iterable[Any], held: Iterable[Any]) -> bool:
     return False
 
 
-def push_code(
-    body: Any, *, key: str | None, line: str | None, held: Callable[[], Iterable[Any]],
-) -> str | None:
-    """The code a push's request *body* is refused with by the account whose
-    design of that name is named *key* and *line* (``None``: it holds no such
-    design, or names none) and holds the versions *held* (called only when
-    they decide it); ``None`` when the push is not refused.
-
-    This is the rule Kiln's servers judge a push by, and the model question
-    asked ahead of it.  A tie naming this design's key goes through.  A tie
-    naming another line is a different design (:data:`REFUSED_CODE`).  A tie
-    naming this line under another key (the design was deleted and made
-    again), and a request naming no tie, are judged by history: refused
-    (:data:`UNRELATED_CODE`) when the account's design holds versions and
-    shares none with the request's :data:`HISTORY_FIELD`, its versions, or
-    the versions they grew from.  A request carrying neither a tie nor a
-    history comes from a client that judges nothing, and is never refused.
-    """
-    body = body if isinstance(body, dict) else {}
-    carried_key, carried_line = named_in(body)
-    history = body.get(HISTORY_FIELD)
-    if carried_key is not None or carried_line is not None:
-        if key is not None and carried_key == key:
-            return None
-        if line is None:
-            return None
-        if carried_line != line:
-            return REFUSED_CODE
-    elif not isinstance(history, list):
-        return None
-    held_ids = {str(v) for v in held() if v}
-    if not held_ids:
-        return None
-    history_ids = [str(v) for v in (history if isinstance(history, list) else ()) if v] + [
-        str(row.get(k)) for row in body.get("versions") or () if isinstance(row, dict)
-        for k in ("version_id", "parent_version_id") if row.get(k)
-    ]
-    return None if related(history_ids, held_ids) else UNRELATED_CODE
-
-
 def _versions_in(answer: dict[str, Any]) -> set[str]:
     """The versions of the design an answer says the account holds."""
     ids: set[str] = set()
@@ -472,7 +432,6 @@ __all__ = [
     "key_in",
     "named_in",
     "numbers_may_be_taken",
-    "push_code",
     "push_fields",
     "refusal",
     "tie_of",
