@@ -669,3 +669,32 @@ def test_when_the_files_cannot_move_the_version_store_is_put_back(home, monkeypa
     finally:
         vault.close()
     assert taken["renumbered"] == [{"key": mine, "from": 4, "to": 5}], taken
+
+
+def test_a_kept_file_that_names_no_version_moves_out_of_the_way_of_the_accounts_number(home, monkeypatch):
+    """A file an older Kiln kept, naming no version, says version 4.  The
+    account's version 4 arrives.  The unnamed file is a copy only this
+    computer holds: it takes the next number, keeps its contents, and the
+    person is told.  Two files never say one number."""
+    accounts = _Accounts()
+    monkeypatch.setattr(courier, "_request", accounts.request)
+    assert courier.clone("cloud_clone_design", "vase")["status"] == "success"
+    folder = _folder(home)
+    (folder / ".kiln_recipe.v4.json").write_text(json.dumps({
+        "name": "vase", "design_id": "vase", "version": 4,
+        "source_scad": "sphere(4);", "notes": "kept by an older Kiln", "created": "2025-01-01T00:00:00+00:00",
+    }))
+    other = "f" * 32
+    accounts.designs["X"]["versions"].append((other, 4))
+
+    pulled = courier.pull("cloud_pull_branch", "vase")
+
+    assert pulled["status"] == "success", pulled
+    kept = _kept(folder)
+    _numbers_agree(folder)
+    assert kept[4]["version_id"] == other
+    assert kept[5]["notes"] == "kept by an older Kiln" and "version_id" not in kept[5], sorted(kept)
+    assert len(kept) == 5
+    assert "version 4 is now version 5" in (pulled.get("said_numbers") or ""), pulled
+    again = courier.pull("cloud_pull_branch", "vase")
+    assert again["status"] == "success" and _kept(folder) == kept and not again.get("said_numbers"), again

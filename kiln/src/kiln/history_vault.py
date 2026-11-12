@@ -1118,7 +1118,14 @@ class HistoryVault:
         every record moved whole or none of them (the store's numbers first,
         in one transaction it can refuse, then these records and the files
         together, the store put back when they fail)."""
-        from kiln.version_numbers import plan_numbers, raise_mark, renumber_folder, said_here
+        from kiln.version_numbers import (
+            FILE_KEY,
+            kept_numbers,
+            plan_numbers,
+            raise_mark,
+            renumber_folder,
+            said_here,
+        )
 
         if here is not None:
             # The next version saved here is numbered past every number the
@@ -1128,7 +1135,8 @@ class HistoryVault:
         try:
             mine, rows, local, past = self._numbers_here(design_id, here, store)
             past = [mark, *past]
-            final = plan_numbers(local, account, past=past)
+            named = {k for k in (kept_numbers(here) if here is not None else {}) if not k.startswith(FILE_KEY)}
+            final = plan_numbers(local, account, past=past, named=named)
             changes = [
                 {"key": key, "from": local[key], "to": final[key]}
                 for key in sorted(local) if final.get(key) != local[key]

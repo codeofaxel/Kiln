@@ -548,7 +548,8 @@ def kept_numbers(folder: str | Path) -> dict[str, int]:
 
 
 def plan_numbers(
-    local: dict[str, int], account: dict[str, int], *, past: Iterable[Any] = ()
+    local: dict[str, int], account: dict[str, int], *, past: Iterable[Any] = (),
+    named: Iterable[str] | None = None,
 ) -> dict[str, int]:
     """The number each version kept here holds once the account's numbers are
     taken: ``{key: number}`` for every key in *local*.
@@ -568,18 +569,35 @@ def plan_numbers(
     A kept file that names no version (``FILE_KEY``) is not known to be any
     version, so it is never moved for naming none: it keeps its number, and
     a version moved past it goes past that number too.
+
+    *named* is the versions here whose own kept file names them, when the
+    caller knows (``None``: it does not, and no unnamed file moves).  Then
+    an unnamed file whose number the account gave to a version moves like
+    any copy only this computer holds, unless a version kept here with no
+    named file of its own ends on that number: the file is taken to be that
+    version's record and stays.
     """
     final: dict[str, int] = {}
     for key, n in local.items():
         given = _whole(account.get(key))
         if given is not None:
             final[key] = given
+    given = {n for n in (_whole(v) for v in account.values()) if n is not None}
+    with_own_file = None if named is None else {str(v) for v in named}
+    # The numbers a version here with no named file of its own will hold:
+    # the account's for one it holds, else the number it has now.
+    recorded_unnamed = set() if with_own_file is None else {
+        final.get(key, _whole(n)) for key, n in local.items()
+        if not key.startswith(FILE_KEY) and key not in with_own_file
+    }
     for key, n in local.items():
         number = _whole(n)
-        if key.startswith(FILE_KEY) and key not in final and number is not None:
-            final[key] = number
-    held = {n for k, n in final.items() if not k.startswith(FILE_KEY)}
-    held |= {n for n in (_whole(v) for v in account.values()) if n is not None}
+        if not key.startswith(FILE_KEY) or key in final or number is None:
+            continue
+        if with_own_file is not None and number in given and number not in recorded_unnamed:
+            continue  # the account's version of that number is another: this copy moves
+        final[key] = number
+    held = {n for k, n in final.items() if not k.startswith(FILE_KEY)} | given
     ceiling = max(
         [*held, *(n for n in (_whole(v) for v in local.values()) if n is not None),
          *(n for n in (_whole(p) for p in past) if n is not None)],

@@ -276,6 +276,30 @@ class TestHeadsAndFilesThatNameNoVersion:
         assert final["mine"] == 4, "a version moved past the numbers given goes past the unnamed file too"
 
 
+    def test_an_unnamed_file_that_is_a_version_heres_only_record_stays_when_the_caller_knows_the_files(self):
+        """The same case, the caller saying which versions have a named file
+        of their own: version b has none, so the unnamed file at its number
+        is taken to be its record and stays."""
+        unnamed = vn.FILE_KEY + ".kiln_recipe.v2.json"
+        final = vn.plan_numbers(
+            {unnamed: 2, "a": 1, "b": 2, "mine": 3}, {"a": 1, "b": 2, "theirs": 3}, named={"a", "mine"},
+        )
+        assert (final[unnamed], final["b"], final["mine"]) == (2, 2, 4)
+
+    def test_an_unnamed_file_moves_when_the_account_gave_its_number_to_another_version(self):
+        """Every version here has its own named file, and the account's
+        version 2 is not one of them: the unnamed file at 2 is a copy only
+        this computer holds, and it moves past every number given."""
+        unnamed = vn.FILE_KEY + ".kiln_recipe.v2.json"
+        final = vn.plan_numbers({unnamed: 2, "a": 1}, {"a": 1, "theirs": 2, "later": 3}, named={"a"})
+        assert final == {"a": 1, unnamed: 4}
+        # ...and when the account's version 2 is kept here under its own named file.
+        final = vn.plan_numbers({unnamed: 2, "a": 1, "theirs": 5}, {"a": 1, "theirs": 2}, named={"a", "theirs"})
+        assert final == {"a": 1, "theirs": 2, unnamed: 6}
+        # A number the account gave no version is the file's to keep.
+        assert vn.plan_numbers({unnamed: 2, "a": 1}, {"a": 1, "theirs": 3}, named={"a"})[unnamed] == 2
+
+
 class TestTheFilesMoveWholeOrNotAtAll:
     def test_a_failure_part_way_puts_every_file_back(self, tmp_path, monkeypatch):
         folder = tmp_path / "cup"
