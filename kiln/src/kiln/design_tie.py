@@ -116,11 +116,6 @@ def named_in(data: Any) -> tuple[str | None, str | None]:
     return (key if well_formed(key) else None), (line if _line_shaped(line) else None)
 
 
-def key_in(answer: Any) -> str | None:
-    """The design key a push, pull or clone answer names, or ``None``."""
-    return named_in(answer)[0]
-
-
 @dataclass(frozen=True)
 class Tie:
     """The tie a design folder carries for its own design id."""
@@ -150,13 +145,6 @@ def tie_of(folder: str | Path | None, design_id: str | None = None) -> Tie | Non
     if made_for is not None and made_for != (design_id or path.name):
         return None
     return Tie(key, line, made_for)
-
-
-def tied_key(folder: str | Path | None, design_id: str | None = None) -> str | None:
-    """The key the design folder *folder* is tied to, or ``None`` when its
-    tie names none or it has no tie of its own (:func:`tie_of`)."""
-    tie = tie_of(folder, design_id)
-    return tie.key if tie is not None else None
 
 
 def push_fields(
@@ -429,13 +417,11 @@ __all__ = [
     "Verdict",
     "judge",
     "keep",
-    "key_in",
     "named_in",
     "numbers_may_be_taken",
     "push_fields",
     "refusal",
     "tie_of",
-    "tied_key",
     "versions_kept_in",
     "well_formed",
 ]

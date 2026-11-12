@@ -28,6 +28,12 @@ LINE_X = "k1:" + "a" * 64
 LINE_Y = "k1:" + "b" * 64
 
 
+def _tied(folder, design_id=None):
+    """The key the design folder is tied to, as public Kiln reads its tie."""
+    tie = design_tie.tie_of(folder, design_id)
+    return tie.key if tie is not None else None
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -178,7 +184,7 @@ class TestTwoAccountsWithOneDesignName:
         cloned = courier.clone("cloud_clone_design", "vase")
         assert cloned["status"] == "success", cloned
         folder = _folder(home)
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(folder) == KEY_X
         before, records = _snapshot(folder), _records()
         assert sorted(records.values()) == [1, 2, 3]
 
@@ -233,7 +239,7 @@ class TestAFolderTiedToNoDesignYet:
             _recipe(folder, n, vid)
         pulled = courier.pull("cloud_pull_branch", "vase")
         assert pulled["status"] == "success", pulled
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(folder) == KEY_X
         assert "said_tie" not in pulled
 
         accounts.signed_in = "Y"
@@ -246,7 +252,7 @@ class TestAFolderTiedToNoDesignYet:
         before = _snapshot(folder)
         refused = courier.pull("cloud_pull_branch", "vase")
         assert refused["code"] == design_tie.UNRELATED_CODE, refused
-        assert _snapshot(folder) == before and design_tie.tied_key(folder) is None
+        assert _snapshot(folder) == before and _tied(folder) is None
 
     def test_a_push_from_an_untied_folder_ties_it_to_the_design_the_account_kept(self, home, accounts):
         folder = _folder(home)
@@ -254,7 +260,7 @@ class TestAFolderTiedToNoDesignYet:
         accounts.designs["X"]["versions"] = []
         pushed = courier.push("cloud_push_branch", "vase")
         assert pushed["status"] == "success", pushed
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(folder) == KEY_X
         assert "said_tie" not in pushed, "a first push of a new design is no surprise"
 
 
@@ -279,13 +285,13 @@ class TestOwnerAndContributorOnOneComputer:
             "expected_heads": {"X-main": head},
         }
         courier.take_delta({"history_delta": {"designs": [delta]}}, {"named": ["vase"]})
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(folder) == KEY_X
         assert made in _records(), "the served change was not kept here"
 
         accounts.designs["X"]["versions"].append((made, 4))
         pulled = courier.pull("cloud_pull_branch", "vase")
         assert pulled["status"] == "success", pulled
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(folder) == KEY_X
 
 
 class TestNeverOnKilnsServer:
@@ -328,7 +334,7 @@ class TestTwoHistories:
                 "name": "vase", "design_id": "vase", "version": n, "source_scad": f"cube({n});"}))
         pulled = courier.pull("cloud_pull_branch", "vase")
         assert pulled["status"] == "success", pulled
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(folder) == KEY_X
 
     def test_an_account_design_that_holds_no_version_joins_a_folder_with_work(self, home, accounts):
         folder = _folder(home)
@@ -344,7 +350,7 @@ class TestTwoHistories:
         refused = courier.push("cloud_push_branch", "vase")
         assert refused["code"] == design_tie.UNRELATED_CODE, refused
         assert not accounts.kept and not accounts.models_sent
-        assert design_tie.tied_key(folder) is None
+        assert _tied(folder) is None
 
     def test_the_cloud_pull_command_refuses_two_histories(self, home, accounts):
         from click.testing import CliRunner
@@ -379,7 +385,7 @@ class TestTheAccountMadeItsDesignAgain:
             assert refused.get("code") == design_tie.UNRELATED_CODE, refused
             assert _snapshot(folder) == before and _records() == records
         assert not accounts.kept and not accounts.models_sent
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(folder) == KEY_X
 
     def test_the_same_history_made_again_is_joined_and_tied_to_the_new_design(self, home, accounts):
         assert courier.clone("cloud_clone_design", "vase")["status"] == "success"
@@ -387,7 +393,7 @@ class TestTheAccountMadeItsDesignAgain:
         again = self._made_again(accounts, list(accounts.designs["X"]["versions"]))
         pulled = courier.pull("cloud_pull_branch", "vase")
         assert pulled["status"] == "success", pulled
-        assert design_tie.tied_key(folder) == again
+        assert _tied(folder) == again
         assert sorted(_records().values()) == [1, 2, 3]
 
     def test_a_design_deleted_and_not_made_again_is_made_by_the_folders_push(self, home, accounts):
@@ -395,7 +401,7 @@ class TestTheAccountMadeItsDesignAgain:
         again = self._made_again(accounts, [])
         pushed = courier.push("cloud_push_branch", "vase")
         assert pushed["status"] == "success", pushed
-        assert design_tie.tied_key(_folder(home)) == again
+        assert _tied(_folder(home)) == again
 
     def test_the_same_history_in_another_account_is_still_a_different_design(self, home, accounts):
         """A different line is never judged by history: a folder cannot move
@@ -432,8 +438,8 @@ class TestARenamedOrCopiedFolder:
         folder = _folder(home)
         copy = folder.with_name("vase copy")
         shutil.copytree(folder, copy)
-        assert design_tie.tied_key(folder) == KEY_X
-        assert design_tie.tie_of(copy) is None and design_tie.tied_key(copy) is None
+        assert _tied(folder) == KEY_X
+        assert design_tie.tie_of(copy) is None and _tied(copy) is None
         fields = design_tie.push_fields(copy)
         assert design_tie.KEY_FIELD not in fields and design_tie.LINE_FIELD not in fields
         assert set(fields[design_tie.HISTORY_FIELD]) == {vid for vid, _n in accounts.designs["X"]["versions"]}
@@ -441,8 +447,8 @@ class TestARenamedOrCopiedFolder:
         other = {"design_key": "k2:" + "d" * 64, "design_line": "k1:" + "d" * 64}
         verdict = design_tie.judge("vase copy", copy, other, doing="push")
         assert verdict.refused is None and design_tie.keep(verdict) == {"tied": True}
-        assert design_tie.tied_key(copy) == other["design_key"]
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(copy) == other["design_key"]
+        assert _tied(folder) == KEY_X
 
     def test_no_refusal_says_a_different_account(self):
         for doing in ("pull", "clone", "push"):
@@ -473,7 +479,7 @@ class TestADamagedOrOlderTie:
         # Its own account's design shares its versions: the tie is written again.
         accounts.signed_in = "X"
         assert courier.pull("cloud_pull_branch", "vase")["status"] == "success"
-        assert design_tie.tied_key(folder) == KEY_X
+        assert _tied(folder) == KEY_X
 
     def test_a_tie_an_older_kiln_wrote_holds_and_is_brought_up_to_date(self, home, accounts):
         assert courier.clone("cloud_clone_design", "vase")["status"] == "success"
