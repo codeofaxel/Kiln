@@ -28,8 +28,8 @@ account and to every other computer of theirs
 (:mod:`kiln.machine_repair_courier`), and marks made elsewhere -- another
 computer, the web -- come down into this record.  The account tells two
 computers' records of one machine apart by a shared code
-(:func:`shared_code`, a printer whose own secret both computers hold) or by
-asking the person once; a question is answered with
+(:func:`shared_code`, from a printer's own secret or its own board's id), by
+a controller code (:func:`controller_code`) or by asking the person once; a question is answered with
 :func:`answer_identity`.
 """
 
@@ -276,13 +276,20 @@ def shared_code(adapter: Any, *, account_id: str | None = None) -> str | None:
     the salt so two accounts that share a printer never produce the same
     code; the access code is the password, so a changed code is a new
     printer to the account (the person is then asked once, and links the
-    two).  ``None`` for a printer with no such secret, or when nobody is
-    signed in -- never a code made from something weaker.
+    two).
+
+    A printer with no such secret gets its code from the id its own board
+    reports, when one is saved for it (:data:`PRINTER_ID_SOURCES`): ``"pc:"``
+    and 24 hex digits of a slow, memory-hard one-way function of that id,
+    salted with the account id and the id's source.  ``None`` for a printer
+    with neither, for an id too plain to name one machine, or when nobody is
+    signed in -- never a code made from an address or a name.
     """
-    serial = str(getattr(adapter, "serial", None) or getattr(adapter, "_serial", None) or "").strip().lower()
+    serial = getattr(adapter, "serial", None) or getattr(adapter, "_serial", None) or ""
+    serial = serial.strip().lower() if isinstance(serial, str) else ""
     access = str(getattr(adapter, "access_code", None) or getattr(adapter, "_access_code", None) or "").strip()
     if not serial or not access:
-        return None
+        return _hardware_code(adapter, PRINTER_ID_SOURCES, "pc:", account_id)
     if account_id is None:
         from kiln.auth_session import signed_in_account_id
 
@@ -301,6 +308,128 @@ def shared_code(adapter: Any, *, account_id: str | None = None) -> str | None:
     with _shared_lock:
         _shared_codes[cache_key] = code
     return code
+
+
+#: Where a saved id names the PRINTER's own board: the same from every
+#: computer, and another printer never reports it.
+PRINTER_ID_SOURCES: tuple[str, ...] = (
+    "mainboard_id",
+    "prusalink_info.serial",
+    "rrf_object_model.boards[0].uniqueId",
+)
+#: Where a saved id names the CONTROLLER a printer is run from: a computer
+#: that can run more than one printer.  Two different controllers are two
+#: printers; one controller says nothing about how many.
+CONTROLLER_ID_SOURCES: tuple[str, ...] = ("moonraker_system_info.cpu_info.serial_number",)
+
+#: How each printer type is told apart on the account: ``printer`` (a shared
+#: code from the printer's own id), ``controller`` (a controller code) or
+#: ``none``, each with the id's source or the reason there is none.
+IDENTITY_BY_TYPE: dict[str, tuple[str, str]] = {
+    "bambu": ("printer", "serial"),
+    "elegoo": ("printer", "mainboard_id"),
+    "prusalink": ("printer", "prusalink_info.serial"),
+    "duet": ("printer", "rrf_object_model.boards[0].uniqueId"),
+    "moonraker": ("controller", "moonraker_system_info.cpu_info.serial_number"),
+    "creality": ("controller", "moonraker_system_info.cpu_info.serial_number"),
+    "octoprint": ("none", "OctoPrint reports no id of the printer or of its host; it is known by its address only"),
+    "usb": ("none", "a printer on a cable is known by the port it is plugged into on one computer"),
+}
+
+#: The cost of one hardware code: 64 MB and a tenth of a second.
+_HARDWARE_CODE_N = 2 ** 16
+_HARDWARE_CODE_MAXMEM = 128 * 1024 * 1024
+#: Words a board reports when it has no id of its own.
+_PLACEHOLDER_IDS = ("unknown", "default", "tobefilled", "notspecified", "notavailable", "0123456789", "123456789")
+
+
+def usable_hardware_id(value: Any) -> str | None:
+    """*value* as a hardware id fit to name one machine, upper-cased, or
+    ``None``: too short, one character repeated, or a placeholder word."""
+    if not isinstance(value, (str, int)) or isinstance(value, bool):
+        return None
+    text = str(value).strip().upper()
+    plain = "".join(ch for ch in text.lower() if ch.isalnum())
+    if len(plain) < 8 or len(set(plain)) < 4:
+        return None
+    if any(word in plain for word in _PLACEHOLDER_IDS):
+        return None
+    return text
+
+
+def saved_hardware_id(adapter: Any) -> tuple[str, str] | None:
+    """``(source, id)`` saved in this computer's config for the printer at
+    *adapter*'s address, or ``None``.  Read from the saved entries of the
+    adapter's own type at the same address; two entries there that disagree
+    answer ``None``.  Never raises."""
+    try:
+        from kiln.cli.config import _normalize_printer_type, _read_config_file, get_config_path
+        from kiln.registry import _normalize_host
+
+        family = str(getattr(adapter, "name", "") or "").strip().lower()
+        host = _normalize_host(getattr(adapter, "host", None) or getattr(adapter, "_host", None) or "")
+        if not family or not host:
+            return None
+        printers = _read_config_file(get_config_path()).get("printers")
+        found: set[tuple[str, str]] = set()
+        for entry in (printers or {}).values() if isinstance(printers, dict) else ():
+            if not isinstance(entry, dict):
+                continue
+            if _normalize_printer_type(str(entry.get("type") or "").strip().lower()) != family:
+                continue
+            if _normalize_host(str(entry.get("host") or "")) != host:
+                continue
+            if family == "elegoo":
+                source, raw = "mainboard_id", entry.get("mainboard_id")
+            else:
+                source, raw = str(entry.get("machine_id_source") or ""), entry.get("machine_id")
+            value = usable_hardware_id(raw)
+            if source and value:
+                found.add((source, value))
+        return next(iter(found)) if len(found) == 1 else None
+    except Exception:  # noqa: BLE001 -- an id that cannot be read is no id
+        logger.debug("saved hardware id not read", exc_info=True)
+        return None
+
+
+def _hardware_code(adapter: Any, sources: tuple[str, ...], prefix: str, account_id: str | None) -> str | None:
+    saved = saved_hardware_id(adapter)
+    if saved is None or saved[0] not in sources:
+        return None
+    source, value = saved
+    if account_id is None:
+        from kiln.auth_session import signed_in_account_id
+
+        account_id = signed_in_account_id()
+    account = str(account_id or "").strip()
+    if not account:
+        return None
+    cache_key = hashlib.sha256(f"{prefix}|{account}|{source}|{value}".encode()).hexdigest()
+    with _shared_lock:
+        cached = _shared_codes.get(cache_key)
+    if cached:
+        return cached
+    salt = f"{SHARED_CODE_SALT}|{account}|{source}".encode()
+    try:
+        key = hashlib.scrypt(value.encode("utf-8"), salt=salt, n=_HARDWARE_CODE_N, r=8, p=1,
+                             maxmem=_HARDWARE_CODE_MAXMEM, dklen=32)
+    except Exception:  # noqa: BLE001 -- no slow function here, no code
+        logger.debug("hardware code not made", exc_info=True)
+        return None
+    code = prefix + hmac.new(key, b"machine", hashlib.sha256).hexdigest()[:24]
+    with _shared_lock:
+        _shared_codes[cache_key] = code
+    return code
+
+
+def controller_code(adapter: Any, *, account_id: str | None = None) -> str | None:
+    """One code for the controller a printer is run from, the same on every
+    computer of the signed-in person's: ``"cc:"`` and 24 hex digits, made as
+    :func:`shared_code` makes a code from a board's id, from the saved id of
+    a source in :data:`CONTROLLER_ID_SOURCES`.  Two printers with different
+    controller codes are two printers; the same code says nothing.  ``None``
+    for a printer with no such id saved, or when nobody is signed in."""
+    return _hardware_code(adapter, CONTROLLER_ID_SOURCES, "cc:", account_id)
 
 
 def answer_identity(adapter_or_name: Any, question_id: str, *, same: bool, db: Any = None) -> dict[str, Any]:
@@ -520,10 +649,12 @@ __all__ = [
     "answer_identity",
     "condition",
     "condition_summary",
+    "controller_code",
     "day_word",
     "mark",
     "mark_nozzle_swap",
     "routing_block",
+    "saved_hardware_id",
     "shared_code",
     "start_warning",
 ]

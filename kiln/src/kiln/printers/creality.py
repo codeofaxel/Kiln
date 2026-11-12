@@ -752,6 +752,8 @@ class CrealityAdapter(PrinterAdapter):
         if not host:
             raise ValueError("host must not be empty")
         self._input_host = host.strip().rstrip("/")
+        #: The address this printer was set up with.
+        self.host = self._input_host
         self._api_key = api_key or None
         self._model = model or None
         self._timeout = timeout
