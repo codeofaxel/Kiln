@@ -240,6 +240,10 @@ kiln = [
     # files it covers travel with the library.
     "data/scad_libraries/MCAD/lgpl-2.1.txt",
     "data/scad_libraries/MCAD/README.markdown",
+    # The fonts carved text is drawn in, each with its own license text
+    # (SIL Open Font License 1.1), which travels with the font.
+    "data/fonts/*.ttf",
+    "data/fonts/*.txt",
     "py.typed",
     # Read by server.py beside itself at every start: the served tools an
     # install without kiln-pro registers.  At the package root, so no data/

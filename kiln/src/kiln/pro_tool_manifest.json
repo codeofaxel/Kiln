@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-12T17:25:17.262974+00:00",
+  "generated": "2026-11-12T17:45:59.932301+00:00",
   "tool_count": 421,
   "categories": {
     "product_generators": {
@@ -3623,7 +3623,7 @@
             "default": "",
             "title": "Font",
             "type": "string",
-            "description": "Font for text content: ``\"sans\"`` (default) or ``\"mono\"``, free on every plan.  When the person names none, carve with the default and tell them which font was used and that they can pick another.  An unknown font is refused naming the accepted list.  Ignored for images and QR codes."
+            "description": "Font for text content: ``\"sans\"`` (default), ``\"mono\"``, ``\"fredoka\"`` (rounded), ``\"zilla-slab\"`` (slab), ``\"oswald\"`` (tall and narrow) or ``\"saira-stencil\"`` (stencil), each free on every plan.  When the person names none, carve with the default and tell them which font was used and that they can pick another.  An unknown font is refused naming the accepted list.  Ignored for images and QR codes."
           }
         },
         "required": [
@@ -5853,7 +5853,7 @@
             "default": "",
             "title": "Font",
             "type": "string",
-            "description": "Font for a text decoration: ``\"sans\"`` (default) or ``\"mono\"``.  The preset records it, so the word is carved in the same font every time it is applied.  A font not on the list is refused naming the list.  Refused for a family that is not text."
+            "description": "Font for a text decoration: ``\"sans\"`` (default), ``\"mono\"``, ``\"fredoka\"`` (rounded), ``\"zilla-slab\"`` (slab), ``\"oswald\"`` (tall and narrow) or ``\"saira-stencil\"`` (stencil).  The preset records it, so the word is carved in the same font every time it is applied.  A font not on the list is refused naming the list.  Refused for a family that is not text."
           }
         },
         "required": [

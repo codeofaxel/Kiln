@@ -175,19 +175,30 @@ def bundled_library_path() -> str:
     return str(Path(__file__).resolve().parent / "data" / "scad_libraries")
 
 
+def bundled_font_path() -> str:
+    """The folder of fonts Kiln ships for carved text, in the wheel."""
+    return str(Path(__file__).resolve().parent / "data" / "fonts")
+
+
 def openscad_env() -> dict[str, str]:
     """The environment every OpenSCAD launch gets.
 
     This process's environment, with Kiln's bundled libraries first on
     ``OPENSCADPATH``: first, so ``include <BOSL2/...>`` reaches the copy Kiln
     ships even where another one is installed.  Folders already on the path
-    stay, after it.
+    stay, after it.  Kiln's bundled fonts are added on ``OPENSCAD_FONT_PATH``
+    the same way, so ``text()`` draws them on a machine that has none of
+    them installed.
     """
     env = dict(os.environ)
     library = bundled_library_path()
     if os.path.isdir(library):
         rest = [p for p in env.get("OPENSCADPATH", "").split(os.pathsep) if p and p != library]
         env["OPENSCADPATH"] = os.pathsep.join([library, *rest])
+    fonts = bundled_font_path()
+    if os.path.isdir(fonts):
+        rest = [p for p in env.get("OPENSCAD_FONT_PATH", "").split(os.pathsep) if p and p != fonts]
+        env["OPENSCAD_FONT_PATH"] = os.pathsep.join([fonts, *rest])
     return env
 
 

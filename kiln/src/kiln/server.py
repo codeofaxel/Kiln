@@ -25216,7 +25216,9 @@ def decorate_surface(
         text carve also reports the ``font`` it used.
     :param absolute_size_mm: Exact letter height (text) or mark width (marks)
         in mm, overriding *scale*; ``0`` leaves *scale* in charge.
-    :param font: Font for text content: ``"sans"`` (default) or ``"mono"``.
+    :param font: Font for text content: ``"sans"`` (default), ``"mono"``,
+        ``"fredoka"`` (rounded), ``"zilla-slab"`` (slab), ``"oswald"`` (tall
+        and narrow) or ``"saira-stencil"`` (stencil, for a cut-through word).
         Every font is free on every plan.  When the person names none,
         carve with the default and tell them which font was used and that
         they can pick another.  An unknown font is refused naming the

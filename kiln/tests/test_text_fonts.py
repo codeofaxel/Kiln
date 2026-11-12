@@ -42,22 +42,53 @@ class TestTheList:
         assert len({font.id for font in TEXT_FONTS}) == len(TEXT_FONTS)
 
 
+class TestEveryShippedFontHasItsLicense:
+    def test_each_font_file_sits_beside_a_license(self):
+        from pathlib import Path
+
+        from kiln.openscad_runner import bundled_font_path
+
+        folder = Path(bundled_font_path())
+        fonts = sorted(folder.glob("*.ttf"))
+        assert len(fonts) == 4, fonts
+        licenses = [p.read_text() for p in folder.glob("*-OFL.txt")]
+        assert len(licenses) == len(fonts)
+        assert all("SIL Open Font License, Version 1.1" in text for text in licenses)
+
+    def test_the_wheel_carries_fonts_and_licenses(self):
+        from pathlib import Path
+
+        packaged = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+        assert '"data/fonts/*.ttf"' in packaged and '"data/fonts/*.txt"' in packaged
+
+
 @needs_openscad
 class TestEveryFontIsReallyDrawn:
     """A font the engine cannot find is drawn in the default face with no
-    error, so each one is measured: a different font is a different width."""
+    error, so each one is measured against what it is recorded to draw."""
 
-    def test_each_font_measures_differently_from_the_default(self):
-        from kiln.emboss_generator import measure_text_block_mm
+    def test_every_font_draws_as_recorded(self):
+        from kiln.text_fonts import fonts_not_drawn
 
-        default = resolve_text_font("")
-        width = {
-            font.id: measure_text_block_mm("Kiln 12", font.spec, 10.0)[0]
-            for font in TEXT_FONTS
-        }
-        for font in TEXT_FONTS:
-            if font.id != default.id:
-                assert abs(width[font.id] - width[default.id]) > 0.5, width
+        assert fonts_not_drawn() == []
+
+    def test_no_two_fonts_could_pass_for_each_other(self):
+        from kiln.text_fonts import _INK_TOLERANCE
+
+        for a in TEXT_FONTS:
+            for b in TEXT_FONTS:
+                if a.id == b.id:
+                    continue
+                ink_apart = abs(a.ink_mm2 - b.ink_mm2) > _INK_TOLERANCE * a.ink_mm2
+                width_apart = abs(a.ink_width_mm - b.ink_width_mm) > _INK_TOLERANCE * a.ink_width_mm
+                assert ink_apart or width_apart, (a.id, b.id)
+
+    def test_a_font_that_is_not_there_is_named(self, monkeypatch, tmp_path):
+        import kiln.openscad_runner as runner
+        from kiln.text_fonts import fonts_not_drawn
+
+        monkeypatch.setattr(runner, "bundled_font_path", lambda: str(tmp_path))
+        assert fonts_not_drawn() == ["fredoka", "zilla-slab", "oswald", "saira-stencil"]
 
 
 @pytest.fixture
