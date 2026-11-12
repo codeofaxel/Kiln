@@ -50,7 +50,7 @@ def ratings_in(node: Any, path: str = "") -> list[str]:
 
 
 def test_the_search_finds_a_rating_where_one_rides():
-    # The search this file relies on, on the shapes the doors used to send.
+    # The search this file relies on, on the shapes a reply could carry a rating in.
     assert ratings_in({"report": {"printable": True, "score": 88, "grade": "B"}}) == [
         "report.score", "report.grade",
     ]
@@ -148,3 +148,87 @@ def test_the_report_keeps_its_rating_in_the_process(parts):
     report = analyze_printability(parts[0])
     assert 0 <= report.score <= 100 and report.grade in {"A", "B", "C", "D", "F"}
     assert not set(report.to_dict()) & RATING_KEYS
+
+
+# --- the rating if placed, the command line, and what tools promise ---
+
+
+@pytest.fixture
+def oversized(tmp_path):
+    """A plate wider than a Bambu A1's bed: it fails where it sits and would
+    print well placed, so its report says both."""
+    plate = trimesh.creation.box(extents=(400.0, 400.0, 10.0))
+    plate.apply_translation((0, 0, 5.0))
+    path = tmp_path / "oversized.stl"
+    plate.export(path)
+    return str(path)
+
+
+#: The rating a part would have where it sits fine: the same score and letter
+#: as the report's own whenever nothing is wrong with where it sits.
+_IF_PLACED = ("score_if_placed", "grade_if_placed")
+
+
+def _keys_at_any_depth(node: Any) -> set[str]:
+    if isinstance(node, dict):
+        return set(node) | {k for v in node.values() for k in _keys_at_any_depth(v)}
+    if isinstance(node, list):
+        return {k for item in node for k in _keys_at_any_depth(item)}
+    return set()
+
+
+@pytest.mark.parametrize("which", ["block", "oversized"])
+def test_the_placement_block_carries_no_rating(server, parts, oversized, which):
+    """Where the part sits says whether it prints once placed, never the
+    score or letter it would have there (``score_if_placed`` /
+    ``grade_if_placed``), which equal the report's own whenever nothing is
+    wrong with where it sits.  Every door that serves the report
+    (validate_and_prepare_mesh, audit_original_design, kiln validate)
+    carries this same block."""
+    path = parts[0] if which == "block" else oversized
+    args = {"file_path": path, **({"printer_id": "bambu_a1"} if which == "oversized" else {})}
+
+    reply = _call(server, "analyze_printability", args)
+
+    placement = reply["report"]["placement"]
+    assert not set(_IF_PLACED) & _keys_at_any_depth(reply), placement
+    assert isinstance(placement["printable_if_placed"], bool), placement
+    if which == "oversized":
+        assert reply["verdict"] == "wont_print" and placement["faults"], reply["message"]
+
+
+def test_the_pipeline_door_carries_no_placement_rating(server, oversized):
+    reply = _call(server, "validate_and_prepare_mesh", {"file_path": oversized, "printer_id": "bambu_a1"})
+
+    assert reply.get("success") is True, reply
+    assert not set(_IF_PLACED) & _keys_at_any_depth(reply)
+
+
+def test_kiln_validate_json_carries_no_rating(server, parts):
+    """The command line's door: ``kiln validate --json`` prints the report,
+    and no rating.  (``server`` keeps a paid add-on out of the process, as
+    above.)"""
+    from click.testing import CliRunner
+
+    from kiln.cli.main import cli
+
+    out = CliRunner().invoke(cli, ["validate", parts[0], "--json"])
+
+    assert out.exit_code == 0, out.output
+    printed = json.loads(out.output)
+    assert ratings_in(printed) == [], ratings_in(printed)
+    assert not set(_IF_PLACED) & _keys_at_any_depth(printed)
+
+
+def test_no_tool_tells_an_agent_it_returns_a_printability_score(server):
+    """No tool description tells an agent to expect a printability score or
+    grade: an agent told to expect a number reports one it never received."""
+    import re
+
+    promise = re.compile(
+        r"printability scor(?:e|es|ed|ing)|printability grade|numeric printability", re.IGNORECASE,
+    )
+    tools = asyncio.run(server.mcp.list_tools())
+    promised = {t.name for t in tools if promise.search(t.description or "")}
+
+    assert promised == set(), sorted(promised)

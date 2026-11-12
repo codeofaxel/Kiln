@@ -371,7 +371,7 @@ class _GenerationToolsPlugin:
             printability analysis → build volume check into a single quality gate.
 
             **Use this instead of ``validate_generated_mesh`` when you want the
-            full pipeline** — repair, printability scoring, build volume checks,
+            full pipeline** — repair, the printability verdict, build volume checks,
             and actionable recommendations.
 
             The mesh file may be modified in place if ``auto_repair`` or

@@ -173,8 +173,8 @@ def _build_summary(result: ValidationPipelineResult) -> str:
 
 
 #: The lowest score that passes a part the check names no single cause for
-#: (verdict ``check``), when the caller sets no minimum of their own: the bar
-#: this pass has always held a rough part to.
+#: (verdict ``check``): the bar this pass holds a rough part to.  No caller
+#: sets it (:func:`kiln.printability.passes`).
 _CHECK_BAR = 40
 
 

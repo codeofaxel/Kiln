@@ -2521,13 +2521,13 @@ def optimize_orientation(
             overwriting the input.
         candidates: Number of candidate rotations per axis (default 6,
             tests 0/30/60/90/120/150 degrees around X and Y = 36 combos).
-        material: Material the printability score is judged for (default
+        material: Material the printability verdict is judged for (default
             ``"pla"``, the same default as :func:`kiln.printability.analyze_printability`).
-        printer_id: Printer the printability score is judged for.
+        printer_id: Printer the printability verdict is judged for.
 
     Returns:
         Dict with best rotation angles, overhang stats, output path, and
-        the printability score and grade of the chosen orientation --
+        the printability verdict of the chosen orientation --
         :func:`kiln.printability.analyze_printability`'s own, for the same
         material and printer, so the two can never disagree about one part.
     """
@@ -4177,7 +4177,7 @@ def can_print_now(
         printer_id: Optional supported printer model id.  When provided and
             ``printer_bed_mm`` is omitted, printer intelligence supplies the
             build volume.
-        material: Material the supports verdict and printability score are
+        material: Material the supports verdict and printability verdict are
             judged for (default ``"pla"``, as in ``analyze_printability``).
 
     Returns:

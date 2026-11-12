@@ -62,6 +62,10 @@ _SCORE_ARITHMETIC: frozenset[str] = frozenset({
 #: builds its own reply drops these keys through :func:`without_rating`.
 RATING_KEYS: frozenset[str] = frozenset({
     "score", "grade", "printability_score", "printability_grade",
+    # The rating the part would have where it sits fine
+    # (PlacementAnalysis.score_if_placed): the score and the letter
+    # themselves whenever nothing is wrong with where it sits.
+    "score_if_placed", "grade_if_placed",
     # The quick mesh check's own 0-100 (MeshAnalysis.mesh_check_score): a
     # second rating of the same part, kept in the process the same way.
     "mesh_check_score",
@@ -587,7 +591,9 @@ class PlacementAnalysis:
     #: end the problem, and the clamped fields cannot answer it.
     #:
     #: ``None`` on a report built before this block existed.  Equal to
-    #: the clamped values when there are no faults.
+    #: the clamped values when there are no faults.  The score and grade
+    #: if placed stay in the process like the report's own
+    #: (:data:`RATING_KEYS`); a reply carries ``printable_if_placed``.
     score_if_placed: int | None = None
     grade_if_placed: str | None = None
     printable_if_placed: bool | None = None
@@ -615,7 +621,7 @@ class PlacementAnalysis:
         return PLACEMENT_FAULT_EXCEEDS_BED in self.fault_names
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return without_rating(asdict(self))
 
 
 @dataclass
@@ -757,9 +763,12 @@ class PrintabilityReport:
         # The rating stays in the process (RATING_KEYS); the reply says the
         # verdict and the reasons.
         out = without_rating(_served(self))
-        # Each check is served as itself, never as asdict's copy of it.
+        # Each check is served as itself, never as asdict's copy of it, and
+        # so is where the part sits, which carries the rating if placed.
         for name, check in _checks(self):
             out[name] = check.to_dict()
+        if self.placement is not None:
+            out["placement"] = self.placement.to_dict()
         return out
 
 

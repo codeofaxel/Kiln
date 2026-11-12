@@ -573,7 +573,7 @@ class _EstimateToolsPlugin:
 
             **See also:** ``estimate_material_cost`` for weight and cost from
             a mesh with your own price per kg, and ``slice_and_estimate`` for
-            a fuller analysis with printability scoring.
+            a fuller analysis with the printability verdict.
 
             :param file_path: Path to STL/3MF/OBJ or .gcode file.
             :param profile: Optional slicer profile path.

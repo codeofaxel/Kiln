@@ -433,7 +433,7 @@ def run_full_validation_pipeline(
         elif printability_fail:
             report.next_action = {
                 "tool": "auto_orient_model",
-                "reason": "Low printability score — reorienting may improve it",
+                "reason": "The printability check did not pass; reorienting may help",
             }
         else:
             report.next_action = None
@@ -577,7 +577,7 @@ class _ValidationPipelinePlugin:
             printability analysis, structural assessment, bed-fit check, and
             (optionally) material-specific checks.
             Returns a detailed pass/fail report with actionable recommendations
-            plus a numeric printability score (0-100).
+            and the printability verdict.
 
             Works with any model — AI-generated, downloaded from marketplaces,
             or created in CAD.  Every model passes Kiln's engineering review

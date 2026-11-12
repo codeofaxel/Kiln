@@ -239,7 +239,7 @@ class _DesignToolsPlugin:
             """Run a ruthless audit of an original design before printing.
 
             Combines design briefing, prompt enhancement, mesh validation,
-            printability scoring, orientation analysis, advanced diagnostics,
+            the printability check, orientation analysis, advanced diagnostics,
             and regeneration feedback into a single report.
 
             Use this after generating or modeling a new part to answer:

@@ -345,6 +345,10 @@ def test_the_floor_is_served_whole_but_for_the_scores_arithmetic(floor):
         for key, value in _without_arithmetic(_without_tuned(asdict(report))).items()
         if key not in P.RATING_KEYS
     }
+    # Where the part sits carries the rating if placed, and serves without it.
+    expected["placement"] = {
+        key: value for key, value in expected["placement"].items() if key not in P.RATING_KEYS
+    }
     assert report.to_dict() == expected
     served = floor["reply"]["report"]
     for block, key in WORKED_OUT:

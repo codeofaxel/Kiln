@@ -14059,8 +14059,8 @@ def validate(file_path: str, json_mode: bool) -> None:
                 )
             )
         else:
-            # The verdict is the answer; --json carries the score for
-            # comparing versions.
+            # The verdict is the answer; --json carries the report's
+            # reasons, never its rating (kiln.printability.RATING_KEYS).
             click.echo(verdict_text)
             if report.recommendations:
                 click.echo("Issues:")
