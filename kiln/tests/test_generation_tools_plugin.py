@@ -80,11 +80,9 @@ class TestGenerationToolsPlugin:
         captured_kwargs = {}
 
         session = SimpleNamespace(
-            summary="Best attempt scored 94/100 (A) via gemini. The design is ready for print.",
+            summary="Best of 1 attempt(s), via gemini. The design is ready for print.",
             to_dict=lambda: {
                 "provider_used": "gemini",
-                "best_readiness_score": 94,
-                "best_readiness_grade": "A",
                 "ready_for_print": True,
                 "attempts_made": 1,
             },
@@ -108,7 +106,7 @@ class TestGenerationToolsPlugin:
         assert result["status"] == "success"
         assert result["message"] == session.summary
         assert result["provider_used"] == "gemini"
-        assert result["best_readiness_score"] == 94
+        assert result["ready_for_print"] is True
         assert result["bed_size_model_id"] == "kilntest_enclosed"
         assert result["bed_dims_mm"] == [256.0, 256.0, 256.0]
         assert captured_kwargs["build_volume"] == (256.0, 256.0, 256.0)

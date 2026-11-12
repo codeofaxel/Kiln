@@ -211,7 +211,7 @@ class TestTheEstimateDoor:
         twin = _estimate(_stl(tmp_path, _PLATE))
         assert cad["success"] and twin["printability"] is not None
         assert cad["printability"] is not None, cad
-        assert cad["printability"]["score"] == twin["printability"]["score"]
+        assert cad["printability"]["printable"] == twin["printability"]["printable"]
         assert cad["adhesion"] == twin["adhesion"]
         assert "Kiln's mesh of this STEP file" in cad["printability_note"]
         assert "printability_note" not in twin

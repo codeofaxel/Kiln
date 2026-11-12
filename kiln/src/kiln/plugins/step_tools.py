@@ -144,7 +144,7 @@ class _StepToolsPlugin:
                     ),
                     "next_steps": [
                         "Run diagnose_mesh on the output to check for defects.",
-                        "Run analyze_mesh_geometry for printability scoring.",
+                        "Run analyze_printability to see whether it prints.",
                         "Run slice_model to prepare for printing.",
                     ],
                 }

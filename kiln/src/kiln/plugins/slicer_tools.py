@@ -3668,8 +3668,8 @@ class _SlicerToolsPlugin:
 
             Pre-print validation gate: mesh inputs (.stl/.obj/.3mf/.step/.glb)
             run through Kiln's full validation pipeline before slicing —
-            format check, watertight check, auto-repair, printability scoring
-            (0-100), bed-fit, and material checks.  Designs that fail the gate
+            format check, watertight check, auto-repair, the printability
+            check, bed-fit, and material checks.  Designs that fail the gate
             are blocked before reaching the printer; auto-repaired meshes are
             sliced from the repaired path.  Pass ``skip_validation=True`` to
             bypass (e.g. for already-validated meshes or pre-sliced 3MFs).

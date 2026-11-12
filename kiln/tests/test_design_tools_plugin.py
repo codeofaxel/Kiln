@@ -50,14 +50,8 @@ class TestDesignToolsPlugin:
 
     def test_audit_original_design_wires_to_core_loop(self, registered_tools, monkeypatch) -> None:
         session = SimpleNamespace(
-            readiness_score=93,
-            readiness_grade="A",
             ready_for_print=True,
-            to_dict=lambda: {
-                "readiness_score": 93,
-                "readiness_grade": "A",
-                "ready_for_print": True,
-            },
+            to_dict=lambda: {"ready_for_print": True, "readiness_reasons": []},
         )
         monkeypatch.setattr(
             "kiln.original_design.audit_original_design",
@@ -71,8 +65,8 @@ class TestDesignToolsPlugin:
         )
 
         assert result["success"] is True
-        assert result["readiness_score"] == 93
         assert result["ready_for_print"] is True
+        assert result["message"] == "The design passes the audit."
 
     def test_registers_parametric_tools(self, registered_tools) -> None:
         assert "build_parametric_prompt" in registered_tools

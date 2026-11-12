@@ -2521,13 +2521,13 @@ def optimize_orientation(
             overwriting the input.
         candidates: Number of candidate rotations per axis (default 6,
             tests 0/30/60/90/120/150 degrees around X and Y = 36 combos).
-        material: Material the printability score is judged for (default
+        material: Material the printability verdict is judged for (default
             ``"pla"``, the same default as :func:`kiln.printability.analyze_printability`).
-        printer_id: Printer the printability score is judged for.
+        printer_id: Printer the printability verdict is judged for.
 
     Returns:
         Dict with best rotation angles, overhang stats, output path, and
-        the printability score and grade of the chosen orientation --
+        the printability verdict of the chosen orientation --
         :func:`kiln.printability.analyze_printability`'s own, for the same
         material and printer, so the two can never disagree about one part.
     """
@@ -2606,10 +2606,10 @@ def optimize_orientation(
 
     # Analyze the result
     analysis = analyze_mesh(out)
-    # The score is the printability score, from the one engine that owns
-    # it.  Reporting analyze_mesh's quick mesh check under the same name
-    # would grade the same part two different ways with nothing rotated.
-    from kiln.printability import analyze_printability
+    # The verdict is the printability verdict, from the one engine that
+    # owns it; the rating it was read from stays in the process
+    # (kiln.printability.RATING_KEYS).
+    from kiln.printability import analyze_printability, verdict_block
 
     report = analyze_printability(out, material=material, printer_id=printer_id)
 
@@ -2619,8 +2619,7 @@ def optimize_orientation(
         "rotation_y_deg": round(best_ry, 1),
         "overhang_percentage": analysis.overhang_percentage,
         "max_overhang_angle": analysis.max_overhang_angle_deg,
-        "printability_score": report.score,
-        "printability_grade": report.grade,
+        **verdict_block(report),
         "printability_material": material,
         "dimensions_mm": analysis.dimensions_mm,
     }
@@ -2985,11 +2984,8 @@ def compare_meshes(
             math.sqrt(dx * dx + dy * dy + dz * dz), 2
         )
 
-    # Mesh-check comparison (the quick mesh check, not the
-    # printability score — see MeshAnalysis.mesh_check_score)
-    result["mesh_check_score_a"] = a.mesh_check_score
-    result["mesh_check_score_b"] = b.mesh_check_score
-    result["mesh_check_score_delta"] = b.mesh_check_score - a.mesh_check_score
+    # The two parts' own overhang measurements; the quick mesh check's
+    # rating stays in the process (kiln.printability.RATING_KEYS).
     result["overhang_pct_a"] = a.overhang_percentage
     result["overhang_pct_b"] = b.overhang_percentage
 
@@ -3324,7 +3320,6 @@ def predict_print_failures(
         "failures": failures,
         "dimensions_mm": dims,
         "triangle_count": len(tris),
-        "mesh_check_score": analysis.mesh_check_score,
         "min_wall_mm": min_wall_mm,
         "min_wall_basis": min_wall_basis,
     }
@@ -3334,38 +3329,12 @@ def predict_print_failures(
 # Multi-factor design scorecard
 # ---------------------------------------------------------------------------
 #
-# Tiering: the SCALE is not a tier feature.  Every tier combines the
-# four factors with the same weights and reads the same grade ladder,
-# because a letter grade is a claim about the part — "B" has to mean
-# the same thing to everyone or it means nothing.  Two earlier ladders
-# (a 25/25/25/25 blend and an A=80 ladder here, an A=90 ladder in the
-# overlay) graded the same 11:1 narrow-base part "A" without a licence
-# and "B" with one, off identical per-factor scores and identical
-# notes.  The scale was the only difference, and it read generous in
-# exactly the direction that hurts: the lighter printability weight
-# discounted the factor that catches overhangs and non-manifold walls.
-#
-# What the ``scorecard_weights`` overlay legitimately still supplies is
-# DEPTH: curated per-factor deduction rules and their notes, which
-# change what gets flagged rather than what a letter is worth.  An
-# overlay may override any value below; these are the floor everyone
-# gets.  The weights here match the ones the ``mesh_quality_scorecard``
-# tool docstring publishes to every caller.
+# The scorecard says each area's findings in words; it carries no score and
+# no grade (kiln.printability.RATING_KEYS).  What the ``scorecard_weights``
+# overlay supplies is DEPTH: curated per-area deduction rules and their
+# notes, which change what gets flagged.  An overlay may override any rule
+# list below; these are the floor everyone gets.
 
-
-_OVERALL_WEIGHTS_PUBLIC: dict[str, float] = {
-    "printability": 0.35,
-    "structural": 0.25,
-    "efficiency": 0.20,
-    "quality": 0.20,
-}
-
-_GRADE_THRESHOLDS_PUBLIC: dict[str, int] = {
-    "A": 90,
-    "B": 80,
-    "C": 65,
-    "D": 50,
-}
 
 # Rule order = severity order.  First matching rule per metric wins,
 # so put more-severe thresholds first.
@@ -3498,22 +3467,17 @@ def _score_factor_from_rules(
 def _printability_factor(
     mesh_path: str, *, material: str, printer_id: str | None,
 ) -> dict[str, Any]:
-    """A scorecard's printability factor: the printability score itself.
+    """A scorecard's printability factor: the printability verdict itself.
 
-    :func:`kiln.printability.analyze_printability`'s score, grade and
-    advice for ``material`` and ``printer_id`` — never the quick mesh
-    check's ``mesh_check_score``, which once sat in this slot as a second
-    "printability" number that disagreed with the first on the same part.
+    :func:`kiln.printability.analyze_printability`'s verdict and advice for
+    ``material`` and ``printer_id``.  The rating it was read from stays in
+    the process (:data:`kiln.printability.RATING_KEYS`).
     """
     from kiln.printability import analyze_printability, verdict_block
 
     report = analyze_printability(mesh_path, material=material, printer_id=printer_id)
     return {
-        # The verdict the score and grade were read from, in the two keys
-        # every door carries: a letter alone is not an answer about printing.
         **verdict_block(report),
-        "score": report.score,
-        "grade": report.grade,
         "material": material,
         "notes": list(report.recommendations),
     }
@@ -3525,33 +3489,30 @@ def design_scorecard(
     material: str = "pla",
     printer_id: str | None = None,
 ) -> dict[str, Any]:
-    """Generate a multi-factor quality scorecard for a mesh.
+    """Review a mesh across four areas, in words.
 
-    Evaluates four factors (each 0-100):
-
-    - **Printability**: the printability score from
+    - **Printability**: the printability verdict from
       :func:`kiln.printability.analyze_printability`, judged for
       ``material`` and ``printer_id``
     - **Structural**: aspect ratio, base stability, component count
     - **Efficiency**: fill ratio, overhang waste
     - **Quality**: triangle density, degenerate count
 
-    The score and the letter mean the same thing at every tier: the
-    35/25/20/20 weighting and the A>=90 / B>=80 / C>=65 / D>=50 ladder
-    are the floor everyone gets.  What the ``scorecard_weights``
-    overlay adds for Pro+ is depth — curated per-factor deduction
-    rules and the notes that come with them, which change what gets
-    flagged, not what a grade is worth.
+    Each area says what it found and what to change.  The reply carries no
+    score and no grade, overall or per area: the verdict is the answer, and
+    the notes are the reasons.  What the ``scorecard_weights`` overlay adds
+    for Pro+ is depth: curated per-area rules and the notes that come with
+    them, which change what gets flagged.
 
     Args:
         file_path: Path to mesh file.
-        material: Material the printability factor is judged for (default
+        material: Material the printability verdict is judged for (default
             ``"pla"``, as in ``analyze_printability``).
-        printer_id: Printer the printability factor is judged for.
+        printer_id: Printer the printability verdict is judged for.
 
     Returns:
-        Dict with per-factor scores, overall score, and grade.  Shape
-        is identical between tiers; only values differ.
+        Dict with the printability verdict and each area's notes.  Shape is
+        identical between tiers; only the notes differ.
     """
     from kiln.design_intelligence import load_pro_overlay_or_empty
 
@@ -3561,59 +3522,32 @@ def design_scorecard(
 
     overlay = load_pro_overlay_or_empty("scorecard_weights")
 
-    # --- Printability: the printability score itself -------------------
     printability_factor = _printability_factor(
         file_path, material=material, printer_id=printer_id,
     )
-    printability = printability_factor["score"]
-
-    # --- Structural / Efficiency / Quality (overlay-driven rules) -------
-    structural, structural_notes = _score_factor_from_rules(
+    # Each area's rules flag what they find; the points they take off stay
+    # here, and the notes are the reply.
+    _, structural_notes = _score_factor_from_rules(
         rules=overlay.get("structural_deductions") or _STRUCTURAL_DEDUCTIONS_PUBLIC,
         analysis=analysis,
     )
-    efficiency, efficiency_notes = _score_factor_from_rules(
+    _, efficiency_notes = _score_factor_from_rules(
         rules=overlay.get("efficiency_deductions") or _EFFICIENCY_DEDUCTIONS_PUBLIC,
         analysis=analysis,
     )
-    quality, quality_notes = _score_factor_from_rules(
+    _, quality_notes = _score_factor_from_rules(
         rules=overlay.get("quality_deductions") or _QUALITY_DEDUCTIONS_PUBLIC,
         analysis=analysis,
     )
 
-    # --- Overall (weighted combination) ---------------------------------
-    weights = overlay.get("overall_weights") or _OVERALL_WEIGHTS_PUBLIC
-    overall = round(
-        printability * weights["printability"]
-        + structural * weights["structural"]
-        + efficiency * weights["efficiency"]
-        + quality * weights["quality"]
-    )
-
-    # --- Grade ladder ---------------------------------------------------
-    thresholds = overlay.get("grade_thresholds") or _GRADE_THRESHOLDS_PUBLIC
-    if overall >= thresholds["A"]:
-        grade = "A"
-    elif overall >= thresholds["B"]:
-        grade = "B"
-    elif overall >= thresholds["C"]:
-        grade = "C"
-    elif overall >= thresholds["D"]:
-        grade = "D"
-    else:
-        grade = "F"
-
     return {
-        "overall_score": overall,
-        "grade": grade,
-        # The printability verdict at the top as well, where every door
-        # names it; the overall grade beside it is the scorecard's own.
+        # The printability verdict at the top, where every door names it.
         "printability_verdict": printability_factor.get("printability_verdict"),
         "printability_verdict_text": printability_factor.get("printability_verdict_text"),
         "printability": printability_factor,
-        "structural": {"score": structural, "notes": structural_notes},
-        "efficiency": {"score": efficiency, "notes": efficiency_notes},
-        "quality": {"score": quality, "notes": quality_notes},
+        "structural": {"notes": structural_notes},
+        "efficiency": {"notes": efficiency_notes},
+        "quality": {"notes": quality_notes},
         "triangle_count": analysis.triangle_count,
         "volume_mm3": analysis.volume_mm3,
         "dimensions_mm": analysis.dimensions_mm,
@@ -3659,34 +3593,6 @@ def design_scorecard(
 # the call rather than with the file.  Closing that needs provenance on
 # emitted meshes, which is a larger piece of work than this one.  What is
 # closed is the path a CAD user actually takes: hand Kiln the STEP.
-
-#: Why a CAD file carries no letter.  Said once, where the report is built,
-#: rather than per band per caller.
-#:
-#: Two endings: a machine with no CAD kernel gets no exact numbers, so its
-#: ending does not point at them, which would read as a reassurance next to a
-#: band that says ``available: false``.
-_GRADE_WITHHELD_HEAD = (
-    "No overall grade for a CAD file. A fifth of that score measures Kiln's "
-    "own tessellation — triangle density and degenerate count — so the same "
-    "part would score differently on a machine with a different converter."
-)
-_GRADE_WITHHELD_WITH_EXACT = (
-    " The exact numbers above come from your file and do not move."
-)
-_GRADE_WITHHELD_WITHOUT_EXACT = (
-    " Nothing here could be read from your file directly either, so every "
-    "number below describes Kiln's mesh copy of it."
-)
-
-
-def _grade_withheld(exact: Any) -> str:
-    return _GRADE_WITHHELD_HEAD + (
-        _GRADE_WITHHELD_WITH_EXACT
-        if exact.available
-        else _GRADE_WITHHELD_WITHOUT_EXACT
-    )
-
 
 def _exact_band(exact: Any) -> dict[str, Any]:
     """Band 1 — the file's own geometry, or an honest reason there is none."""
@@ -3881,7 +3787,8 @@ def cad_intake_report(
     number over as a grade of somebody's design is the error this whole
     report exists to avoid.
 
-    There is no overall grade, and ``grade_withheld`` says why in one line.
+    There is no score and no grade anywhere in it: the printability verdict
+    and each band's notes are the answer.
 
     Takes the converted mesh rather than converting one, so the CAD door
     stays in the tool body where every other tool keeps it — one visible
@@ -3940,11 +3847,11 @@ def cad_intake_report(
     from kiln.design_intelligence import load_pro_overlay_or_empty
 
     overlay = load_pro_overlay_or_empty("scorecard_weights")
-    structural, structural_notes = _score_factor_from_rules(
+    _, structural_notes = _score_factor_from_rules(
         rules=overlay.get("structural_deductions") or _STRUCTURAL_DEDUCTIONS_PUBLIC,
         analysis=analysis,
     )
-    efficiency, efficiency_notes = _score_factor_from_rules(
+    _, efficiency_notes = _score_factor_from_rules(
         rules=overlay.get("efficiency_deductions") or _EFFICIENCY_DEDUCTIONS_PUBLIC,
         analysis=analysis,
     )
@@ -3963,8 +3870,8 @@ def cad_intake_report(
             "printability": _printability_factor(
                 mesh_path, material=material, printer_id=printer_id,
             ),
-            "structural": {"score": structural, "notes": structural_notes},
-            "efficiency": {"score": efficiency, "notes": efficiency_notes},
+            "structural": {"notes": structural_notes},
+            "efficiency": {"notes": efficiency_notes},
             "max_overhang_angle_deg": analysis.max_overhang_angle_deg,
             "overhang_percentage": analysis.overhang_percentage,
             "connected_components": analysis.connected_components,
@@ -3992,8 +3899,6 @@ def cad_intake_report(
                 "score here would read as a verdict on your part."
             ),
         },
-        "grade": None,
-        "grade_withheld": _grade_withheld(exact),
     }
 
 
@@ -4272,7 +4177,7 @@ def can_print_now(
         printer_id: Optional supported printer model id.  When provided and
             ``printer_bed_mm`` is omitted, printer intelligence supplies the
             build volume.
-        material: Material the supports verdict and printability score are
+        material: Material the supports verdict and printability verdict are
             judged for (default ``"pla"``, as in ``analyze_printability``).
 
     Returns:
@@ -4465,12 +4370,10 @@ def can_print_now(
         "actions_taken": actions_taken,
         # The part's printability verdict and its sentence, the answer every
         # door gives; ``verdict`` above is this check's word for the mesh and
-        # that verdict together, and the score is for comparing versions.
+        # that verdict together.  The rating behind them stays in the
+        # process (kiln.printability.RATING_KEYS).
         **verdict_block(report),
-        "printability_score": report.score,
-        "printability_grade": report.grade,
         "printability_material": material,
-        "mesh_check_score": analysis.mesh_check_score,
         "triangle_count": analysis.triangle_count,
         "dimensions_mm": analysis.dimensions_mm,
         "bed_check": _bed_check_block(printer_bed_mm, bed_source),

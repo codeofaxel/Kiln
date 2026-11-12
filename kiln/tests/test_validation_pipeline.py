@@ -945,7 +945,8 @@ class TestPrintabilityScore:
             result = _invoke_tool(stl)
 
         assert result["readiness_score"] == 100
-        assert result["printability_score"] == mock_printability.score
+        # The rating stays in the process; the verdict rides.
+        assert "printability_score" not in result
 
     def test_score_less_than_100_when_warnings_present(self, tmp_path: Path) -> None:
         """Skipped modules produce warning checks → score < 100."""
@@ -959,7 +960,8 @@ class TestPrintabilityScore:
             result = _invoke_tool(stl)
 
         assert result["readiness_score"] < 100
-        assert result["printability_score"] is None  # the analyzer never ran
+        assert result["printability_verdict"] is None  # the analyzer never ran
+        assert "printability_score" not in result
         assert isinstance(result["score_breakdown"], list)
         assert len(result["score_breakdown"]) > 0
 
@@ -2159,7 +2161,7 @@ class TestPrepareAiModelReturnFormat:
         assert required_keys.issubset(result.keys())
         assert "dimensions_mm" in result["original"]
         assert "triangles" in result["original"]
-        assert "printability_score" in result["original"]
+        assert "printability_verdict" in result["original"]
         assert "stl_path" in result["prepared"]
 
 
@@ -2632,7 +2634,7 @@ class TestRunFullValidationPipeline:
         # quick_print reads must be present.
         for key in (
             "ready_to_print",
-            "printability_score",
+            "printability_verdict",
             "readiness_score",
             "validated_path",
             "summary",
@@ -2652,7 +2654,7 @@ class TestRunFullValidationPipeline:
         report = run_full_validation_pipeline(str(tmp_path / "missing.stl"))
         assert report["ready_to_print"] is False
         assert report["readiness_score"] == 0
-        assert report["printability_score"] is None
+        assert report["printability_verdict"] is None
 
     def test_unsupported_format_returns_not_ready(self, tmp_path: Path) -> None:
         """An unsupported format also fails — but slice_and_print /

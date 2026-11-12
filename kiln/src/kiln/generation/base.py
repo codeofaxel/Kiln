@@ -164,11 +164,10 @@ class MeshAnalysis:
     max_overhang_angle_deg: float = 0.0
     #: A quick 0-100 mesh check: watertight, loose parts, overhang
     #: angle and share, degenerate faces, size.  It is not the
-    #: printability score — :func:`kiln.printability.analyze_printability`
-    #: is the one number called that, and it judges an overhang by whether
-    #: a slicer can print it, which this check cannot (a 9 mm port ceiling
-    #: costs 20 points here and nothing there).  Under one name the two
-    #: read as two verdicts on the same part.
+    #: printability verdict, which judges an overhang by whether a slicer
+    #: can print it.  It stays in the process like the printability rating
+    #: (:data:`kiln.printability.RATING_KEYS`): :meth:`to_dict` leaves it
+    #: out, so no reply carries it.
     mesh_check_score: int = 0
     printability_issues: list[str] = field(default_factory=list)
     #: Why this file cannot print as a part at all -- unreadable, empty,
@@ -191,7 +190,10 @@ class MeshAnalysis:
         return self.triangle_count > 0
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        # A rating stays in the process; see mesh_check_score.
+        out.pop("mesh_check_score", None)
+        return out
 
 
 # ---------------------------------------------------------------------------

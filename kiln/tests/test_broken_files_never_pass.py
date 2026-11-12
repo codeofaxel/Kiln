@@ -276,7 +276,7 @@ def test_a_cad_file_is_converted_and_judged(tmp_path):
 
     names = [c["name"] for c in report["checks"]]
     assert report["ready_to_print"] is True, report["summary"]
-    assert "step_conversion" in names and report["printability_score"] is not None
+    assert "step_conversion" in names and report["printability_verdict"] is not None
     assert "conversion" in report
 
 
@@ -558,7 +558,7 @@ CALLERS = {
         "reads: reports what both download doors brought in (download_generated_model, "
         "download_model); prints nothing"
     ),
-    "print_service.py::_printability_score": "reads: the quote's score, None when the file cannot be read",
+    "print_service.py::_printability_verdict": "reads: the quote's verdict, None when the file cannot be read",
     "server.py::generate_from_template": "reads: reports the generated mesh; prints nothing",
 }
 

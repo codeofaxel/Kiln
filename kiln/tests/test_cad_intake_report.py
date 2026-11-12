@@ -1,4 +1,4 @@
-"""The CAD intake report — exact numbers, and the grade that must not appear.
+"""The CAD intake report — exact numbers, and no rating anywhere in it.
 
 Everything Kiln says about a CAD part's size was measured off triangles Kiln
 generated.  These tests pin the two halves of the fix:
@@ -240,31 +240,6 @@ def test_a_hosted_caller_is_never_handed_an_install_command(plate, monkeypatch):
     assert "gap on our side" in reason
 
 
-def test_the_withheld_reason_never_points_at_numbers_that_are_absent(
-    plate, monkeypatch
-):
-    """The first draft closed on "the exact numbers above come from your
-    file" unconditionally, which reads as a reassurance sitting next to a
-    band that says ``available: false``."""
-    import kiln.step_import as step_import
-
-    path, _ = plate
-    with_exact = _report(path)
-    assert "come from your file" in with_exact["grade_withheld"]
-
-    monkeypatch.setattr(
-        step_import,
-        "read_exact_geometry",
-        lambda p: ExactGeometry(available=False, reason="no kernel here"),
-    )
-    without = _report(path)
-
-    assert "come from your file" not in without["grade_withheld"]
-    assert "describes Kiln's mesh copy" in without["grade_withheld"]
-    # The reason for withholding is unchanged — only the pointer to numbers.
-    assert "tessellation" in without["grade_withheld"]
-
-
 def test_a_file_the_kernel_refuses_is_a_reason_not_an_exception(tmp_path):
     """A STEP header on garbage: sniffs as CAD, dies in the kernel."""
     broken = tmp_path / "broken.step"
@@ -420,63 +395,19 @@ def test_two_backends_mesh_one_file_differently(tmp_path, monkeypatch):
     assert exact.volume_mm3 == pytest.approx(sphere, rel=1e-9)
 
 
-def test_the_score_moves_when_only_the_tessellation_does(tmp_path, monkeypatch):
-    """One file, two tessellation densities, two different scores.
-
-    The claim is a SCORE change, not a letter; the letter evidence lives in
-    the cross-backend test above.
-
-    That is not a reprieve for the grade.  Whether a letter crosses depends on
-    how near a boundary a part happens to sit, so the same dependence is in
-    every score and merely invisible in most.
-
-    If this ever stops being true — if tessellation density stops moving the
-    score at all — the reason for withholding the grade deserves re-examining,
-    so a failure here is a prompt to re-decide rather than a number to nudge.
-    """
-    import tempfile
-
-    import kiln.step_import as step_import
-    from kiln.generation.validation import design_scorecard
-    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
-    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
-    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
-
-    disc = BRepPrimAPI_MakeCylinder(
-        gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 40.0, 8.0
-    ).Shape()
-    path = tmp_path / "disc.step"
-    writer = STEPControl_Writer()
-    writer.Transfer(disc, STEPControl_StepModelType.STEPControl_AsIs)
-    writer.Write(str(path))
-
-    scored = {}
-    for linear, angular, label in ((5e-3, 0.1, "fine"), (0.2, 0.6, "coarse")):
-        monkeypatch.setattr(step_import, "_OCP_LINEAR_DEFLECTION", linear)
-        monkeypatch.setattr(step_import, "_OCP_ANGULAR_DEFLECTION", angular)
-        outputs = step_import._convert_via_ocp(path, Path(tempfile.mkdtemp())).outputs
-        scored[label] = design_scorecard(outputs[0])
-
-    assert scored["fine"]["overall_score"] > scored["coarse"]["overall_score"], (
-        "the score must still move when only the tessellation does"
-    )
-    # And the exact numbers, which is the contrast: unmoved by any of it.
-    exact = read_exact_geometry(str(path))
-    assert exact.volume_mm3 == pytest.approx(math.pi * 40.0**2 * 8.0, rel=1e-9)
-
-
-def test_a_cad_file_gets_no_grade_and_says_why(plate):
-    """The core rule.  A grade whose Quality factor scores Kiln's own
-    tessellation would move when the converter changes and the part does
-    not, so there is no grade — and the reason ships next to the absence."""
+def test_a_cad_file_gets_no_grade_and_no_score(plate):
+    """No report carries a rating (kiln.printability.RATING_KEYS); a CAD
+    file's intake report is no exception, in any band."""
 
     path, _ = plate
     report = _report(path)
 
     assert report["subject"] == "cad_file"
-    assert report["grade"] is None
-    assert "overall_score" not in report, "a composite is the thing being avoided"
-    assert "tessellation" in report["grade_withheld"]
+    for gone in ("grade", "grade_withheld", "overall_score"):
+        assert gone not in report, gone
+    measured = report["measured"]
+    for area in ("printability", "structural", "efficiency"):
+        assert "score" not in measured[area] and "grade" not in measured[area], area
 
 
 def test_the_exact_band_carries_the_files_own_numbers(plate):
@@ -552,7 +483,7 @@ def test_the_measured_band_names_whose_mesh_it_measured(plate):
 
     assert "not the file itself" in band["measured_on"]
     assert "Converted from CAD" in band["conversion"]
-    assert band["printability"]["score"] >= 0
+    assert band["printability"]["printability_verdict"] in {"ready", "prints_with_supports", "wont_print", "check"}
 
 
 def test_the_conversion_difference_is_this_part_not_a_benchmark(plate):
@@ -591,7 +522,7 @@ def test_the_report_survives_a_machine_with_no_kernel(plate, monkeypatch):
     report = _report(path)
 
     assert report["exact"] == {"available": False, "reason": "no kernel here"}
-    assert report["measured"]["printability"]["score"] >= 0
+    assert report["measured"]["printability"]["printability_verdict"]
     assert report["about_our_copy"]["triangle_count"] > 0
     assert report["measured"]["conversion_difference"] == {"available": False}
 
@@ -735,11 +666,11 @@ def test_the_tool_routes_a_step_file_to_the_intake_report(plate):
 
     assert result["success"] is True
     assert result["subject"] == "cad_file"
-    assert result["grade"] is None
+    assert "grade" not in result
     assert result["exact"]["volume_mm3"] == pytest.approx(true_volume, rel=1e-9)
 
 
-def test_the_tool_still_grades_a_mesh(plate):
+def test_the_tool_still_judges_a_mesh(plate):
     """Widening the door must not close it behind meshes."""
     from kiln.step_import import resolve_mesh_input
 
@@ -751,8 +682,8 @@ def test_the_tool_still_grades_a_mesh(plate):
 
     assert result["success"] is True
     assert result["subject"] == "mesh"
-    assert result["grade"] in {"A", "B", "C", "D", "F"}
-    assert result["overall_score"] >= 0
+    assert result["printability_verdict"] in {"ready", "prints_with_supports", "wont_print", "check"}
+    assert "grade" not in result and "overall_score" not in result
 
 
 def test_a_disguised_step_is_told_the_real_problem(plate, tmp_path):

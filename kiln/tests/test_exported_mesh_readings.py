@@ -124,15 +124,16 @@ class TestAScoreNeverReadsAsAnABesideWontPrint:
 
         assert out["verdict"] == "wont_print"
         report = out["report"]
-        assert report["grade"] == "F"
+        assert "grade" not in report and "score" not in report
         assert report["placement"]["printable_if_placed"] is False
-        # The grade is in the report; the message says the verdict alone.
+        # The report and the message say the verdict alone; no rating rides.
         assert "grade" not in out["message"] and "/100" not in out["message"]
 
-    def test_the_meter_cube_grades_f(self, tools, meter_cube):
+    def test_the_meter_cube_does_not_read_ready(self, tools, meter_cube):
         out = tools["analyze_printability"](file_path=meter_cube)
 
-        assert out["report"]["grade"] == "F"
+        assert out["verdict"] != "ready"
+        assert "grade" not in out["report"]
         assert "(grade A)" not in out["message"]
 
 
@@ -183,7 +184,6 @@ class TestAPartBelowThePlateIsJudgedOnIt:
         out = tools["analyze_printability"](file_path=centred)
 
         assert out["verdict"] == on_plate["verdict"] == "ready"
-        assert out["report"]["score"] == on_plate["report"]["score"]
         assert out["report"]["placement"]["faults"] == []
         assert out["report"]["placement"]["below_plate_mm"] == 10.0
         assert "judged resting on the plate" in out["message"]
