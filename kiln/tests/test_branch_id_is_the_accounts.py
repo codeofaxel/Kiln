@@ -263,3 +263,56 @@ class TestTheLapsCases:
             assert vault.branch_named("vase", first["kept_as"])["created_at"] == made_at
         finally:
             vault.close()
+
+
+class TestTwoBranchesAreNeverJoinedForAName:
+    def test_the_accounts_id_is_not_taken_when_it_is_a_branch_renamed_here(self, home):
+        made_as = _made_here(home)
+        vault = HistoryVault()
+        try:
+            vault.keep_branch_copy(
+                {"branch_id": ACCOUNT_ID, "design_id": "vase", "name": "main-old", "created_at": 1.0,
+                 "status": "active", "head_version_id": "f" * 32},
+                [{"version_id": "f" * 32}],
+            )
+
+            assert vault.take_account_branch_id("vase", made_as, ACCOUNT_ID) is False
+
+            assert vault.branch(ACCOUNT_ID)["name"] == "main-old"
+            assert [m["version_id"] for m in vault.memberships(ACCOUNT_ID)] == ["f" * 32]
+            assert [m["version_id"] for m in vault.memberships(made_as)] == IDS
+        finally:
+            vault.close()
+
+    def test_a_pull_never_joins_a_side_branch_here_with_the_accounts_of_that_name(self, home, monkeypatch):
+        _made_here(home)
+        vault = HistoryVault()
+        try:
+            vault.keep_branch_copy(
+                {"branch_id": "side-made-here", "design_id": "vase", "name": "side", "created_at": 1.0,
+                 "status": "active", "head_version_id": IDS[0]},
+                [{"version_id": IDS[0]}],
+            )
+        finally:
+            vault.close()
+        accounts = _Accounts()
+        accounts.designs["X"]["versions"] = [(vid, n) for n, vid in enumerate(IDS, start=1)]
+        real = accounts._bundle
+
+        def as_side(*, single: bool) -> dict:
+            answer = real(single=single)
+            answer["branch"]["name"] = "side"
+            return answer
+
+        monkeypatch.setattr(accounts, "_bundle", as_side)
+        monkeypatch.setattr(courier, "_request", accounts.request)
+
+        assert courier.pull("cloud_pull_branch", "vase", branch_name="side")["status"] == "success"
+
+        vault = HistoryVault()
+        try:
+            sides = sorted(b["branch_id"] for b in vault.branches("vase") if b["name"] == "side")
+            assert sides == ["X-main", "side-made-here"]
+            assert [m["version_id"] for m in vault.memberships("side-made-here")] == [IDS[0]]
+        finally:
+            vault.close()

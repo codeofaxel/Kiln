@@ -764,8 +764,9 @@ class HistoryVault:
 
         Its versions, its place as the checked-out branch, its log and every
         record naming it follow.  ``False``, and nothing changes, when the
-        two ids are one, *here_id* is not a branch of this design, or
-        *account_id* is a branch of another design here.
+        two ids are one, *here_id* is not a branch of this design,
+        *account_id* is a branch of another design here, or it is a branch
+        this computer keeps under another name.
         """
         with self._lock:
             moved = self._take_account_branch_id(design_id, here_id, account_id)
@@ -780,6 +781,11 @@ class HistoryVault:
         if here is None or here.get("design_id") != design_id:
             return False
         if not self._is_designs("branches", account_id, design_id):
+            return False
+        there = self.branch(account_id)
+        if there is not None and there.get("name") != here.get("name"):
+            # The account's id is a branch this computer keeps under another
+            # name: two branches, never joined.
             return False
         self._conn.execute(
             "INSERT OR IGNORE INTO memberships (branch_id, version_id, position, added_at) "
@@ -1316,12 +1322,12 @@ class HistoryVault:
                 )
                 written.append(self.version(v["version_id"]) or {})
             for b in branches:
-                # A live branch here of the same name under another id is
-                # this branch: it takes the account's id before the
-                # account's record is kept.
-                same = self.branch_named(design_id, str(b.get("name") or ""))
-                if same is not None and same["branch_id"] != b["branch_id"] and b.get("status") != "retired":
-                    self._take_account_branch_id(design_id, same["branch_id"], b["branch_id"])
+                # ``main`` under the id this computer made for it before the
+                # account gave one is the account's ``main``: it takes the
+                # account's id before the account's record is kept.  No other
+                # two branches are joined for sharing a name.
+                if b.get("name") == _MAIN and b.get("status") != "retired":
+                    self._take_account_branch_id(design_id, _main_branch_id(design_id), b["branch_id"])
                 self._put_branch({**b, "design_id": design_id})
             for m in _rows(bundle_like["memberships"], "branch_id", "version_id"):
                 if self.design_of_branch(m["branch_id"]) != design_id:

@@ -103,6 +103,9 @@ _BY_FINGERPRINT = "by_sha256"
 #: under, and the answer it gives: the account's.
 _BRANCH_IDS = "branch_ids"
 _ACCOUNTS = "account"
+#: The code of the account's refusal of a push whose branch name another
+#: live branch of the design has there.
+_NAME_TAKEN = "BRANCH_NAME_TAKEN"
 #: The longest wait on the API's request rate one model's fetch sits out
 #: (seconds), and how many times it waits for the same model.  A longer wait
 #: is an allowance for the day: said, never sat out.
@@ -1016,7 +1019,10 @@ def _bring_recipes(tool: str, design_id: str, vault: Any) -> dict[str, Any]:
     return {"in_account": len(rows), "files_changed": vault.merge_proven_rows(design_id, rows)}
 
 
-def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_for: str | None = None, vault: Any = None) -> dict[str, Any]:
+def push(
+    tool: str, design_id: str, branch_id: str | None = None, *, make_room_for: str | None = None,
+    vault: Any = None, _names_settled: bool = False,
+) -> dict[str, Any]:
     """Send one branch of this computer's history, and the design's proven
     recipes, to the person's Kiln account.
 
@@ -1095,6 +1101,16 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     if answer.get("http_status") == design_tie.REFUSED_STATUS and _judged_push(body):
         # Nothing was kept there and nothing changes here.
         return _push_refusal(tool, design_id, body, answer)
+    if answer.get("code") == _NAME_TAKEN and not _names_settled:
+        # The account keeps another branch under this name.  When that
+        # branch is one this computer has since renamed or retired, the
+        # account hears of that first, and the push is sent once more.
+        told = _tell_of_rename(tool, design_id, branch, answer.get("held_by"), None if own else vault)
+        if told:
+            return push(
+                tool, design_id, branch["branch_id"], make_room_for=make_room_for,
+                vault=None if own else vault, _names_settled=True,
+            )
     if _diverged(answer):
         out = _keep_as_this_computers(tool, design_id, branch, body, answer, vault=None if own else vault)
         if out.get("status") == "error":
@@ -1140,6 +1156,23 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     if recipes:
         out["proven_recipes"] = _send_recipes(tool, design_id, recipes)
     return out
+
+
+def _tell_of_rename(tool: str, design_id: str, pushed: dict[str, Any], held_by: Any, vault: Any) -> bool:
+    """Push the branch the account keeps under the pushed branch's name, when
+    this computer has it under another name or retired; whether the account
+    took it.  A branch this computer does not have, or has under that same
+    live name, is another branch: nothing is sent."""
+    if not isinstance(held_by, str) or not held_by or held_by == pushed.get("branch_id"):
+        return False
+    with _opened(vault) as v:
+        other = v.branch(held_by)
+    if other is None or other.get("design_id") != design_id:
+        return False
+    if other.get("name") == pushed.get("name") and other.get("status") != "retired":
+        return False
+    told = push(tool, design_id, held_by, vault=vault, _names_settled=True)
+    return told.get("status") == "success"
 
 
 def _branch_kept_as(design_id: str, sent_id: str, answer: dict[str, Any], vault: Any) -> str:
