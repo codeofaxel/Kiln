@@ -1017,8 +1017,6 @@ def _refusal(
     engagement: Engagement | None, action: str, machine: str, adapter: Any = None,
     *, go_on_with: str = "",
 ) -> dict[str, Any]:
-    from kiln.tiers_and_terms import upgrade_nudge_block
-
     store = _read_store()
     if engagement is None:
         return _refusal_with_nothing_engaged(store, action, machine, adapter, go_on_with)
@@ -1090,7 +1088,8 @@ def _refusal(
         "returns_left": 0 if spent else max(0, _RETURNS_PER_JOB - _returns_used(store, machine)),
         "suggestions": [free_included, *([way_on] if way_on else [])],
     }
-    verdict["upgrade_nudge"] = upgrade_nudge_block(
+    return _with_the_plan(
+        verdict,
         variant="single_printer_engagement",
         tier="business",
         feature="Working several printers at once",
@@ -1103,15 +1102,12 @@ def _refusal(
         moment="resource_threshold",
         context={"action": action, "plan": _plan_phrase()},
     )
-    return verdict
 
 
 def _refusal_with_nothing_engaged(
     store: dict[str, Any], action: str, machine: str, adapter: Any = None, go_on_with: str = "",
 ) -> dict[str, Any]:
     """The refusal for a print whose one return is spent, with no printer engaged."""
-    from kiln.tiers_and_terms import upgrade_nudge_block
-
     handbacks = store.get("handbacks")
     entry = handbacks.get(machine) if isinstance(handbacks, dict) else None
     this_one = str(entry["label"]) if isinstance(entry, dict) and entry.get("label") else ""
@@ -1153,7 +1149,8 @@ def _refusal_with_nothing_engaged(
         "returns_left": 0,
         "suggestions": [free_included],
     }
-    verdict["upgrade_nudge"] = upgrade_nudge_block(
+    return _with_the_plan(
+        verdict,
         variant="single_printer_engagement",
         tier="business",
         feature="Working several printers at once",
@@ -1166,6 +1163,19 @@ def _refusal_with_nothing_engaged(
         moment="resource_threshold",
         context={"action": action, "plan": _plan_phrase()},
     )
+
+
+def _with_the_plan(verdict: dict[str, Any], **nudge: Any) -> dict[str, Any]:
+    """*verdict* with what it says about the plan that works several printers
+    at once: the pitch when the plan check's words send this caller to buy
+    it, else those words (sign back in, get online) and no pitch."""
+    from kiln.tiers_and_terms import plan_offer, upgrade_nudge_block
+
+    offer = plan_offer("business", "Working several printers at once")
+    if offer.sells:
+        verdict["upgrade_nudge"] = upgrade_nudge_block(**nudge)
+    elif offer.words:
+        verdict["suggestions"] = [*verdict.get("suggestions", []), offer.words]
     return verdict
 
 

@@ -14206,12 +14206,11 @@ def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | 
     only when those words point there: a caller told to sign back in or get
     online is not sent to buy.
     """
-    from kiln import licensing
     from kiln.printer_roster import known_printers
-    from kiln.tiers_and_terms import PRICING_URL
+    from kiln.tiers_and_terms import plan_offer
 
-    fleet_view, said = licensing.check_tier(LicenseTier.BUSINESS)
-    if fleet_view:
+    offer = plan_offer(LicenseTier.BUSINESS)
+    if offer.covered:
         return None
     # Counted the way a plan refusal is: this caller reached for the fleet
     # view on a plan without it.
@@ -14219,7 +14218,7 @@ def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | 
 
     count_plan_wall(asked_through)
     rows = known_printers(_get_registry())
-    plan_line = str(said or "").strip() or "This feature is part of Kiln Business."
+    plan_line = offer.words or "This feature is part of Kiln Business."
     listed: dict[str, Any] = {
         "success": True,
         "known_printers": rows,
@@ -14230,7 +14229,7 @@ def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | 
             f"answer is the fleet view. {plan_line}"
         ),
     }
-    if PRICING_URL.split("://", 1)[-1] in plan_line:
+    if offer.sells:
         listed["upgrade_url"] = upgrade_link(asked_through)
     return listed
 
@@ -14249,16 +14248,19 @@ def _attach_sites(
     (and already carry their ``repair`` block), so grouping is a sort, not a
     second round of printer calls.
     """
-    from kiln.licensing import LicenseTier as _Tier
-    from kiln.licensing import check_tier as _check_tier
+    from kiln.tiers_and_terms import plan_offer
 
-    enterprise, _ = _check_tier(_Tier.ENTERPRISE)
-    if not enterprise:
+    offer = plan_offer("enterprise", "Grouping printers by site")
+    if not offer.covered:
         note = (
             "Grouped by site, each site would list its own printers with "
             "their idle, busy and needs-repair names; that view is part of "
             "Kiln Enterprise. Here is the whole fleet in one list."
         )
+        if not offer.sells:
+            # Someone who pays for the grouping is told the step that brings it back.
+            result["note"] = f"{offer.words} Here is the whole fleet in one list."
+            return
         result["note"] = note
         result["upgrade_url"] = upgrade_link(asked_through)
         result["upgrade_nudge"] = upgrade_nudge_block(

@@ -917,14 +917,18 @@ def _refuse_a_watcher_over_every_printer(names: list[str], json_mode: bool) -> N
     the watcher is allowed.
     """
     from kiln.printers.engagement import multi_machine_tier
+    from kiln.tiers_and_terms import plan_offer
 
     if len(names) <= 1 or multi_machine_tier():
         return
+    offer = plan_offer("business", "Sending dropped files to every printer")
+    plan_line = (
+        "Kiln Business sends them to every printer: https://kiln3d.com/pricing" if offer.sells else offer.words
+    )
     click.echo(
         format_error(
             "On this plan the watcher sends files to one printer: add --printer NAME "
-            f"(one of {', '.join(sorted(names))}). Kiln Business sends them to every printer: "
-            "https://kiln3d.com/pricing",
+            f"(one of {', '.join(sorted(names))}). {plan_line}".rstrip(),
             code="ONE_PRINTER_WATCHER",
             json_mode=json_mode,
         )

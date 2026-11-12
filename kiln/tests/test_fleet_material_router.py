@@ -469,15 +469,17 @@ class TestThePlanIsNamedInThePlanChecksOwnWords:
         self._sold_the_plan(answers, "enterprise", machines=over)
 
     def test_a_plan_check_that_takes_no_subject_has_the_feature_said_first(self):
-        """A plan check that takes the plan alone speaks of "this feature"."""
+        """A plan check that takes the plan alone speaks of "this feature":
+        the feature and the count are said in its place."""
         lapsed = "This feature is part of your Kiln Business plan. Signing in again takes a few seconds."
         self.monkeypatch.setattr(sys.modules["kiln.licensing"], "check_tier", lambda required: (False, lapsed))
 
         out = self.tools["get_restock_suggestions"]()
         ask = self.tools["material_on_hand"]()
 
-        assert out["error"] == f"Fleet restock suggestions answers across all 3 of your machines. {lapsed}"
-        assert ask["note"].endswith(f"Fleet material summary answers across all 3 of your machines. {lapsed}")
+        rest = lapsed.removeprefix("This feature")
+        assert out["error"] == f"Fleet restock suggestions across all 3 of your machines{rest}"
+        assert ask["note"].endswith(f"Fleet material summary across all 3 of your machines{rest}")
         assert not PITCH_KEYS & (set(out) | set(ask))
 
     def test_a_plan_module_with_no_plan_check_keeps_the_standing_refusal(self):
