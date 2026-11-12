@@ -437,8 +437,9 @@ def record_print_outcome(
     classifier's confidence meets or exceeds
     ``_AUTO_CLASSIFY_MIN_CONFIDENCE`` (0.75).  Lower-confidence guesses
     are surfaced to the caller without poisoning the learning database.  A
-    guessed ``clog`` is echoed and never stored: a blocked nozzle counts
-    against the printer, and only the printer or a person names one.
+    guessed machine fault or outside cause (``clog``, ``thermal_runaway``,
+    ``mechanical``, ``power_loss``, ``filament_runout``) is echoed and never
+    stored: only the printer or a person names one.
 
     Args:
         job_id: The job ID from the print queue.

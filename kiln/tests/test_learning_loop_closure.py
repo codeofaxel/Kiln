@@ -404,6 +404,45 @@ class TestWireE_AutoClassify:
         assert ac["db_mode"] == "clog" and ac["stored"] is False
         assert ending_verdict("failed", result.get("failure_mode"), result["determined_by"]) == "bad_print"
 
+    @pytest.mark.parametrize("guessed, word", [
+        ("power_loss", "power_loss"), ("filament_runout", "filament_runout"),
+        ("thermal_runaway", "thermal_runaway"), ("nozzle_clog", "clog"),
+    ])
+    def test_a_guess_never_takes_a_reported_failure_off_the_print(self, tmp_kiln_env, guessed, word):
+        """A person reports a failed print and names no cause.  A guess that
+        names a machine fault or an outside cause is echoed and not stored:
+        the row stays a bad print, counted about the print, and its history
+        line is not a stop."""
+        from kiln.failure_vocabulary import ending_verdict, is_judged_ending, stop_said
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        analysis = self._fake_analysis(guessed, 0.95, ["Power/disconnect event: disconnect"])
+        with patch("kiln.server._check_auth", return_value=None), patch(
+            "kiln.failure_recovery.classify_failure", return_value=analysis,
+        ):
+            result = record_print_outcome(
+                job_id=f"job-guess-{guessed}",
+                outcome="failed",
+                printer_name="test-bambu",
+                material_type="PLA",
+                determined_by="user_reported",
+                auto_classify=True,
+            )
+        assert result.get("success") is True
+        ac = result["auto_classification"]
+        assert ac["db_mode"] == word and ac["stored"] is False
+        assert "failure_mode" not in result
+        said = ("failed", result.get("failure_mode"), result["determined_by"])
+        assert ending_verdict(*said) == "bad_print" and is_judged_ending(*said)
+        assert stop_said(*said) is None
+
+    def test_every_cause_that_takes_an_ending_off_the_print_is_one_a_guess_never_names(self):
+        from kiln import failure_vocabulary as fv
+
+        assert fv.CAUSES_A_GUESS_NEVER_NAMES == fv.MACHINE_FAULTS | fv.OUTSIDE_CAUSES
+        for cause in fv.VALID_FAILURE_MODES - fv.CAUSES_A_GUESS_NEVER_NAMES - {fv.UNNAMED_CAUSE}:
+            assert fv.ending_verdict("failed", cause, "user_reported") == "bad_print", cause
+
     def test_low_confidence_echoes_but_does_not_store(self, tmp_kiln_env):
         """0.4 confidence < 0.75 → classification echoed but not stored;
         failure_mode stays unset to avoid poisoning the DB."""
