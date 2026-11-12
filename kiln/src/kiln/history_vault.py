@@ -1024,24 +1024,46 @@ class HistoryVault:
         ``{"renumbered": [{"key", "from", "to"}], "said": sentence}``, empty
         when nothing changed or the answer kept no numbers.
         """
-        from kiln.version_numbers import (
-            account_numbers_in,
-            kept_numbers,
-            note_number_given,
-            numbers_in_folder,
-            plan_numbers,
-            renumber_folder,
-            said_here,
-        )
+        from contextlib import nullcontext
+
+        from kiln.version_numbers import NumbersBusy, NumbersNotTaken, account_numbers_in, numbers_lock
 
         account, mark = account_numbers_in(answer)
         if not account:
             return {}
         folder = _design_folder(design_id)
-        if folder is not None and folder.is_dir():
+        here = folder if folder is not None and folder.is_dir() else None
+        # Planned and applied under the design's numbers lock, so a save
+        # waits for the numbers to be taken instead of landing between the
+        # plan and the files moving.
+        try:
+            with numbers_lock(here) if here is not None else nullcontext():
+                return self._take_numbers_held(design_id, here, account, mark)
+        except NumbersBusy as exc:
+            raise NumbersNotTaken("another save of this design was running") from exc
+        except (ValueError, OSError) as exc:
+            raise NumbersNotTaken(str(exc)) from exc
+
+    def _take_numbers_held(
+        self, design_id: str, here: Path | None, account: dict[str, int], mark: int,
+    ) -> dict[str, Any]:
+        """:meth:`take_account_numbers`, the numbers lock held: the plan, then
+        every record moved whole or none of them (the store's numbers first,
+        in one transaction it can refuse, then these records and the files
+        together, the store put back when they fail)."""
+        from kiln.version_numbers import (
+            kept_numbers,
+            numbers_in_folder,
+            plan_numbers,
+            raise_mark,
+            renumber_folder,
+            said_here,
+        )
+
+        if here is not None:
             # The next version saved here is numbered past every number the
             # account has given, other computers' included.
-            note_number_given(folder, max([mark, *account.values()]))
+            raise_mark(here, max([mark, *account.values()]))
         with self._lock:
             mine = {
                 str(r["version_id"]): json.loads(r["recipe"])
@@ -1051,13 +1073,15 @@ class HistoryVault:
             }
         local: dict[str, int] = {}
         past: list[Any] = [mark]
-        if folder is not None and folder.is_dir():
-            local.update(kept_numbers(folder))
-            past += list(numbers_in_folder(folder))
+        if here is not None:
+            local.update(kept_numbers(here))
+            past += list(numbers_in_folder(here))
         store = _open_version_store()
         try:
+            rows: dict[str, int] = {}
             if store is not None:
                 for v in store.list_versions(design_id, limit=100000):
+                    rows[v.version_id] = v.version_number
                     local.setdefault(v.version_id, v.version_number)
                 past += list(store.numbers(design_id))
             for vid, recipe in mine.items():
@@ -1069,23 +1093,32 @@ class HistoryVault:
                 {"key": key, "from": local[key], "to": final[key]}
                 for key in sorted(local) if final.get(key) != local[key]
             ]
-            with self._lock:
-                for vid, recipe in mine.items():
-                    if vid in final and isinstance(recipe, dict) and recipe.get("version") != final[vid]:
-                        self._conn.execute(
-                            "UPDATE versions SET recipe = ? WHERE version_id = ? AND design_id = ?",
-                            (_canonical({**recipe, "version": final[vid]}), vid, design_id),
-                        )
-                self._conn.commit()
-            if folder is not None and folder.is_dir():
-                renumber_folder(folder, final)
+            if not changes:
+                return {}
             if store is not None:
                 store.set_numbers(design_id, final)
+            try:
+                with self._lock:
+                    for vid, recipe in mine.items():
+                        if vid in final and isinstance(recipe, dict) and recipe.get("version") != final[vid]:
+                            self._conn.execute(
+                                "UPDATE versions SET recipe = ? WHERE version_id = ? AND design_id = ?",
+                                (_canonical({**recipe, "version": final[vid]}), vid, design_id),
+                            )
+                    if here is not None:
+                        renumber_folder(here, final, held=True)
+                    self._conn.commit()
+            except BaseException:
+                with self._lock:
+                    self._conn.rollback()
+                if store is not None:
+                    store.set_numbers(design_id, rows)
+                raise
         finally:
             if store is not None:
                 store.close()
         said = said_here(changes, account)
-        return {"renumbered": changes, "said": said} if changes else {}
+        return {"renumbered": changes, "said": said}
 
     def apply_remote(
         self, payload: dict[str, Any], *, kept_models: dict[str, str] | None = None,

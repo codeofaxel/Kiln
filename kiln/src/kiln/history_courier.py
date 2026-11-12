@@ -1096,8 +1096,15 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     # The numbers the account gave the versions it now holds, taken here;
     # the proven recipes are read after, so each goes to the account under
     # its version's number there.
+    from kiln.version_numbers import NumbersNotTaken
+
     with _opened(None if own else vault) as v:
-        numbers = v.take_account_numbers(design_id, out.get("push"))
+        try:
+            numbers = v.take_account_numbers(design_id, out.get("push"))
+        except NumbersNotTaken as exc:
+            # The push stands: the versions are in the account.  The numbers
+            # wait for the next push or pull, and the person is told.
+            numbers = {"error": "not taken on this computer this time", "said": str(exc)}
         if recipes:
             recipes = v.proven_rows(design_id)
     if numbers:
@@ -1398,7 +1405,14 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, An
             else:
                 kept, models = fetched["kept"], fetched["models"]
         carried = _notes_carried(answer)
-        applied = vault.apply_remote({**answer, "design_id": design_id}, kept_models=kept)
+        from kiln.version_numbers import NumbersNotTaken
+
+        try:
+            applied = vault.apply_remote({**answer, "design_id": design_id}, kept_models=kept)
+        except NumbersNotTaken as exc:
+            # Nothing was laid down: a pulled version is never filed beside a
+            # version here that still holds its number.
+            return {"status": "error", "code": "NUMBERS_NOT_TAKEN", "error": str(exc), "design_id": design_id}
         notes = _bring_notes(tool, answer, carried, vault)
         recipes = _bring_recipes(tool, design_id, vault)
     finally:

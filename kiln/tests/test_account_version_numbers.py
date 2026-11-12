@@ -232,3 +232,187 @@ class TestAPlainInstall:
         assert vn.next_version_number(folder) == 6
         # The proven recipe reached the account under its version's number there.
         assert [r["version_ref"] for r in proven_sent] == ["5"]
+
+
+class TestHeadsAndFilesThatNameNoVersion:
+    def test_a_head_that_names_no_version_follows_the_version_it_copies(self, tmp_path):
+        """A plain save writes a head that names no version.  A push moved
+        that version from 4 to 5 and the head still said 4, so the next save
+        was diffed against a version 4 no file holds."""
+        folder = tmp_path / "vase"
+        folder.mkdir()
+        _recipe(folder, 1, "a", source_scad="cube(1);")
+        four = _recipe(folder, 4, "b", source_scad="sphere(4);")
+        head = json.loads(four.read_text())
+        head.pop("version_id")
+        (folder / ".kiln_recipe.json").write_text(json.dumps(head))
+
+        vn.renumber_folder(folder, {"a": 1, "b": 5})
+
+        after = json.loads((folder / ".kiln_recipe.json").read_text())
+        assert (after["version"], after["version_id"]) == (5, "b")
+
+    def test_a_head_that_copies_a_version_that_did_not_move_stays_as_it_is(self, tmp_path):
+        folder = tmp_path / "vase"
+        folder.mkdir()
+        one = _recipe(folder, 1, "a", source_scad="cube(1);")
+        _recipe(folder, 2, "b", source_scad="sphere(2);")
+        head = json.loads(one.read_text())
+        head.pop("version_id")
+        (folder / ".kiln_recipe.json").write_text(json.dumps(head))
+
+        vn.renumber_folder(folder, {"a": 1, "b": 5})
+
+        assert json.loads((folder / ".kiln_recipe.json").read_text()) == head
+
+    def test_a_kept_file_that_names_no_version_is_never_moved_for_naming_none(self):
+        """The account agrees with this computer: version 2 is 2.  Its kept
+        file is from before files named their version, so it counted as a
+        second version holding 2 and was moved past it: a push renamed the
+        version's only record and said the account had given its number away."""
+        unnamed = vn.FILE_KEY + ".kiln_recipe.v2.json"
+        final = vn.plan_numbers({unnamed: 2, "a": 1, "b": 2, "mine": 3}, {"a": 1, "b": 2, "theirs": 3})
+        assert final[unnamed] == 2
+        assert final["mine"] == 4, "a version moved past the numbers given goes past the unnamed file too"
+
+
+class TestTheFilesMoveWholeOrNotAtAll:
+    def test_a_failure_part_way_puts_every_file_back(self, tmp_path, monkeypatch):
+        folder = tmp_path / "cup"
+        folder.mkdir()
+        for n, vid in ((1, "a"), (2, "b"), (3, "c")):
+            _recipe(folder, n, vid)
+        before = {p.name: p.read_text() for p in folder.glob(".kiln_recipe*.json")}
+        real = vn._write_json
+        writes: list[Path] = []
+
+        def fails_second(path, data):
+            writes.append(path)
+            if len(writes) == 2:
+                raise OSError("the disk is full")
+            real(path, data)
+
+        monkeypatch.setattr(vn, "_write_json", fails_second)
+        with pytest.raises(OSError):
+            vn.renumber_folder(folder, {"a": 4, "b": 5, "c": 6})
+
+        assert {p.name: p.read_text() for p in folder.glob(".kiln_recipe*.json")} == before
+
+
+def _pulled_answer(design_id: str, mine: dict[int, str], theirs: str, number: int) -> dict:
+    return {
+        "design_id": design_id,
+        "branch": {"branch_id": "remote", "design_id": design_id, "name": "theirs", "head_version_id": theirs},
+        "versions": [{"version_id": theirs, "parent_version_id": mine[1], "created_at": 9.0,
+                      "version_number": number}],
+        "memberships": [{"branch_id": "remote", "version_id": theirs, "position": 0}],
+        "provenance_sidecars": [{"version_id": theirs, "recipe_dict": {
+            "name": design_id, "design_id": design_id, "version": number, "version_id": theirs,
+            "created": "2026-11-09T00:00:00+00:00"}}],
+        "account_numbers": {mine[1]: 1, theirs: number},
+        "version_number_mark": number,
+    }
+
+
+def _synced(home: Path, design_id: str, count: int) -> tuple[Path, dict[int, str]]:
+    folder = home / ".kiln" / "designs" / design_id
+    folder.mkdir(parents=True)
+    for n in range(1, count + 1):
+        _recipe(folder, n, None, source_scad=f"cube({n});", parts=[])
+    vault = HistoryVault()
+    try:
+        vault.sync_from_library(design_id)
+    finally:
+        vault.close()
+    return folder, {json.loads(p.read_text())["version"]: json.loads(p.read_text())["version_id"]
+                    for p in folder.glob(".kiln_recipe.v*.json")}
+
+
+class TestASaveWhileTheNumbersAreTaken:
+    def test_a_save_during_a_pull_waits_and_takes_the_next_number(self, home, monkeypatch):
+        """A save landed between the pull's plan and its files moving: it
+        took the number the plan gave a version here, and two files said
+        one number."""
+        import threading
+        import time
+
+        folder, mine = _synced(home, "vase", 2)
+        started = threading.Event()
+        taken: list[int] = []
+        real = vn.renumber_folder
+
+        def slow(where, final, **kw):
+            started.set()
+            time.sleep(0.5)
+            return real(where, final, **kw)
+
+        def save() -> None:
+            started.wait(5)
+            n = vn.reserve_version_number(folder)
+            (folder / f".kiln_recipe.v{n}.json").write_text(json.dumps(
+                {"name": "vase", "version": n, "version_id": "racer", "created": "2026-11-11T00:00:00+00:00"}))
+            taken.append(n)
+
+        monkeypatch.setattr(vn, "renumber_folder", slow)
+        racer = threading.Thread(target=save)
+        racer.start()
+        vault = HistoryVault()
+        try:
+            vault.take_account_numbers("vase", {"account_numbers": {mine[1]: 1, "theirs": 2}, "version_number_mark": 2})
+        finally:
+            vault.close()
+            racer.join(10)
+
+        numbers = sorted(json.loads(p.read_text())["version"] for p in folder.glob(".kiln_recipe*.json")
+                         if p.name != ".kiln_recipe.json")
+        assert len(numbers) == len(set(numbers)), numbers
+        assert taken == [4]
+
+    def test_a_pull_whose_numbers_cannot_be_taken_lays_nothing_down(self, home, monkeypatch):
+        import fcntl
+
+        folder, mine = _synced(home, "vase", 2)
+        before = {p.name: p.read_text() for p in folder.glob(".kiln_recipe*.json")}
+        monkeypatch.setattr(vn, "_LOCK_WAIT_SECONDS", 0.2)
+        monkeypatch.setattr(courier, "_request",
+                            lambda tool, method, path, body=None, **kw: _pulled_answer("vase", mine, "t" * 32, 3))
+        holder = open(folder / ".kiln_numbers.lock", "a+")
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            answer = courier.pull("cloud_pull_branch", "vase")
+        finally:
+            holder.close()
+
+        assert answer["status"] == "error" and answer["code"] == "NUMBERS_NOT_TAKEN", answer
+        assert "nothing here changed" in answer["error"]
+        assert {p.name: p.read_text() for p in folder.glob(".kiln_recipe*.json")} == before
+        vault = HistoryVault()
+        try:
+            assert vault.version("t" * 32) is None
+        finally:
+            vault.close()
+
+    def test_a_push_whose_numbers_cannot_be_taken_still_says_so(self, home, monkeypatch):
+        import fcntl
+
+        folder, mine = _synced(home, "mug", 2)
+
+        def account(tool, method, path, body=None, **_kw):
+            if path.endswith("/branches/push"):
+                ids = [v["version_id"] for v in body["versions"]]
+                return {"pushed_versions": ids, "version_numbers": {ids[0]: 1, ids[1]: 5},
+                        "account_numbers": {ids[0]: 1, ids[1]: 5, "other-2": 2}, "version_number_mark": 5}
+            return {"stored": []}
+
+        monkeypatch.setattr(courier, "_request", account)
+        monkeypatch.setattr(vn, "_LOCK_WAIT_SECONDS", 0.2)
+        holder = open(folder / ".kiln_numbers.lock", "a+")
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            answer = courier.push("cloud_push_branch", "mug")
+        finally:
+            holder.close()
+
+        assert answer["status"] == "success", answer
+        assert "could not be taken" in answer["said_numbers"]
+        assert sorted(_numbers(folder).values()) == [1, 2], "nothing here changed"

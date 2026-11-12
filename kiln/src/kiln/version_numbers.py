@@ -190,6 +190,18 @@ class NumbersBusy(RuntimeError):
     """Another save of this design is still taking its number."""
 
 
+class NumbersNotTaken(RuntimeError):
+    """The numbers a Kiln account gave could not be taken on this computer
+    this time, and nothing here was changed."""
+
+    def __init__(self, why: str = "") -> None:
+        super().__init__(
+            "The version numbers your Kiln account gave could not be taken on this "
+            "computer this time" + (f" ({why})" if why else "") + ", so nothing here "
+            "changed. Try again in a moment."
+        )
+
+
 @contextmanager
 def numbers_lock(folder: str | Path) -> Iterator[None]:
     """Hold the numbers lock of the design kept in *folder*.
@@ -342,13 +354,22 @@ def plan_numbers(
     version here now holds it; then it takes the next number past every
     number the account, this computer and *past* hold.  Never a number two
     versions share, never a number taken from a version the account holds.
+
+    A kept file that names no version (``FILE_KEY``) is not known to be any
+    version, so it is never moved for naming none: it keeps its number, and
+    a version moved past it goes past that number too.
     """
     final: dict[str, int] = {}
     for key, n in local.items():
         given = _whole(account.get(key))
         if given is not None:
             final[key] = given
-    held = set(final.values()) | {n for n in (_whole(v) for v in account.values()) if n is not None}
+    for key, n in local.items():
+        number = _whole(n)
+        if key.startswith(FILE_KEY) and key not in final and number is not None:
+            final[key] = number
+    held = {n for k, n in final.items() if not k.startswith(FILE_KEY)}
+    held |= {n for n in (_whole(v) for v in account.values()) if n is not None}
     ceiling = max(
         [*held, *(n for n in (_whole(v) for v in local.values()) if n is not None),
          *(n for n in (_whole(p) for p in past) if n is not None)],
@@ -421,46 +442,67 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     part.replace(path)
 
 
-def renumber_folder(folder: str | Path, final: dict[str, int]) -> list[dict[str, Any]]:
+def renumber_folder(folder: str | Path, final: dict[str, int], *, held: bool = False) -> list[dict[str, Any]]:
     """Give the kept versions in *folder* the numbers in *final* (keys as in
     :func:`kept_numbers`): each moved version's file is renamed to its new
     number with that number inside, the head copy follows the version it
-    is, and a recipe that names a moved file as its parent names it at its
-    new place.  The folder's mark is raised past every number in *final*.
+    is a copy of, and a recipe that names a moved file as its parent names
+    it at its new place.  The folder's mark is raised past every number in
+    *final*.
 
-    Held under the numbers lock, so no save takes a number while versions
-    move.  A file is first set aside under a name no number names, then
-    written to its new name: a version is never written over another, and
-    one interrupted half way is still found by the id inside it.  Returns
+    Done under the numbers lock, so no save takes a number while versions
+    move; *held* says the caller holds it already, having planned under it.
+    The files move whole or not at all: each is set aside under a name no
+    number names, every new file is written, and only then are the set-aside
+    ones removed; a failure part way puts every file back as it was and
+    raises.  A version is never written over another.  Returns
     ``[{"key", "from", "to"}]`` for each version moved.
     """
-    import uuid
-
     root = Path(folder)
     if not root.is_dir():
         return []
     wanted = {k: n for k, n in ((k, _whole(v)) for k, v in final.items()) if n is not None}
+    if held:
+        return _renumber_held(root, wanted)
     with numbers_lock(root):
-        files: dict[str, tuple[Path, int, dict[str, Any]]] = {}
-        for path in recipe_files(root):
-            if path.name == _HEAD:
-                continue
-            data = _read(path)
-            if not data:
-                continue  # unreadable: it keeps its name, and the number in it
-            number = _number(data.get("version")) or _number_in_name(path)
-            vid = data.get("version_id")
-            key = vid if isinstance(vid, str) and vid else FILE_KEY + path.name
-            if number is not None and key not in files:
-                files[key] = (path, number, data)
-        moving = {k: v for k, v in files.items() if k in wanted and wanted[k] != v[1]}
-        aside: dict[str, Path] = {}
+        return _renumber_held(root, wanted)
+
+
+def _same_apart_from_number(head: dict[str, Any], kept: dict[str, Any]) -> bool:
+    """Whether the head recipe is a copy of a kept one: the same record
+    apart from the number and the id the head may not carry."""
+    def bare(data: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in data.items() if k not in ("version", "version_id")}
+
+    return bool(kept) and bare(head) == bare(kept)
+
+
+def _renumber_held(root: Path, wanted: dict[str, int]) -> list[dict[str, Any]]:
+    """:func:`renumber_folder`'s work, the numbers lock held."""
+    import uuid
+
+    files: dict[str, tuple[Path, int, dict[str, Any]]] = {}
+    for path in recipe_files(root):
+        if path.name == _HEAD:
+            continue
+        data = _read(path)
+        if not data:
+            continue  # unreadable: it keeps its name, and the number in it
+        number = _number(data.get("version")) or _number_in_name(path)
+        vid = data.get("version_id")
+        key = vid if isinstance(vid, str) and vid else FILE_KEY + path.name
+        if number is not None and key not in files:
+            files[key] = (path, number, data)
+    moving = {k: v for k, v in files.items() if k in wanted and wanted[k] != v[1]}
+    aside: dict[str, Path] = {}
+    written: list[Path] = []
+    moved: dict[str, Path] = {}
+    changes: list[dict[str, Any]] = []
+    try:
         for key, (path, _n, _d) in moving.items():
             temp = root / f"{_PREFIX}.moving-{uuid.uuid4().hex[:12]}.json"
             path.replace(temp)
             aside[key] = temp
-        moved: dict[str, Path] = {}
-        changes: list[dict[str, Any]] = []
         for key, (old_path, old_number, data) in sorted(moving.items(), key=lambda kv: wanted[kv[0]]):
             new = wanted[key]
             target = root / f"{_PREFIX}.v{new}.json"
@@ -469,47 +511,57 @@ def renumber_folder(folder: str | Path, final: dict[str, int]) -> list[dict[str,
                 # inside says otherwise): never written over.
                 target = root / f"{_PREFIX}.moved-{uuid.uuid4().hex[:12]}.json"
             _write_json(target, {**data, "version": new})
-            aside[key].unlink()
+            written.append(target)
             moved[old_path.name] = target
             changes.append({"key": key, "from": old_number, "to": new})
-        # A version's proven recipes are kept under its number
-        # (``.kiln_proven_recipe.v<n>.json``): they move with it, all set
-        # aside first so two versions trading numbers never meet.
-        proven_aside: dict[int, Path] = {}
-        for change in changes:
-            src = root / f"{_PROVEN}.v{change['from']}.json"
-            if src.is_file():
-                temp = root / f"{_PROVEN}.moving-{uuid.uuid4().hex[:12]}.json"
-                src.replace(temp)
-                proven_aside[change["to"]] = temp
-        for new, temp in proven_aside.items():
-            target = root / f"{_PROVEN}.v{new}.json"
-            if target.exists():
-                # Kept under a number no version here holds now: never
-                # written over, and no longer read as any version's.
-                target.replace(root / f"{_PROVEN}.v{new}.json.unclaimed-{uuid.uuid4().hex[:12]}")
-            temp.replace(target)
-        head = root / _HEAD
-        head_data = _read(head)
-        if head_data:
-            vid = head_data.get("version_id")
-            key = vid if isinstance(vid, str) and vid else None
-            follows = key in wanted if key else False
-            if not key:
-                # A head from before ids: it follows the unnamed file it copies.
-                for change in changes:
-                    if change["key"].startswith(FILE_KEY) and head_data.get("version") == change["from"]:
-                        key, follows = change["key"], True
-                        break
-            if follows and head_data.get("version") != wanted[key]:
-                _write_json(head, {**head_data, "version": wanted[key]})
-        if moved:
-            for path in recipe_files(root):
-                data = _read(path)
-                parent = data.get("parent_version")
-                if isinstance(parent, str) and parent:
-                    gone = Path(parent)
-                    if gone.name in moved and (not gone.is_absolute() or gone.parent.resolve() == root.resolve()):
-                        _write_json(path, {**data, "parent_version": str(moved[gone.name].resolve())})
-        raise_mark(root, max(wanted.values(), default=0))
+    except BaseException:
+        for target in written:
+            target.unlink(missing_ok=True)
+        for key, temp in aside.items():
+            if temp.exists():
+                temp.replace(moving[key][0])
+        raise
+    for temp in aside.values():
+        temp.unlink(missing_ok=True)
+    # A version's proven recipes are kept under its number
+    # (``.kiln_proven_recipe.v<n>.json``): they move with it, all set
+    # aside first so two versions trading numbers never meet.
+    proven_aside: dict[int, Path] = {}
+    for change in changes:
+        src = root / f"{_PROVEN}.v{change['from']}.json"
+        if src.is_file():
+            temp = root / f"{_PROVEN}.moving-{uuid.uuid4().hex[:12]}.json"
+            src.replace(temp)
+            proven_aside[change["to"]] = temp
+    for new, temp in proven_aside.items():
+        target = root / f"{_PROVEN}.v{new}.json"
+        if target.exists():
+            # Kept under a number no version here holds now: never
+            # written over, and no longer read as any version's.
+            target.replace(root / f"{_PROVEN}.v{new}.json.unclaimed-{uuid.uuid4().hex[:12]}")
+        temp.replace(target)
+    head = root / _HEAD
+    head_data = _read(head)
+    if head_data:
+        vid = head_data.get("version_id")
+        if isinstance(vid, str) and vid:
+            key = vid if vid in wanted else None
+        else:
+            # A head that names no version (a save that wrote none into it)
+            # follows the kept file it is a copy of, and names it from now on.
+            key = next((c["key"] for c in changes if _same_apart_from_number(head_data, moving[c["key"]][2])), None)
+        if key is not None and head_data.get("version") != wanted[key]:
+            follows = {**head_data, "version": wanted[key]}
+            if not key.startswith(FILE_KEY):
+                follows["version_id"] = key
+            _write_json(head, follows)
+    if moved:
+        for path in recipe_files(root):
+            data = _read(path)
+            parent = data.get("parent_version")
+            if isinstance(parent, str) and parent:
+                gone = Path(parent)
+                if gone.name in moved and (not gone.is_absolute() or gone.parent.resolve() == root.resolve()):
+                    _write_json(path, {**data, "parent_version": str(moved[gone.name].resolve())})
+    raise_mark(root, max(wanted.values(), default=0))
     return changes
