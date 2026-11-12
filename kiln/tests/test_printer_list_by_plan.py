@@ -275,3 +275,167 @@ class TestThePlanIsNamedInThePlanChecksOwnWords:
 
         assert {row["name"]: row["state"] for row in fleet["printers"]} == {"a1": "printing", "garage": "printing"}
         assert "note" not in fleet and "upgrade_url" not in fleet
+
+
+class TestSeveralPrintersThroughPrinterStatus:
+    """``printer_status(printer_names=...)``: every printer, or the ones
+    named, in one answer.  The fleet plan's read; the list is everyone's."""
+
+    @pytest.mark.parametrize("plan", ["free", "pro"])
+    @pytest.mark.parametrize("asked", ["all", ["a1", "garage"], ["garage"], "garage"])
+    def test_below_the_fleet_plan_the_list_comes_back_and_no_printer_is_asked(self, bench, on_plan, plan, asked):
+        a, b = bench
+        on_plan(plan)
+
+        out = _ask("printer_status", printer_names=asked)
+
+        assert out["success"] is True and out["count"] == 2
+        assert sorted(row["name"] for row in out["known_printers"]) == ["a1", "garage"]
+        assert all(set(row) <= {"name", "printer_model", "kiln_is_working_with"} for row in out["known_printers"])
+        assert "printers" not in out and "state_counts" not in out and "printing" not in str(out)
+        assert out["note"].count("Kiln Business") == 1
+        assert out["upgrade_url"] == "https://kiln3d.com/pricing?src=agent&tool=printer_status"
+        assert a.state_calls == 0 and b.state_calls == 0
+
+    @pytest.mark.parametrize("plan", _LADDER)
+    def test_one_printer_set_up_is_read_on_every_plan_with_no_plan_named(self, one_printer, on_plan, plan):
+        on_plan(plan)
+
+        out = _ask("printer_status", printer_names="all")
+
+        assert [(row["name"], row["state"]) for row in out["printers"]] == [("a1", "printing")]
+        assert "note" not in out and "upgrade_url" not in out
+        assert "Business" not in str(out) and "pricing" not in str(out)
+
+    @pytest.mark.parametrize("plan", ["business", "enterprise"])
+    def test_the_fleet_plan_reads_every_printer(self, bench, on_plan, plan):
+        on_plan(plan)
+
+        out = _ask("printer_status", printer_names="all")
+
+        assert {row["name"]: row["state"] for row in out["printers"]} == {"a1": "printing", "garage": "printing"}
+        assert out["count"] == 2 and "note" not in out and "known_printers" not in out
+
+    @pytest.mark.parametrize("plan", ["business", "enterprise"])
+    def test_the_fleet_plan_reads_only_the_printers_named(self, bench, on_plan, plan):
+        a, b = bench
+        on_plan(plan)
+
+        out = _ask("printer_status", printer_names=["garage"])
+
+        assert [row["name"] for row in out["printers"]] == ["garage"] and out["count"] == 1
+        assert out["busy_printers"] == ["garage"] and out["idle_printers"] == []
+        # The printer nobody named was not asked anything.
+        assert a.state_calls == 0 and b.state_calls > 0
+
+    @pytest.mark.parametrize("plan", ["business", "enterprise"])
+    def test_a_name_given_twice_is_read_once_and_all_means_every_printer(self, bench, on_plan, plan):
+        on_plan(plan)
+
+        twice = _ask("printer_status", printer_names=["garage", "garage"])
+        every = _ask("printer_status", printer_names=["a1", "all"])
+
+        assert [row["name"] for row in twice["printers"]] == ["garage"]
+        assert sorted(row["name"] for row in every["printers"]) == ["a1", "garage"]
+
+    @pytest.mark.parametrize("spelled", ["garage, a1", '["garage", "a1"]', " garage ,a1 "])
+    def test_a_list_sent_as_text_is_read_as_the_list_it_spells(self, bench, on_plan, spelled):
+        on_plan("business")
+
+        out = _ask("printer_status", printer_names=spelled)
+
+        assert [row["name"] for row in out["printers"]] == ["garage", "a1"]
+
+    @pytest.mark.parametrize(
+        ("given", "names"),
+        [
+            ("all", None),
+            (" ALL ", None),
+            (["a1", "all"], None),
+            ("garage", ["garage"]),
+            ("garage, a1", ["garage", "a1"]),
+            ('["garage", "a1"]', ["garage", "a1"]),
+            ("[garage", ["[garage"]),
+            (["a1", " a1 ", "garage", ""], ["a1", "garage"]),
+            ([], []),
+            ("", []),
+        ],
+    )
+    def test_the_names_asked_for_are_read_once_each_in_the_order_given(self, given, names):
+        assert server._names_asked_for(given) == names
+
+    def test_the_answer_keeps_the_order_asked_for_and_the_lists_order_for_all(self, bench, on_plan):
+        on_plan("business")
+
+        for _ in range(5):
+            asked = _ask("printer_status", printer_names=["garage", "a1"])
+            every = _ask("printer_status", printer_names="all")
+            assert [row["name"] for row in asked["printers"]] == ["garage", "a1"]
+            assert asked["busy_printers"] == ["garage", "a1"]
+            assert [row["name"] for row in every["printers"]] == ["a1", "garage"]
+
+    def test_a_printer_asked_for_by_another_of_its_names_is_the_same_printer(self, bench, on_plan, monkeypatch):
+        a, b = bench
+        on_plan("business")
+        # A second name for the first machine, as the "default" alias is.
+        server._get_registry().register("default", a)
+
+        out = _ask("printer_status", printer_names=["default", "a1", "garage"])
+
+        assert [row["name"] for row in out["printers"]] == ["a1", "garage"] and out["count"] == 2
+
+    def test_a_name_that_is_not_set_up_is_said_with_the_names_that_are(self, bench, on_plan):
+        a, b = bench
+        on_plan("business")
+
+        out = _ask("printer_status", printer_names=["a1", "attic"])
+
+        assert out["success"] is False and "PRINTER_NOT_FOUND" in str(out)
+        assert "'attic'" in str(out) and "a1, garage" in str(out)
+        assert a.state_calls == 0 and b.state_calls == 0
+
+    def test_no_name_at_all_and_both_ways_of_naming_are_refused_as_mistakes(self, bench, on_plan):
+        on_plan("business")
+
+        nothing = _ask("printer_status", printer_names=[])
+        both = _ask("printer_status", printer_name="a1", printer_names=["garage"])
+
+        assert nothing["success"] is False and "VALIDATION_ERROR" in str(nothing)
+        assert both["success"] is False and "VALIDATION_ERROR" in str(both)
+
+    @pytest.mark.parametrize("plan", _LADDER)
+    def test_the_older_name_gives_the_same_answer(self, bench, on_plan, plan):
+        on_plan(plan)
+
+        through_status = _ask("printer_status", printer_names="all")
+        through_fleet = _ask("fleet_status")
+
+        # The pricing link carries the name of the tool that was called, and
+        # printers answer in the order they reply.
+        for out in (through_status, through_fleet):
+            out.pop("upgrade_url", None)
+            for key, value in out.items():
+                if isinstance(value, list):
+                    out[key] = sorted(value, key=str)
+        assert through_status == through_fleet
+
+    @pytest.mark.parametrize("plan", ["free", "pro"])
+    def test_the_reach_is_counted_under_the_tool_that_was_called(self, bench, on_plan, plan, walls_counted):
+        on_plan(plan)
+        _ask("printer_status", printer_names="all")
+        assert walls_counted == ["printer_status", "own:printer_status"]
+
+    @pytest.mark.parametrize("plan", _LADDER)
+    def test_reading_one_printer_is_never_counted_as_a_wall(self, bench, on_plan, plan, walls_counted):
+        on_plan(plan)
+        assert server.printer_status(detail="lite")["success"] is True
+        assert walls_counted == []
+
+    def test_grouped_by_site_names_its_plan_once_and_keeps_the_flat_answer(self, bench, on_plan):
+        on_plan("business")
+
+        out = _ask("printer_status", by_site=True)
+
+        assert sorted(row["name"] for row in out["printers"]) == ["a1", "garage"] and "sites" not in out
+        assert out["note"].count("Kiln Enterprise") == 1
+        assert out["upgrade_url"] == "https://kiln3d.com/pricing?src=agent&tool=printer_status"

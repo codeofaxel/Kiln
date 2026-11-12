@@ -844,9 +844,9 @@ def _build_instructions() -> str:
             else:
                 parts.append(
                     f"PRINTERS: {len(printer_names)} registered. "
-                    "`fleet_status` lists them; use "
-                    "`printer_status(printer_name=...)` to read one at a "
-                    "time. Every printer's live state in one view, and "
+                    "`printer_status` lists them and reads one at a "
+                    "time (`printer_name=...`). Several printers' live "
+                    "state in one answer (`printer_names=...`), and "
                     "driving them together, is a Business feature (the "
                     "fleet tools)."
                 )
@@ -7410,18 +7410,37 @@ def _engagement_machine(adapter: Any) -> str:
 def printer_status(
     printer_name: str | None = None,
     detail: str = "full",
+    printer_names: list[str] | str | None = None,
+    by_site: bool = False,
 ) -> dict:
-    """Get printer state, temperatures, job progress, and capabilities.
+    """Get printer state, temperatures, job progress, and capabilities, and list the printers set up here.
 
     Returns a JSON object with:
     - ``printer``: connection status, operational state, tool/bed temperatures
     - ``job``: current file name, completion percentage, elapsed and remaining time
     - ``capabilities``: what this printer backend supports (``full`` only)
+    - ``known_printers``: the printers set up here, by name and model, so
+      this read also answers "which printers do I have?" on every plan
 
     Use this as the first call to understand what the printer is doing.
 
+    One printer at a time is on every plan (``printer_name``).  Several
+    printers' live state in one answer (``printer_names``) is the fleet
+    view, part of Kiln Business (https://kiln3d.com/pricing); a plan
+    without it gets ``known_printers`` and one ``note``, never a refusal.
+
     Args:
         printer_name: Target printer.  Omit for the default printer.
+        printer_names: ``"all"`` or a list of names, for several printers
+            in one answer: ``printers`` (one snapshot each: name, backend,
+            connection, state, temperatures), ``count``, and which are
+            idle, busy, offline or marked as needing repair
+            (``set_machine_repair``).  A printer that does not respond is
+            reported as offline.  ``detail`` does not apply.
+        by_site: With several printers, also group them by the site each
+            one is at (``update_printer_site``): ``sites`` and
+            ``site_count`` when the plan includes it, otherwise the flat
+            answer with one ``note``.
         detail: ``"full"`` (default) for everything, or ``"lite"`` for
             frequent polling during a print — same field names, but
             ``capabilities`` is omitted and ``printer`` is trimmed to the
@@ -7437,6 +7456,17 @@ def printer_status(
             return _error_dict(
                 f"detail must be 'full' or 'lite', got {detail!r}.",
                 code="VALIDATION_ERROR",
+            )
+        if printer_names is not None or by_site:
+            if printer_name:
+                return _error_dict(
+                    "Give printer_name for one printer or printer_names for several, not both.",
+                    code="VALIDATION_ERROR",
+                )
+            return _several_printers_read(
+                "all" if printer_names is None else printer_names,
+                by_site=by_site,
+                asked_through="printer_status",
             )
         adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
         # ONE door for both halves: `get_status` reconciles them so the job
@@ -13892,47 +13922,76 @@ def confirm_action(token: str) -> dict:
 
 @mcp.tool(annotations=read_only("Fleet status"))
 def fleet_status(by_site: bool = False) -> dict:
-    """List the printers set up here, with live status for one printer or, on Kiln Business, all of them.
+    """The same answer as ``printer_status(printer_names="all")``, for clients that call it by this name.
 
-    Answers "which printers do I have?" on every plan.  With none set up it
-    says so, and with one it returns that printer's snapshot.  With two or
-    more, every printer's live state in one answer is the fleet view, part
-    of Kiln Business (https://kiln3d.com/pricing); a plan without it gets
-    ``known_printers`` (each printer's name, and its model when one is on
-    record, read from this computer's records with no printer contacted)
-    and one ``note``, never a refusal.  ``printer_status`` reads one
-    printer at a time, by ``printer_name``.
+    Lists the printers set up here on every plan; every printer's live
+    state in one answer is the fleet view, part of Kiln Business
+    (https://kiln3d.com/pricing), and a plan without it gets
+    ``known_printers`` and one ``note``, never a refusal.  New callers use
+    ``printer_status``, which also reads one printer or a chosen few.
 
     For historical analytics (success rates, throughput), use ``fleet_analytics``.
-    The fleet view returns a list of printer snapshots including name,
-    backend type, connection status, operational state, and temperatures.
-    Printers that fail to respond are reported as offline rather than raising.
-    A printer the person marked with ``set_machine_repair`` carries a
-    ``repair`` block (needs repair since, or repaired at and what), and
-    ``needs_repair_printers`` lists the ones out of service: routing does
-    not choose them, though they may read as idle.
 
     Args:
-        by_site: Also group the same printers by the site each one is at
-            (``update_printer_site``; printers with no site fall under
-            ``"unassigned"``).  When the plan includes it the answer adds
-            ``sites`` (per site: ``printers``, ``count``, ``idle``, ``busy``,
-            ``needs_repair``) and ``site_count``; otherwise the flat answer
-            comes back with one ``note``, never a refusal.
+        by_site: Also group the printers by the site each one is at, as
+            ``printer_status(printer_names="all", by_site=True)`` does.
+    """
+    return _several_printers_read("all", by_site=by_site, asked_through="fleet_status")
 
-    If no printers are registered yet, the current adapter (from env config)
-    is auto-registered as "default".
+
+def _names_asked_for(printer_names: list[str] | str) -> list[str] | None:
+    """The printers a several-printer read names, in the order given and
+    once each; ``None`` for every printer (``"all"``).
+
+    A list sent as text is read as the list it spells: a JSON array, or
+    names separated by commas.
+    """
+    if isinstance(printer_names, str):
+        given: list[Any] = printer_names.split(",")
+        if printer_names.strip().startswith("["):
+            import json
+
+            try:
+                spelled = json.loads(printer_names)
+            except ValueError:
+                spelled = None
+            if isinstance(spelled, list):
+                given = spelled
+    else:
+        given = list(printer_names)
+    names: list[str] = []
+    for item in given:
+        name = str(item).strip()
+        if name.lower() == "all":
+            return None
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _several_printers_read(
+    printer_names: list[str] | str, *, by_site: bool, asked_through: str
+) -> dict:
+    """Several printers' live state in one answer: every one, or the ones
+    named.  *asked_through* is the tool the caller used, for the counts and
+    the pricing link.
+
+    One printer set up is read on every plan.  With two or more, the read
+    is the fleet view: a plan without it gets the list and one note
+    (:func:`_printers_listed_without_fleet_view`) and no printer is asked
+    anything.  If no printers are registered yet, the current adapter (from
+    env config) is auto-registered as "default".
     """
     try:
+        registry = _get_registry()
         # Auto-register the env-configured adapter if registry is empty
-        if _get_registry().count == 0:
+        if registry.count == 0:
             try:
-                adapter = _get_adapter()
-                _get_registry().register("default", adapter)
+                registry.register("default", _get_adapter())
             except RuntimeError:
                 pass  # No adapter configured
 
-        if _get_registry().count == 0:
+        if registry.count == 0:
             empty: dict[str, Any] = {
                 "success": True,
                 "printers": [],
@@ -13940,16 +13999,56 @@ def fleet_status(by_site: bool = False) -> dict:
                 "message": "No printers registered.",
             }
             if by_site:
-                _attach_sites(empty, [])
+                _attach_sites(empty, [], asked_through=asked_through)
             return empty
 
-        if _get_registry().count > 1:
-            listed = _printers_listed_without_fleet_view()
+        wanted = _names_asked_for(printer_names)
+        if wanted is not None and not wanted:
+            return _error_dict(
+                'printer_names names no printer. Pass "all" for every printer set up here.',
+                code="VALIDATION_ERROR",
+            )
+
+        set_up = registry.list_machines()
+        if len(set_up) > 1:
+            listed = _printers_listed_without_fleet_view(asked_through)
             if listed is not None:
                 return listed
 
-        status = _get_registry().get_fleet_status()
-        idle = _get_registry().get_idle_printers()
+        if wanted is not None:
+            # Each name as the one its machine is listed under: a printer
+            # asked for by another of its names is the same printer.
+            listed_as: list[str] = []
+            unknown: list[str] = []
+            for name in wanted:
+                same_machine = [name] if name in set_up else [n for n in registry.aliases_of(name) if n in set_up]
+                if not same_machine:
+                    unknown.append(name)
+                elif same_machine[0] not in listed_as:
+                    listed_as.append(same_machine[0])
+            if unknown:
+                return _error_dict(
+                    f"No printer named {', '.join(repr(n) for n in unknown)} is set up here. "
+                    f"Set up: {', '.join(set_up)}.",
+                    code="PRINTER_NOT_FOUND",
+                )
+            wanted = listed_as
+
+        status = registry.get_fleet_status(names=wanted)
+        # Printers reply in any order; the answer keeps the order asked
+        # for, or the list's own order for every printer.
+        place = {name: at for at, name in enumerate(set_up if wanted is None else wanted)}
+        status.sort(key=lambda row: place.get(str(row.get("name", "")), len(place)))
+        if wanted is None:
+            idle = registry.get_idle_printers()
+        else:
+            # Read off the rows just fetched: asking the registry would
+            # query the printers nobody named.
+            idle = sorted(
+                str(p.get("name", ""))
+                for p in status
+                if p.get("connected") and str(p.get("state", "")).lower() == PrinterStatus.IDLE.value
+            )
         connected_count = sum(1 for p in status if p.get("connected"))
         disconnected_count = len(status) - connected_count
 
@@ -13995,24 +14094,25 @@ def fleet_status(by_site: bool = False) -> dict:
             "needs_repair_printers": needs_repair_printers,
         }
         if by_site:
-            _attach_sites(result, status)
+            _attach_sites(result, status, asked_through=asked_through)
         return result
     except Exception as exc:
-        logger.exception("Unexpected error in fleet_status")
-        return _error_dict(f"Unexpected error in fleet_status: {exc}", code="INTERNAL_ERROR")
+        logger.exception("Unexpected error in %s", asked_through)
+        return _error_dict(f"Unexpected error in {asked_through}: {exc}", code="INTERNAL_ERROR")
 
 
-def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
-    """The ``fleet_status`` answer for several printers on a plan without
-    the fleet view, or ``None`` when the caller's plan has it.
+def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | None:
+    """The answer to a several-printer read on a plan without the fleet
+    view, or ``None`` when the caller's plan has it.
 
     The CALLER's plan, read through ``kiln.licensing`` at call time.  The
-    list is the one ``printer_status`` carries (``kiln.printer_roster``):
-    names and models from this computer's records, no printer contacted, so
-    it says nothing about what any of them is doing.  The plan is named
-    once, in ``note``, in the plan check's own words for this caller, and
-    the pricing link is attached only when those words point there: a
-    caller told to sign back in or get online is not sent to buy.
+    list is the one a one-printer ``printer_status`` carries
+    (``kiln.printer_roster``): names and models from this computer's
+    records, no printer contacted, so it says nothing about what any of
+    them is doing.  The plan is named once, in ``note``, in the plan
+    check's own words for this caller, and the pricing link is attached
+    only when those words point there: a caller told to sign back in or get
+    online is not sent to buy.
     """
     from kiln import licensing
     from kiln.printer_roster import known_printers
@@ -14025,7 +14125,7 @@ def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
     # view on a plan without it.
     from kiln.account_plan import count_plan_wall
 
-    count_plan_wall("fleet_status")
+    count_plan_wall(asked_through)
     rows = known_printers(_get_registry())
     plan_line = str(said or "").strip() or "This feature is part of Kiln Business."
     listed: dict[str, Any] = {
@@ -14034,17 +14134,19 @@ def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
         "count": len(rows),
         "note": (
             f"{len(rows)} printers are set up here. printer_status(printer_name=...) "
-            "reads one of them at a time. Every printer's live state in one "
+            "reads one of them at a time. Several printers' live state in one "
             f"answer is the fleet view. {plan_line}"
         ),
     }
     if PRICING_URL.split("://", 1)[-1] in plan_line:
-        listed["upgrade_url"] = upgrade_link("fleet_status")
+        listed["upgrade_url"] = upgrade_link(asked_through)
     return listed
 
 
-def _attach_sites(result: dict[str, Any], status: list[dict[str, Any]]) -> None:
-    """Add the by-site grouping to a ``fleet_status`` answer, or the one
+def _attach_sites(
+    result: dict[str, Any], status: list[dict[str, Any]], *, asked_through: str = "fleet_status"
+) -> None:
+    """Add the by-site grouping to a several-printer answer, or the one
     line saying which plan has it.
 
     The CALLER's plan, read through ``kiln.licensing`` at call time: on
@@ -14066,7 +14168,7 @@ def _attach_sites(result: dict[str, Any], status: list[dict[str, Any]]) -> None:
             "Kiln Enterprise. Here is the whole fleet in one list."
         )
         result["note"] = note
-        result["upgrade_url"] = upgrade_link("fleet_status")
+        result["upgrade_url"] = upgrade_link(asked_through)
         result["upgrade_nudge"] = upgrade_nudge_block(
             variant="fleet_by_site",
             tier="enterprise",
@@ -14228,9 +14330,10 @@ def register_printer(
     ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
     all take a ``printer_name`` at every tier, one printer at a time: Kiln
     works with one machine until it is handed back (``hand_back_printer``),
-    and each printer's own controls always work.  ``fleet_status`` lists
-    the printers set up here; every one's live state in one view, and
-    driving them together, are Business features.
+    and each printer's own controls always work.  ``printer_status`` lists
+    the printers set up here; several printers' live state in one answer
+    (its ``printer_names``), and driving them together, are Business
+    features.
     """
     if err := _check_auth("admin"):
         return err
@@ -17749,7 +17852,7 @@ def fleet_workflow() -> str:
     """Guide for managing multiple printers in a fleet."""
     return (
         "To manage a fleet of printers:\n\n"
-        "1. Call `fleet_status` to see all registered printers (with every one's live state on Kiln Business)\n"
+        "1. Call `printer_status(printer_names=\"all\")` to see all registered printers (with every one's live state on Kiln Business)\n"
         "2. Use `register_printer` to add new printers ("
         + format_printer_types(quote="", conjunction="or")
         + ")\n"

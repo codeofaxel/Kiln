@@ -33,6 +33,7 @@ Usage::
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import os
 import re
@@ -121,6 +122,16 @@ _DIALECT_ALLOWED: dict[GCodeDialect, set[str]] = {
 _DIALECT_PLAIN_LINES: dict[GCodeDialect, re.Pattern[str]] = {
     GCodeDialect.BAMBU: re.compile(r"^(?:SYNC\b.*|=+\s.*\s=+)$"),
 }
+
+
+#: Dialects whose firmware runs one command a line and reads every later
+#: word as that command's parameter: a maker's own files carry parameter
+#: words that look like commands (a buzzer note written ``M60``).  Any other
+#: firmware may run a second command written on the same line, so every
+#: command word on the line is judged.
+_ONE_COMMAND_A_LINE: frozenset[GCodeDialect] = frozenset(
+    {GCodeDialect.MARLIN, GCodeDialect.KLIPPER, GCodeDialect.BAMBU}
+)
 
 
 def _is_plain_line(dialect: GCodeDialect, cleaned: str) -> bool:
@@ -397,6 +408,34 @@ def _parse_command_word(line: str) -> str | None:
     return f"{letter}{number}"
 
 
+#: Commands whose whole line, after the command word, is text a person
+#: wrote: a display message, or a file name on the card.  Nothing in it is
+#: run.  A command that takes its text in quotes is not here: only what is
+#: inside the quotes is text, and a command may follow them.
+_TEXT_COMMANDS: frozenset[str] = frozenset({"M28", "M30", "M36", "M38", "M117"})
+
+#: A quoted run, opened and closed: text, never commands.  A quote left
+#: open hides nothing.
+_QUOTED_RE = re.compile(r'"[^"]*"')
+#: A G or M word, wherever on the line it starts.
+_COMMAND_WORD_START_RE = re.compile(r"[GgMm]\s*\d")
+
+
+def _later_commands(cmd: str, cleaned: str) -> list[str]:
+    """Each command word on *cleaned* after its first, with what follows it
+    up to the next: what a firmware that runs several commands a line would
+    run after *cmd*.  None for a line that is text after its command word,
+    and nothing inside quotes is a command."""
+    if cmd in _TEXT_COMMANDS:
+        return []
+    text = _QUOTED_RE.sub(lambda quoted: " " * len(quoted.group()), cleaned)
+    first = _CMD_RE.match(text)
+    if first is None:
+        return []
+    starts = [m.start() for m in _COMMAND_WORD_START_RE.finditer(text, first.end())]
+    return [cleaned[a:b].strip() for a, b in itertools.pairwise([*starts, len(cleaned)])]
+
+
 def _extract_param(line: str, letter: str) -> float | None:
     """Extract the numeric value for parameter *letter* from *line*.
 
@@ -654,6 +693,44 @@ def _judge_macro_line(
     return False
 
 
+def _later_command_refused(
+    cmd: str,
+    cleaned: str,
+    dialect: GCodeDialect,
+    rules: Any,
+    warnings: list[str],
+    errors: list[str],
+    blocked: list[str],
+    ceilings: dict[str, tuple[float, str]],
+) -> bool:
+    """Judge every command word on the line after its first; ``True`` when
+    the line is blocked.
+
+    A later word is held to what stops a printer being harmed or started
+    behind the person's back: the blocked commands, this printer's own
+    refusals, and the heater ceilings.  A later word that is none of those
+    is left as the parameter it may be."""
+    if dialect in _ONE_COMMAND_A_LINE:
+        return False
+    allowed = _DIALECT_ALLOWED.get(dialect, set())
+    for part in _later_commands(cmd, cleaned):
+        word = _parse_command_word(part)
+        if word is None:
+            continue
+        said = None if word in allowed else _BLOCKED_COMMANDS.get(word)
+        said = said or _DIALECT_BLOCKED.get(dialect, {}).get(word)
+        verdict = rules.judge(word, part) if said is None and rules is not None else None
+        if verdict is not None and verdict[0] == "refused":
+            said = verdict[1]
+        if said is not None:
+            errors.append(f"{said} (written as a second command on the line {cleaned!r})")
+            blocked.append(cleaned)
+            return True
+        if _judge_heat_command(word, part, warnings, errors, blocked, ceilings):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Core validation logic
 # ---------------------------------------------------------------------------
@@ -743,6 +820,10 @@ def _validate_single(
 
     # --- This printer's own command rules ---------------------------------
     if _refused_by_rules(rules, cmd, cleaned, warnings, errors, blocked):
+        return None
+
+    # --- Every other command word on the line -----------------------------
+    if _later_command_refused(cmd, cleaned, dialect, rules, warnings, errors, blocked, _GENERIC_CEILINGS):
         return None
 
     # --- Warning-level commands ------------------------------------------
@@ -1094,6 +1175,10 @@ def _validate_single_with_profile(
 
     # --- This printer's own command rules ---
     if _refused_by_rules(rules, cmd, cleaned, warnings, errors, blocked):
+        return None
+
+    # --- Every other command word on the line ---
+    if _later_command_refused(cmd, cleaned, dialect, rules, warnings, errors, blocked, _profile_ceilings(profile)):
         return None
 
     # --- Warning-level commands ---
