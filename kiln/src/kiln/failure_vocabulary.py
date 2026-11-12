@@ -201,6 +201,11 @@ UNNAMED_CAUSE = "other"
 #: camera that saw it.  A printer's own "failed" is not one of them.
 SAW_THE_PART: frozenset[str] = frozenset({"user_reported", "seen"})
 
+#: Who settled an ending that was read off the printer's own job log after
+#: the fact.  No person and nothing of Kiln's was there: the log says the
+#: job ran to its end or stopped, never how the part came out.
+PRINTER_LOG = "printer_log"
+
 #: Outcome words that carry a failed ending.
 FAILED_OUTCOMES: frozenset[str] = frozenset({"failed", "partial"})
 
@@ -241,7 +246,14 @@ def ending_verdict(
     ``"machine_stop"`` or ``"outside_stop"``, or ``None`` for an ending that
     carries no verdict at all (cancelled, pending, unknown, or a word outside
     the vocabulary).  The account's word for a finished print, ``completed``,
-    reads as ``success``."""
+    reads as ``success``.
+
+    A job known only from the printer's own log (:data:`PRINTER_LOG`)
+    carries no verdict either, whatever word the log gave it: nobody saw the
+    part, so it counts for and against nothing, the printer included.  It
+    takes a verdict when the person says how it came out."""
+    if determined_by == PRINTER_LOG:
+        return None
     if outcome in ("success", "completed"):
         return "success"
     if outcome in FAILED_OUTCOMES:
@@ -280,7 +292,11 @@ def judged_ending_sql(alias: str = "", *, about: str = ABOUT_THE_PRINT) -> str:
             f"(COALESCE({col}failure_mode, '') IN ('', '{UNNAMED_CAUSE}') "
             f"AND {col}determined_by IN ({words(SAW_THE_PART)})))"
         )
-    return f"({col}outcome = 'success' OR ({col}outcome IN ({words(FAILED_OUTCOMES)}) AND {failure}))"
+    witnessed = f"COALESCE({col}determined_by, '') <> '{PRINTER_LOG}'"
+    return (
+        f"({witnessed} AND "
+        f"({col}outcome = 'success' OR ({col}outcome IN ({words(FAILED_OUTCOMES)}) AND {failure})))"
+    )
 
 
 def pooled_row_is_about_the_print(outcome: str | None, failure_mode: str | None) -> bool:
@@ -310,12 +326,35 @@ STOP_WORDS: dict[str, str] = {
 }
 
 
+#: What the printer's own log says about a job, in the person's history.
+PRINTER_LOG_WORDS: dict[str, str] = {
+    "success": "Ran to the end, by the printer's own log (Kiln did not see the part)",
+    "failed": "Stopped by the printer, by its own log",
+    "partial": "Stopped by the printer, by its own log",
+    "cancelled": "Cancelled, by the printer's own log",
+}
+_PRINTER_LOG_UNKNOWN = "Listed in the printer's own log, ending not known"
+
+
+def printer_log_said(outcome: str | None, determined_by: str | None = None) -> str | None:
+    """The words for a job known only from the printer's own log
+    (:data:`PRINTER_LOG`), or ``None`` for every other row.  What a person's
+    own history shows in place of the bare outcome word.  Never raises."""
+    if determined_by != PRINTER_LOG:
+        return None
+    return PRINTER_LOG_WORDS.get(outcome or "", _PRINTER_LOG_UNKNOWN)
+
+
 def ending_wants_a_question(
     outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
 ) -> str | None:
     """Which question an ending owes the person: ``"stop"`` (the printer
     stopped it and named no cause), ``"cancel"`` (someone stopped it), or
-    ``None``.  Only the person knows whether the part was coming out bad."""
+    ``None``.  Only the person knows whether the part was coming out bad.
+    A job known only from the printer's own log (:data:`PRINTER_LOG`) owes
+    none: Kiln had no part in it."""
+    if determined_by == PRINTER_LOG:
+        return None
     if outcome == "cancelled":
         return "cancel"
     return "stop" if stop_wants_a_reason(outcome, failure_mode, determined_by) else None

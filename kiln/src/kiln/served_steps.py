@@ -927,7 +927,9 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
     try:
         # Every ending with a verdict, whatever its cause, and who settled it:
         # the servers apply the ending rule per question, as this store does.
-        rows = get_db().list_print_outcomes(limit=_HISTORY_RECORDS + 1, include_stops=True)
+        # A job known only from the printer's own log carries no verdict and
+        # is not sent.
+        rows = get_db().list_print_outcomes(limit=_HISTORY_RECORDS + 1, include_stops=True, witnessed_only=True)
     except Exception:  # noqa: BLE001 — said, never guessed
         return None, _refusal(
             tool, "PRINT_HISTORY_NOT_READ",

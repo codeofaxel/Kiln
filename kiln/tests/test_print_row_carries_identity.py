@@ -111,7 +111,7 @@ class TestSchema:
     def test_rank_and_vocabulary_agree(self):
         from kiln.persistence import KilnDB
 
-        assert set(KilnDB.DETERMINED_BY_RANK) == KilnDB.VALID_DETERMINED_BY
+        assert set(KilnDB.DETERMINED_BY_RANK) == KilnDB.PRINT_OUTCOME_DETERMINED_BY
         assert "seen" in KilnDB.VALID_DETERMINED_BY
         assert tuple(KilnDB.PRINT_OUTCOME_IDENTITY_COLUMNS) == IDENTITY
 
