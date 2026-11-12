@@ -33,10 +33,14 @@ A miss (offline, signed out, no answer, refused) asks nothing and says
 nothing: what was kept is left as it was and the next ending asks again.
 
 Shown (:func:`for_the_ending`, :func:`listed`): in the slot the ending's own
-question uses (``ask_the_person``), once per ending and only when that ending
-owes no question of its own, and in ``get_printer_insights``.  A question is
-shown only while the ending it came back at is still the printer's newest
-print.
+question uses (``ask_the_person``), only when that ending owes no question of
+its own, and in ``get_printer_insights``.  A question is shown only while the
+ending it came back at is still the printer's newest print.  In the slot an
+unanswered question is given once, and once more for each time the printer
+has a failed ending after the ending of its last showing
+(:func:`_may_be_put`).  The insights list it every time until it is answered;
+a question first met there counts as given once, and listing one already
+given changes nothing.
 
 Answered (:func:`answer`, the ``set_machine_repair`` tool's ``answer_to``):
 each answer carries the servers' ``do`` word.  ``mark_needs_repair`` and
@@ -471,10 +475,38 @@ def _waiting(printer_name: str, store: Any) -> tuple[dict[str, Any], dict[str, A
     return row, latest
 
 
+def _may_be_put(row: dict[str, Any], latest: dict[str, Any], store: Any) -> bool:
+    """Whether the kept question *row* may be put to the person, in the
+    ``ask_the_person`` slot, with *latest* the printer's newest print.
+
+    True for a question never given.  For one already given, true only when
+    the machine has a print newer than the ending of its last showing whose
+    ending is a bad print or a machine stop
+    (:func:`kiln.failure_vocabulary.ending_verdict`).  A print that came out,
+    an outside stop, a cancel and an unknown ending do not count."""
+    from kiln.failure_vocabulary import ABOUT_THE_MACHINE, JUDGED_ENDINGS, ending_verdict
+
+    given_at = row.get("shown_job_id")
+    if not given_at:
+        return True
+    if given_at == latest.get("job_id"):
+        return False
+    failed = JUDGED_ENDINGS[ABOUT_THE_MACHINE] - {"success"}
+    for print_row in store.machine_print_rows(row["machine_fingerprint"], MAX_PRINTS):
+        if print_row.get("job_id") == given_at:
+            return False
+        verdict = ending_verdict(
+            print_row.get("outcome"), print_row.get("failure_mode"), print_row.get("determined_by")
+        )
+        if verdict in failed:
+            return True
+    return False
+
+
 def for_the_ending(printer_name: str | None, *, db: Any = None) -> dict[str, Any] | None:
     """The printer question for the ``ask_the_person`` slot of the tool that
-    reports *printer_name*'s ending, or ``None``.  Given once per ending:
-    a question already shown at this ending is not given again.  Reads only
+    reports *printer_name*'s ending, or ``None``.  Given when
+    :func:`_may_be_put` allows, and recorded as given at this ending.  Reads only
     this computer's record, and only when this process has it open
     (``kiln.persistence.db_if_open``): it never opens the record itself.
     Never raises."""
@@ -496,7 +528,7 @@ def for_the_ending(printer_name: str | None, *, db: Any = None) -> dict[str, Any
         if found is None:
             return None
         row, latest = found
-        if row.get("shown_job_id") == latest.get("job_id"):
+        if not _may_be_put(row, latest, store):
             return None
         block = _block(row)
         if block is not None:
@@ -509,8 +541,9 @@ def for_the_ending(printer_name: str | None, *, db: Any = None) -> dict[str, Any
 
 def listed(printer_name: str | None, *, db: Any = None) -> dict[str, Any] | None:
     """The question waiting on *printer_name*, for the printer's own
-    insights, or ``None``.  Listing it counts as showing it at this ending.
-    Reads only this computer's record; never raises."""
+    insights, or ``None``, every time it is read.  Listing a question never
+    given records it as given at this ending; listing one already given
+    records nothing.  Reads only this computer's record; never raises."""
     try:
         if not printer_name:
             return None
@@ -524,7 +557,7 @@ def listed(printer_name: str | None, *, db: Any = None) -> dict[str, Any] | None
             return None
         row, latest = found
         block = _block(row)
-        if block is not None and row.get("shown_job_id") != latest.get("job_id"):
+        if block is not None and not row.get("shown_job_id"):
             store.mark_printer_checkin_shown(row["id"], str(latest.get("job_id") or ""))
         return block
     except Exception:  # noqa: BLE001

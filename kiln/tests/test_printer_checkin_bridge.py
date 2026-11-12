@@ -11,8 +11,11 @@ the real ``set_machine_repair`` tool.  Pinned:
 * the ending's own question comes first, and the slot never holds two;
 * an answered episode is sent with later check-ins and never shown again;
 * a slow server never delays the write or the tool that reports an ending;
-* a question is shown once per ending and only while that ending is the
-  printer's newest print.
+* a question is shown only while the ending it came back at is the printer's
+  newest print;
+* an unanswered question is put to the person once, and once more for each
+  new failed ending on that printer; the printer's insights list it every
+  time until it is answered.
 """
 
 from __future__ import annotations
@@ -580,6 +583,159 @@ class TestShowing:
         world.db.mark_ending_asked("bare")
         later = read(printer_name="Shop A1")
         assert later["endings_to_ask_about"] == [] and later["printer_question"]["episode"] == EPISODE
+
+
+# ---------------------------------------------------------------------------
+# Shown once, and again at a new failed ending
+# ---------------------------------------------------------------------------
+
+
+OTHER_EPISODE = "ep:" + "1a2b3c4d5e6f7a8b9c0d1e2f"
+
+
+class TestShownOnceAndAgainAtANewFailedEnding:
+    """Through the tools' own reader (``ending_question.attach``), the
+    registered ``get_printer_insights`` and ``set_machine_repair``, the real
+    store, and the fake servers."""
+
+    @pytest.fixture
+    def asked(self, world):
+        """The history, and the question kept and put to the person once."""
+        _history(world)
+        world.servers.question = _question()
+        world.ends = 0
+        assert checkin.ask_now("Shop A1", db=world.db)["why"] == "kept"
+        assert self._put(world)["episode"] == EPISODE
+        assert self._put(world) is None
+        return world
+
+    @staticmethod
+    def _put(world) -> dict[str, Any] | None:
+        """What the tool reporting the printer's newest ending puts to the person."""
+        ask = ending_question.attach({"outcome": "completed"}, "Shop A1").get("ask_the_person")
+        assert ask is None or ask["about"] == "printer"
+        return ask
+
+    @staticmethod
+    def _insights(world) -> dict[str, Any] | None:
+        from kiln.server import mcp
+
+        return mcp._tool_manager.get_tool("get_printer_insights").fn(printer_name="Shop A1")["printer_question"]
+
+    @staticmethod
+    def _ends(world, job: str, outcome: str = "success", mode: str | None = None, *, checks_in: bool = True,
+              **more: Any) -> None:
+        """One more print ends on the printer, and the check-in for it comes back."""
+        world.ends += 1
+        _print(world, job, outcome, mode, days_ago=0.5 - 0.01 * world.ends, **more)
+        if outcome == "cancelled":
+            world.db.mark_ending_asked(job)
+        if checks_in:
+            assert checkin.ask_now("Shop A1", db=world.db)["why"] == "kept"
+
+    def test_three_prints_that_come_out_do_not_bring_it_back(self, asked):
+        for i in range(3):
+            self._ends(asked, f"clean-{i}")
+            assert asked.db.printer_checkin_waiting(asked.fingerprint)["episode"] == EPISODE
+            assert self._put(asked) is None
+            assert self._insights(asked)["episode"] == EPISODE
+        assert len(asked.servers.calls) == 4
+
+    def test_a_new_failed_print_brings_it_back_once(self, asked):
+        self._ends(asked, "clean-0")
+        self._ends(asked, "shift-3", "failed", "layer_shift")
+        assert self._put(asked)["episode"] == EPISODE
+        assert self._put(asked) is None
+        self._ends(asked, "clean-1")
+        assert self._put(asked) is None
+
+    def test_a_machine_stop_and_a_partial_print_each_bring_it_back(self, asked):
+        self._ends(asked, "stall", "failed", "thermal_runaway")
+        assert self._put(asked)["episode"] == EPISODE
+        self._ends(asked, "half", "partial", "layer_shift")
+        assert self._put(asked)["episode"] == EPISODE
+        assert self._put(asked) is None
+
+    @pytest.mark.parametrize(
+        ("outcome", "mode"),
+        [("failed", "power_loss"), ("failed", "filament_runout"), ("cancelled", None), ("unknown", None)],
+    )
+    def test_an_outside_stop_a_cancel_and_an_unknown_ending_do_not(self, asked, outcome, mode):
+        self._ends(asked, "not-the-printer", outcome, mode)
+        assert asked.db.printer_checkin_waiting(asked.fingerprint)["episode"] == EPISODE
+        assert self._put(asked) is None
+        assert self._insights(asked)["episode"] == EPISODE
+        assert self._put(asked) is None
+
+    def test_several_failures_bring_it_back_once_each_and_two_unread_bring_it_back_once(self, asked):
+        self._ends(asked, "shift-3", "failed", "layer_shift")
+        assert self._put(asked)["episode"] == EPISODE
+        self._ends(asked, "shift-4", "failed", "layer_shift")
+        assert self._put(asked)["episode"] == EPISODE
+        assert self._put(asked) is None
+        # Two failures with no reader between them are one showing.
+        self._ends(asked, "shift-5", "failed", "layer_shift")
+        self._ends(asked, "shift-6", "failed", "layer_shift")
+        assert self._put(asked)["episode"] == EPISODE
+        assert self._put(asked) is None
+        self._ends(asked, "clean-0")
+        assert self._put(asked) is None
+
+    def test_a_failure_whose_check_in_missed_brings_it_back_at_the_next_ending_that_checks_in(self, asked):
+        self._ends(asked, "shift-3", "failed", "layer_shift", checks_in=False)
+        assert self._put(asked) is None
+        self._ends(asked, "clean-0")
+        assert self._put(asked)["episode"] == EPISODE
+        assert self._put(asked) is None
+
+    def test_a_failure_the_servers_answer_with_nothing_shows_nothing(self, asked):
+        asked.servers.question = None
+        self._ends(asked, "shift-3", "failed", "layer_shift")
+        assert self._put(asked) is None and self._insights(asked) is None
+
+    def test_a_different_episode_is_a_new_question_shown_once(self, asked):
+        asked.servers.question = _question(episode=OTHER_EPISODE, ask="Is it the bed?")
+        self._ends(asked, "clean-0")
+        assert self._put(asked)["episode"] == OTHER_EPISODE
+        assert self._put(asked) is None
+        self._ends(asked, "clean-1")
+        assert self._put(asked) is None
+        # The earlier episode, handed back at a print that came out, stays given.
+        asked.servers.question = _question()
+        self._ends(asked, "clean-2")
+        assert self._insights(asked)["episode"] == EPISODE
+        assert self._put(asked) is None
+
+    def test_the_insights_list_it_every_time_and_spend_no_showing(self, asked):
+        for _ in range(3):
+            assert self._insights(asked)["episode"] == EPISODE
+        self._ends(asked, "shift-3", "failed", "layer_shift")
+        for _ in range(2):
+            assert self._insights(asked)["episode"] == EPISODE
+        # Read there after the new failure, it is still put to the person once.
+        assert self._put(asked)["episode"] == EPISODE
+        assert self._put(asked) is None
+        assert self._insights(asked)["episode"] == EPISODE
+
+    def test_a_question_first_met_in_the_insights_is_given_once_there(self, world):
+        _history(world)
+        world.servers.question = _question()
+        world.ends = 0
+        checkin.ask_now("Shop A1", db=world.db)
+        assert self._insights(world)["episode"] == EPISODE
+        assert self._put(world) is None
+        self._ends(world, "clean-0")
+        assert self._put(world) is None and self._insights(world)["episode"] == EPISODE
+        self._ends(world, "shift-3", "failed", "layer_shift")
+        assert self._put(world)["episode"] == EPISODE
+        assert self._put(world) is None
+
+    def test_an_answer_ends_it_whatever_fails_afterwards(self, asked):
+        answer = _tool()("Shop A1", answer_to=EPISODE, answer="neither")
+        assert answer["success"] is True and answer["recorded"] is True
+        assert self._insights(asked) is None and self._put(asked) is None
+        self._ends(asked, "shift-3", "failed", "layer_shift")
+        assert self._put(asked) is None and self._insights(asked) is None
 
 
 # ---------------------------------------------------------------------------
