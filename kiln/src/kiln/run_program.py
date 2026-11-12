@@ -73,6 +73,12 @@ _TRAMPOLINE = (
 )
 
 
+#: What carries the command it ran (``.args``), held as the classes
+#: themselves: a caller may swap ``subprocess.Popen`` for a stand-in, and a
+#: stand-in is not a type to test against.
+_CARRIES_ARGS = (subprocess.CompletedProcess, subprocess.Popen)
+
+
 def _avoids_fork() -> bool:
     """Whether a launch here must keep off ``fork()``: macOS only."""
     return sys.platform == "darwin"
@@ -178,7 +184,7 @@ def _as_given(call: Callable[..., Any], args: Any, kwargs: dict[str, Any], *, ca
         raise
     finally:
         _close(opened)
-    if isinstance(result, (subprocess.CompletedProcess, subprocess.Popen)):
+    if isinstance(result, _CARRIES_ARGS):
         result.args = args
     return result
 

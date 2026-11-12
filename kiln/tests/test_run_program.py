@@ -191,6 +191,14 @@ def test_stderr_joins_the_captured_output_in_check_output(no_fork):
     assert no_fork
 
 
+def test_a_stand_in_for_popen_gets_its_object_back(monkeypatch):
+    """A caller that swaps ``subprocess.Popen`` for a stand-in gets the
+    stand-in's object, not an error from treating the stand-in as a type."""
+    made = object()
+    monkeypatch.setattr(subprocess, "Popen", lambda *_a, **_k: made)
+    assert run_program.Popen([sys.executable, "-c", "pass"]) is made
+
+
 # -- census: every launch in Kiln goes through the launcher -------------------
 
 _LAUNCHERS = {"run", "Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput"}
