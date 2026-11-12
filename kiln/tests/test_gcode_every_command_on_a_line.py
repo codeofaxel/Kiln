@@ -81,15 +81,34 @@ def test_a_line_of_safe_commands_and_parameters_still_passes(line):
 
 @pytest.mark.parametrize("line", [
     "M117 now M24 starts",
-    "M118 send M112 if it jams",
+    "M30 old M112 test.gcode",
     'M291 P"M997 is the update command" S2',
     'M98 P"M24.g"',
-    "M486 AM112 bracket",
-    "M0 press to run M502",
+    'M118 P0 S"send M112 if it jams"',
+    'M291 P"say ""M502"" to reset" S2',
 ])
 def test_text_after_a_message_command_and_text_in_quotes_is_never_a_command(line):
     for result in _both(line):
         assert result.valid is True, (line, result.errors)
+
+
+@pytest.mark.parametrize("line", [
+    'M98 P"macro.g" M24',
+    'M291 P"done" S2 M112',
+    'M118 P0 S"ok" M997',
+    'M587 S"net" P"pw" M502',
+    'M291 P"never closed M112',
+    "M118 send M112 if it jams",
+    "M0 press to run M502",
+    "M486 A M112",
+    "M1002 gcode_claim_action M24",
+])
+def test_a_command_after_quoted_text_or_behind_an_open_quote_is_still_judged(line):
+    """Only a display message and a file name run to the end of the line.
+    Text in quotes ends at the closing quote, and a quote left open hides
+    nothing."""
+    for result in _both(line):
+        assert result.valid is False and result.commands == [], line
 
 
 def test_a_parameter_word_that_looks_like_a_command_is_left_alone():
@@ -128,6 +147,8 @@ def test_one_bad_line_does_not_take_the_good_lines_with_it():
     ("G1 X10 Y10", []),
     ("M117 M24", []),
     ('G4 P1 "M24"', []),
+    ('M98 P"a.g" M24', ["M24"]),
+    ('G4 P1 "M24', ["M24"]),
 ])
 def test_the_later_commands_on_a_line_are_split_at_each_command_word(line, later):
     from kiln.gcode import _parse_command_word
@@ -170,6 +191,7 @@ def watched():
 @pytest.mark.parametrize("line", [
     "G4 P1 M112", "G4 P1 M997", "G4 P1 M502", "G4P1M500", "g4 p1 m112", "N10 G4 P1 M112*33",
     "G90 G4 P1 M552 S1", "G28 M104 S400", "G4 P1 M140 S200",
+    'M98 P"macro.g" M112', 'M291 P"never closed M997',
 ])
 def test_a_running_print_refuses_a_blocked_or_overheating_command_written_later_on_a_line(watched, line):
     assert watched(line) == "block", line
@@ -178,6 +200,7 @@ def test_a_running_print_refuses_a_blocked_or_overheating_command_written_later_
 @pytest.mark.parametrize("line", [
     "G28 M104 S200", "G91 G1 Z5 F200 G90", "M104 S200 T1", "M117 now M112 would stop it",
     'M291 P"M997 updates the firmware" S2', "M1006 A0 B10 L100 C37 D10 M60 E37 F10 N60",
+    "M1002 gcode_claim_action : 2", "M1002 judge_flag g29_before_print_flag",
 ])
 def test_a_running_print_still_takes_safe_lines(watched, line):
     assert watched(line) != "block", line

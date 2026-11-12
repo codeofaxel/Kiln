@@ -408,15 +408,15 @@ def _parse_command_word(line: str) -> str | None:
     return f"{letter}{number}"
 
 
-#: Commands whose line, after the command word, is text a person wrote (a
-#: message, a file name, a label): nothing in it is run.
-_TEXT_COMMANDS: frozenset[str] = frozenset({
-    "M0", "M1", "M16", "M28", "M30", "M36", "M38", "M70", "M75", "M98", "M117", "M118", "M291", "M486",
-    "M550", "M551", "M587", "M588", "M929", "M1002",
-})
+#: Commands whose whole line, after the command word, is text a person
+#: wrote: a display message, or a file name on the card.  Nothing in it is
+#: run.  A command that takes its text in quotes is not here: only what is
+#: inside the quotes is text, and a command may follow them.
+_TEXT_COMMANDS: frozenset[str] = frozenset({"M28", "M30", "M36", "M38", "M117"})
 
-#: A quoted run: text, never commands.
-_QUOTED_RE = re.compile(r'"[^"]*"?')
+#: A quoted run, opened and closed: text, never commands.  A quote left
+#: open hides nothing.
+_QUOTED_RE = re.compile(r'"[^"]*"')
 #: A G or M word, wherever on the line it starts.
 _COMMAND_WORD_START_RE = re.compile(r"[GgMm]\s*\d")
 
