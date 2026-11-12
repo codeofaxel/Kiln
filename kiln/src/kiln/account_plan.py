@@ -386,6 +386,28 @@ def check_tier(
     return False, _refusal(subject or "This feature", required)["error"]
 
 
+def count_plan_wall(tool_name: str) -> None:
+    """Count that *tool_name* told this caller a plan above theirs has it.
+
+    Counted so the heartbeat can say which tools people reach for and are
+    turned away from, and, for a signed-in person, in their own usage beside
+    the call.  One recorder for a tool that refuses and for one that answers
+    with less and names the plan.  Never raises.
+    """
+    try:
+        from kiln.daily_stats import record_tier_denial
+
+        record_tier_denial(tool_name)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from kiln.usage_ledger import record_refusal
+
+        record_refusal(tool_name)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def requires_tier(tier: object):
     """Gate a tool on the person's plan covering *tier*.
 
@@ -401,21 +423,7 @@ def requires_tier(tier: object):
             if _covers(needed):
                 return fn(*args, **kwargs)
             tool_name = fn.__name__
-            # Counted so the heartbeat can say which tools people reach
-            # for and are refused, and, for a signed-in person, in their
-            # own usage beside the call.  Never blocks the refusal.
-            try:
-                from kiln.daily_stats import record_tier_denial
-
-                record_tier_denial(tool_name)
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                from kiln.usage_ledger import record_refusal
-
-                record_refusal(tool_name)
-            except Exception:  # noqa: BLE001
-                pass
+            count_plan_wall(tool_name)
             return {
                 "success": False,
                 "required_tier": needed.value,

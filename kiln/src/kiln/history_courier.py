@@ -1045,6 +1045,7 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
         if branch is None or branch.get("design_id") != design_id:
             return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id or 'main'} of {design_id} on this computer.")
         members = vault.memberships(branch["branch_id"])
+        held_here = vault.version_ids(design_id)
         versions, sidecars = [], []
         meshes: dict[str, Path] = {}
         for m in members:
@@ -1065,21 +1066,29 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     finally:
         if own:
             vault.close()
-    from kiln.history_vault import _without_local_paths
+    from kiln import design_tie
+    from kiln.history_vault import _design_folder, _without_local_paths
 
     body = {
         "branch": branch,
         "versions": versions,
         "memberships": members,
         "provenance_sidecars": _without_local_paths(sidecars),
+        # The design this folder is synced with, or its history when it is
+        # synced with none: Kiln's servers refuse a push into another design,
+        # or into one sharing no version with it, before they keep anything.
+        **design_tie.push_fields(_design_folder(design_id), held_here, design_id=design_id),
     }
     if make_room_for:
         body["make_room_for"] = make_room_for
-    refused, listed = _send_models(tool, body, meshes)
+    refused, listed = _send_models(tool, body, meshes, design_id=design_id)
     if refused is not None:
         return refused
     _carry_notes(body, meshes, listed)
     answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push", body)
+    if answer.get("http_status") == design_tie.REFUSED_STATUS and _judged_push(body):
+        # Nothing was kept there and nothing changes here.
+        return _push_refusal(tool, design_id, body, answer)
     if _diverged(answer):
         out = _keep_as_this_computers(tool, design_id, branch, body, answer, vault=None if own else vault)
         if out.get("status") == "error":
@@ -1093,9 +1102,56 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
             # Which of their designs was archived to make room, said at the
             # top of the answer so an agent tells the person what moved.
             out["made_room"] = made_room
+    # The numbers the account gave the versions it now holds, taken here;
+    # the proven recipes are read after, so each goes to the account under
+    # its version's number there.
+    from kiln.version_numbers import NumbersNotTaken
+
+    with _opened(None if own else vault) as v:
+        try:
+            numbers = v.take_account_numbers(design_id, out.get("push"))
+        except NumbersNotTaken as exc:
+            # The push stands: the versions are in the account.  The numbers
+            # wait for the next push or pull, and the person is told.
+            numbers = {"error": "not taken on this computer this time", "said": str(exc)}
+        if recipes:
+            recipes = v.proven_rows(design_id)
+    if numbers:
+        out["numbers_here"] = numbers
+        if numbers.get("said"):
+            out["said_numbers"] = numbers["said"]
+    # The account kept the push: a folder synced with no design is tied to
+    # this one from now on.
+    tie = design_tie.keep(design_tie.judge(
+        design_id, _design_folder(design_id), out.get("push"), doing="push",
+        here=[row["version_id"] for row in versions], tool=tool,
+    ))
+    if tie:
+        out["tie"] = tie
+        if tie.get("said"):
+            out["said_tie"] = tie["said"]
     if recipes:
         out["proven_recipes"] = _send_recipes(tool, design_id, recipes)
     return out
+
+
+def _judged_push(body: dict[str, Any]) -> bool:
+    """Whether a push's request carries what Kiln's servers judge its design by."""
+    from kiln import design_tie
+
+    return any(k in body for k in (design_tie.KEY_FIELD, design_tie.LINE_FIELD, design_tie.HISTORY_FIELD))
+
+
+def _push_refusal(tool: str, design_id: str, body: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
+    """A push Kiln's servers refused for its design, in public Kiln's words:
+    the code the server named, else what the request carried says which."""
+    from kiln import design_tie
+
+    code = answer.get("code")
+    if code not in (design_tie.REFUSED_CODE, design_tie.UNRELATED_CODE):
+        tied = design_tie.KEY_FIELD in body or design_tie.LINE_FIELD in body
+        code = design_tie.REFUSED_CODE if tied else design_tie.UNRELATED_CODE
+    return design_tie.refusal(design_id, "push", tool=tool, code=code)
 
 
 def _diverged(answer: dict[str, Any]) -> bool:
@@ -1201,7 +1257,7 @@ def _carry_models(body: dict[str, Any], meshes: dict[str, Path]) -> None:
 
 
 def _send_models(
-    tool: str, body: dict[str, Any], meshes: dict[str, Path],
+    tool: str, body: dict[str, Any], meshes: dict[str, Path], *, design_id: str = "",
 ) -> tuple[dict[str, Any] | None, dict[str, dict[str, str]] | None]:
     """Put each model a push uses in the person's account once, by fingerprint.
 
@@ -1209,7 +1265,9 @@ def _send_models(
     request, and names each version's model by ``mesh_sha256`` in *body*;
     Kiln's server refuses a push naming a model the account does not keep.
     A server that does not know the question gets the models inside *body*
-    instead, as pushes always carried them.
+    instead, as pushes always carried them.  The question carries the
+    folder's tie when *body* does, so a folder synced with a different
+    design is refused before any model is sent (:mod:`kiln.design_tie`).
 
     Returns ``(refusal, listed)``: *refusal* is ``None`` when the push may
     go, or the answer to give when a model was not kept (nothing is pushed
@@ -1227,14 +1285,22 @@ def _send_models(
                 f"Kiln could not read the model of version {version_id} on this computer "
                 f"({exc}), so nothing was pushed.",
             ), None
+    from kiln import design_tie
+
     wanted = sorted(set(shas.values()))
     kept: set[str] = set()
     listed: dict[str, dict[str, str]] | None = {}
+    tied = (
+        {"design_id": design_id, **{k: body[k] for k in (design_tie.KEY_FIELD, design_tie.LINE_FIELD, design_tie.HISTORY_FIELD) if k in body}}
+        if design_id and _judged_push(body) else {}
+    )
     for start in range(0, len(wanted), _MAX_FINGERPRINTS_ASKED):
         answer = _request(
             tool, "POST", "/api/cloud/meshes/stored",
-            {"sha256s": wanted[start:start + _MAX_FINGERPRINTS_ASKED], _MODEL_NOTES: True},
+            {"sha256s": wanted[start:start + _MAX_FINGERPRINTS_ASKED], _MODEL_NOTES: True, **tied},
         )
+        if tied and answer.get("http_status") == design_tie.REFUSED_STATUS:
+            return _push_refusal(tool, design_id, body, answer), None
         if answer.get("status") == "error" and answer.get("http_status") not in (404, 405):
             return answer, None
         stored = answer.get("stored")
@@ -1341,14 +1407,30 @@ def pull(
         branch_name = "main"
     body = {"branch_id": branch_id, "branch_name": branch_name, "since_version_id": since_version_id}
     path = f"/api/cloud/designs/{_quote(design_id)}/branches/pull"
-    return _bring_here(tool, design_id, lambda named: _request(tool, "POST", path, _asking(body, named)), vault)
+    return _bring_here(
+        tool, design_id, lambda named: _request(tool, "POST", path, _asking(body, named)), vault, doing="pull",
+    )
 
 
 def clone(tool: str, design_id: str, *, vault: Any = None) -> dict[str, Any]:
     """Bring a whole design, and its proven recipes, from the person's Kiln
     account onto this computer."""
     path = f"/api/cloud/designs/{_quote(design_id)}/clone"
-    return _bring_here(tool, design_id, lambda named: _request(tool, "POST", path, _asking({}, named)), vault)
+    return _bring_here(
+        tool, design_id, lambda named: _request(tool, "POST", path, _asking({}, named)), vault, doing="clone",
+    )
+
+
+def _judged(tool: str, design_id: str, answer: dict[str, Any], vault: Any, doing: str) -> Any:
+    """*answer* judged against the tie of *design_id*'s folder here
+    (:func:`kiln.design_tie.judge`)."""
+    from kiln import design_tie
+    from kiln.history_vault import _design_folder
+
+    return design_tie.judge(
+        design_id, _design_folder(design_id), answer, doing=doing,
+        here=lambda: vault.version_ids(design_id), tool=tool,
+    )
 
 
 def _asking(body: dict[str, Any], models_named: bool) -> dict[str, Any]:
@@ -1356,7 +1438,7 @@ def _asking(body: dict[str, Any], models_named: bool) -> dict[str, Any]:
     return {**body, _MESH_TRANSPORT: _BY_FINGERPRINT} if models_named else body
 
 
-def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, Any]:
+def _bring_here(tool: str, design_id: str, ask: Any, vault: Any, *, doing: str) -> dict[str, Any]:
     """Ask for a pull or clone answer naming its models, fetch the ones this
     computer lacks, and keep the history here.
 
@@ -1365,7 +1447,13 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, An
     cannot come on its own the request is sent again for an answer carrying
     them.  A model whose bytes are not the fingerprint asked for, or one
     that could not be fetched, stops the pull before anything is recorded.
+
+    An answer about a design other than the one this computer's folder is
+    synced with is refused before any model is fetched or anything recorded
+    (:mod:`kiln.design_tie`); a folder synced with none is tied to this
+    design once its history is kept.
     """
+    from kiln import design_tie
     from kiln.history_vault import HistoryVault
 
     answer = ask(True)
@@ -1374,6 +1462,9 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, An
     own = vault is None
     vault = vault or HistoryVault()
     try:
+        verdict = _judged(tool, design_id, answer, vault, doing)
+        if verdict.refused is not None:
+            return verdict.refused
         kept: dict[str, str] = {}
         models: dict[str, Any] | None = None
         if answer.get(_MESH_TRANSPORT) == _BY_FINGERPRINT:
@@ -1382,18 +1473,36 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, An
                 answer = ask(False)
                 if answer.get("status") == "error":
                     return answer
+                verdict = _judged(tool, design_id, answer, vault, doing)
+                if verdict.refused is not None:
+                    return verdict.refused
             elif fetched.get("status") == "error":
                 return fetched
             else:
                 kept, models = fetched["kept"], fetched["models"]
         carried = _notes_carried(answer)
-        applied = vault.apply_remote({**answer, "design_id": design_id}, kept_models=kept)
+        from kiln.version_numbers import NumbersNotTaken
+
+        try:
+            applied = vault.apply_remote({**answer, "design_id": design_id}, kept_models=kept)
+        except NumbersNotTaken as exc:
+            # Nothing was laid down: a pulled version is never filed beside a
+            # version here that still holds its number.
+            return {"status": "error", "code": "NUMBERS_NOT_TAKEN", "error": str(exc), "design_id": design_id}
+        tie = design_tie.keep(verdict)
         notes = _bring_notes(tool, answer, carried, vault)
         recipes = _bring_recipes(tool, design_id, vault)
     finally:
         if own:
             vault.close()
     out = {"status": "success", "applied": applied, "design_id": design_id, "proven_recipes": recipes}
+    said = (applied.get("numbers_here") or {}).get("said") if isinstance(applied, dict) else None
+    if said:
+        out["said_numbers"] = said
+    if tie:
+        out["tie"] = tie
+        if tie.get("said"):
+            out["said_tie"] = tie["said"]
     if models is not None:
         out["models"] = models
     if notes:

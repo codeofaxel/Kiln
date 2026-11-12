@@ -130,10 +130,10 @@ _ESSENTIAL_TOOLS = frozenset(
         "printer_files",
         "preflight_check",
         "validate_gcode",
-        # ``printer_status`` above takes a printer_name and is free, so the
-        # single-printer experience is complete without a fleet tool here.
-        # ``fleet_status`` is Business — advertising it in the smallest
-        # allowed set spends a slot on a refusal.
+        # ``printer_status`` above takes a printer_name, is free, and lists
+        # the printers set up here, so the single-printer experience is
+        # complete without ``fleet_status`` taking a slot in the smallest
+        # allowed set.
         "queue_summary",
         "kiln_health",
         "marketplace_info",
@@ -630,8 +630,9 @@ def _get_default_system_prompt() -> str:
         "- Start with `printer_status` to see what the printer is doing.\n"
         "- Use `preflight_check` before printing.\n"
         "- `printer_status` takes a printer name, so use it per machine when "
-        "more than one is registered. Managing them together (`fleet_status` "
-        "and the other fleet tools) is a Business feature.\n"
+        "more than one is registered; `fleet_status` lists the printers set "
+        "up. Every printer's live state in one view, and managing them "
+        "together (the fleet tools), is a Business feature.\n"
         "- Use `validate_gcode` before `send_gcode` for raw commands.\n"
         "- Submit jobs via `submit_job` for queued execution.\n"
         "- Use `search_all_models` to search across Thingiverse, MyMiniFactory, "

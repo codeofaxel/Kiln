@@ -262,7 +262,8 @@ class TestWhatComesBack:
         from kiln.version_numbers import numbers_in_folder
 
         head_path = str(folder / ".kiln_recipe.json")
-        assert create_new_version(load_recipe(head_path), head_path).version == max(numbers_in_folder(folder)) + 1
+        past_every_version = max(numbers_in_folder(folder)) + 1
+        assert create_new_version(load_recipe(head_path), head_path).version == past_every_version
 
     def test_a_branch_moved_here_meanwhile_is_left_as_it_is(self, home):
         _library(home, "mug", [MESH_V1])
@@ -453,10 +454,15 @@ class TestAPushSendsEachModelOnce:
         answer, calls = _account([_sha(MESH_V1)])
         monkeypatch.setattr(courier, "_request", answer)
         assert courier.push("cloud_push_branch", "mug")["status"] == "success"
-        assert calls[0][:3] == (
-            "POST", "/api/cloud/meshes/stored",
-            {"sha256s": sorted([_sha(MESH_V1), _sha(MESH_V2)]), "notes": True},
-        )
+        method, path, asked = calls[0][:3]
+        assert (method, path) == ("POST", "/api/cloud/meshes/stored")
+        assert {k: asked[k] for k in ("sha256s", "notes")} == {
+            "sha256s": sorted([_sha(MESH_V1), _sha(MESH_V2)]), "notes": True,
+        }
+        # A folder tied to no design carries its history, so the account can
+        # refuse joining it with a design that shares none of it.
+        assert asked["design_id"] == "mug"
+        assert set(asked["design_history"]) >= {v["version_id"] for v in calls[-1][2]["versions"]}
         assert [(m, p, c) for m, p, _, c in calls if m == "PUT"] == [
             ("PUT", f"/api/cloud/meshes/{_sha(MESH_V2)}", MESH_V2),
         ]
@@ -1132,7 +1138,8 @@ class TestProvenRecipesTravelWithTheDesign:
         answer = courier.pull("cloud_pull_branch", "mug")
 
         assert answer["proven_recipes"]["files_changed"] == 0
-        assert sorted(p.name for p in folder.iterdir()) == before
+        # The pull's own lock file aside (it holds nothing of the design).
+        assert sorted(p.name for p in folder.iterdir() if p.name != ".kiln_numbers.lock") == before
         assert not (home / ".kiln" / "designs" / "bowl").exists()
 
     def test_recipes_the_account_could_not_send_leave_the_pull_done_and_say_so(self, home, monkeypatch):

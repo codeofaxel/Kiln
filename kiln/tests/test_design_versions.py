@@ -464,3 +464,43 @@ class TestLimitClamping:
         store.save_version("d1", SCAD_V1, prompt="findme")
         results = store.search_versions("findme", limit=-1)
         assert len(results) == 1
+
+
+def test_a_store_shared_by_threads_keeps_every_save_and_every_read_works(tmp_path):
+    """One store, one connection, several threads: reads take the same lock
+    as saves, every read answers, and every save is kept."""
+    import threading
+    from collections import Counter
+
+    from kiln.design_versions import DesignVersionStore
+
+    store = DesignVersionStore(db_path=str(tmp_path / "threads.db"))
+    errors: list[str] = []
+
+    def write(i: int) -> None:
+        for k in range(30):
+            try:
+                store.save_version("thr", f"// {i}-{k}")
+            except Exception as exc:  # noqa: BLE001 -- counted below
+                errors.append(f"save: {exc!r}")
+
+    def read() -> None:
+        for _ in range(400):
+            try:
+                store.get_latest("thr")
+                store.list_versions("thr")
+            except Exception as exc:  # noqa: BLE001 -- counted below
+                errors.append(f"read: {exc!r}")
+
+    threads = [threading.Thread(target=write, args=(i,)) for i in range(4)]
+    threads += [threading.Thread(target=read) for _ in range(2)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        numbers = [v.version_number for v in store.list_versions("thr", limit=1000)]
+    finally:
+        store.close()
+    assert errors == [], Counter(e[:60] for e in errors).most_common(3)
+    assert sorted(numbers) == list(range(1, 121))

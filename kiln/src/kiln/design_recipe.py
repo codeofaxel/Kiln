@@ -175,7 +175,10 @@ def save_recipe(recipe: DesignRecipe, directory: str) -> str:
     """Serialize *recipe* to ``<directory>/.kiln_recipe.json``.
 
     Also writes a versioned copy (e.g., ``.kiln_recipe.v2.json``) so that
-    every version is preserved on disk alongside the "current" recipe.
+    every version is preserved on disk alongside the "current" recipe.  The
+    copy is never written over another version's: when a kept file already
+    holds the recipe's number for a different version, the recipe takes the
+    design's next number, and ``recipe.version`` says which on return.
 
     :returns: The absolute path of the written file.
     :raises FileNotFoundError: If *directory* does not exist.
@@ -196,14 +199,32 @@ def save_recipe(recipe: DesignRecipe, directory: str) -> str:
     # The layer height the mesh was designed in rides on the version, so a
     # copy of the version anywhere slices in it (kiln.slicer_layer).
     recipe.provenance = keep_on_record(recipe.provenance, recipe.stl_path)
-    # Always write the canonical "current" recipe
+    from kiln.version_numbers import library_design_id, number_to_write, numbers_in_store, numbers_lock
+
     path = os.path.join(directory, _RECIPE_FILENAME)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(recipe.to_dict(), fh, indent=2)
-    # Write a versioned snapshot (v1, v2, ...) for history
-    versioned = os.path.join(directory, f".kiln_recipe.v{recipe.version}.json")
-    with open(versioned, "w", encoding="utf-8") as fh:
-        json.dump(recipe.to_dict(), fh, indent=2)
+    # Checked and written under the design's numbers lock: a kept file that
+    # holds this number for another version (a pull laid it down after this
+    # version took the number) is never written over; this version takes
+    # the next number instead.  A version written again keeps the id its
+    # file names.
+    with numbers_lock(directory):
+        def recorded() -> set[int]:
+            return numbers_in_store(recipe.design_id or library_design_id(directory))
+
+        recipe.version, version_id = number_to_write(directory, recipe.version, recipe.created, recorded)
+        body = recipe.to_dict()
+        if version_id:
+            body["version_id"] = version_id
+        versioned = os.path.join(directory, f".kiln_recipe.v{recipe.version}.json")
+        # The versioned snapshot (v1, v2, ...) first, then the current
+        # recipe, each written whole and moved into place: a reader never
+        # meets half a file, and the current recipe never names a version
+        # with no snapshot.
+        for target in (versioned, path):
+            part = f"{target}.{os.getpid()}.part"
+            with open(part, "w", encoding="utf-8") as fh:
+                json.dump(body, fh, indent=2)
+            os.replace(part, target)
     return os.path.abspath(path)
 
 
@@ -336,7 +357,15 @@ def create_new_version(
         e.g. ``{"portrait.color": "white -> black"}``.
     :param notes: Free-text notes for this version.
     """
-    from kiln.version_numbers import holds_a_version, next_version_number, numbers_in_store
+    from kiln.design_versions import _library_folder
+    from kiln.version_numbers import (
+        holds_a_version,
+        library_design_id,
+        next_version_number,
+        numbers_from_library,
+        numbers_in_store,
+        reserve_version_number,
+    )
 
     new = copy.deepcopy(parent)
     # One past every number the design has given, not one past the parent:
@@ -344,8 +373,24 @@ def create_new_version(
     # saved into it is 1.
     folder = os.path.dirname(os.path.abspath(parent_path))
     is_version = not os.path.isfile(parent_path) or holds_a_version(parent_path)
-    taken = [*numbers_in_store(parent.design_id), *([parent.version] if is_version else [])]
-    new.version = next_version_number(folder, taken)
+    # A recipe from before designs wrote their id inside is the design its
+    # folder is named for.
+    library_id = library_design_id(folder)
+    design_id = parent.design_id or library_id
+    taken = [parent.version] if is_version else []
+
+    def recorded() -> set[int]:
+        return numbers_in_store(design_id)
+
+    if library_id is not None:
+        # Taken for good, with the history record read under the same lock.
+        new.version = reserve_version_number(folder, taken, also=recorded)
+    else:
+        # A recipe kept outside the library: numbered past its design's
+        # numbers, those its folder in the library has given included, and
+        # nothing written beside it.
+        elsewhere = numbers_from_library(folder, _library_folder(design_id)) if design_id else set()
+        new.version = next_version_number(folder, [*taken, *recorded(), *elsewhere])
     new.parent_version = os.path.abspath(parent_path)
     new.changes = changes
     new.created = datetime.now(timezone.utc).isoformat()
@@ -364,13 +409,60 @@ def create_new_version(
 VERSION_STORY_KEYS = ("tools_used", "change_summary", "source_files", "edit")
 
 
+#: Provenance keys that describe the part itself: what it is made of, where
+#: its geometry came from, what it is shaped to take.  These follow the part
+#: from a version to the next one made from it.  Every other key is one
+#: version's own (how it was made, what was measured, stamped or filed for
+#: it, the splits and the merge it records, and anything a caller stated
+#: about it), so a key nobody listed here is never shown as a later
+#: version's.
+PART_FACT_KEYS = frozenset({
+    "arrival",
+    "artifact_attestation_id",
+    "created_by",
+    "decided_against",
+    "decoration",
+    "designed_hardware",
+    "designed_layer",
+    "first_layer_height",
+    "format_conversion",
+    "generator_origin",
+    "import_origin",
+    "imported_from",
+    "imported_mesh_path",
+    "layer_height",
+    "material",
+    "mesh_conversion",
+    "origin",
+    "original_step",
+    "piece_of",
+    "pose",
+    "product_type",
+    "safety_notes",
+    "source_attribution",
+    "surface_repair",
+    "unit_reading",
+})
+
+#: The provenance key that marks a version as one piece of a split of its
+#: design: a part of the whole, kept beside it, never the design itself.
+PIECE_KEY = "piece_of"
+
+
 def part_facts(provenance: dict[str, Any] | None) -> dict[str, Any] | None:
-    """*provenance* without :data:`VERSION_STORY_KEYS`: the facts that
+    """The keys of *provenance* in :data:`PART_FACT_KEYS`: the facts that
     follow the part itself.  ``None`` when nothing is left."""
     if not isinstance(provenance, dict):
         return None
-    kept = {k: copy.deepcopy(v) for k, v in provenance.items() if k not in VERSION_STORY_KEYS}
+    kept = {k: copy.deepcopy(v) for k, v in provenance.items() if k in PART_FACT_KEYS}
     return kept or None
+
+
+def is_a_piece(recipe: Any) -> bool:
+    """Whether *recipe* (a :class:`DesignRecipe` or its dict) is one piece
+    of a split of its design."""
+    provenance = recipe.get("provenance") if isinstance(recipe, dict) else getattr(recipe, "provenance", None)
+    return isinstance(provenance, dict) and bool(provenance.get(PIECE_KEY))
 
 
 def own_parameters(source_scad: str | None) -> dict[str, Any]:
@@ -439,5 +531,5 @@ def list_recipe_versions(directory: str) -> list[dict[str, Any]]:
                 })
             except Exception:  # noqa: BLE001
                 results.append({"path": path, "error": "failed to parse"})
-    results.sort(key=lambda r: r.get("version", 0))
+    results.sort(key=lambda r: r["version"] if isinstance(r.get("version"), int) else 0)
     return results

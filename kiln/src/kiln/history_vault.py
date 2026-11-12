@@ -123,6 +123,20 @@ def _design_folder(design_id: Any) -> Path | None:
     return Path(target)
 
 
+def _open_version_store() -> Any:
+    """This computer's version store, when it has one; ``None`` otherwise.
+    Never makes a store, and never opens the one file on a shared server."""
+    from kiln import design_versions
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant() or not os.path.isfile(design_versions._DEFAULT_DB_PATH):
+        return None
+    try:
+        return design_versions.DesignVersionStore()
+    except Exception:  # noqa: BLE001 -- no store this computer can open: none is changed
+        return None
+
+
 #: A mesh is filed under its SHA-256; anything else is not a mesh name.
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _NOT_ID_CHARS = re.compile(r"[^A-Za-z0-9_-]")
@@ -628,6 +642,14 @@ class HistoryVault:
                 return path
         return None
 
+    def version_ids(self, design_id: str) -> set[str]:
+        """The ids of the versions these records keep for *design_id*."""
+        with self._lock:
+            return {
+                str(r["version_id"])
+                for r in self._conn.execute("SELECT version_id FROM versions WHERE design_id = ?", (design_id,))
+            }
+
     def version_count(self, design_id: str) -> int:
         """How many versions of *design_id* this computer keeps."""
         row = self._conn.execute(
@@ -997,6 +1019,155 @@ class HistoryVault:
             "library_files": library,
         }
 
+    def take_account_numbers(self, design_id: str, answer: Any) -> dict[str, Any]:
+        """Take the version numbers a Kiln account's *answer* says it keeps
+        for *design_id* (:func:`kiln.version_numbers.account_numbers_in`), in
+        every record this computer keeps of them: these records, the
+        design's library files, and the version store.
+
+        A version the account holds takes the account's number.  One only
+        this computer holds keeps its own, unless the account gave that
+        number to another version; then it moves past every number given
+        (:func:`kiln.version_numbers.plan_numbers`).  Returns
+        ``{"renumbered": [{"key", "from", "to"}], "said": sentence}``, empty
+        when nothing changed or the answer kept no numbers.
+        """
+        from contextlib import nullcontext
+
+        from kiln.design_tie import NUMBERS_NOT_FOR_THIS_FOLDER, numbers_may_be_taken
+        from kiln.version_numbers import NumbersBusy, NumbersNotTaken, account_numbers_in, numbers_lock
+
+        account, mark = account_numbers_in(answer)
+        if not account:
+            return {}
+        folder = _design_folder(design_id)
+        if not numbers_may_be_taken(folder, answer, design_id=design_id, here=self.version_ids(design_id)):
+            # The folder is synced with another design: its versions are
+            # never renumbered for this one.
+            return {"said": NUMBERS_NOT_FOR_THIS_FOLDER}
+        here = folder if folder is not None and folder.is_dir() else None
+        # Planned and applied under the design's numbers lock, so a save
+        # waits for the numbers to be taken instead of landing between the
+        # plan and the files moving.
+        try:
+            with numbers_lock(here) if here is not None else nullcontext():
+                return self._take_numbers_held(design_id, here, account, mark)
+        except NumbersBusy as exc:
+            raise NumbersNotTaken("another save of this design was running") from exc
+        except (ValueError, OSError) as exc:
+            raise NumbersNotTaken(str(exc)) from exc
+
+    def _settle_arrivals(self, design_id: str, answer: dict[str, Any]) -> dict[str, dict[str, int]]:
+        """:func:`kiln.version_numbers.settle_arrivals` for *answer*, over
+        every version this computer keeps of *design_id* (its records, its
+        library files and its version store).  The caller holds the numbers
+        lock.  The folder's mark is raised past each number given."""
+        from kiln.version_numbers import raise_mark, settle_arrivals
+
+        folder = _design_folder(design_id)
+        here = folder if folder is not None and folder.is_dir() else None
+        store = _open_version_store()
+        try:
+            _mine, _rows_here, local, past = self._numbers_here(design_id, here, store)
+        finally:
+            if store is not None:
+                store.close()
+        moves = settle_arrivals(answer, local, past)
+        if moves and here is not None:
+            raise_mark(here, max(m["to"] for m in moves.values()))
+        return moves
+
+    def _numbers_here(
+        self, design_id: str, here: Path | None, store: Any,
+    ) -> tuple[dict[str, Any], dict[str, int], dict[str, int], list[Any]]:
+        """Every number this computer holds for *design_id*: ``(mine, rows,
+        local, past)``.  *mine* is these records' recipes by version, *rows*
+        the version store's numbers, *local* each kept version's number
+        (files, then the store, then these records), *past* every number
+        given before."""
+        from kiln.version_numbers import kept_numbers, numbers_in_folder
+
+        with self._lock:
+            mine = {
+                str(r["version_id"]): json.loads(r["recipe"])
+                for r in self._conn.execute(
+                    "SELECT version_id, recipe FROM versions WHERE design_id = ?", (design_id,)
+                )
+            }
+        local: dict[str, int] = {}
+        past: list[Any] = []
+        if here is not None:
+            local.update(kept_numbers(here))
+            past += list(numbers_in_folder(here))
+        rows: dict[str, int] = {}
+        if store is not None:
+            for v in store.list_versions(design_id, limit=100000):
+                rows[v.version_id] = v.version_number
+                local.setdefault(v.version_id, v.version_number)
+            past += list(store.numbers(design_id))
+        for vid, recipe in mine.items():
+            number = recipe.get("version") if isinstance(recipe, dict) else None
+            if isinstance(number, int) and not isinstance(number, bool) and number > 0:
+                local[vid] = number
+        return mine, rows, local, past
+
+    def _take_numbers_held(
+        self, design_id: str, here: Path | None, account: dict[str, int], mark: int,
+    ) -> dict[str, Any]:
+        """:meth:`take_account_numbers`, the numbers lock held: the plan, then
+        every record moved whole or none of them (the store's numbers first,
+        in one transaction it can refuse, then these records and the files
+        together, the store put back when they fail)."""
+        from kiln.version_numbers import (
+            FILE_KEY,
+            kept_numbers,
+            plan_numbers,
+            raise_mark,
+            renumber_folder,
+            said_here,
+        )
+
+        if here is not None:
+            # The next version saved here is numbered past every number the
+            # account has given, other computers' included.
+            raise_mark(here, max([mark, *account.values()]))
+        store = _open_version_store()
+        try:
+            mine, rows, local, past = self._numbers_here(design_id, here, store)
+            past = [mark, *past]
+            named = {k for k in (kept_numbers(here) if here is not None else {}) if not k.startswith(FILE_KEY)}
+            final = plan_numbers(local, account, past=past, named=named)
+            changes = [
+                {"key": key, "from": local[key], "to": final[key]}
+                for key in sorted(local) if final.get(key) != local[key]
+            ]
+            if not changes:
+                return {}
+            if store is not None:
+                store.set_numbers(design_id, final)
+            try:
+                with self._lock:
+                    for vid, recipe in mine.items():
+                        if vid in final and isinstance(recipe, dict) and recipe.get("version") != final[vid]:
+                            self._conn.execute(
+                                "UPDATE versions SET recipe = ? WHERE version_id = ? AND design_id = ?",
+                                (_canonical({**recipe, "version": final[vid]}), vid, design_id),
+                            )
+                    if here is not None:
+                        renumber_folder(here, final, held=True)
+                    self._conn.commit()
+            except BaseException:
+                with self._lock:
+                    self._conn.rollback()
+                if store is not None:
+                    store.set_numbers(design_id, rows)
+                raise
+        finally:
+            if store is not None:
+                store.close()
+        said = said_here(changes, account)
+        return {"renumbered": changes, "said": said}
+
     def apply_remote(
         self, payload: dict[str, Any], *, kept_models: dict[str, str] | None = None,
     ) -> dict[str, Any]:
@@ -1004,9 +1175,20 @@ class HistoryVault:
 
         *kept_models* maps a version to the model already kept here for it
         (:meth:`keep_mesh`), for an answer that named its models rather than
-        carrying them.
+        carrying them.  The versions take the numbers the account keeps on
+        them, and a version only this computer keeps moves out of the way of
+        a number the account gave another (:meth:`take_account_numbers`).
         """
-        kept_models = kept_models or {}
+        from kiln.version_numbers import pull_lock
+
+        # One hold from taking the account's numbers to writing the pulled
+        # files: a save never takes a number or writes a file in between.
+        named = payload.get("design_id") or (payload.get("branch") or {}).get("design_id")
+        with pull_lock(_design_folder(named)):
+            return self._apply_remote_held(payload, kept_models or {})
+
+    def _apply_remote_held(self, payload: dict[str, Any], kept_models: dict[str, str]) -> dict[str, Any]:
+        """:meth:`apply_remote`, the design's numbers lock held."""
         bundle_like = {
             "design_id": payload.get("design_id") or (payload.get("branch") or {}).get("design_id"),
             "branches": payload.get("branches") or ([payload["branch"]] if payload.get("branch") else []),
@@ -1016,6 +1198,19 @@ class HistoryVault:
             "releases": payload.get("releases") or [],
         }
         design_id = str(bundle_like["design_id"] or "")
+        # The account's numbers first, so a version only this computer keeps
+        # is out of the way before a pulled version takes its number.  Then
+        # the versions the account gave no number: one arriving under a
+        # number already held here takes the next one free here, before
+        # anything of it is recorded.
+        numbers = self.take_account_numbers(design_id, payload) if design_id else {}
+        arrivals = self._settle_arrivals(design_id, payload) if design_id else {}
+        if arrivals:
+            from kiln.version_numbers import with_arrivals_settled
+
+            bundle_like["provenance_sidecars"] = with_arrivals_settled(
+                {"provenance_sidecars": bundle_like["provenance_sidecars"]}, arrivals,
+            )["provenance_sidecars"]
         recipes = {
             r["version_id"]: r.get("recipe_dict") if isinstance(r.get("recipe_dict"), dict) else {}
             for r in _rows(bundle_like["provenance_sidecars"], "version_id")
@@ -1025,13 +1220,23 @@ class HistoryVault:
             if b.get("design_id") in (None, design_id) and self._is_designs("branches", b["branch_id"], design_id)
         ]
         bundle_like["branches"] = branches
+        if arrivals:
+            from kiln.version_numbers import new_arrivals, said_arrivals
+
+            if new_arrivals(arrivals):
+                numbers = {**numbers, "arrived_as": new_arrivals(arrivals), "said": said_arrivals(arrivals)}
+        account = {str(v["version_id"]): v.get("version_number") for v in _rows(bundle_like["versions"], "version_id")}
         written = []
         with self._lock:
             for v in _rows(bundle_like["versions"], "version_id"):
                 if not self._is_designs("versions", v["version_id"], design_id):
                     continue
+                recipe = dict(recipes.get(v["version_id"]) or {})
+                number = account.get(str(v["version_id"]))
+                if recipe and isinstance(number, int) and not isinstance(number, bool) and number > 0:
+                    recipe["version"] = number
                 self._put_version(
-                    design_id, v, dict(recipes.get(v["version_id"]) or {}),
+                    design_id, v, recipe,
                     kept_sha=kept_models.get(v["version_id"]),
                 )
                 written.append(self.version(v["version_id"]) or {})
@@ -1049,12 +1254,15 @@ class HistoryVault:
                 self._put_release({**r, "design_id": design_id})
             self._conn.commit()
         self._write_library(design_id, [w for w in written if w])
-        return {
+        out = {
             "design_id": design_id,
             "branches": len(bundle_like["branches"]),
             "versions": len(written),
             "releases": len(bundle_like["releases"]),
         }
+        if numbers:
+            out["numbers_here"] = numbers
+        return out
 
 
     # -- saved features and decoration presets --------------------------------
@@ -1515,6 +1723,17 @@ class HistoryVault:
         if folder is None or not versions:
             return []
         folder.mkdir(parents=True, exist_ok=True)
+        from kiln.version_numbers import numbers_lock
+
+        # Which names are taken is read, and the files written, under the
+        # design's numbers lock: a save's file is never written over, and
+        # never lands between the look and the write.
+        with numbers_lock(folder):
+            written = self._write_library_held(design_id, folder, versions)
+        self._point_head(design_id)
+        return written
+
+    def _write_library_held(self, design_id: str, folder: Path, versions: list[dict[str, Any]]) -> list[str]:
         taken = {p.name: p for p in folder.glob(".kiln_recipe*.json")}
         written = []
         for v in versions:
@@ -1535,7 +1754,6 @@ class HistoryVault:
             path.write_text(json.dumps(recipe, indent=2, sort_keys=True), encoding="utf-8")
             taken[name] = path
             written.append(str(path))
-        self._point_head(design_id)
         return written
 
     def _point_head(self, design_id: str) -> None:
