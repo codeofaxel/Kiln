@@ -19,7 +19,10 @@ column.  The failure classifier (:mod:`kiln.failure_recovery`
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import math
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Canonical vocabulary
@@ -164,6 +167,11 @@ def normalize_failure_type(value: str | None) -> str | None:
 # printer too.  An outside stop counts toward neither and stays in the
 # person's history with its cause.  Every reader in both packages asks here
 # and never keeps its own list.
+#
+# One more thing keeps a bad print from counting about the PRINT: the person
+# had marked the printer as needing repair when the print started
+# (:func:`excused_by_repair`).  The print stays in their history and still
+# counts about the MACHINE.  A success is never set aside.
 
 #: Causes that are the print itself coming out wrong.
 PRINT_DEFECTS: frozenset[str] = frozenset({
@@ -248,20 +256,138 @@ def ending_verdict(
     return None
 
 
+#: The times a machine stood marked as needing repair, by its fingerprint:
+#: each ``(from, until)`` in epoch seconds, ``until`` ``None`` for a mark
+#: still standing.  Read off the repair record by
+#: ``KilnDB.repair_windows`` (:mod:`kiln.persistence`).
+RepairWindows = Mapping[str, Sequence[tuple[float, float | None]]]
+
+#: A machine fingerprint that may be written into a SQL condition as it is.
+_PLAIN_FINGERPRINT = re.compile(r"[A-Za-z0-9_.:\-\[\]@ /]{1,256}")
+
+#: What a bad print set aside by the repair record is called, to the person
+#: whose print it was.
+REPAIR_EXCUSED_WORDS = (
+    "Bad print while this printer was marked needs repair: "
+    "not counted against the design or the material"
+)
+
+
+def plain_fingerprint(machine_fingerprint: Any) -> bool:
+    """Whether *machine_fingerprint* can be named in :func:`judged_ending_sql`.
+    A repair window is read for such a machine only, in both forms of the
+    rule, so the two never disagree."""
+    return isinstance(machine_fingerprint, str) and _PLAIN_FINGERPRINT.fullmatch(machine_fingerprint) is not None
+
+
+def _moment(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def excused_by_repair(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+    *, machine_fingerprint: str | None = None, started_at: float | None = None,
+    repair_windows: RepairWindows | None = None,
+) -> bool:
+    """Whether a bad print is set aside, about the print, by its machine's
+    repair record: it started at or after the moment the person marked that
+    machine as needing repair and before the repair that followed (or the
+    mark still stands).
+
+    Only a ``bad_print`` (:func:`ending_verdict`) is ever set aside.  A print
+    whose machine or start time is not on record is not, and neither is one
+    on a machine that was repaired without first being marked.  Never raises.
+    """
+    if not repair_windows or ending_verdict(outcome, failure_mode, determined_by) != "bad_print":
+        return False
+    if not plain_fingerprint(machine_fingerprint):
+        return False
+    started = _moment(started_at)
+    if started is None:
+        return False
+    for since, until in repair_windows.get(machine_fingerprint) or ():
+        begin, end = _moment(since), _moment(until)
+        if begin is not None and begin <= started and (end is None or started < end):
+            return True
+    return False
+
+
+def repair_said(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+    *, machine_fingerprint: str | None = None, started_at: float | None = None,
+    repair_windows: RepairWindows | None = None,
+) -> str | None:
+    """The words for a bad print the repair record sets aside
+    (:data:`REPAIR_EXCUSED_WORDS`), or ``None`` for every other ending.  What
+    a person's own history shows beside the ending.  Never raises."""
+    excused = excused_by_repair(
+        outcome, failure_mode, determined_by,
+        machine_fingerprint=machine_fingerprint, started_at=started_at, repair_windows=repair_windows,
+    )
+    return REPAIR_EXCUSED_WORDS if excused else None
+
+
 def is_judged_ending(
     outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
     *, about: str = ABOUT_THE_PRINT,
+    machine_fingerprint: str | None = None, started_at: float | None = None,
+    repair_windows: RepairWindows | None = None,
 ) -> bool:
     """Whether the ending counts for a reader judging *about*
-    (:data:`ABOUT_THE_PRINT` or :data:`ABOUT_THE_MACHINE`)."""
-    return ending_verdict(outcome, failure_mode, determined_by) in JUDGED_ENDINGS[about]
+    (:data:`ABOUT_THE_PRINT` or :data:`ABOUT_THE_MACHINE`).
+
+    About the print, a bad print on a machine standing marked as needing
+    repair does not count (:func:`excused_by_repair`): a reader hands in the
+    row's ``machine_fingerprint``, its start time and the repair windows.
+    About the machine the repair record changes nothing here."""
+    if ending_verdict(outcome, failure_mode, determined_by) not in JUDGED_ENDINGS[about]:
+        return False
+    return about != ABOUT_THE_PRINT or not excused_by_repair(
+        outcome, failure_mode, determined_by,
+        machine_fingerprint=machine_fingerprint, started_at=started_at, repair_windows=repair_windows,
+    )
 
 
-def judged_ending_sql(alias: str = "", *, about: str = ABOUT_THE_PRINT) -> str:
+def _repair_sql(col: str, repair_windows: RepairWindows) -> str:
+    """:func:`excused_by_repair` as a SQL condition over a row already known
+    to be a success or a bad print, or ``""`` when no window is given."""
+    machines = []
+    for fingerprint in sorted(repair_windows):
+        if not plain_fingerprint(fingerprint):
+            raise ValueError(f"not a fingerprint that can be named in SQL: {fingerprint!r}")
+        spans = []
+        for since, until in repair_windows[fingerprint] or ():
+            begin, end = _moment(since), _moment(until)
+            if begin is None:
+                continue
+            span = f"{col}created_at >= {begin!r}"
+            if end is not None:
+                span += f" AND {col}created_at < {end!r}"
+            spans.append(f"({span})")
+        if spans:
+            machines.append(
+                f"(COALESCE({col}machine_fingerprint, '') = '{fingerprint}' "
+                f"AND {col}created_at IS NOT NULL AND ({' OR '.join(spans)}))"
+            )
+    if not machines:
+        return ""
+    return f" AND NOT ({col}outcome <> 'success' AND ({' OR '.join(machines)}))"
+
+
+def judged_ending_sql(
+    alias: str = "", *, about: str = ABOUT_THE_PRINT, repair_windows: RepairWindows | None = None,
+) -> str:
     """:func:`is_judged_ending` as a SQL condition over a ``print_outcomes``
     row (its ``outcome``, ``failure_mode`` and ``determined_by`` columns),
     every column qualified with *alias* when one is given.  Stored cause
-    words are already canonical, so no translation is needed here."""
+    words are already canonical, so no translation is needed here.
+
+    With *repair_windows*, about the print, the condition also reads the
+    row's ``machine_fingerprint`` and ``created_at`` (its start) and leaves
+    out what :func:`excused_by_repair` sets aside.  The windows are written
+    into the condition, so it takes no parameters."""
     if alias and not alias.isidentifier():
         raise ValueError(f"not a table alias: {alias!r}")
     if about not in JUDGED_ENDINGS:
@@ -279,7 +405,11 @@ def judged_ending_sql(alias: str = "", *, about: str = ABOUT_THE_PRINT) -> str:
             f"(COALESCE({col}failure_mode, '') IN ('', '{UNNAMED_CAUSE}') "
             f"AND {col}determined_by IN ({words(SAW_THE_PART)})))"
         )
-    return f"({col}outcome = 'success' OR ({col}outcome IN ({words(FAILED_OUTCOMES)}) AND {failure}))"
+    judged = f"({col}outcome = 'success' OR ({col}outcome IN ({words(FAILED_OUTCOMES)}) AND {failure}))"
+    if about != ABOUT_THE_PRINT or not repair_windows:
+        return judged
+    set_aside = _repair_sql(col, repair_windows)
+    return f"({judged}{set_aside})" if set_aside else judged
 
 
 def pooled_row_is_about_the_print(outcome: str | None, failure_mode: str | None) -> bool:

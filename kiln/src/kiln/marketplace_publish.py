@@ -191,7 +191,7 @@ def generate_print_certificate(file_path: str) -> PrintCertificate | None:
     # pending/unknown/cancelled row, or a failure an outside cause stopped,
     # carries no verdict and must not dilute a certificate's success rate.
     rows = db._conn.execute(
-        f"SELECT * FROM print_outcomes WHERE file_hash = ? AND {db._DECIDED}",
+        f"SELECT * FROM print_outcomes WHERE file_hash = ? AND {db.decided_sql()}",
         (fhash,),
     ).fetchall()
 

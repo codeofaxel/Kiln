@@ -696,6 +696,31 @@ def print_contribution_key(
     return f"print:sig:{name or signature}:{signature}"
 
 
+def _printer_marked_for_repair(
+    job_id: str | None, printer_file_name: str | None, outcome: str, failure_mode: Any, determined_by: str | None,
+) -> bool:
+    """Whether this computer's row for the print says its printer stood
+    marked as needing repair when it started.  The ending is judged as the
+    caller reports it; the machine and the start time come from the row.  No
+    row, or a store that cannot be read, is ``False``."""
+    try:
+        from kiln.failure_vocabulary import excused_by_repair
+        from kiln.persistence import get_db
+
+        db = get_db()
+        row = db.print_row_for_ending(job_id, printer_file_name)
+        if not row or not row.get("machine_fingerprint"):
+            return False
+        return excused_by_repair(
+            outcome, failure_mode if isinstance(failure_mode, str) else None, determined_by,
+            machine_fingerprint=row.get("machine_fingerprint"), started_at=row.get("created_at"),
+            repair_windows=db.repair_windows(),
+        )
+    except Exception:  # noqa: BLE001 -- a row that cannot be read sets nothing aside
+        logger.debug("repair record not read for a contribution", exc_info=True)
+        return False
+
+
 def contribute_print_outcome(
     *,
     outcome: str,
@@ -735,7 +760,10 @@ def contribute_print_outcome(
     (:func:`kiln.failure_vocabulary.ending_verdict`, with the failure word in
     ``extra`` and *determined_by*, who settled the ending): a print an outside
     cause stopped, or one only the printer called failed without naming why,
-    says nothing about the model, the material or the nozzle.
+    says nothing about the model, the material or the nozzle.  Neither does a
+    bad print on a printer the person had marked as needing repair
+    (:func:`kiln.failure_vocabulary.excused_by_repair`, asked of this
+    computer's own row for the print).
 
     :returns: ``{"contributed": False, "reason": ...}`` when the outcome
         carries no verdict, nothing names the print, the user is opted out,
@@ -754,6 +782,8 @@ def contribute_print_outcome(
         word = (extra or {}).get("failure_mode")
         if failed_ending_kind(word if isinstance(word, str) else None, determined_by) != "bad_print":
             return {"contributed": False, "reason": "not_about_the_print"}
+        if _printer_marked_for_repair(job_id, printer_file_name, mapped, word, determined_by):
+            return {"contributed": False, "reason": "printer_marked_for_repair"}
     key = print_contribution_key(job_id, str(geometric_signature or ""), printer_file_name)
     if not key:
         return {"contributed": False, "reason": "no_identity"}

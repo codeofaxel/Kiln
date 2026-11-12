@@ -3729,6 +3729,7 @@ class KilnDB:
         version_ids: list[str] | None = None,
         design_id: str | None = None,
         include_stops: bool = False,
+        count_repair_excused: bool = False,
     ) -> list[dict[str, Any]]:
         """Return outcome records, optionally filtered.
 
@@ -3744,6 +3745,11 @@ class KilnDB:
         that applies the rule per subject itself (the print history an
         install sends with a call).  An explicit
         ``outcome=`` filter or ``include_all=True`` sees everything.
+
+        A bad print the repair record sets aside (:meth:`excused_by_repair`)
+        is not a judged ending about the print and is left out by default;
+        ``count_repair_excused`` keeps it, for a reader of the printer's own
+        record.
         """
         clauses: list[str] = []
         params: list[Any] = []
@@ -3768,7 +3774,7 @@ class KilnDB:
         elif include_stops:
             clauses.append(f"outcome IN ('success', {_sql_words(FAILED_OUTCOMES)})")
         elif not include_all:
-            clauses.append(self._DECIDED)
+            clauses.append(self._DECIDED if count_repair_excused else self.decided_sql())
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
         rows = self._conn.execute(
@@ -3786,6 +3792,9 @@ class KilnDB:
     # a printer stopping itself is not a verdict on any of them.
     # ``_MACHINE_DECIDED`` judges the printer, which a machine stop is.
     # Neither counts a power cut or a run-out spool (kiln.failure_vocabulary).
+    # A reader judging the print asks ``decided_sql()``, which also leaves
+    # out a bad print the repair record sets aside; ``_DECIDED`` alone is the
+    # rule before the repair record.
     _DECIDED = judged_ending_sql()
     _MACHINE_DECIDED = judged_ending_sql(about=ABOUT_THE_MACHINE)
 
@@ -3831,7 +3840,7 @@ class KilnDB:
             "  COUNT(*) as total, "
             "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
             "FROM print_outcomes "
-            f"WHERE printer_name = ? AND material_type IS NOT NULL AND {self._DECIDED} "
+            f"WHERE printer_name = ? AND material_type IS NOT NULL AND {self.decided_sql()} "
             "GROUP BY material_type ORDER BY total DESC",
             (printer_name,),
         ).fetchall()
@@ -4071,6 +4080,103 @@ class KilnDB:
         elif current is not None:
             out["state"] = "repaired"
         return out
+
+    @staticmethod
+    def needs_repair_windows(standing: list[dict[str, Any]]) -> list[tuple[float, float | None]]:
+        """The times a machine stood marked as needing repair, from its
+        standing marks (:meth:`standing_repair_marks`) in the order of their
+        moments: each ``(from, until)``, opened by a ``needed`` and closed by
+        the next ``done``; ``until`` is ``None`` for a mark still standing.
+        A ``done`` with no ``needed`` before it opens and closes nothing."""
+        windows: list[tuple[float, float | None]] = []
+        since: float | None = None
+        for mark in standing:
+            if mark["status"] == "needed":
+                if since is None:
+                    since = float(mark["marked_at"])
+            elif mark["status"] == "done" and since is not None:
+                windows.append((since, float(mark["marked_at"])))
+                since = None
+        if since is not None:
+            windows.append((since, None))
+        return windows
+
+    def repair_windows(self) -> dict[str, list[tuple[float, float | None]]]:
+        """Every machine's needs-repair windows (:meth:`needs_repair_windows`),
+        by fingerprint: what :func:`kiln.failure_vocabulary.excused_by_repair`
+        and its SQL form read.  Machines with no window are left out, and so
+        is one whose fingerprint cannot be named in a SQL condition.  A record
+        that cannot be read gives no windows, so nothing is set aside."""
+        from kiln.failure_vocabulary import plain_fingerprint
+
+        try:
+            rows = self._conn.execute(
+                "SELECT DISTINCT machine_fingerprint FROM machine_repairs WHERE status = 'needed'"
+            ).fetchall()
+            out: dict[str, list[tuple[float, float | None]]] = {}
+            for (fingerprint,) in rows:
+                if not plain_fingerprint(fingerprint):
+                    logger.debug("repair windows not read for a machine whose fingerprint is not plain")
+                    continue
+                windows = self.needs_repair_windows(
+                    self.standing_repair_marks(self.machine_repair_marks(fingerprint))
+                )
+                if windows:
+                    out[fingerprint] = windows
+            return out
+        except Exception:  # noqa: BLE001 -- a record that cannot be read sets nothing aside
+            logger.debug("repair windows not read", exc_info=True)
+            return {}
+
+    def decided_sql(self, alias: str = "") -> str:
+        """The endings that count about the print, as a SQL condition over
+        ``print_outcomes``: :attr:`_DECIDED` less the bad prints this
+        computer's repair record sets aside (:meth:`repair_windows`).  Takes
+        no parameters.  Every reader that judges a design, a version, a
+        material or settings asks here."""
+        return judged_ending_sql(alias, repair_windows=self.repair_windows())
+
+    def excused_by_repair(self, row: dict[str, Any] | None) -> bool:
+        """Whether *row* (a ``print_outcomes`` row) is a bad print the repair
+        record sets aside (:func:`kiln.failure_vocabulary.excused_by_repair`)."""
+        from kiln.failure_vocabulary import excused_by_repair
+
+        if not isinstance(row, dict) or not row.get("machine_fingerprint"):
+            return False
+        return excused_by_repair(
+            row.get("outcome"), row.get("failure_mode"), row.get("determined_by"),
+            machine_fingerprint=row.get("machine_fingerprint"), started_at=row.get("created_at"),
+            repair_windows=self.repair_windows(),
+        )
+
+    #: How many of the newest print rows an ending is looked for among.
+    _ENDING_ROW_SEARCH = 50
+
+    def print_row_for_ending(self, job_id: str | None, file_name: str | None = None) -> dict[str, Any] | None:
+        """The newest print row, by start time, that an ending under
+        *job_id* (a job label) or *file_name* belongs to: its job id is that
+        label, or its file is that file with or without its folder and
+        extensions.  Looked for among the :attr:`_ENDING_ROW_SEARCH` newest
+        rows; ``None`` when none of them is it."""
+        keys = {k for k in (job_id, file_name) if isinstance(k, str) and k}
+        stems = {_file_stem_token(k) for k in keys} - {""}
+        if not keys:
+            return None
+        rows = self._conn.execute(
+            "SELECT * FROM print_outcomes ORDER BY created_at DESC LIMIT ?", (self._ENDING_ROW_SEARCH,)
+        ).fetchall()
+        for raw in rows:
+            row = self._outcome_row_to_dict(raw)
+            if row.get("job_id") in keys or stems & {
+                _file_stem_token(row.get("job_id")), _file_stem_token(row.get("file_name")),
+            }:
+                return row
+        return None
+
+    def print_outcome_row(self, row_id: int) -> dict[str, Any] | None:
+        """The print row with id *row_id*, or ``None``."""
+        raw = self._conn.execute("SELECT * FROM print_outcomes WHERE id = ?", (row_id,)).fetchone()
+        return self._outcome_row_to_dict(raw) if raw is not None else None
 
     # The account's copy of a repair mark (kiln.machine_repair_courier)
 
