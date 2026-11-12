@@ -30,6 +30,11 @@ _ASSIGN_RE = re.compile(
     r"(?:\s*//\s*(?P<comment>.*))?$"
 )
 
+# A line that only sets OpenSCAD's own special variables (``$fn``, ``$fa``,
+# ``$fs``...), one or several: a render setting inside the parameter block,
+# never a parameter and never the end of the block.
+_SPECIAL_ONLY_RE = re.compile(r"^(?:\$\w+\s*=\s*[^;]+;\s*)+(?://.*)?$")
+
 # Identifiers inside an expression, once string literals are removed.
 _IDENT_RE = re.compile(r"[a-zA-Z_]\w*")
 _STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
@@ -251,6 +256,8 @@ def parse_openscad_parameters(scad_code: str) -> list[ParameterDef]:
     params: list[ParameterDef] = []
 
     for line in lines:
+        if _SPECIAL_ONLY_RE.match(line):
+            continue
         m = _VAR_RE.match(line)
         if m:
             name = m.group("name")

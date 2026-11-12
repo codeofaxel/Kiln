@@ -34,6 +34,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Safety notes stick to the thing you made, in plain words.**
+
 - **Every order waits for your yes.** Before a print service makes anything, you see the model and the price and approve it yourself; your agent can't order alone.
 
 - **Lightening a heavy model no longer breaks it.** Kiln now simplifies big models on its servers without opening holes in closed parts, and says how far the surface moved. Needs a free Kiln account.
