@@ -69,6 +69,7 @@ from kiln.printers.base import (
     TelemetryCadence,
     UploadResult,
     _record_print_duration,
+    _record_progress_at_end,
     capture_rtsp_frame,
     describe_fault_remedy,
     describe_unacknowledged_fault,
@@ -77,6 +78,7 @@ from kiln.printers.base import (
     format_error_code,
     is_resume_mode_3mf,
     outcome_printer_name,
+    outcome_printer_names,
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
@@ -2043,6 +2045,24 @@ class BambuAdapter(PrinterAdapter):
                         else None
                     )
 
+                    progress = None
+                    if ended:
+                        with self._state_lock:
+                            percent_at_end = self._last_status.get("mc_percent")
+                            layer_at_end = self._last_status.get("layer_num")
+                        progress = {
+                            "printer_names": outcome_printer_names(self),
+                            "job_label": str(file_name_for_hook or job_id_for_hook),
+                            "job": JobProgress(
+                                completion=percent_at_end if isinstance(percent_at_end, (int, float)) else None,
+                                current_layer=layer_at_end if isinstance(layer_at_end, int) else None,
+                            ),
+                            "state_age_seconds": 0.0,
+                            "observation_gap_seconds": push_gap_seconds,
+                        }
+                        if _record_progress_at_end(**progress):
+                            progress = None
+
                     fire_terminal_state_hook(
                         prev_state=prev_gcode_state,
                         new_state=new_gcode_state,
@@ -2051,6 +2071,8 @@ class BambuAdapter(PrinterAdapter):
                         job_id=str(job_id_for_hook),
                         file_name=str(file_name_for_hook) if file_name_for_hook else None,
                     )
+                    if progress is not None:
+                        _record_progress_at_end(**progress, settled=True)
 
                     if ended:
                         # Stop the stopwatch — the job it was measuring is over

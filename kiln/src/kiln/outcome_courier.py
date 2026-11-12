@@ -14,11 +14,15 @@ branch ids, the machine as a one-way code (:func:`kiln.outbound_guard.machine_co
 the same code for the same machine on this computer, meaningless anywhere
 else), the printer's model word, the material word, the nozzle size, the
 ending, who settled it, a failure-vocabulary word, the start and end times,
-and a note the person or their agent wrote on how it came out, labelled with
+a note the person or their agent wrote on how it came out, labelled with
 who wrote it (:mod:`kiln.outcome_note`), sent only when it changed here (a
-note deleted here goes up as a delete).  No printer name, serial, address,
-file name, settings or readings; a system string in ``notes`` with no label
-(a hook's "auto-recorded ...") stays here.
+note deleted here goes up as a delete), and what the row holds of
+:mod:`kiln.print_evidence`: a one-way code of the settings the file was
+sliced with, how far the print got (a share and a layer number), the spool
+as a one-way code (:func:`kiln.outbound_guard.spool_code`) and the firmware
+version text.  No printer name, serial, address, file name, settings, spool
+id, spool name or colour; a system string in ``notes`` with no label (a
+hook's "auto-recorded ...") stays here.
 
 Not sent: a print of a file that is no kept design (no version to mark), a
 print still ``pending``, a design locked to this computer, anything at all when
@@ -64,6 +68,7 @@ _EXIT_WAIT_S = 8.0
 
 _SYNC_ID = re.compile(r"^[0-9a-f]{32}$")
 _WORD = re.compile(r"^[a-z_]{1,40}$")
+_SETTINGS_CODE = re.compile(r"^[0-9a-f]{16,64}$")
 
 _lock = threading.Lock()
 _timer: threading.Timer | None = None
@@ -157,8 +162,9 @@ def flush(wait: float = _EXIT_WAIT_S) -> bool:
 
 def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     """*row* as it goes to the account: the named fields, nothing else."""
-    from kiln.outbound_guard import machine_code
+    from kiln.outbound_guard import machine_code, spool_code
     from kiln.outcome_note import NOTE_BY, clean_note
+    from kiln.print_evidence import wire_firmware
 
     out: dict[str, Any] = {
         "source_job_id": sync_id,
@@ -193,6 +199,21 @@ def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
         if note:
             out["note"] = note
             out["note_by"] = note_by
+    settings = row.get("settings_code")
+    if isinstance(settings, str) and _SETTINGS_CODE.fullmatch(settings):
+        out["settings_code"] = settings
+    share = row.get("progress_at_end")
+    if isinstance(share, (int, float)) and not isinstance(share, bool) and 0.0 <= share <= 1.0:
+        out["progress_at_end"] = float(share)
+    layer = row.get("layer_at_end")
+    if isinstance(layer, int) and not isinstance(layer, bool) and layer >= 0:
+        out["layer_at_end"] = layer
+    spool = spool_code(row.get("spool_id")) if isinstance(row.get("spool_id"), str) else None
+    if spool:
+        out["spool_code"] = spool
+    firmware = wire_firmware(row.get("firmware_version"))
+    if firmware:
+        out["firmware"] = firmware
     for key, src in (("started_at", "created_at"), ("ended_at", "ended_at")):
         when = row.get(src)
         if isinstance(when, (int, float)) and not isinstance(when, bool) and when > 0:
@@ -264,6 +285,19 @@ def _kept_here(rows: list[dict[str, Any]]) -> set[int]:
         vault.close()
 
 
+def _scrubbed(payload: list[dict[str, Any]], scrub: Any) -> list[dict[str, Any]]:
+    """*payload* through the outbound guard, each row's ``firmware`` as
+    :func:`account_row` passed it: a version of four numbers reads as a
+    network address to the guard, and the field holds nothing but the
+    letters, digits, dots, dashes and spaces
+    :data:`kiln.print_evidence.FIRMWARE_WIRE` allows."""
+    rows = scrub(payload)
+    for clean, raw in zip(rows, payload, strict=True):
+        if isinstance(clean, dict) and "firmware" in raw:
+            clean["firmware"] = raw["firmware"]
+    return rows
+
+
 def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -> dict[str, Any]:
     """Send every settled row the account has not taken yet.  Returns what
     happened, in words a caller can show; never raises for the network.
@@ -299,7 +333,7 @@ def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -
         state = db.account_push_state(row)
         payload.append(note_change(account_row(row, sync_id), row.get("account_pushed_state"), state))
         states.append((row["id"], state))
-    answer = _request(TOOL, "POST", PUSH_PATH, {"rows": scrub(payload)}, timeout=wait)
+    answer = _request(TOOL, "POST", PUSH_PATH, {"rows": _scrubbed(payload, scrub)}, timeout=wait)
     if answer.get("success") is False or answer.get("status") == "error":
         return {"sent": 0, "why": "not_taken", "code": answer.get("code"), "owed": len(payload)}
     # Taken, held (a surer answer is already there) and refused (a row the

@@ -666,3 +666,43 @@ class TestACountThatMissesSaysWhy:
             _start(machine, _sliced(tmp_path))
         said = [r.getMessage() for r in caplog.records if "spool count for workshop skipped" in r.getMessage()]
         assert len(said) == 1 and "the printer did not answer" in said[0]
+
+
+def _row_spool(printer: str = "workshop") -> str | None:
+    row = get_db()._conn.execute(
+        "SELECT spool_id FROM print_outcomes WHERE printer_name = ? ORDER BY id DESC LIMIT 1", (printer,)
+    ).fetchone()
+    assert row is not None, "the start opened no outcome row"
+    return row[0]
+
+
+class TestThePrintsRowNamesTheSpoolThatFedIt:
+    """The outcome row a start opens carries the one linked spool that
+    printed it, and nothing when which spool it was is not on record."""
+
+    def test_a_linked_spool_on_one_feed_is_named(self, machine, tmp_path):
+        red = _add("PLA", "red")
+        assert server.set_material("workshop", "PLA", color="red", spool_id=red)["success"]
+        machine.load(_NO_UNIT)
+        _start(machine, _sliced(tmp_path, grams="16.0", colours="#F72323", types="PLA"))
+        assert _row_spool() == red
+
+    def test_a_spool_paired_to_a_tray_by_colour_is_not_named(self, machine, tmp_path):
+        red = _add("PLA", "red")
+        _start(machine, _sliced(tmp_path, grams="16.0", colours="#F72323", types="PLA"))
+        assert _left(red) == 984.0  # counted, by colour
+        assert _row_spool() is None
+
+    def test_a_print_fed_by_two_spools_names_neither(self, machine, tmp_path):
+        first, second = _add("PLA", "red"), _add("PLA", "white")
+        assert server.set_material("workshop", "PLA", spool_id=first, tool_index=0)["success"]
+        assert server.set_material("workshop", "PLA", spool_id=second, tool_index=1)["success"]
+        machine.load(_NO_UNIT)
+        _start(machine, _sliced(tmp_path))
+        assert (_left(first), _left(second)) == (987.5, 996.5)
+        assert _row_spool() is None
+
+    def test_no_spool_on_record_names_nothing(self, machine, tmp_path):
+        machine.load(_NO_UNIT)
+        _start(machine, _sliced(tmp_path, grams="16.0", colours="#F72323", types="PLA"))
+        assert _row_spool() is None
