@@ -35,11 +35,10 @@ TIER_ESSENTIAL: list[str] = [
     "preflight_check",
     "send_gcode",
     # No fleet tool here.  This list is the ENTIRE surface a weak model
-    # gets, and the multi-machine view is a fleet feature — handing it to
-    # a single-printer user spends one of their few slots on a door that
-    # answers "upgrade".  ``printer_status`` above is the single-printer
-    # experience and takes a printer_name, so any machine is reachable.
-    # ``fleet_status`` stays in TIER_FULL for the strong-model fleet user.
+    # gets, and the multi-machine view is a fleet feature.
+    # ``printer_status`` above is the single-printer experience: it takes
+    # a printer_name and lists the printers set up, so any machine is
+    # reachable, and its ``printer_names`` is the several-printer read.
     "submit_job",
     "job_status",
     "queue_summary",

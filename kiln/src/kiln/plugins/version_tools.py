@@ -16,10 +16,12 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
+from contextlib import ExitStack
 from typing import Any
 
 from kiln.errors import HostedUnavailableError
 from kiln.tool_annotations import creates, destructive, read_only
+from kiln.version_numbers import numbers_lock
 
 _logger = logging.getLogger(__name__)
 
@@ -132,6 +134,70 @@ def _after_save_here(design_id: str, missing: ImportError) -> dict:
     from kiln.history_courier import after_local_save
 
     return after_local_save(design_id)
+
+
+#: Said when a version was kept on this computer but its history record did
+#: not take it, so nothing would ever push it.
+NOT_IN_HISTORY = (
+    "This version is kept on this computer, but it could not be added to the "
+    "design's history, so a push will not carry it. Save it again to try once more."
+)
+
+
+def _note_not_in_history(result: dict, registration: dict | None) -> None:
+    """Say so in *result* when a version did not reach its history record."""
+    if registration is None:
+        result["warnings"] = [*(result.get("warnings") or []), NOT_IN_HISTORY]
+
+
+def _register_on_branch(
+    pro_features: Any, design_id: str, recipe: Any, scad_source: str | None, saving: ExitStack | None = None,
+) -> dict | None:
+    """Hand a version just saved here to the branch record, with its number.
+
+    One call for every door in this module that saves a version, so each
+    lands on the design's branch (and can be pushed) under the number its
+    recipe already carries: the branch record never counts its own.
+    Returns the registration, or ``None`` when this install keeps no branch
+    record.  (A kiln-pro whose registration takes no number is called
+    without it.)
+
+    *saving* is the door's hold of the design's numbers lock.  It is let go
+    once the version is filed, and only then does the branch record do what
+    it left for afterwards (``after_filed``: sending the version to the
+    person's account, when they turned that on), so nothing slow or over a
+    network runs while another save of the design waits.
+    """
+    import inspect
+
+    register = getattr(pro_features, "register_saved_version", None)
+    if register is None:
+        if saving is not None:
+            saving.close()
+        return None
+    accepts = inspect.signature(register).parameters
+    extra: dict[str, Any] = {}
+    if "version_number" in accepts:
+        extra["version_number"] = recipe.version
+    if "after_filed" in accepts:
+        extra["after_filed"] = True
+    try:
+        registration = register(
+            design_id=design_id,
+            scad_source=scad_source,
+            stl_path=recipe.stl_path or None,
+            prompt=recipe.prompt or "",
+            parameters=recipe.parameters,
+            notes=recipe.notes or "",
+            **extra,
+        )
+    finally:
+        if saving is not None:
+            saving.close()
+    afterwards = registration.pop("after_filed", None) if isinstance(registration, dict) else None
+    if callable(afterwards):
+        afterwards()
+    return registration
 
 
 def _load_versioned_recipe(design_dir: str, version: int) -> Any:
@@ -249,8 +315,13 @@ class _VersionToolsPlugin:
                 save_recipe,
             )
 
+            # The design's numbers lock, held from taking this version's
+            # number until its file is written and its history record
+            # made: a pull never lands between those steps.
+            saving = ExitStack()
             try:
                 design_directory = _ensure_design_dir(design_id)
+                saving.enter_context(numbers_lock(design_directory))
                 existing_path = find_recipe(design_directory)
 
                 if existing_path is None:
@@ -264,6 +335,15 @@ class _VersionToolsPlugin:
                         notes=notes,
                     )
                     recipe.design_id = design_id
+                    # No current recipe is not the same as no versions: a
+                    # pulled design, or one whose record outlived its
+                    # folder, already holds numbers.  This version takes
+                    # the next one, never 1 over a kept file.
+                    from kiln.version_numbers import numbers_in_store, reserve_version_number
+
+                    recipe.version = reserve_version_number(
+                        design_directory, also=lambda: numbers_in_store(design_id)
+                    )
                     recipe.prompt = prompt or None
                     recipe.provenance = provenance or None
                     recipe.stl_path = stl_path or None
@@ -313,7 +393,10 @@ class _VersionToolsPlugin:
                     recipe.brief_id = goal_id or parent.brief_id
                     recipe.intent_hash = intent_hash or parent.intent_hash
 
+                taken = recipe.version
                 saved_path = save_recipe(recipe, design_directory)
+                if diff_text and recipe.version != taken:
+                    diff_text = diff_text.replace(f"+++ v{taken}\n", f"+++ v{recipe.version}\n", 1)
                 result: dict = {
                     "ok": True,
                     "version": {
@@ -365,30 +448,11 @@ class _VersionToolsPlugin:
                     # ``getattr`` so an older kiln-pro that predates this
                     # hook degrades to recipe-only, exactly like free tier
                     # (a missing attribute is not an error here).
-                    register = getattr(
-                        pro_features, "register_saved_version", None
+                    registration = _register_on_branch(
+                        pro_features, design_id, recipe, scad_source, saving
                     )
-                    if register is not None:
-                        # The version keeps the number it was just given:
-                        # the branch record is handed it, never counts its
-                        # own.  (A kiln-pro from before that argument takes
-                        # the call without it.)
-                        import inspect
-
-                        number = (
-                            {"version_number": recipe.version}
-                            if "version_number" in inspect.signature(register).parameters
-                            else {}
-                        )
-                        registration = register(
-                            design_id=design_id,
-                            scad_source=scad_source,
-                            stl_path=recipe.stl_path or stl_path or None,
-                            prompt=recipe.prompt or "",
-                            parameters=recipe.parameters,
-                            notes=recipe.notes or "",
-                            **number,
-                        )
+                    _note_not_in_history(result, registration)
+                    if registration is not None:
                         if registration:
                             result["version"]["branch"] = registration
                             # What the filing has to say about the version
@@ -404,7 +468,9 @@ class _VersionToolsPlugin:
                     # registration.  This computer's history keeps the
                     # version, and the person's account gets it too when
                     # they turned automatic saving on.
+                    saving.close()
                     result.update(_after_save_here(design_id, missing))
+                saving.close()
 
                 try:
                     from kiln_pro.plugins.git_render_tools import (
@@ -423,6 +489,8 @@ class _VersionToolsPlugin:
             except Exception as exc:
                 _logger.exception("save_design_version failed")
                 return {"ok": False, "error": str(exc)}
+            finally:
+                saving.close()
 
         @mcp.tool(annotations=read_only("List design versions"))
         def list_design_versions(design_id: str, limit: int = 20) -> dict:
@@ -537,19 +605,39 @@ class _VersionToolsPlugin:
             from kiln.design_recipe import (
                 create_new_version,
                 find_recipe,
+                is_a_piece,
                 load_recipe,
                 part_facts,
                 save_recipe,
             )
 
+            saving = ExitStack()
             try:
                 design_directory = _ensure_design_dir(design_id)
+                # Held from taking the new version's number until its file
+                # is written and its history record made, as a save holds it.
+                saving.enter_context(numbers_lock(design_directory))
 
                 # Parse the target version number
                 _, target_ver = _parse_version_ref(to_version_id, default_design_id=design_id)
                 target_recipe, target_path = _load_versioned_recipe(
                     design_directory, target_ver
                 )
+
+                if is_a_piece(target_recipe):
+                    # A piece of a split is a part of the design, kept on a
+                    # line of its own.  The design is always the whole part.
+                    return {
+                        "ok": False,
+                        "code": "VERSION_IS_A_PIECE",
+                        "error": (
+                            f"Version {target_ver} of {design_id} is one piece of a split of it, "
+                            f"not a version of the whole part, so {design_id} was not rolled back "
+                            "to it and nothing changed. Roll back to a version of the whole part."
+                        ),
+                        "design_id": design_id,
+                        "changed": False,
+                    }
 
                 # Load current recipe as parent for the new rollback version
                 existing_path = find_recipe(design_directory)
@@ -599,6 +687,16 @@ class _VersionToolsPlugin:
                     },
                 }
                 try:
+                    from kiln_pro.bridge import pro_features
+
+                    # A rollback is a new version: it joins the branch the
+                    # way a save does, under the number on its recipe.
+                    registration = _register_on_branch(
+                        pro_features, design_id, new_recipe, new_recipe.source_scad, saving
+                    )
+                    _note_not_in_history(result, registration)
+                    if registration:
+                        result["version"]["branch"] = registration
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
                     )
@@ -611,6 +709,7 @@ class _VersionToolsPlugin:
                 except ImportError as missing:
                     # The rollback is a new version saved here: on an
                     # install without kiln-pro it goes the way a save does.
+                    saving.close()
                     result.update(_after_save_here(design_id, missing))
                     return result
             except HostedUnavailableError as exc:
@@ -620,6 +719,8 @@ class _VersionToolsPlugin:
             except Exception as exc:
                 _logger.exception("rollback_design_version failed")
                 return {"ok": False, "error": str(exc)}
+            finally:
+                saving.close()
 
         @mcp.tool(annotations=read_only("Get a design version"))
         def get_design_version(version_id: str) -> dict:

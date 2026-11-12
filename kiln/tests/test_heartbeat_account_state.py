@@ -96,7 +96,7 @@ class TestItRidesTheHeartbeat:
 
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         monkeypatch.setattr(heartbeat, "_already_sent_today", lambda: False)
-        monkeypatch.setattr(heartbeat, "_mark_sent", lambda: None)
+        monkeypatch.setattr(heartbeat, "_mark_sent", lambda *named: None)
         monkeypatch.setattr(heartbeat, "_is_ephemeral_runner", lambda: False)
         monkeypatch.setattr(heartbeat, "_is_hosted_multitenant", lambda: False)
         monkeypatch.setattr(heartbeat, "_sent_on", None)

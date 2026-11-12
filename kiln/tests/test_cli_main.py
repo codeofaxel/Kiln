@@ -1749,18 +1749,20 @@ class TestFleetCLI:
         data = json.loads(result.output)
         assert data["status"] == "success"
 
-    def test_fleet_requires_license(self, runner, tmp_path):
-        """kiln fleet status requires Pro license."""
-        with patch("kiln.licensing.check_tier", return_value=(False, (
-            "This feature requires Kiln Pro. "
-            "You're on the Free tier. "
-            "Already subscribed? Run `kiln login` to sync this machine. "
-            "Otherwise: https://kiln3d.com/pricing"
-        ))):
+    def test_fleet_status_prints_the_list_a_plan_without_the_fleet_view_gets(self, runner):
+        """kiln fleet status follows the tool: the list and its one note, never a refusal of its own."""
+        listed = {
+            "success": True,
+            "known_printers": [{"name": "a1", "printer_model": "bambu_a1"}, {"name": "garage"}],
+            "count": 2,
+            "note": "2 printers are set up here. This feature needs Kiln Business.",
+        }
+        with patch("kiln.licensing.check_tier", return_value=(False, "This feature needs Kiln Business.")), \
+                patch("kiln.server.fleet_status", return_value=listed):
             result = runner.invoke(cli, ["fleet", "status"])
-        assert result.exit_code != 0
-        assert "LICENSE_REQUIRED" in result.output
-        assert "kiln3d.com/pricing" in result.output
+        assert result.exit_code == 0
+        assert "a1" in result.output and "garage" in result.output
+        assert "Kiln Business" in result.output and "LICENSE_REQUIRED" not in result.output
 
 
 # ---------------------------------------------------------------------------

@@ -464,7 +464,7 @@ class TestFoundBedsAreReported:
             return _Resp()
 
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-        for name, value in (("_already_sent_today", lambda: False), ("_mark_sent", lambda: None),
+        for name, value in (("_already_sent_today", lambda: False), ("_mark_sent", lambda *named: None),
                             ("_is_ephemeral_runner", lambda: False), ("_is_hosted_multitenant", lambda: False)):
             monkeypatch.setattr(heartbeat, name, value)
         monkeypatch.setattr(heartbeat, "_sent_on", None)

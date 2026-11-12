@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import difflib
+import functools
 import json
 import logging
 import os
@@ -98,12 +99,29 @@ class DesignVersion:
 def _library_folder(design_id: str) -> Any:
     """The design's recipe folder, where its other version numbers are kept;
     ``None`` where there is no library to read."""
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        return None
     try:
         from kiln.history_vault import _design_folder
 
         return _design_folder(design_id)
     except ValueError:
         return None
+
+
+def _locked(method: Any) -> Any:
+    """Run a store method under the store's lock: one connection serves
+    every thread, and a read between another thread's statements reads a
+    half-made row or breaks the statement it shares the connection with."""
+
+    @functools.wraps(method)
+    def under_lock(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return under_lock
 
 
 class DesignVersionStore:
@@ -118,7 +136,8 @@ class DesignVersionStore:
 
     def __init__(self, *, db_path: str | None = None) -> None:
         self._db_path = db_path or _DEFAULT_DB_PATH
-        self._lock = threading.Lock()
+        # Re-entrant: a method holding it calls the reads, which take it too.
+        self._lock = threading.RLock()
 
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
 
@@ -167,6 +186,14 @@ class DesignVersionStore:
                 ON design_aliases(alias);
             CREATE INDEX IF NOT EXISTS idx_da_design_id
                 ON design_aliases(design_id);
+
+            -- The highest version number each design has ever given, so a
+            -- number is not given again after the version that held it is
+            -- deleted.
+            CREATE TABLE IF NOT EXISTS design_version_marks (
+                design_id   TEXT PRIMARY KEY,
+                highest     INTEGER NOT NULL
+            );
             """
         )
         # Migrate existing databases that lack the new columns.
@@ -297,13 +324,18 @@ class DesignVersionStore:
         notes: str = "",
         *,
         version_number: int | None = None,
+        past: Any = (),
     ) -> DesignVersion:
         """Save a new version for *design_id*.
 
         *version_number* is the number the version was given when it was
         made (:mod:`kiln.version_numbers`); a caller that already wrote the
         version's recipe passes that number so this record keeps it.  Left
-        out, the version takes one past the design's highest number here.
+        out, the version takes one past the highest number the design has
+        ever held here and every number in *past* (the numbers a caller
+        knows from the design's recipe files, for a version that has no
+        recipe of its own).  The number is chosen and written inside one
+        database transaction, so two saves at once never share it.
 
         Automatically computes a unified diff from the previous version
         (if any), assigns a UUID version_id, and records the timestamp.
@@ -340,53 +372,78 @@ class DesignVersionStore:
         now = time.time()
 
         with self._lock:
-            # Find the latest existing version for this design.
-            prev = self._conn.execute(
-                "SELECT * FROM design_versions "
-                "WHERE design_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-                (design_id,),
-            ).fetchone()
-
-            if prev is not None:
-                diff_text = self._compute_diff(prev["scad_source"], scad_source)
-                parent_id: str | None = prev["version_id"]
-            else:
-                diff_text = None
-                parent_id = None
-            if version_number is None:
-                from kiln.version_numbers import next_version_number
-
-                held = self._conn.execute(
-                    "SELECT MAX(version_number) FROM design_versions WHERE design_id = ?",
+            # One transaction from reading the design's numbers to writing
+            # the row: another process waits here rather than read the same
+            # highest number.  A caller's own uncommitted writes on this
+            # connection are committed first, as this save's commit always
+            # committed them.
+            if self._conn.in_transaction:
+                self._conn.commit()
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                # Find the latest existing version for this design.
+                prev = self._conn.execute(
+                    "SELECT * FROM design_versions "
+                    "WHERE design_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
                     (design_id,),
-                ).fetchone()[0]
-                # The store's own numbers only.  A caller whose version has no
-                # recipe yet asks :meth:`next_number`, which reads the
-                # library too; a caller that wrote the recipe first hands
-                # its number in, and that recipe must not be counted twice.
-                version_number = next_version_number(None, [held])
-            elif isinstance(version_number, bool) or not isinstance(version_number, int) or version_number < 1:
-                raise ValueError("version_number must be a whole number from 1")
+                ).fetchone()
 
-            self._conn.execute(
-                "INSERT INTO design_versions "
-                "(version_id, design_id, scad_source, prompt, parameters, "
-                " diff_from_prev, created_at, parent_version_id, notes, version_number) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    version_id,
-                    design_id,
-                    scad_source,
-                    prompt,
-                    json.dumps(parameters),
-                    diff_text,
-                    now,
-                    parent_id,
-                    notes,
-                    version_number,
-                ),
-            )
-            self._conn.commit()
+                if prev is not None:
+                    diff_text = self._compute_diff(prev["scad_source"], scad_source)
+                    parent_id: str | None = prev["version_id"]
+                else:
+                    diff_text = None
+                    parent_id = None
+                if version_number is None:
+                    from kiln.version_numbers import next_version_number
+
+                    # The store's own numbers and the caller's *past*.  A
+                    # caller that wrote the recipe first hands its number
+                    # in, and that recipe is never counted a second time.
+                    version_number = next_version_number(None, [*self._numbers(design_id), *past])
+                elif isinstance(version_number, bool) or not isinstance(version_number, int) or version_number < 1:
+                    raise ValueError("version_number must be a whole number from 1")
+                from kiln.version_numbers import _MOST
+
+                if version_number > _MOST:
+                    raise ValueError(f"version number {version_number} is past any real design's history")
+                held_by = self._conn.execute(
+                    "SELECT version_id FROM design_versions WHERE design_id = ? AND version_number = ? LIMIT 1",
+                    (design_id, version_number),
+                ).fetchone()
+                if held_by is not None:
+                    raise ValueError(
+                        f"version number {version_number} of {design_id!r} is already held by version "
+                        f"{held_by[0]}; a number is given once"
+                    )
+
+                self._conn.execute(
+                    "INSERT INTO design_versions "
+                    "(version_id, design_id, scad_source, prompt, parameters, "
+                    " diff_from_prev, created_at, parent_version_id, notes, version_number) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        version_id,
+                        design_id,
+                        scad_source,
+                        prompt,
+                        json.dumps(parameters),
+                        diff_text,
+                        now,
+                        parent_id,
+                        notes,
+                        version_number,
+                    ),
+                )
+                self._conn.execute(
+                    "INSERT INTO design_version_marks (design_id, highest) VALUES (?, ?) "
+                    "ON CONFLICT(design_id) DO UPDATE SET highest = MAX(highest, excluded.highest)",
+                    (design_id, version_number),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
 
         logger.info(
             "Saved version %s (#%d) for design %s",
@@ -407,18 +464,101 @@ class DesignVersionStore:
             version_number=version_number,
         )
 
+    def _numbers(self, design_id: str) -> set[int]:
+        """Every number *design_id* holds or has ever held here (no lock)."""
+        held = {
+            int(r[0]) for r in self._conn.execute(
+                "SELECT version_number FROM design_versions WHERE design_id = ?", (design_id,)
+            ) if r[0]
+        }
+        mark = self._conn.execute(
+            "SELECT highest FROM design_version_marks WHERE design_id = ?", (design_id,)
+        ).fetchone()
+        if mark is not None and mark[0]:
+            held.add(int(mark[0]))
+        return held
+
+    def numbers(self, design_id: str) -> set[int]:
+        """The numbers *design_id* holds here, and the highest it ever gave."""
+        with self._lock:
+            return self._numbers(design_id)
+
     def next_number(self, design_id: str) -> int:
-        """The number for a version of *design_id* that has no recipe yet:
-        one past every number the design holds, here and in its library."""
+        """What the next version of *design_id* would be numbered: one past
+        every number the design holds, here and in its library.  A look, not
+        a claim; :meth:`save_without_recipe` takes the number."""
         from kiln.version_numbers import next_version_number
 
-        with self._lock:
-            held = self._conn.execute(
-                "SELECT MAX(version_number) FROM design_versions WHERE design_id = ?",
-                (design_id,),
-            ).fetchone()[0]
-        return next_version_number(_library_folder(design_id), [held])
+        return next_version_number(_library_folder(design_id), self.numbers(design_id))
 
+    def save_without_recipe(self, design_id: str, scad_source: str | None = None, **fields: Any) -> DesignVersion:
+        """Save a version that has no recipe file of its own, numbered past
+        the design's recipes too, and note the number in its library folder
+        so a later save there is numbered past it."""
+        from kiln.version_numbers import numbers_in_folder, numbers_lock, raise_mark
+
+        folder = _library_folder(design_id)
+        if folder is None or not folder.is_dir():
+            return self.save_version(design_id, scad_source, **fields)
+        # The folder's numbers lock is held from reading them to writing the
+        # number down, as every door that gives a number holds it.
+        with numbers_lock(folder):
+            saved = self.save_version(design_id, scad_source, past=numbers_in_folder(folder), **fields)
+            raise_mark(folder, saved.version_number)
+        return saved
+
+    def set_numbers(self, design_id: str, numbers: dict[str, int]) -> list[tuple[str, int, int]]:
+        """Give *design_id*'s versions here the numbers in *numbers*
+        (``{version_id: number}``, from :func:`kiln.version_numbers.plan_numbers`),
+        in one transaction, and raise the design's mark past them.
+
+        For a version a Kiln account numbered differently from this computer:
+        the account's number is the version's one number.  Refused, changing
+        nothing, when the result would leave two versions of the design with
+        one number.  Returns ``[(version_id, old, new)]`` for each row moved.
+        """
+        from kiln.version_numbers import _number
+
+        with self._lock:
+            if self._conn.in_transaction:
+                self._conn.commit()
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = {
+                    str(r[0]): int(r[1]) for r in self._conn.execute(
+                        "SELECT version_id, version_number FROM design_versions WHERE design_id = ?",
+                        (design_id,),
+                    )
+                }
+                changes = [
+                    (vid, rows[vid], new) for vid, new in ((v, _number(n)) for v, n in numbers.items())
+                    if vid in rows and new is not None and rows[vid] != new
+                ]
+                after = {**rows, **{vid: new for vid, _old, new in changes}}
+                for vid, _old, new in changes:
+                    if any(other != vid and n == new for other, n in after.items()):
+                        raise ValueError(
+                            f"version number {new} of {design_id!r} would be held by two versions; "
+                            "nothing was renumbered"
+                        )
+                for vid, _old, new in changes:
+                    self._conn.execute(
+                        "UPDATE design_versions SET version_number = ? WHERE version_id = ? AND design_id = ?",
+                        (new, vid, design_id),
+                    )
+                if changes:
+                    self._conn.execute(
+                        "INSERT INTO design_version_marks (design_id, highest) VALUES (?, ?) "
+                        "ON CONFLICT(design_id) DO UPDATE SET highest = MAX(highest, excluded.highest)",
+                        (design_id, max(new for _v, _o, new in changes)),
+                    )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return changes
+
+    @_locked
     def get_version(self, version_id: str) -> DesignVersion | None:
         """Retrieve a single version by its ID, or ``None``."""
         row = self._conn.execute(
@@ -427,6 +567,7 @@ class DesignVersionStore:
         ).fetchone()
         return self._row_to_version(row) if row else None
 
+    @_locked
     def list_versions(
         self, design_id: str, *, limit: int = 20
     ) -> list[DesignVersion]:
@@ -440,6 +581,7 @@ class DesignVersionStore:
         ).fetchall()
         return [self._row_to_version(r) for r in rows]
 
+    @_locked
     def diff_versions(self, version_id_a: str, version_id_b: str) -> str:
         """Return a unified diff between two arbitrary versions.
 
@@ -476,15 +618,15 @@ class DesignVersionStore:
                     f"{target.design_id}, not {design_id}"
                 )
         # save_version acquires its own lock.
-        return self.save_version(
+        return self.save_without_recipe(
             design_id=design_id,
             scad_source=target.scad_source,
             prompt=target.prompt,
             parameters=target.parameters,
             notes=f"Rollback to version {version_id}",
-            version_number=self.next_number(design_id),
         )
 
+    @_locked
     def get_latest(self, design_id: str) -> DesignVersion | None:
         """Return the most recent version for *design_id*, or ``None``."""
         row = self._conn.execute(
@@ -504,6 +646,7 @@ class DesignVersionStore:
             self._conn.commit()
         return cur.rowcount > 0
 
+    @_locked
     def search_versions(
         self, query: str, *, limit: int = 10
     ) -> list[DesignVersion]:
@@ -546,6 +689,7 @@ class DesignVersionStore:
             )
             self._conn.commit()
 
+    @_locked
     def resolve_aliases(self, name: str) -> list[str]:
         """Return all design_ids associated with *name*.
 
@@ -581,6 +725,7 @@ class DesignVersionStore:
                 ids.add(sub[0])
         return sorted(ids)
 
+    @_locked
     def get_ancestry(
         self, version_id: str, *, max_depth: int = 50
     ) -> list[DesignVersion]:

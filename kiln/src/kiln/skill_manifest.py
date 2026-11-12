@@ -312,12 +312,12 @@ class SkillManifest:
                 "validate_design_for_requirements(file_path, requirements) — verification",
                 "get_post_processing_guide(material) — finishing guidance",
             ],
-            # Every entry here is Business+.  Running machines together is
-            # the fleet product; the single-printer experience is the
-            # printer_status / monitor_print family, which takes a printer
-            # name and is free, so one machine is never behind this.
+            # Running machines together is the fleet product, Business+.
+            # The single-printer experience is the printer_status /
+            # monitor_print family, which takes a printer name and is free,
+            # so one machine is never behind this.
             "fleet_management (Business+)": [
-                "fleet_status() — all printers overview",
+                "printer_status(printer_names=\"all\") — every printer's live state in one view, or a chosen few by name (on any plan it lists the printers set up)",
                 "fleet_pause() / fleet_resume() / fleet_cancel() — stop the fleet gracefully",
                 "route_print_job(file_path, material, quality) — intelligent job routing",
                 "plan_multi_copy_split(file_path, copies) — copies across your printers, wherever there is safe room",
@@ -383,7 +383,7 @@ class SkillManifest:
                 "fine while a print runs"
             ),
             "sign_in": "kiln_signin() — browser sign-in for hosted features (poll with kiln_signin_poll())",
-            "fleet": "fleet_status() — fleet overview and job routing (Business+; for one machine use printer_status(printer_name=...), free)",
+            "fleet": "printer_status() — lists the printers set up and reads one (printer_name=...), on any plan; several printers' live state in one answer (printer_names=...) and job routing are Business+",
             "design_history": "list_design_versions(design_id) — a design's versions, newest first; rollback_design_version(design_id, to_version_id) brings one back as a new version",
             "design_branch": "create_design_branch(design_id, annotation=<what they are trying>) — branch before a risky change; Kiln names the branch when name is left out (needs a Kiln account); merge_design_branches brings a winner back",
             "design_compare": "compare_mesh_versions(file_a, file_b) — what changed between two meshes, in numbers",

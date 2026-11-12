@@ -538,6 +538,18 @@ def _check_position_limit(
     return False
 
 
+def _later_command_parts(cleaned: str) -> list[str]:
+    """Each command word on the line after its first, with what follows it:
+    the split the G-code check makes (:func:`kiln.gcode._later_commands`),
+    so the two doors read a line the same way."""
+    from kiln.gcode import _later_commands
+    from kiln.gcode import _parse_command_word as first_word
+
+    line = cleaned.strip()
+    cmd = first_word(line)
+    return _later_commands(cmd, line) if cmd else []
+
+
 def _check_command_blocked(
     rule: InterceptionRule,
     command: str,
@@ -865,8 +877,12 @@ class GcodeInterceptor:
         winning_action = InterceptionAction.ALLOW
         modify_params: dict[str, Any] = {}
 
+        # A firmware may run a second command written on the same line, so
+        # each rule is asked of the line and of every later command word on it.
+        asked = [cleaned, *_later_command_parts(cleaned)]
+
         for rule in sorted_rules:
-            if self._evaluate_trigger(rule, cleaned, telemetry, prev_telemetry):
+            if any(self._evaluate_trigger(rule, part, telemetry, prev_telemetry) for part in asked):
                 triggered_rules.append(rule.rule_id)
                 if rule.message:
                     reasons.append(rule.message)
