@@ -48,9 +48,11 @@ FREE_PER_PRINTER_TOOLS = [
     "emergency_stop",
 ]
 
-#: Tools whose whole point is acting on machines TOGETHER.
+#: Tools whose whole point is acting on machines TOGETHER.  ``fleet_status``
+#: is not here: it lists the printers set up on every plan and keeps only
+#: the every-printer live view for Business, which is a different shape
+#: from a refusal (``test_printer_list_by_plan.py`` walks it plan by plan).
 FLEET_TOOLS_REQUIRING_BUSINESS = [
-    "fleet_status",
     "fleet_analytics",
     "route_print_job",
     "fleet_utilization",
@@ -136,11 +138,7 @@ def test_a_single_machine_can_always_be_seen_and_stopped(name, monkeypatch):
 
 @pytest.mark.parametrize("name", FLEET_TOOLS_REQUIRING_BUSINESS)
 def test_acting_on_machines_together_needs_business(name, monkeypatch):
-    """Pro is not enough — the fleet product starts at Business.
-
-    ``fleet_status`` is the one this was written for: it sat at Pro, whose
-    printer cap is 1, while every sibling had already moved to Business.
-    """
+    """Pro is not enough — the fleet product starts at Business."""
     _force_free_tier(monkeypatch)
 
     result = _unwrap(name)()
@@ -176,7 +174,9 @@ def test_the_smallest_tool_set_spends_no_slot_on_a_refusal():
         ("tool_tiers.TIER_ESSENTIAL", set(TIER_ESSENTIAL)),
         ("agent_loop._ESSENTIAL_TOOLS", set(_ESSENTIAL_TOOLS)),
     ):
-        offenders = names & set(FLEET_TOOLS_REQUIRING_BUSINESS)
+        # ``fleet_status`` stays out as well: ``printer_status`` already
+        # lists the printers, so it would spend a slot saying it twice.
+        offenders = names & {*FLEET_TOOLS_REQUIRING_BUSINESS, "fleet_status"}
         assert not offenders, (
             f"{label} offers {sorted(offenders)} to every user, including "
             "free ones who can only be refused. printer_status is the "

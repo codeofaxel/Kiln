@@ -10,7 +10,9 @@ registered tools:
 * Enterprise, ``by_site=True``: the flat answer plus ``sites`` -- per site
   its printers, count, idle, busy and needs-repair -- carrying the repair
   record on every row;
-* Free: refused at the Business gate, ``by_site`` either way;
+* Free, with these two printers: the list of them and ONE line naming the
+  plan that reads them together, ``by_site`` either way -- no live row, no
+  grouping, and the by-site plan is not named on top;
 * the old name: still registered, refuses, and names the new call.
 
 A/B: every test here fails at public f0f987ab (``fleet_status`` took no
@@ -141,12 +143,18 @@ class TestEnterprise:
 
 class TestFree:
     @pytest.mark.parametrize("by_site", [False, True])
-    def test_refused_at_the_business_gate(self, fleet, monkeypatch, by_site):
+    def test_lists_the_printers_and_names_the_fleet_plan_once(self, fleet, monkeypatch, by_site):
         _plan(monkeypatch, "free")
         out = fleet(by_site=by_site)
-        assert out["success"] is False
-        assert out["code"] == "TIER_REQUIRED" and out["required_tier"] == "business"
-        assert "sites" not in out and "note" not in out
+        assert out["success"] is True and out["count"] == 2
+        assert [row["name"] for row in out["known_printers"]] == ["a", "b"]
+        # None of the fleet view came with the list: no live row, no
+        # grouping, nothing about which printer is idle or out of service.
+        assert not (FLAT_KEYS - {"success", "count"}) & set(out)
+        assert "sites" not in out and "site_count" not in out
+        assert "idle" not in str(out) and "repair" not in str(out)
+        assert "BUSINESS" in out["note"].upper() and "ENTERPRISE" not in str(out).upper()
+        assert "upgrade_nudge" not in out
 
 
 class TestTheOldName:

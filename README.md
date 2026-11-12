@@ -443,8 +443,8 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 88
   - Linear history is free; branching and merges are free on the designs you keep in a free Kiln account and on every design with Pro; signed releases are Pro
 - **export_step**
   - Export a finished design as a real STEP CAD file — analytic B-rep a machine shop can open and measure
-- **fleet_status** *(Business)*
-  - Live status of every printer in a fleet: state, temperatures, connection
+- **fleet_status**
+  - Lists the printers you have set up; live status of every printer in one view (state, temperatures, connection) is part of Kiln Business
 - **fulfillment_quote**
   - Get a manufacturing quote from Craftcloud's network — printing without owning a printer
 

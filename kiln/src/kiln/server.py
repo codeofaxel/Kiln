@@ -844,9 +844,11 @@ def _build_instructions() -> str:
             else:
                 parts.append(
                     f"PRINTERS: {len(printer_names)} registered. "
-                    "Use `printer_status(printer_name=...)` for any one of "
-                    "them. Seeing and driving them together is a Business "
-                    "feature (`fleet_status` and the other fleet tools)."
+                    "`fleet_status` lists them; use "
+                    "`printer_status(printer_name=...)` to read one at a "
+                    "time. Every printer's live state in one view, and "
+                    "driving them together, is a Business feature (the "
+                    "fleet tools)."
                 )
 
         # --- Model marketplaces ---
@@ -13880,21 +13882,22 @@ def confirm_action(token: str) -> dict:
 
 
 @mcp.tool(annotations=read_only("Fleet status"))
-@requires_tier(LicenseTier.BUSINESS)
 def fleet_status(by_site: bool = False) -> dict:
-    """Get live status of all fleet printers (state, temps, connection — current snapshot).
+    """List the printers set up here, with live status for one printer or, on Kiln Business, all of them.
 
-    The multi-machine view is a fleet feature.  For ONE printer — which is
-    the single-printer experience at every tier — use ``printer_status``
-    (``detail="lite"`` for the cheap version), ``printer_snapshot`` or
-    ``monitor_print``; each takes a ``printer_name`` and none of them is
-    tier-gated, so any machine you own can be inspected and stopped
-    whatever your licence.
+    Answers "which printers do I have?" on every plan.  With none set up it
+    says so, and with one it returns that printer's snapshot.  With two or
+    more, every printer's live state in one answer is the fleet view, part
+    of Kiln Business (https://kiln3d.com/pricing); a plan without it gets
+    ``known_printers`` (each printer's name, and its model when one is on
+    record, read from this computer's records with no printer contacted)
+    and one ``note``, never a refusal.  ``printer_status`` reads one
+    printer at a time, by ``printer_name``.
 
     For historical analytics (success rates, throughput), use ``fleet_analytics``.
-    Returns a list of printer snapshots including name, backend type,
-    connection status, operational state, and temperatures.  Printers
-    that fail to respond are reported as offline rather than raising.
+    The fleet view returns a list of printer snapshots including name,
+    backend type, connection status, operational state, and temperatures.
+    Printers that fail to respond are reported as offline rather than raising.
     A printer the person marked with ``set_machine_repair`` carries a
     ``repair`` block (needs repair since, or repaired at and what), and
     ``needs_repair_printers`` lists the ones out of service: routing does
@@ -13930,6 +13933,11 @@ def fleet_status(by_site: bool = False) -> dict:
             if by_site:
                 _attach_sites(empty, [])
             return empty
+
+        if _get_registry().count > 1:
+            listed = _printers_listed_without_fleet_view()
+            if listed is not None:
+                return listed
 
         status = _get_registry().get_fleet_status()
         idle = _get_registry().get_idle_printers()
@@ -13983,6 +13991,47 @@ def fleet_status(by_site: bool = False) -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in fleet_status")
         return _error_dict(f"Unexpected error in fleet_status: {exc}", code="INTERNAL_ERROR")
+
+
+def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
+    """The ``fleet_status`` answer for several printers on a plan without
+    the fleet view, or ``None`` when the caller's plan has it.
+
+    The CALLER's plan, read through ``kiln.licensing`` at call time.  The
+    list is the one ``printer_status`` carries (``kiln.printer_roster``):
+    names and models from this computer's records, no printer contacted, so
+    it says nothing about what any of them is doing.  The plan is named
+    once, in ``note``, in the plan check's own words for this caller, and
+    the pricing link is attached only when those words point there: a
+    caller told to sign back in or get online is not sent to buy.
+    """
+    from kiln import licensing
+    from kiln.printer_roster import known_printers
+    from kiln.tiers_and_terms import PRICING_URL
+
+    fleet_view, said = licensing.check_tier(LicenseTier.BUSINESS)
+    if fleet_view:
+        return None
+    # Counted the way a plan refusal is: this caller reached for the fleet
+    # view on a plan without it.
+    from kiln.account_plan import count_plan_wall
+
+    count_plan_wall("fleet_status")
+    rows = known_printers(_get_registry())
+    plan_line = str(said or "").strip() or "This feature is part of Kiln Business."
+    listed: dict[str, Any] = {
+        "success": True,
+        "known_printers": rows,
+        "count": len(rows),
+        "note": (
+            f"{len(rows)} printers are set up here. printer_status(printer_name=...) "
+            "reads one of them at a time. Every printer's live state in one "
+            f"answer is the fleet view. {plan_line}"
+        ),
+    }
+    if PRICING_URL.split("://", 1)[-1] in plan_line:
+        listed["upgrade_url"] = upgrade_link("fleet_status")
+    return listed
 
 
 def _attach_sites(result: dict[str, Any], status: list[dict[str, Any]]) -> None:
@@ -14168,9 +14217,11 @@ def register_printer(
 
     Once registered the printer can be targeted by name — ``printer_status``,
     ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
-    all take a ``printer_name`` at every tier, so owning a second machine
-    never costs you sight of it or control over it.  Seeing them together
-    (``fleet_status``) and driving them together are Business features.
+    all take a ``printer_name`` at every tier, one printer at a time: Kiln
+    works with one machine until it is handed back (``hand_back_printer``),
+    and each printer's own controls always work.  ``fleet_status`` lists
+    the printers set up here; every one's live state in one view, and
+    driving them together, are Business features.
     """
     if err := _check_auth("admin"):
         return err
@@ -17684,7 +17735,7 @@ def fleet_workflow() -> str:
     """Guide for managing multiple printers in a fleet."""
     return (
         "To manage a fleet of printers:\n\n"
-        "1. Call `fleet_status` to see all registered printers and their states\n"
+        "1. Call `fleet_status` to see all registered printers (with every one's live state on Kiln Business)\n"
         "2. Use `register_printer` to add new printers ("
         + format_printer_types(quote="", conjunction="or")
         + ")\n"
