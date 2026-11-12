@@ -340,9 +340,11 @@ class _PrintWatcher:
     def _with_ending_question(self, result: dict) -> dict:
         """*result* with the one question its ending owes the person
         (:mod:`kiln.ending_question`), read when the result is read: the
-        print's row may settle after the watch notices the ending.  Never
-        raises."""
-        if result.get("outcome") not in self._ENDINGS_THAT_ASK or "ask_the_person" in result:
+        print's row may settle after the watch notices the ending.  A print
+        that finished owes none of its own and carries the one waiting about
+        its printer, when there is one.  Never raises."""
+        finished = result.get("outcome") == "completed"
+        if "ask_the_person" in result or not (finished or result.get("outcome") in self._ENDINGS_THAT_ASK):
             return result
         try:
             from kiln import ending_question
@@ -350,7 +352,8 @@ class _PrintWatcher:
 
             ending_question.attach(
                 result, outcome_printer_name(self._adapter),
-                cancelling=result.get("outcome") != "failed",
+                cancelling=not finished and result.get("outcome") != "failed",
+                ending_can_owe=not finished,
             )
         except Exception:  # noqa: BLE001
             _logger.debug("watch: ending question not attached", exc_info=True)

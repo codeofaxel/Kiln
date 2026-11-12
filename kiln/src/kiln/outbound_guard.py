@@ -47,6 +47,9 @@ __all__ = [
     "VERSION_FIELDS",
     "machine_code",
     "spool_code",
+    "file_code",
+    "file_hash_code",
+    "job_code",
     "is_listing_link",
     "redact_text",
     "scrub",
@@ -116,6 +119,34 @@ def spool_code(value: Any) -> str | None:
     if not text:
         return None
     return "sp:" + hmac.new(_key(), b"spool|" + text.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+
+
+def _labelled_code(prefix: str, label: bytes, text: str) -> str | None:
+    if not text:
+        return None
+    return prefix + hmac.new(_key(), label + b"|" + text.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+
+
+def file_code(value: Any) -> str | None:
+    """A stable one-way code for a printed file's name on this computer,
+    made as :func:`machine_code` is, under its own label.  The name is read
+    without its folder; the same file name gives the same code every time
+    here, and the code reveals nothing about the name."""
+    text = str(value or "").strip().replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+    return _labelled_code("fc:", b"file", text)
+
+
+def file_hash_code(value: Any) -> str | None:
+    """A stable one-way code for a printed file's fingerprint on this
+    computer, under its own label: two prints of the same bytes share it,
+    and the fingerprint itself never leaves."""
+    return _labelled_code("fh:", b"file-hash", str(value or "").strip().lower())
+
+
+def job_code(value: Any) -> str | None:
+    """A stable one-way code for a print's job id on this computer, under
+    its own label.  A job id is often a file's name; the code is not."""
+    return _labelled_code("pj:", b"job", str(value or "").strip())
 
 
 def redact_text(text: str) -> str:
@@ -333,6 +364,7 @@ _OWN_PIECE_MIN = 6
 VERSION_FIELDS: dict[str, frozenset[str]] = {
     "kiln/outcome_courier.py": frozenset({"firmware"}),
     "kiln/served_steps.py": frozenset({"firmware"}),
+    "kiln/_pro_printer_checkin_bridge.py": frozenset({"firmware"}),
 }
 
 
@@ -488,7 +520,19 @@ SENDERS: dict[str, tuple[str, str]] = {
         "(a random id, the machine as machine_code(), a status word, a kind word, two "
         "times; per printer its code, model word and a one-way shared code -- never the "
         "note, the name, the serial or the access code) and the person's answer to an "
-        "identity question (a question id and same/different), scrubbed",
+        "identity question (a question id and same/different), scrubbed; "
+        "and kiln/_pro_printer_checkin_bridge.py's check-in on one printer after a "
+        "print ends there, built field by field and scrubbed: the machine as "
+        "machine_code(), the name the person gave the printer (cut to 40 characters, and "
+        "left out when it holds one of this computer's printer addresses, serials or codes), "
+        "its repair mark (a state word, a kind word, times), the episode keys the "
+        "person has answered and when, and per print record a one-way code of the job "
+        "id (job_code()), the ending, who settled it, a failure word, two times, the "
+        "design id, the file's name as file_code() and its fingerprint as "
+        "file_hash_code(), the material word, the nozzle size, a one-way code of the "
+        "sliced settings, the spool as spool_code(), how far the print got, and the "
+        "firmware version, declared in VERSION_FIELDS -- never a file's name, path or "
+        "fingerprint, a job id, a serial, an address, a note, or settings",
     ),
     "kiln/account_plan.py": ("own_schema", "asks which plan the signed-in account holds; sends only the sign-in"),
     "kiln/plugins/spend_cap_tools.py": (

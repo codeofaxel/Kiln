@@ -16965,6 +16965,11 @@ def await_print_completion(
             from kiln import ending_question
 
             ending_question.attach(result)
+        elif result.get("outcome") == "completed":
+            from kiln import ending_question
+
+            # A finished print owes no question of its own.
+            ending_question.attach(result, ending_can_owe=False)
         if _goal_ctx is not None:
             result["design_goal"] = _goal_ctx
         try:

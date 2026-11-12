@@ -457,6 +457,8 @@ class _PrinterManagementToolsPlugin:
             when: str | None = None,
             same_as: str = "",
             different_from: str = "",
+            answer_to: str = "",
+            answer: str = "",
         ) -> dict:
             """Tell Kiln a printer needs repair, or that you have repaired it.
 
@@ -475,6 +477,15 @@ class _PrinterManagementToolsPlugin:
             ``same_as`` (it is this printer) or ``different_from`` (it is
             not), passing the question's id and no status.
 
+            A question Kiln asked about this printer (a ``printer_question``
+            in ``get_printer_insights``, or an ``ask_the_person`` block whose
+            ``about`` is ``printer``) is answered here too: pass its
+            ``episode`` as ``answer_to`` and what the person said as
+            ``answer``, exactly as the block's ``record`` gives the call, and
+            no status.  Kiln then marks the printer needs repair or repaired
+            when that is what they said, and keeps the answer on this
+            computer either way, so the question is not asked again.
+
             Args:
                 machine_name: The printer, by its name here.
                 status: ``needed`` (out of service until repaired), ``done``
@@ -492,6 +503,8 @@ class _PrinterManagementToolsPlugin:
                     printer IS the one marked from the other computer.
                 different_from: The id of a question: it is NOT (also undoes
                     a wrong yes; never asked again for that pair).
+                answer_to: The ``episode`` of a question about this printer.
+                answer: The id of the answer the person gave to it.
 
             Returns ``recorded``, the printer, ``status``, ``kind``,
             ``marked_at``, the printer's ``condition`` now, ``next`` (one
@@ -508,6 +521,19 @@ class _PrinterManagementToolsPlugin:
             from kiln.machine_repairs import RepairRefused, answer_identity, mark
 
             try:
+                if answer_to or answer:
+                    if status or same_as or different_from or not (answer_to and answer):
+                        return _srv._error_dict(
+                            "Answering a question about the printer takes answer_to and answer, and nothing "
+                            "else; mark the printer in a second call.",
+                            code="REPAIR_ANSWER_AMBIGUOUS",
+                        )
+                    from kiln._pro_printer_checkin_bridge import answer as _answer_checkin
+
+                    result = _answer_checkin(machine_name, answer_to, answer)
+                    if result.get("mark"):
+                        result.update(_account_after_mark())
+                    return {"success": True, **result}
                 if same_as or different_from:
                     if same_as and different_from:
                         return _srv._error_dict(
@@ -523,7 +549,8 @@ class _PrinterManagementToolsPlugin:
                     return {"success": True, **result}
                 if not status:
                     return _srv._error_dict(
-                        "status is needed, done or clear; or answer a question with same_as / different_from.",
+                        "status is needed, done or clear; or answer a question with same_as / different_from, "
+                        "or with answer_to and answer.",
                         code="REPAIR_STATUS_UNKNOWN",
                     )
                 result = mark(machine_name, status, kind=kind, note=note, when=when)

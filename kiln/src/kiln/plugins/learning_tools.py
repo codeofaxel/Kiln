@@ -378,6 +378,14 @@ def _endings_to_ask_about(printer_name: str, limit: int) -> list[dict]:
     return out
 
 
+def _printer_question(printer_name: str) -> dict | None:
+    """The question waiting about *printer_name* itself
+    (:mod:`kiln._pro_printer_checkin_bridge`), or ``None``."""
+    from kiln._pro_printer_checkin_bridge import listed
+
+    return listed(printer_name)
+
+
 def _repair_windows() -> dict:
     """This computer's needs-repair windows, or none when they cannot be read."""
     try:
@@ -1484,6 +1492,17 @@ class _LearningToolsPlugin:
             answer for them.  The same block rides as ``ask_the_person`` on
             the tool that reports a print's ending.
 
+            **Agent contract for ``printer_question``**: one question about
+            this printer itself, or ``null``.  ``seen``, ``check`` (when
+            present) and ``question`` are sentences to say to the person as
+            written; ``record`` maps each thing they can say to the exact
+            ``set_machine_repair`` call that records it.  ``check_part``
+            names the part ``check`` is about: offering that part's steps is
+            not an answer.  Ask once, at a natural moment, and never pick an
+            answer for them.  The same block can ride as ``ask_the_person``
+            on the tool that reports a print's ending, when that ending owes
+            no question of its own.
+
             A row carrying ``ending_said`` ("Stopped: power cut") is a stop,
             not a bad print: say those words to the person, never "failed".
             A row carrying ``repair_said`` is a bad print made while the
@@ -1525,6 +1544,7 @@ class _LearningToolsPlugin:
                     "recent_outcomes": _with_ending_said(recent),
                     "unresolved_prints": unresolved,
                     "endings_to_ask_about": _endings_to_ask_about(printer_name, limit),
+                    "printer_question": _printer_question(printer_name),
                     "confidence": confidence,
                     "safety_notice": _LEARNING_SAFETY_NOTICE,
                 }

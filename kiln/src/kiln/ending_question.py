@@ -10,6 +10,10 @@ Only the person knows whether the part was coming out bad.  A row carries the
 question until it is answered or the person has nothing to add
 (``KilnDB.mark_ending_asked``).  Every door that tells an agent a print ended
 reads :func:`for_row` or :func:`for_printer`; none words the question itself.
+
+The slot holds one question.  An ending that owes none of its own carries the
+question waiting about its printer
+(:func:`kiln._pro_printer_checkin_bridge.for_the_ending`), when there is one.
 """
 
 from __future__ import annotations
@@ -96,6 +100,16 @@ def for_row(row: dict[str, Any] | None, *, about: str | None = None) -> dict[str
     }
 
 
+def _filed_name(printer_name: str | None) -> str | None:
+    """*printer_name*, or the name the active printer's rows are filed under."""
+    if printer_name:
+        return printer_name
+    import kiln.server as server
+    from kiln.printers.base import outcome_printer_name
+
+    return outcome_printer_name(server._get_adapter()) or None
+
+
 def for_printer(
     printer_name: str | None, *, cancelling: bool = False, db: Any = None,
 ) -> dict[str, Any] | None:
@@ -109,12 +123,7 @@ def for_printer(
             from kiln.persistence import get_db
 
             db = get_db()
-        if not printer_name:
-            import kiln.server as server
-            from kiln.printers.base import outcome_printer_name
-
-            # The name the active printer's rows are filed under.
-            printer_name = outcome_printer_name(server._get_adapter())
+        printer_name = _filed_name(printer_name)
         if not printer_name:
             return None
         row = db.latest_outcome_row(printer_name)
@@ -131,10 +140,30 @@ def for_printer(
         return None
 
 
-def attach(result: dict[str, Any], printer_name: str | None = None, *, cancelling: bool = False) -> dict[str, Any]:
-    """*result* with ``ask_the_person`` when the ending owes a question."""
+def about_the_printer(printer_name: str | None) -> dict[str, Any] | None:
+    """The question waiting about the printer whose print just ended, or
+    ``None``.  Never raises."""
+    try:
+        from kiln._pro_printer_checkin_bridge import for_the_ending
+
+        return for_the_ending(_filed_name(printer_name))
+    except Exception:  # noqa: BLE001
+        _logger.debug("printer question not read", exc_info=True)
+        return None
+
+
+def attach(
+    result: dict[str, Any], printer_name: str | None = None, *, cancelling: bool = False,
+    ending_can_owe: bool = True,
+) -> dict[str, Any]:
+    """*result* with ``ask_the_person``: the question the ending owes, else
+    the one waiting about its printer.  Never both.  *ending_can_owe* is
+    false for an ending that owes no question of its own (a print that
+    finished)."""
     if isinstance(result, dict) and result.get("success") is not False:
-        ask = for_printer(printer_name, cancelling=cancelling)
+        ask = for_printer(printer_name, cancelling=cancelling) if ending_can_owe else None
+        if not ask:
+            ask = about_the_printer(printer_name)
         if ask:
             result["ask_the_person"] = ask
     return result
