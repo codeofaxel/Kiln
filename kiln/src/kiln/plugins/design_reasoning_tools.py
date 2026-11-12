@@ -1133,11 +1133,13 @@ class _DesignReasoningToolsPlugin:
             # honor-gate hook in original_design.py.
             _attach_brief_to_iteration_result(goal_id, best_result)
 
+            # The quick mesh check that picked the best round stays in the
+            # process (kiln.printability.RATING_KEYS); each round's outcome
+            # and issues say how it went.
             response = {
                 "success": True,
                 "iterations": iterations,
                 "iteration_count": len(iterations),
-                "best_score": best_score,
                 "brief_id": goal_id or None,
                 **best_result,
             }

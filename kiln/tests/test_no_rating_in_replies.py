@@ -232,3 +232,29 @@ def test_no_tool_tells_an_agent_it_returns_a_printability_score(server):
     promised = {t.name for t in tools if promise.search(t.description or "")}
 
     assert promised == set(), sorted(promised)
+
+
+def test_iterate_design_says_no_rating_of_its_best_round(server, parts, monkeypatch):
+    """iterate_design keeps its rounds' quick mesh check in the process,
+    where it picks the best round and decides when to stop, and its reply
+    carries none of it, under ``best_score`` or any other name."""
+    from types import SimpleNamespace
+
+    import kiln.server as srv_module
+
+    block = parts[0]
+    job = SimpleNamespace(
+        id="round-1", error=None, status=SimpleNamespace(value="succeeded"),
+        to_dict=lambda: {"id": "round-1", "status": "succeeded"},
+    )
+    made = SimpleNamespace(local_path=block, to_dict=lambda: {"local_path": block})
+    provider = SimpleNamespace(
+        name="openscad", generate=lambda *a, **k: job, download_result=lambda job_id: made,
+    )
+    monkeypatch.setattr(srv_module, "_get_generation_provider", lambda name: provider)
+
+    reply = _call(server, "iterate_design", {"prompt": "cube([30, 20, 10]);", "max_iterations": 1})
+
+    assert reply.get("success") is True, reply
+    assert "best_score" not in reply, reply.get("best_score")
+    assert ratings_in(reply) == [], ratings_in(reply)

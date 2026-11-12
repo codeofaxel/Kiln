@@ -1193,7 +1193,7 @@ class TestIterateDesign:
 
     @patch("kiln.server._get_generation_provider")
     def test_iteration_stops_on_high_score(self, mock_get_provider, tmp_path):
-        """Loop stops when printability score is >= 80."""
+        """Loop stops when a round passes the quick mesh check."""
         cube_path = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_path, 20.0)
 
@@ -1217,7 +1217,10 @@ class TestIterateDesign:
         result = iterate_design("cube(20);", provider="openscad", max_iterations=3)
 
         assert result["success"] is True
-        assert result["best_score"] >= 0
+        # The check that stops the loop stays in the process; the round says
+        # it passed.
+        assert "best_score" not in result
+        assert result["iterations"][0]["outcome"] == "passed"
         assert len(result["iterations"]) >= 1
 
     @patch("kiln.server._get_generation_provider")
