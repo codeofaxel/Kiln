@@ -14012,6 +14012,11 @@ def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
     fleet_view, said = licensing.check_tier(LicenseTier.BUSINESS)
     if fleet_view:
         return None
+    # Counted the way a plan refusal is: this caller reached for the fleet
+    # view on a plan without it.
+    from kiln.account_plan import count_plan_wall
+
+    count_plan_wall("fleet_status")
     rows = known_printers(_get_registry())
     plan_line = str(said or "").strip() or "This feature is part of Kiln Business."
     listed: dict[str, Any] = {
@@ -14212,8 +14217,9 @@ def register_printer(
 
     Once registered the printer can be targeted by name — ``printer_status``,
     ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
-    all take a ``printer_name`` at every tier, so owning a second machine
-    never costs you sight of it or control over it.  ``fleet_status`` lists
+    all take a ``printer_name`` at every tier, one printer at a time: Kiln
+    works with one machine until it is handed back (``hand_back_printer``),
+    and each printer's own controls always work.  ``fleet_status`` lists
     the printers set up here; every one's live state in one view, and
     driving them together, are Business features.
     """

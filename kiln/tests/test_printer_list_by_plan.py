@@ -171,6 +171,42 @@ def test_the_fleet_plan_reads_every_printer(bench, on_plan, plan):
     assert {row["name"]: row["state"] for row in fleet["printers"]} == {"a1": "printing", "garage": "printing"}
 
 
+@pytest.fixture
+def walls_counted(monkeypatch):
+    counted: list[str] = []
+    monkeypatch.setattr("kiln.daily_stats.record_tier_denial", lambda tool: counted.append(tool))
+    monkeypatch.setattr("kiln.usage_ledger.record_refusal", lambda tool: counted.append(f"own:{tool}"))
+    return counted
+
+
+@pytest.mark.parametrize("plan", ["free", "pro"])
+def test_reaching_for_the_fleet_view_without_the_plan_is_counted(bench, on_plan, plan, walls_counted):
+    """The list comes back, and the reach for every printer's state is still
+    counted where a refusal was: in the install's daily counts and in the
+    signed-in person's own usage."""
+    on_plan(plan)
+    out = _ask("fleet_status")
+    assert out["success"] is True and "known_printers" in out
+    assert walls_counted == ["fleet_status", "own:fleet_status"]
+
+
+@pytest.mark.parametrize("plan", _LADDER)
+def test_one_printer_or_none_is_never_counted_as_a_wall(on_plan, plan, walls_counted, request):
+    on_plan(plan)
+    request.getfixturevalue("one_printer")
+    _ask("fleet_status")
+    request.getfixturevalue("no_printer")
+    _ask("fleet_status")
+    assert walls_counted == []
+
+
+@pytest.mark.parametrize("plan", ["business", "enterprise"])
+def test_the_fleet_plan_is_never_counted_as_a_wall(bench, on_plan, plan, walls_counted):
+    on_plan(plan)
+    _ask("fleet_status")
+    assert walls_counted == []
+
+
 class TestThePlanIsNamedInThePlanChecksOwnWords:
     """Two printers, and the plan check of an install with no kiln-pro
     (``kiln.account_plan``), in each state a sign-in can be in."""
