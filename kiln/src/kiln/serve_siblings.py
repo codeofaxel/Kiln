@@ -68,7 +68,7 @@ import subprocess
 import sys
 import time
 
-from kiln import proc_alive
+from kiln import proc_alive, run_program
 from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,7 @@ def _list_serve_processes() -> list[dict] | None:
     if kind != "ps":
         return None
     try:
-        out = subprocess.run(
+        out = run_program.run(
             ["ps", "-axo", "pid=,uid=,etime=,args="],
             capture_output=True,
             text=True,
@@ -352,7 +352,7 @@ def _list_serve_processes_windows() -> list[dict] | None:
     server there.
     """
     try:
-        out = subprocess.run(
+        out = run_program.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_SCAN],
             capture_output=True,
             text=True,
@@ -521,7 +521,7 @@ def printer_connection_holders(host: str) -> dict:
     if not host or os.name != "posix":
         return unknown
     try:
-        out = subprocess.run(
+        out = run_program.run(
             # -n/-P skip DNS and port-name lookups (slow, and irrelevant
             # here); the @host filter keeps this to the printer's sockets.
             ["lsof", "-nP", "-a", "-u", str(os.getuid()), "-i", f"@{host}"],
@@ -853,7 +853,7 @@ def _is_zombie(pid: int) -> bool:
     zombies), so ask ps for the state.
     """
     try:
-        out = subprocess.run(
+        out = run_program.run(
             ["ps", "-o", "stat=", "-p", str(pid)],
             capture_output=True,
             text=True,

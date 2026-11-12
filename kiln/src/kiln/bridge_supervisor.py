@@ -52,6 +52,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from kiln import run_program
+
 logger = logging.getLogger(__name__)
 
 #: Where the supervisor advertises itself.  Deliberately NOT the bridge's own
@@ -264,7 +266,7 @@ def _spawn_child() -> subprocess.Popen:
     those at ``~/.kiln/bridge.log``, so the bridge's log lines and the
     supervisor's restart lines land in one file in the order they happened.
     """
-    return subprocess.Popen([sys.executable, "-m", "kiln.bridge_client"])
+    return run_program.Popen([sys.executable, "-m", "kiln.bridge_client"])
 
 
 def run_supervisor() -> None:

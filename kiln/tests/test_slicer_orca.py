@@ -468,7 +468,7 @@ class TestMultiPlateAndSalvage:
             return _completed(0)
 
         with patch("kiln.slicer.find_slicer", return_value=self._fake_orca(tmp_path)), \
-             patch("kiln.slicer.subprocess.run", side_effect=fake_run), \
+             patch("kiln.slicer.run_program.run", side_effect=fake_run), \
              pytest.raises(SlicerError, match="2 build plates"):
             slice_file(stl, output_dir=str(tmp_path / "out"))
 
@@ -488,7 +488,7 @@ class TestMultiPlateAndSalvage:
             return _completed(-11)
 
         with patch("kiln.slicer.find_slicer", return_value=self._fake_orca(tmp_path)), \
-             patch("kiln.slicer.subprocess.run", side_effect=fake_run):
+             patch("kiln.slicer.run_program.run", side_effect=fake_run):
             result = slice_file(stl, output_dir=str(tmp_path / "out"))
 
         assert result.success is True
@@ -500,7 +500,7 @@ class TestMultiPlateAndSalvage:
         stl = _write_cube(str(tmp_path / "cube.stl"))
 
         with patch("kiln.slicer.find_slicer", return_value=self._fake_orca(tmp_path)), \
-             patch("kiln.slicer.subprocess.run", return_value=_completed(-11)), \
+             patch("kiln.slicer.run_program.run", return_value=_completed(-11)), \
              pytest.raises(SlicerError, match="crashed while slicing"):
             slice_file(stl, output_dir=str(tmp_path / "out"))
 
@@ -533,11 +533,11 @@ class TestPrusaSlicerIsUnaffected:
             seen.append(list(cmd))
             return real_run(cmd, **kwargs)
 
-        # patch(), not an attribute assignment: ``kiln.slicer.subprocess`` IS
-        # the subprocess module, so assigning through it swaps subprocess.run
-        # for the whole process and leaves a window where any other test in
-        # this worker would call the spy.
-        with patch("kiln.slicer.subprocess.run", side_effect=spy):
+        # patch(), not an attribute assignment: ``kiln.slicer.run_program`` IS
+        # the launcher module, so assigning through it swaps its run for the
+        # whole process and leaves a window where any other test in this
+        # worker would call the spy.
+        with patch("kiln.slicer.run_program.run", side_effect=spy):
             slice_file(
                 stl,
                 output_dir=str(tmp_path / "out"),
@@ -717,7 +717,7 @@ class TestThePlacementIsPrintedAsHandedOver:
 
         fake = SimpleNamespace(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
         with patch("kiln.slicer.find_slicer", return_value=fake), \
-             patch("kiln.slicer.subprocess.run", side_effect=fake_run):
+             patch("kiln.slicer.run_program.run", side_effect=fake_run):
             slice_file(input_path, output_dir=str(tmp_path / "out"), extra_args=["--x-extra"])
         return seen["cmd"]
 
@@ -747,7 +747,7 @@ class TestThePlacementIsPrintedAsHandedOver:
 
         fake = SimpleNamespace(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
         with patch("kiln.slicer.find_slicer", return_value=fake), \
-             patch("kiln.slicer.subprocess.run", side_effect=fake_run):
+             patch("kiln.slicer.run_program.run", side_effect=fake_run):
             slice_file(_write_cube(str(tmp_path / "cube.stl")), output_dir=str(tmp_path / "out"))
         assert seen["cwd"] == seen["work"]
 
@@ -809,7 +809,7 @@ class TestAPlateOrcaWillNotMoveIsRefusedInPlainWords:
             "no object is fully inside the print volume before apply.\n\nrun found error, exit"
         )
         with patch("kiln.slicer.find_slicer", return_value=fake), \
-             patch("kiln.slicer.subprocess.run", return_value=_completed(206, stderr=orca_said)), \
+             patch("kiln.slicer.run_program.run", return_value=_completed(206, stderr=orca_said)), \
              pytest.raises(SlicerError, match="exactly where it was placed") as info:
             slice_file(str(threemf), output_dir=str(tmp_path / "out"))
         assert "move the part in from the bed edge" in str(info.value)
@@ -817,7 +817,7 @@ class TestAPlateOrcaWillNotMoveIsRefusedInPlainWords:
     def test_an_stl_keeps_the_verbatim_report(self, tmp_path):
         fake = SimpleNamespace(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
         with patch("kiln.slicer.find_slicer", return_value=fake), \
-             patch("kiln.slicer.subprocess.run", return_value=_completed(206, stderr="no object is fully inside the print volume")), \
+             patch("kiln.slicer.run_program.run", return_value=_completed(206, stderr="no object is fully inside the print volume")), \
              pytest.raises(SlicerError, match="exited with code 206"):
             slice_file(_write_cube(str(tmp_path / "cube.stl")), output_dir=str(tmp_path / "out"))
 

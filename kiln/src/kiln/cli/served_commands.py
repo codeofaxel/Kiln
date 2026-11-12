@@ -778,9 +778,9 @@ def _open_page(
     if no_open:
         return
     try:
-        import webbrowser
+        from kiln import run_program
 
-        webbrowser.open(url)
+        run_program.open_url(url)
     except Exception:  # noqa: BLE001 — the address is printed above
         pass
 

@@ -244,7 +244,7 @@ def _with_stand_in(orca: _StandInOrca):
     info = SlicerInfo(path=orca.path, name="orcaslicer", version="OrcaSlicer-2.3.2:")
     return (
         patch("kiln.slicer.find_slicer", return_value=info),
-        patch("kiln.slicer.subprocess.run", side_effect=orca),
+        patch("kiln.slicer.run_program.run", side_effect=orca),
     )
 
 
@@ -286,7 +286,7 @@ class TestBambuStudioSaysWhyItRefused:
         bambu = _StandInBambu()
         info = SlicerInfo(path=bambu.path, name="bambustudio", version=None)
         with patch("kiln.slicer.find_slicer", return_value=info), \
-                patch("kiln.slicer.subprocess.run", side_effect=bambu), \
+                patch("kiln.slicer.run_program.run", side_effect=bambu), \
                 pytest.raises(SlicerRefusal) as refused:
             slice_file(_cube_in_the_corner(tmp_path), output_dir=str(tmp_path / "out"))
         assert refused.value.kind == REFUSED_OFF_THE_BED

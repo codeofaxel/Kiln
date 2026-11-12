@@ -495,7 +495,7 @@ def test_the_code_never_rides_a_command_line(monkeypatch, platform):
 
     monkeypatch.setattr(screen_code, "_show_hook", None)
     monkeypatch.setattr(screen_code.sys, "platform", platform)
-    monkeypatch.setattr(screen_code.subprocess, "run", fake_run)
+    monkeypatch.setattr(screen_code.run_program, "run", fake_run)
     monkeypatch.setattr(screen_code, "_show_as_kiln", lambda issued: False)  # the fallback route
     assert screen_code._show(_issued("4821"))
     argv, stdin = seen[-1]
@@ -557,8 +557,8 @@ def mac_helper(monkeypatch, tmp_path):
         monkeypatch.setattr(screen_code, "_show_hook", None)
         monkeypatch.setattr(screen_code.sys, "platform", "darwin")
         monkeypatch.setattr(screen_code, "_notifier_path", lambda: exe)
-        monkeypatch.setattr(screen_code.subprocess, "run", helper.run)
-        monkeypatch.setattr(screen_code.subprocess, "Popen", helper.popen)
+        monkeypatch.setattr(screen_code.run_program, "run", helper.run)
+        monkeypatch.setattr(screen_code.run_program, "Popen", helper.popen)
         return helper
 
     return make
@@ -602,7 +602,7 @@ class TestTheBannerComesFromKiln:
         monkeypatch.setattr(screen_code, "_show_hook", None)
         monkeypatch.setattr(screen_code.sys, "platform", "darwin")
         monkeypatch.setattr(screen_code, "_notifier_path", lambda: None)
-        monkeypatch.setattr(screen_code.subprocess, "run", lambda argv, **kw: seen.append(argv) or types.SimpleNamespace(returncode=0))
+        monkeypatch.setattr(screen_code.run_program, "run", lambda argv, **kw: seen.append(argv) or types.SimpleNamespace(returncode=0))
         assert screen_code._show(_issued())
         assert [a[0] for a in seen] == ["osascript"]
 
@@ -881,7 +881,7 @@ def test_on_windows_no_console_window_flashes_up(monkeypatch):
     monkeypatch.setattr(screen_code, "_show_hook", None)
     monkeypatch.setattr(screen_code.sys, "platform", "win32")
     monkeypatch.setattr(screen_code, "_windows_icon", lambda: "")
-    monkeypatch.setattr(screen_code.subprocess, "run", fake_run)
+    monkeypatch.setattr(screen_code.run_program, "run", fake_run)
     assert screen_code._show(_issued())
     assert seen.get("creationflags") == 0x08000000
     assert seen["input"].endswith("\n") and seen["input"].count("\n") == 1

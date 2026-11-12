@@ -73,7 +73,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from kiln import callers_printers
+from kiln import callers_printers, run_program
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
     out = Path(tempfile.mkdtemp(prefix="kiln_step_")) / "slice.gcode"
     cmd = [slicer.path, "--export-gcode", str(model), "--output", str(out), *args]
     try:
-        run = subprocess.run(  # noqa: S603 — argv built above from checked parts
+        run = run_program.run(  # noqa: S603 — argv built above from checked parts
             cmd, capture_output=True, text=True, timeout=_SLICE_TIMEOUT_S, stdin=subprocess.DEVNULL,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:

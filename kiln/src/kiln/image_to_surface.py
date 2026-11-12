@@ -19,6 +19,8 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+from kiln import run_program
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -887,7 +889,7 @@ def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int
         try:
             # Try macOS sips
             try:
-                subprocess.run(
+                run_program.run(
                     ["sips", "-s", "format", "png", abs_path, "--out", tmp_png],
                     check=True,
                     capture_output=True,
@@ -900,7 +902,7 @@ def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int
 
             # Try ImageMagick convert
             try:
-                subprocess.run(
+                run_program.run(
                     ["convert", abs_path, tmp_png],
                     check=True,
                     capture_output=True,
@@ -1214,7 +1216,7 @@ def _auto_convert_heic(src: str, work_dir: str) -> str:
         )
     out = os.path.join(work_dir, f"heic_converted_{os.path.basename(src)}.jpg")
     try:
-        _sp.run(
+        run_program.run(
             ["sips", "-s", "format", "jpeg", src, "--out", out],
             check=True, capture_output=True, timeout=30,
         )
@@ -2235,7 +2237,7 @@ def rasterize_svg_to_png(
     # --- Try rsvg-convert ---
     rsvg = shutil.which("rsvg-convert")
     if rsvg:
-        result = subprocess.run(
+        result = run_program.run(
             [rsvg, "-w", str(width_px), "-o", abs_png, abs_svg],
             capture_output=True, text=True, timeout=30,
         )
@@ -2246,7 +2248,7 @@ def rasterize_svg_to_png(
     sips = shutil.which("sips")
     if sips:
         # sips can convert SVG to PNG on macOS
-        result = subprocess.run(
+        result = run_program.run(
             [sips, "-s", "format", "png", "-z", str(width_px), str(width_px),
              abs_svg, "--out", abs_png],
             capture_output=True, text=True, timeout=30,
@@ -2257,7 +2259,7 @@ def rasterize_svg_to_png(
     # --- Try ImageMagick convert ---
     convert = shutil.which("magick") or shutil.which("convert")
     if convert:
-        result = subprocess.run(
+        result = run_program.run(
             [convert, "-background", "white", "-flatten",
              "-resize", f"{width_px}x", abs_svg, abs_png],
             capture_output=True, text=True, timeout=30,
@@ -2268,7 +2270,7 @@ def rasterize_svg_to_png(
     # --- Try Inkscape ---
     inkscape = shutil.which("inkscape")
     if inkscape:
-        result = subprocess.run(
+        result = run_program.run(
             [inkscape, "--export-type=png", f"--export-filename={abs_png}",
              f"--export-width={width_px}", abs_svg],
             capture_output=True, text=True, timeout=30,

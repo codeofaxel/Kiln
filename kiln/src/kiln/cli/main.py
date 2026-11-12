@@ -30,6 +30,7 @@ from typing import Any
 
 import click
 
+from kiln import run_program
 from kiln._pro_order_bridge import ServedRefusal as _ServedOrderRefusal
 from kiln.auto_record_hook import note_cancel_requested
 from kiln.print_start_verdict import resolve_print_start
@@ -479,14 +480,13 @@ def _notify_preview_if_available(preview_path: str) -> bool:
     """Best-effort preview notification via optional env-configured hooks."""
     cmd_template = os.environ.get("KILN_PREVIEW_NOTIFY_CMD", "").strip()
     if cmd_template:
-        import subprocess
 
         try:
             import shlex
 
             safe_path = shlex.quote(preview_path)
             cmd = cmd_template.replace("{path}", safe_path)
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
+            result = run_program.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
             if result.returncode == 0:
                 return True
             logger.warning("Preview notify command failed (exit %d): %s", result.returncode, (result.stderr or "").strip())
@@ -1978,7 +1978,6 @@ def self_update(yes: bool, dry_run: bool) -> None:
     for when you want it done for you.  (To change your subscription
     tier, use ``kiln upgrade`` instead.)
     """
-    import subprocess
 
     from kiln import __version__ as current
     from kiln.self_update import managed_message, managed_update_command
@@ -2005,7 +2004,7 @@ def self_update(yes: bool, dry_run: bool) -> None:
     if not yes and not click.confirm(f"Run '{printable}'?", default=True):
         click.echo("Cancelled.")
         return
-    raise SystemExit(subprocess.call(cmd))
+    raise SystemExit(run_program.call(cmd))
 
 
 # ---------------------------------------------------------------------------
@@ -5390,7 +5389,7 @@ def _fetch_external_snapshot(source: str) -> bytes | None:
         if not cmd:
             return None
         try:
-            result = subprocess.run(
+            result = run_program.run(
                 cmd,
                 shell=True,
                 capture_output=True,
@@ -7956,7 +7955,7 @@ def ingest_service_start_cmd(config_path: str | None, json_mode: bool) -> None:
             stamp = time.strftime("%Y-%m-%d %H:%M:%S")
             log_file.write(f"\n[{stamp}] starting ingest service\n")
             log_file.flush()
-            proc = subprocess.Popen(
+            proc = run_program.Popen(
                 cmd,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
@@ -11620,7 +11619,7 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
     # --- 1. ICMP Ping ---
     ping_ok = False
     try:
-        result = subprocess.run(
+        result = run_program.run(
             ["ping", "-c", "2", "-W", "2", host],
             capture_output=True,
             text=True,
@@ -14014,9 +14013,8 @@ def preview(file_path: str, open: bool, json_mode: bool) -> None:
                 click.echo(f"  {p}")
 
         if open and image_paths:
-            import subprocess
 
-            subprocess.run(["open", image_paths[0]], check=False)  # noqa: S603, S607
+            run_program.run(["open", image_paths[0]], check=False)  # noqa: S603, S607
     except Exception as exc:
         click.echo(
             format_error(
