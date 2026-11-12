@@ -318,19 +318,6 @@ def create_recipe(
     )
 
 
-def _library_design_id(folder: str) -> str | None:
-    """The design a library folder is named for; ``None`` for a folder that
-    is not a design's folder in this computer's library."""
-    try:
-        from kiln.history_vault import _design_folder
-
-        name = os.path.basename(folder)
-        kept = _design_folder(name)
-    except ValueError:
-        return None
-    return name if kept is not None and os.path.realpath(str(kept)) == os.path.realpath(folder) else None
-
-
 def create_new_version(
     parent: DesignRecipe,
     parent_path: str,
@@ -352,9 +339,12 @@ def create_new_version(
         e.g. ``{"portrait.color": "white -> black"}``.
     :param notes: Free-text notes for this version.
     """
+    from kiln.design_versions import _library_folder
     from kiln.version_numbers import (
         holds_a_version,
+        library_design_id,
         next_version_number,
+        numbers_from_library,
         numbers_in_store,
         reserve_version_number,
     )
@@ -367,7 +357,7 @@ def create_new_version(
     is_version = not os.path.isfile(parent_path) or holds_a_version(parent_path)
     # A recipe from before designs wrote their id inside is the design its
     # folder is named for.
-    library_id = _library_design_id(folder)
+    library_id = library_design_id(folder)
     design_id = parent.design_id or library_id
     taken = [parent.version] if is_version else []
 
@@ -378,8 +368,11 @@ def create_new_version(
         # Taken for good, with the history record read under the same lock.
         new.version = reserve_version_number(folder, taken, also=recorded)
     else:
-        # A recipe kept outside the library: numbered, nothing written there.
-        new.version = next_version_number(folder, [*taken, *recorded()])
+        # A recipe kept outside the library: numbered past its design's
+        # numbers, those its folder in the library has given included, and
+        # nothing written beside it.
+        elsewhere = numbers_from_library(folder, _library_folder(design_id)) if design_id else set()
+        new.version = next_version_number(folder, [*taken, *recorded(), *elsewhere])
     new.parent_version = os.path.abspath(parent_path)
     new.changes = changes
     new.created = datetime.now(timezone.utc).isoformat()

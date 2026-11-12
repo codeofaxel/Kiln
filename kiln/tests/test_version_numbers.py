@@ -393,6 +393,28 @@ class TestNothingIsWrittenOutsideTheLibrary:
         assert create_new_version(load_recipe(str(head)), str(head)).version == 2
         assert sorted(p.name for p in project.iterdir()) == [".kiln_recipe.json", ".kiln_recipe.v1.json"]
 
+    def test_a_recipe_outside_the_library_is_numbered_past_its_designs_library_folder(self, tmp_path, monkeypatch):
+        """The design's folder in the library keeps version 1 and records that
+        12 was given, as a pull writes the numbers a Kiln account gave: a new
+        version of the design's recipe kept in a project folder is 13, and
+        nothing is written in either folder."""
+        from kiln.plugins import version_tools
+        from kiln.version_numbers import note_number_given
+
+        monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path / "designs"))
+        library = tmp_path / "designs" / "part"
+        library.mkdir(parents=True)
+        _write(library, ".kiln_recipe.v1.json", version=1, design_id="part")
+        note_number_given(library, 12)
+        kept = sorted(p.name for p in library.iterdir())
+        project = tmp_path / "my-project"
+        project.mkdir()
+        head = _write(project, ".kiln_recipe.json", version=1, design_id="part")
+
+        assert create_new_version(load_recipe(str(head)), str(head)).version == 13
+        assert sorted(p.name for p in project.iterdir()) == [".kiln_recipe.json"]
+        assert sorted(p.name for p in library.iterdir()) == kept
+
 
 class TestASaveAfterTheCallersOwnWrite:
     def test_an_open_transaction_on_the_connection_does_not_fail_the_save(self, tmp_path):

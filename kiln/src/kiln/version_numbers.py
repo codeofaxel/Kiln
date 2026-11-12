@@ -130,6 +130,49 @@ def numbers_in_store(design_id: str | None, db_path: str | None = None) -> set[i
     return {n for n in (_number(h) for h in held) if n is not None}
 
 
+def library_design_id(
+    folder: str | Path, library_of: Callable[[str], Any] | None = None
+) -> str | None:
+    """The design whose folder in the library *folder* is: the folder's name,
+    when the library folder of that name is *folder* itself.  ``None`` for any
+    other folder, whatever it is named, so a recipe kept there that names no
+    design takes no design's numbers.
+
+    *library_of* finds a design's folder in the library; this computer's
+    library (``kiln.history_vault``) when it is not given.
+    """
+    import os
+
+    if library_of is None:
+        from kiln.history_vault import _design_folder as library_of
+    path = os.fspath(folder)
+    name = os.path.basename(os.path.normpath(path))
+    try:
+        kept = library_of(name)
+    except ValueError:
+        return None
+    if kept is None:
+        return None
+    return name if os.path.realpath(os.fspath(kept)) == os.path.realpath(path) else None
+
+
+def numbers_from_library(folder: str | Path | None, library: str | Path | None) -> set[int]:
+    """The numbers a version written in *folder* is numbered past from
+    *library*, its design's own folder in the library: every number that
+    folder has given (:func:`numbers_in_folder`, its recipe files and its
+    record of numbers given, which holds the numbers a Kiln account gave
+    versions kept on other computers).
+
+    Empty when the design has no folder in the library, and when *folder* is
+    that folder, where its numbers are read already.
+    """
+    if library is None or not Path(library).is_dir():
+        return set()
+    if folder is not None and Path(folder).resolve() == Path(library).resolve():
+        return set()
+    return numbers_in_folder(library)
+
+
 def next_version_number(folder: str | Path | None, taken: Iterable[Any] = ()) -> int:
     """The number for the next version of the design kept in *folder*.
 
