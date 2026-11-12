@@ -297,3 +297,18 @@ def test_sharing_turned_off_while_the_server_runs_stops_every_later_row(day, mon
     _FakeDate._today = _FakeDate._today + timedelta(days=1)
     assert heartbeat._send_heartbeat() is False             # and the next day's
     assert len(day.rows) == 1
+
+
+def test_every_ask_of_the_motion_door_goes_through_the_one_helper():
+    """A second way to ask the door would be a second place the report is forgotten."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(bridge))
+    askers = {
+        fn.name
+        for fn in ast.walk(tree) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for call in ast.walk(fn)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "_pro_api_call"
+    }
+    assert askers == {"_ask_service"}
