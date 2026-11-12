@@ -162,7 +162,10 @@ function Install-Kiln {
         elseif ($interactive -and ((Read-Host "  Install OpenSCAD now? Kiln designs parts with it. [Y/n]") -notmatch '^[nN]')) {
             & $kiln install-openscad
             if ($LASTEXITCODE -ne 0) { Warn "OpenSCAD didn't install; run 'kiln install-openscad' later" }
-        } else { Say "  Skipped. Install it any time with: kiln install-openscad" }
+        } else {
+            Say "  Skipped. Kiln designs and previews parts with OpenSCAD,"
+            Say "  so install it before you start: kiln install-openscad"
+        }
 
         Step "Your Kiln account"
         if ($interactive) {

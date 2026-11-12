@@ -396,7 +396,7 @@ if [ -t 0 ]; then tty=tty; else tty=notty; fi
 echo "kiln $* [$tty]" >> "$STUB_LOG"
 case "$1" in
   install-mcp|uninstall-mcp) exec "$STUB_PYTHON" -m kiln "$@" ;;
-  install-openscad) exit 0 ;;
+  install-openscad) if [ "$2" = --check ] && [ -n "$STUB_NO_OPENSCAD" ]; then exit 1; fi; exit 0 ;;
 esac
 exit 0
 """
@@ -506,6 +506,18 @@ def test_script_never_answers_the_terms_for_the_person(tmp_path: Path) -> None:
     assert not any("accept-terms" in c or "signin" in c for c in _calls(env)), _calls(env)
     assert "kiln accept-terms" in proc.stdout
     assert "Sign in any time with: kiln signin" in proc.stdout
+
+
+@posix_only
+def test_a_skipped_openscad_says_what_it_costs(tmp_path: Path) -> None:
+    """Without OpenSCAD, Kiln cannot make or preview a part on this
+    computer, so a skip says so instead of reading like a free choice."""
+    env = {**_stubs(tmp_path), "STUB_NO_OPENSCAD": "1"}
+    proc = _run_piped(env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "Kiln designs and previews parts with OpenSCAD" in proc.stdout
+    assert "so install it before you start: kiln install-openscad" in proc.stdout
+    assert not any(c.startswith("kiln install-openscad [") for c in _calls(env)), _calls(env)
 
 
 @posix_only

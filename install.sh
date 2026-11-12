@@ -195,7 +195,8 @@ install() {
     elif ask "Install OpenSCAD now? Kiln designs parts with it."; then
         "$KILN" install-openscad </dev/tty || warn "OpenSCAD didn't install; run 'kiln install-openscad' later"
     else
-        say "  Skipped. Install it any time with: kiln install-openscad"
+        say "  Skipped. Kiln designs and previews parts with OpenSCAD,"
+        say "  so install it before you start: kiln install-openscad"
     fi
 
     step "Your Kiln account"
