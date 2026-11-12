@@ -51,6 +51,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 #: Options with no ``posix_spawn`` equivalent: a call carrying one is left
 #: exactly as given.
@@ -107,9 +108,13 @@ def _lift(stream: Any, opened: list[int]) -> Any:
     return copy
 
 
-def _prepare(args: Any, kwargs: dict[str, Any]) -> tuple[Any, dict[str, Any], list[int]]:
+def _prepare(
+    args: Any, kwargs: dict[str, Any], *, captures_stdout: bool = False
+) -> tuple[Any, dict[str, Any], list[int]]:
     """The call that starts the same child without ``fork()``: new arguments,
-    new options, and the descriptors to close once the child has started."""
+    new options, and the descriptors to close once the child has started.
+    *captures_stdout* says the caller pipes the child's output itself
+    (:func:`check_output`), so ``stderr=STDOUT`` joins that pipe."""
     if not _avoids_fork() or any(_set(kwargs.get(k)) for k in _FORK_ONLY_OPTIONS):
         return args, kwargs, []
     kw = dict(kwargs)
@@ -149,7 +154,7 @@ def _prepare(args: Any, kwargs: dict[str, Any]) -> tuple[Any, dict[str, Any], li
     for name in ("stdin", "stdout", "stderr"):
         if name in kw and kw[name] is not subprocess.STDOUT:
             kw[name] = _lift(kw[name], opened)
-    if kw.get("stderr") is subprocess.STDOUT and kw.get("stdout") is None:
+    if kw.get("stderr") is subprocess.STDOUT and kw.get("stdout") is None and not captures_stdout:
         kw["stderr"] = _lift(1, opened)
     kw["close_fds"] = False
     kw["executable"] = program
@@ -162,10 +167,10 @@ def _close(opened: list[int]) -> None:
             os.close(fd)
 
 
-def _as_given(call: Callable[..., Any], args: Any, kwargs: dict[str, Any]) -> Any:
+def _as_given(call: Callable[..., Any], args: Any, kwargs: dict[str, Any], *, captures_stdout: bool = False) -> Any:
     """Run *call* on the prepared launch; whatever it returns or raises names
     the command as the caller gave it."""
-    prepared, kw, opened = _prepare(args, kwargs)
+    prepared, kw, opened = _prepare(args, kwargs, captures_stdout=captures_stdout)
     try:
         result = call(prepared, **kw)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
@@ -190,7 +195,7 @@ def Popen(args: Any, **kwargs: Any) -> subprocess.Popen:  # noqa: N802 — mirro
 
 def check_output(args: Any, **kwargs: Any) -> Any:
     """:func:`subprocess.check_output`, started without ``fork()`` on macOS."""
-    return _as_given(subprocess.check_output, args, kwargs)
+    return _as_given(subprocess.check_output, args, kwargs, captures_stdout=True)
 
 
 def call(args: Any, **kwargs: Any) -> int:
@@ -203,9 +208,16 @@ _browser_registered = False
 
 
 def _hand_to_open(url: str) -> bool:
-    """Give *url* to macOS ``open``, started here; whether it took it."""
+    """Give a web address to macOS ``open``, started here; whether it took it.
+
+    Only ``http``/``https``, and always as a URL (``-u``), so an address can
+    never be read as an option, a file or an application; anything else is
+    declined and :mod:`webbrowser` tries its next browser.
+    """
+    if urlsplit(url).scheme.lower() not in ("http", "https"):
+        return False
     try:
-        return run(["/usr/bin/open", url], capture_output=True, timeout=15).returncode == 0
+        return run(["/usr/bin/open", "-u", url], capture_output=True, timeout=15).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 

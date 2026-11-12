@@ -172,7 +172,23 @@ def test_open_url_on_macos_puts_the_spawned_open_first(monkeypatch):
     monkeypatch.setattr(run_program, "run", fake_run)
     assert run_program.open_url("https://kiln3d.com") is True
     assert webbrowser._tryorder[0] == "kiln-open"
-    assert seen == [["/usr/bin/open", "https://kiln3d.com"]]
+    assert seen == [["/usr/bin/open", "-u", "https://kiln3d.com"]]
+
+
+@pytest.mark.parametrize("address", ["-a Calculator", "file:///etc/hosts", "/Applications/Calculator.app", "x-app://do"])
+def test_open_declines_anything_but_a_web_address(monkeypatch, address):
+    monkeypatch.setattr(run_program, "run", lambda *_a, **_k: pytest.fail("open was started"))
+    assert run_program._hand_to_open(address) is False
+
+
+def test_stderr_joins_the_captured_output_in_check_output(no_fork):
+    """``check_output(stderr=STDOUT)`` merges the child's errors into what it
+    returns; it must never send them to this process's own stdout."""
+    out = run_program.check_output(
+        _py("import sys; print('out'); print('err', file=sys.stderr)"), stderr=subprocess.STDOUT, text=True
+    )
+    assert "out" in out and "err" in out
+    assert no_fork
 
 
 # -- census: every launch in Kiln goes through the launcher -------------------
