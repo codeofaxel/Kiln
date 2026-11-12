@@ -427,28 +427,33 @@ def _keep(pending: Pending, output: str) -> dict[str, Any]:
     assert parent is not None
     folder = parent.recipe_path.parent
     head_path = folder / ".kiln_recipe.json"
-    head = load_recipe(str(head_path))
-    recipe = create_new_version(head, str(head_path), changes={"mesh": pending.says}, notes=pending.says)
     suffix = Path(output).suffix.lower() or ".stl"
     copy = folder / f"mesh.{_sha256(output)[:16]}{suffix}"
     if not copy.is_file():
         tmp = copy.with_name(copy.name + ".part")
         shutil.copyfile(output, tmp)
         os.replace(tmp, copy)
-    recipe.stl_path = str(copy)
-    provenance = dict(recipe.provenance or {})
-    provenance["edit"] = {
-        "tool": pending.tool,
-        "by": pending.by,
-        "derived_from": {
-            "design_id": parent.design_id,
-            "version_id": parent.version_id,
-            "version": parent.version,
-        },
-        "summary": pending.says,
-    }
-    recipe.provenance = provenance
-    save_recipe(recipe, str(folder))
+    from kiln.version_numbers import numbers_lock
+
+    # Held from taking the version's number until its file is written, so a
+    # pull never lands between the two.
+    with numbers_lock(folder):
+        head = load_recipe(str(head_path))
+        recipe = create_new_version(head, str(head_path), changes={"mesh": pending.says}, notes=pending.says)
+        recipe.stl_path = str(copy)
+        provenance = dict(recipe.provenance or {})
+        provenance["edit"] = {
+            "tool": pending.tool,
+            "by": pending.by,
+            "derived_from": {
+                "design_id": parent.design_id,
+                "version_id": parent.version_id,
+                "version": parent.version,
+            },
+            "summary": pending.says,
+        }
+        recipe.provenance = provenance
+        save_recipe(recipe, str(folder))
     extra = after_local_save(parent.design_id)
     kept = _read(folder / f".kiln_recipe.v{recipe.version}.json")
     branch = "main"

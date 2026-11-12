@@ -1144,7 +1144,16 @@ class HistoryVault:
         them, and a version only this computer keeps moves out of the way of
         a number the account gave another (:meth:`take_account_numbers`).
         """
-        kept_models = kept_models or {}
+        from kiln.version_numbers import pull_lock
+
+        # One hold from taking the account's numbers to writing the pulled
+        # files: a save never takes a number or writes a file in between.
+        named = payload.get("design_id") or (payload.get("branch") or {}).get("design_id")
+        with pull_lock(_design_folder(named)):
+            return self._apply_remote_held(payload, kept_models or {})
+
+    def _apply_remote_held(self, payload: dict[str, Any], kept_models: dict[str, str]) -> dict[str, Any]:
+        """:meth:`apply_remote`, the design's numbers lock held."""
         bundle_like = {
             "design_id": payload.get("design_id") or (payload.get("branch") or {}).get("design_id"),
             "branches": payload.get("branches") or ([payload["branch"]] if payload.get("branch") else []),
@@ -1664,6 +1673,17 @@ class HistoryVault:
         if folder is None or not versions:
             return []
         folder.mkdir(parents=True, exist_ok=True)
+        from kiln.version_numbers import numbers_lock
+
+        # Which names are taken is read, and the files written, under the
+        # design's numbers lock: a save's file is never written over, and
+        # never lands between the look and the write.
+        with numbers_lock(folder):
+            written = self._write_library_held(design_id, folder, versions)
+        self._point_head(design_id)
+        return written
+
+    def _write_library_held(self, design_id: str, folder: Path, versions: list[dict[str, Any]]) -> list[str]:
         taken = {p.name: p for p in folder.glob(".kiln_recipe*.json")}
         written = []
         for v in versions:
@@ -1684,7 +1704,6 @@ class HistoryVault:
             path.write_text(json.dumps(recipe, indent=2, sort_keys=True), encoding="utf-8")
             taken[name] = path
             written.append(str(path))
-        self._point_head(design_id)
         return written
 
     def _point_head(self, design_id: str) -> None:

@@ -129,3 +129,75 @@ def test_a_new_version_is_numbered_past_numbers_given_elsewhere_and_keeps_only_p
     assert new.version == 13
     assert new.provenance == {"material": "PETG"}
     assert json.loads(head.read_text(encoding="utf-8"))["provenance"]["tools_used"] == ["compile_scad"]
+
+
+# ---------------------------------------------------------------------------
+# Only what describes the part travels, and a piece never becomes the design
+# ---------------------------------------------------------------------------
+
+#: Facts of one version's own, as records carry them: the splits and the
+#: merge it records, the branch it was filed on, what was measured and
+#: stamped for it, and something its saver stated about it.
+ONE_VERSIONS_OWN = {
+    "kits": [{"kit_id": "k1", "pieces": 2}],
+    "merge": {"of": ["a", "b"]},
+    "branch": {"name": "main"},
+    "sealed": {"origin": "seal"},
+    "mesh_fingerprint": {"volume_mm3": 1.0},
+    "spec_receipt": {"for": "this version"},
+    "promoted_from": {"piece": 1},
+    "a_savers_own_note": "stated when this version was saved",
+}
+
+
+def test_only_the_keys_that_describe_the_part_travel_to_a_new_version():
+    from kiln.design_recipe import PART_FACT_KEYS, DesignRecipe, create_new_version, part_facts
+
+    about_the_part = {"material": "PETG", "import_origin": True, "designed_hardware": [{"kind": "insert"}]}
+    assert set(about_the_part) <= PART_FACT_KEYS and not set(ONE_VERSIONS_OWN) & PART_FACT_KEYS
+    parent = DesignRecipe(
+        name="pot", created="2026-10-01T12:00:00+00:00", design_id="pot", source_scad=FIRST,
+        provenance={**about_the_part, **ONE_VERSIONS_OWN},
+    )
+    child = create_new_version(parent, "/nonexistent/.kiln_recipe.json")
+
+    assert child.provenance == about_the_part, sorted(set(child.provenance) - set(about_the_part))
+    assert part_facts(dict(ONE_VERSIONS_OWN)) is None
+    assert child.provenance["designed_hardware"] is not parent.provenance["designed_hardware"]
+
+
+def test_a_rollback_to_the_version_that_was_split_does_not_say_the_new_version_was_split(record, tmp_path):
+    _write_version(
+        tmp_path, "pot", 1, source_scad=FIRST, parameters=dict(FIRST_OWN),
+        provenance={"material": "PETG", **ONE_VERSIONS_OWN},
+    )
+    _write_version(tmp_path, "pot", 2, source_scad=SECOND, parameters=dict(SECOND_OWN),
+                   provenance={"material": "PLA"})
+
+    out = _tools()["rollback_design_version"](design_id="pot", to_version_id="1")
+
+    assert out.get("ok"), out
+    assert _recipe(tmp_path, "pot", out["version"]["version"])["provenance"] == {"material": "PETG"}
+
+
+def test_a_rollback_to_a_piece_of_a_split_is_refused_and_the_design_is_untouched(record, tmp_path):
+    """Version 2 is one piece of a split of version 1, kept beside the
+    design.  The design is always the whole part: rolling back to the piece
+    is refused, and nothing is written, filed or renumbered."""
+    folder = tmp_path / ".kiln" / "designs" / "pot"
+    _write_version(tmp_path, "pot", 2, source_scad="cube(5);", parameters={},
+                   provenance={"piece_of": {"design_id": "pot", "piece": 1, "of_pieces": 2}})
+    _write_version(tmp_path, "pot", 1, source_scad=FIRST, parameters=dict(FIRST_OWN),
+                   provenance={"material": "PETG", "kits": [{"kit_id": "k1"}]})
+    before = {p.name: p.read_bytes() for p in folder.iterdir()}
+    assert json.loads(before[".kiln_recipe.json"])["version"] == 1
+
+    for named in ("2", "pot:2"):
+        out = _tools()["rollback_design_version"](design_id="pot", to_version_id=named)
+        assert out.get("ok") is False and out.get("code") == "VERSION_IS_A_PIECE", out
+        assert out["changed"] is False and "whole part" in out["error"]
+    assert {p.name: p.read_bytes() for p in folder.iterdir() if p.name != ".kiln_numbers.lock"} == before
+    assert record.filed == [], "a refused rollback was filed on a branch"
+
+    whole = _tools()["rollback_design_version"](design_id="pot", to_version_id="1")
+    assert whole.get("ok") and whole["version"]["version"] == 3, whole

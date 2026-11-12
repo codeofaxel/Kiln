@@ -1138,7 +1138,8 @@ class TestProvenRecipesTravelWithTheDesign:
         answer = courier.pull("cloud_pull_branch", "mug")
 
         assert answer["proven_recipes"]["files_changed"] == 0
-        assert sorted(p.name for p in folder.iterdir()) == before
+        # The pull's own lock file aside (it holds nothing of the design).
+        assert sorted(p.name for p in folder.iterdir() if p.name != ".kiln_numbers.lock") == before
         assert not (home / ".kiln" / "designs" / "bowl").exists()
 
     def test_recipes_the_account_could_not_send_leave_the_pull_done_and_say_so(self, home, monkeypatch):

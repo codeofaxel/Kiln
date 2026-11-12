@@ -13,6 +13,7 @@ of its own) is not a version and takes no number.
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -202,48 +203,197 @@ class NumbersNotTaken(RuntimeError):
         )
 
 
+#: After this long a lock file left by a holder that ended without removing
+#: it is taken over (only where the system has no lock of its own to release).
+_LOCK_STALE_SECONDS = 120.0
+
+_held_here = threading.local()
+_in_process: dict[str, threading.Lock] = {}
+_in_process_guard = threading.Lock()
+
+
+def _system_lock() -> tuple[Callable[[Any], bool], Callable[[Any], None]] | None:
+    """``(take, release)`` over an open lock file, by the system's own file
+    lock, which it releases when the holder ends however it ends; ``None``
+    on a system that has neither kind."""
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None  # type: ignore[assignment]
+    if fcntl is not None:
+        def take(handle: Any) -> bool:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return False
+            return True
+
+        return take, lambda handle: None  # released when the file is closed
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+
+    def take_region(handle: Any) -> bool:
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+
+    def release_region(handle: Any) -> None:
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+
+    return take_region, release_region
+
+
+def _take_by_file(root: Path) -> Callable[[], None] | None:
+    """Take the lock by making a file only one holder can make; ``None``
+    when another holds it.  One left behind by a holder that ended is taken
+    over after :data:`_LOCK_STALE_SECONDS`."""
+    import os
+    import time
+
+    marker = root / f"{_LOCK}.held"
+    for _attempt in (1, 2):
+        try:
+            os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            try:
+                stale = time.time() - marker.stat().st_mtime > _LOCK_STALE_SECONDS
+            except OSError:
+                continue  # removed a moment ago: ask again
+            if not stale:
+                return None
+            marker.unlink(missing_ok=True)
+            continue
+        return lambda: marker.unlink(missing_ok=True)
+    return None
+
+
+def _busy() -> NumbersBusy:
+    return NumbersBusy(
+        "Another save of this design is still running, so nothing was saved. "
+        "Try again in a moment."
+    )
+
+
 @contextmanager
 def numbers_lock(folder: str | Path) -> Iterator[None]:
     """Hold the numbers lock of the design kept in *folder*.
 
     Every door that gives a number holds it from reading the numbers already
-    given to writing down the one it takes, so two saves of one design never
-    take the same number, whichever doors they come through.  A save that
-    cannot get it within :data:`_LOCK_WAIT_SECONDS` is refused
-    (:class:`NumbersBusy`), never let through without it: two saves holding
-    one number is how a kept file gets written over.  The lock is released
-    by the system when its holder ends, however it ends.  Not re-entrant: a
-    holder never asks for it again.
+    given until the version's file is written, and a pull holds it from
+    planning the account's numbers until its files are written, so two saves
+    of one design never take the same number and a save and a pull never
+    write between each other's steps, whichever doors they come through.  A
+    holder that cannot get it within :data:`_LOCK_WAIT_SECONDS` is refused
+    (:class:`NumbersBusy`), never let through without it: two versions
+    holding one number is how a kept file gets written over.
+
+    Held across processes by the system's file lock (released when its
+    holder ends, however it ends), or where the system has none by a file
+    only one holder can make; and across the threads of one process.  The
+    thread that holds it may ask for it again.
     """
+    import os
     import time
 
     root = Path(folder)
+    key = os.path.realpath(root)
+    depth = _held_here.__dict__.setdefault("depth", {})
+    if depth.get(key):
+        depth[key] += 1
+        try:
+            yield
+        finally:
+            depth[key] -= 1
+        return
+    deadline = time.monotonic() + _LOCK_WAIT_SECONDS
+    with _in_process_guard:
+        within = _in_process.setdefault(key, threading.Lock())
+    if not within.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        raise _busy()
+    release: Callable[[], None] | None = None
     try:
-        import fcntl
-    except ImportError:  # no file locks on this system: the count alone
+        release = _take_across_processes(root, deadline)
+        depth[key] = 1
+        try:
+            yield
+        finally:
+            depth.pop(key, None)
+    finally:
+        if release is not None:
+            release()
+        within.release()
+
+
+@contextmanager
+def pull_lock(folder: str | Path | None) -> Iterator[None]:
+    """Hold the numbers lock of the design kept in *folder* for a pull or a
+    clone: from planning the account's numbers until the pulled versions'
+    files are written, so no save takes a number or writes a file between
+    the two.  A folder that does not exist yet has no numbers to hold.  A
+    lock another save holds past the wait is :class:`NumbersNotTaken`:
+    nothing here changed, and the pull is asked for again."""
+    if folder is None or not Path(folder).is_dir():
         yield
         return
     try:
-        lock = open(root / _LOCK, "a+")  # noqa: SIM115 -- held across the read and the write
-    except OSError:  # a folder this process cannot write: nothing to write a number into either
-        yield
-        return
+        held = numbers_lock(folder)
+        held.__enter__()
+    except NumbersBusy as exc:
+        raise NumbersNotTaken("another save of this design was running") from exc
     try:
-        deadline = time.monotonic() + _LOCK_WAIT_SECONDS
-        while True:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise NumbersBusy(
-                        "Another save of this design is still running, so nothing was saved. "
-                        "Try again in a moment."
-                    ) from None
-                time.sleep(0.02)
         yield
     finally:
-        lock.close()
+        held.__exit__(None, None, None)
+
+
+def _take_across_processes(root: Path, deadline: float) -> Callable[[], None] | None:
+    """Take *root*'s lock from every other process, waiting until
+    *deadline*; returns what releases it, or ``None`` for a folder this
+    process cannot write (there is nothing to write a number into either)."""
+    import time
+
+    system = _system_lock()
+    handle = None
+    if system is not None:
+        try:
+            handle = open(root / _LOCK, "a+")  # noqa: SIM115 -- held until released
+        except OSError:
+            return None
+    elif not root.is_dir():
+        return None
+    try:
+        while True:
+            if system is not None:
+                take, give_back = system
+                if take(handle):
+                    def release(handle: Any = handle, give_back: Any = give_back) -> None:
+                        give_back(handle)
+                        handle.close()
+
+                    return release
+            else:
+                try:
+                    release_file = _take_by_file(root)
+                except OSError:
+                    return None
+                if release_file is not None:
+                    return release_file
+            if time.monotonic() >= deadline:
+                raise _busy() from None
+            time.sleep(0.02)
+    except BaseException:
+        if handle is not None:
+            handle.close()
+        raise
 
 
 def _write_given(root: Path, number: int) -> None:
@@ -286,6 +436,34 @@ def reserve_version_number(
         number = next_version_number(root, [*taken, *(also() if also else ())])
         _write_given(root, number)
         return number
+
+
+def number_to_write(
+    folder: str | Path, number: Any, made: Any, taken: Callable[[], Iterable[Any]] | None = None,
+) -> tuple[int, str | None]:
+    """The number the version made at *made* (its recipe's ``created``) is
+    written under in *folder*, having been given *number*; the caller holds
+    :func:`numbers_lock` and writes the file before letting go of it.
+
+    *number*, unless a kept file already holds it for another version (one
+    a pull laid down after this version took the number): then the next
+    number, past what *taken* returns too (read only then), taken for good.  A version is never written
+    over another.  Returns ``(number, version_id)``; the id is the one the
+    version's own kept file names, when it is being written again.
+    """
+    root = Path(folder)
+    given = _number(number)
+    if given is None or not root.is_dir():
+        return (given if given is not None else 1), None
+    kept = _read(root / f"{_PREFIX}.v{given}.json")
+    if not kept:
+        return given, None
+    if (kept.get("created") or kept.get("created_at") or "") == (made or ""):
+        vid = kept.get("version_id")
+        return given, vid if isinstance(vid, str) and vid else None
+    moved = next_version_number(root, [given, *(taken() if taken else ())])
+    _write_given(root, moved)
+    return moved, None
 
 
 def note_number_given(folder: str | Path, number: Any) -> None:

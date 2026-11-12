@@ -1,0 +1,449 @@
+"""A save and a pull of one design never write between each other's steps.
+
+A save takes its version's number, then writes the version's file.  A pull
+plans the account's numbers, then writes the pulled versions' files.  The
+case replayed here: a save took number 4, a pull laid down the account's
+version 4 (made on another computer), and the save then wrote its own
+version over that file.
+
+Three things keep it from happening, each proven below:
+
+* every door that makes a version holds the design's numbers lock from
+  taking the number until the file is written, and a pull holds it from
+  planning until its files are written;
+* the lock is a real one on every system: the system's file lock (POSIX or
+  Windows), else a file only one holder can make, and it holds between the
+  threads of one process;
+* the recipe writer itself never writes a version's kept file over another
+  version's, whoever calls it.
+"""
+
+from __future__ import annotations
+
+import ast
+import builtins
+import json
+import sys
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+from kiln import design_recipe, version_numbers
+from kiln import history_courier as courier
+from kiln.design_recipe import create_recipe, save_recipe
+from tests.test_design_tie import _Accounts, _folder, home  # noqa: F401 -- fixture
+
+SRC = Path(version_numbers.__file__).resolve().parent
+
+
+def _kept(folder: Path) -> dict[int, dict]:
+    """Each kept version file in *folder*, by the number in its name."""
+    out = {}
+    for path in folder.glob(".kiln_recipe.v*.json"):
+        out[int(path.name.split(".v")[1].split(".")[0])] = json.loads(path.read_text())
+    return out
+
+
+def _numbers_agree(folder: Path) -> None:
+    for number, data in _kept(folder).items():
+        assert data["version"] == number, f"the file named v{number} says version {data['version']}"
+
+
+# ---------------------------------------------------------------------------
+# The writer
+# ---------------------------------------------------------------------------
+
+
+class TestTheWriterNeverWritesOverAnotherVersion:
+    def _pulled(self, folder: Path, number: int) -> dict:
+        folder.mkdir(parents=True, exist_ok=True)
+        data = {"name": "vase", "design_id": "vase", "version": number, "version_id": "a" * 32,
+                "source_scad": "cube(4);", "notes": "made on another computer",
+                "created": "2026-01-01T00:00:00+00:00"}
+        (folder / f".kiln_recipe.v{number}.json").write_text(json.dumps(data))
+        return data
+
+    def test_a_number_another_versions_file_holds_is_left_and_the_next_is_taken(self, home):
+        folder = _folder(home)
+        pulled = self._pulled(folder, 4)
+        recipe = create_recipe(name="vase", parts=[], source_scad="sphere(4);", notes="saved here")
+        recipe.design_id, recipe.version = "vase", 4
+
+        save_recipe(recipe, str(folder))
+
+        kept = _kept(folder)
+        assert kept[4] == pulled, "the other version's file was written over"
+        assert recipe.version == 5 and kept[5]["notes"] == "saved here"
+        assert json.loads((folder / ".kiln_recipe.json").read_text())["version"] == 5
+        assert version_numbers.next_version_number(folder) == 6, "the number taken was not written down"
+
+    def test_a_version_written_again_keeps_its_number_and_the_id_its_file_names(self, home):
+        folder = _folder(home)
+        folder.mkdir(parents=True)
+        recipe = create_recipe(name="vase", parts=[], source_scad="cube(1);", notes="first")
+        recipe.design_id = "vase"
+        save_recipe(recipe, str(folder))
+        named = {**json.loads((folder / ".kiln_recipe.v1.json").read_text()), "version_id": "b" * 32}
+        (folder / ".kiln_recipe.v1.json").write_text(json.dumps(named))
+
+        again = design_recipe.load_recipe(str(folder))
+        again.notes = "the same version, written again"
+        save_recipe(again, str(folder))
+
+        assert sorted(_kept(folder)) == [1] and again.version == 1
+        assert _kept(folder)[1]["notes"] == "the same version, written again"
+        assert _kept(folder)[1]["version_id"] == "b" * 32, "writing a version again dropped the id its file named"
+
+
+# ---------------------------------------------------------------------------
+# A save in flight, and a pull
+# ---------------------------------------------------------------------------
+
+
+def _save_tool():
+    from kiln.plugins.version_tools import _VersionToolsPlugin
+
+    tools: dict = {}
+
+    class _MCP:
+        def tool(self, **_kw):
+            def deco(fn):
+                tools[fn.__name__] = fn
+                return fn
+            return deco
+
+    _VersionToolsPlugin().register(_MCP())
+    return tools
+
+
+@pytest.fixture
+def accounts(home, monkeypatch):  # noqa: F811
+    stand_in = _Accounts()
+    monkeypatch.setattr(courier, "_request", stand_in.request)
+    # No kiln-pro in these: the save is a plain install's.
+    real_import = builtins.__import__
+
+    def no_pro(name, *args, **kwargs):
+        if name.split(".")[0] == "kiln_pro":
+            raise ImportError("No module named 'kiln_pro'", name="kiln_pro")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_pro)
+    for loaded in [m for m in sys.modules if m.split(".")[0] == "kiln_pro"]:
+        monkeypatch.delitem(sys.modules, loaded)
+    return stand_in
+
+
+class _Paused:
+    """The recipe writer, stopped at its door until released: the moment
+    between a save taking its number and writing its file."""
+
+    def __init__(self, monkeypatch) -> None:
+        self.reached, self.release = threading.Event(), threading.Event()
+        real = design_recipe.save_recipe
+
+        def paused(recipe, directory):
+            self.number = recipe.version
+            self.reached.set()
+            assert self.release.wait(20), "the test never released the save"
+            return real(recipe, directory)
+
+        monkeypatch.setattr(design_recipe, "save_recipe", paused)
+
+
+@pytest.mark.parametrize("door", ["save_design_version", "rollback_design_version"])
+def test_a_pull_waits_for_a_save_in_flight_and_neither_writes_over_the_other(home, accounts, monkeypatch, door):
+    assert courier.clone("cloud_clone_design", "vase")["status"] == "success"
+    folder = _folder(home)
+    # Another computer made the account's version 4 after this one cloned.
+    other = "f" * 32
+    accounts.designs["X"]["versions"].append((other, 4))
+
+    tools = _save_tool()
+    paused = _Paused(monkeypatch)
+    answer: dict = {}
+    call = (
+        (lambda: tools[door](design_id="vase", scad_source="sphere(44);", notes="saved here, racing"))
+        if door == "save_design_version" else (lambda: tools[door](design_id="vase", to_version_id="1"))
+    )
+    saving = threading.Thread(target=lambda: answer.update(call()))
+    saving.start()
+    try:
+        assert paused.reached.wait(20), "the save never reached its writer"
+        assert paused.number == 4, "the save in flight did not take the number the account's new version holds"
+        before = {p.name: p.read_bytes() for p in folder.iterdir() if p.name != ".kiln_numbers.lock"}
+
+        monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.3)
+        refused = courier.pull("cloud_pull_branch", "vase")
+        assert refused.get("code") == "NUMBERS_NOT_TAKEN", (
+            f"a pull landed between a save's number and its file: {refused}"
+        )
+        assert {p.name: p.read_bytes() for p in folder.iterdir() if p.name != ".kiln_numbers.lock"} == before
+    finally:
+        paused.release.set()
+        saving.join(30)
+    assert answer.get("ok"), answer
+
+    monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 30.0)
+    pulled = courier.pull("cloud_pull_branch", "vase")
+    assert pulled["status"] == "success", pulled
+    kept = _kept(folder)
+    _numbers_agree(folder)
+    assert kept[4]["version_id"] == other, "the account's version 4 is not version 4 here"
+    mine = [n for n, data in kept.items() if data.get("version_id") != other and n > 3]
+    assert mine == [5], f"the version saved here should have moved to 5: {sorted(kept)}"
+    assert len(kept) == 5, sorted(kept)
+
+
+def test_a_save_waits_for_a_pull_in_flight(home, accounts, monkeypatch):
+    """The other order: a pull has taken the account's numbers and not yet
+    written its files.  A save does not take a number in between."""
+    from kiln.history_vault import HistoryVault
+
+    assert courier.clone("cloud_clone_design", "vase")["status"] == "success"
+    folder = _folder(home)
+    other = "f" * 32
+    accounts.designs["X"]["versions"].append((other, 4))
+
+    reached, release = threading.Event(), threading.Event()
+    real = HistoryVault._write_library
+
+    def paused(self, design_id, versions):
+        reached.set()
+        assert release.wait(20), "the test never released the pull"
+        return real(self, design_id, versions)
+
+    monkeypatch.setattr(HistoryVault, "_write_library", paused)
+    pulled: dict = {}
+    pulling = threading.Thread(target=lambda: pulled.update(courier.pull("cloud_pull_branch", "vase")))
+    pulling.start()
+    tools = _save_tool()
+    try:
+        assert reached.wait(20), "the pull never reached its writer"
+        monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.3)
+        mid = tools["save_design_version"](design_id="vase", scad_source="sphere(44);", notes="saved mid-pull")
+        assert mid.get("ok") is False and "still running" in mid.get("error", ""), (
+            f"a save landed between a pull's numbers and its files: {mid}"
+        )
+    finally:
+        release.set()
+        pulling.join(30)
+    assert pulled.get("status") == "success", pulled
+    monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 30.0)
+    saved = tools["save_design_version"](design_id="vase", scad_source="sphere(44);", notes="saved after the pull")
+    assert saved.get("ok") and saved["version"]["version"] == 5, saved
+    kept = _kept(folder)
+    _numbers_agree(folder)
+    assert kept[4]["version_id"] == other and kept[5]["notes"] == "saved after the pull" and len(kept) == 5
+
+
+# ---------------------------------------------------------------------------
+# The lock
+# ---------------------------------------------------------------------------
+
+
+def _held_elsewhere(folder: Path, monkeypatch) -> bool:
+    """Whether another thread is refused the lock while this one holds it."""
+    monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.2)
+    seen: list[str] = []
+
+    def other() -> None:
+        try:
+            with version_numbers.numbers_lock(folder):
+                seen.append("taken")
+        except version_numbers.NumbersBusy:
+            seen.append("busy")
+
+    with version_numbers.numbers_lock(folder):
+        thread = threading.Thread(target=other)
+        thread.start()
+        thread.join(10)
+    return seen == ["busy"]
+
+
+class _WindowsLocks:
+    """``msvcrt.locking`` as Windows keeps it: one holder of a file's first
+    byte at a time, whichever handle asks."""
+
+    LK_NBLCK, LK_UNLCK = 2, 0
+
+    def __init__(self) -> None:
+        self.held: dict[tuple[int, int], int] = {}
+        self.calls: list[str] = []
+
+    def locking(self, fd: int, mode: int, nbytes: int) -> None:
+        import os
+
+        stat = os.fstat(fd)
+        key = (stat.st_dev, stat.st_ino)
+        if mode == self.LK_NBLCK:
+            if key in self.held:
+                raise OSError(13, "Permission denied")
+            self.held[key] = fd
+            self.calls.append("lock")
+        elif self.held.get(key) == fd:
+            del self.held[key]
+            self.calls.append("unlock")
+
+
+def _without(monkeypatch, *modules: str) -> None:
+    for name in modules:
+        monkeypatch.setitem(sys.modules, name, None)  # import raises ImportError
+
+
+class TestTheLock:
+    def test_it_holds_between_two_threads_and_its_holder_may_ask_again(self, tmp_path, monkeypatch):
+        with version_numbers.numbers_lock(tmp_path), version_numbers.numbers_lock(tmp_path):
+            pass
+        assert _held_elsewhere(tmp_path, monkeypatch)
+        with version_numbers.numbers_lock(tmp_path):  # and it was let go
+            pass
+
+    def test_two_processes_never_hold_it_together(self, tmp_path):
+        import subprocess
+
+        holder = (
+            "import sys, time; sys.path.insert(0, sys.argv[2]);"
+            "from kiln import version_numbers as vn\n"
+            "with vn.numbers_lock(sys.argv[1]):\n"
+            "    print('held', flush=True); time.sleep(30)\n"
+        )
+        child = subprocess.Popen([sys.executable, "-c", holder, str(tmp_path), str(SRC.parent)],
+                                 stdout=subprocess.PIPE, text=True)
+        try:
+            assert child.stdout.readline().strip() == "held"
+            started = time.monotonic()
+            version_numbers_wait = version_numbers._LOCK_WAIT_SECONDS
+            version_numbers._LOCK_WAIT_SECONDS = 0.3
+            try:
+                with pytest.raises(version_numbers.NumbersBusy), version_numbers.numbers_lock(tmp_path):
+                    pass
+            finally:
+                version_numbers._LOCK_WAIT_SECONDS = version_numbers_wait
+            assert time.monotonic() - started < 5
+        finally:
+            child.kill()
+            child.wait(10)
+        with version_numbers.numbers_lock(tmp_path):  # released when its holder ended
+            pass
+
+    def test_where_there_is_no_fcntl_it_is_the_windows_file_lock(self, tmp_path, monkeypatch):
+        windows = _WindowsLocks()
+        _without(monkeypatch, "fcntl")
+        monkeypatch.setitem(sys.modules, "msvcrt", windows)
+        monkeypatch.setattr(version_numbers, "_in_process", {})
+
+        with version_numbers.numbers_lock(tmp_path):
+            assert windows.held, "nothing was locked where there is no fcntl"
+            # Another process: its own handle on the same lock file.
+            take, _release = version_numbers._system_lock()
+            with open(tmp_path / version_numbers._LOCK, "a+") as theirs:
+                assert take(theirs) is False
+        assert not windows.held and windows.calls == ["lock", "unlock"]
+        monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.2)
+        with open(tmp_path / version_numbers._LOCK, "a+") as theirs:
+            take, release = version_numbers._system_lock()
+            assert take(theirs)
+            with pytest.raises(version_numbers.NumbersBusy), version_numbers.numbers_lock(tmp_path):
+                pass
+            release(theirs)
+
+    def test_where_the_system_has_no_file_lock_it_is_a_file_only_one_can_make(self, tmp_path, monkeypatch):
+        _without(monkeypatch, "fcntl", "msvcrt")
+        assert version_numbers._system_lock() is None
+        marker = tmp_path / f"{version_numbers._LOCK}.held"
+        with version_numbers.numbers_lock(tmp_path):
+            assert marker.is_file()
+            assert version_numbers._take_by_file(tmp_path) is None, "a second holder made the lock file"
+        assert not marker.exists()
+        assert _held_elsewhere(tmp_path, monkeypatch)
+
+        # One left by a holder that ended without removing it: refused while
+        # fresh, taken over once it is old.
+        marker.write_text("")
+        monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.2)
+        with pytest.raises(version_numbers.NumbersBusy), version_numbers.numbers_lock(tmp_path):
+            pass
+        monkeypatch.setattr(version_numbers, "_LOCK_STALE_SECONDS", 0.0)
+        time.sleep(0.05)
+        with version_numbers.numbers_lock(tmp_path):
+            pass
+        assert not marker.exists()
+
+    def test_a_pull_that_cannot_get_it_says_nothing_changed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(version_numbers, "_LOCK_WAIT_SECONDS", 0.2)
+        refused: list[BaseException] = []
+
+        def pull() -> None:
+            try:
+                with version_numbers.pull_lock(tmp_path):
+                    pass
+            except version_numbers.NumbersNotTaken as exc:
+                refused.append(exc)
+
+        with version_numbers.numbers_lock(tmp_path):
+            thread = threading.Thread(target=pull)
+            thread.start()
+            thread.join(10)
+        assert refused and "nothing here changed" in str(refused[0])
+        with version_numbers.pull_lock(tmp_path / "not-made-yet"):  # no folder: nothing to hold
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Every door
+# ---------------------------------------------------------------------------
+
+
+def _functions_calling(names: set[str]) -> list[tuple[str, str, ast.AST]]:
+    """``(file, function, node)`` for each function whose own body (not a
+    function nested in it) calls one of *names*."""
+    found = []
+
+    class _Calls(ast.NodeVisitor):
+        def __init__(self, path: str) -> None:
+            self.path, self.stack = path, []
+
+        def _function(self, node: ast.AST) -> None:
+            self.stack.append(node)
+            self.generic_visit(node)
+            self.stack.pop()
+
+        visit_FunctionDef = visit_AsyncFunctionDef = _function
+
+        def visit_Call(self, node: ast.Call) -> None:
+            name = getattr(node.func, "id", getattr(node.func, "attr", None))
+            if name in names and self.stack and (self.path, self.stack[-1].name, self.stack[-1]) not in found:
+                found.append((self.path, self.stack[-1].name, self.stack[-1]))
+            self.generic_visit(node)
+
+    for path in sorted(SRC.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        if any(name in source for name in names):
+            _Calls(str(path.relative_to(SRC))).visit(ast.parse(source))
+    return found
+
+
+def test_every_door_that_takes_a_number_and_writes_a_file_holds_the_lock_across_both():
+    """A function that takes a version's number (or asks for a new version,
+    which takes one) and is not the number-taker itself must name the
+    design's numbers lock: held from the number to the file."""
+    takers = {
+        ("version_numbers.py", "reserve_version_number"), ("design_recipe.py", "create_new_version"),
+    }
+    doors = [
+        (path, name, func) for path, name, func in _functions_calling({"reserve_version_number", "create_new_version"})
+        if (path, name) not in takers
+    ]
+    assert {(p, n) for p, n, _f in doors} >= {
+        ("plugins/version_tools.py", "save_design_version"),
+        ("plugins/version_tools.py", "rollback_design_version"),
+        ("edit_lineage.py", "_keep"),
+    }, "the doors this test knows of were not found: it is reading the wrong tree"
+    unheld = [
+        f"{path}::{name}" for path, name, func in doors
+        if "numbers_lock" not in {getattr(n, "id", getattr(n, "attr", None)) for n in ast.walk(func)}
+    ]
+    assert not unheld, f"these take a version's number and never hold the design's numbers lock: {unheld}"
