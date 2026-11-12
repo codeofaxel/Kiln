@@ -285,6 +285,31 @@ def test_with_no_printer_named_it_reads_the_active_printers_rows(db, monkeypatch
     assert "ask_the_person" not in ending_question.attach({"success": True, "outcome": "failed"})
 
 
+def test_the_background_watch_carries_the_question_once_the_row_settles(db):
+    """The watch notices the ending before the print's row is written, so the
+    question is read when the result is read."""
+    from types import SimpleNamespace
+
+    from kiln.plugins.monitoring_tools import _PrintWatcher
+
+    watcher = _PrintWatcher(
+        "w-ask", SimpleNamespace(_kiln_registered_name="p1", get_job=lambda: None), "p1",
+        snapshot_interval=9999, poll_interval=1, timeout=120, stall_timeout=0,
+    )
+    watcher._finish({"success": True, "outcome": "failed"})
+    assert "ask_the_person" not in (watcher.status()["result"] or {})   # no row yet
+    _stop(db, "bare")
+    result = watcher.status()["result"]
+    assert result["ask_the_person"]["about"] == "stop" and result["ask_the_person"]["job_id"] == "bare"
+    assert watcher.stop()["ask_the_person"]["job_id"] == "bare"
+    done = _PrintWatcher(
+        "w-ok", SimpleNamespace(_kiln_registered_name="p1", get_job=lambda: None), "p1",
+        snapshot_interval=9999, poll_interval=1, timeout=120, stall_timeout=0,
+    )
+    done._finish({"success": True, "outcome": "completed"})
+    assert "ask_the_person" not in done.status()["result"]
+
+
 def test_the_cancel_engine_and_the_wait_tool_carry_the_question():
     """The wiring: both doors call the one helper."""
     import inspect

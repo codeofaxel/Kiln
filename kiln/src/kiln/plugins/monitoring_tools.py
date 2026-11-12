@@ -284,7 +284,7 @@ class _PrintWatcher:
             self._thread.join(timeout=5)
         with self._lock:
             if self._result is not None:
-                return self._result
+                return self._with_ending_question(self._result)
             elapsed = round(time.time() - self._start_time, 1)
             return {
                 "success": True,
@@ -312,6 +312,8 @@ class _PrintWatcher:
                 "finished": self._result is not None,
                 "result": self._result,
             }
+        if data["result"] is not None:
+            data["result"] = self._with_ending_question(data["result"])
 
         # Cost estimate (outside lock — calls adapter)
         try:
@@ -331,6 +333,28 @@ class _PrintWatcher:
         return data
 
     # -- internal ----------------------------------------------------------
+
+    #: Watch outcomes whose ending can owe the person a question.
+    _ENDINGS_THAT_ASK = frozenset({"failed", "auto_cancelled", "cancelling"})
+
+    def _with_ending_question(self, result: dict) -> dict:
+        """*result* with the one question its ending owes the person
+        (:mod:`kiln.ending_question`), read when the result is read: the
+        print's row may settle after the watch notices the ending.  Never
+        raises."""
+        if result.get("outcome") not in self._ENDINGS_THAT_ASK or "ask_the_person" in result:
+            return result
+        try:
+            from kiln import ending_question
+            from kiln.printers.base import outcome_printer_name
+
+            ending_question.attach(
+                result, outcome_printer_name(self._adapter),
+                cancelling=result.get("outcome") != "failed",
+            )
+        except Exception:  # noqa: BLE001
+            _logger.debug("watch: ending question not attached", exc_info=True)
+        return result
 
     def _finish(self, result: dict) -> None:
         """Store the final result and publish a completion event."""
