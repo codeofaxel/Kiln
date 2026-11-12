@@ -122,3 +122,73 @@ def test_once_this_computers_line_is_on_a_branch_of_its_own_the_pull_follows_the
         assert [m["version_id"] for m in vault.memberships("kept-copy")] == IDS
     finally:
         vault.close()
+
+
+def test_a_branch_made_from_main_is_not_a_kept_copy_of_it(home, monkeypatch):
+    """Unpushed work on ``main``, then a branch made from it to try
+    something.  That branch lists main's head but does not hold main's
+    line: a pull leaves ``main`` on its own versions and says to push first."""
+    _here(home, 3)
+    vault = HistoryVault()
+    try:
+        main = vault.branch_named("vase", "main")
+        vault.keep_branch_copy(
+            {**main, "branch_id": "experiment-id", "name": "experiment", "parent_branch_id": main["branch_id"],
+             "base_version_id": IDS[2], "head_version_id": IDS[2]},
+            [{"version_id": IDS[2]}],
+        )
+    finally:
+        vault.close()
+    _account(monkeypatch, [IDS[0], OTHER])
+
+    pulled = courier.pull("cloud_pull_branch", "vase")
+
+    assert pulled["status"] == "success", pulled
+    head, members = _main()
+    assert head == IDS[2] and members == IDS
+    assert pulled["applied"]["heads_kept_here"]["main"] == "went another way"
+    assert "cloud push" in pulled["said_heads"]
+
+
+def test_a_copy_that_does_not_hold_the_whole_line_is_not_enough(home, monkeypatch):
+    """A branch kept from ``main`` earlier holds v1 and v2; ``main`` has
+    since gained v3.  Following the account would leave v3 on no branch."""
+    _here(home, 3)
+    vault = HistoryVault()
+    try:
+        main = vault.branch_named("vase", "main")
+        vault.keep_branch_copy(
+            {**main, "branch_id": "kept-copy", "name": "main@this-computer", "parent_branch_id": main["branch_id"],
+             "head_version_id": IDS[1]},
+            [{"version_id": IDS[0]}, {"version_id": IDS[1]}],
+        )
+    finally:
+        vault.close()
+    _account(monkeypatch, [IDS[0], OTHER])
+
+    pulled = courier.pull("cloud_pull_branch", "vase")
+
+    head, members = _main()
+    assert head == IDS[2] and members == IDS
+    assert pulled["applied"]["heads_kept_here"]["main"] == "went another way"
+
+
+def test_a_pull_that_follows_the_account_says_so(home, monkeypatch):
+    _here(home, 3)
+    vault = HistoryVault()
+    try:
+        main = vault.branch_named("vase", "main")
+        vault.keep_branch_copy(
+            {**main, "branch_id": "kept-copy", "name": "main@this-computer", "parent_branch_id": main["branch_id"]},
+            [{"version_id": v} for v in IDS],
+        )
+    finally:
+        vault.close()
+    _account(monkeypatch, [IDS[0], IDS[1], OTHER])
+
+    pulled = courier.pull("cloud_pull_branch", "vase")
+
+    head, _members = _main()
+    assert head == OTHER
+    assert pulled["applied"]["heads_followed_here"] == {"main": "main@this-computer"}
+    assert "main@this-computer" in pulled["said_heads"] and "now follows your Kiln account" in pulled["said_heads"]

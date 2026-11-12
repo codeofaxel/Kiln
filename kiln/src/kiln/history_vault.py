@@ -1330,6 +1330,7 @@ class HistoryVault:
         written = []
         heads_kept: dict[str, str] = {}
         follows: set[str] = set()
+        heads_followed: dict[str, str] = {}
         stays: set[str] = set()
         with self._lock:
             for v in _rows(bundle_like["versions"], "version_id"):
@@ -1363,11 +1364,12 @@ class HistoryVault:
                         # own versions.
                         heads_kept[name] = "this computer is ahead"
                         b = {**b, "head_version_id": here}
-                    elif self._on_another_branch(design_id, b["branch_id"], here):
-                        # The two went different ways, and this computer's
-                        # line is whole on a branch of its own: the branch
-                        # follows the account and lets that line go.
+                    elif (copy := self._kept_copy_of(design_id, b["branch_id"], there)) is not None:
+                        # The two went different ways, and everything this
+                        # branch would let go is on the branch kept from it:
+                        # the branch follows the account.
                         follows.add(b["branch_id"])
+                        heads_followed[name] = str(copy.get("name") or copy["branch_id"])
                     else:
                         # The two went different ways and this computer's
                         # line is on this branch alone: it stays, and the
@@ -1410,22 +1412,27 @@ class HistoryVault:
             out["numbers_here"] = numbers
         if heads_kept:
             out["heads_kept_here"] = heads_kept
+        if heads_followed:
+            out["heads_followed_here"] = heads_followed
         return out
 
-    def _on_another_branch(self, design_id: str, branch_id: str, version_id: str) -> bool:
-        """Whether *version_id* is on a live branch of the design other than *branch_id*."""
-        row = self._conn.execute(
-            "SELECT 1 FROM memberships m JOIN branches b ON b.branch_id = m.branch_id "
-            "WHERE b.design_id = ? AND m.branch_id != ? AND m.version_id = ? LIMIT 5",
-            (design_id, branch_id, version_id),
-        ).fetchall()
-        if not row:
-            return False
-        return any(
-            b["branch_id"] != branch_id and b.get("status") != "retired"
-            and any(m["version_id"] == version_id for m in self.memberships(b["branch_id"]))
-            for b in self.branches(design_id)
-        )
+    def _kept_copy_of(self, design_id: str, branch_id: str, account_head: Any) -> dict[str, Any] | None:
+        """The live branch kept from *branch_id* that holds every version
+        *branch_id* would let go by following the account to *account_head*,
+        or ``None``.  A branch merely made from it, or a kept copy that
+        lacks any of those versions, is not one."""
+        letting_go = {
+            m["version_id"] for m in self.memberships(branch_id)
+            if not self._grows_from(account_head, m["version_id"])
+        }
+        for other in self.branches(design_id):
+            if other["branch_id"] == branch_id or other.get("status") == "retired":
+                continue
+            if other.get("parent_branch_id") != branch_id:
+                continue
+            if letting_go <= {m["version_id"] for m in self.memberships(other["branch_id"])}:
+                return other
+        return None
 
     def _grows_from(self, head: Any, base: Any) -> bool:
         """Whether the version *head* is *base* or is reached from it by

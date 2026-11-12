@@ -1593,9 +1593,16 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any, *, doing: str) 
         out["tie"] = tie
         if tie.get("said"):
             out["said_tie"] = tie["said"]
-    kept_heads = applied.get("heads_kept_here") if isinstance(applied, dict) else None
-    if kept_heads:
-        out["said_heads"] = " ".join(_said_head_kept(design_id, name, why) for name, why in sorted(kept_heads.items()))
+    kept_heads = (applied.get("heads_kept_here") or {}) if isinstance(applied, dict) else {}
+    followed = (applied.get("heads_followed_here") or {}) if isinstance(applied, dict) else {}
+    said_heads = [_said_head_kept(design_id, name, why) for name, why in sorted(kept_heads.items())]
+    said_heads += [
+        f"{name} of {design_id} now follows your Kiln account. This computer's own versions are on "
+        f"{copy}: nothing was merged or lost."
+        for name, copy in sorted(followed.items())
+    ]
+    if said_heads:
+        out["said_heads"] = " ".join(said_heads)
     if models is not None:
         out["models"] = models
     if notes:
