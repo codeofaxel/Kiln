@@ -550,6 +550,10 @@ def _send_heartbeat(also_model: str = "") -> bool:
 
     if _is_ephemeral_runner() or _is_hosted_multitenant():
         return False
+    # Asked at every send, not only when the scheduler starts: sharing
+    # turned off while a server runs stops the next row.
+    if not _telemetry_enabled():
+        return False
 
     today = str(date.today())
     with _lock:

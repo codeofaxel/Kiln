@@ -286,3 +286,14 @@ def test_a_new_day_starts_from_nothing_named(day):
     assert heartbeat._send_heartbeat() is True              # the new day's own row
     assert heartbeat._send_heartbeat() is False
     assert len(day.rows) == 2 and day.extras == 2
+
+
+def test_sharing_turned_off_while_the_server_runs_stops_every_later_row(day, monkeypatch):
+    assert heartbeat._send_heartbeat() is True
+    monkeypatch.setattr(heartbeat, "_telemetry_enabled", lambda: False)
+    day.registry.adapters["default"] = _Adapter()
+
+    assert heartbeat._send_heartbeat() is False             # the scheduler's next look
+    _FakeDate._today = _FakeDate._today + timedelta(days=1)
+    assert heartbeat._send_heartbeat() is False             # and the next day's
+    assert len(day.rows) == 1
