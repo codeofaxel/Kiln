@@ -155,10 +155,9 @@ TOOL_EVENT_MAP: dict[str, str] = {
     # -- decorations: an existing mesh gained a decoration -------------
     **dict.fromkeys(
         (
-            "apply_decoration", "smart_decorate", "batch_decorate",
+            "apply_decoration", "batch_decorate",
             "decorate_during_print", "decorate_during_print_fleet",
-            "deboss_during_print", "add_qr_to_product",
-            "generate_qr_decoration", "iterate_decoration",
+            "deboss_during_print", "iterate_decoration",
             "auto_multicolor_from_texture",
             # Colouring a part: each changes the colours it prints in.
             "auto_color_by_height", "auto_color_by_region",

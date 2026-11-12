@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-12T17:45:59.932301+00:00",
-  "tool_count": 421,
+  "generated": "2026-11-12T23:12:54.599283+00:00",
+  "tool_count": 418,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3222,77 +3222,6 @@
       }
     },
     {
-      "name": "generate_qr_decoration",
-      "description": "Generate a QR code heightmap for embossing onto 3D models (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
-      "tier": "business",
-      "access": "business",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "content": {
-            "title": "Content",
-            "type": "string",
-            "description": "What the code encodes -- a URL or any text."
-          },
-          "output_dir": {
-            "title": "Output Dir",
-            "type": "string",
-            "description": "Folder the heightmap (``qr_heightmap.dat``) is written to."
-          },
-          "target_size_mm": {
-            "default": 0.0,
-            "title": "Target Size Mm",
-            "type": "number",
-            "description": "How wide the code will be printed, in mm.  Give it and the answer says whether the code will still scan at that size; leave it at 0 to get the heightmap alone."
-          },
-          "nozzle_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nozzle Mm",
-            "description": "Nozzle diameter the scan check is judged for.  Leave it out to use the nozzle on record for your printer (else 0.4); the answer's ``nozzle`` block says which size it used."
-          }
-        },
-        "required": [
-          "content",
-          "output_dir"
-        ],
-        "title": "generate_qr_decorationArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Generate QR decoration",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "qr_branding_v1",
-        "variant": "qr_branding",
-        "feature": "QR codes on printed products",
-        "headline": "Put a scannable QR on this product.",
-        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
-        "free_included": "The product itself still generates without the QR."
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "inputs": {
-        "image": "content",
-        "outputs": {
-          "output_dir": "folder"
-        }
-      }
-    },
-    {
       "name": "paint_mesh_regions",
       "description": "Paint mesh regions by name or id and write a painted 3MF. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
@@ -3539,113 +3468,6 @@
       },
       "inputs": {
         "mesh": "input_path"
-      }
-    },
-    {
-      "name": "smart_decorate",
-      "description": "Intelligent decoration with auto-fix for printability (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "model_path": {
-            "title": "Model Path",
-            "type": "string",
-            "description": "Path to the STL model to decorate."
-          },
-          "content": {
-            "title": "Content",
-            "type": "string",
-            "description": "What to put on the surface: an image or SVG path, ``\"text:...\"`` for text, or ``\"qr:...\"`` for a QR code."
-          },
-          "face": {
-            "default": "auto",
-            "title": "Face",
-            "type": "string",
-            "description": "Which face to decorate.  ``\"auto\"`` (default) picks the largest flat face; also ``\"top\"``, ``\"bottom\"``, ``\"front\"``, ``\"back\"``, ``\"left\"``, ``\"right\"``, a sketch-built part's own wall name (``\"side:l2\"``), or ``\"wall\"`` to wrap text or a line-art mark around the round wall of a cup, jar or vase."
-          },
-          "depth_mm": {
-            "default": 0.0,
-            "title": "Depth Mm",
-            "type": "number",
-            "description": "Emboss/deboss depth in mm.  0 (default) picks a depth for *material*; a depth too shallow for it is raised and said."
-          },
-          "mode": {
-            "default": "deboss",
-            "title": "Mode",
-            "type": "string",
-            "description": "``\"deboss\"`` (cut in, default) or ``\"emboss\"`` (raised). ``face=\"wall\"`` is deboss only."
-          },
-          "scale": {
-            "default": 0.7,
-            "title": "Scale",
-            "type": "number",
-            "description": "Share of the face the decoration covers, 0.0-1.0 (default 0.7).  A QR too small to scan at this scale is enlarged."
-          },
-          "material": {
-            "default": "PLA",
-            "title": "Material",
-            "type": "string",
-            "description": "Material the depth is judged for (default ``\"PLA\"``)."
-          },
-          "content_type": {
-            "default": "auto",
-            "title": "Content Type",
-            "type": "string",
-            "description": "``\"auto\"`` (default, read from *content*), or ``\"text\"``, ``\"qr\"``, ``\"svg\"``, ``\"image\"``."
-          },
-          "offset_x_mm": {
-            "default": 0.0,
-            "title": "Offset X Mm",
-            "type": "number",
-            "description": "Move the decoration across the face, in mm (default 0)."
-          },
-          "offset_y_mm": {
-            "default": 0.0,
-            "title": "Offset Y Mm",
-            "type": "number",
-            "description": "Move the decoration along the face, in mm (default 0)."
-          },
-          "absolute_size_mm": {
-            "default": 0.0,
-            "title": "Absolute Size Mm",
-            "type": "number",
-            "description": "``face=\"wall\"`` only: the size in mm instead of a share of the wall (letter height for text, width for a mark). 0 (default) uses *scale*."
-          },
-          "image_style": {
-            "default": "auto",
-            "title": "Image Style",
-            "type": "string",
-            "description": "``face=\"wall\"`` only: ``\"stencil\"`` or ``\"logo\"`` to carve an image as a line-art mark; ``\"auto\"`` (default) tells a mark from a photo by looking."
-          },
-          "font": {
-            "default": "",
-            "title": "Font",
-            "type": "string",
-            "description": "Font for text content: ``\"sans\"`` (default), ``\"mono\"``, ``\"fredoka\"`` (rounded), ``\"zilla-slab\"`` (slab), ``\"oswald\"`` (tall and narrow) or ``\"saira-stencil\"`` (stencil), each free on every plan.  When the person names none, carve with the default and tell them which font was used and that they can pick another.  An unknown font is refused naming the accepted list.  Ignored for images and QR codes."
-          }
-        },
-        "required": [
-          "model_path",
-          "content"
-        ],
-        "title": "smart_decorateArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Smart decorate",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "inputs": {
-        "mesh": "model_path",
-        "image": "content"
       }
     },
     {
@@ -24996,7 +24818,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Pro. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25210,7 +25032,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Pro. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25512,7 +25334,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Pro. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -26113,7 +25935,7 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Pro. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -26794,92 +26616,6 @@
       },
       "inputs": {
         "image": "photo"
-      }
-    },
-    {
-      "name": "add_qr_to_product",
-      "description": "Add a scannable QR code to any product STL (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
-      "tier": "business",
-      "access": "business",
-      "category": "product_intelligence",
-      "parameters": {
-        "properties": {
-          "product_stl_path": {
-            "title": "Product Stl Path",
-            "type": "string",
-            "description": "Path to the base product STL."
-          },
-          "qr_content": {
-            "title": "Qr Content",
-            "type": "string",
-            "description": "URL or text to encode in the QR code."
-          },
-          "placement": {
-            "default": "bottom",
-            "title": "Placement",
-            "type": "string",
-            "description": "``'bottom'``, ``'top'``, or ``'pocket'``."
-          },
-          "product_type": {
-            "default": "",
-            "title": "Product Type",
-            "type": "string",
-            "description": "Template key for profile lookup (optional)."
-          },
-          "size_mm": {
-            "default": 0,
-            "title": "Size Mm",
-            "type": "number",
-            "description": "QR size override in mm (0 = auto from product)."
-          },
-          "pad_height_mm": {
-            "default": 0.5,
-            "title": "Pad Height Mm",
-            "type": "number",
-            "description": "Height of the QR pads in mm, default 0.5."
-          },
-          "nozzle_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nozzle Mm",
-            "description": "Nozzle diameter in mm; the QR's smallest module is sized from it so the code prints cleanly. Leave unset to use the only printer Kiln knows of, else 0.4; ``nozzle`` in the reply says which was used."
-          }
-        },
-        "required": [
-          "product_stl_path",
-          "qr_content"
-        ],
-        "title": "add_qr_to_productArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Add a QR code to a product",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "qr_branding_v1",
-        "variant": "qr_branding",
-        "feature": "QR codes on printed products",
-        "headline": "Put a scannable QR on this product.",
-        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
-        "free_included": "The product itself still generates without the QR."
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "inputs": {
-        "mesh": "product_stl_path"
       }
     },
     {
@@ -30935,6 +30671,13 @@
           }
         }
       },
+      "decorate_surface": {
+        "inputs": {
+          "mesh": "model_path",
+          "image": "content"
+        },
+        "asked_by_the_tool": true
+      },
       "generate_from_template": {},
       "import_step_file": {
         "inputs": {
@@ -30992,13 +30735,6 @@
         "says": "Rounded the edges",
         "inputs": [
           "file_path"
-        ],
-        "outputs": []
-      },
-      "add_qr_to_product": {
-        "says": "Added a QR code",
-        "inputs": [
-          "product_stl_path"
         ],
         "outputs": []
       },
@@ -31176,13 +30912,6 @@
         "says": "Simplified the surface",
         "inputs": [
           "file_path"
-        ],
-        "outputs": []
-      },
-      "smart_decorate": {
-        "says": "Decorated the surface",
-        "inputs": [
-          "model_path"
         ],
         "outputs": []
       },

@@ -95,7 +95,9 @@ class TestEveryFontIsReallyDrawn:
 def plate(tmp_path):
     import trimesh
 
-    path = tmp_path / "plate.stl"
+    # A name of its own: the carve writes beside a shared folder by the
+    # model's name, and parallel workers carving "plate.stl" collide.
+    path = tmp_path / f"plate_{tmp_path.name}.stl"
     trimesh.creation.box(extents=(80.0, 40.0, 6.0)).export(str(path))
     return str(path)
 
