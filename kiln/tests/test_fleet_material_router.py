@@ -2,7 +2,8 @@
 
 One machine: the answer is worked out here from this install's records,
 offline, nothing asked.  Several machines below the plan that covers them:
-the fleet refusal, nothing asked.  On that plan (Kiln Business): Kiln's
+the fleet refusal, nothing asked; a door that can answer for one named
+printer asks which one instead, and answers for it.  On that plan (Kiln Business): Kiln's
 servers answer, sent only the rows the question reads.  The doors are walked
 by name, so a door added later that answers on its own fails here.
 """
@@ -20,11 +21,13 @@ from kiln.persistence import KilnDB
 
 #: Every door that answers a material question about the machines, and a call.
 DOORS: list[tuple[str, dict[str, Any], str]] = [
+    ("material_on_hand", {}, "summary"),
     ("get_fleet_material_summary", {}, "summary"),
     ("get_material_consumption_history", {"days": 14}, "history"),
     ("forecast_material_consumption", {"material_type": "PLA"}, "forecast"),
     ("get_restock_suggestions", {}, "restock"),
     ("find_printers_with_material", {"material_type": "PLA"}, "find"),
+    ("assign_jobs", {"jobs": [{"file_name": "a.gcode", "material_type": "PLA", "required_grams": 5.0}]}, "assign"),
     ("optimize_fleet_assignment", {"jobs": [{"file_name": "a.gcode", "material_type": "PLA", "required_grams": 5.0}]}, "assign"),
     ("suggest_spool_swaps", {"jobs": [{"material_type": "ABS", "required_grams": 5.0}]}, "swaps"),
     ("check_material_sufficiency", {"printer_name": "a1", "required_grams": 900.0}, "alternatives"),
@@ -50,6 +53,17 @@ class _Registry:
 
     def list_names(self) -> list[str]:
         return list(self.names)
+
+    def list_machines(self) -> list[str]:
+        return sorted(self.names)
+
+    def list_all(self) -> dict[str, Any]:
+        return dict.fromkeys(self.names)
+
+
+#: The doors that can answer for one named printer: below the plan, with
+#: several printers and none named, they ask which one.
+ASKS_WHICH_PRINTER = {"material_on_hand", "get_fleet_material_summary", "assign_jobs", "optimize_fleet_assignment"}
 
 
 @pytest.fixture()
@@ -140,6 +154,13 @@ def test_several_machines_below_the_plan_ask_nothing(tools, machines, servers, d
         # The one door whose own verdict is never gated: the other machines
         # are withheld and counted, as before.
         assert out["check"]["alternative_printers"] == [] and out["check"]["sufficient"] is False
+    elif door in ASKS_WHICH_PRINTER:
+        assert out["success"] is True and out["ask"] == "Which printer?"
+        assert [row["name"] for row in out["known_printers"]] == ["a1", "b2", "c3"] and out["count"] == 3
+        assert out["note"].count("Kiln Business") == 1 and "printer_name" in out["note"]
+        assert out["upgrade_url"].endswith(f"tool={door}")
+        # Nothing about any printer's material is in the answer.
+        assert "summary" not in out and "assignments" not in out and "PLA" not in json.dumps(out)
     else:
         assert out["success"] is False and out["code"] == "TIER_FLEET_SCOPE"
 
@@ -215,3 +236,89 @@ def test_the_bridge_is_on_the_hosted_doors_roster():
     from kiln.served_answer import HOSTED_DOORS
 
     assert HOSTED_DOORS["kiln._pro_fleet_materials_bridge"][0] == "served_answer"
+
+
+# ---------------------------------------------------------------------------
+# One named printer answers for itself on every plan
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("cap", [1, 50], ids=["below the plan", "on the plan"])
+def test_a_named_printers_material_is_answered_here_whatever_the_plan(tools, machines, servers, cap):
+    machines(["a1", "b2", "c3"], cap=cap)
+    out = tools["material_on_hand"](printer_name="a1")
+    assert out["success"] is True and out["printer_name"] == "a1" and servers == []
+    by_type = {row["material_type"]: row for row in out["summary"]}
+    # What a1 has loaded, and the shelf: the spool it holds and the spare one.
+    assert by_type["PLA"]["total_grams"] == 300.0 and by_type["PLA"]["printers_loaded"] == ["a1"]
+    assert by_type["ABS"]["total_grams"] == 700.0 and by_type["ABS"]["printers_loaded"] == []
+    # Nothing another printer has loaded.
+    assert "PETG" not in by_type
+
+
+def test_a_spool_loaded_on_another_printer_is_not_this_printers(tools, machines, servers, db):
+    db.save_material("c3", 0, "ABS", color=None, spool_id="s2", remaining_grams=700.0)
+    machines(["a1", "b2", "c3"], cap=1)
+    types_a1 = {row["material_type"] for row in tools["material_on_hand"](printer_name="a1")["summary"]}
+    types_c3 = {row["material_type"] for row in tools["material_on_hand"](printer_name="c3")["summary"]}
+    assert types_a1 == {"PLA"} and types_c3 == {"ABS"}
+
+
+def test_a_named_printers_jobs_are_planned_here_whatever_the_plan(tools, machines, servers):
+    machines(["a1", "b2", "c3"], cap=1)
+    jobs = [{"file_name": "a.gcode", "material_type": "PLA", "required_grams": 100.0},
+            {"file_name": "b.gcode", "material_type": "PETG", "required_grams": 100.0}]
+    on_a1 = tools["assign_jobs"](jobs=jobs, printer_name="a1")
+    on_b2 = tools["assign_jobs"](jobs=jobs, printer_name="b2")
+    assert servers == [] and on_a1["printer_name"] == "a1" and on_a1["count"] == 2
+    assert [a["material_match"] for a in on_a1["assignments"]] == [True, False]
+    assert [a["material_match"] for a in on_b2["assignments"]] == [False, True]
+    assert on_a1["assignments"][0]["recommended_printer"] == "a1"
+    assert on_b2["assignments"][1]["recommended_printer"] == "b2"
+
+
+@pytest.mark.parametrize("door, kwargs", [
+    ("material_on_hand", {}),
+    ("assign_jobs", {"jobs": [{"file_name": "a.gcode", "material_type": "PLA", "required_grams": 5.0}]}),
+])
+def test_a_printer_that_is_not_set_up_is_said_with_the_ones_that_are(tools, machines, servers, door, kwargs):
+    machines(["a1", "b2"], cap=1)
+    out = tools[door](printer_name="attic", **kwargs)
+    assert out["success"] is False and out["code"] == "PRINTER_NOT_FOUND"
+    assert "'attic'" in out["error"] and "a1, b2" in out["error"] and servers == []
+
+
+def test_asking_which_printer_is_counted_and_answering_for_one_is_not(tools, machines, monkeypatch):
+    counted: list[str] = []
+    monkeypatch.setattr("kiln.account_plan.count_plan_wall", lambda tool: counted.append(tool))
+    machines(["a1", "b2"], cap=1)
+    tools["material_on_hand"]()
+    tools["get_fleet_material_summary"]()
+    tools["assign_jobs"](jobs=[])
+    assert counted == ["material_on_hand", "get_fleet_material_summary", "assign_jobs"]
+    counted.clear()
+    tools["material_on_hand"](printer_name="a1")
+    machines(["a1"], cap=1)
+    tools["material_on_hand"]()
+    assert counted == []
+
+
+@pytest.mark.parametrize("names, cap", [(["a1"], 1), (["a1", "b2"], 1), (["a1", "b2"], 50)],
+                         ids=["one printer", "several below the plan", "several on the plan"])
+def test_the_older_names_give_the_same_answers(tools, machines, servers, names, cap):
+    machines(names, cap=cap)
+    jobs = [{"file_name": "a.gcode", "material_type": "PLA", "required_grams": 5.0}]
+
+    def same(new: dict, old: dict) -> bool:
+        return {k: v for k, v in new.items() if k != "upgrade_url"} == {k: v for k, v in old.items() if k != "upgrade_url"}
+
+    assert same(tools["material_on_hand"](), tools["get_fleet_material_summary"]())
+    assert same(tools["assign_jobs"](jobs=jobs), tools["optimize_fleet_assignment"](jobs=jobs))
+
+
+def test_only_the_two_questions_a_printer_answers_for_itself_take_a_name(db):
+    from kiln.material_inventory import ONE_PRINTER_QUESTIONS, inventory_answer
+
+    assert {"summary", "assign"} == ONE_PRINTER_QUESTIONS
+    with pytest.raises(ValueError, match="one named printer"):
+        inventory_answer("restock", db, feature="x", printer_name="a1")

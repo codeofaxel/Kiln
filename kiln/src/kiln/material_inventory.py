@@ -832,8 +832,11 @@ def _machine_slot(loaded: list[dict[str, Any]]) -> dict[str, Any] | None:
     return next((m for m in slots if m.get("printer_name") in names), slots[0])
 
 
-def plan_jobs_for_one_machine(db: Any, *, jobs: list[dict[str, Any]]) -> list[FleetAssignment]:
-    """Which of *jobs* the machine's loaded spool can take, in order.
+def plan_jobs_for_one_machine(
+    db: Any, *, jobs: list[dict[str, Any]], printer_name: str | None = None,
+) -> list[FleetAssignment]:
+    """Which of *jobs* the machine's loaded spool can take, in order.  With
+    *printer_name*, the machine is that one.
 
     Each job: ``file_name``, ``material_type``, ``required_grams``, optional
     ``color``.  A job is taken when the first-tool spool is that material
@@ -842,7 +845,10 @@ def plan_jobs_for_one_machine(db: Any, *, jobs: list[dict[str, Any]]) -> list[Fl
     """
     if not jobs:
         return []
-    slot = _machine_slot(_get_all_materials(db))
+    loaded = _get_all_materials(db)
+    if printer_name is not None:
+        loaded = [m for m in loaded if m.get("printer_name") == printer_name]
+    slot = _machine_slot(loaded)
     capacity = (weight_on_record(db, slot) or 0.0) if slot is not None else 0.0
     out: list[FleetAssignment] = []
     for job in jobs:
@@ -945,6 +951,74 @@ FLEET_QUESTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: The questions one named printer answers for itself, on every plan.
+ONE_PRINTER_QUESTIONS: frozenset[str] = frozenset({"summary", "assign"})
+
+
+def summary_for_one_printer(db: Any, printer_name: str) -> list[FleetMaterialSummary]:
+    """Per-material totals for *printer_name*: what it has loaded, and the
+    shelf.  A spool loaded on another printer is left out; a shelved spool
+    counts, since it can be swapped in."""
+    loaded = _loaded_rows(db)
+    elsewhere = {m.get("spool_id") for m in loaded if m.get("spool_id") and m.get("printer_name") != printer_name}
+    return summarize(
+        [s for s in _spool_rows(db) if s.get("id") not in elsewhere],
+        [m for m in loaded if m.get("printer_name") == printer_name],
+    )
+
+
+def _one_named_printer(question: str, db: Any, printer_name: str, params: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
+    """*question* answered for one printer from this install's own rows, or
+    the refusal for a name that is not set up here."""
+    try:
+        from kiln.registry import get_registry
+
+        set_up = sorted(get_registry().list_names())
+    except Exception:  # noqa: BLE001 -- no registry to check the name against
+        set_up = [printer_name]
+    if printer_name not in set_up:
+        return None, {
+            "success": False,
+            "error": f"No printer named {printer_name!r} is set up here. Set up: {', '.join(set_up) or 'none'}.",
+            "code": "PRINTER_NOT_FOUND",
+        }
+    if question == "summary":
+        return [s.to_dict() for s in summary_for_one_printer(db, printer_name)], None
+    return [a.to_dict() for a in plan_jobs_for_one_machine(db, jobs=params["jobs"], printer_name=printer_name)], None
+
+
+def ask_which_printer(refused: dict[str, Any], *, tool: str, what: str) -> dict[str, Any]:
+    """What a door that can answer for one printer says in place of the
+    across-machines refusal *refused*: the printers set up here and the
+    question, with the plan that answers for all of them named once.  Any
+    other refusal comes back as it is."""
+    if refused.get("code") != "TIER_FLEET_SCOPE":
+        return refused
+    from kiln.account_plan import count_plan_wall
+    from kiln.printer_roster import known_printers
+    from kiln.registry import get_registry
+    from kiln.tiers_and_terms import upgrade_link
+
+    count_plan_wall(tool)
+    try:
+        rows = known_printers(get_registry())
+    except Exception:  # noqa: BLE001 -- the question is still asked without the list
+        logger.debug("printer list unavailable", exc_info=True)
+        rows = []
+    count = len(rows) or int(refused.get("machines") or 0)
+    return {
+        "success": True,
+        "ask": "Which printer?",
+        "known_printers": rows,
+        "count": count,
+        "note": (
+            f"{count} printers are set up here. Name one (printer_name=...) for {what}. "
+            "Checking all of them at once is part of Kiln Business."
+        ),
+        "upgrade_url": upgrade_link(tool),
+    }
+
+
 def registered_machines() -> int:
     """How many machines are registered here; ``1`` when the registry cannot
     be read, so a broken registry never stands between a person and their
@@ -980,8 +1054,13 @@ def _one_machine(question: str, db: Any, params: dict[str, Any]) -> Any:
     raise ValueError(f"not a material question: {question!r}")
 
 
-def inventory_answer(question: str, db: Any, *, feature: str, **params: Any) -> tuple[Any, dict[str, Any] | None]:
+def inventory_answer(
+    question: str, db: Any, *, feature: str, printer_name: str | None = None, **params: Any,
+) -> tuple[Any, dict[str, Any] | None]:
     """``(answer, None)``, or ``(None, refusal)`` for a door to return as it is.
+
+    With *printer_name* the answer is that one printer's own, from this
+    install's rows on every plan (:data:`ONE_PRINTER_QUESTIONS`).
 
     The one router: on an install with one machine the answer is worked out
     here from this install's rows, offline and with no sign-in.  Across
@@ -994,6 +1073,10 @@ def inventory_answer(question: str, db: Any, *, feature: str, **params: Any) -> 
     """
     if question not in FLEET_QUESTIONS:
         raise ValueError(f"not a material question: {question!r}")
+    if printer_name is not None:
+        if question not in ONE_PRINTER_QUESTIONS:
+            raise ValueError(f"not a question one named printer answers: {question!r}")
+        return _one_named_printer(question, db, printer_name, params)
     if registered_machines() <= 1:
         return _one_machine(question, db, params), None
     refused = fleet_scope_verdict(feature)

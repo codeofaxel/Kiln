@@ -26,12 +26,14 @@ class _MaterialInventoryToolsPlugin:
     """Material inventory tools — fleet tracking and forecasting.
 
     Tools:
+        - material_on_hand
         - get_fleet_material_summary
         - get_material_consumption_history
         - forecast_material_consumption
         - check_material_sufficiency
         - get_restock_suggestions
         - find_printers_with_material
+        - assign_jobs
         - optimize_fleet_assignment
         - suggest_spool_swaps
     """
@@ -47,31 +49,51 @@ class _MaterialInventoryToolsPlugin:
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register material inventory tools with the MCP server."""
 
-        @mcp.tool(annotations=read_only("Fleet material summary"))
-        def get_fleet_material_summary() -> dict:
-            """Aggregate material inventory across all printers and spools.
-
-            Returns a per-material-type summary of total stock in grams,
-            spool counts, which printers have it loaded, and available
-            colours.
-            """
+        def _on_hand(tool: str, printer_name: str | None) -> dict:
+            """The material on hand, for the door *tool*."""
             import kiln.server as _srv
 
             try:
-                from kiln.material_inventory import inventory_answer
+                from kiln.material_inventory import ask_which_printer, inventory_answer
                 from kiln.persistence import get_db
 
-                results, refused = inventory_answer("summary", get_db(), feature="Fleet material summary")
+                results, refused = inventory_answer(
+                    "summary", get_db(), feature="Fleet material summary", printer_name=printer_name,
+                )
                 if refused is not None:
-                    return refused
-                return {
-                    "success": True,
-                    "summary": results,
-                    "material_types": len(results),
-                }
+                    return ask_which_printer(refused, tool=tool, what="its material on hand")
+                answer = {"success": True, "summary": results, "material_types": len(results)}
+                if printer_name is not None:
+                    answer["printer_name"] = printer_name
+                return answer
             except Exception as exc:
-                _logger.exception("Unexpected error in get_fleet_material_summary")
+                _logger.exception("Unexpected error in %s", tool)
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+        @mcp.tool(annotations=read_only("Material on hand"))
+        def material_on_hand(printer_name: str | None = None) -> dict:
+            """What material is on hand: every spool on record, on the shelf and loaded.
+
+            Returns a per-material-type summary of total stock in grams,
+            spool counts, which printers have it loaded, and available
+            colours.  With one printer set up, or with ``printer_name``, the
+            answer is that printer's (what it has loaded, and the shelf) on
+            every plan.  With several printers and none named, every
+            printer at once is Kiln Business
+            (https://kiln3d.com/pricing); a plan without it gets the
+            printers set up here and the question of which one, never a
+            refusal.
+
+            Args:
+                printer_name: The printer to answer for.  Omit for the only
+                    printer, or for every printer at once.
+            """
+            return _on_hand("material_on_hand", printer_name)
+
+        @mcp.tool(annotations=read_only("Fleet material summary"))
+        def get_fleet_material_summary() -> dict:
+            """The same answer as ``material_on_hand()``, for clients that call it by this name."""
+            return _on_hand("get_fleet_material_summary", None)
 
         @mcp.tool(annotations=read_only("Material consumption history"))
         def get_material_consumption_history(days: int = 30) -> dict:
@@ -298,40 +320,53 @@ class _MaterialInventoryToolsPlugin:
                 _logger.exception("Unexpected error in find_printers_with_material")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool(annotations=read_only("Plan fleet job assignment"))
-        def optimize_fleet_assignment(jobs: list[dict[str, Any]]) -> dict:
-            """Assign print jobs to printers by material availability.
+        def _assign(tool: str, jobs: list[dict[str, Any]], printer_name: str | None) -> dict:
+            """Which printer takes each job, for the door *tool*."""
+            import kiln.server as _srv
+
+            try:
+                from kiln.material_inventory import ask_which_printer, inventory_answer
+                from kiln.persistence import get_db
+
+                assignments, refused = inventory_answer(
+                    "assign", get_db(), feature="Fleet job assignment", printer_name=printer_name, jobs=jobs,
+                )
+                if refused is not None:
+                    return ask_which_printer(refused, tool=tool, what="the jobs its loaded spool can take")
+                answer = {"success": True, "assignments": assignments, "count": len(assignments)}
+                if printer_name is not None:
+                    answer["printer_name"] = printer_name
+                return answer
+            except Exception as exc:
+                _logger.exception("Unexpected error in %s", tool)
+                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+        @mcp.tool(annotations=read_only("Assign jobs"))
+        def assign_jobs(jobs: list[dict[str, Any]], printer_name: str | None = None) -> dict:
+            """Say which jobs a printer's loaded material can take, or which printer takes each job.
 
             Each job dict should contain ``file_name``, ``material_type``,
-            ``required_grams``, and optionally ``color``.  On one machine it
-            says which jobs its loaded spool can take, in order; across
-            several machines it picks a printer for each job, preferring
-            colour matches and fewer spool swaps (Kiln Business).
+            ``required_grams``, and optionally ``color``.  With one printer
+            set up, or with ``printer_name``, it says which jobs that
+            printer's loaded spool can take, in order, on every plan.  With
+            several printers and none named, picking a printer for each job
+            is Kiln Business (https://kiln3d.com/pricing); a plan without
+            it gets the printers set up here and the question of which
+            one, never a refusal.
 
             Args:
                 jobs: List of job dicts, each with ``file_name``,
                     ``material_type``, ``required_grams`` and optionally
                     ``color``.
+                printer_name: The printer to answer for.  Omit for the only
+                    printer, or to assign across every printer.
             """
-            import kiln.server as _srv
+            return _assign("assign_jobs", jobs, printer_name)
 
-            try:
-                from kiln.material_inventory import inventory_answer
-                from kiln.persistence import get_db
-
-                assignments, refused = inventory_answer(
-                    "assign", get_db(), feature="Fleet job assignment", jobs=jobs,
-                )
-                if refused is not None:
-                    return refused
-                return {
-                    "success": True,
-                    "assignments": assignments,
-                    "count": len(assignments),
-                }
-            except Exception as exc:
-                _logger.exception("Unexpected error in optimize_fleet_assignment")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        @mcp.tool(annotations=read_only("Plan fleet job assignment"))
+        def optimize_fleet_assignment(jobs: list[dict[str, Any]]) -> dict:
+            """The same answer as ``assign_jobs(jobs)``, for clients that call it by this name."""
+            return _assign("optimize_fleet_assignment", jobs, None)
 
         @mcp.tool(annotations=read_only("Suggest spool swaps"))
         def suggest_spool_swaps(jobs: list[dict[str, Any]]) -> dict:

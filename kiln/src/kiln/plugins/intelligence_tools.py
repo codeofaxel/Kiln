@@ -732,7 +732,7 @@ class _IntelligenceToolsPlugin:
             - Designing a part and need engineering specs? → ``recommend_design_material``
             - Ordering a print from a service? → ``suggest_material_for_order``
             - Which of MY printers has a material loaded? → ``find_printers_with_material``
-            - What's loaded across the fleet right now? → ``get_fleet_material_summary``
+            - What material is on hand right now? → ``material_on_hand``
 
             Args:
                 intent: User intent text (e.g. ``"strong"``, ``"pretty"``).
