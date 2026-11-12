@@ -564,6 +564,23 @@ class TestShowing:
         other = mcp._tool_manager.get_tool("get_printer_insights").fn(printer_name="Another")
         assert other["printer_question"] is None
 
+    def test_an_endings_own_question_comes_first_and_the_printers_waits(self, world):
+        """One question at a time: while an ending owes its question the
+        printer's is held back, and it is not spent by being held."""
+        from kiln.server import mcp
+
+        _history(world)
+        world.servers.question = _question()
+        _print(world, "bare", "failed", None, days_ago=5)   # an earlier stop the printer gave no reason for
+        checkin.ask_now("Shop A1", db=world.db)
+        read = mcp._tool_manager.get_tool("get_printer_insights").fn
+        first = read(printer_name="Shop A1")
+        assert [r["job_id"] for r in first["endings_to_ask_about"]] == ["bare"]
+        assert first["printer_question"] is None
+        world.db.mark_ending_asked("bare")
+        later = read(printer_name="Shop A1")
+        assert later["endings_to_ask_about"] == [] and later["printer_question"]["episode"] == EPISODE
+
 
 # ---------------------------------------------------------------------------
 # Answering

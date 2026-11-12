@@ -904,15 +904,12 @@ _HISTORY_FIELDS = (
     "printer_name", "material_type", "outcome", "failure_mode", "determined_by",
     "quality_grade", "settings", "environment", "created_at",
 )
-#: What a record carries beside those, each only when this computer holds it:
-#: ``set_aside`` (true for a bad print the person's repair record sets
-#: aside), a one-way code of the settings the file was sliced with, the spool
-#: as a one-way code, the firmware version when it is a bare version, and how
-#: far the print got.  Never the spool's id, and never a file.
-_HISTORY_EVIDENCE = ("set_aside", "settings_code", "spool_code", "firmware", "progress_at_end")
+#: What a record carries beside those, only when it holds: ``set_aside``,
+#: true for a bad print the person's repair record sets aside.  A served
+#: tool is sent what it reads and nothing more.
+_HISTORY_EVIDENCE = ("set_aside",)
 #: This module's name in :data:`kiln.outbound_guard.VERSION_FIELDS`.
 SENDER = "kiln/served_steps.py"
-_SETTINGS_CODE = re.compile(r"[0-9a-f]{16,64}")
 #: The most recent records sent, and the most they may weigh as JSON (the
 #: servers refuse a reading step over a megabyte).
 _HISTORY_RECORDS = 400
@@ -923,8 +920,6 @@ def _history_record(row: dict[str, Any], repair_windows: Any) -> dict[str, Any]:
     """One print row as a served tool receives it: :data:`_HISTORY_FIELDS`,
     then each of :data:`_HISTORY_EVIDENCE` this computer holds for it."""
     from kiln.failure_vocabulary import excused_by_repair
-    from kiln.outbound_guard import spool_code
-    from kiln.print_evidence import wire_firmware
 
     out: dict[str, Any] = {k: row.get(k) for k in _HISTORY_FIELDS}
     if excused_by_repair(
@@ -933,18 +928,6 @@ def _history_record(row: dict[str, Any], repair_windows: Any) -> dict[str, Any]:
         repair_windows=repair_windows,
     ):
         out["set_aside"] = True
-    settings = row.get("settings_code")
-    if isinstance(settings, str) and _SETTINGS_CODE.fullmatch(settings):
-        out["settings_code"] = settings
-    spool = spool_code(row.get("spool_id")) if isinstance(row.get("spool_id"), str) else None
-    if spool:
-        out["spool_code"] = spool
-    firmware = wire_firmware(row.get("firmware_version"))
-    if firmware:
-        out["firmware"] = firmware
-    share = row.get("progress_at_end")
-    if isinstance(share, (int, float)) and not isinstance(share, bool) and 0.0 <= share <= 1.0:
-        out["progress_at_end"] = float(share)
     return out
 
 

@@ -1544,8 +1544,10 @@ class _LearningToolsPlugin:
                     "insights": insights,
                     "recent_outcomes": _with_ending_said(recent),
                     "unresolved_prints": unresolved,
-                    "endings_to_ask_about": _endings_to_ask_about(printer_name, limit),
-                    "printer_question": _printer_question(printer_name),
+                    "endings_to_ask_about": (asks := _endings_to_ask_about(printer_name, limit)),
+                    # One question at a time: an ending's own question
+                    # comes first, and the printer's waits for a later read.
+                    "printer_question": None if asks else _printer_question(printer_name),
                     "confidence": confidence,
                     "safety_notice": _LEARNING_SAFETY_NOTICE,
                 }
