@@ -299,7 +299,8 @@ class TestTheLock:
             pass
         assert _held_elsewhere(tmp_path, monkeypatch)
         with version_numbers.numbers_lock(tmp_path):  # and it was let go
-            pass
+            assert len(version_numbers._in_process) == 1
+        assert version_numbers._in_process == {}, "a folder's lock outlived its last holder"
 
     def test_two_processes_never_hold_it_together(self, tmp_path):
         import subprocess

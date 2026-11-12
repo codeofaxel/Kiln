@@ -208,7 +208,10 @@ class NumbersNotTaken(RuntimeError):
 _LOCK_STALE_SECONDS = 120.0
 
 _held_here = threading.local()
-_in_process: dict[str, threading.Lock] = {}
+#: The lock between this process's threads for each design folder now held
+#: or waited for: ``{folder: [lock, holders and waiters]}``.  An entry goes
+#: when its last holder lets go, so it never outlives the saves using it.
+_in_process: dict[str, list[Any]] = {}
 _in_process_guard = threading.Lock()
 
 
@@ -316,11 +319,15 @@ def numbers_lock(folder: str | Path) -> Iterator[None]:
         return
     deadline = time.monotonic() + _LOCK_WAIT_SECONDS
     with _in_process_guard:
-        within = _in_process.setdefault(key, threading.Lock())
-    if not within.acquire(timeout=max(0.0, deadline - time.monotonic())):
-        raise _busy()
+        entry = _in_process.setdefault(key, [threading.Lock(), 0])
+        entry[1] += 1
+    within: threading.Lock = entry[0]
+    got = False
     release: Callable[[], None] | None = None
     try:
+        got = within.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        if not got:
+            raise _busy()
         release = _take_across_processes(root, deadline)
         depth[key] = 1
         try:
@@ -330,7 +337,12 @@ def numbers_lock(folder: str | Path) -> Iterator[None]:
     finally:
         if release is not None:
             release()
-        within.release()
+        if got:
+            within.release()
+        with _in_process_guard:
+            entry[1] -= 1
+            if entry[1] <= 0 and _in_process.get(key) is entry:
+                del _in_process[key]
 
 
 @contextmanager
