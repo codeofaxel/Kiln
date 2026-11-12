@@ -1077,7 +1077,7 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
         # The design this folder is synced with, or its history when it is
         # synced with none: Kiln's servers refuse a push into another design,
         # or into one sharing no version with it, before they keep anything.
-        **design_tie.push_fields(_design_folder(design_id), held_here),
+        **design_tie.push_fields(_design_folder(design_id), held_here, design_id=design_id),
     }
     if make_room_for:
         body["make_room_for"] = make_room_for
@@ -1139,7 +1139,7 @@ def _judged_push(body: dict[str, Any]) -> bool:
     """Whether a push's request carries what Kiln's servers judge its design by."""
     from kiln import design_tie
 
-    return design_tie.KEY_FIELD in body or design_tie.HISTORY_FIELD in body
+    return any(k in body for k in (design_tie.KEY_FIELD, design_tie.LINE_FIELD, design_tie.HISTORY_FIELD))
 
 
 def _push_refusal(tool: str, design_id: str, body: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
@@ -1149,7 +1149,8 @@ def _push_refusal(tool: str, design_id: str, body: dict[str, Any], answer: dict[
 
     code = answer.get("code")
     if code not in (design_tie.REFUSED_CODE, design_tie.UNRELATED_CODE):
-        code = design_tie.REFUSED_CODE if design_tie.KEY_FIELD in body else design_tie.UNRELATED_CODE
+        tied = design_tie.KEY_FIELD in body or design_tie.LINE_FIELD in body
+        code = design_tie.REFUSED_CODE if tied else design_tie.UNRELATED_CODE
     return design_tie.refusal(design_id, "push", tool=tool, code=code)
 
 
@@ -1290,7 +1291,7 @@ def _send_models(
     kept: set[str] = set()
     listed: dict[str, dict[str, str]] | None = {}
     tied = (
-        {"design_id": design_id, **{k: body[k] for k in (design_tie.KEY_FIELD, design_tie.HISTORY_FIELD) if k in body}}
+        {"design_id": design_id, **{k: body[k] for k in (design_tie.KEY_FIELD, design_tie.LINE_FIELD, design_tie.HISTORY_FIELD) if k in body}}
         if design_id and _judged_push(body) else {}
     )
     for start in range(0, len(wanted), _MAX_FINGERPRINTS_ASKED):

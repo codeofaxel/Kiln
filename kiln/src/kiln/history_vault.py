@@ -1041,7 +1041,7 @@ class HistoryVault:
         if not account:
             return {}
         folder = _design_folder(design_id)
-        if not numbers_may_be_taken(folder, answer):
+        if not numbers_may_be_taken(folder, answer, design_id=design_id, here=self.version_ids(design_id)):
             # The folder is synced with another design: its versions are
             # never renumbered for this one.
             return {"said": NUMBERS_NOT_FOR_THIS_FOLDER}
