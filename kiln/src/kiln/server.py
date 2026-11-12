@@ -14005,12 +14005,11 @@ def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
     the pricing link is attached only when those words point there: a
     caller told to sign back in or get online is not sent to buy.
     """
-    from kiln.licensing import LicenseTier as _Tier
-    from kiln.licensing import check_tier as _check_tier
+    from kiln import licensing
     from kiln.printer_roster import known_printers
     from kiln.tiers_and_terms import PRICING_URL
 
-    fleet_view, said = _check_tier(_Tier.BUSINESS)
+    fleet_view, said = licensing.check_tier(LicenseTier.BUSINESS)
     if fleet_view:
         return None
     rows = known_printers(_get_registry())
