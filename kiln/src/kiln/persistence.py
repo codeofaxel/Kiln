@@ -698,9 +698,8 @@ class KilnDB:
         # string with no label; only a labelled note goes to the account.
         if "note_by" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN note_by TEXT DEFAULT NULL")
-        # When the person was asked why a stop with no cause happened and
-        # could not say (``mark_stop_reason_asked``): the row is not asked
-        # about again.
+        # When the person was asked about this ending and had nothing to add
+        # (``mark_ending_asked``): the row is not asked about again.
         if "stop_reason_asked" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN stop_reason_asked REAL DEFAULT NULL")
         # How long the print took against what the slicer said it would
@@ -3442,24 +3441,25 @@ class KilnDB:
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
 
-    #: How long after a stop the person is still asked why it happened.
+    #: How long after an ending the person is still asked about it.
     STOP_ASK_WINDOW_S = 14 * 24 * 3600
 
-    def list_unexplained_stops(
+    def list_endings_to_ask_about(
         self,
         printer_name: str | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
-        """Recent prints the printer stopped without naming a cause, that
-        nobody has been asked about yet (``kiln.failure_vocabulary
-        .stop_wants_a_reason``).  The person may know whether the part came
-        out bad or something outside the print stopped it."""
-        from kiln.failure_vocabulary import FAILED_OUTCOMES, stop_wants_a_reason
+        """Recent prints whose ending owes the person a question nobody has
+        asked yet (``kiln.failure_vocabulary.ending_wants_a_question``): the
+        printer stopped it and named no cause, or someone stopped it.  Only
+        the person knows whether the part was coming out bad."""
+        from kiln.failure_vocabulary import FAILED_OUTCOMES, ending_wants_a_question
 
-        marks = ", ".join("?" for _ in FAILED_OUTCOMES)
+        words = [*sorted(FAILED_OUTCOMES), "cancelled"]
+        marks = ", ".join("?" for _ in words)
         clauses = [f"outcome IN ({marks})", "stop_reason_asked IS NULL",
                    "COALESCE(ended_at, created_at) >= ?"]
-        params: list[Any] = [*sorted(FAILED_OUTCOMES), time.time() - self.STOP_ASK_WINDOW_S]
+        params: list[Any] = [*words, time.time() - self.STOP_ASK_WINDOW_S]
         if printer_name:
             clauses.append("printer_name = ?")
             params.append(printer_name)
@@ -3471,19 +3471,26 @@ class KilnDB:
         out = []
         for raw in rows:
             row = self._outcome_row_to_dict(raw)
-            if stop_wants_a_reason(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+            if ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
                 out.append(row)
                 if len(out) >= limit:
                     break
         return out
 
-    def mark_stop_reason_asked(self, job_id: str) -> dict[str, Any] | None:
-        """Record that the person was asked why *job_id*'s print stopped and
-        could not say, and return the row, or ``None`` when there is no such
-        print or its ending is not a stop with no cause.  The ending is not
-        touched; the row is owed to the account again so the answer follows
-        it there."""
-        from kiln.failure_vocabulary import stop_wants_a_reason
+    def latest_outcome_row(self, printer_name: str) -> dict[str, Any] | None:
+        """The newest print row on *printer_name*, whatever its ending."""
+        raw = self._conn.execute(
+            "SELECT * FROM print_outcomes WHERE printer_name = ? ORDER BY created_at DESC LIMIT 1",
+            (printer_name,),
+        ).fetchone()
+        return self._outcome_row_to_dict(raw) if raw is not None else None
+
+    def mark_ending_asked(self, job_id: str) -> dict[str, Any] | None:
+        """Record that the person was asked about *job_id*'s ending and had
+        nothing to add, and return the row, or ``None`` when there is no such
+        print or its ending owes no question.  The ending is not touched; the
+        row is owed to the account again so the answer follows it there."""
+        from kiln.failure_vocabulary import ending_wants_a_question
 
         with self._write_lock:
             raw = self._conn.execute(
@@ -3493,7 +3500,7 @@ class KilnDB:
             if raw is None:
                 return None
             row = self._outcome_row_to_dict(raw)
-            if not stop_wants_a_reason(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+            if not ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
                 return None
             self._conn.execute(
                 "UPDATE print_outcomes SET stop_reason_asked = COALESCE(stop_reason_asked, ?), "

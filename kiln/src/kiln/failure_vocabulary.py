@@ -304,6 +304,17 @@ STOP_WORDS: dict[str, str] = {
 }
 
 
+def ending_wants_a_question(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+) -> str | None:
+    """Which question an ending owes the person: ``"stop"`` (the printer
+    stopped it and named no cause), ``"cancel"`` (someone stopped it), or
+    ``None``.  Only the person knows whether the part was coming out bad."""
+    if outcome == "cancelled":
+        return "cancel"
+    return "stop" if stop_wants_a_reason(outcome, failure_mode, determined_by) else None
+
+
 #: The causes a person can name when asked why a print stopped: something
 #: outside the print, or the printer itself.
 STOP_CAUSES_A_PERSON_NAMES: frozenset[str] = OUTSIDE_CAUSES | {"mechanical"}

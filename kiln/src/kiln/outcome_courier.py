@@ -182,10 +182,10 @@ def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     if isinstance(failure, str) and _WORD.match(failure):
         out["failure_mode"] = failure
     if row.get("stop_reason_asked"):
-        from kiln.failure_vocabulary import stop_wants_a_reason
+        from kiln.failure_vocabulary import ending_wants_a_question
 
-        # The person was asked why it stopped and could not say.
-        if stop_wants_a_reason(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+        # The person was asked about this ending and had nothing to add.
+        if ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
             out["person_said_unchecked"] = True
     note_by = row.get("note_by")
     if note_by in NOTE_BY:

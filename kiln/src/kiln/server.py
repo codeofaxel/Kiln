@@ -10538,6 +10538,15 @@ def _cancel_print_on(
         out["preserved_temperatures"] = restored
         if chamber_restored is not None:
             out["preserved_chamber"] = chamber_restored
+    # Only the person knows whether the part was going wrong when they
+    # stopped it: the result carries the one question (kiln.ending_question).
+    try:
+        from kiln import ending_question
+        from kiln.printers.base import outcome_printer_name
+
+        ending_question.attach(out, outcome_printer_name(adapter), cancelling=True)
+    except Exception as exc:  # pragma: no cover -- best-effort
+        logger.debug("cancel_print: ending question not attached: %s", exc)
     return out
 
 
@@ -16950,7 +16959,12 @@ def await_print_completion(
         """Add the design_goal block to a terminal-state result, and silently
         contribute the outcome to the community pool.  Both are best-effort;
         the auto-contribution is opt-in-gated and skips non-quality outcomes
-        (timeout/cancelled) inside the helper."""
+        (timeout/cancelled) inside the helper.  An ending that owes the
+        person a question carries it (``ask_the_person``)."""
+        if result.get("outcome") in ("failed", "cancelled"):
+            from kiln import ending_question
+
+            ending_question.attach(result)
         if _goal_ctx is not None:
             result["design_goal"] = _goal_ctx
         try:
