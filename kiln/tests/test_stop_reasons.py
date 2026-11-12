@@ -133,6 +133,7 @@ def test_a_stop_with_no_cause_is_listed_once_for_the_question(db):
         ({"failure_mode": "stringing"}, "bad_print"),
         ({"failure_mode": "power_loss"}, "outside_stop"),
         ({"failure_mode": "filament_runout"}, "outside_stop"),
+        ({"failure_mode": "mechanical"}, "machine_stop"),
     ],
 )
 def test_each_answer_settles_the_stop(db, answer, verdict):

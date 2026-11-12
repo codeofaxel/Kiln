@@ -1409,7 +1409,10 @@ class _LearningToolsPlugin:
             determined_by="user_reported")``: add nothing for a part that
             came out bad (or the defect as ``failure_mode``), or
             ``failure_mode="power_loss"`` / ``"filament_runout"`` when
-            something outside the print stopped it.  If they cannot say,
+            something outside the print stopped it, or
+            ``failure_mode="mechanical"`` when the printer itself faulted
+            (that counts for the printer's record, never the design's).  If
+            they cannot say,
             send ``stop_reason_unknown=True`` with the print's recorded
             outcome, and it is not asked about again.  Never pick an answer
             for them.

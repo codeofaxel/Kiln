@@ -304,6 +304,11 @@ STOP_WORDS: dict[str, str] = {
 }
 
 
+#: The causes a person can name when asked why a print stopped: something
+#: outside the print, or the printer itself.
+STOP_CAUSES_A_PERSON_NAMES: frozenset[str] = OUTSIDE_CAUSES | {"mechanical"}
+
+
 def stop_said(
     outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
 ) -> str | None:
