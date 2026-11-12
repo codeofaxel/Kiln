@@ -57,6 +57,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from kiln.cli import install_mcp
 
     monkeypatch.setattr(install_mcp, "_DEFAULT_CLIENTS", install_mcp._clients_from_registry())
+    # The machine's own /Applications must not leak into a scratch home.
+    monkeypatch.setattr(install_mcp, "QWEN_APP_PATHS", (), raising=False)
     return h
 
 
@@ -1233,6 +1235,41 @@ def test_no_held_app_here_means_no_note(home: Path, kiln_bin: Path) -> None:
 
     assert result.exit_code == 0
     assert "doesn't connect to" not in result.output
+
+
+def _fake_mac_app(home: Path, name: str, bundle_id: str) -> None:
+    import plistlib
+
+    contents = home / "Applications" / name / "Contents"
+    contents.mkdir(parents=True)
+    with open(contents / "Info.plist", "wb") as f:
+        plistlib.dump({"CFBundleIdentifier": bundle_id}, f)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Qwen note is for the Mac app")
+def test_qwen_found_here_gets_its_add_it_yourself_steps(home: Path, kiln_bin: Path) -> None:
+    """Kiln never writes Qwen's settings; it tells the person how to add it."""
+    _fake_mac_app(home, "Qwen.app", "com.qwen.chat")
+    before = _snapshot(home)
+
+    result = _install("--dry-run", "--command", str(kiln_bin))
+
+    assert result.exit_code == 0
+    out = " ".join(result.output.split())
+    assert "Found Qwen. Add Kiln yourself: Settings > MCP > + Add MCP > Quick Add." in out
+    assert "Command: uvx. Parameters: kiln3d, then serve on the next line." in out
+    assert "Pick Qwen3.8-Max in the model menu" in out
+    assert _snapshot(home) == before
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Qwen note is for the Mac app")
+def test_another_app_named_qwen_gets_no_steps(home: Path, kiln_bin: Path) -> None:
+    """The steps are for Qwen's own Mac app, not another app by that name."""
+    _fake_mac_app(home, "Qwen.app", "com.example.other")
+
+    result = _install("--dry-run", "--command", str(kiln_bin))
+
+    assert "Found Qwen" not in result.output
 
 
 def test_one_held_app_is_named_alone(home: Path, kiln_bin: Path) -> None:

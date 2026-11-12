@@ -687,6 +687,35 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
     )
 
 
+#: Where Qwen's Mac app lives besides ~/Applications.  Kiln never writes
+#: Qwen's settings: Qwen saves a copy of its own environment into each server
+#: it adds, so the person adds Kiln there themselves with these steps.
+QWEN_APP_PATHS: tuple[Path, ...] = (Path("/Applications/Qwen.app"),)
+_QWEN_BUNDLE_ID = "com.qwen.chat"
+_QWEN_STEPS = (
+    "  Found Qwen. Add Kiln yourself: Settings > MCP > + Add MCP > Quick Add.\n"
+    "  Name: Kiln. Type: STDIO. Command: uvx. Parameters: kiln3d, then serve on the next line.\n"
+    "  Choose Save and enable, then quit and reopen Qwen. Pick Qwen3.8-Max in the model menu;\n"
+    "  in our test the default model stopped after Kiln's first step."
+)
+
+
+def _qwen_app_here() -> bool:
+    """True when Qwen's own Mac app is installed (not another app by that name)."""
+    if sys.platform != "darwin":
+        return False
+    import plistlib
+
+    for app in (*QWEN_APP_PATHS, Path.home() / "Applications" / "Qwen.app"):
+        try:
+            with open(app / "Contents" / "Info.plist", "rb") as f:
+                if plistlib.load(f).get("CFBundleIdentifier") == _QWEN_BUNDLE_ID:
+                    return True
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            continue
+    return False
+
+
 @click.command("install-mcp")
 @click.option(
     "--only", multiple=True, metavar="ID",
@@ -846,6 +875,10 @@ def install_mcp(
         them = "it" if len(held_here) == 1 else "them"
         click.echo("")
         click.echo(f"  Found {names} too. Kiln doesn't connect to {them} yet.")
+
+    if not only and _qwen_app_here():
+        click.echo("")
+        click.echo(_QWEN_STEPS)
 
     if not only:
         click.echo("")
