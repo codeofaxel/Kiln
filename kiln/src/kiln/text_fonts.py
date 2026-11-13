@@ -157,9 +157,8 @@ def drawn_ink(spec: str) -> tuple[float, float]:
     import os
     import tempfile
 
-    import trimesh
-
     from kiln.emboss_generator import _find_openscad
+    from kiln.mesh_frame import load_mesh
     from kiln.openscad_runner import run_openscad
 
     with tempfile.TemporaryDirectory(prefix="kiln_font_ink_") as work:
@@ -176,7 +175,7 @@ def drawn_ink(spec: str) -> tuple[float, float]:
             raise RuntimeError(f"the text engine did not run: {exc}") from exc
         if done.returncode != 0 or not os.path.exists(stl):
             raise RuntimeError(f"the text engine could not draw {spec!r}")
-        drawn = trimesh.load(stl)
+        drawn = load_mesh(stl)
         # Extruded 1 mm, so the volume is the area.
         return float(drawn.volume), float(drawn.extents[0])
 
