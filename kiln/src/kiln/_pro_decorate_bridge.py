@@ -36,22 +36,12 @@ __all__ = [
     "WIRE_TOOL",
     "before_carve",
     "finish_carve",
-    "kiln_pro_here",
     "on_servers",
     "plan_includes_recess",
     "qr_missed",
     "qr_on_part",
     "sketch_face",
 ]
-
-
-def kiln_pro_here() -> bool:
-    """Whether the servers' part runs in this process."""
-    try:
-        import kiln_pro.decoration.one_door  # noqa: F401
-    except ImportError:
-        return False
-    return True
 
 
 def before_carve(**facts: Any) -> dict[str, Any] | None:
