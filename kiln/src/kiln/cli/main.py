@@ -12778,9 +12778,14 @@ def _account_plan_summary() -> dict:
 
 def _echo_account_plan(json_mode: bool, *, title: str = "Kiln plan") -> None:
     """Print the plan of the signed-in account (an install without kiln-pro)."""
-    from kiln.tiers_and_terms import upgrade_link
+    from kiln.tiers_and_terms import plan_offer, upgrade_link
 
     data = _account_plan_summary()
+    offer = plan_offer("pro", "Everything Kiln adds on a paid plan") if data["tier"] == "free" else None
+    if offer is not None and not offer.sells:
+        # A paid plan this machine could not confirm, or a sign-in the server
+        # refused: the step that brings it back, never the plans.
+        data["plan_note"] = offer.words
     if json_mode:
         import json as _json
 
@@ -12797,7 +12802,9 @@ def _echo_account_plan(json_mode: bool, *, title: str = "Kiln plan") -> None:
         return
     else:
         click.echo("  Account: not signed in")
-    if data["tier"] == "free":
+    if data.get("plan_note"):
+        click.echo(f"\n  {data['plan_note']}")
+    elif data["tier"] == "free":
         if not data["signed_in"]:
             click.echo("\n  Already subscribed?  Run `kiln signin` to connect this machine.")
         click.echo(f"  See the plans:       {upgrade_link(src='cli')}")

@@ -209,7 +209,8 @@ class _MaterialInventoryToolsPlugin:
                 # only when this printer falls short; below it it is counted
                 # here and withheld, as before.
                 many = registered_machines() > 1
-                withheld = many and fleet_scope_verdict("Alternative printers") is not None
+                refused = fleet_scope_verdict("Alternative printers") if many else None
+                withheld = refused is not None
                 others = None
                 unanswered = None
                 if many and not withheld:
@@ -246,11 +247,13 @@ class _MaterialInventoryToolsPlugin:
                     ]
                     if hidden:
                         payload["fleet_alternatives_available"] = hidden
-                        payload["upgrade_hint"] = (
-                            f"{hidden} other machine(s) of yours have this "
-                            f"material — fleet answers are a Kiln Business "
-                            f"feature."
-                        )
+                        said = f"{hidden} other machine(s) of yours have this material"
+                        if refused.get("upgrade_hint"):
+                            payload["upgrade_hint"] = f"{said} — fleet answers are a Kiln Business feature."
+                        else:
+                            # Someone who pays for the plan hears the step
+                            # that brings it back, never the plan.
+                            payload["fleet_alternatives_note"] = f"{said}. {refused['error']}"
                 return {"success": True, "check": payload}
             except Exception as exc:
                 _logger.exception("Unexpected error in check_material_sufficiency")

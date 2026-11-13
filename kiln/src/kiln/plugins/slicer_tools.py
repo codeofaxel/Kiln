@@ -735,6 +735,11 @@ def _spots_clause(verdict: dict[str, Any] | list[dict[str, Any]] | None) -> str:
     if isinstance(found, int) and found > 0:
         count = f" {found} spot{'s' if found != 1 else ''} beside it would fit"
         if _quiet_start_would_stand(verdict):
+            from kiln.tiers_and_terms import plan_offer
+
+            offer = plan_offer("pro", "Printing beside what is on the plate")
+            if not offer.sells:
+                return f"{count}. {offer.words}"
             return count + "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing)."
         return count + "."
     return ""
@@ -771,7 +776,14 @@ def _placement_refusal(
     # The names a region may be given -- none where the places, and so any
     # region, cannot be resolved.
     resp["regions"] = [] if _places_withheld(verdict) else list(PLACEMENT_REGIONS)
-    resp["tier_note"] = _PLACEMENT_TIER_NOTE if _quiet_start_would_stand(verdict) else _PLACEMENT_FREE_NOTE
+    if _quiet_start_would_stand(verdict):
+        from kiln.tiers_and_terms import plan_offer
+
+        resp["tier_note"] = plan_offer(
+            "pro", "Placing and starting a second print beside one on the plate"
+        ).tail(_PLACEMENT_TIER_NOTE)
+    else:
+        resp["tier_note"] = _PLACEMENT_FREE_NOTE
     offer = _bench_offer(state, verdict)
     if offer is not None:
         resp["bench_offer"] = offer
@@ -1163,10 +1175,14 @@ def _fill_plate_placement(
             fits = _copies_fit(verdict) or 0
             noun = "copy" if fits == 1 else "copies"
             if _quiet_start_would_stand(verdict):
+                from kiln.tiers_and_terms import plan_offer
+
+                offer = plan_offer("pro", "Printing beside what is on the plate")
                 tail = (
                     "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing). "
-                    "Or clear the plate and say so, and Kiln fills the empty plate."
-                )
+                    if offer.sells
+                    else f". {offer.words} "
+                ) + "Or clear the plate and say so, and Kiln fills the empty plate."
             else:
                 tail = ", but Kiln has no way to start a print there; clear the plate and say so."
             return input_path, _placement_refusal(
@@ -4540,10 +4556,21 @@ class _SlicerToolsPlugin:
                     if not ok:
                         from kiln.tiers_and_terms import (
                             paywall_fields,
+                            plan_offer,
                             signin_hint_fields,
                             tier_required_message,
                         )
 
+                        offer = plan_offer("pro", f"The '{profile.display_name}' slicer profile")
+                        if not offer.sells:
+                            return {
+                                "success": False,
+                                "error": f"{offer.words} Free-tier profiles available: default, "
+                                "ender3, prusa_mk3s, klipper_generic.",
+                                "code": "LICENSE_REQUIRED",
+                                **signin_hint_fields(),
+                                **paywall_fields("pro"),
+                            }
                         return {
                             "success": False,
                             "error": tier_required_message(

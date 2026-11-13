@@ -51,7 +51,12 @@ def _encryption_not_installed() -> dict[str, Any]:
     if key_set:
         message += f" {_ENCRYPTION_KEY_ENV} is set, but nothing on this machine uses it."
     message += f" {_ACCOUNT_FILES_SENTENCE}"
-    message += " Encryption at rest is part of Kiln Enterprise: https://kiln3d.com/pricing"
+    from kiln.tiers_and_terms import plan_offer
+
+    # Only to someone who would buy the plan: signing back in or getting
+    # online installs nothing on this machine, so an owner hears no plan line.
+    if plan_offer("enterprise", "Encryption at rest").buying:
+        message += " Encryption at rest is part of Kiln Enterprise: https://kiln3d.com/pricing"
     return {
         "success": True,
         "encryption": {

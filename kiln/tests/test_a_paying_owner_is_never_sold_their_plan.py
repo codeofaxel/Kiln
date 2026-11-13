@@ -45,6 +45,9 @@ def caller(monkeypatch, tmp_path):
         if kind == "smaller_plan":
             _sign_in(tmp_path, tier="pro")
             answer = {"tier": "pro"}
+        elif kind == "free_account":
+            _sign_in(tmp_path, tier="free")
+            answer = {"tier": "free"}
         elif kind == "signin_refused":
             _sign_in(tmp_path, tier=owns, refresh_token="", refresh_rejected_at=int(time.time()))
         elif kind == "offline":
@@ -197,3 +200,193 @@ def test_grouping_printers_by_site(caller, kind):
     else:
         assert "upgrade_url" not in result and "upgrade_nudge" not in result
         assert _says_the_step_back(kind, result["note"]), result["note"]
+
+
+# ---------------------------------------------------------------------------
+# every door that names a plan beside an answer or a refusal
+# ---------------------------------------------------------------------------
+
+
+def _material_that_bonds_badly():
+    from kiln.design_intelligence import MaterialProfile
+
+    return MaterialProfile(
+        material_id="tpu", display_name="TPU", category="flexible", thermal={}, chemical={},
+        bonding={"hard_to_bond": True},
+    )
+
+
+def _a_window_over_two_printers() -> str:
+    from kiln import consent_windows
+
+    with pytest.raises(consent_windows.NotTheFleetTier) as refused:
+        consent_windows._checked_scope(["ender", "voron"])
+    return str(refused.value)
+
+
+def _say(door: str) -> str:
+    """What *door* says about its plan, as text."""
+    from kiln import consent_windows
+    from kiln.decoration_quota import QuotaStatus, _quota_exceeded_error
+    from kiln.design_intelligence import _format_upgrade_nudge, _upgrade_hint, unestablished_caution
+    from kiln.design_reasoning import _print_aware_note
+    from kiln.emboss_generator import _qr_unavailable_message
+    from kiln.load_bearing_detector import _build_upgrade_recommendation
+    from kiln.plugins.slicer_tools import _spots_clause
+    from kiln.plugins.tier_diagnostic_tools import _build_response
+    from kiln.scheduler import turn_plan_line
+    from kiln.server import get_material_properties
+    from kiln.slicer_profiles import get_slicer_profile, slicer_profile_to_dict
+
+    return {
+        "troubleshooting hint": lambda: _upgrade_hint("material_troubleshooting"),
+        "post-processing hint": lambda: _upgrade_hint("post_processing"),
+        "environment hint": lambda: _upgrade_hint("environment_compatibility"),
+        "unestablished caution": lambda: unestablished_caution("load_tables", "No load figure was established here."),
+        "load-bearing warning": lambda: _format_upgrade_nudge(None),
+        "load-bearing block": lambda: json.dumps(_build_upgrade_recommendation(["engineering-grade material"])),
+        "bonding caveat": lambda: _material_that_bonds_badly().bonding_caveat(),
+        "edge finishing note": lambda: _print_aware_note({"edges": {"cautions": ["one"]}}, False, "M3 bolt"),
+        "decoration allowance": lambda: json.dumps(_quota_exceeded_error(QuotaStatus(3, 3, 0, "free", "2026-11", False))),
+        "slicer profile pointer": lambda: json.dumps(slicer_profile_to_dict(get_slicer_profile("default"))),
+        "spots beside a part": lambda: _spots_clause({"spots": [], "spots_found": 2, "record": {"quiet_start": True}}),
+        "always allow": consent_windows._always_allow_refusal,
+        "plan diagnostic": lambda: _build_response("free", [], "account_plan", "the account is on free")["agent_summary"],
+        "chemical pointer": lambda: get_material_properties("pla")["chemical_resistance"]["note"],
+        "QR code": _qr_unavailable_message,
+        "queue held to one printer": turn_plan_line,
+        "window over two printers": _a_window_over_two_printers,
+    }[door]()
+
+
+#: The plan each door names, where it is not Kiln Pro.
+PLAN_OF = {
+    "QR code": "business",
+    "queue held to one printer": "business",
+    "window over two printers": "business",
+}
+DOORS = (
+    "troubleshooting hint", "post-processing hint", "environment hint", "unestablished caution",
+    "load-bearing warning", "load-bearing block", "bonding caveat", "edge finishing note",
+    "decoration allowance", "slicer profile pointer", "spots beside a part", "always allow",
+    "plan diagnostic", "chemical pointer", "QR code", "queue held to one printer", "window over two printers",
+)
+
+
+@pytest.fixture
+def no_curated_tables(monkeypatch):
+    """The curated tables were not read here, as on an install without kiln-pro."""
+    from kiln import design_intelligence
+
+    monkeypatch.setattr(design_intelligence, "_engineering_overlay_loaded", lambda _kind: False)
+
+
+@pytest.mark.parametrize("kind", ("signed_out", "below_the_plan", *OWNERS))
+@pytest.mark.parametrize("door", DOORS)
+def test_a_door_sells_its_plan_only_to_someone_who_would_buy_it(caller, no_curated_tables, door, kind):
+    plan = PLAN_OF.get(door, "pro")
+    if kind == "below_the_plan":
+        caller("smaller_plan" if plan == "business" else "free_account")
+    else:
+        caller(kind)
+    said = _say(door)
+    if kind in ("signed_out", "below_the_plan"):
+        assert "kiln3d.com/pricing" in said, said
+    else:
+        assert "kiln3d.com/pricing" not in said and _says_the_step_back(kind, said), said
+
+
+#: What a nudge beside an answer still says to someone whose plan includes
+#: what it points at: the caution, and nothing about the plan.
+STILL_SAID = {
+    "troubleshooting hint": "",
+    "unestablished caution": "No load figure was established here.",
+    "load-bearing warning": "doesn't account for cross-section shape",
+    "load-bearing block": "This part looks load-bearing",
+    "bonding caveat": "TPU bonds poorly with common glues.",
+    "edge finishing note": "will print badly as asked",
+    "slicer profile pointer": "get_printer_profile",
+    "chemical pointer": "check_chemical_resistance",
+}
+
+
+@pytest.mark.parametrize("door", sorted(STILL_SAID))
+def test_a_nudge_says_only_its_caution_to_someone_whose_plan_includes_it(caller, no_curated_tables, door):
+    caller("holds_it", owns="enterprise")
+    said = _say(door)
+    assert "pricing" not in said and "requires_tier" not in said and "Kiln Pro shows" not in said, said
+    assert STILL_SAID[door] in said if STILL_SAID[door] else said == ""
+
+
+@pytest.mark.parametrize("kind", ("signed_out", "smaller_plan", *OWNERS, "holds_it"))
+def test_encryption_at_rest_is_pitched_only_to_someone_who_would_buy_it(caller, kind):
+    from kiln.plugins.enterprise_tools import _encryption_not_installed
+
+    caller(kind, owns="enterprise")
+    message = _encryption_not_installed()["message"]
+    assert message.startswith("G-code encryption at rest is not installed on this machine")
+    assert ("kiln3d.com/pricing" in message) is (kind in SOLD), message
+
+
+@pytest.mark.parametrize("kind", SOLD + OWNERS)
+def test_a_second_live_watch(caller, monkeypatch, kind):
+    import kiln.registry as registry
+    from kiln import server
+
+    caller(kind)
+    monkeypatch.setattr(server, "_watched_machines", lambda *_a, **_k: {"voron"})
+    monkeypatch.setattr(registry, "machine_fingerprint", lambda _adapter: "ender")
+    refusal = server._watch_capacity_error(object(), "ender")["error"]
+    assert refusal["code"] == "TIER_CONCURRENT_WATCH_LIMIT" and "printer_status" in refusal["message"]
+    if kind in SOLD:
+        assert "kiln3d.com/pricing" in refusal["message"]
+    else:
+        assert "pricing" not in refusal["message"] and _says_the_step_back(kind, refusal["message"]), refusal
+
+
+@pytest.mark.parametrize("kind", ("signed_out", "free_account", "offline"))
+def test_the_free_recovery_plan(caller, kind):
+    from kiln._pro_recovery_bridge import Asked, floor_note
+
+    caller(kind)
+    note = floor_note(Asked(), "the cause on your model, and the fix")
+    assert note["floor"] is True and note["pro_adds"]
+    if kind == "offline":
+        assert "upgrade_url" not in note and _says_the_step_back(kind, note["plan_note"]), note
+    else:
+        assert note["upgrade_url"].startswith("https://kiln3d.com/pricing") and "plan_note" not in note
+
+
+@pytest.mark.parametrize("kind", ("free_account", *OWNERS))
+def test_the_plan_this_machine_shows(caller, capsys, kind):
+    from kiln.cli.main import _echo_account_plan
+
+    caller(kind)
+    _echo_account_plan(json_mode=False)
+    shown = capsys.readouterr().out
+    if kind == "free_account":
+        assert "kiln3d.com/pricing" in shown
+    else:
+        assert "pricing" not in shown, shown
+    if kind == "offline":
+        assert _says_the_step_back(kind, shown), shown
+
+
+def test_the_qr_stub_says_what_the_qr_door_says(caller):
+    from kiln.emboss_generator import _qr_unavailable_message
+    from kiln.image_to_surface import generate_qr_data
+
+    caller("offline")
+    with pytest.raises(ImportError) as missing:
+        generate_qr_data("https://example.com", "/nowhere")
+    assert str(missing.value) == _qr_unavailable_message() and "pricing" not in str(missing.value)
+
+
+def test_a_second_live_watch_on_the_plan_that_includes_it(caller, monkeypatch):
+    import kiln.registry as registry
+    from kiln import server
+
+    caller("holds_it")
+    monkeypatch.setattr(server, "_watched_machines", lambda *_a, **_k: {"voron"})
+    monkeypatch.setattr(registry, "machine_fingerprint", lambda _adapter: "ender")
+    assert server._watch_capacity_error(object(), "ender") is None

@@ -28,6 +28,7 @@ import pytest
 from kiln.edge_plan import CHAMFER, FILLET, PrintFrame, hanging_band_mm, parse_selector, place_of, plan_edges
 from kiln.mesh_edit_check import EDIT_REFUSED, TOO_LARGE_TO_CHECK, measure_mesh
 from tests._child_memory import CHILD_PEAK_MB_FUNCTION
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 trimesh = pytest.importorskip("trimesh")
 
@@ -1131,6 +1132,7 @@ def shelf(path: Path) -> str:
 
 
 @needs_cad_kernel
+@pytest.mark.usefixtures("free_caller")
 def test_reinforcing_a_cad_part_rounds_it_on_the_cad_and_says_what_prints_badly(tmp_path, monkeypatch):
     """Without a chooser: the radius asked, on every sharp inside edge and no
     other, with the edges that will need support listed and one sentence

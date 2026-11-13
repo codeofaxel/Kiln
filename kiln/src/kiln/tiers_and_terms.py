@@ -654,13 +654,32 @@ class PlanOffer:
     its pitch (an upgrade link, a nudge, the price) only when ``sells`` is
     true: a person who already pays for the plan is never sold it.
     ``words`` is empty when the plan check could not be asked, or says the
-    caller's plan includes it after all (``covered``); the door's own
-    sentence stands then, and so does its pitch.
+    caller's plan includes it after all (``covered``); a refusal's own
+    sentence stands then, and so does its pitch (:meth:`tail`), while a
+    nudge beside an answer says nothing (:meth:`nudge`).
     """
 
     words: str
     sells: bool
     covered: bool = False
+
+    def tail(self, pitch: str) -> str:
+        """The plan sentence a refusal ends on: the door's own *pitch* where
+        the caller would buy, the plan check's words where they pay for the
+        plan already."""
+        return pitch if self.sells else self.words
+
+    def nudge(self, pitch: str) -> str:
+        """The same for a nudge beside an answer, which says nothing to a
+        caller whose plan includes what it points at."""
+        return "" if self.covered else self.tail(pitch)
+
+    @property
+    def buying(self) -> bool:
+        """Whether a nudge beside an answer carries its pitch fields (a link,
+        the plan it names): the caller would be buying the plan, neither
+        holding it nor paying for it already."""
+        return self.sells and not self.covered
 
 
 def plan_offer(required: object, subject: str = "This feature") -> PlanOffer:

@@ -2533,7 +2533,7 @@ def _print_aware_note(
         return said + (f", and each hole for the {fastener} you named." if fastener else ".")
     if not cautions and not fastener:
         return ""
-    from kiln.tiers_and_terms import upgrade_link
+    from kiln.tiers_and_terms import plan_offer, upgrade_link
 
     parts = []
     if cautions:
@@ -2541,10 +2541,15 @@ def _print_aware_note(
     if fastener:
         parts.append(f"The holes are left as drawn for the {fastener} you named.")
     does = ["chooses the finish edge by edge for your printer and material"] if cautions else []
+    asks = ["choosing each edge's finish for your printer"] if cautions else []
     if fastener:
         does.append(f"prepares each hole that takes the {fastener} as it rounds the corners")
-    parts.append(f"Kiln Pro {' and '.join(does)}: {upgrade_link('apply_design_reinforcements')}")
-    return " ".join(parts)
+        asks.append(f"preparing each hole for the {fastener}")
+    subject = " and ".join(asks)
+    plan = plan_offer("pro", subject[:1].upper() + subject[1:]).nudge(
+        f"Kiln Pro {' and '.join(does)}: {upgrade_link('apply_design_reinforcements')}"
+    )
+    return " ".join([*parts, plan] if plan else parts)
 
 
 def _apply_thicken(

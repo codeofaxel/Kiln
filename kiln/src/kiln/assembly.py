@@ -1198,12 +1198,14 @@ def _validate_joint(
         if hint:
             recommendations.append(hint)
         elif hint is None and not _has_pro_license():
-            recommendations.append(
+            from kiln.tiers_and_terms import plan_offer
+
+            recommendations.append(plan_offer("pro", "The cited adhesive for these two materials").tail(
                 "Bonding two printed plastics? Kiln Pro's adhesive intelligence "
                 "recommends the right cited adhesive, surface prep, and the full "
                 "cure schedule for your exact materials (recommend_adhesive). "
                 "More: https://kiln3d.com/pricing"
-            )
+            ))
 
     elif jtype == "loose":
         rules_checked.append("clearance_range")

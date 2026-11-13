@@ -38,6 +38,10 @@ from kiln.design_intelligence import (
     troubleshoot_print_issue,
     unestablished_caution,
 )
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
+
+#: Every hint here is said to a caller whose plan does not include the depth.
+pytestmark = pytest.mark.usefixtures("free_caller")
 
 # ---------------------------------------------------------------------------
 # Helper — detect actual overlay state for skip decisions

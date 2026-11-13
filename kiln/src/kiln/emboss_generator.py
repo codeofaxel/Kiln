@@ -2791,15 +2791,12 @@ def generate_qr_openscad_module(
 
 def _qr_unavailable_message() -> str:
     """Why no QR code was drawn here, worded for the caller's plan."""
-    from kiln.licensing import LicenseTier, check_tier
+    from kiln.tiers_and_terms import plan_offer
 
-    try:
-        on_plan, refusal = check_tier(LicenseTier.PRO)
-    except Exception:  # noqa: BLE001 -- an unreadable plan is Free
-        on_plan, refusal = False, None
-    if on_plan:
+    offer = plan_offer("pro", "A QR code on a part")
+    if offer.covered:
         return (
             "QR codes are made on Kiln's servers, not in this install. Your plan "
             "includes them: use decorate_surface with content='qr:https://...'."
         )
-    return refusal or "A QR code on a part is part of Kiln Pro: https://kiln3d.com/pricing"
+    return offer.words or "A QR code on a part is part of Kiln Pro: https://kiln3d.com/pricing"

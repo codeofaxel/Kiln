@@ -29,6 +29,7 @@ from typing import Any, Callable
 import pathlib
 
 import pytest
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 import kiln.design_intelligence as di
 from kiln.design_intelligence import (
@@ -313,7 +314,7 @@ class TestPerCallerEntitlement:
         assert paid_first == paid_second == paid_alone
 
     def test_the_caution_follows_the_caller_not_the_warm_up_order(
-        self, tiered_overlay
+        self, tiered_overlay, monkeypatch
     ) -> None:
         """The dangerous direction: a paid caller silencing a free one's caution.
 
@@ -323,6 +324,14 @@ class TestPerCallerEntitlement:
         a clearance by the user who most needed the warning.
         """
         said = "Nobody characterised this."
+        from kiln import licensing
+
+        # The plan check answers for the same caller the overlay does.
+        monkeypatch.setattr(
+            licensing, "check_tier",
+            lambda _required, **_k: (True, None) if tiered_overlay.tier != "free"
+            else (False, "This feature needs Kiln Pro. See what Pro includes at kiln3d.com/pricing"),
+        )
 
         def caution(tier: str) -> str:
             tiered_overlay.tier = tier
@@ -1765,6 +1774,7 @@ class TestBondingMetadata:
         assert profile is not None
         assert profile.bonding["bonding_difficulty"] == "easy"
 
+    @pytest.mark.usefixtures("free_caller")
     def test_floor_nudge_fires_for_free_tier(self):
         # Free tier: only the public common-knowledge `hard_to_bond` flag, no
         # precise verdict -> the generic upgrade nudge (states the risk, points
@@ -1838,6 +1848,7 @@ class TestFreePathCautions:
 
     # --- the shared helper itself -----------------------------------------
 
+    @pytest.mark.usefixtures("free_caller")
     def test_helper_speaks_when_the_overlay_could_not_be_read(self, monkeypatch):
         self._overlay(monkeypatch, None)
         said = unestablished_caution("load_tables", "Nobody checked X.")
@@ -1886,6 +1897,7 @@ class TestFreePathCautions:
         assert "pricing" not in said
         assert "Kiln Pro" not in said
 
+    @pytest.mark.usefixtures("free_caller")
     def test_unreadable_table_outranks_the_entity_question(self, monkeypatch):
         """An entitlement refusal must never be relabelled "nobody wrote one".
 
@@ -1964,6 +1976,7 @@ class TestFreePathCautions:
 
     # --- 2. design templates ----------------------------------------------
 
+    @pytest.mark.usefixtures("free_caller")
     def test_template_cautions_when_only_the_orientation_label_survives(
         self, monkeypatch
     ):
@@ -2021,6 +2034,7 @@ class TestFreePathCautions:
 
     # --- 3. multi-material compatibility ----------------------------------
 
+    @pytest.mark.usefixtures("free_caller")
     def test_multi_material_cautions_when_the_reasoning_is_unreadable(
         self, monkeypatch
     ):
@@ -2083,6 +2097,7 @@ class TestFreePathCautions:
         assert requirement_id in found, f"{ask!r} matched {sorted(found)}"
         return found[requirement_id]
 
+    @pytest.mark.usefixtures("free_caller")
     def test_requirement_cautions_when_its_guidance_is_unreadable(
         self, monkeypatch
     ):

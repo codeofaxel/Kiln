@@ -7,9 +7,13 @@ is the get-sued gap this locks.  The nudge is shared by assess_load_bearing,
 get_joint_recommendation, validate_assembly, and estimate_structural_load,
 so removing the caveat silently regresses all four.
 """
+import pytest
+
 from kiln.load_bearing_detector import _build_upgrade_recommendation
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 
+@pytest.mark.usefixtures("free_caller")
 def test_nudge_warns_to_physically_test_and_names_real_danger():
     warning = _build_upgrade_recommendation(["noun 'bracket'"])["warning"].lower()
     # The calculation is not a tested part — say so.

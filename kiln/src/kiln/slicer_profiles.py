@@ -1527,7 +1527,20 @@ def start_gcode_override_from_printer(
 
 
 def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
-    """Serialise a :class:`SlicerProfile` to a plain dict for MCP responses."""
+    """Serialise a :class:`SlicerProfile` to a plain dict for MCP responses.
+
+    The ``expanded_profile`` pointer names the plan and its page only to a
+    caller who would buy it, and carries the plan check's own words to one
+    who pays for it already.
+    """
+    from kiln.tiers_and_terms import plan_offer
+
+    offer = plan_offer("pro", "The expanded profile")
+    expanded: dict[str, Any] = {"available_with": "Kiln Pro", "resolver": "get_printer_profile"}
+    if offer.buying:
+        expanded.update({"requires_tier": "pro", "url": "https://kiln3d.com/pricing"})
+    elif not offer.covered:
+        expanded["plan_note"] = offer.words
     return {
         "id": profile.id,
         "display_name": profile.display_name,
@@ -1535,12 +1548,7 @@ def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
         "notes": profile.notes,
         "settings": dict(profile.settings),
         "tier": profile.tier,
-        "expanded_profile": {
-            "available_with": "Kiln Pro",
-            "resolver": "get_printer_profile",
-            "requires_tier": "pro",
-            "url": "https://kiln3d.com/pricing",
-        },
+        "expanded_profile": expanded,
     }
 
 

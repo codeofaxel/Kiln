@@ -34,6 +34,7 @@ from kiln.printer_intelligence import (
     get_printer_intel,
     read_load_step,
 )
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 #: The printer the curated depth below is served for: a synthetic row the
 #: session holds (tests/fixtures/printer_catalogue_test.json).  An overlay
@@ -502,6 +503,7 @@ def _a_bambu_on_record(printer_id: str = "bambu_a1"):
         yield
 
 
+@pytest.mark.usefixtures("free_caller")
 def test_the_nudge_is_specific_for_a_catalogued_bambu_with_no_record(signed_out_install):
     """A signed-out install holds no record, so the printer resolves to the
     generic row -- but which firmware family a roster printer runs is on the
@@ -516,6 +518,7 @@ def test_the_nudge_is_specific_for_a_catalogued_bambu_with_no_record(signed_out_
     assert "fault code" in hint and "wizard step" in hint
 
 
+@pytest.mark.usefixtures("free_caller")
 def test_the_nudge_is_specific_when_the_user_named_an_exact_signal():
     """The sharpest honest moment to mention Pro.
 
@@ -535,6 +538,7 @@ def test_the_nudge_is_specific_when_the_user_named_an_exact_signal():
     assert "kiln3d.com" in hint
 
 
+@pytest.mark.usefixtures("free_caller")
 def test_the_nudge_never_leaks_the_paid_answer():
     # Naming the shape of the answer sells it; naming the answer gives it
     # away. "Step 5 is upstream of the melt zone" is the product.
@@ -548,6 +552,7 @@ def test_the_nudge_never_leaks_the_paid_answer():
         assert leak not in hint, f"the nudge gives away {leak!r}"
 
 
+@pytest.mark.usefixtures("free_caller")
 def test_the_nudge_does_not_promise_what_pro_cannot_deliver():
     # A Prusa owner who types "step 3" gets the generic line, because the
     # codes and load sequences only exist for Bambu in the paid data. A
@@ -564,6 +569,7 @@ def test_the_nudge_does_not_promise_what_pro_cannot_deliver():
     assert "kiln3d.com" in hint
 
 
+@pytest.mark.usefixtures("free_caller")
 def test_the_generic_nudge_says_what_it_means_in_plain_words():
     # Plain words at the exact moment a stuck user is reading: no
     # engineer-speak.
@@ -575,6 +581,7 @@ def test_the_generic_nudge_says_what_it_means_in_plain_words():
     assert "what goes wrong" in hint
 
 
+@pytest.mark.usefixtures("free_caller")
 def test_the_nudge_is_said_once_per_session():
     """The tenth showing does not persuade — it teaches people to skip the field.
 

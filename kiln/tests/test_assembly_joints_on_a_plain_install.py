@@ -87,7 +87,13 @@ def _plan(monkeypatch, *, pro: bool, lapsed: str = "") -> None:
     """The signed-in account's plan, read where every gate reads it."""
     licensing = importlib.import_module("kiln.licensing")
     monkeypatch.setattr(
-        licensing, "check_tier", lambda _tier: (True, None) if pro else (False, "This feature needs Kiln Pro."),
+        licensing, "check_tier",
+        # The plan check's own words: a lapsed sign-in is told to sign back
+        # in; anyone else is shown where Pro is described.
+        lambda _tier: (True, None) if pro else (
+            False, f"This feature needs Kiln Pro. {lapsed}" if lapsed
+            else "This feature needs Kiln Pro. See what Pro includes at kiln3d.com/pricing",
+        ),
     )
     from kiln import auth_session
 
