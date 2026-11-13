@@ -448,7 +448,7 @@ class TestIngestService:
         proc = MagicMock()
         proc.pid = 43210
         proc.poll.return_value = None
-        with patch("kiln.cli.main.subprocess.Popen", return_value=proc):
+        with patch("kiln.cli.main.run_program.Popen", return_value=proc):
             start = runner.invoke(
                 cli,
                 ["ingest", "service", "start", "--config-path", str(config_path), "--json"],

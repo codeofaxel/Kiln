@@ -183,7 +183,7 @@ class TestStatusMapping:
 
 
 class TestImportWritesRows:
-    def test_rows_land_with_inferred_provenance(self, tmp_kiln_env) -> None:
+    def test_rows_land_labelled_as_the_printers_own_log(self, tmp_kiln_env) -> None:
         adapter = _adapter()
         counts = _import(
             adapter,
@@ -200,9 +200,9 @@ class TestImportWritesRows:
         assert rows["moonraker:1"]["outcome"] == "success"
         assert rows["moonraker:2"]["outcome"] == "failed"
         for row in rows.values():
-            # The machine's testimony — not observed by Kiln, not
-            # reported by the user.
-            assert row["determined_by"] == "inferred"
+            # The printer's own log: not watched by Kiln, not read off a
+            # print Kiln started, not reported by the person.
+            assert row["determined_by"] == "printer_log"
             assert row["agent_id"] == "auto"
             assert row["printer_name"] == "moonraker"
             assert "Moonraker job history" in (row["notes"] or "")
@@ -419,7 +419,10 @@ class TestPrintsKilnAlreadyKnows:
 
 
 class TestImportedRowsReadCorrectly:
-    def test_unknown_rows_surface_as_unresolved(self, tmp_kiln_env) -> None:
+    def test_unknown_rows_are_not_owed_an_answer(self, tmp_kiln_env) -> None:
+        """An open ending is a print Kiln started and lost sight of, and the
+        person is asked about it.  A job Kiln only read off the printer's log
+        is not one: nobody is asked about a print Kiln had no part in."""
         from kiln.persistence import get_db
 
         adapter = _adapter()
@@ -428,10 +431,9 @@ class TestImportedRowsReadCorrectly:
             _job("1", "completed"),
             _job("2", "interrupted"),
         )
-        unresolved = get_db().list_unresolved_outcomes(printer_name="moonraker")
-        assert [r["job_id"] for r in unresolved] == ["moonraker:2"]
+        assert get_db().list_unresolved_outcomes(printer_name="moonraker") == []
 
-    def test_decided_rows_feed_the_learning_reads(self, tmp_kiln_env) -> None:
+    def test_logged_jobs_feed_no_learning_read_and_are_counted_apart(self, tmp_kiln_env) -> None:
         from kiln.persistence import get_db
 
         adapter = _adapter()
@@ -442,17 +444,17 @@ class TestImportedRowsReadCorrectly:
             _job("3", "interrupted"),
             _job("4", "cancelled"),
         )
-        decided = get_db().list_print_outcomes(printer_name="moonraker", limit=50)
-        by_id = {r["job_id"]: r["outcome"] for r in decided}
-        # A success carries learning about the print; unknown is excluded;
-        # cancelled is not a quality signal either way.  The server's "error"
-        # is the printer stopping itself with no cause named: it counts
-        # against the printer, never against the print.
-        assert by_id.get("moonraker:1") == "success"
-        assert "moonraker:2" not in by_id
-        assert "moonraker:3" not in by_id
+        # The log's "completed" is a job that ran to its end; nobody saw the
+        # part.  Counting it as a print that came out, or the log's "error"
+        # against the printer with nothing on the other side of the scale,
+        # would set a rate from prints Kiln never saw.  They are counted
+        # apart instead (tests/test_printer_log_jobs_stand_apart.py).
+        assert get_db().list_print_outcomes(printer_name="moonraker", limit=50) == []
         insights = get_db().get_printer_learning_insights("moonraker")
-        assert insights["total_outcomes"] == 2 and insights["success_rate"] == 0.5
+        assert insights["total_outcomes"] == 0
+        assert insights["printer_own_history"] == {
+            "jobs": 4, "ran_to_end": 1, "stopped": 1, "cancelled": 1, "not_known": 1,
+        }
 
 
 # ---------------------------------------------------------------------------

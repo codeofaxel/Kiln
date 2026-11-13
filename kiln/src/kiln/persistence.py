@@ -39,7 +39,13 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
-from kiln.failure_vocabulary import ABOUT_THE_MACHINE, FAILED_OUTCOMES, OUTSIDE_CAUSES, judged_ending_sql
+from kiln.failure_vocabulary import (
+    ABOUT_THE_MACHINE,
+    FAILED_OUTCOMES,
+    OUTSIDE_CAUSES,
+    PRINTER_LOG,
+    judged_ending_sql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -698,6 +704,14 @@ class KilnDB:
         # string with no label; only a labelled note goes to the account.
         if "note_by" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN note_by TEXT DEFAULT NULL")
+        # A job copied from the printer's own log carries that label.  Rows
+        # copied under the label of a reconnect's reading are moved to it;
+        # one a person has since answered for keeps their word.
+        for prefix in self.PRINTER_LOG_JOB_PREFIXES:
+            self._conn.execute(
+                f"UPDATE print_outcomes SET determined_by = '{PRINTER_LOG}' "
+                f"WHERE substr(job_id, 1, {len(prefix)}) = '{prefix}' AND determined_by = 'inferred'"
+            )
         # When the person was asked about this ending and had nothing to add
         # (``mark_ending_asked``): the row is not asked about again.
         if "stop_reason_asked" not in columns:
@@ -2916,9 +2930,20 @@ class KilnDB:
     # at the ending), ``observed`` (a live process watched the terminal
     # edge), ``user_reported`` (the person holding the part said so).  A
     # later record never downgrades a stronger one -- see
-    # ``_resolve_row_locked``.
+    # ``_resolve_row_locked``.  Below them all sits ``printer_log``
+    # (:data:`kiln.failure_vocabulary.PRINTER_LOG`): a job copied from the
+    # printer's own log, which Kiln neither started nor watched.  It says the
+    # job ran to its end or stopped, never how the part came out, so it is a
+    # success for no reader until the person says how it went.
+    #: The words a person, an agent or a watcher may settle something with.
     VALID_DETERMINED_BY = frozenset({"observed", "inferred", "seen", "user_reported"})
-    DETERMINED_BY_RANK = {"inferred": 1, "seen": 2, "observed": 3, "user_reported": 4}
+    #: Those, and the one only a copy of a printer's own log carries.  A
+    #: door that takes a caller's word reads :attr:`VALID_DETERMINED_BY`, so
+    #: nobody can relabel a print they saw as one nobody saw.
+    PRINT_OUTCOME_DETERMINED_BY = VALID_DETERMINED_BY | {PRINTER_LOG}
+    DETERMINED_BY_RANK = {PRINTER_LOG: 0, "inferred": 1, "seen": 2, "observed": 3, "user_reported": 4}
+    #: How a job copied from a printer's own log is named (``job_id``).
+    PRINTER_LOG_JOB_PREFIXES = ("moonraker:",)
     #: The identity a print row carries beyond its label.  One roster: the
     #: fresh schema, the migration, the insert and the resolve all read it.
     PRINT_OUTCOME_IDENTITY_COLUMNS = {
@@ -3001,7 +3026,7 @@ class KilnDB:
         if outcome_val not in self.VALID_OUTCOMES:
             raise ValueError(f"Invalid outcome {outcome_val!r}. Must be one of: {sorted(self.VALID_OUTCOMES)}")
         determined_by = outcome.get("determined_by")
-        if determined_by and determined_by not in self.VALID_DETERMINED_BY:
+        if determined_by and determined_by not in self.PRINT_OUTCOME_DETERMINED_BY:
             raise ValueError(
                 f"Invalid determined_by {determined_by!r}. Must be one of: {sorted(self.VALID_DETERMINED_BY)}"
             )
@@ -3565,9 +3590,10 @@ class KilnDB:
         These are the prints that started (or ended unseen) while no
         Kiln process was watching.  Surfaced so the next session can ask
         the human, who is holding the part and can settle what the
-        machine could not.
+        machine could not.  A job known only from the printer's own log is
+        never one: Kiln had no part in it.
         """
-        clauses = ["outcome IN ('pending', 'unknown')"]
+        clauses = ["outcome IN ('pending', 'unknown')", f"COALESCE(determined_by, '') <> '{PRINTER_LOG}'"]
         params: list[Any] = []
         if printer_name:
             clauses.append("printer_name = ?")
@@ -3761,6 +3787,7 @@ class KilnDB:
         design_id: str | None = None,
         include_stops: bool = False,
         count_repair_excused: bool = False,
+        witnessed_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Return outcome records, optionally filtered.
 
@@ -3780,7 +3807,11 @@ class KilnDB:
         A bad print the repair record sets aside (:meth:`excused_by_repair`)
         is not a judged ending about the print and is left out by default;
         ``count_repair_excused`` keeps it, for a reader of the printer's own
-        record.
+        record.  A job known only from the printer's own log
+        (:data:`kiln.failure_vocabulary.PRINTER_LOG`) is never a judged
+        ending, so the default leaves it out.  ``include_stops``,
+        ``include_all`` and an ``outcome=`` filter keep it, for the person's
+        own list; ``witnessed_only`` leaves it out of those too.
         """
         clauses: list[str] = []
         params: list[Any] = []
@@ -3806,6 +3837,8 @@ class KilnDB:
             clauses.append(f"outcome IN ('success', {_sql_words(FAILED_OUTCOMES)})")
         elif not include_all:
             clauses.append(self._DECIDED if count_repair_excused else self.decided_sql())
+        if witnessed_only:
+            clauses.append(f"COALESCE(determined_by, '') <> '{PRINTER_LOG}'")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
         rows = self._conn.execute(
@@ -3829,8 +3862,39 @@ class KilnDB:
     _DECIDED = judged_ending_sql()
     _MACHINE_DECIDED = judged_ending_sql(about=ABOUT_THE_MACHINE)
 
+    def printer_log_summary(self, printer_name: str) -> dict[str, int]:
+        """The jobs on *printer_name* known only from the printer's own log
+        (:data:`kiln.failure_vocabulary.PRINTER_LOG`), counted by how the
+        log says each ended: ``jobs``, ``ran_to_end``, ``stopped``,
+        ``cancelled`` and ``not_known``.  Kiln saw none of these parts, so
+        none of them is in any rate; this is where they are counted."""
+        rows = self._conn.execute(
+            "SELECT outcome, COUNT(*) FROM print_outcomes "
+            f"WHERE printer_name = ? AND determined_by = '{PRINTER_LOG}' GROUP BY outcome",
+            (printer_name,),
+        ).fetchall()
+        by_word = {row[0]: int(row[1]) for row in rows}
+        jobs = sum(by_word.values())
+        ran = by_word.get("success", 0)
+        stopped = sum(by_word.get(word, 0) for word in FAILED_OUTCOMES)
+        cancelled = by_word.get("cancelled", 0)
+        return {
+            "jobs": jobs,
+            "ran_to_end": ran,
+            "stopped": stopped,
+            "cancelled": cancelled,
+            "not_known": jobs - ran - stopped - cancelled,
+        }
+
     def get_printer_learning_insights(self, printer_name: str) -> dict[str, Any]:
-        """Return aggregated outcome insights for a single printer."""
+        """Return aggregated outcome insights for a single printer.
+
+        Every rate counts only endings something of Kiln's or the person
+        saw.  Jobs known only from the printer's own log are counted apart,
+        under ``printer_own_history`` (:meth:`printer_log_summary`), present
+        when there are any."""
+        own_log = self.printer_log_summary(printer_name)
+        apart = {"printer_own_history": own_log} if own_log["jobs"] else {}
         total = self._conn.execute(
             f"SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND {self._MACHINE_DECIDED}",
             (printer_name,),
@@ -3843,9 +3907,11 @@ class KilnDB:
                 "failure_breakdown": {},
                 "stopped_early": {},
                 "material_stats": {},
+                **apart,
             }
         successes = self._conn.execute(
-            "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND outcome = 'success'",
+            "SELECT COUNT(*) FROM print_outcomes "
+            f"WHERE printer_name = ? AND outcome = 'success' AND {self._MACHINE_DECIDED}",
             (printer_name,),
         ).fetchone()[0]
         # Failure breakdown: what went wrong on this printer, its own stops
@@ -3888,6 +3954,7 @@ class KilnDB:
             "failure_breakdown": failure_breakdown,
             "stopped_early": stopped_early,
             "material_stats": material_stats,
+            **apart,
         }
 
     #: A print whose ending is SETTLED: it ended one of the three ways a print

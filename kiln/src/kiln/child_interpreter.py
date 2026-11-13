@@ -33,6 +33,8 @@ import tempfile
 import time
 from typing import Any
 
+from kiln import run_program
+
 #: The child's entry: drop the bootstrap's own argv slot, then run the script
 #: as ``__main__`` without its folder on the path.
 _BOOTSTRAP = "import runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
@@ -69,7 +71,7 @@ def resident_mb(pid: int) -> float | None:
         if sys.platform.startswith("linux"):
             with open(f"/proc/{pid}/statm", encoding="ascii") as fh:
                 return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2**20
-        shown = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+        shown = run_program.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
         return int(shown.stdout.strip()) / 1024
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
@@ -101,7 +103,7 @@ def run_in_child(
     command = [sys.executable, "-c", _BOOTSTRAP, os.path.abspath(script), request_path]
     try:
         if max_memory_mb is None:
-            run = subprocess.run(command, capture_output=True, text=True, timeout=timeout_s, cwd=workdir, env=env)
+            run = run_program.run(command, capture_output=True, text=True, timeout=timeout_s, cwd=workdir, env=env)
         else:
             run = _run_watched(command, workdir, env, timeout_s=timeout_s, max_memory_mb=max_memory_mb, what=what)
     except subprocess.TimeoutExpired as exc:
@@ -150,7 +152,7 @@ def _run_watched(
     # The child gets a session of its own, so stopping it stops anything it
     # started too: a child left behind keeps the machine's memory and CPU
     # after the caller has given up on it.
-    with subprocess.Popen(
+    with run_program.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=workdir, env=env,
         start_new_session=True,
     ) as child:

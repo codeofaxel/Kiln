@@ -60,6 +60,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kiln import run_program
+
 logger = logging.getLogger(__name__)
 
 #: Digits in a code.  Four is enough once guessing is bounded below.
@@ -457,7 +459,7 @@ def kiln_notifications() -> str | None:
     if exe is None:
         return None
     try:
-        done = subprocess.run([str(exe), "status"], capture_output=True, text=True, timeout=5, check=False)
+        done = run_program.run([str(exe), "status"], capture_output=True, text=True, timeout=5, check=False)
     except Exception:  # noqa: BLE001
         return None
     answer = str(getattr(done, "stdout", "") or "").strip()
@@ -478,7 +480,7 @@ def _post_as_kiln(exe: Path, issued: Issued) -> bool:
     title, subtitle, message = banner_text(issued)
     words = json.dumps({"title": title, "subtitle": subtitle, "body": message})
     try:
-        done = subprocess.run([str(exe), "post"], input=words, capture_output=True, text=True, timeout=10, check=False)
+        done = run_program.run([str(exe), "post"], input=words, capture_output=True, text=True, timeout=10, check=False)
     except Exception:  # noqa: BLE001
         return False
     return done.returncode == 0
@@ -497,7 +499,7 @@ def _show_as_kiln(issued: Issued) -> bool:
     status = kiln_notifications()
     if status == KILN_NOT_ASKED:
         try:
-            ask = subprocess.Popen([str(exe), "request"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            ask = run_program.Popen([str(exe), "request"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
             out, _ = ask.communicate(timeout=_ASK_WAIT_S)
             status = str(out or "").strip()
         except subprocess.TimeoutExpired:
@@ -529,7 +531,7 @@ def _show(issued: Issued) -> bool:
     # console window of its own; the person would see a black box flash up.
     quiet = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)} if sys.platform.startswith("win") else {}
     try:
-        done = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=8, check=False, **quiet)
+        done = run_program.run(argv, input=stdin, capture_output=True, text=True, timeout=8, check=False, **quiet)
     except Exception as exc:  # noqa: BLE001 — no binary, a timeout, a dead session
         logger.debug("screen code banner not shown: %s", type(exc).__name__)
         return False

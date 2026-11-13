@@ -358,10 +358,13 @@ def _ending_asked(job_id: str, outcome: str) -> dict:
 
 
 def _ending_said(row: dict) -> str | None:
-    """The words for *row*'s ending when it is a stop and not a bad print."""
-    from kiln.failure_vocabulary import stop_said
+    """The words for *row*'s ending when it is a stop and not a bad print,
+    or a job known only from the printer's own log."""
+    from kiln.failure_vocabulary import printer_log_said, stop_said
 
-    return stop_said(row.get("outcome"), row.get("failure_mode"), row.get("determined_by"))
+    return printer_log_said(row.get("outcome"), row.get("determined_by")) or stop_said(
+        row.get("outcome"), row.get("failure_mode"), row.get("determined_by")
+    )
 
 
 def _endings_to_ask_about(printer_name: str, limit: int) -> list[dict]:
@@ -1509,6 +1512,15 @@ class _LearningToolsPlugin:
             A row carrying ``repair_said`` is a bad print made while the
             printer was marked needs repair: say those words; it counts
             about the printer and not against the design or the material.
+
+            ``insights.printer_own_history`` counts jobs Kiln only read off
+            the printer's own log: it neither started nor watched them, and
+            nobody told Kiln how the parts came out.  They are in no success
+            rate.  Say them apart ("your printer's own log lists N earlier
+            jobs, M ran to the end"), never as prints that succeeded.  A row
+            of that kind carries ``ending_said`` with the same meaning.  If
+            the person says how one came out, ``record_print_outcome`` with
+            its ``job_id`` makes it count.
 
             **Note**: Insights are advisory.  They do NOT override safety limits
             or preflight checks.

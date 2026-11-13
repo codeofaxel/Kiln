@@ -56,6 +56,8 @@ import subprocess
 import threading
 from pathlib import Path
 
+from kiln import run_program
+
 _logger = logging.getLogger(__name__)
 
 # Versioned salt — bumping the suffix invalidates every prior
@@ -91,7 +93,7 @@ def _read_macos_machine_id() -> str:
     value is empty.
     """
     try:
-        result = subprocess.run(
+        result = run_program.run(
             ["ioreg", "-d2", "-c", "IOPlatformExpertDevice"],
             capture_output=True,
             text=True,

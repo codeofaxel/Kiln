@@ -58,6 +58,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from kiln import run_program
 from kiln.scad_main import runnable_inputs
 
 logger = logging.getLogger(__name__)
@@ -398,7 +399,7 @@ def run_openscad(
 ) -> subprocess.CompletedProcess:
     """Run an OpenSCAD command, retrying the upstream startup crash.
 
-    A drop-in for ``subprocess.run(cmd, capture_output=True, ...)`` at
+    A drop-in for ``run_program.run(cmd, capture_output=True, ...)`` at
     every OpenSCAD call site.  Output is always captured, because every
     OpenSCAD site in Kiln wants stderr.
 
@@ -647,7 +648,7 @@ def _run_with_retry(
 
     for attempt in range(1, max(1, attempts) + 1):
         started = time.monotonic()
-        result = subprocess.run(  # noqa: S603 — argv is built by Kiln, never shell
+        result = run_program.run(  # noqa: S603 — argv is built by Kiln, never shell
             argv,
             capture_output=True,
             text=text,

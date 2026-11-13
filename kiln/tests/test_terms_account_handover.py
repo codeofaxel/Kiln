@@ -326,7 +326,7 @@ def test_kiln_signin_hands_it_over(handed, monkeypatch):
         return dict(_SIGNED_IN)
 
     monkeypatch.setattr(auth_commands, "_http_post", fake_post)
-    monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+    monkeypatch.setattr(auth_commands.run_program, "open_url", lambda *a, **k: False)
     g = click.Group("kiln")
     auth_commands.register_auth_cli(g)
     result = CliRunner().invoke(g, ["login", "--no-browser"])

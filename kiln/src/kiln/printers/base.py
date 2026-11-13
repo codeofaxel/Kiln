@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
+from kiln import run_program
 from kiln.cli_command import kiln_command
 from kiln.printer_backends import need_where
 from kiln.printers.command_verdict import CommandVerdict
@@ -1674,7 +1675,7 @@ def capture_rtsp_frame(
     said = f"{who[:1].upper()}{who[1:]}"
     shown = redact_url_credentials(stream_url)
     try:
-        result = subprocess.run(
+        result = run_program.run(
             [
                 ffmpeg, "-y",
                 "-rtsp_transport", "tcp",

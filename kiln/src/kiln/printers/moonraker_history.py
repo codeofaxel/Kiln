@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.failure_vocabulary import PRINTER_LOG
+
 logger = logging.getLogger(__name__)
 
 _HISTORY_PATH = "/server/history/list"
@@ -79,7 +81,7 @@ def _row_from_job(job: dict[str, Any], printer_name: str) -> dict[str, Any] | No
         "file_name": file_name,
         "material_type": _material_from_metadata(job),
         "outcome": map_status(raw_status),
-        "determined_by": "inferred",
+        "determined_by": PRINTER_LOG,
         "agent_id": "auto",
         "notes": (
             "Imported from Moonraker job history "
