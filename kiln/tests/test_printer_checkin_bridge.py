@@ -917,3 +917,17 @@ def test_a_database_made_before_the_table_gains_it(tmp_path):
     assert db.printer_checkin_waiting("fp")["episode"] == EPISODE
     assert db.printer_checkins_answered("fp") == []
     db.close()
+
+
+def test_signing_in_forgets_what_was_asked_while_signed_out():
+    """A question answered "signed out" is not remembered past the sign-in,
+    so the next ending asks Kiln's servers for the account now signed in."""
+    from kiln import _pro_printer_checkin_bridge as checkin
+    from kiln.cli.auth_commands import _complete_signin
+
+    checkin._asked["bambu"] = "signed-out-state"
+    try:
+        _complete_signin({"access_token": "a", "refresh_token": "r", "email": "x@y.z"}, door="chat")
+        assert checkin._asked == {}
+    finally:
+        checkin.forget()
