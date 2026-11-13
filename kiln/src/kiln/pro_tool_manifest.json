@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-12T23:12:54.599283+00:00",
+  "generated": "2026-11-13T16:42:51.577928+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -20245,7 +20245,7 @@
             "default": 0.0,
             "title": "Requested Depth Mm",
             "type": "number",
-            "description": "The decoration depth the originating tool call asked for.  Used to compute the ``depth_gap_mm`` and fire ``DEPTH_SHY`` when the achievable depth falls short.  Pass 0.0 (default) to skip depth warnings \u2014 the per-layer breakdown + carve metrics still populate."
+            "description": "The decoration depth the originating tool call asked for.  Used to compute the ``depth_gap_mm`` and fire ``DEPTH_SHY`` / ``DEPTH_OVER`` when the file carves less or more than that by over half a layer.  Pass 0.0 (default) to skip depth warnings \u2014 the per-layer breakdown + carve metrics still populate."
           }
         },
         "title": "analyze_mid_print_impactArguments",
@@ -21041,7 +21041,7 @@
           "current_layer": {
             "title": "Current Layer",
             "type": "integer",
-            "description": "1-indexed layer the printer is paused at. The deboss starts at ``current_layer + 1`` so the carve never touches the layer currently being laid down."
+            "description": "1-indexed layer the printer is paused at. The print continues from this layer; the carve begins above it."
           },
           "depth_mm": {
             "default": 1.2,
@@ -21060,25 +21060,25 @@
             ],
             "default": null,
             "title": "Top Layers",
-            "description": "Reserved override for the top-layer count. ``None`` (default) uses the value detected from ``analyze_top_region`` (TYPE:Top tags or solid-infill inference)."
+            "description": "Not used.  The layers that can be carved are read from the print's own file."
           },
           "image_scale": {
             "default": 0.7,
             "title": "Image Scale",
             "type": "number",
-            "description": "Heightmap-to-bed scale factor \u2014 0.7 means the image fills 70% of the carved region's bounding box."
+            "description": "0.7 means the image fills 70% of the top face's shorter side."
           },
           "aspect_policy": {
             "default": "auto_crop",
             "title": "Aspect Policy",
             "type": "string",
-            "description": "How to fit a non-matching aspect ratio onto the carve region.  ``\"auto_crop\"`` crops the image to match (default), ``\"auto_scale\"`` letterboxes it, ``\"strict\"`` rejects mismatches."
+            "description": "How to fit an image whose shape differs from the top face: ``\"auto_crop\"`` (default), ``\"auto_scale\"`` or ``\"strict\"`` (refuse a mismatch)."
           },
           "printer_z_known": {
             "default": false,
             "title": "Printer Z Known",
             "type": "boolean",
-            "description": "REQUIRED ``True``.  Same safety gate as ``generate_recovery_gcode`` \u2014 if the printer's Z isn't trustworthy, refuses with ``PRINTER_Z_UNKNOWN``."
+            "description": "REQUIRED ``True``: your confirmation that the printer has not been power-cycled or re-homed since it paused.  Otherwise refused with ``PRINTER_Z_UNKNOWN``."
           },
           "resume_z_mm": {
             "anyOf": [
@@ -21091,19 +21091,19 @@
             ],
             "default": null,
             "title": "Resume Z Mm",
-            "description": "Explicit resume Z height in mm.  ``None`` means the resume scanner derives it from the carved G-code at ``current_layer + 1``."
+            "description": "The height you believe the print is at.  The file's own height for that layer is used; a different number here is said in ``warnings``."
           },
           "threshold": {
             "default": 0.35,
             "title": "Threshold",
             "type": "number",
-            "description": "Heightmap value above which a pixel is treated as carved-away (0.0\u20131.0, default 0.35)."
+            "description": "How dark a pixel must be to be cut (0.0-1.0, default 0.35)."
           },
           "bevel": {
             "default": true,
             "title": "Bevel",
             "type": "boolean",
-            "description": "Add a 1-layer bevel ring around the deboss for cleaner visual edges.  Default ``True``."
+            "description": "Soften the walls of the cut.  Default ``True``."
           },
           "output_dir": {
             "anyOf": [
@@ -21116,19 +21116,19 @@
             ],
             "default": null,
             "title": "Output Dir",
-            "description": "Output directory for the carved + resume files.  ``None`` uses the system temp dir."
+            "description": "Where to write the files.  Left out, a new session folder is used."
           },
           "package_as_3mf": {
             "default": true,
             "title": "Package As 3Mf",
             "type": "boolean",
-            "description": "When ``True`` (default), the tool also wraps the resume gcode as a Bambu resume-mode 3MF and returns its path as ``resume_3mf_path``.  Disable for non-Bambu targets or when you want to inspect the carved gcode before packaging.  On failure the error is surfaced via ``warnings`` \u2014 the .gcode path is still returned so the caller can recover."
+            "description": "For a Bambu printer the edited print is packaged as a 3MF and returned as ``resume_3mf_path``; pass ``False`` to leave that field empty and use ``resume_gcode_path``.  Other printers get G-code either way."
           },
           "source_3mf_path": {
             "default": "",
             "title": "Source 3Mf Path",
             "type": "string",
-            "description": "Passed through to the 3MF wrapper. Supplying the original job's .3mf preserves its thumbnail and 3D model preview on the printer's display."
+            "description": "The original job's .3mf, for its thumbnail on the printer's screen."
           },
           "hotend_temp": {
             "anyOf": [
@@ -21141,7 +21141,7 @@
             ],
             "default": null,
             "title": "Hotend Temp",
-            "description": "Hotend setpoint for the resume 3MF metadata.  Leave unset to use the temperature the print's own file heats to; a value that differs from it is kept and said in ``warnings``."
+            "description": "Nozzle temperature.  Leave unset to use the one the print's own file heats to; a value that differs from it is kept and said in ``warnings``."
           },
           "bed_temp": {
             "anyOf": [
@@ -21154,7 +21154,7 @@
             ],
             "default": null,
             "title": "Bed Temp",
-            "description": "Bed setpoint for the 3MF metadata, read the same way as ``hotend_temp``."
+            "description": "Bed temperature, read the same way."
           },
           "filament_type": {
             "anyOf": [
@@ -21167,7 +21167,19 @@
             ],
             "default": null,
             "title": "Filament Type",
-            "description": "The print's material, for 3MF metadata. Leave it out and Kiln reads the print's own material; when nothing says which, the call is refused (``PRINT_MATERIAL_UNKNOWN``)."
+            "description": "The print's material.  Leave it out and Kiln reads the print's own; when nothing says which, the call is refused (``PRINT_MATERIAL_UNKNOWN``)."
+          },
+          "accept_bridge_cascade_risk": {
+            "default": false,
+            "title": "Accept Bridge Cascade Risk",
+            "type": "boolean",
+            "description": "Yes to a carve that cuts into the layer where the print bridges across its infill, when an answer of ``needs_acceptance`` names it."
+          },
+          "accept_subtle_depth": {
+            "default": false,
+            "title": "Accept Subtle Depth",
+            "type": "boolean",
+            "description": "Yes to a carve shallower than reads clearly, when an answer of ``needs_acceptance`` names it."
           }
         },
         "required": [
@@ -21359,7 +21371,13 @@
             "default": false,
             "title": "Accept Bridge Cascade Risk",
             "type": "boolean",
-            "description": "THIRD safety gate on top of ``start_layer_override`` + ``accept_unsafe_depth``. Required when the override drops below ``band_floor`` AND any layer in ``[override, last_layer]`` is tagged ``;TYPE:Bridge infill`` or ``;TYPE:Internal infill`` in the source gcode.  Crossing one of those layers removes the substrate the solid infill above was going to cool against, cascading into a cap failure. Without it the engine raises ``BRIDGE_CASCADE_RISK``."
+            "description": "THIRD safety gate on top of ``start_layer_override`` + ``accept_unsafe_depth``. Required when the override drops below ``band_floor`` AND any layer in ``[override, last_layer]`` is tagged ``;TYPE:Bridge infill`` or ``;TYPE:Internal infill`` in the source gcode.  Crossing one of those layers removes the substrate the solid infill above was going to cool against, cascading into a cap failure. Without it the engine raises ``BRIDGE_CASCADE_RISK``. Also accepts a carve that, at the depth asked for, cuts into the layer where the print bridges across its infill."
+          },
+          "accept_subtle_depth": {
+            "default": false,
+            "title": "Accept Subtle Depth",
+            "type": "boolean",
+            "description": "Accept a carve shallower than reads clearly (a faint mark).  Without it such a carve is not handed over.  Defaults to ``False``."
           },
           "target_ams_slot": {
             "default": -1,
@@ -22779,7 +22797,7 @@
             "default": 1.2,
             "title": "Depth Mm",
             "type": "number",
-            "description": "Deboss depth in mm, (0, 5]. Defaults to 1.2."
+            "description": "Deboss depth in mm, (0, 5]. Defaults to 1.2. It decides how far down the carve reaches; when the print cannot give it, the answer says how deep the carve is and why."
           },
           "image_scale": {
             "default": 0.7,
@@ -22888,31 +22906,31 @@
             "default": 0,
             "title": "Start Layer Override",
             "type": "integer",
-            "description": "Recorded on the returned ``plan`` when non-zero. This tool does not pass it to the carve, so the planned artifacts start at the analyzer's own floor; use ``decorate_during_print`` to carve deeper. Defaults to ``0``."
+            "description": "The first layer to carve, instead of the one ``depth_mm`` reaches. Passed to the carve exactly as ``decorate_during_print`` takes it. Defaults to ``0`` (let the depth decide)."
           },
           "accept_unsafe_depth": {
             "default": false,
             "title": "Accept Unsafe Depth",
             "type": "boolean",
-            "description": "Accept a ``DEPTH_UNSAFE`` plan warning so it no longer blocks; recorded on the plan. Defaults to ``False``."
+            "description": "Accept a carve deeper than 2 mm, or one started below the print's solid top. Defaults to ``False``."
           },
           "accept_bridge_cascade_risk": {
             "default": false,
             "title": "Accept Bridge Cascade Risk",
             "type": "boolean",
-            "description": "Accept a ``CARVE_CROSSES_BRIDGE`` plan warning so it no longer blocks; recorded on the plan. Defaults to ``False``."
+            "description": "Accept a carve that cuts into the layer where the print bridges across its infill. Defaults to ``False``."
           },
           "accept_subtle_depth": {
             "default": false,
             "title": "Accept Subtle Depth",
             "type": "boolean",
-            "description": "Accept a carve whose effective depth is below the legibility threshold. Without it such a plan carries a blocking ``DEPTH_SUBTLE`` warning. Defaults to ``False``."
+            "description": "Accept a carve shallower than reads clearly (a faint mark). Defaults to ``False``."
           },
           "strict": {
             "default": true,
             "title": "Strict",
             "type": "boolean",
-            "description": "When True (the default), run the analyzer-invariant checks before returning.  Any failure raises a structured error envelope (``status=\"error\"``, ``code=\"STRICT_INVARIANT_FAILED\"``, ``invariant_failures=[...]``) instead of a malformed \"ok\" \u2014 every check pins one shape the envelope must satisfy (bridge_safe agreement, depth gap within tolerance, feature-mush floor, resolver token match, carve reaches last layer, contiguous band, required preview views exist, etc.).  You almost never want to set this to False; the checks exist because the analyzer envelope IS allowed to be inconsistent in subtle ways and an agent can't always tell from the response alone.  The off-switch is kept only for development scenarios where you're deliberately exercising the analyzer with pathological inputs."
+            "description": "When True (the default), the file Kiln made is checked against its plan before the answer leaves, and a disagreement is an error (``status=\"error\"``, ``code=\"STRICT_INVARIANT_FAILED\"``, ``error`` saying what does not agree, ``invariant_failures=[...]`` naming each check with its ``detail``).  A session that fails here is refused by ``apply_mid_print_decoration_plan``.  The off-switch is kept only for development: with it off the same disagreement comes back as ``needs_acceptance`` with the underlying envelope, and the session is still held back."
           },
           "target_ams_slot": {
             "default": -1,
