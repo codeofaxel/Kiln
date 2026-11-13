@@ -166,6 +166,14 @@ def _complete_signin(data: dict[str, Any], *, door: str = "other") -> None:
         forget()
     except Exception:  # noqa: BLE001
         pass
+    # The printer question likewise forgets what it was told while signed
+    # out, so the next ending asks the servers for the account now signed in.
+    try:
+        from kiln._pro_printer_checkin_bridge import forget as forget_checkins
+
+        forget_checkins()
+    except Exception:  # noqa: BLE001
+        pass
     from kiln import terms
 
     # A sign-in never fails over either terms hand-off below.

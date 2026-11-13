@@ -261,7 +261,7 @@ SRC = Path(fv.__file__).resolve().parent
 
 #: The calls that ask the rule.
 _ASKS = ("ending_verdict", "is_judged_ending", "judged_ending_sql", "failed_ending_kind",
-         "pooled_row_is_about_the_print", "_DECIDED", "_MACHINE_DECIDED")
+         "pooled_row_is_about_the_print", "_DECIDED", "_MACHINE_DECIDED", "decided_sql")
 
 #: Modules that name ending words for another reason, with it.
 _NOT_A_JUDGE = {

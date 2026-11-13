@@ -120,6 +120,27 @@ def test_a_confirmed_swap_marks_the_printer_here_repaired(plain_install):
     assert cond["marks"][0]["determined_by"] == "user_reported"
 
 
+@pytest.mark.parametrize(("kind", "closes"), [
+    ("belts", False), ("bed", False), ("extruder", False), ("other", False),
+    ("nozzle", True), ("hotend", True),
+])
+def test_a_swap_closes_only_a_mark_about_the_nozzle_or_hotend(plain_install, kind, closes):
+    pr.mark("shop", "needed", kind=kind)
+
+    out = plain_install.tools["record_nozzle_replacement"](
+        printer_id="shop", reason="worn_out", new_material="hardened_steel",
+    )
+
+    repair = out["machine_repair"]
+    cond = _condition(plain_install)
+    if closes:
+        assert repair["marked"] is True and cond["state"] == "repaired"
+    else:
+        assert repair["marked"] is False and repair["status"] == "needs_repair" and repair["kind"] == kind
+        assert "stays marked needs repair" in repair["next"]
+        assert cond["state"] == "needs_repair" and cond["kind"] == kind
+
+
 def test_a_swap_dated_earlier_keeps_its_date(plain_install):
     day = (date.today() - timedelta(days=3)).isoformat()
 

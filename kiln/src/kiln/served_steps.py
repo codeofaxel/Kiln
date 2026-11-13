@@ -37,8 +37,11 @@ reads, and nothing here tells it where the printer is or how to reach it.
 
 ``print_history``: this install's own recent print records, for a served
 tool that learns from them -- which printer and material, how the print
-went, and the settings and conditions it ran under.  Never a file's name or
-fingerprint, a note, or who recorded it.  They go with the one call that
+went, and the settings and conditions it ran under; and, when this computer
+holds them, whether the person's repair record sets a bad print aside, a
+one-way code of the sliced settings, the spool as a one-way code, the
+firmware version and how far the print got.  Never a file's name or
+fingerprint, a spool's id, a note, or who recorded it.  They go with the one call that
 asked and the servers keep none of it.
 
 ``act``: one of a short, fixed list of this install's OWN printer tools,
@@ -901,10 +904,31 @@ _HISTORY_FIELDS = (
     "printer_name", "material_type", "outcome", "failure_mode", "determined_by",
     "quality_grade", "settings", "environment", "created_at",
 )
+#: What a record carries beside those, only when it holds: ``set_aside``,
+#: true for a bad print the person's repair record sets aside.  A served
+#: tool is sent what it reads and nothing more.
+_HISTORY_EVIDENCE = ("set_aside",)
+#: This module's name in :data:`kiln.outbound_guard.VERSION_FIELDS`.
+SENDER = "kiln/served_steps.py"
 #: The most recent records sent, and the most they may weigh as JSON (the
 #: servers refuse a reading step over a megabyte).
 _HISTORY_RECORDS = 400
 _HISTORY_BYTES = 900_000
+
+
+def _history_record(row: dict[str, Any], repair_windows: Any) -> dict[str, Any]:
+    """One print row as a served tool receives it: :data:`_HISTORY_FIELDS`,
+    then each of :data:`_HISTORY_EVIDENCE` this computer holds for it."""
+    from kiln.failure_vocabulary import excused_by_repair
+
+    out: dict[str, Any] = {k: row.get(k) for k in _HISTORY_FIELDS}
+    if excused_by_repair(
+        row.get("outcome"), row.get("failure_mode"), row.get("determined_by"),
+        machine_fingerprint=row.get("machine_fingerprint"), started_at=row.get("created_at"),
+        repair_windows=repair_windows,
+    ):
+        out["set_aside"] = True
+    return out
 
 
 def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -927,9 +951,11 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
     try:
         # Every ending with a verdict, whatever its cause, and who settled it:
         # the servers apply the ending rule per question, as this store does.
+        db = get_db()
         # A job known only from the printer's own log carries no verdict and
         # is not sent.
-        rows = get_db().list_print_outcomes(limit=_HISTORY_RECORDS + 1, include_stops=True, witnessed_only=True)
+        rows = db.list_print_outcomes(limit=_HISTORY_RECORDS + 1, include_stops=True, witnessed_only=True)
+        repair_windows = db.repair_windows()
     except Exception:  # noqa: BLE001 — said, never guessed
         return None, _refusal(
             tool, "PRINT_HISTORY_NOT_READ",
@@ -937,7 +963,7 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             "not read its own record of it. Nothing was sent.",
         )
     complete = len(rows) <= _HISTORY_RECORDS
-    sent = [{k: row.get(k) for k in _HISTORY_FIELDS} for row in rows[:_HISTORY_RECORDS]]
+    sent = [_history_record(row, repair_windows) for row in rows[:_HISTORY_RECORDS]]
     while sent and len(json.dumps(sent, default=str)) > _HISTORY_BYTES:
         # Oldest first: the list is newest-first, and recent prints say the
         # most about the printer as it is now.

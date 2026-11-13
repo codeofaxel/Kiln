@@ -513,6 +513,40 @@ def test_every_fact_a_served_tool_may_ask_for_leaves_clean(wire, monkeypatch):
         assert _leaks(sent[-1].decode()) == [], (extra, sent[-1].decode())
 
 
+def test_a_printer_check_in_carries_no_file_name_and_no_serial(tmp_path, monkeypatch):
+    """The check-in a printer's ending sends (kiln._pro_printer_checkin_bridge),
+    built from rows that hold a file's name and path, its fingerprint, a job
+    id that is the file's name, a raw spool id and a machine fingerprint made
+    of the serial, for a printer the person named after its serial."""
+    from kiln import _pro_printer_checkin_bridge as checkin
+    from kiln.persistence import KilnDB
+
+    serial, fingerprint = "01P00A000000001", "bambu:serial:01p00a000000001"
+    monkeypatch.setattr(guard, "_own_printer_values", lambda: [("a printer's serial number", serial)])
+    db = KilnDB(db_path=str(tmp_path / "kiln.db"))
+    try:
+        db._save_print_outcome({
+            "job_id": "benchy_final_v3", "printer_name": f"A1 {serial}", "outcome": "failed",
+            "failure_mode": "warping", "determined_by": "observed", "machine_fingerprint": fingerprint,
+            "file_name": "/Users/pat/Desktop/benchy_final_v3.gcode", "file_hash": "c0ffee" * 8,
+            "material_type": "PLA", "notes": "for the client on Elm St", "note_by": "person",
+        })
+        db._conn.execute(
+            "UPDATE print_outcomes SET spool_id = 'spool-raw-7', firmware_version = ? WHERE job_id = 'benchy_final_v3'",
+            (f"fw-{serial}",),
+        )
+        db._conn.commit()
+        body = checkin.request_body(db, fingerprint, f"A1 {serial}")
+    finally:
+        db.close()
+    sent = json.dumps(body)
+    assert len(body["prints"]) == 1 and body["machine_code"] == guard.machine_code(fingerprint)
+    for private in ("benchy", "Desktop", "pat", ".gcode", "c0ffee", serial, serial.lower(), "spool-raw-7",
+                    "Elm St", "printer_label", "firmware"):
+        assert private not in sent, private
+    assert _leaks(sent) == []
+
+
 #: The calls that put bytes on the network, by their dotted names.
 _SENDS = {
     ("urllib", "request", "urlopen"), ("request", "urlopen"), ("urlopen",),

@@ -648,8 +648,10 @@ class TestTheSwitchIsOneDoor:
         from kiln import machine_repair_courier as mod
 
         root = Path(mod.__file__).resolve().parents[1]
+        routes = ("api/cloud/machines/repairs", "api/cloud/machines/links")
+        assert all(route in path for route, path in zip(routes, (mod.SYNC_PATH, mod.ANSWER_PATH), strict=True))
         hits = sorted(
             str(p) for p in root.rglob("*.py")
-            if "api/cloud/machines/" in p.read_text(encoding="utf-8", errors="replace")
+            if any(route in p.read_text(encoding="utf-8", errors="replace") for route in routes)
         )
         assert [Path(h).name for h in hits] == ["machine_repair_courier.py"], hits

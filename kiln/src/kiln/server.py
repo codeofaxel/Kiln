@@ -17119,6 +17119,11 @@ def await_print_completion(
             from kiln import ending_question
 
             ending_question.attach(result)
+        elif result.get("outcome") == "completed":
+            from kiln import ending_question
+
+            # A finished print owes no question of its own.
+            ending_question.attach(result, ending_can_owe=False)
         if _goal_ctx is not None:
             result["design_goal"] = _goal_ctx
         try:
@@ -20819,11 +20824,16 @@ def _guarded_for_the_wire(kwargs: dict[str, Any], *, asked_by_user: bool) -> dic
     never made (a bridge fetching something on its own), and the arguments
     this install added from its own reads on one they did.  The person's
     own words and files go as they gave them."""
-    from kiln.outbound_guard import scrub
+    from kiln.outbound_guard import VERSION_FIELDS, scrub
 
     if not asked_by_user:
         return scrub(kwargs)
-    return {key: scrub(value) if key in _MACHINE_READ_ARGS else value for key, value in kwargs.items()}
+    # A served step's print records name their firmware field as a version.
+    versions = {"step_results": VERSION_FIELDS.get("kiln/served_steps.py", frozenset())}
+    return {
+        key: scrub(value, version_keys=versions.get(key, frozenset())) if key in _MACHINE_READ_ARGS else value
+        for key, value in kwargs.items()
+    }
 
 
 def _served_bearer() -> tuple[str, str | None]:

@@ -381,13 +381,63 @@ def _endings_to_ask_about(printer_name: str, limit: int) -> list[dict]:
     return out
 
 
+def _printer_question(printer_name: str) -> dict | None:
+    """The question waiting about *printer_name* itself
+    (:mod:`kiln._pro_printer_checkin_bridge`), or ``None``."""
+    from kiln._pro_printer_checkin_bridge import listed
+
+    return listed(printer_name)
+
+
+def _repair_windows() -> dict:
+    """This computer's needs-repair windows, or none when they cannot be read."""
+    try:
+        from kiln.persistence import get_db
+
+        return get_db().repair_windows()
+    except Exception:  # noqa: BLE001 -- a record that cannot be read sets nothing aside
+        _logger.debug("repair windows not read", exc_info=True)
+        return {}
+
+
+def _print_and_repairs(row_id: int) -> dict:
+    """The machine and start time on the print row *row_id* and this
+    computer's needs-repair windows: what
+    :func:`kiln.failure_vocabulary.is_judged_ending` reads to set a bad print
+    aside.  Empty when the row cannot be read."""
+    try:
+        from kiln.persistence import get_db
+
+        row = get_db().print_outcome_row(row_id) or {}
+    except Exception:  # noqa: BLE001 -- a row that cannot be read sets nothing aside
+        _logger.debug("print row %s not read", row_id, exc_info=True)
+        return {}
+    return {
+        "machine_fingerprint": row.get("machine_fingerprint"),
+        "started_at": row.get("created_at"),
+        "repair_windows": _repair_windows(),
+    }
+
+
 def _with_ending_said(rows: list[dict]) -> list[dict]:
-    """*rows* with ``ending_said`` on each stop: what to call the ending to
-    the person in place of "failed"."""
+    """*rows* with ``ending_said`` on each stop (what to call the ending to
+    the person in place of "failed") and ``repair_said`` on each bad print
+    the repair record sets aside
+    (:func:`kiln.failure_vocabulary.repair_said`)."""
+    from kiln.failure_vocabulary import repair_said
+
+    windows = _repair_windows() if rows else {}
     out = []
     for row in rows:
         said = _ending_said(row)
-        out.append({**row, "ending_said": said} if said else row)
+        if said:
+            row = {**row, "ending_said": said}
+        set_aside = repair_said(
+            row.get("outcome"), row.get("failure_mode"), row.get("determined_by"),
+            machine_fingerprint=row.get("machine_fingerprint"), started_at=row.get("created_at"),
+            repair_windows=windows,
+        )
+        out.append({**row, "repair_said": set_aside} if set_aside else row)
     return out
 
 
@@ -817,11 +867,12 @@ def record_print_outcome(
         # true we skip silently rather than invent defaults — proven
         # settings must reflect real prints, not our guesses.  A failure only
         # counts against the decoration when it is a bad print: a printer's
-        # own stop, a power cut or a run-out spool says nothing about it.
+        # own stop, a power cut or a run-out spool says nothing about it, and
+        # neither does a bad print on a printer marked as needing repair.
         from kiln.failure_vocabulary import is_judged_ending
 
         if (decoration_slug and material_type and outcome in ("success", "failed")
-                and is_judged_ending(outcome, failure_mode, determined_by)):
+                and is_judged_ending(outcome, failure_mode, determined_by, **_print_and_repairs(row_id))):
             try:
                 from kiln.decoration_library import (
                     get_decoration,
@@ -1445,8 +1496,22 @@ class _LearningToolsPlugin:
             answer for them.  The same block rides as ``ask_the_person`` on
             the tool that reports a print's ending.
 
+            **Agent contract for ``printer_question``**: one question about
+            this printer itself, or ``null``.  ``seen``, ``check`` (when
+            present) and ``question`` are sentences to say to the person as
+            written; ``record`` maps each thing they can say to the exact
+            ``set_machine_repair`` call that records it.  ``check_part``
+            names the part ``check`` is about: offering that part's steps is
+            not an answer.  Ask once, at a natural moment, and never pick an
+            answer for them.  The same block can ride as ``ask_the_person``
+            on the tool that reports a print's ending, when that ending owes
+            no question of its own.
+
             A row carrying ``ending_said`` ("Stopped: power cut") is a stop,
             not a bad print: say those words to the person, never "failed".
+            A row carrying ``repair_said`` is a bad print made while the
+            printer was marked needs repair: say those words; it counts
+            about the printer and not against the design or the material.
 
             ``insights.printer_own_history`` counts jobs Kiln only read off
             the printer's own log: it neither started nor watched them, and
@@ -1491,7 +1556,10 @@ class _LearningToolsPlugin:
                     "insights": insights,
                     "recent_outcomes": _with_ending_said(recent),
                     "unresolved_prints": unresolved,
-                    "endings_to_ask_about": _endings_to_ask_about(printer_name, limit),
+                    "endings_to_ask_about": (asks := _endings_to_ask_about(printer_name, limit)),
+                    # One question at a time: an ending's own question
+                    # comes first, and the printer's waits for a later read.
+                    "printer_question": None if asks else _printer_question(printer_name),
                     "confidence": confidence,
                     "safety_notice": _LEARNING_SAFETY_NOTICE,
                 }

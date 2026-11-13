@@ -1436,6 +1436,24 @@ class KilnDB:
                 CREATE INDEX IF NOT EXISTS idx_machine_repairs_machine
                     ON machine_repairs(machine_fingerprint);
 
+                CREATE TABLE IF NOT EXISTS printer_checkins (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    machine_fingerprint TEXT NOT NULL,
+                    printer_name        TEXT NOT NULL,
+                    episode             TEXT NOT NULL,
+                    about               TEXT,
+                    question            TEXT NOT NULL,
+                    asked_job_id        TEXT DEFAULT NULL,
+                    shown_job_id        TEXT DEFAULT NULL,
+                    shown_at            REAL DEFAULT NULL,
+                    received_at         REAL NOT NULL,
+                    answer              TEXT DEFAULT NULL,
+                    answered_at         REAL DEFAULT NULL,
+                    UNIQUE(machine_fingerprint, episode)
+                );
+                CREATE INDEX IF NOT EXISTS idx_printer_checkins_machine
+                    ON printer_checkins(machine_fingerprint);
+
                 CREATE TABLE IF NOT EXISTS printer_renames (
                     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                     old_name            TEXT NOT NULL,
@@ -2991,7 +3009,19 @@ class KilnDB:
                 push_soon()
             except Exception:  # noqa: BLE001 -- the account copy never blocks a record
                 pass
+            self._printer_checkin_soon(outcome.get("printer_name"))
         return row_id
+
+    def _printer_checkin_soon(self, printer_name: Any) -> None:
+        """Offer the printer *printer_name* its check-in
+        (:func:`kiln._pro_printer_checkin_bridge.ask_soon`).  Never raises and
+        never waits on the network."""
+        try:
+            from kiln._pro_printer_checkin_bridge import ask_soon
+
+            ask_soon(printer_name, db=self)
+        except Exception:  # noqa: BLE001 -- a check-in never blocks a record
+            pass
 
     def _save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
@@ -3655,6 +3685,7 @@ class KilnDB:
                 (time.time(), row["id"]),
             )
             self._conn.commit()
+        self._printer_checkin_soon(row.get("printer_name"))
         return self.get_print_outcome(job_id)
 
     def clear_print_note(self, job_id: str) -> dict[str, Any] | None:
@@ -3767,6 +3798,7 @@ class KilnDB:
         version_ids: list[str] | None = None,
         design_id: str | None = None,
         include_stops: bool = False,
+        count_repair_excused: bool = False,
         witnessed_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Return outcome records, optionally filtered.
@@ -3784,7 +3816,10 @@ class KilnDB:
         install sends with a call).  An explicit
         ``outcome=`` filter or ``include_all=True`` sees everything.
 
-        A job known only from the printer's own log
+        A bad print the repair record sets aside (:meth:`excused_by_repair`)
+        is not a judged ending about the print and is left out by default;
+        ``count_repair_excused`` keeps it, for a reader of the printer's own
+        record.  A job known only from the printer's own log
         (:data:`kiln.failure_vocabulary.PRINTER_LOG`) is never a judged
         ending, so the default leaves it out.  ``include_stops``,
         ``include_all`` and an ``outcome=`` filter keep it, for the person's
@@ -3813,7 +3848,7 @@ class KilnDB:
         elif include_stops:
             clauses.append(f"outcome IN ('success', {_sql_words(FAILED_OUTCOMES)})")
         elif not include_all:
-            clauses.append(self._DECIDED)
+            clauses.append(self._DECIDED if count_repair_excused else self.decided_sql())
         if witnessed_only:
             clauses.append(f"COALESCE(determined_by, '') <> '{PRINTER_LOG}'")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
@@ -3833,6 +3868,9 @@ class KilnDB:
     # a printer stopping itself is not a verdict on any of them.
     # ``_MACHINE_DECIDED`` judges the printer, which a machine stop is.
     # Neither counts a power cut or a run-out spool (kiln.failure_vocabulary).
+    # A reader judging the print asks ``decided_sql()``, which also leaves
+    # out a bad print the repair record sets aside; ``_DECIDED`` alone is the
+    # rule before the repair record.
     _DECIDED = judged_ending_sql()
     _MACHINE_DECIDED = judged_ending_sql(about=ABOUT_THE_MACHINE)
 
@@ -3911,7 +3949,7 @@ class KilnDB:
             "  COUNT(*) as total, "
             "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
             "FROM print_outcomes "
-            f"WHERE printer_name = ? AND material_type IS NOT NULL AND {self._DECIDED} "
+            f"WHERE printer_name = ? AND material_type IS NOT NULL AND {self.decided_sql()} "
             "GROUP BY material_type ORDER BY total DESC",
             (printer_name,),
         ).fetchall()
@@ -4152,6 +4190,220 @@ class KilnDB:
         elif current is not None:
             out["state"] = "repaired"
         return out
+
+    @staticmethod
+    def needs_repair_windows(standing: list[dict[str, Any]]) -> list[tuple[float, float | None]]:
+        """The times a machine stood marked as needing repair, from its
+        standing marks (:meth:`standing_repair_marks`) in the order of their
+        moments: each ``(from, until)``, opened by a ``needed`` and closed by
+        the next ``done``; ``until`` is ``None`` for a mark still standing.
+        A ``done`` with no ``needed`` before it opens and closes nothing."""
+        windows: list[tuple[float, float | None]] = []
+        since: float | None = None
+        for mark in standing:
+            if mark["status"] == "needed":
+                if since is None:
+                    since = float(mark["marked_at"])
+            elif mark["status"] == "done" and since is not None:
+                windows.append((since, float(mark["marked_at"])))
+                since = None
+        if since is not None:
+            windows.append((since, None))
+        return windows
+
+    def repair_windows(self) -> dict[str, list[tuple[float, float | None]]]:
+        """Every machine's needs-repair windows (:meth:`needs_repair_windows`),
+        by fingerprint: what :func:`kiln.failure_vocabulary.excused_by_repair`
+        and its SQL form read.  Machines with no window are left out, and so
+        is one whose fingerprint cannot be named in a SQL condition.  A record
+        that cannot be read gives no windows, so nothing is set aside."""
+        from kiln.failure_vocabulary import plain_fingerprint
+
+        try:
+            rows = self._conn.execute(
+                "SELECT DISTINCT machine_fingerprint FROM machine_repairs WHERE status = 'needed'"
+            ).fetchall()
+            out: dict[str, list[tuple[float, float | None]]] = {}
+            for (fingerprint,) in rows:
+                if not plain_fingerprint(fingerprint):
+                    logger.debug("repair windows not read for a machine whose fingerprint is not plain")
+                    continue
+                windows = self.needs_repair_windows(
+                    self.standing_repair_marks(self.machine_repair_marks(fingerprint))
+                )
+                if windows:
+                    out[fingerprint] = windows
+            return out
+        except Exception:  # noqa: BLE001 -- a record that cannot be read sets nothing aside
+            logger.debug("repair windows not read", exc_info=True)
+            return {}
+
+    # ------------------------------------------------------------------
+    # Printer check-ins: one question about a printer, and its answer
+    # (kiln._pro_printer_checkin_bridge)
+    # ------------------------------------------------------------------
+
+    _CHECKIN_COLUMNS = (
+        "id, machine_fingerprint, printer_name, episode, about, question, asked_job_id, "
+        "shown_job_id, shown_at, received_at, answer, answered_at"
+    )
+
+    @staticmethod
+    def _checkin_row(raw: Any) -> dict[str, Any]:
+        keys = ("id", "machine_fingerprint", "printer_name", "episode", "about", "question",
+                "asked_job_id", "shown_job_id", "shown_at", "received_at", "answer", "answered_at")
+        return dict(zip(keys, tuple(raw), strict=True))
+
+    def machine_print_rows(self, machine_fingerprint: str, limit: int = 400) -> list[dict[str, Any]]:
+        """The newest *limit* print rows of one machine, newest first,
+        whatever their ending."""
+        rows = self._conn.execute(
+            "SELECT * FROM print_outcomes WHERE machine_fingerprint = ? ORDER BY created_at DESC LIMIT ?",
+            (machine_fingerprint, int(limit)),
+        ).fetchall()
+        return [self._outcome_row_to_dict(r) for r in rows]
+
+    def set_printer_checkin(
+        self, machine_fingerprint: str, printer_name: str, question: dict[str, Any] | None,
+        *, asked_job_id: str,
+    ) -> None:
+        """Keep the one question waiting for a machine, as Kiln's servers
+        answered at the ending *asked_job_id*; ``None`` leaves none waiting.
+
+        Every unanswered question of the machine stops waiting.  *question*
+        (its ``episode`` is the key) then waits at *asked_job_id*; a question
+        already shown at that same ending keeps that it was shown.  An
+        answered episode is never made to wait again."""
+        now = time.time()
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE printer_checkins SET asked_job_id = NULL "
+                "WHERE machine_fingerprint = ? AND answer IS NULL AND (episode != ? OR asked_job_id != ?)",
+                (machine_fingerprint, (question or {}).get("episode") or "", asked_job_id),
+            )
+            if question:
+                episode = str(question["episode"])
+                held = self._conn.execute(
+                    "SELECT id, answer, asked_job_id FROM printer_checkins "
+                    "WHERE machine_fingerprint = ? AND episode = ?",
+                    (machine_fingerprint, episode),
+                ).fetchone()
+                text = json.dumps(question)
+                if held is None:
+                    self._conn.execute(
+                        "INSERT INTO printer_checkins (machine_fingerprint, printer_name, episode, about, "
+                        "question, asked_job_id, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (machine_fingerprint, printer_name, episode, question.get("about"), text,
+                         asked_job_id, now),
+                    )
+                elif held[1] is None:
+                    self._conn.execute(
+                        "UPDATE printer_checkins SET printer_name = ?, about = ?, question = ?, "
+                        "asked_job_id = ?, received_at = ? WHERE id = ?",
+                        (printer_name, question.get("about"), text, asked_job_id, now, held[0]),
+                    )
+            self._conn.commit()
+
+    def printer_checkin_waiting(self, machine_fingerprint: str) -> dict[str, Any] | None:
+        """The question waiting for a machine, or ``None``."""
+        raw = self._conn.execute(
+            f"SELECT {self._CHECKIN_COLUMNS} FROM printer_checkins WHERE machine_fingerprint = ? "
+            "AND answer IS NULL AND asked_job_id IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1",
+            (machine_fingerprint,),
+        ).fetchone()
+        return self._checkin_row(raw) if raw is not None else None
+
+    def get_printer_checkin(self, episode: str) -> dict[str, Any] | None:
+        """The newest question kept under *episode*, or ``None``."""
+        raw = self._conn.execute(
+            f"SELECT {self._CHECKIN_COLUMNS} FROM printer_checkins WHERE episode = ? "
+            "ORDER BY received_at DESC, id DESC LIMIT 1",
+            (episode,),
+        ).fetchone()
+        return self._checkin_row(raw) if raw is not None else None
+
+    def mark_printer_checkin_shown(self, row_id: int, job_id: str) -> None:
+        """Record that a question was shown to the person at the ending *job_id*."""
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE printer_checkins SET shown_job_id = ?, shown_at = ? WHERE id = ?",
+                (job_id, time.time(), int(row_id)),
+            )
+            self._conn.commit()
+
+    def answer_printer_checkin(self, row_id: int, answer: str, *, answered_at: float | None = None) -> None:
+        """Record the person's answer to a question; it stops waiting.  The
+        first answer stands."""
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE printer_checkins SET answer = ?, answered_at = ?, asked_job_id = NULL "
+                "WHERE id = ? AND answer IS NULL",
+                (answer, float(time.time() if answered_at is None else answered_at), int(row_id)),
+            )
+            self._conn.commit()
+
+    def printer_checkins_answered(self, machine_fingerprint: str, limit: int = 200) -> list[dict[str, Any]]:
+        """Every answered question of a machine, newest first: ``episode``,
+        ``about``, ``answer``, ``answered_at``."""
+        rows = self._conn.execute(
+            "SELECT episode, about, answer, answered_at FROM printer_checkins "
+            "WHERE machine_fingerprint = ? AND answer IS NOT NULL ORDER BY answered_at DESC, id DESC LIMIT ?",
+            (machine_fingerprint, int(limit)),
+        ).fetchall()
+        return [
+            {"episode": r[0], "about": r[1], "answer": r[2], "answered_at": float(r[3]) if r[3] is not None else None}
+            for r in rows
+        ]
+
+    def decided_sql(self, alias: str = "") -> str:
+        """The endings that count about the print, as a SQL condition over
+        ``print_outcomes``: :attr:`_DECIDED` less the bad prints this
+        computer's repair record sets aside (:meth:`repair_windows`).  Takes
+        no parameters.  Every reader that judges a design, a version, a
+        material or settings asks here."""
+        return judged_ending_sql(alias, repair_windows=self.repair_windows())
+
+    def excused_by_repair(self, row: dict[str, Any] | None) -> bool:
+        """Whether *row* (a ``print_outcomes`` row) is a bad print the repair
+        record sets aside (:func:`kiln.failure_vocabulary.excused_by_repair`)."""
+        from kiln.failure_vocabulary import excused_by_repair
+
+        if not isinstance(row, dict) or not row.get("machine_fingerprint"):
+            return False
+        return excused_by_repair(
+            row.get("outcome"), row.get("failure_mode"), row.get("determined_by"),
+            machine_fingerprint=row.get("machine_fingerprint"), started_at=row.get("created_at"),
+            repair_windows=self.repair_windows(),
+        )
+
+    #: How many of the newest print rows an ending is looked for among.
+    _ENDING_ROW_SEARCH = 50
+
+    def print_row_for_ending(self, job_id: str | None, file_name: str | None = None) -> dict[str, Any] | None:
+        """The newest print row, by start time, that an ending under
+        *job_id* (a job label) or *file_name* belongs to: its job id is that
+        label, or its file is that file with or without its folder and
+        extensions.  Looked for among the :attr:`_ENDING_ROW_SEARCH` newest
+        rows; ``None`` when none of them is it."""
+        keys = {k for k in (job_id, file_name) if isinstance(k, str) and k}
+        stems = {_file_stem_token(k) for k in keys} - {""}
+        if not keys:
+            return None
+        rows = self._conn.execute(
+            "SELECT * FROM print_outcomes ORDER BY created_at DESC LIMIT ?", (self._ENDING_ROW_SEARCH,)
+        ).fetchall()
+        for raw in rows:
+            row = self._outcome_row_to_dict(raw)
+            if row.get("job_id") in keys or stems & {
+                _file_stem_token(row.get("job_id")), _file_stem_token(row.get("file_name")),
+            }:
+                return row
+        return None
+
+    def print_outcome_row(self, row_id: int) -> dict[str, Any] | None:
+        """The print row with id *row_id*, or ``None``."""
+        raw = self._conn.execute("SELECT * FROM print_outcomes WHERE id = ?", (row_id,)).fetchone()
+        return self._outcome_row_to_dict(raw) if raw is not None else None
 
     # The account's copy of a repair mark (kiln.machine_repair_courier)
 
@@ -5159,6 +5411,14 @@ def _db_path_in_force() -> str:
 
 def _stale(db: KilnDB | None, wanted: str) -> bool:
     return db is None or db._db_path != wanted
+
+
+def db_if_open() -> KilnDB | None:
+    """The module-level :class:`KilnDB` singleton when this process has
+    already opened it for the path in force, else ``None``.  Never opens or
+    builds one, so a reader on a tool's way out costs no schema setup."""
+    held = _db
+    return None if _stale(held, _db_path_in_force()) else held
 
 
 def get_db() -> KilnDB:
