@@ -557,6 +557,22 @@ FADE_HALF_LIFE_PRINTS = 20
 RECENT_PRINTS = 10
 
 
+def _relabel_printer_log_copies(conn: StorageBackend, prefixes: Sequence[str]) -> None:
+    """Give :data:`kiln.failure_vocabulary.PRINTER_LOG` to every job copied
+    from a printer's own log (its ``job_id`` starts with one of *prefixes*)
+    that still carries ``inferred``.
+
+    It writes only while such a row exists, so a store with none opens
+    without a write, whichever door opens it first.  A row a person answered
+    for carries their own label and is never matched.
+    """
+    for prefix in prefixes:
+        match = f"substr(job_id, 1, {len(prefix)}) = '{prefix}' AND determined_by = 'inferred'"
+        if conn.execute(f"SELECT 1 FROM print_outcomes WHERE {match} LIMIT 1").fetchone() is None:
+            continue
+        conn.execute(f"UPDATE print_outcomes SET determined_by = '{PRINTER_LOG}' WHERE {match}")
+
+
 class KilnDB:
     """Thread-safe persistence wrapper for Kiln.
 
@@ -707,11 +723,7 @@ class KilnDB:
         # A job copied from the printer's own log carries that label.  Rows
         # copied under the label of a reconnect's reading are moved to it;
         # one a person has since answered for keeps their word.
-        for prefix in self.PRINTER_LOG_JOB_PREFIXES:
-            self._conn.execute(
-                f"UPDATE print_outcomes SET determined_by = '{PRINTER_LOG}' "
-                f"WHERE substr(job_id, 1, {len(prefix)}) = '{prefix}' AND determined_by = 'inferred'"
-            )
+        _relabel_printer_log_copies(self._conn, self.PRINTER_LOG_JOB_PREFIXES)
         # When the person was asked about this ending and had nothing to add
         # (``mark_ending_asked``): the row is not asked about again.
         if "stop_reason_asked" not in columns:

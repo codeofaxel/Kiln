@@ -278,6 +278,36 @@ class TestRowsCopiedBeforeTheLabel:
         assert insights["total_outcomes"] == 2
         assert insights["printer_own_history"]["jobs"] == 1
 
+    def test_a_store_with_none_left_to_move_opens_without_a_write(self, store, monkeypatch) -> None:
+        """Every door opens the store first, read-only tools included, so the
+        move writes only while a copied row still carries ``inferred``."""
+        db = store.get_db()
+        with db._write_lock:
+            db._conn.execute(
+                "INSERT INTO print_outcomes (job_id, printer_name, outcome, determined_by, agent_id, created_at) "
+                "VALUES (?, ?, 'success', 'inferred', 'auto', ?)",
+                (f"{_JOB_ID_PREFIX}77", PRINTER, time.time()),
+            )
+            db._conn.commit()
+        store._db = None
+        store.get_db()
+
+        statements: list[str] = []
+        real_connect = store.sqlite3.connect
+
+        def watched(*args: Any, **kwargs: Any):
+            conn = real_connect(*args, **kwargs)
+            conn.set_trace_callback(statements.append)
+            return conn
+
+        monkeypatch.setattr(store.sqlite3, "connect", watched)
+        store._db = None
+        reopened = store.get_db()
+        assert statements, "the store was not reopened through sqlite3.connect"
+        assert not [s for s in statements if s.lstrip().upper().startswith("UPDATE PRINT_OUTCOMES")]
+        said = {r["job_id"]: r["determined_by"] for r in reopened.list_print_outcomes(limit=10, include_all=True)}
+        assert said == {f"{_JOB_ID_PREFIX}77": PRINTER_LOG}
+
 
 class TestNoneLeaveThisComputer:
     def test_the_history_sent_with_a_served_call_leaves_them_out(self, store) -> None:
