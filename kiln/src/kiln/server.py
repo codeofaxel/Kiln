@@ -25130,6 +25130,7 @@ def decorate_surface(
     svg_id: str = "",
     svg_layer: str = "",
     template_id: str = "",
+    font: str = "",
 ) -> dict:
     """Put any image, text, or pattern onto a 3D model surface.
 
@@ -25147,6 +25148,11 @@ def decorate_surface(
 
     - **Image file** (PNG/JPG/SVG): ``"/path/to/photo.jpg"``
     - **Text**: ``"text:KILN"`` or ``"text:Hello World"``
+    - **QR code**: ``"qr:https://example.com"`` (Kiln Pro, made on Kiln's
+      servers).  ``output_3mf`` is one print file holding the part and the
+      code in two colours, with ``print_recipe`` saying which goes in which
+      slot.  ``face`` is ``"top"`` (printed last; the default) or
+      ``"bottom"`` (set flush into the face on the bed, reading from below).
 
     **Image styles** for raster images:
 
@@ -25225,9 +25231,20 @@ def decorate_surface(
         ``mode``, ``scale``, and ``image_style`` from a template's curated
         decoration profile, call ``resolve_template_decoration()`` first
         (kiln-pro) and pass its results explicitly.
-    :returns: Dict with output STL path, preview info, and metadata.
+    :returns: Dict with output STL path, preview info, and metadata.  A
+        text carve also reports the ``font`` it used.  ``changed_for_you``
+        lists anything Kiln adjusted so the decoration prints (a depth
+        raised, a recess added); ``pro_adds`` says what a higher plan would
+        add to this carve, when there is something.
     :param absolute_size_mm: Exact letter height (text) or mark width (marks)
         in mm, overriding *scale*; ``0`` leaves *scale* in charge.
+    :param font: Font for text content: ``"sans"`` (default), ``"mono"``,
+        ``"fredoka"`` (rounded), ``"zilla-slab"`` (slab), ``"oswald"`` (tall
+        and narrow) or ``"saira-stencil"`` (stencil, for a cut-through word).
+        Every font is free on every plan.  When the person names none,
+        carve with the default and tell them which font was used and that
+        they can pick another.  An unknown font is refused naming the
+        accepted list.  Ignored for images.
     """
     if err := _check_auth("design:decorate"):
         return err
@@ -25306,6 +25323,24 @@ def decorate_surface(
     if not os.path.isfile(model_path):
         _refund_decoration_quota(quota_consumed)
         return _error_dict(f"Model not found: {model_path}", code="FILE_NOT_FOUND")
+    # A CAD file is read through the one door every mesh tool shares; the
+    # decoration is carved on the mesh it becomes, and the reply says so.
+    cad_note: str | None = None
+    try:
+        from kiln.step_import import NoBackendError, ensure_mesh_path, is_step_file
+
+        if is_step_file(model_path):
+            try:
+                model_path, cad_note = ensure_mesh_path(model_path)
+            except NoBackendError as exc:
+                _refund_decoration_quota(quota_consumed)
+                return _error_dict(
+                    f"{os.path.basename(model_path)} is a CAD file, and this computer "
+                    f"cannot turn it into a mesh to decorate: {exc}",
+                    code="UNSUPPORTED_FORMAT",
+                )
+    except ImportError:
+        pass
     model_ext = os.path.splitext(model_path)[1].lower()
     if model_ext not in (".stl", ".obj"):
         _refund_decoration_quota(quota_consumed)
@@ -25314,14 +25349,72 @@ def decorate_surface(
             code="VALIDATION_ERROR",
         )
 
+    from kiln.text_fonts import (
+        DEFAULT_TEXT_FONT,
+        UnknownTextFontError,
+        list_text_fonts,
+        resolve_text_font,
+    )
+
+    try:
+        text_font = resolve_text_font(font)
+    except UnknownTextFontError as exc:
+        _refund_decoration_quota(quota_consumed)
+        font_err = _error_dict(str(exc), code="UNKNOWN_FONT")
+        font_err["fonts"] = list_text_fonts()
+        return font_err
+
     from kiln.output_paths import kiln_output_dir
 
     work_dir = kiln_output_dir("kiln_decorate_surface")
     warnings: list[str] = []
+    # What Kiln's servers add to this tool (kiln._pro_decorate_bridge), and
+    # this call as it was made, for the times the servers run it whole.
+    from kiln import _pro_decorate_bridge as _servers_add
+
+    asked = {
+        "model_path": model_path, "content": content, "face": face,
+        "depth_mm": depth_mm, "mode": mode, "scale": scale,
+        "material": material, "content_type": content_type,
+        "offset_x_mm": offset_x_mm, "offset_y_mm": offset_y_mm,
+        "image_style": image_style, "placement": placement,
+        "absolute_size_mm": absolute_size_mm, "font": font,
+    }
+    done: list[str] = []
+    pro_adds: dict[str, Any] | None = None
+    as_given = model_path
+    if cad_note:
+        done.append(cad_note)
 
     try:
         # --- Step 1: Detect content type ---
         ctype = content_type.lower().strip()
+        if ctype == "qr" or (ctype == "auto" and content.lower().startswith("qr:")):
+            # A QR code is made on Kiln's servers.  Here, with kiln-pro in
+            # the process, that is this call; anywhere else the servers are
+            # asked, and a miss writes nothing and says why.
+            if face.lower().strip() not in ("auto", "top", "bottom"):
+                _refund_decoration_quota(quota_consumed)
+                return _error_dict(
+                    f"A QR code goes on the top or the bottom face, not {face!r}: "
+                    "it is printed flat, in a second colour. Use face='top' "
+                    "or face='bottom'.",
+                    code="INVALID_CONTENT",
+                )
+            qr_result = _servers_add.qr_on_part(
+                model_path=model_path, content=content, face=face,
+                size_mm=absolute_size_mm,
+            )
+            if qr_result is None:
+                qr_result, qr_miss = _servers_add.on_servers(asked)
+                if qr_result is None:
+                    qr_result = _servers_add.qr_missed(qr_miss, os.path.basename(model_path))
+            if qr_result.get("status") != "success":
+                _refund_decoration_quota(quota_consumed)
+                return qr_result
+            if warnings:
+                qr_result["warnings"] = [*(qr_result.get("warnings") or []), *warnings]
+            return _finish_decoration_result(qr_result, content=content, before=model_path)
         if ctype == "auto":
             if content.lower().startswith("text:"):
                 ctype = "text"
@@ -25429,6 +25522,13 @@ def decorate_surface(
 
             from kiln.decoration_helpers import TextDoesNotFitError
 
+            wall_prepared = _servers_add.before_carve(
+                model_path=model_path, face_name="wall", touches_bed=False,
+                depth_mm=depth_mm, material=material,
+            )
+            if wall_prepared is not None:
+                done.extend(wall_prepared.get("done") or [])
+                depth_mm = float(wall_prepared.get("depth_mm") or depth_mm)
             wall_depth = depth_mm if depth_mm > 0 else 1.0
             # Placement controls that only mean something on a flat face —
             # say so rather than accepting them and doing nothing.
@@ -25447,6 +25547,10 @@ def decorate_surface(
                 # keeps the default scale (0.7) on the engine's own default
                 # band share.
                 wall_kwargs: dict[str, Any] = {}
+                # The default font is left to the wall engine so a call that
+                # names none is unchanged.
+                if text_font.id != DEFAULT_TEXT_FONT:
+                    wall_kwargs["font"] = text_font.spec
                 if absolute_size_mm > 0:
                     wall_kwargs["target_size_mm"] = absolute_size_mm
                 elif scale > 0:
@@ -25618,6 +25722,10 @@ def decorate_surface(
                 record_event("decorations", detail=wall_event)
             except Exception:
                 pass
+            if ctype == "text":
+                result_dict["font"] = text_font.id
+            if done:
+                result_dict["changed_for_you"] = done
             return _finish_decoration_result(result_dict, content=content, before=model_path)
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
@@ -25627,6 +25735,17 @@ def decorate_surface(
         )
 
         face_lower = face.lower().strip()
+        sketch_wall: str | None = None
+        if ":" in face_lower:
+            # A sketch-built part's own wall name, read on Kiln's servers.
+            try:
+                named = _servers_add.sketch_face(model_path, face.strip())
+            except ValueError as exc:
+                _refund_decoration_quota(quota_consumed)
+                return _error_dict(str(exc), code="VALIDATION_ERROR")
+            if named:
+                face_lower = str(named["face"]).lower()
+                sketch_wall = named.get("sketch_face")
         # This tool names faces by the direction they point.  The product
         # face registry and the template decoration profiles name them by
         # what they are FOR (interior_bed, exterior_bottom, exterior, a flat
@@ -25654,6 +25773,57 @@ def decorate_surface(
         # which picks a tray's UNDERSIDE — its biggest flat face — while
         # every texture tool had already learned better.
         face_info = resolve_decoratable_face(model_path, face_lower)
+        on_the_bed = (
+            face_info.get("face_name") == "bottom"
+            and face_info.get("center", (0, 0, 0))[2] < 0.5
+        )
+        # A recess can go under a decoration cut to one depth everywhere.
+        one_depth = mode == "deboss" and ctype in ("text", "svg")
+        prepared = _servers_add.before_carve(
+            model_path=model_path, face_name=str(face_info.get("face_name") or ""),
+            touches_bed=on_the_bed, depth_mm=depth_mm, material=material,
+            uniform_cut=one_depth,
+        )
+        if prepared is None and on_the_bed and one_depth and _servers_add.plan_includes_recess():
+            # This install's plan includes the bottom recess, which Kiln's
+            # servers add: they run this call whole.  A miss carves here.
+            served, served_miss = _servers_add.on_servers(asked)
+            if served is not None:
+                _refund_decoration_quota(quota_consumed)
+                return served
+            from kiln import served_public as _served_public
+            from kiln.served_answer import sentence as _miss_sentence
+
+            if _served_public.first_this_session(f"decorate_surface:recess:{served_miss.cause}"):
+                warnings.append(_miss_sentence(
+                    served_miss, feature="servers",
+                    on_the_line="Kiln Pro puts a bottom-face decoration in a recess, on Kiln's servers",
+                    cannot="add that recess",
+                    wont="carved straight into the bottom face on this computer",
+                ))
+        recess: dict[str, Any] | None = None
+        if prepared is not None:
+            done.extend(prepared.get("done") or [])
+            warnings.extend(prepared.get("warnings") or [])
+            pro_adds = prepared.get("offer")
+            depth_mm = float(prepared.get("depth_mm") or depth_mm)
+            recess = prepared.get("recess")
+            if recess:
+                # The decoration ends in a recess cut after it: it is carved
+                # that much deeper, and kept inside the recess's rim.
+                face_info = dict(face_info)
+                inset = 2.0 * float(recess.get("rim_mm") or 0.0)
+                for side in ("width_mm", "height_mm"):
+                    if face_info.get(side, 0) > inset:
+                        face_info[side] = face_info[side] - inset
+                if face_info.get("width_mm") and face_info.get("height_mm"):
+                    # An oval recess is fitted as a round face is: the
+                    # decoration stays inside the curve, corners included.
+                    # (An oval fills pi/4 of the box around it.)
+                    face_info["area_mm2"] = (
+                        (0.7853981633974483 if recess.get("oval") else 1.0)
+                        * face_info["width_mm"] * face_info["height_mm"]
+                    )
         if face_lower != "auto" and face_info.get("curvature_warning"):
             warnings.append(face_info["curvature_warning"])
 
@@ -25812,7 +25982,7 @@ def decorate_surface(
             ample_margin = max(4.0, 0.06 * min(fit_w, fit_h))
             if absolute_size_mm <= 0:
                 try:
-                    t_w, t_h, _, _ = measure_text_block_mm(text_content)
+                    t_w, t_h, _, _ = measure_text_block_mm(text_content, text_font.spec)
                     k = t_h / t_w if t_w > 0 else 0.3
                     if is_round:
                         r_use = min(fit_w, fit_h) / 2.0 - ample_margin
@@ -25847,7 +26017,7 @@ def decorate_surface(
                     # inscribed-square factor so corners stay off the rim.
                     usable = min(fit_w, fit_h) - 2.0 * ample_margin
                     absolute_size_mm = max(1.0, usable * (0.71 if is_round else 1.0))
-            content_info = generate_text_image(text_content, work_dir)
+            content_info = generate_text_image(text_content, work_dir, font=text_font.spec)
 
         else:
             _refund_decoration_quota(quota_consumed)
@@ -25857,7 +26027,7 @@ def decorate_surface(
             )
 
         # --- Step 3.5: Print intelligence warnings ---
-        if face_info.get("face_name") == "bottom":
+        if face_info.get("face_name") == "bottom" and not recess:
             center_z = face_info.get("center", (0, 0, 0))[2]
             if center_z < 0.5:
                 warnings.append(
@@ -25889,12 +26059,13 @@ def decorate_surface(
         # --- Step 5: Generate OpenSCAD ---
         from kiln.emboss_generator import generate_emboss_scad
 
+        carve_depth = effective_depth + (float(recess["depth_mm"]) if recess else 0.0)
         scad_result = generate_emboss_scad(
             model_path=os.path.abspath(model_path),
             content_info=content_info,
             face=face_info,
             output_dir=work_dir,
-            depth_mm=effective_depth,
+            depth_mm=carve_depth,
             mode=mode,
             scale=scale,
             absolute_size_mm=absolute_size_mm,
@@ -26029,7 +26200,7 @@ def decorate_surface(
                     content_info=content_info,
                     face=face_info,
                     output_dir=work_dir,
-                    depth_mm=effective_depth,
+                    depth_mm=carve_depth,
                     mode=mode,
                     scale=scale,
                     absolute_size_mm=absolute_size_mm,
@@ -26096,7 +26267,22 @@ def decorate_surface(
 
         # --- Step 7: Build result ---
         output_stl = compile_result["stl_path"]
-        file_size = compile_result.get("file_size", 0)
+        if recess:
+            finished = _servers_add.finish_carve(output_stl, recess)
+            if finished.get("error"):
+                _refund_decoration_quota(quota_consumed)
+                return _error_dict(
+                    "The decoration was carved, but the recess it belongs in "
+                    f"could not be cut ({finished['error']}), so nothing was "
+                    "kept. Try another face, or a shallower depth.",
+                    code="RECESS_FAILED",
+                )
+            output_stl = finished["model_path"]
+            done.extend(finished.get("done") or [])
+        file_size = (
+            os.path.getsize(output_stl) if recess and os.path.isfile(output_stl)
+            else compile_result.get("file_size", 0)
+        )
 
         # The layer height the relief was designed in, kept beside the part
         # so every slice door prints it in those layers (kiln.slicer_layer).
@@ -26123,7 +26309,7 @@ def decorate_surface(
             "message": (
                 f"Successfully {mode}ed content onto "
                 f"{face_info.get('face_name', 'surface')} face of "
-                f"{os.path.basename(model_path)}."
+                f"{os.path.basename(as_given)}."
             ),
             "output_stl": output_stl,
             "file_size_bytes": file_size,
@@ -26154,7 +26340,7 @@ def decorate_surface(
             from kiln.format_conversion import format_conversion_record
 
             result_dict["conversion"] = format_conversion_record(
-                from_path=model_path,
+                from_path=as_given,
                 to_path=output_stl,
                 tool="decorate_surface",
                 reason="decorated through the OpenSCAD pipeline, which writes STL",
@@ -26184,7 +26370,16 @@ def decorate_surface(
         # sees where they stand ("2 of 3 used") before the wall instead of
         # only hitting it as an error next time. Best-effort — never blocks
         # a decoration that already succeeded.
-        return _finish_decoration_result(result_dict, content=content, before=model_path)
+        if ctype == "text":
+            result_dict["font"] = text_font.id
+        if done:
+            result_dict["changed_for_you"] = done
+        if pro_adds:
+            result_dict["pro_adds"] = pro_adds.get("adds")
+            result_dict["upgrade_url"] = pro_adds.get("upgrade_url")
+        if sketch_wall:
+            result_dict["sketch_face"] = sketch_wall
+        return _finish_decoration_result(result_dict, content=content, before=as_given)
 
     except FileNotFoundError as exc:
         _refund_decoration_quota(quota_consumed)

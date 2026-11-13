@@ -91,7 +91,9 @@ def plan(name: str, arguments: dict[str, Any] | None) -> dict[str, Any] | None:
     ``None``: the tool is not named, kiln-pro is here, or the call's own
     arguments reach something kept on this computer."""
     entry = _tools.get(name)
-    if entry is None or _kiln_pro_here():
+    if entry is None or _kiln_pro_here() or entry.get("asked_by_the_tool"):
+        # ``asked_by_the_tool``: the tool runs here and asks the servers
+        # itself, for the calls that need them (:func:`answer_or_missed`).
         return None
     for param, values in (entry.get("stays_here_when") or {}).items():
         if isinstance(values, list) and (arguments or {}).get(param) in values:

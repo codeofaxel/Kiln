@@ -81,14 +81,14 @@ class TestQrCodeWording:
             generate_qr_openscad_module("https://kiln3d.com")
         return str(caught.value)
 
-    @pytest.mark.parametrize("tier", [LicenseTier.BUSINESS, LicenseTier.ENTERPRISE])
+    @pytest.mark.parametrize("tier", [LicenseTier.PRO, LicenseTier.BUSINESS, LicenseTier.ENTERPRISE])
     def test_an_account_on_the_plan_is_never_told_to_upgrade(self, plan, tier):
         plan(tier)
         message = self._message()
         assert "upgrade" not in message.lower(), message
-        assert "generate_qr_decoration" in message, message
+        assert "decorate_surface" in message and "qr:" in message, message
 
-    def test_below_the_plan_names_business(self, plan):
-        plan(LicenseTier.PRO)
+    def test_below_the_plan_names_pro(self, plan):
+        plan(LicenseTier.FREE)
         message = self._message()
-        assert "Business" in message, message
+        assert "Pro" in message, message
