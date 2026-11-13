@@ -2541,12 +2541,14 @@ def _print_aware_note(
     if fastener:
         parts.append(f"The holes are left as drawn for the {fastener} you named.")
     does = ["chooses the finish edge by edge for your printer and material"] if cautions else []
-    asks = ["choosing each edge's finish for your printer"] if cautions else []
     if fastener:
         does.append(f"prepares each hole that takes the {fastener} as it rounds the corners")
-        asks.append(f"preparing each hole for the {fastener}")
-    subject = " and ".join(asks)
-    plan = plan_offer("pro", subject[:1].upper() + subject[1:]).nudge(
+    subject = (
+        "Finishing each edge and hole for your printer" if cautions and fastener
+        else f"Preparing each hole for the {fastener}" if fastener
+        else "Choosing each edge's finish for your printer"
+    )
+    plan = plan_offer("pro", subject).nudge(
         f"Kiln Pro {' and '.join(does)}: {upgrade_link('apply_design_reinforcements')}"
     )
     return " ".join([*parts, plan] if plan else parts)

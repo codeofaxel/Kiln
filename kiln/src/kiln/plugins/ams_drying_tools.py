@@ -163,7 +163,7 @@ def ams_filament_drying(
     if started and claim_once("ams_filament_drying.advisor_tip"):
         from kiln.tiers_and_terms import plan_offer
 
-        offer = plan_offer("pro", "The exact drying temperature and time for your material")
+        offer = plan_offer("pro", "Knowing the exact drying temperature and time for your material")
         result["pro_tip"] = _ADVISOR_POINTER if offer.covered else offer.tail(_ADVISOR_TIP)
     return result
 

@@ -179,7 +179,7 @@ def submit_job(
             if offer.sells:
                 refusal["error"] = (
                     f"{held}, "
-                    "or upgrade to Kiln Pro for unlimited queue depth with multi-printer scheduling. "
+                    "or upgrade to Kiln Pro for unlimited queue depth. "
                     f"{ALREADY_SUBSCRIBED_LINE} "
                     "Otherwise, see what Pro includes at kiln3d.com/pricing"
                 )

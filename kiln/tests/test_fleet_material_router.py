@@ -478,8 +478,8 @@ class TestThePlanIsNamedInThePlanChecksOwnWords:
         ask = self.tools["material_on_hand"]()
 
         rest = lapsed.removeprefix("This feature")
-        assert out["error"] == f"Fleet restock suggestions across all 3 of your machines{rest}"
-        assert ask["note"].endswith(f"Fleet material summary across all 3 of your machines{rest}")
+        assert out["error"] == f"Seeing the fleet restock suggestions across all 3 of your machines{rest}"
+        assert ask["note"].endswith(f"Seeing the fleet material summary across all 3 of your machines{rest}")
         assert not PITCH_KEYS & (set(out) | set(ask))
 
     def test_a_plan_module_with_no_plan_check_keeps_the_standing_refusal(self):

@@ -43,10 +43,6 @@ _PRICING = "kiln3d.com/pricing"
 #: is never a sale to someone who already pays for one.
 INFORMS: dict[str, str] = {
     "agent_loop.py::_get_default_system_prompt": "The Terms text every agent reads, the same for everyone.",
-    "cli/main.py::upgrade": (
-        "Runs only where kiln-pro's own licence manager is installed; a plain install shows the "
-        "plan through _echo_account_plan, which asks."
-    ),
     "plugins/enterprise_tools.py::_usage_from_the_servers": (
         "Where the printer prices are, beside the servers' own figure for the account's plan when "
         "that figure did not come back: a price list for the plan already held, never a plan to buy."
@@ -198,6 +194,35 @@ def test_a_listed_function_that_asks_now_or_no_longer_pitches_is_stale():
 
 def test_every_informing_function_says_why():
     assert all(why.strip() for why in INFORMS.values())
+
+
+def _reply_strings(tree: ast.Module) -> list[ast.Constant]:
+    """The string literals that can reach a reply: every one but a docstring
+    or another bare string statement."""
+    bare = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+    return [n for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in bare]
+
+
+def test_a_line_that_points_at_kiln3d_names_the_plan_not_the_package():
+    """Nobody installs kiln-pro, so a line pointing a person at kiln3d.com
+    names the plan that includes the thing (Kiln Pro, Business, Enterprise),
+    or Kiln's servers, never the package; and a tool's description, which an
+    agent reads, never calls a feature "a kiln-pro feature"."""
+    found = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        where = path.relative_to(SRC).as_posix()
+        found += [
+            f"{where}:{node.lineno}" for node in _reply_strings(tree)
+            if "kiln-pro" in node.value.lower() and "kiln3d.com" in node.value.lower()
+        ]
+        module_doc = ast.get_docstring(tree, clean=False) or ""
+        found += [
+            f"{where}:{node.lineno}" for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and "kiln-pro feature" in node.value and node.value != module_doc
+        ]
+    assert not found, f"these name the package where the plan belongs: {sorted(set(found))}"
 
 
 _DOOR = '''

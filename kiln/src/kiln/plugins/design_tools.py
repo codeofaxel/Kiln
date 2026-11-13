@@ -718,7 +718,7 @@ class _DesignToolsPlugin:
 
                 plan = plan_offer("pro", "A cited verdict for a specific reagent").nudge(
                     "Safety warnings are free; "
-                    "curated verdicts are a kiln-pro feature — "
+                    "curated verdicts are part of Kiln Pro: "
                     "https://kiln3d.com/pricing."
                 )
                 result["cited_chemical_resistance"] = (

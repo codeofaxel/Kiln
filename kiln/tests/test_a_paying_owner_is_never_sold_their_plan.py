@@ -235,7 +235,7 @@ def _say(door: str) -> str:
     from kiln.plugins.slicer_tools import _spots_clause
     from kiln.plugins.tier_diagnostic_tools import _build_response
     from kiln.scheduler import turn_plan_line
-    from kiln.server import get_material_properties
+    from kiln.server import _drying_advisor_line, get_material_properties
     from kiln.slicer_profiles import get_slicer_profile, slicer_profile_to_dict
 
     return {
@@ -256,6 +256,7 @@ def _say(door: str) -> str:
         "QR code": _qr_unavailable_message,
         "queue held to one printer": turn_plan_line,
         "window over two printers": _a_window_over_two_printers,
+        "wet filament tip": _drying_advisor_line,
     }[door]()
 
 
@@ -270,6 +271,7 @@ DOORS = (
     "load-bearing warning", "load-bearing block", "bonding caveat", "edge finishing note",
     "decoration allowance", "slicer profile pointer", "spots beside a part", "always allow",
     "plan diagnostic", "chemical pointer", "QR code", "queue held to one printer", "window over two printers",
+    "wet filament tip",
 )
 
 
@@ -307,6 +309,7 @@ STILL_SAID = {
     "edge finishing note": "will print badly as asked",
     "slicer profile pointer": "get_printer_profile",
     "chemical pointer": "check_chemical_resistance",
+    "wet filament tip": "drying_advisor gives the safe drying temperature",
 }
 
 
@@ -319,13 +322,15 @@ def test_a_nudge_says_only_its_caution_to_someone_whose_plan_includes_it(caller,
 
 
 @pytest.mark.parametrize("kind", ("signed_out", "smaller_plan", *OWNERS, "holds_it"))
-def test_encryption_at_rest_is_pitched_only_to_someone_who_would_buy_it(caller, kind):
+def test_encryption_status_on_this_machine_names_no_plan(caller, kind):
+    """No plan makes this machine encrypt the G-code it stores, so its answer
+    sells none, to anyone."""
     from kiln.plugins.enterprise_tools import _encryption_not_installed
 
     caller(kind, owns="enterprise")
     message = _encryption_not_installed()["message"]
     assert message.startswith("G-code encryption at rest is not installed on this machine")
-    assert ("kiln3d.com/pricing" in message) is (kind in SOLD), message
+    assert "pricing" not in message and "Kiln Enterprise" not in message, message
 
 
 @pytest.mark.parametrize("kind", SOLD + OWNERS)

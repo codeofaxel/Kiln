@@ -685,6 +685,10 @@ class PlanOffer:
 def plan_offer(required: object, subject: str = "This feature") -> PlanOffer:
     """The plan check's words, for this caller, about *subject* at *required*.
 
+    *subject* starts the sentence the plan check says ("... needs Kiln Pro",
+    "... is part of your Pro plan"), so it reads as one thing: a singular
+    phrase ("A QR code") or an -ing phrase ("Running printers side by side").
+
     The one place a door that holds something back learns what to say about
     the plan: the plan check knows whether this machine is signed out, on a
     sign-in the server refused, on a paid plan it has not been able to

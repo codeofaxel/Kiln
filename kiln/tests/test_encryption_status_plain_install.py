@@ -89,8 +89,8 @@ def test_encryption_status_answers_instead_of_refusing(plain_install):
     assert isinstance(out["encryption"]["library_installed"], bool)
     assert "not installed on this machine" in out["message"]
     assert "unencrypted" in out["message"]
-    # Asked on the plan that includes encryption, so that plan is not sold.
-    assert "kiln3d.com/pricing" not in out["message"]
+    # No plan makes this machine encrypt what it stores, so none is named.
+    assert "kiln3d.com/pricing" not in out["message"] and "Kiln Enterprise" not in out["message"]
     assert "encrypted on Kiln's servers" in out["account_files"]
     assert out["account_files"] in out["message"]
 

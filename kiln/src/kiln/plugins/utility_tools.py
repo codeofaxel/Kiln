@@ -918,8 +918,8 @@ class _UtilityToolsPlugin:
                     f"monitoring, file management, slicing, marketplaces, model "
                     f"generation, design intelligence, safety controls"
                     + (
-                        ", and kiln-pro features (product generators, decoration, "
-                        "print intelligence, fleet ops, billing)."
+                        ", and the tools Kiln's servers add (product generators, "
+                        "decoration, print intelligence, fleet ops, billing)."
                         if kiln_pro_installed
                         else ". Some tools you discover may be Pro/Business-tier "
                         "stubs — their descriptions include tier + upgrade URL "

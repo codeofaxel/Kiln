@@ -325,7 +325,8 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
         from kiln.tiers_and_terms import plan_offer
 
         plan = _plan_covering(machines)
-        offer = plan_offer(plan, f"{feature} across all {machines} of your machines")
+        named = feature[:1].lower() + feature[1:] if feature[1:2].islower() else feature
+        offer = plan_offer(plan, f"Seeing the {named} across all {machines} of your machines")
         if not offer.words:
             plan = "business"  # the standing refusal, which names Business
         verdict: dict[str, Any] = {

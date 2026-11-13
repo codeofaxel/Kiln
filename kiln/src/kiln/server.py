@@ -4812,6 +4812,19 @@ def _watched_machines(exclude: PrinterAdapter | None = None) -> set[str]:
     return seen
 
 
+def _drying_advisor_line(after: str = "") -> str:
+    """Where the safe drying temperature and time for a material come from,
+    with *after* said to every caller: ``drying_advisor``'s plan and page
+    only to a caller who would buy it, the plan check's own words to one who
+    pays for it already, and the tool alone to one whose plan includes it."""
+    from kiln.tiers_and_terms import plan_offer
+
+    offer = plan_offer("pro", "Knowing the safe drying temperature and time for your material")
+    plan = " (Kiln Pro, https://kiln3d.com/pricing)" if offer.buying else ""
+    said = f"drying_advisor{plan} gives the safe drying temperature and time for your material{after}."
+    return said if offer.sells else f"{said} {offer.words}"
+
+
 def _watch_capacity_error(adapter: PrinterAdapter, target_name: str) -> dict | None:
     """Refuse a NEW persistent watch beyond the tier's machine limit.
 
@@ -13020,8 +13033,7 @@ def preflight_check(
                         f"{expected_material.upper()} readily absorbs moisture. "
                         "If the spool has been open or stored in humid air, a wet "
                         "spool prints rough/weak — consider drying first. "
-                        "drying_advisor (kiln-pro) gives the safe temp and time "
-                        "for your material."
+                        + _drying_advisor_line()
                     ),
                 }
             )
@@ -17758,10 +17770,11 @@ def analyze_print_failure(job_id: str) -> dict:
             )
             recommendations.append(
                 "If you see stringing, popping, or weak/rough layers, the filament "
-                "may be wet. drying_advisor (kiln-pro, https://kiln3d.com) gives the "
-                "safe drying temperature and time for your exact material before a "
-                "reprint — drying protects future prints but can't restore strength "
-                "already lost in the failed part."
+                "may be wet. "
+                + _drying_advisor_line(
+                    " before a reprint — drying protects future prints but can't restore "
+                    "strength already lost in the failed part"
+                )
             )
 
         # Default if no specific analysis
@@ -19859,7 +19872,7 @@ def troubleshoot_printer(
                     "https://kiln3d.com/pricing"
                 )
             else:
-                subject = "The known failures for your exact printer model"
+                subject = "Knowing what goes wrong on your exact printer model"
                 text = (
                     "Kiln Pro adds the known failures for your exact printer "
                     "model — what goes wrong, and what fixed it. "
@@ -20347,7 +20360,7 @@ def multi_copy_print(
     plate once this one is taken off and the plate is said to be clear,
     plate after plate until all are done; ``cancel_queued_job`` stops the
     rest.  How many fit is answered on every tier; placing copies beside a
-    part still on the plate is a kiln-pro feature.
+    part still on the plate is part of Kiln Pro.
 
     Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
     The printer must be idle and connected.
@@ -22886,7 +22899,7 @@ def get_material_properties(material_id: str) -> dict:
             "per_reagent_tool": "check_chemical_resistance",
             "note": plan_offer("pro", "A cited survival verdict for one reagent").nudge(
                 "Safety warnings are always free; cited survival "
-                "verdicts are a kiln-pro feature — https://kiln3d.com/pricing."
+                "verdicts are part of Kiln Pro: https://kiln3d.com/pricing."
             ) or "Ask check_chemical_resistance for a cited verdict on one reagent.",
         }
         return result
@@ -25663,10 +25676,9 @@ def decorate_surface(
             except ImportError:
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
-                    "Curved-wall wrapping runs on the engine that ships "
-                    "with kiln-pro — included on the hosted service "
-                    "(api.kiln3d.com) on every tier. Locally without it, "
-                    "decorate a flat face instead (face='front', 'top', ...).",
+                    "Curved-wall wrapping runs on Kiln's hosted service "
+                    "(api.kiln3d.com), included on every plan. On this "
+                    "install, decorate a flat face instead (face='front', 'top', ...).",
                     code="ENGINE_UNAVAILABLE",
                 )
 

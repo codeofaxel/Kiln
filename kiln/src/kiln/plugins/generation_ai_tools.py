@@ -791,7 +791,7 @@ class _GenerationAIToolsPlugin:
                     Omitted, an occupied plate refuses before slicing and
                     lists the spots that would work.  The clearance verdict
                     is free; placing and starting a second print on an
-                    occupied plate is a kiln-pro feature.
+                    occupied plate is part of Kiln Pro.
 
             """
             from kiln.generation import (

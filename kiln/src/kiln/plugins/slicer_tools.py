@@ -444,7 +444,7 @@ def _apply_bed_fit_gate(
 
 _PLACEMENT_TIER_NOTE = (
     "The clearance verdict is free; placing and starting a second print on an "
-    "occupied plate is a kiln-pro feature (https://kiln3d.com/pricing)."
+    "occupied plate is part of Kiln Pro (https://kiln3d.com/pricing)."
 )
 #: The note where the verdict does not say a quiet start would stand on this
 #: plate: no tier is named on a plate where paying would start nothing.
@@ -740,7 +740,7 @@ def _spots_clause(verdict: dict[str, Any] | list[dict[str, Any]] | None) -> str:
             offer = plan_offer("pro", "Printing beside what is on the plate")
             if not offer.sells:
                 return f"{count}. {offer.words}"
-            return count + "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing)."
+            return count + "; printing around what is on the plate is part of Kiln Pro (https://kiln3d.com/pricing)."
         return count + "."
     return ""
 
@@ -780,7 +780,7 @@ def _placement_refusal(
         from kiln.tiers_and_terms import plan_offer
 
         resp["tier_note"] = plan_offer(
-            "pro", "Placing and starting a second print beside one on the plate"
+            "pro", "Starting a second print beside one on the plate"
         ).tail(_PLACEMENT_TIER_NOTE)
     else:
         resp["tier_note"] = _PLACEMENT_FREE_NOTE
@@ -1179,7 +1179,7 @@ def _fill_plate_placement(
 
                 offer = plan_offer("pro", "Printing beside what is on the plate")
                 tail = (
-                    "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing). "
+                    "; printing around what is on the plate is part of Kiln Pro (https://kiln3d.com/pricing). "
                     if offer.sells
                     else f". {offer.words} "
                 ) + "Or clear the plate and say so, and Kiln fills the empty plate."
