@@ -169,8 +169,7 @@ except ImportError:
     FulfillmentProvider = None
     QuoteRequest = None
     get_fulfillment_provider = None
-from kiln.gcode import validate_gcode as _validate_gcode_impl
-from kiln.gcode import validate_gcode_for_printer
+from kiln.gcode import validate_commands
 from kiln.generation import (
     GeminiDeepThinkProvider,
     GenerationError,
@@ -4239,6 +4238,52 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     return f"{ready} A yes {doors}{always}"
 
 
+def _said_go(
+    tool_name: str, file_name: str, printer_name: str | None, *, is_resume: bool = False,
+) -> tuple[Any, str, Any]:
+    """``(exemption, aimed_at, consent)``: the gate's first question, read
+    and nothing else -- whether the call is exempt, which printer it is
+    aimed at, and the consent on record for it (``None`` when nobody said
+    go).  Records nothing, spends nothing, takes no picture."""
+    from kiln import print_signoff
+
+    exempt = print_signoff.exemption_verdict(tool_name, file_name, printer_name, is_resume=is_resume)
+    if exempt is not None:
+        return exempt, printer_name or "", None
+    # SAID GO.  The one reader of the consent record.  An unnamed call is
+    # aimed at the default printer; a window is matched on that name.
+    try:
+        aimed = printer_name or _resolve_effective_printer_name(None)
+    except Exception:  # noqa: BLE001
+        aimed = printer_name or "default"
+    return None, aimed, consent_for(file_name=file_name, printer_name=printer_name, aimed_at=aimed)
+
+
+def _no_yes_error(tool_name: str, file_name: str, preview_token: str | None, aimed: str) -> dict:
+    """The refusal for a print nobody said go to."""
+    from kiln import print_signoff
+
+    if preview_token:
+        # The token is left unspent: it is still good for the call that
+        # carries the yes.
+        return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
+    return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
+
+
+def _no_yes_before_sending(
+    tool_name: str, file_name: str, preview_token: str | None, *, printer_name: str | None = None,
+) -> dict | None:
+    """The refusal for a print nobody said go to, asked BEFORE a door sends
+    its file to the printer, so a refused print leaves no file on it.
+    ``None`` when a yes is on record or the call is exempt: the full
+    gate (:func:`_preview_gate_error`) still judges the print right before
+    it starts, the preview half and any look at the bed included."""
+    exempt, aimed, granted = _said_go(tool_name, file_name, printer_name)
+    if exempt is not None or granted is not None:
+        return None
+    return _no_yes_error(tool_name, file_name, preview_token, aimed)
+
+
 def _preview_gate_error(
     tool_name: str,
     file_name: str,
@@ -4277,7 +4322,7 @@ def _preview_gate_error(
 
     # Neither fact is needed for the audited CI bypass or for a resume
     # continuation; decided first, before anything touches the token.
-    exempt = print_signoff.exemption_verdict(tool_name, file_name, printer_name, is_resume=is_resume)
+    exempt, aimed, granted = _said_go(tool_name, file_name, printer_name, is_resume=is_resume)
     if exempt is not None:
         if exempt.audit == "preview_gate_skipped":
             _audit(
@@ -4287,20 +4332,9 @@ def _preview_gate_error(
             )
         return None
 
-    # SAID GO.  The one reader of the consent record.  An unnamed call is
-    # aimed at the default printer; a window is matched on that name.
-    try:
-        aimed = printer_name or _resolve_effective_printer_name(None)
-    except Exception:  # noqa: BLE001
-        aimed = printer_name or "default"
-    granted = consent_for(file_name=file_name, printer_name=printer_name, aimed_at=aimed)
     if granted is None:
         print_signoff.clear()
-        if preview_token:
-            # The token is left unspent: it is still good for the call
-            # that carries the yes.
-            return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
-        return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
+        return _no_yes_error(tool_name, file_name, preview_token, aimed)
 
     # LOOKED.  Always allow means nobody was asked, so where the machine
     # has a camera the plate has to have been seen clear in a fresh frame.
@@ -13584,11 +13618,10 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         # Use the live resolver so users who haven't manually set
         # _PRINTER_MODEL (via env or printer_model yaml field) still get
         # the bounds/temperature checks.
+        # A printer whose model Kiln does not know is held to the floor
+        # set_temperature holds it to (kiln.gcode.validate_commands).
         _live_model = _resolve_printer_model_live() or _PRINTER_MODEL
-        if _live_model:
-            validation = validate_gcode_for_printer(cmd_list, _live_model)
-        else:
-            validation = _validate_gcode_impl(cmd_list)
+        validation = validate_commands(cmd_list, _live_model or None)
 
         # Incident #0 hardening: promote bounds-violation warnings to
         # blockers.  Before this, "G1 X-50 Y-50" passed through with a

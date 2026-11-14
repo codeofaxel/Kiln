@@ -4153,6 +4153,14 @@ class _SlicerToolsPlugin:
                 except Exception as _exc:
                     _logger.warning("slice_and_print safety check skipped: %s", _exc)
 
+                # Nobody said go: refuse before the file is sent to the printer,
+                # so a refused print leaves nothing on it.  The full gate still
+                # judges the print right before the start.  Asked about the
+                # model the person was shown, as the gate is.
+                if block := _srv._no_yes_before_sending(
+                    "slice_and_print", input_path, preview_token, printer_name=printer_name,
+                ):
+                    return block
                 upload = adapter.upload_file(upload_path)
                 file_name = upload.file_name or os.path.basename(upload_path)
 
