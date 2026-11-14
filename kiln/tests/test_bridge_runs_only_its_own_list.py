@@ -57,6 +57,7 @@ NEVER_OVER_THE_BRIDGE = (
     "download_and_upload",
     "run_quick_print",
     "print_plate_object",
+    "skip_print_objects",
     "firmware_resume_print",
     "force_print_oversize",
     "clear_emergency_stop",
@@ -78,6 +79,9 @@ NEVER_FROM_THE_RELAY = (
     ("resume_print", "hardware_confirmed"),
     ("printer_snapshot", "save_path"),
     ("set_printer_model", "slicer_file"),
+    ("set_printer_model", "bed_mm"),
+    ("set_printer_model", "bed_confirmed"),
+    ("printer_status", "printer_names"),
     ("slice_and_print", "input_path"),
     ("slice_and_print", "profile"),
     ("slice_and_print", "printer_id"),
@@ -409,7 +413,7 @@ class TestTheListNamesRealTools:
         carrying = sorted(tool for tool, allowed in BRIDGE_ARGUMENTS.items() if allowed & _READ_HERE)
         assert carrying == ["slice_and_print"]
 
-    def test_the_list_cannot_be_changed_at_run_time(self):
+    def test_the_table_cannot_be_edited_in_place(self):
         with pytest.raises(TypeError):
             BRIDGE_ARGUMENTS["send_gcode"] = frozenset({"commands"})  # type: ignore[index]
 
@@ -420,6 +424,7 @@ class TestTheListNamesRealTools:
 _LOCAL_ONLY_ARGUMENT = (
     r"(^|_)(path|paths|file|files|dir|folder|profile)$"
     r"|^force$|^skip_|_confirmed$|^preserve_|^keep_|^leave_|^bypass|^override"
+    r"|^replace$|_authority$"
 )
 
 #: Arguments of that kind a relayed call still carries, each with its reason.
@@ -427,10 +432,14 @@ _LOCAL_ONLY_ARGUMENT = (
 #: make up; that is the separate item "print approvals the server cannot
 #: forge", not a reason to break the flow below.
 _CARRIED_ON_PURPOSE = {
-    ("set_printer_model", "bed_confirmed"): (
-        "the bed size a person confirmed in Kiln's web app or a connector chat; a print on a "
-        "printer outside the catalogue waits for it (kiln-pro "
-        "tests/test_relay_safe_tools_registry.py)"
+    ("set_printer_model", "replace"): (
+        "the web's model picker sends it only after the person has seen the model it replaces; "
+        "the picker names a catalogue model, never a file or a bed"
+    ),
+    ("slice_and_print", "print_authority"): (
+        "the yes a relayed print rests on, read off the frame here and never passed to the tool; "
+        "a yes the server cannot make up is the separate item, print approvals the server "
+        "cannot forge"
     ),
 }
 
@@ -449,3 +458,125 @@ def test_no_listed_argument_is_one_only_this_computer_may_give():
     assert found == [], f"listed arguments only this computer may give: {found}"
     stale = sorted(key for key in _CARRIED_ON_PURPOSE if key[1] not in BRIDGE_ARGUMENTS.get(key[0], ()))
     assert stale == [], stale
+
+
+class _Server:
+    """A local HTTP server that answers each path from *routes* and keeps
+    every request it saw, with the Authorization header it carried."""
+
+    def __init__(self, routes):
+        import http.server
+        import threading
+
+        seen = self.seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                seen.append((self.path, self.headers.get("Authorization")))
+                status, headers, body = routes(self.path)
+                self.send_response(status)
+                for key, value in headers.items():
+                    self.send_header(key, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def _relay_folders():
+    import tempfile
+    from pathlib import Path
+
+    return {p for p in Path(tempfile.gettempdir()).glob("kiln-relay-*")}
+
+
+class TestTheDownloadOfASavedMake:
+    """The bridge fetches a relayed print's model with the person's sign-in,
+    against a real local server: a redirect is refused, never followed (it
+    would carry that sign-in to the address it names); an answer past the
+    size bound is refused; the token cannot name another path on the server;
+    the call's download folder is removed when the call is over; and nothing
+    but a download folder is ever removed."""
+
+    def test_a_redirect_is_refused_and_the_other_address_sees_nothing(self, monkeypatch):
+        printer = _Server(lambda path: (200, {}, b"ok"))
+        api = _Server(lambda path: (302, {"Location": f"{printer.url}/rr_gcode?gcode=M104%20S280"}, b""))
+        try:
+            monkeypatch.setenv("KILN_API_URL", api.url)
+            before = _relay_folders()
+            fetch = bridge_client._default_artifact_fetcher(lambda: "bearer-of-the-person")
+            with pytest.raises(ValueError, match="does not follow"):
+                fetch("tok-1")
+            assert printer.seen == []
+            assert _relay_folders() == before
+        finally:
+            api.close()
+            printer.close()
+
+    def test_an_answer_past_the_bound_is_refused_and_leaves_nothing(self, monkeypatch):
+        api = _Server(lambda path: (200, {}, b"x" * 5000) if path == "/api/artifact/tok-1" else (404, {}, b""))
+        try:
+            monkeypatch.setenv("KILN_API_URL", api.url)
+            monkeypatch.setattr(bridge_client, "_ARTIFACT_MAX_BYTES", 1000)
+            before = _relay_folders()
+            with pytest.raises(ValueError, match="larger"):
+                bridge_client._default_artifact_fetcher(lambda: "b")("tok-1")
+            assert _relay_folders() == before
+        finally:
+            api.close()
+
+    def test_the_token_cannot_name_another_path_on_the_server(self, monkeypatch):
+        api = _Server(lambda path: (200, {}, b"solid x\nendsolid x\n") if "notes" not in path else (404, {}, b""))
+        try:
+            monkeypatch.setenv("KILN_API_URL", api.url)
+            path = bridge_client._default_artifact_fetcher(lambda: "b")("../account/delete")
+            assert api.seen[0][0] == "/api/artifact/..%2Faccount%2Fdelete"
+            bridge_client._discard_fetched(path)
+        finally:
+            api.close()
+
+    def test_a_calls_download_is_removed_when_the_call_is_over(self, monkeypatch, tmp_path):
+        import os
+        import tempfile
+
+        made: list[str] = []
+
+        def fetch(token):
+            folder = tempfile.mkdtemp(prefix="kiln-relay-")
+            path = os.path.join(folder, "model.stl")
+            with open(path, "wb") as fh:
+                fh.write(b"solid x\nendsolid x\n")
+            made.append(path)
+            return path
+
+        ran: list = []
+        monkeypatch.setattr(bridge_client, "_STATE_FILE", str(tmp_path / "bridge.state"))
+        monkeypatch.setattr(bridge_client, "_default_tool_caller", lambda: _recording_caller(ran))
+        client = bridge_client.BridgeClient(license_key="lic", fetch_artifact=fetch)
+
+        reply = client._relay({"request_id": "p", "tool_name": "slice_and_print", "args": {"cloud_artifact_token": "t"}})
+
+        assert reply["ok"] is True
+        assert ran[0][1]["input_path"] == made[0]
+        assert not os.path.exists(os.path.dirname(made[0]))
+
+    def test_only_a_download_folder_is_ever_removed(self, tmp_path):
+        keep = tmp_path / "kiln-relay-not-in-temp" / "model.stl"
+        keep.parent.mkdir()
+        keep.write_bytes(b"x")
+        other = tmp_path / "mine" / "model.stl"
+        other.parent.mkdir()
+        other.write_bytes(b"x")
+        bridge_client._discard_fetched(str(keep))
+        bridge_client._discard_fetched(str(other))
+        assert keep.exists() and other.exists()
