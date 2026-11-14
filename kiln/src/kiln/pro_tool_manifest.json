@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-14T16:06:12.242799+00:00",
+  "generated": "2026-11-14T23:24:24.437091+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -30700,7 +30700,17 @@
         },
         "asked_by_the_tool": true
       },
-      "generate_from_template": {},
+      "generate_from_template": {
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
+      },
       "import_step_file": {
         "inputs": {
           "files": {
