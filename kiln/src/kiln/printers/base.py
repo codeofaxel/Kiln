@@ -1947,17 +1947,17 @@ class PrinterAdapter(ABC):
                 if refusal := _incomplete_upload_reason(self, file_path):
                     from kiln.printers import PrinterError
                     raise PrinterError(refusal)
-                sent = _resume_digest(self, file_path) if digest is not None else None
+                sent = _sent_digest(file_path)
                 if digest is not None and file_path == given and sent != digest:
                     digest = None  # the file changed while it was checked: not the recorded bytes
                 try:
                     result = original(self, file_path)
                 except BaseException:
-                    _note_resume_upload(self, file_path, None, None)
+                    _note_resume_upload(self, file_path, None, None, ok=False)
                     raise
                 ok = bool(getattr(result, "success", True))
                 _note_resume_upload(
-                    self, file_path, getattr(result, "file_name", None), digest if ok else None, sent,
+                    self, file_path, getattr(result, "file_name", None), digest if ok else None, sent, ok=ok,
                 )
                 return result
 
@@ -2298,8 +2298,12 @@ class PrinterAdapter(ABC):
             try:
                 from kiln.monitor_twin import note_print_started
                 from kiln.registry import machine_fingerprint
+                from kiln.resume_provenance import sent_sha256
 
-                note_print_started(self.name, file_name, machine=machine_fingerprint(self))
+                note_print_started(
+                    self.name, file_name, machine=machine_fingerprint(self),
+                    sent_sha256=sent_sha256(self, file_name),
+                )
             except Exception:  # noqa: BLE001 — the twin never affects a print
                 import logging as _logging
 
@@ -4590,20 +4594,33 @@ def _resume_digest(adapter: PrinterAdapter, file_path: str) -> str | None:
 
 def _note_resume_upload(
     adapter: PrinterAdapter, sent_path: str, remote_name: str | None, digest: str | None,
-    sent: str | None = None,
+    sent: str | None = None, *, ok: bool = True,
 ) -> None:
     """Tell the resume record what is now saved under this name on the
-    printer: the recorded file *digest* names, as the bytes *sent*
-    (:func:`kiln.resume_provenance.note_upload`)."""
+    printer: the bytes *sent* (unknown when the upload did not succeed), and
+    the recorded resume *digest* names, if any
+    (:func:`kiln.resume_provenance.note_sent`, :func:`~kiln.resume_provenance.note_upload`)."""
     try:
-        from kiln.resume_provenance import note_upload
+        from kiln.resume_provenance import note_sent, note_upload
 
         saved_as = os.path.basename(str(remote_name or sent_path))
         names = {os.path.basename(str(sent_path or "")), saved_as}
         for name in names:
             note_upload(adapter, name, digest=digest if name == saved_as else None, sent=sent)
+            # What every name holds now: the bytes sent, or unknown.
+            note_sent(adapter, name, sent if ok and name == saved_as else None)
     except Exception:  # noqa: BLE001 -- bookkeeping never blocks an upload
         logger.debug("resume record: upload not noted", exc_info=True)
+
+
+def _sent_digest(file_path: str) -> str | None:
+    """The SHA-256 of the file about to be sent (:func:`kiln.resume_provenance.file_sha256`)."""
+    try:
+        from kiln.resume_provenance import file_sha256
+
+        return file_sha256(file_path)
+    except Exception:  # noqa: BLE001 -- bookkeeping never blocks an upload
+        return None
 
 
 def _note_resume_raw_commands(adapter: PrinterAdapter, commands: Any) -> None:

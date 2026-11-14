@@ -254,18 +254,64 @@ def test_kilns_copy_of_another_job_is_not_this_ones(machine, tmp_path):
     assert _maker_builds(machine, built, kept)[0] is None
 
 
-def test_the_print_start_keeps_kilns_copy_and_its_hash(monkeypatch, tmp_path):
-    """The record a resume is judged against is written where every print
-    starts, with the machine and the hash of the toolpath kept."""
+@pytest.fixture()
+def twin(monkeypatch, tmp_path):
     monkeypatch.setattr(monitor_twin, "_TWIN_DIR", tmp_path / "twin")
     monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", tmp_path / "twin" / "active.json")
     monkeypatch.setattr(monitor_twin, "_SLICES_FILE", tmp_path / "twin" / "slices.json")
-    gcode = _file(tmp_path, "vase.gcode", TOOLPATH)
-    monitor_twin.note_sliced(_file(tmp_path, "vase.stl", b"solid vase"), gcode)
-    monitor_twin.note_print_started("bambu", "vase.gcode", machine="bambu:serial:01p")
+    return tmp_path
+
+
+def test_the_print_start_keeps_kilns_copy_and_its_hash(twin):
+    """The record a resume is judged against is written where every print
+    starts, with the machine and the hash of the toolpath kept, when what
+    Kiln sent under the job's name is that slice."""
+    gcode = _file(twin, "vase.gcode", TOOLPATH)
+    monitor_twin.note_sliced(_file(twin, "vase.stl", b"solid vase"), gcode)
+    monitor_twin.note_print_started(
+        "bambu", "vase.gcode", machine="bambu:serial:01p", sent_sha256=hashlib.sha256(TOOLPATH).hexdigest(),
+    )
     [record] = monitor_twin.active_records()
     assert record["machine"] == "bambu:serial:01p"
     assert record["gcode_sha256"] == hashlib.sha256(TOOLPATH).hexdigest()
+
+
+@pytest.mark.parametrize("sent", [None, hashlib.sha256(OTHER).hexdigest()], ids=["nothing-known", "other-bytes"])
+def test_a_job_whose_bytes_are_not_the_slice_keeps_no_hash(twin, sent):
+    """The printer prints what was sent under its name.  A slice that shares
+    the name but not the bytes (or bytes Kiln never saw) is not that job, so
+    nothing is resumed from it."""
+    gcode = _file(twin, "vase.gcode", TOOLPATH)
+    monitor_twin.note_sliced(_file(twin, "vase.stl", b"solid vase"), gcode)
+    monitor_twin.note_print_started("bambu", "vase.gcode", machine="bambu:serial:01p", sent_sha256=sent)
+    [record] = monitor_twin.active_records()
+    assert record["gcode"] and record["gcode_sha256"] is None
+
+
+def test_a_wrapped_job_is_judged_by_the_wrap_it_sent(twin):
+    gcode = _file(twin, "vase.gcode", TOOLPATH)
+    monitor_twin.note_sliced(_file(twin, "vase.stl", b"solid vase"), gcode)
+    wrap = _file(twin, "vase.gcode.3mf", b"PK the wrap of the vase")
+    monitor_twin.note_wrapped(gcode, wrap)
+    sent = hashlib.sha256(b"PK the wrap of the vase").hexdigest()
+    monitor_twin.note_print_started("bambu", "vase.gcode.3mf", machine="bambu:serial:01p", sent_sha256=sent)
+    assert monitor_twin.active_records()[0]["gcode_sha256"] == hashlib.sha256(TOOLPATH).hexdigest()
+    # A slice newer than its wrap is a re-slice the wrap never held.
+    os.utime(wrap, (1, 1))
+    monitor_twin.note_print_started("bambu", "vase.gcode.3mf", machine="bambu:serial:01p", sent_sha256=sent)
+    assert monitor_twin.active_records()[0]["gcode_sha256"] is None
+
+
+def test_every_upload_records_the_bytes_sent_under_its_name(machine, tmp_path):
+    first = _file(tmp_path, "vase.gcode", TOOLPATH)
+    machine.upload_file(first)
+    assert resume_provenance.sent_sha256(machine, "vase.gcode") == hashlib.sha256(TOOLPATH).hexdigest()
+    other = tmp_path / "other"
+    other.mkdir()
+    machine.upload_file(_file(other, "vase.gcode", OTHER))
+    assert resume_provenance.sent_sha256(machine, "vase.gcode") == hashlib.sha256(OTHER).hexdigest()
+    machine.delete_file("vase.gcode")
+    assert resume_provenance.sent_sha256(machine, "vase.gcode") is None
 
 
 # ---------------------------------------------------------------------------
@@ -395,14 +441,30 @@ def test_a_deleted_resume_file_is_not_a_resume(machine, tmp_path):
     assert print_signoff.verified_resume(name, {}, printer_name="garage") is False
 
 
-@pytest.mark.parametrize("command", ["M28 transformed_resume_ab12.3mf", "m30 transformed_resume_ab12.3mf", "M29"])
+@pytest.mark.parametrize("command", [
+    "M28 transformed_resume_ab12.3mf",
+    "m30 transformed_resume_ab12.3mf",
+    "M29",
+    "N10 M28 transformed_resume_ab12.3mf*71",
+    "G28 M28 transformed_resume_ab12.3mf",
+    "M928 transformed_resume_ab12.3mf",
+    'M471 S"0:/gcodes/a.gcode" T"0:/gcodes/transformed_resume_ab12.3mf"',
+    'M559 P"config.g"',
+    'M560 P"index.html"',
+])
 def test_a_raw_command_that_writes_a_file_unties_every_name(machine, tmp_path, command):
     name = _recorded_and_uploaded(machine, tmp_path)
     machine.send_gcode(["G28", command])
     assert print_signoff.verified_resume(name, {}, printer_name="garage") is False
 
 
-def test_an_ordinary_raw_command_leaves_the_resume(machine, tmp_path):
+@pytest.mark.parametrize("command", [
+    "G28",
+    "M117 resuming ; M28 in a comment",
+    "M117 resuming M28 is only text here",
+    "G1 X10 Y10 F3000",
+])
+def test_an_ordinary_raw_command_leaves_the_resume(machine, tmp_path, command):
     name = _recorded_and_uploaded(machine, tmp_path)
-    machine.send_gcode(["G28", "M117 resuming ; M28 in a comment"])
+    machine.send_gcode([command])
     assert print_signoff.verified_resume(name, {}, printer_name="garage") is True

@@ -291,6 +291,26 @@ def _sha256(path: Path | str) -> str | None:
         return None
 
 
+def _sent_is_this_slice(entry: dict[str, Any], base: str, sent_sha256: str) -> bool:
+    """Whether the printer-side *base* is, by the bytes Kiln sent under it,
+    the slice *entry* names: its G-code, or its wrap when the wrap is not
+    older than the G-code it holds."""
+    output = str(entry.get("output") or "")
+    wrapped = str(entry.get("wrapped") or "")
+    if output and os.path.basename(output) == base:
+        printer_copy = output
+    elif wrapped and os.path.basename(wrapped) == base:
+        try:
+            if not output or os.path.getmtime(output) > os.path.getmtime(wrapped) + 1.0:
+                return False
+        except OSError:
+            return False
+        printer_copy = wrapped
+    else:
+        return False
+    return _sha256(printer_copy) == sent_sha256
+
+
 def active_records() -> list[dict[str, Any]]:
     """Every retained print-start record, newest first.  Never raises."""
     active = _read_json(_ACTIVE_FILE, {})
@@ -319,7 +339,9 @@ def _written_after(path: str, since: float | None) -> bool:
         return False
 
 
-def note_print_started(printer_name: str, file_name: str, *, machine: str = "") -> None:
+def note_print_started(
+    printer_name: str, file_name: str, *, machine: str = "", sent_sha256: str | None = None,
+) -> None:
     """A print just started: join the printer-side name to the sliced pair
     and retain copies of the toolpath (+ mesh) for the Monitor's twin.
 
@@ -332,7 +354,11 @@ def note_print_started(printer_name: str, file_name: str, *, machine: str = "") 
     The record also names the *machine* (its fingerprint) and the SHA-256 of
     the retained toolpath: Kiln's own record of which bytes this job prints,
     which is the only source a resume of it may be built from
-    (:func:`kiln.resume_provenance.recorded_job_source`).
+    (:func:`kiln.resume_provenance.recorded_job_source`).  The hash is kept
+    only when the file the printer-side name stands for (the slice, or its
+    wrap when the wrap is not older than the slice) is, byte for byte, what
+    Kiln sent under that name (*sent_sha256*); otherwise the job is not
+    known to be that slice, and nothing can be resumed from it.
     """
     try:
         base = os.path.basename(str(file_name or ""))
@@ -360,7 +386,8 @@ def note_print_started(printer_name: str, file_name: str, *, machine: str = "") 
                 dst_gcode = _TWIN_DIR / f"{slug}-current.gcode"
                 shutil.copy2(src_gcode, dst_gcode)
                 record["gcode"] = str(dst_gcode)
-                record["gcode_sha256"] = _sha256(dst_gcode)
+                if sent_sha256 and _sent_is_this_slice(match, base, sent_sha256):
+                    record["gcode_sha256"] = _sha256(dst_gcode)
             src_mesh = str(match.get("input") or "")
             ext = os.path.splitext(src_mesh)[1].lower()
             if (

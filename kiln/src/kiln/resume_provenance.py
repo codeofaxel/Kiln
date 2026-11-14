@@ -65,6 +65,7 @@ __all__ = [
     "made_for_paused_job",
     "not_recorded_sentence",
     "note_raw_commands",
+    "note_sent",
     "note_upload",
     "paused_job_name",
     "record_derived_resume",
@@ -73,8 +74,10 @@ __all__ = [
     "recorded_job_source",
     "records_for",
     "report_unrecognized",
+    "sent_sha256",
     "stated_source",
     "try_record_resume",
+    "writes_a_file",
 ]
 
 #: How long after it was made a resume file may still continue its print
@@ -119,8 +122,10 @@ _REPORT_QUIET_SECONDS = 120.0
 #: one start, so the file is read back once per start, not once per gate.
 _READ_BACK_SECONDS = 30.0
 
-#: Raw commands that write or delete a file on the printer's own storage.
-_FILE_COMMANDS = frozenset({"M28", "M29", "M30"})
+#: Raw commands that write, delete or rename a file on the printer's own
+#: storage: begin and end a write (M28 / M29), delete (M30), rename (M471),
+#: write a configuration or web file (M559 / M560), and log to a file (M928).
+_FILE_COMMANDS = frozenset({"M28", "M29", "M30", "M471", "M559", "M560", "M928"})
 
 #: The key a resume maker's answer (or its upload step) carries for the
 #: SHA-256 of the G-code it built the resume from.
@@ -155,6 +160,10 @@ _lock = threading.Lock()
 _records: list[ResumeRecord] = []
 _reported: dict[tuple[str, str], float] = {}
 _read_back: dict[tuple[str, str, str], tuple[float, bool]] = {}
+#: (machine, printer-side name) -> the SHA-256 of the bytes Kiln last sent
+#: under that name, for every upload (:func:`note_sent`).
+_sent: dict[tuple[str, str], str] = {}
+_MAX_SENT = 256
 
 
 def _hosted() -> bool:
@@ -471,6 +480,36 @@ def note_upload(adapter: Any, remote_name: Any, *, digest: str | None, sent: str
                 record.uploaded_as.pop(name, None)
 
 
+def note_sent(adapter: Any, remote_name: Any, digest: str | None) -> None:
+    """After an upload to *adapter* under *remote_name*: Kiln sent the bytes
+    *digest* names there (``None``: the upload failed, so what the name holds
+    is not known).  Never raises."""
+    name = _name(remote_name)
+    if not name:
+        return
+    try:
+        key = (_machine(adapter), name)
+    except Exception:  # noqa: BLE001
+        return
+    with _lock:
+        _sent.pop(key, None)
+        if digest:
+            _sent[key] = digest
+            while len(_sent) > _MAX_SENT:
+                _sent.pop(next(iter(_sent)))
+
+
+def sent_sha256(adapter: Any, file_name: Any) -> str | None:
+    """The SHA-256 of the bytes Kiln last sent to *adapter*'s machine under
+    *file_name*, or ``None`` when Kiln does not know what that name holds."""
+    try:
+        key = (_machine(adapter), _name(file_name))
+    except Exception:  # noqa: BLE001
+        return None
+    with _lock:
+        return _sent.get(key)
+
+
 def forget_printer_names(adapter: Any, name: Any = None) -> None:
     """Untie *name* (every name, when ``None``) from the records of
     *adapter*'s machine: the file under it was deleted, or a raw command
@@ -482,6 +521,8 @@ def forget_printer_names(adapter: Any, name: Any = None) -> None:
         return
     one = _name(name) if name is not None else None
     with _lock:
+        for key in [k for k in _sent if k[0] == machine and (one is None or k[1] == one)]:
+            _sent.pop(key, None)
         for record in _records:
             if record.machine != machine:
                 continue
@@ -491,20 +532,33 @@ def forget_printer_names(adapter: Any, name: Any = None) -> None:
                 record.uploaded_as.pop(one, None)
 
 
+def writes_a_file(line: Any) -> bool:
+    """Whether the raw command *line* would write, delete or rename a file on
+    the printer (:data:`_FILE_COMMANDS`), read the way Kiln's G-code checks
+    read a line: comment, line number and checksum taken off, and every
+    command word on it judged, not only the first."""
+    from kiln.gcode import _later_commands, _parse_command_word, _strip_comment, _strip_line_number
+
+    cleaned = _strip_line_number(_strip_comment(str(line)))
+    command = _parse_command_word(cleaned) if cleaned else None
+    if command is None:
+        return False
+    words = [command] + [w for part in _later_commands(command, cleaned) if (w := _parse_command_word(part))]
+    return any(word in _FILE_COMMANDS for word in words)
+
+
 def note_raw_commands(adapter: Any, commands: Any) -> None:
-    """Untie every name on *adapter*'s machine when *commands* (a raw
-    command or a list of them) write or delete a file on the printer
-    (:data:`_FILE_COMMANDS`).  Never raises."""
+    """Untie every name on *adapter*'s machine when any of *commands* (a raw
+    command or a list of them, one or more per line) writes, deletes or
+    renames a file on the printer (:func:`writes_a_file`).  A list Kiln
+    cannot read unties them too.  Never raises."""
     try:
         lines = [commands] if isinstance(commands, str) else list(commands or [])
-        for line in lines:
-            for part in str(line).splitlines():
-                word = part.split(";", 1)[0].strip().split(" ", 1)[0].upper()
-                if word in _FILE_COMMANDS:
-                    forget_printer_names(adapter)
-                    return
-    except Exception:  # noqa: BLE001
-        logger.debug("resume record: raw commands not read", exc_info=True)
+        if any(writes_a_file(part) for line in lines for part in str(line).splitlines()):
+            forget_printer_names(adapter)
+    except Exception:  # noqa: BLE001 -- unreadable is treated as a write
+        logger.debug("resume record: raw commands not read; untying", exc_info=True)
+        forget_printer_names(adapter)
 
 
 def _printer_still_holds(adapter: Any, file_name: str, sent: str) -> bool:
@@ -620,3 +674,4 @@ def _reset_for_tests() -> None:
         _records.clear()
         _reported.clear()
         _read_back.clear()
+        _sent.clear()
