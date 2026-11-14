@@ -85,7 +85,8 @@ def _tokens(code: str) -> list[_Token]:
                 j += 1
             word = code[i:j]
             k = j
-            while k < n and code[k].isspace():
+            # ``>`` before the ``<`` does not hide the file an include names.
+            while k < n and (code[k].isspace() or code[k] == ">"):
                 k += 1
             if word in ("include", "use") and k < n and code[k] == "<":
                 end = code.find(">", k)
@@ -134,6 +135,14 @@ def _argument(tokens: list[_Token], start: int) -> tuple[list[_Token], int]:
     return tokens[start:i], i
 
 
+def _target_opens(tokens: list[_Token], start: int) -> bool:
+    """Whether the tokens from *start* open an include's target: a ``<``,
+    with any number of ``>`` before it."""
+    while start < len(tokens) and tokens[start] == ("p", ">"):
+        start += 1
+    return start < len(tokens) and tokens[start] == ("p", "<")
+
+
 def _plain_literal(argument: list[_Token]) -> bool:
     """Whether *argument* is only numbers, booleans and lists of them: a
     value that cannot name a file (a convexity, an origin, a scale)."""
@@ -174,7 +183,7 @@ def file_reads(code: str) -> list[tuple[str, str | None]]:
             reads.append(("include", text))
         elif kind != "id" or i + 1 >= len(tokens):
             continue
-        elif text in ("include", "use") and tokens[i + 1] == ("p", "<"):
+        elif text in ("include", "use") and _target_opens(tokens, i + 1):
             # Something between the word and its target (a comment) kept the
             # tokenizer from reading the target: a read of an unknown file.
             reads.append(("include", None))
@@ -195,13 +204,20 @@ def file_reads(code: str) -> list[tuple[str, str | None]]:
     return reads
 
 
+#: A library include names a file in one of :data:`LIBRARIES` with letters,
+#: digits and ``_ . / -`` only, as every file Kiln ships is named.  Anything
+#: else between the brackets (a tab, a line break, a space) is refused.
+_LIBRARY_TARGET = re.compile(
+    r"(?:%s)/[A-Za-z0-9_./-]+" % "|".join(re.escape(name) for name in LIBRARIES)
+)
+
+
 def is_bundled_library(path: str | None) -> bool:
     """Whether an ``include`` / ``use`` target is a file inside one of
     :data:`LIBRARIES`, named from the library's own folder."""
-    if path is None or "\\" in path or "\x00" in path or path.startswith("/"):
+    if path is None or not _LIBRARY_TARGET.fullmatch(path):
         return False
-    parts = path.split("/")
-    return ".." not in parts and parts[0] in LIBRARIES
+    return ".." not in path.split("/")
 
 
 def reads_beyond_bundled_libraries(code: str) -> bool:
