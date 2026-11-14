@@ -101,7 +101,14 @@ def _bypassed() -> bool:
     return os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in _BYPASS_VALUES
 
 
-def _is_resume(file_name: str, kwargs: dict[str, Any] | None = None) -> bool:
+def claims_resume(file_name: str, kwargs: dict[str, Any] | None = None) -> bool:
+    """Whether a start SAYS it continues a paused print: the caller's
+    ``resume_from_paused`` flag, or a file named like a resume file.
+
+    A claim only.  Both are things whoever starts the print chooses, so on
+    their own they never skip a person's yes or the preview; see
+    :func:`verified_resume`.
+    """
     if kwargs and kwargs.get("resume_from_paused"):
         return True
     try:
@@ -111,6 +118,57 @@ def _is_resume(file_name: str, kwargs: dict[str, Any] | None = None) -> bool:
     except Exception:  # noqa: BLE001
         name = (file_name or "").lower()
         return "_resume_" in name
+
+
+def printer_reports_paused(printer_name: str | None = None, *, adapter: Any = None) -> bool:
+    """True only when the printer this start is aimed at says, right now,
+    that it is connected and holding a paused job.
+
+    *adapter* is asked when given; otherwise the printer is found by
+    *printer_name* (``None`` is the default printer).  Anything that cannot
+    be read (no such printer, no answer, an error) is ``False``: the start is
+    then judged as the fresh print it might be.
+    """
+    try:
+        if adapter is None:
+            from kiln.server import _resolve_adapter
+
+            adapter = _resolve_adapter(printer_name)
+        from kiln.printers.base import PrinterStatus
+
+        state = adapter.get_state()
+        return bool(getattr(state, "connected", False)) and getattr(state, "state", None) is PrinterStatus.PAUSED
+    except Exception:  # noqa: BLE001 -- unreadable is not paused
+        logger.debug("resume check: printer state unreadable", exc_info=True)
+        return False
+
+
+def verified_resume(
+    file_name: str,
+    kwargs: dict[str, Any] | None = None,
+    *,
+    printer_name: str | None = None,
+    adapter: Any = None,
+) -> bool:
+    """Whether this start really continues a paused print: it claims to
+    (:func:`claims_resume`) AND the printer reports a paused job
+    (:func:`printer_reports_paused`).  Every start that skips the yes or
+    the preview because it is a resume asks this, never the claim alone.
+
+    A claim the printer does not back is written to this computer's log and
+    answered ``False``, so the start gets the same dialog and preview as any
+    other print.
+    """
+    if not claims_resume(file_name, kwargs):
+        return False
+    if printer_reports_paused(printer_name, adapter=adapter):
+        return True
+    logger.warning(
+        "A start of %s said it continues a paused print, but the printer reports no paused "
+        "job; it is treated as a new print and needs a yes and a preview.",
+        os.path.basename(str(file_name or "")) or "a file",
+    )
+    return False
 
 
 @dataclass(frozen=True)
@@ -450,7 +508,18 @@ def exemption_verdict(
     resume continuation of a print that already had its yes — granted
     here, or ``None`` when this start is not one of them.  Decided before
     anything touches the token, so a refusal for want of a yes does not
-    spend a token that is still good for the call that carries one."""
+    spend a token that is still good for the call that carries one.
+
+    *is_resume* is the caller's claim, and is granted only when the printer
+    it is aimed at reports a paused job (:func:`printer_reports_paused`).
+    """
+    if is_resume and not _bypassed() and not printer_reports_paused(printer_name):
+        logger.warning(
+            "%s(%s) said it continues a paused print, but the printer reports no paused job; "
+            "it needs a yes and a preview like any new print.",
+            tool, os.path.basename(str(file_name or "")) or "a file",
+        )
+        is_resume = False
     if _bypassed():
         if not is_resume:
             logger.warning(
@@ -522,7 +591,7 @@ def adapter_verdict(adapter: Any, file_name: str, kwargs: dict[str, Any] | None 
     try:
         if not signoff_required(adapter):
             return None
-        if _bypassed() or _is_resume(file_name, kwargs):
+        if _bypassed() or verified_resume(file_name, kwargs, adapter=adapter):
             return None
         printer_name = getattr(adapter, "_kiln_registered_name", None) or None
         if take(file_name, printer_name) is not None:

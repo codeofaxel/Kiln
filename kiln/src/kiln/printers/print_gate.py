@@ -448,7 +448,9 @@ def _resolve_local_job(file_name: str, kwargs: dict[str, Any]) -> str | None:
 
 def with_judged_plate(file_name: str, kwargs: dict[str, Any], kept: list[str]) -> dict[str, Any]:
     """The start's arguments."""
-    if kwargs.get("local_file_path") or _is_resume_print(file_name, kwargs):
+    # Routing help only: the gate has already judged this start, so the
+    # claim is enough to leave a continuation's arguments as they came.
+    if kwargs.get("local_file_path") or _claims_resume_print(file_name, kwargs):
         return kwargs
     plate = _resolve_local_job(file_name, kwargs) or (kept[0] if kept else None)
     return {**kwargs, "local_file_path": plate} if plate else kwargs
@@ -509,14 +511,42 @@ def _resolve_material(kwargs: dict[str, Any]) -> str | None:
     return None
 
 
-def _is_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
-    """True for a resume-mode continuation (mid-print decoration / recovery)."""
+def _claims_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
+    """Whether a start SAYS it is a resume-mode continuation (mid-print
+    decoration / recovery): the caller's flag or a resume-style file name.
+    A claim only; see :func:`_is_resume_print`."""
     if kwargs.get("resume_from_paused"):
         return True
     name = (file_name or "").lower()
     return "_resume_" in name or name.startswith(
         ("transformed_resume", "original_resume")
     )
+
+
+def _is_resume_print(file_name: str, kwargs: dict[str, Any], *, adapter: Any = None) -> bool:
+    """True for a resume-mode continuation the printer backs: the start
+    claims to continue a paused print AND the printer it is aimed at reports
+    a paused job right now (:func:`kiln.print_signoff.printer_reports_paused`).
+
+    Both the flag and the name are chosen by whoever starts the print, so a
+    claim the printer does not back is judged as the new print it may be.
+    """
+    if not _claims_resume_print(file_name, kwargs):
+        return False
+    from kiln.print_signoff import printer_reports_paused
+
+    if adapter is not None:
+        paused = printer_reports_paused(adapter=adapter)
+    else:
+        paused = printer_reports_paused(kwargs.get("printer_name"))
+    if paused:
+        return True
+    _logger.warning(
+        "print_gate: %s said it continues a paused print, but the printer reports no paused job; "
+        "it is judged as a new print.",
+        os.path.basename(str(file_name or "")) or "a file",
+    )
+    return False
 
 
 def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
@@ -1596,7 +1626,7 @@ def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any], *, keep: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Universal print-time backstop, called from ``PrinterAdapter.start_print``."""
-    if _is_resume_print(file_name, kwargs):
+    if _is_resume_print(file_name, kwargs, adapter=adapter):
         return None
 
     if fleet_blocked := _concurrent_fleet_verdict(adapter):

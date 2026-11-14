@@ -2844,7 +2844,15 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
         return None  # one switch turns off consent prompts, as it always did
     file_value = str(arguments.get(arg_name) or "")
-    if _is_resume_mode_3mf(file_value) or arguments.get("resume_from_paused"):
+    # A resume continues a print that already had its yes, so nobody is
+    # asked again -- but only when the printer itself reports the paused
+    # job.  The flag and the file name are the caller's to choose, and a
+    # claim the printer does not back is asked about like any new print.
+    from kiln import print_signoff
+
+    if print_signoff.claims_resume(file_value, arguments) and await asyncio.to_thread(
+        print_signoff.verified_resume, file_value, arguments, printer_name=arguments.get("printer_name"),
+    ):
         return None  # already running, already approved
     note_window_outcome(None)  # nothing from an earlier call rides this result
     note_alerted_devices(None)
@@ -9786,7 +9794,10 @@ def start_print(
             check accepts ``paused`` as a valid state.  Use this when
             starting a resume-mode 3MF (mid-print decoration swap):
             the printer is paused, you upload the resume 3MF, and then
-            ``start_print`` it with this flag.  The file is treated as
+            ``start_print`` it with this flag.  It counts only when the
+            printer reports a paused job; on any other printer the start
+            is a new print and needs the person's yes and a preview.
+            The file is treated as
             a fresh print from the firmware's POV — the resume gcode
             carries its own preamble (heat → safety lift → home X/Y →
             travel → descend to resume Z).  Default ``False``.
@@ -9880,24 +9891,30 @@ def start_print(
     # -- Preview confirmation gate -----------------------------------------
     # One helper, six callers: see _preview_gate_error for why this stopped
     # living inside this function.
-    _is_resume = resume_from_paused or _is_resume_mode_3mf(file_name)
+    # A resume is a start the printer backs: the caller's flag, or a file
+    # named like a resume file (``transformed_resume_<sid>.3mf`` /
+    # ``original_resume_<sid>.3mf`` from decorate_during_print and
+    # get_print_before_edit), AND the printer reporting a paused job.  A
+    # claim alone is a new print: it gets the yes and the preview, its
+    # pre-flight wants an idle printer, and the plate check applies.
+    from kiln import print_signoff
+
+    _is_resume = print_signoff.verified_resume(
+        file_name, {"resume_from_paused": resume_from_paused}, printer_name=printer_name,
+    )
     if block := _preview_gate_error(
         "start_print", file_name, preview_token,
         printer_name=printer_name, is_resume=_is_resume,
     ):
         return block
 
-    # Auto-detect resume-mode 3MFs by filename.  Convention: files
-    # produced by decorate_during_print / get_print_before_edit are named
-    # ``transformed_resume_<sid>.3mf`` or ``original_resume_<sid>.3mf``,
-    # both contain the substring ``_resume_``.  When detected, we flip
-    # ``resume_from_paused`` so the printer_idle preflight check accepts
-    # ``paused`` as a valid state.  Caller can still pass it explicitly.
-    is_resume_3mf = _is_resume_mode_3mf(file_name)
-    if is_resume_3mf and not resume_from_paused:
-        resume_from_paused = True
+    # One answer for every gate below: the pre-flight accepts (and then
+    # requires) a paused printer only for a verified resume.
+    is_resume_3mf = _is_resume and _is_resume_mode_3mf(file_name)
+    resume_from_paused = _is_resume
+    if is_resume_3mf:
         logger.info(
-            "start_print: auto-detected resume-mode 3MF %r — accepting paused state in preflight",
+            "start_print: resume-mode 3MF %r on a paused printer — the pre-flight wants the paused state",
             file_name,
         )
 
@@ -12595,10 +12612,10 @@ def preflight_check(
 
         remote_file: Optional filename to verify exists on the printer.
             If provided, checks the printer's file list for a matching file.
-        accept_paused: When ``True``, the ``printer_idle`` check accepts
-            the ``paused`` state in addition to ``idle``.  Used by
-            ``start_print(resume_from_paused=True)`` for mid-print
-            resume 3MFs (which start from a paused-state printer).
+        accept_paused: When ``True``, the ``printer_idle`` check wants
+            the ``paused`` state instead of ``idle``: a resume continues a
+            paused job, so an idle printer has nothing to resume.  Used by
+            ``start_print`` for a resume the printer has backed.
             Default ``False`` — only ``idle`` is accepted.
         start_door_gates_plate: Set by Kiln's own start doors, which judge
             the plate themselves (with the resume and print-beside-a-part
@@ -12645,15 +12662,13 @@ def preflight_check(
         if not is_connected:
             errors.append("Printer is not connected / offline")
 
-        # Idle (not printing or in error).  Resume-mode 3MFs need to
-        # start from a PAUSED printer (the original print was paused
-        # by decorate_during_print before slicing the resume), so
-        # callers may opt to also accept PAUSED here.
-        idle_states = {PrinterStatus.IDLE}
-        if accept_paused:
-            idle_states.add(PrinterStatus.PAUSED)
+        # Idle (not printing or in error).  A resume starts from a PAUSED
+        # printer (the original print was paused by decorate_during_print
+        # before slicing the resume), so for a resume PAUSED is required,
+        # not merely accepted: an idle printer has no job to continue.
+        idle_states = {PrinterStatus.PAUSED} if accept_paused else {PrinterStatus.IDLE}
         is_idle = state.state in idle_states
-        msg_suffix = " (paused accepted for resume-mode start)" if accept_paused and state.state == PrinterStatus.PAUSED else ""
+        msg_suffix = " (a resume needs a paused printer)" if accept_paused else ""
         checks.append(
             {
                 "name": "printer_idle",

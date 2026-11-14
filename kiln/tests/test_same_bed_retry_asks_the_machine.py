@@ -358,8 +358,13 @@ def test_the_contract_does_not_rescue_a_material_the_hotend_cannot_reach(retry_f
 
 
 def test_resume_exemption_is_untouched(retry_file):
+    # The exemption holds for a continuation the printer backs (it reports
+    # the paused job); a bare claim on an idle printer is judged as new.
+    from kiln.printers.base import PrinterState, PrinterStatus
+
     adapter = _RetryAdapter()
     adapter.homed = None
+    adapter.get_state = lambda: PrinterState(state=PrinterStatus.PAUSED, connected=True)
     assert pg.run_adapter_gate(adapter, retry_file(), {"resume_from_paused": True}) is None
     assert adapter.homed_reads == 0
 

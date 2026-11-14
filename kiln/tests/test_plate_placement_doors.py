@@ -1357,6 +1357,15 @@ class TestEveryDoorThatStartsAPrint:
             plate_state, "start_refusal",
             lambda adapter, resume=False, file_name=None, local_path=None: seen.append((resume, file_name)) or None,
         )
+        # A resume the printer does not back is a new print: the flag alone
+        # once told this gate "resume", and an idle printer took a file onto
+        # an occupied plate with no yes and no preview.
+        srv.start_print(file_name="part.gcode", resume_from_paused=True)
+        assert seen == [(False, "part.gcode")], "a flag alone is not a resume"
+        seen.clear()
+        from kiln.printers.base import PrinterStatus
+
+        monkeypatch.setattr(machine, "get_state", lambda: SimpleNamespace(connected=True, state=PrinterStatus.PAUSED))
         srv.start_print(file_name="part.gcode", resume_from_paused=True)
         assert seen == [(True, "part.gcode")], "the tool tells the gate a resume is a resume, and names the file"
 

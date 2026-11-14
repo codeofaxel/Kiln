@@ -11,6 +11,11 @@ It is also where a source written as named modules composed by ``main()``
 compiles to that ``main()`` (:func:`kiln.scad_main.runnable_inputs`), so every
 door that hands OpenSCAD a file gets the same answer.
 
+It is where a process that runs OpenSCAD for more than one person has its
+say over every launch (:func:`set_host_policy`): which files the source may
+read, how long a launch may run, and how many may run at once.  A plain
+install sets no policy and runs every launch as before.
+
 It is where OpenSCAD finds the BOSL2 and MCAD libraries Kiln ships: every
 launch runs with them first on ``OPENSCADPATH`` (:func:`openscad_env`).
 
@@ -57,6 +62,7 @@ import subprocess
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from kiln import run_program
 from kiln.scad_main import runnable_inputs
@@ -65,13 +71,153 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "OPENSCAD_CRASH_RETURNCODES",
+    "LaunchRefused",
     "bundled_library_path",
+    "host_policy",
     "ignored_settings",
     "left_out_parts",
     "openscad_env",
     "present_signals",
+    "refused_source",
     "run_openscad",
+    "set_host_policy",
 ]
+
+
+# ---------------------------------------------------------------------------
+# A host's say over each launch
+# ---------------------------------------------------------------------------
+#
+# A process that runs OpenSCAD for more than one person can set ONE policy
+# here, and every launch in the process consults it, because every launch
+# passes through :func:`run_openscad`.  A plain install sets none, and every
+# launch runs exactly as it did before.
+#
+# A policy is any object with two methods:
+#
+# * ``refuse_source(source, source_dir)``: called with the text of each
+#   OpenSCAD source file a launch would read, and the folder it sits in (the
+#   folder relative ``import`` / ``surface`` names resolve against), before
+#   OpenSCAD starts.  It returns ``None`` to allow, or the sentence the person
+#   is shown; the launch then does not happen.
+# * ``admit(timeout)``: a context manager entered around the launch.  It
+#   yields the time limit, in seconds, the launch runs under (``None`` for
+#   none), and may raise :class:`LaunchRefused` instead.
+#
+# A refused launch comes back as a failed run (exit code 1, the sentence on
+# stderr, ``refused`` set on the returned object), so every caller's existing
+# handling of a failed compile carries the sentence to the person.  A policy
+# that raises anything else has not judged, and the launch is refused.
+
+_host_policy: Any = None
+
+#: The largest source file a policy is handed.  A source past it is refused
+#: while a policy is set: a check that cannot read the whole file has not
+#: checked it.
+_SOURCE_CHECK_MAX_BYTES = 4 * 1024 * 1024
+
+#: Input files OpenSCAD reads as source (a ``.csg`` file is OpenSCAD source
+#: too, and can import files of its own).
+_SOURCE_SUFFIXES = (".scad", ".csg")
+
+_POLICY_FAULT_MESSAGE = (
+    "Kiln could not check this OpenSCAD source before compiling it, so it was not compiled."
+)
+_TOO_LARGE_TO_CHECK_MESSAGE = (
+    "This OpenSCAD source is too large for Kiln to check before compiling it, so it was not "
+    "compiled."
+)
+
+
+class LaunchRefused(Exception):
+    """A host policy declined to start OpenSCAD.
+
+    ``message`` is the sentence the person is shown; ``retryable`` says
+    whether the same call may succeed if asked again later.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.message = message
+        self.retryable = retryable
+
+
+def set_host_policy(policy: Any) -> Any:
+    """Make *policy* the one every later launch in this process consults
+    (``None`` removes it).  Returns the policy it replaced."""
+    global _host_policy
+    previous, _host_policy = _host_policy, policy
+    return previous
+
+
+def host_policy() -> Any:
+    """The policy every launch consults, or ``None`` on a plain install."""
+    return _host_policy
+
+
+def refused_source(source: str, source_dir: str | None = None) -> str | None:
+    """The host policy's refusal for OpenSCAD *source*, or ``None``.
+
+    For code that checks source before writing it to a file, so the person
+    hears the same answer a launch would give.  Always ``None`` with no
+    policy set.
+    """
+    policy = _host_policy
+    if policy is None:
+        return None
+    try:
+        return policy.refuse_source(source, source_dir)
+    except Exception:  # noqa: BLE001 -- a policy that could not judge has not judged
+        logger.exception("OpenSCAD host policy failed while checking source")
+        return _POLICY_FAULT_MESSAGE
+
+
+def _source_inputs(argv: Sequence[str], cwd: str | None) -> list[str]:
+    """The source files a launch of *argv* reads, as paths."""
+    from kiln.scad_main import _VALUE_OPTIONS
+
+    found: list[str] = []
+    skip = False
+    for i, arg in enumerate(argv):
+        if i == 0 or skip:
+            skip = False
+            continue
+        if arg in _VALUE_OPTIONS:
+            skip = True
+        elif not arg.startswith("-") and arg.lower().endswith(_SOURCE_SUFFIXES):
+            found.append(os.path.join(cwd, arg) if cwd and not os.path.isabs(arg) else arg)
+    return found
+
+
+def _source_refusal(argv: Sequence[str], cwd: str | None) -> str | None:
+    """The host policy's refusal for any source file *argv* would read."""
+    for path in _source_inputs(argv, cwd):
+        real = os.path.realpath(path)
+        try:
+            if os.path.getsize(real) > _SOURCE_CHECK_MAX_BYTES:
+                return _TOO_LARGE_TO_CHECK_MESSAGE
+            source = Path(real).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # Nothing to read means nothing for OpenSCAD to read either; it
+            # reports the missing input itself.
+            continue
+        refusal = refused_source(source, os.path.dirname(real))
+        if refusal is not None:
+            return refusal
+    return None
+
+
+def _refused_launch(
+    argv: Sequence[str], message: str, *, text: bool, retryable: bool = False,
+) -> subprocess.CompletedProcess:
+    """A launch that never happened, shaped as the failed run callers handle."""
+    stderr: Any = message.rstrip() + "\n"
+    refused = subprocess.CompletedProcess(list(argv), 1, "" if text else b"",
+                                          stderr if text else stderr.encode("utf-8"))
+    refused.refused = True  # type: ignore[attr-defined]
+    refused.retryable = retryable  # type: ignore[attr-defined]
+    logger.warning("OpenSCAD launch refused by the host policy: %s", message)
+    return refused
 
 
 def present_signals(*names: str) -> frozenset[int]:
@@ -450,8 +596,40 @@ def run_openscad(
         A run that exited 0 after leaving part of the model out, or after
         ignoring a setting in the caller's source, comes back with exit
         code 1, the reason first on stderr, ``left_out_parts`` and
-        ``ignored_settings`` set, and *output_path* deleted.
+        ``ignored_settings`` set, and *output_path* deleted.  A launch the
+        host policy refused (:func:`set_host_policy`) never starts, and
+        comes back the same way with ``refused`` set.
     """
+    policy = _host_policy
+    if policy is None:
+        return _launch(cmd, timeout=timeout, cwd=cwd, text=text,
+                       output_path=output_path, attempts=attempts)
+    refusal = _source_refusal(cmd, cwd)
+    if refusal is not None:
+        return _refused_launch(cmd, refusal, text=text)
+    admission = contextlib.ExitStack()
+    try:
+        limit = admission.enter_context(policy.admit(timeout))
+    except LaunchRefused as refused:
+        return _refused_launch(cmd, refused.message, text=text, retryable=refused.retryable)
+    except Exception:  # noqa: BLE001 -- a policy that could not judge has not judged
+        logger.exception("OpenSCAD host policy failed while admitting a launch")
+        return _refused_launch(cmd, _POLICY_FAULT_MESSAGE, text=text)
+    with admission:
+        return _launch(cmd, timeout=limit, cwd=cwd, text=text,
+                       output_path=output_path, attempts=attempts)
+
+
+def _launch(
+    cmd: Sequence[str],
+    *,
+    timeout: float | None,
+    cwd: str | None,
+    text: bool,
+    output_path: str | None,
+    attempts: int,
+) -> subprocess.CompletedProcess:
+    """The launch itself, once any host policy has allowed it."""
     with runnable_inputs(cmd, cwd=cwd) as argv:
         result = _run_with_retry(argv, timeout=timeout, cwd=cwd, text=text,
                                  output_path=output_path, attempts=attempts)

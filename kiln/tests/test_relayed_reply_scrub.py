@@ -98,7 +98,11 @@ class TestWhateverAToolPutsInItsReply:
             "note": f"mainboard {MAINBOARD} answered",
         }
 
-        _clean(_relay("list_trusted_printers", answer))
+        # A tool on the bridge's own list, so the answer really is relayed
+        # (a tool off the list is refused before it can answer anything).
+        frame = _relay("printer_status", answer)
+        assert frame["ok"] is True
+        _clean(frame)
 
     def test_an_address_this_computer_never_saved_is_taken_out_of_text_too(self):
         frame = _relay("printer_status", {

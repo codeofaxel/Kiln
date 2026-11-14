@@ -47,6 +47,15 @@ _FILE_IO_PATTERN = re.compile(
 )
 
 
+class SourceReadRefused(GenerationError, ValueError):
+    """The host refused a file this source would read.  A refusal, not a
+    fault: it carries its own code, and it is a :class:`ValueError` for the
+    callers that already answer a refused source as invalid input."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="SCAD_FILE_READ_NOT_ALLOWED")
+
+
 def _check_scad_security(code: str, *, allow_local_files: bool = True) -> None:
     """Validate OpenSCAD code against security rules.
 
@@ -55,12 +64,27 @@ def _check_scad_security(code: str, *, allow_local_files: bool = True) -> None:
     that already exist on the local filesystem.  This is safe because
     the agent already has filesystem access.
 
+    Where the process has a host policy for OpenSCAD
+    (:func:`kiln.openscad_runner.set_host_policy`), the policy judges the
+    files the code reads first, and its answer is the one given: a path it
+    refuses gets the same answer whether or not a file is there.
+
     Raises :class:`ValueError` on violations.
     """
     if len(code) > 100_000:
         raise ValueError("OpenSCAD code too large (max 100KB).")
 
-    for match in _FILE_IO_PATTERN.finditer(code):
+    from kiln import openscad_runner
+
+    refusal = openscad_runner.refused_source(code)
+    if refusal is not None:
+        raise SourceReadRefused(refusal)
+    # With a host judging every read by where it points (one answer whether
+    # or not a file is there), asking the disk here would answer that
+    # question for any path, so the existence check below is skipped.
+    judged_by_host = allow_local_files and openscad_runner.host_policy() is not None
+
+    for match in ([] if judged_by_host else _FILE_IO_PATTERN.finditer(code)):
         func_name = match.group(1)
         file_ref = match.group(2)
         if not allow_local_files:

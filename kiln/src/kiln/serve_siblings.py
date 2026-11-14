@@ -201,6 +201,15 @@ def _humanize_etime(etime: str) -> str:
         return etime
 
 
+def _on_shared_server() -> bool:
+    """True on the shared hosted server, where this module reads no process
+    or socket table: every question it answers is about a person's own
+    computer, and a customer's call there must not start ``ps`` or ``lsof``."""
+    from kiln.runtime_env import is_hosted_multitenant
+
+    return is_hosted_multitenant()
+
+
 def _process_table_kind() -> str:
     """Which process table this platform can read: ``"ps"`` on POSIX,
     ``"cim"`` on Windows, ``""`` where there is none to read."""
@@ -216,7 +225,13 @@ def _list_serve_processes() -> list[dict] | None:
     the process table cannot be read (a platform with neither ``ps``
     nor PowerShell, or the scan failing).  ``None`` means "unknown",
     never "zero".
+
+    On the shared hosted server the table is never read: leftover local
+    servers are a question about a person's own computer, and a customer's
+    call there must not start a process listing.
     """
+    if _on_shared_server():
+        return None
     kind = _process_table_kind()
     if kind == "cim":
         return _list_serve_processes_windows()
@@ -518,7 +533,7 @@ def printer_connection_holders(host: str) -> dict:
     than one that admits it does not know.
     """
     unknown = {"supported": False, "holders": [], "kiln_count": 0}
-    if not host or os.name != "posix":
+    if not host or os.name != "posix" or _on_shared_server():
         return unknown
     try:
         out = run_program.run(

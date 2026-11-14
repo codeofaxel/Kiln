@@ -11,8 +11,15 @@ reinvented here — this is transport + local execution of existing tools.
 Why dial OUT (not listen): an outbound socket opens no inbound port, needs no
 firewall change, and sidesteps the browser's local-network restrictions that
 make a listening localhost bridge fail in Safari. Auth is the user's sign-in;
-the relay server enforces tenant isolation + the ``RELAY_SAFE_TOOLS`` allow-list,
-so a call can only ever reach its own account's machine.
+the relay server enforces tenant isolation + its own list of the tools it
+relays, so a call can only ever reach its own account's machine.
+
+This computer does not take the server's word for which tools may run: it
+keeps its own list (:data:`BRIDGE_TOOLS`) and its own refused arguments
+(:data:`BRIDGE_REFUSED_ARGS`), and refuses everything else before any work
+starts, whatever a relayed frame names.  Raw G-code, temperatures, fans,
+safety limits, firmware, the credential vault, the install itself and the
+consent settings are not on it, so they never run over the bridge.
 
 The core (:func:`handle_relay_request`) is pure and injected with its tool caller
 + artifact fetcher, so it is unit-tested without a socket, the cloud, or a
@@ -69,6 +76,75 @@ ToolCaller = Callable[[str, dict], Any]          # (tool_name, args) -> result
 ArtifactFetcher = Callable[[str], str]           # cloud token -> local file path
 
 
+#: The only tools this computer runs for a relayed call.  Everything the web
+#: app and the AI apps reach through the bridge, and nothing more: status
+#: and camera reads, the tray and spool reads, slice-and-print, watching a
+#: print, pause / resume / cancel (stopping is always the safe direction),
+#: and the four printer-record writes the web's own buttons make (rename,
+#: model, repair mark, the live layer view's upload).  A tool not named here
+#: is refused on this computer even when the server names it, so a server
+#: that misbehaves cannot send G-code, heat a printer, change a safety
+#: limit, flash firmware, read stored credentials, upgrade or restart Kiln,
+#: or change consent settings.  Adding a tool here is a security review.
+BRIDGE_TOOLS: frozenset[str] = frozenset(
+    {
+        "printer_status",
+        "printer_snapshot",
+        "fleet_status",
+        "queue_summary",
+        "ams_status",
+        "list_spools",
+        "slice_and_print",
+        "monitor_print",
+        "watch_print_status",
+        "pause_print",
+        "resume_print",
+        "cancel_print",
+        "cancel_queued_job",
+        "rename_printer",
+        # The web's model picker, and the bed a printer outside the
+        # catalogue waits for before its first print from the web.  Never
+        # with a file (see BRIDGE_REFUSED_ARGS).
+        "set_printer_model",
+        "publish_print_twin",
+        "set_machine_repair",
+    }
+)
+
+#: Arguments a relayed call may not carry, by tool: each names a file on
+#: this computer, which a request from the web or an app does not choose.
+#: ``slice_and_print`` gets its model from the saved make the call names
+#: (the bridge fetches it and fills ``input_path`` itself).
+BRIDGE_REFUSED_ARGS: dict[str, frozenset[str]] = {
+    "set_printer_model": frozenset({"slicer_file"}),
+    "slice_and_print": frozenset({"input_path", "profile"}),
+}
+
+#: The code a refused relayed call carries back to the server.
+BRIDGE_REFUSED_CODE = "BRIDGE_TOOL_REFUSED"
+
+
+def bridge_refusal(tool: str, args: dict) -> str | None:
+    """Why this computer will not run *tool* with *args* for a relayed call,
+    or ``None`` when it will.  Judged on the call as it arrived, before the
+    bridge fetches anything or fills any argument itself."""
+    if tool not in BRIDGE_TOOLS:
+        return (
+            f"Kiln on this computer does not run {tool[:64] or 'that tool'} for a request from the "
+            "web or an app. Run it on this computer if you meant to."
+        )
+    refused = sorted(
+        name for name in BRIDGE_REFUSED_ARGS.get(tool, frozenset())
+        if args.get(name) not in (None, "")
+    )
+    if refused:
+        return (
+            f"Kiln on this computer does not take {', '.join(refused)} for {tool} from the web "
+            "or an app: it names a file on this computer, so it is given here."
+        )
+    return None
+
+
 def handle_relay_request(
     req: dict,
     *,
@@ -96,10 +172,23 @@ def handle_relay_request(
     that arrived hash to the bytes that were approved.  Bytes that differ
     are refused before any tool runs: a consent by file name would let a
     re-generated model print under the old approval.
+
+    The list: a tool outside :data:`BRIDGE_TOOLS`, or an argument in
+    :data:`BRIDGE_REFUSED_ARGS`, is refused here before anything else runs
+    (no fetch, no consent, no tool), with :data:`BRIDGE_REFUSED_CODE` so the
+    server knows this computer said no.
     """
     request_id = req.get("request_id")
     tool = str(req.get("tool_name") or "")
     args = dict(req.get("args") or {})
+    refusal = bridge_refusal(tool, args)
+    if refusal is not None:
+        logger.warning("bridge: refused a relayed %r call: %s", tool, refusal)
+        return {
+            "request_id": request_id,
+            "ok": False,
+            "error": {"message": refusal, "tool": tool, "code": BRIDGE_REFUSED_CODE},
+        }
     reset = None
     try:
         token = args.pop("cloud_artifact_token", None)
@@ -246,6 +335,10 @@ def _default_tool_caller() -> ToolCaller:
     _server.register_configured_printers()
 
     def call_tool(name: str, args: dict) -> Any:
+        # The same list :func:`handle_relay_request` reads, asked again here so
+        # a second way into this caller cannot run a tool the list leaves out.
+        if name not in BRIDGE_TOOLS:
+            raise ValueError(bridge_refusal(name, args))
         tool = _server.mcp._tool_manager._tools.get(name)
         if tool is None:
             raise ValueError(f"tool {name!r} is not available on this machine")
