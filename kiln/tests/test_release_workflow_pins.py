@@ -7,7 +7,8 @@ hand it the artifacts it uploads.  So in any workflow holding such a job:
 * every ``uses:`` names a full commit SHA, because a tag or branch can be moved
   to different code after it was reviewed;
 * nothing fetched from a moving address (a ``latest`` release, a branch) is
-  piped into a shell or unpacked and run, unless the address is a commit;
+  piped into a shell, an interpreter or an archive, unless the address is a
+  commit;
 * every npm tool installed globally or run with ``npx`` names an exact version;
 * the OIDC grant sits on the jobs that use it, not on a workflow of many jobs.
 """
@@ -27,7 +28,10 @@ _WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 _PINNED = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 _COMMIT_IN_URL = re.compile(r"/[0-9a-f]{40}/")
 _DOWNLOAD = re.compile(r"\b(curl|wget)\b")
-_PIPED_TO_RUN = re.compile(r"\|\s*(?:sudo\s+)?(?:sh|bash|tar)\b")
+_PIPED_TO_RUN = re.compile(
+    r"\|\s*(?:sudo\s+)?(?:sh|bash|zsh|tar|python[0-9.]*|node|perl|ruby)\b"
+    r"|\b(?:sh|bash|zsh|source)\s+<\("
+)
 _EXACT_VERSION = re.compile(r"^@\d+\.\d+\.\d+$")
 _NPM_TOOL = re.compile(
     r"\b(?:npm\s+(?:install|i)\s+(?:-g|--global)|npx(?:\s+(?:--yes|-y))?)\s+"
@@ -47,6 +51,8 @@ def _grants(block: Any) -> dict[str, str]:
 def _can_publish(job: dict[str, Any], workflow_grants: dict[str, str]) -> bool:
     grants = _grants(job["permissions"]) if "permissions" in job else workflow_grants
     if grants.get("id-token") == "write" or grants.get("contents") == "write":
+        return True
+    if job.get("secrets"):  # a called workflow handed secrets, `inherit` included
         return True
     return bool(_REPO_SECRET.search(str(job)))
 
@@ -157,3 +163,40 @@ def test_the_check_catches_each_shape() -> None:
 
 def test_the_check_passes_pinned_shapes() -> None:
     assert violations("good.yml", yaml.safe_load(_GOOD)) == []
+
+
+# --- shapes that hide a publishing job or a download being run ---
+
+
+_INHERITS_SECRETS = """
+jobs:
+  call:
+    uses: some-org/workflows/.github/workflows/shared.yml@main
+    secrets: inherit
+"""
+
+_OTHER_RUNNERS = """
+permissions:
+  contents: write
+jobs:
+  one:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsSL https://example.invalid/main/setup.py | python3 -
+      - run: bash <(curl -fsSL https://example.invalid/main/install.sh)
+"""
+
+
+def test_a_call_that_inherits_secrets_can_publish() -> None:
+    """`secrets: inherit` hands the called workflow every repository secret
+    without one `secrets.NAME` appearing in the caller, so the job counts as
+    able to publish."""
+    found = "\n".join(violations("inherit.yml", yaml.safe_load(_INHERITS_SECRETS)))
+    assert "shared.yml@main is not pinned" in found, found
+
+
+def test_a_download_run_by_any_interpreter_is_caught() -> None:
+    """A download piped into python or node, or fed to bash through `<(...)`,
+    runs as surely as one piped into `sh`."""
+    found = violations("runners.yml", yaml.safe_load(_OTHER_RUNNERS))
+    assert len([f for f in found if "moving address" in f]) == 2, found
