@@ -34,12 +34,13 @@ from kiln.generation.base import (
 from kiln.generation.job_records import JobRecord, MemoryJobRecords
 from kiln.openscad_runner import bundled_library_path, run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
+from kiln.scad_reads import LIBRARIES
 
 logger = logging.getLogger(__name__)
 
 # Bundled OpenSCAD library whitelist — only these prefixes are allowed
 # in include/use statements for security.
-_SAFE_LIBRARY_PREFIXES = ("BOSL2/", "MCAD/")
+_SAFE_LIBRARY_PREFIXES = tuple(f"{name}/" for name in LIBRARIES)
 
 # File-IO patterns that need path validation before compiling.
 _FILE_IO_PATTERN = re.compile(
