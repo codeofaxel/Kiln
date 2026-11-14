@@ -159,3 +159,51 @@ class TestTheRealCaller:
 
     def test_no_listed_tool_is_one_that_must_never_cross(self):
         assert sorted(BRIDGE_TOOLS & set(NEVER_OVER_THE_BRIDGE)) == []
+
+
+#: An argument that names a place on this computer, or that stands for the
+#: person or a safety check here: a confirmation, a forced or skipped check,
+#: heaters kept on.  Judged by name over every listed tool's real signature.
+_LOCAL_ONLY_ARGUMENT = (
+    r"(^|_)(path|paths|file|files|dir|folder|profile)$"
+    r"|^force$|^skip_|_confirmed$|^preserve_|^keep_|^leave_|^bypass|^override"
+)
+
+#: Arguments of that kind a relayed call still carries, each with its reason.
+#: A confirmation the server carries is one a server that is not Kiln's could
+#: make up; that is the separate item "print approvals the server cannot
+#: forge", not a reason to break the flow below.
+_CARRIED_ON_PURPOSE = {
+    ("set_printer_model", "bed_confirmed"): (
+        "the bed size a person confirmed in Kiln's web app or a connector chat; a print on a "
+        "printer outside the catalogue waits for it (kiln-pro "
+        "tests/test_relay_safe_tools_registry.py)"
+    ),
+}
+
+
+def test_every_listed_tool_refuses_what_only_this_computer_may_give():
+    """No tool on the bridge's list takes a file location or a person's or
+    safety check's say from a relayed call.
+
+    Reads every listed tool's real signature: an argument that names a place
+    on this computer, or a confirmation, a forced or skipped check, or heaters
+    kept on, is refused for a relayed call (``BRIDGE_REFUSED_ARGS``) or carried
+    on purpose with its reason (``_CARRIED_ON_PURPOSE``).
+    """
+    import re
+
+    from kiln import server as _server
+
+    pattern = re.compile(_LOCAL_ONLY_ARGUMENT)
+    tools = {tool.name: tool for tool in _server.mcp._tool_manager.list_tools()}
+    missing = []
+    for name in sorted(BRIDGE_TOOLS):
+        tool = tools.get(name)
+        if tool is None:
+            continue  # registered only where its plugin loads; judged where it does
+        for arg in sorted((tool.parameters or {}).get("properties", {})):
+            if (pattern.search(arg) and arg not in BRIDGE_REFUSED_ARGS.get(name, frozenset())
+                    and (name, arg) not in _CARRIED_ON_PURPOSE):
+                missing.append(f"{name}({arg})")
+    assert not missing, f"listed tools take arguments only this computer may give: {missing}"

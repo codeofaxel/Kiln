@@ -111,13 +111,22 @@ BRIDGE_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-#: Arguments a relayed call may not carry, by tool: each names a file on
-#: this computer, which a request from the web or an app does not choose.
-#: ``slice_and_print`` gets its model from the saved make the call names
-#: (the bridge fetches it and fills ``input_path`` itself).
+#: Arguments a relayed call may not carry, by tool.  Each either names a file
+#: on this computer (a place to read or write, which a request from the web
+#: or an app does not choose) or stands for the person or a safety check
+#: here (a confirmation, a forced or skipped check, heaters left on), which
+#: only this computer can give.  A relayed call gets the tool's defaults for
+#: all of them.  ``slice_and_print`` gets its model from the saved make the
+#: call names (the bridge fetches it and fills ``input_path`` itself).
+#: ``kiln/tests/test_bridge_runs_only_its_own_list.py`` fails a listed tool
+#: that gains such an argument without a row here.
 BRIDGE_REFUSED_ARGS: dict[str, frozenset[str]] = {
     "set_printer_model": frozenset({"slicer_file"}),
-    "slice_and_print": frozenset({"input_path", "profile"}),
+    "slice_and_print": frozenset({"input_path", "profile", "skip_validation"}),
+    "printer_snapshot": frozenset({"save_path"}),
+    "resume_print": frozenset({"force", "hardware_confirmed"}),
+    "cancel_print": frozenset({"preserve_temperatures"}),
+    "pause_print": frozenset({"keep_temps", "leave_nozzle"}),
 }
 
 #: The code a refused relayed call carries back to the server.
