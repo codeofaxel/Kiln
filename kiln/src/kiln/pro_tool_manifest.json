@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-13T16:42:51.577928+00:00",
+  "generated": "2026-11-14T19:57:20.482087+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -8477,6 +8477,19 @@
             "default": null,
             "title": "Pr Id",
             "description": "Optional explicit pull-request id to satisfy the gate with.  Omitted \u2192 the open/approved PR on this exact source\u2192target pair is used."
+          },
+          "expected_head_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Head Version Id",
+            "description": "The source branch's newest version as the person last saw it (a request's proposed part, a branch list).  If the branch has a newer one now, nothing is merged (``SOURCE_HEAD_MOVED``).  Omitted: the branch as it is."
           }
         },
         "required": [
@@ -29058,6 +29071,12 @@
             "title": "Allow Unsatisfiable",
             "type": "boolean",
             "description": "When true, keep a gate whose rules ask for more qualifying reviewers than the org has, with the problem reported under ``rule_warnings``.  When false (the default), such a gate is refused and nothing is saved."
+          },
+          "applies_to_owner": {
+            "default": false,
+            "title": "Applies To Owner",
+            "type": "boolean",
+            "description": "When true, the rule holds the design's owner too: on Kiln's servers the branch then changes only through a merge that meets the rule, and the owner's own direct changes and pushes to it are refused (``BRANCH_PROTECTED``).  When false (the default), the owner may still change the branch directly.  Each save of the rule sets it again."
           }
         },
         "required": [
