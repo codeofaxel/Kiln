@@ -1483,7 +1483,8 @@ async def _served_or_here(
     # An edit of a design kept on this computer, read before the tool may
     # write over its file (a no-op where kiln-pro keeps edits itself).
     edit = await asyncio.to_thread(edit_lineage.begin_here, name, arguments)
-    entry = served_public.plan(name, arguments)
+    # Off the event loop too: a plan can read the call's own source file.
+    entry = await asyncio.to_thread(served_public.plan, name, arguments)
     tool = (getattr(tool_mgr, "_tools", None) or {}).get(name)
     try:
         if entry is None or tool is None or not _arguments_validate(tool, arguments):

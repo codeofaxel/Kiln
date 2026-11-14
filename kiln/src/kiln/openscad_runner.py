@@ -66,6 +66,7 @@ from typing import Any
 
 from kiln import run_program
 from kiln.scad_main import runnable_inputs
+from kiln.scad_reads import LIBRARIES
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +438,7 @@ _IGNORED_SETTING = re.compile(
     r"(?: in file (.+?), line (\d+))?"
 )
 #: The bundled libraries: a warning raised inside one is not the caller's.
-_LIBRARY_FOLDERS = ("BOSL2", "MCAD")
+_LIBRARY_FOLDERS = LIBRARIES
 
 
 def ignored_settings(stderr: str | bytes | None) -> list[tuple[str, int | None]]:

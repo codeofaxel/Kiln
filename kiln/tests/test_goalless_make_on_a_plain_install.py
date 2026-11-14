@@ -490,6 +490,35 @@ def test_a_compile_through_the_mcp_dispatch_sends_no_source(plain_install, serve
     assert out[SAVED_GOAL_KEY]["brief_id"] == "session-1"
 
 
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD not installed")
+def test_a_compile_that_imports_a_file_here_still_opens_its_goal(plain_install, servers, tmp_path):
+    """A signed-in install sends compile_scad to Kiln's servers, but not a
+    source that reads a file on this computer: that one is built here from
+    the start.  Nothing was missed on the way, so its model still opens a
+    goal in the person's account, told by its words and never sent."""
+    import json
+
+    import trimesh
+
+    manifest = json.loads((Path(srv.__file__).parent / "pro_tool_manifest.json").read_text())
+    served_public.load(manifest["served_public"])
+    s = servers(_opened())
+    relief = tmp_path / "relief.stl"
+    trimesh.creation.box(extents=(10, 10, 4)).export(relief)
+    out = asyncio.run(
+        srv.mcp._tool_manager.call_tool(
+            "compile_scad", {"scad_code": f'import("{relief}");'}, context=None, convert_result=False,
+        )
+    )
+    out = next(x for x in out if isinstance(x, dict)) if isinstance(out, list) else out
+    assert out.get("success") is True, out
+    assert [tool for tool, _ in s.asks if tool == "compile_scad"] == []
+    sessions = [sent for tool, sent in s.asks if tool == "design_session"]
+    assert len(sessions) == 1 and sessions[0]["verb"] == "join", s.asks
+    assert str(relief) not in repr(s.asks) and "import(" not in repr(s.asks)
+    assert out[SAVED_GOAL_KEY]["brief_id"] == "session-1"
+
+
 # ---------------------------------------------------------------------------
 # The served door itself: an ask nobody made, and scrubbed
 # ---------------------------------------------------------------------------
