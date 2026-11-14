@@ -1935,6 +1935,9 @@ class PrinterAdapter(ABC):
 
             @functools.wraps(original)
             def _safe_upload_file(self, file_path: str):
+                # A resume file Kiln made is followed to the name it is
+                # saved under; anything saved over that name unties it.
+                digest = _resume_digest(self, file_path)
                 try:
                     file_path = _preflight_upload_or_raise(self, file_path)
                 except _UnsafeUpload as exc:
@@ -1943,7 +1946,14 @@ class PrinterAdapter(ABC):
                 if refusal := _incomplete_upload_reason(self, file_path):
                     from kiln.printers import PrinterError
                     raise PrinterError(refusal)
-                return original(self, file_path)
+                try:
+                    result = original(self, file_path)
+                except BaseException:
+                    _note_resume_upload(self, file_path, None, None)
+                    raise
+                ok = bool(getattr(result, "success", True))
+                _note_resume_upload(self, file_path, getattr(result, "file_name", None), digest if ok else None)
+                return result
 
             _safe_upload_file._kiln_safety_wrapped = True  # type: ignore[attr-defined]
             cls.upload_file = _safe_upload_file
@@ -4530,6 +4540,34 @@ def _feed_outcome_lifecycle(
 # ---------------------------------------------------------------------------
 # Pre-upload safety check (called from PrinterAdapter.__init_subclass__)
 # ---------------------------------------------------------------------------
+
+
+def _resume_digest(adapter: PrinterAdapter, file_path: str) -> str | None:
+    """The bytes' digest of a file about to go to *adapter*, read only when
+    a resume record exists for that machine (:mod:`kiln.resume_provenance`)."""
+    try:
+        from kiln.resume_provenance import digest_for_upload
+
+        return digest_for_upload(adapter, file_path)
+    except Exception:  # noqa: BLE001 -- bookkeeping never blocks an upload
+        return None
+
+
+def _note_resume_upload(
+    adapter: PrinterAdapter, sent_path: str, remote_name: str | None, digest: str | None,
+) -> None:
+    """Tell the resume record what is now saved under this name on the
+    printer (:func:`kiln.resume_provenance.note_upload`)."""
+    try:
+        from kiln.resume_provenance import note_upload
+
+        names = {os.path.basename(str(sent_path or ""))}
+        if remote_name:
+            names.add(os.path.basename(str(remote_name)))
+        for name in names:
+            note_upload(adapter, name, digest=digest if name == os.path.basename(str(remote_name or sent_path)) else None)
+    except Exception:  # noqa: BLE001 -- bookkeeping never blocks an upload
+        logger.debug("resume record: upload not noted", exc_info=True)
 
 
 class _UnsafeUpload(Exception):

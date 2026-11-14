@@ -512,41 +512,25 @@ def _resolve_material(kwargs: dict[str, Any]) -> str | None:
 
 
 def _claims_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
-    """Whether a start SAYS it is a resume-mode continuation (mid-print
-    decoration / recovery): the caller's flag or a resume-style file name.
+    """Whether a start SAYS it is a resume-mode continuation: the caller's
+    flag or a resume-style file name (:func:`kiln.print_signoff.claims_resume`).
     A claim only; see :func:`_is_resume_print`."""
-    if kwargs.get("resume_from_paused"):
-        return True
-    name = (file_name or "").lower()
-    return "_resume_" in name or name.startswith(
-        ("transformed_resume", "original_resume")
-    )
+    from kiln.print_signoff import claims_resume
+
+    return claims_resume(file_name, kwargs)
 
 
 def _is_resume_print(file_name: str, kwargs: dict[str, Any], *, adapter: Any = None) -> bool:
-    """True for a resume-mode continuation the printer backs: the start
-    claims to continue a paused print AND the printer it is aimed at reports
-    a paused job right now (:func:`kiln.print_signoff.printer_reports_paused`).
+    """True only for a resume file Kiln made for the job paused on this
+    printer right now: :func:`kiln.print_signoff.verified_resume`, the one
+    check every start door asks.  Anything else, whatever it calls itself,
+    is judged here as the new print it may be."""
+    from kiln.print_signoff import verified_resume
 
-    Both the flag and the name are chosen by whoever starts the print, so a
-    claim the printer does not back is judged as the new print it may be.
-    """
-    if not _claims_resume_print(file_name, kwargs):
-        return False
-    from kiln.print_signoff import printer_reports_paused
-
-    if adapter is not None:
-        paused = printer_reports_paused(adapter=adapter)
-    else:
-        paused = printer_reports_paused(kwargs.get("printer_name"))
-    if paused:
-        return True
-    _logger.warning(
-        "print_gate: %s said it continues a paused print, but the printer reports no paused job; "
-        "it is judged as a new print.",
-        os.path.basename(str(file_name or "")) or "a file",
+    return verified_resume(
+        file_name, kwargs, adapter=adapter,
+        printer_name=None if adapter is not None else kwargs.get("printer_name"),
     )
-    return False
 
 
 def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:

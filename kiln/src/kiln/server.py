@@ -2845,12 +2845,13 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         return None  # one switch turns off consent prompts, as it always did
     file_value = str(arguments.get(arg_name) or "")
     # A resume continues a print that already had its yes, so nobody is
-    # asked again -- but only when the printer itself reports the paused
-    # job.  The flag and the file name are the caller's to choose, and a
-    # claim the printer does not back is asked about like any new print.
+    # asked again -- but only for a resume file Kiln made for the job the
+    # printer reports paused right now (print_signoff.verified_resume).  The
+    # flag and the file name are the caller's to choose, and a start they
+    # alone call a resume is asked about like any new print.
     from kiln import print_signoff
 
-    if print_signoff.claims_resume(file_value, arguments) and await asyncio.to_thread(
+    if await asyncio.to_thread(
         print_signoff.verified_resume, file_value, arguments, printer_name=arguments.get("printer_name"),
     ):
         return None  # already running, already approved
@@ -9891,12 +9892,11 @@ def start_print(
     # -- Preview confirmation gate -----------------------------------------
     # One helper, six callers: see _preview_gate_error for why this stopped
     # living inside this function.
-    # A resume is a start the printer backs: the caller's flag, or a file
-    # named like a resume file (``transformed_resume_<sid>.3mf`` /
-    # ``original_resume_<sid>.3mf`` from decorate_during_print and
-    # get_print_before_edit), AND the printer reporting a paused job.  A
-    # claim alone is a new print: it gets the yes and the preview, its
-    # pre-flight wants an idle printer, and the plate check applies.
+    # A resume is a resume file Kiln made for the job this printer reports
+    # paused right now (print_signoff.verified_resume): the same bytes, the
+    # same machine, the same job.  The caller's flag and a resume-style file
+    # name are claims only: a start they alone call a resume is a new print,
+    # with the yes, the preview, an idle pre-flight and the plate check.
     from kiln import print_signoff
 
     _is_resume = print_signoff.verified_resume(
@@ -21536,7 +21536,10 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     # never where the call asked for its OUTPUT: it is not
                     # the person's file, and a step runs only on a file
                     # that is there.
-                    answer = served_makes.arrive(_name, answer)
+                    # A resume file in these steps is recorded where it is
+                    # started (served_steps.carry_out), for the printer the
+                    # start names.
+                    answer = served_makes.arrive(_name, answer, record_resumes=False)
                     steps = served_steps.wanted(answer)
                     acting = bool(served_steps.actions_in(steps))
                     if acting and not approved:
@@ -21581,6 +21584,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # here.  Say so, and fetch its look for the stage.
                 return served_makes.arrive(
                     _name, answer, allowance=_PRO_TOOL_QUOTA.get(_name), trip=trip,
+                    printer_name=str(asked_printer) if asked_printer else None,
                 )
             return _stub
 

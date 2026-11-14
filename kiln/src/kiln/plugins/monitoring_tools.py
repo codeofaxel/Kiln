@@ -1539,11 +1539,14 @@ class _MonitoringToolsPlugin:
             try:
                 # The same consent rule start_print applies: this starts a
                 # print on a file already on the printer, which is the same
-                # act under a different name.
+                # act under a different name.  A resume claim is judged by
+                # the one check (print_signoff.verified_resume).
+                from kiln import print_signoff as _print_signoff
+
                 if block := _srv._preview_gate_error(
                     "start_monitored_print", file_name, preview_token,
                     printer_name=printer_name,
-                    is_resume=_srv._is_resume_mode_3mf(file_name),
+                    is_resume=_print_signoff.claims_resume(file_name),
                 ):
                     return block
                 # Same door as the control verbs: config.yaml fallback included.

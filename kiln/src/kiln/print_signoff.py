@@ -78,7 +78,8 @@ SOURCE_QUEUED = "queued_job"
 #: A retry of the same object with new print settings leans on the approval
 #: the first print got.
 SOURCE_PRIOR_APPROVAL = "prior_approval"
-#: A resume 3MF continues a print that already had its yes.
+#: A resume file Kiln made continues a print that already had its yes
+#: (granted only after :func:`verified_resume`).
 SOURCE_RESUME = "resume"
 
 CODE_NOT_CONFIRMED = "PREVIEW_NOT_CONFIRMED"
@@ -103,21 +104,18 @@ def _bypassed() -> bool:
 
 def claims_resume(file_name: str, kwargs: dict[str, Any] | None = None) -> bool:
     """Whether a start SAYS it continues a paused print: the caller's
-    ``resume_from_paused`` flag, or a file named like a resume file.
+    ``resume_from_paused`` flag, or a file named like a resume file (a
+    ``_resume_`` mark, or a ``transformed_resume`` / ``original_resume``
+    name, in any format).
 
     A claim only.  Both are things whoever starts the print chooses, so on
-    their own they never skip a person's yes or the preview; see
-    :func:`verified_resume`.
+    their own they never skip a person's yes, the preview or the safety
+    gate; see :func:`verified_resume`.
     """
     if kwargs and kwargs.get("resume_from_paused"):
         return True
-    try:
-        from kiln.printers.base import is_resume_mode_3mf
-
-        return is_resume_mode_3mf(file_name)
-    except Exception:  # noqa: BLE001
-        name = (file_name or "").lower()
-        return "_resume_" in name
+    name = os.path.basename(str(file_name or "")).lower()
+    return "_resume_" in name or name.startswith(("transformed_resume", "original_resume"))
 
 
 def printer_reports_paused(printer_name: str | None = None, *, adapter: Any = None) -> bool:
@@ -150,25 +148,53 @@ def verified_resume(
     printer_name: str | None = None,
     adapter: Any = None,
 ) -> bool:
-    """Whether this start really continues a paused print: it claims to
-    (:func:`claims_resume`) AND the printer reports a paused job
-    (:func:`printer_reports_paused`).  Every start that skips the yes or
-    the preview because it is a resume asks this, never the claim alone.
+    """Whether this start really continues a paused print.  The one check
+    every start door asks before it skips the person's yes, the preview or
+    the print-time safety gate because a start is a resume.
 
-    A claim the printer does not back is written to this computer's log and
-    answered ``False``, so the start gets the same dialog and preview as any
-    other print.
+    ``True`` only when the file being started is a resume file Kiln itself
+    made for the job this printer is holding
+    (:func:`kiln.resume_provenance.made_for_paused_job`: same bytes, same
+    machine, same job, made recently) AND the printer reports that job
+    paused right now (:func:`printer_reports_paused`).  What the start says
+    about itself (:func:`claims_resume`) decides nothing: a start that
+    claims to be a resume and is not one is a new print, and when the
+    printer is paused that claim is reported
+    (:func:`kiln.resume_provenance.report_unrecognized`).
     """
-    if not claims_resume(file_name, kwargs):
-        return False
-    if printer_reports_paused(printer_name, adapter=adapter):
+    from kiln import resume_provenance
+
+    claimed = claims_resume(file_name, kwargs)
+    shown = os.path.basename(str(file_name or "")) or "a file"
+    try:
+        adapter = adapter if adapter is not None else _resolve_target(printer_name)
+    except Exception:  # noqa: BLE001 -- no printer, nothing to continue
+        adapter = None
+    record = resume_provenance.made_for_paused_job(file_name, adapter=adapter) if adapter is not None else None
+    if record is None and not claimed:
+        return False  # an ordinary start: the printer is not asked anything here
+    paused = adapter is not None and printer_reports_paused(adapter=adapter)
+    if record is not None and paused:
         return True
-    logger.warning(
-        "A start of %s said it continues a paused print, but the printer reports no paused "
-        "job; it is treated as a new print and needs a yes and a preview.",
-        os.path.basename(str(file_name or "")) or "a file",
+    if not claimed:
+        return False
+    if not paused:
+        logger.warning(
+            "A start of %s said it continues a paused print, but the printer reports no paused "
+            "job; it is treated as a new print and needs a yes, a preview and the safety gate.",
+            shown,
+        )
+        return False
+    resume_provenance.report_unrecognized(
+        file_name, adapter=adapter, why="no resume file Kiln made for the paused job matches it",
     )
     return False
+
+
+def _resolve_target(printer_name: str | None) -> Any:
+    from kiln.server import _resolve_adapter
+
+    return _resolve_adapter(printer_name)
 
 
 @dataclass(frozen=True)
@@ -510,15 +536,13 @@ def exemption_verdict(
     anything touches the token, so a refusal for want of a yes does not
     spend a token that is still good for the call that carries one.
 
-    *is_resume* is the caller's claim, and is granted only when the printer
-    it is aimed at reports a paused job (:func:`printer_reports_paused`).
+    *is_resume* is the caller's claim, and is granted only when
+    :func:`verified_resume` says this start continues the job paused on the
+    printer it is aimed at.
     """
-    if is_resume and not _bypassed() and not printer_reports_paused(printer_name):
-        logger.warning(
-            "%s(%s) said it continues a paused print, but the printer reports no paused job; "
-            "it needs a yes and a preview like any new print.",
-            tool, os.path.basename(str(file_name or "")) or "a file",
-        )
+    if is_resume and not _bypassed() and not verified_resume(
+        file_name, {"resume_from_paused": True}, printer_name=printer_name,
+    ):
         is_resume = False
     if _bypassed():
         if not is_resume:
@@ -584,8 +608,10 @@ def adapter_verdict(adapter: Any, file_name: str, kwargs: dict[str, Any] | None 
     """Called from ``PrinterAdapter.start_print``.  ``None`` to allow.
 
     Refuses only an adapter marked as requiring sign-off, for a file no
-    clearance covers, that is not a resume continuation, when the CI
-    bypass is off.  Everything unreadable allows: a backstop that could
+    clearance covers, that is not a resume continuation
+    (:func:`verified_resume`), when the CI bypass is off.  A clearance
+    whose source is a resume covers nothing on its own: only the check
+    does.  Everything unreadable allows: a backstop that could
     strand a legitimate print over its own bookkeeping is worse than none.
     """
     try:
@@ -594,7 +620,10 @@ def adapter_verdict(adapter: Any, file_name: str, kwargs: dict[str, Any] | None 
         if _bypassed() or verified_resume(file_name, kwargs, adapter=adapter):
             return None
         printer_name = getattr(adapter, "_kiln_registered_name", None) or None
-        if take(file_name, printer_name) is not None:
+        cleared = take(file_name, printer_name)
+        # A clearance that says "resume" is only ever as good as the check
+        # above, which has just said no: it clears nothing here.
+        if cleared is not None and cleared.source != SOURCE_RESUME:
             return None
     except Exception:  # noqa: BLE001
         logger.debug("sign-off backstop could not decide; allowing", exc_info=True)

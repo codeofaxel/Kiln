@@ -1,5 +1,6 @@
 """A start skips the person's yes and the preview as a resume only when the
-printer itself reports the paused job it continues.
+printer itself reports the paused job it continues, and the file is a resume
+file Kiln made for that job (``kiln/tests/test_a_resume_is_one_kiln_made.py``).
 
 ``resume_from_paused`` is an argument whoever starts the print sets, and a
 ``*_resume_*.3mf`` name is whatever the file's maker chose.  Each once let a
@@ -20,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kiln import print_signoff, server
+from kiln import print_signoff, resume_provenance, server
 from kiln.printers.base import PrinterState, PrinterStatus
 
 RESUME_FILE = "transformed_resume_ab12.3mf"
@@ -40,8 +41,18 @@ def printer(monkeypatch):
     monkeypatch.setattr(server, "_resolve_adapter", lambda *_a, **_k: machine)
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
     print_signoff.clear()
+    resume_provenance._reset_for_tests()
     yield machine
     print_signoff.clear()
+    resume_provenance._reset_for_tests()
+
+
+def _backed(machine, tmp_path, name: str) -> None:
+    """A resume file Kiln made for *machine*, saved there under *name*."""
+    path = tmp_path / name
+    path.write_bytes(b"a resume Kiln made")
+    record = resume_provenance.record_made_resume(str(path), adapter=machine, made_by="decorate_during_print")
+    resume_provenance.note_upload(machine, name, digest=record.sha256)
 
 
 CLAIMS = [
@@ -83,8 +94,9 @@ def test_a_claimed_resume_on_an_idle_printer_is_asked_about(printer, monkeypatch
 
 
 @pytest.mark.parametrize(("file_name", "extra"), CLAIMS)
-def test_a_resume_the_printer_backs_is_not_asked_again(printer, monkeypatch, file_name, extra):
+def test_a_resume_the_printer_backs_is_not_asked_again(printer, monkeypatch, tmp_path, file_name, extra):
     printer.status = PrinterStatus.PAUSED
+    _backed(printer, tmp_path, file_name)
     assert _dialog(monkeypatch, file_name, extra) == []
 
 
@@ -98,12 +110,14 @@ def test_the_preview_gate_refuses_a_claimed_resume_on_an_idle_printer(printer):
     assert block is not None and block["success"] is False
 
 
-def test_the_preview_gate_lets_a_backed_resume_through(printer):
+def test_the_preview_gate_lets_a_backed_resume_through(printer, tmp_path):
     printer.status = PrinterStatus.PAUSED
+    _backed(printer, tmp_path, RESUME_FILE)
     assert server._preview_gate_error("start_print", RESUME_FILE, None, printer_name="garage", is_resume=True) is None
 
 
-def test_the_exemption_is_granted_only_on_a_paused_printer(printer):
+def test_the_exemption_is_granted_only_on_a_paused_printer(printer, tmp_path):
+    _backed(printer, tmp_path, RESUME_FILE)
     assert print_signoff.exemption_verdict("start_print", RESUME_FILE, "garage", is_resume=True) is None
     printer.status = PrinterStatus.PAUSED
     verdict = print_signoff.exemption_verdict("start_print", RESUME_FILE, "garage", is_resume=True)
@@ -111,17 +125,21 @@ def test_the_exemption_is_granted_only_on_a_paused_printer(printer):
 
 
 @pytest.mark.parametrize(("file_name", "extra"), CLAIMS)
-def test_the_adapter_backstop_asks_the_printer(printer, file_name, extra):
+def test_the_adapter_backstop_asks_the_printer(printer, tmp_path, file_name, extra):
     printer._kiln_signoff_required = True  # the mark a registry sets
+    _backed(printer, tmp_path, file_name)
     assert print_signoff.adapter_verdict(printer, file_name, extra) is not None
     printer.status = PrinterStatus.PAUSED
     assert print_signoff.adapter_verdict(printer, file_name, extra) is None
 
 
 @pytest.mark.parametrize(("file_name", "extra"), CLAIMS)
-def test_the_pre_print_safety_gate_judges_a_claimed_resume_on_an_idle_printer(printer, monkeypatch, file_name, extra):
+def test_the_pre_print_safety_gate_judges_a_claimed_resume_on_an_idle_printer(
+    printer, monkeypatch, tmp_path, file_name, extra,
+):
     """The gate every adapter start meets skips its checks only for a resume
     the printer backs; a claim alone is judged like any new print."""
+    _backed(printer, tmp_path, file_name)
     from kiln.printers import print_gate
 
     judged = {"reason": "judged as a new print"}
@@ -190,8 +208,10 @@ GATE_CALLS = frozenset({"consent_for", "exemption_verdict", "adapter_verdict", "
 #: Calls that read a resume CLAIM (a flag or a name the caller chose).
 CLAIM_CALLS = frozenset({"is_resume_mode_3mf", "_is_resume_mode_3mf", "claims_resume", "_is_resume"})
 CLAIM_NAMES = frozenset({"resume_from_paused", "is_resume", "_is_resume", "is_resume_3mf"})
-#: Calls that ask the printer.
-VERIFIERS = frozenset({"verified_resume", "printer_reports_paused"})
+#: The one check: the printer reports the paused job, and the file is a
+#: resume Kiln made for it.  Asking only whether the printer is paused is
+#: not enough.
+VERIFIERS = frozenset({"verified_resume"})
 #: The helpers that define the claim and the check themselves.
 HELPERS = frozenset({"claims_resume", "verified_resume", "printer_reports_paused"})
 
@@ -256,13 +276,14 @@ def resume_gates(src: Path) -> dict[str, tuple[list[int], bool]]:
 
 def test_every_early_return_on_a_resume_claim_asks_the_printer():
     gates = resume_gates(SRC)
-    # Not vacuous: the gates that read a resume claim are found.  (The adapter
-    # backstop asks verified_resume directly, so it reads no bare claim.)
-    assert {"server.py::_obtain_print_consent", "print_signoff.py::exemption_verdict"} <= set(gates)
+    # Not vacuous: the gates that read a resume claim are found.  (The
+    # approval dialog and the adapter backstop ask verified_resume directly,
+    # so they read no bare claim.)
+    assert {"print_signoff.py::exemption_verdict"} <= set(gates)
     unverified = {name: lines for name, (lines, asks) in gates.items() if not asks}
     assert unverified == {}, (
-        "a gate returns early on a resume flag or file name without asking the printer "
-        "(print_signoff.verified_resume / printer_reports_paused): " + repr(unverified)
+        "a gate returns early on a resume flag or file name without the one check "
+        "(print_signoff.verified_resume): " + repr(unverified)
     )
 
 
@@ -270,6 +291,16 @@ def test_the_scan_catches_the_old_shape(tmp_path):
     (tmp_path / "gate.py").write_text(
         "def ask(arguments, file_value):\n"
         "    if _is_resume_mode_3mf(file_value) or arguments.get('resume_from_paused'):\n"
+        "        return None\n"
+        "    return consent_for(file_name=file_value)\n"
+    )
+    assert resume_gates(tmp_path) == {"gate.py::ask": ([2], False)}
+
+
+def test_the_scan_catches_a_gate_that_only_asks_whether_the_printer_is_paused(tmp_path):
+    (tmp_path / "gate.py").write_text(
+        "def ask(arguments, file_value):\n"
+        "    if claims_resume(file_value, arguments) and printer_reports_paused(None):\n"
         "        return None\n"
         "    return consent_for(file_name=file_value)\n"
     )

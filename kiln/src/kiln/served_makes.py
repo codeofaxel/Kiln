@@ -660,12 +660,21 @@ def _without_server_files(answer: dict) -> dict:
 
 
 def arrive(
-    tool: str, answer: Any, *, allowance: dict | None = None, trip: dict | None = None,
+    tool: str,
+    answer: Any,
+    *,
+    allowance: dict | None = None,
+    trip: dict | None = None,
+    printer_name: str | None = None,
+    record_resumes: bool = True,
 ) -> Any:
     """*answer* from a served tool, made true for this computer.
 
     *trip* is what :func:`send_inputs` noted on the way out: where the call
-    asked for its outputs.
+    asked for its outputs.  A resume file a resume-making tool hands over is
+    recorded as Kiln's for *printer_name* (the printer the call was aimed
+    at) unless *record_resumes* is off
+    (:func:`kiln.resume_provenance.record_handed_resumes`).
 
     An answer that made nothing (no ``artifact`` block, or an error) comes
     back untouched.  One that did has its server-side paths removed, gains a
@@ -681,6 +690,10 @@ def arrive(
         # sweep for server-only paths below leaves them alone.
         _bring_documents(answer)
         _bring_files(answer, trip)
+        if record_resumes:
+            from kiln.resume_provenance import record_handed_resumes
+
+            record_handed_resumes(tool, answer, printer_name=printer_name)
         _scrub_below_the_top(answer)
         artifact = answer.get("artifact")
         token = (

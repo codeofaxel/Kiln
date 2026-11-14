@@ -1230,6 +1230,43 @@ def _act(
     return _act_result(answered), None
 
 
+def _record_served_resumes(tool: str, actions: list[dict[str, Any]]) -> None:
+    """Record as Kiln's each file the servers handed over that these actions
+    upload and then start as a resume (``start_print`` with
+    ``resume_from_paused``), for the printer the start names
+    (:func:`kiln.resume_provenance.record_made_resume`).  Only for a
+    resume-making tool (:data:`kiln.resume_provenance.RESUME_MAKERS`), and
+    before the upload runs, so the upload ties the file to its name on the
+    printer.  Never raises."""
+    try:
+        from kiln.resume_provenance import RESUME_MAKERS, record_made_resume
+
+        if tool not in RESUME_MAKERS:
+            return
+        uploads = {
+            str(s.get("id")): s.get("args") or {}
+            for s in actions
+            if s.get("tool") == "upload_file" and isinstance(s.get("args"), dict)
+        }
+        for step in actions:
+            args = step.get("args") or {}
+            if step.get("tool") != "start_print" or not isinstance(args, dict):
+                continue
+            if args.get("resume_from_paused") is not True:
+                continue
+            named = args.get("file_name")
+            if not isinstance(named, dict) or named.get("field") != "file_name":
+                continue
+            upload = uploads.get(str(named.get("from_step")))
+            path = _handed_file((upload or {}).get("file_path"))
+            if path is None:
+                continue
+            printer = args.get("printer_name") or (upload or {}).get("printer_name")
+            record_made_resume(path, printer_name=printer if isinstance(printer, str) and printer else None, made_by=tool)
+    except Exception:  # noqa: BLE001 -- a missing record only means the start is asked about
+        logger.debug("served steps: resume not recorded", exc_info=True)
+
+
 def actions_in(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The steps of *steps* that act on a printer."""
     return [s for s in steps if s.get("kind") == ACT_KIND]
@@ -1513,6 +1550,7 @@ def carry_out(
                 f"{tool} asked this computer to act on your printer in a way "
                 "Kiln does not carry out for a served tool. Nothing was run.",
             )
+    _record_served_resumes(tool, actions)
     done: dict[str, dict[str, Any]] = {}
     for step in actions:
         step_id = str(step.get("id"))
