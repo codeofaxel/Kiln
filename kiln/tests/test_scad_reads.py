@@ -43,6 +43,18 @@ READS = [
     ('surface(file = str("/etc/", "hosts"));', [("read", None)]),
     ('import("/tmp/a.stl" /* */ , file = f);', [("read", "/tmp/a.stl"), ("read", None)]),
     ('dxf_dim(file="/etc/a.dxf", name="x");', [("read", "/etc/a.dxf")]),
+    # A positional argument names the file wherever it stands; numbers,
+    # booleans and lists of them name none.
+    ('import(convexity=2, "/x/a.stl");', [("read", "/x/a.stl")]),
+    ('surface(center=true, invert=false, "/x/b.dat");', [("read", "/x/b.dat")]),
+    ('import("/x/a.stl", 10, [0, 0]);', [("read", "/x/a.stl")]),
+    ('import("/x/a.stl", -1, true, undef);', [("read", "/x/a.stl")]),
+    ('surface(["/x/b.dat"][0]);', [("read", None)]),
+    ('surface(true ? "/x/b.dat" : "");', [("read", None)]),
+    ('let(f="/x/b.dat") surface(f);', [("read", None)]),
+    ('function p()="/x/b.dat"; surface(p());', [("read", None)]),
+    # A comment between the word and its target hides the target.
+    ("include /* x */ </x/b.scad>", [("include", None)]),
 ]
 
 
@@ -80,6 +92,8 @@ def test_a_source_reading_nothing_but_the_bundled_libraries(code):
         "include <BOSL2\\std.scad>",
         'f = "/Users/someone/relief.stl"; import(f);',
         'translate([0, 0, 2]) linear_extrude(height=1, file="/Users/someone/outline.dxf");',
+        'import(convexity=2, "/Users/someone/relief.stl");',
+        "include /* the parts */ <BOSL2/std.scad>",
     ],
 )
 def test_a_source_reading_any_other_file(code):

@@ -2,11 +2,15 @@
 
 OpenSCAD reads a file in two ways: ``include <...>`` / ``use <...>``, and the
 built-ins that take a file (``import``, ``surface``, the ``dxf_*`` family),
-by their first argument or a ``file`` / ``filename`` argument.
+by a positional argument or a ``file`` / ``filename`` argument.
 :func:`file_reads` lists every such read in a source, comments left out.
 A read whose file is not written as one plain quoted string (a variable, a
 ``str(...)``, a module parameter) is listed with no path, because nothing
 short of running the source says which file it is.
+
+It is the one reader of this in Kiln: a signed-in install asks it before a
+build leaves the computer, and Kiln's servers ask it of every source they
+are handed.
 
 Kiln ships two OpenSCAD libraries, :data:`LIBRARIES`, on OpenSCAD's library
 path.  :func:`reads_beyond_bundled_libraries` says whether a source reads
@@ -20,7 +24,7 @@ from __future__ import annotations
 #: The OpenSCAD libraries Kiln ships, as ``include`` / ``use`` name them.
 LIBRARIES: tuple[str, ...] = ("BOSL2", "MCAD")
 
-#: Built-ins that read a file named by their first argument.
+#: Built-ins that read a file named by a positional argument.
 READERS = frozenset({
     "import", "surface", "import_stl", "import_off", "import_dxf",
     "dxf_linear_extrude", "dxf_rotate_extrude", "dxf_dim", "dxf_cross",
@@ -33,6 +37,10 @@ FILE_ARGS = frozenset({"file", "filename"})
 _READ_WORDS = ("include", "use", *sorted(READERS), *sorted(FILE_ARGS))
 
 _OPENERS, _CLOSERS = "([{", ")]}"
+
+#: Words that are values, never a file, in a reader's positional argument.
+_LITERAL_WORDS = frozenset({"true", "false", "undef"})
+_LITERAL_PUNCT = frozenset({"[", "]", ",", "-", "+", "."})
 
 _Token = tuple[str, str]
 
@@ -108,12 +116,31 @@ def _argument(tokens: list[_Token], start: int) -> tuple[list[_Token], int]:
     return tokens[start:i], i
 
 
+def _plain_literal(argument: list[_Token]) -> bool:
+    """Whether *argument* is only numbers, booleans and lists of them: a
+    value that cannot name a file (a convexity, an origin, a scale)."""
+    return bool(argument) and all(
+        kind == "num"
+        or (kind == "id" and text in _LITERAL_WORDS)
+        or (kind == "p" and text in _LITERAL_PUNCT)
+        for kind, text in argument
+    )
+
+
 def file_reads(code: str) -> list[tuple[str, str | None]]:
     """Every file *code* would read, as ``(how, path)``.
 
     ``how`` is ``"include"`` (an ``include`` or ``use``) or ``"read"`` (a
     built-in that reads a file).  ``path`` is ``None`` when the source does
     not name the file as one plain quoted string.
+
+    Every argument of a reading built-in is judged, not only the first:
+    OpenSCAD binds a positional argument to the file however many named
+    ones come before it (``import(convexity=2, "/x.stl")`` reads
+    ``/x.stl``).  A positional argument that is only numbers and booleans
+    names no file; any other one is a read.  A named ``file=`` or
+    ``filename=`` is a read in any call.  An ``include`` or ``use`` whose
+    target cannot be taken as written is a read of an unknown file.
     """
     if not any(word in code for word in _READ_WORDS):
         return []
@@ -129,11 +156,21 @@ def file_reads(code: str) -> list[tuple[str, str | None]]:
             reads.append(("include", text))
         elif kind != "id" or i + 1 >= len(tokens):
             continue
+        elif text in ("include", "use") and tokens[i + 1] == ("p", "<"):
+            # Something between the word and its target (a comment) kept the
+            # tokenizer from reading the target: a read of an unknown file.
+            reads.append(("include", None))
         elif text in READERS and tokens[i + 1] == ("p", "("):
-            first, _end = _argument(tokens, i + 2)
-            named = len(first) >= 2 and first[0][0] == "id" and first[1] == ("p", "=")
-            if first and not named:
-                reads.append(("read", first[0][1] if len(first) == 1 and first[0][0] == "str" else None))
+            start = i + 2
+            while start < len(tokens):
+                argument, end = _argument(tokens, start)
+                named = len(argument) >= 2 and argument[0][0] == "id" and argument[1] == ("p", "=")
+                if argument and not named and not _plain_literal(argument):
+                    single = len(argument) == 1 and argument[0][0] == "str"
+                    reads.append(("read", argument[0][1] if single else None))
+                if end >= len(tokens) or tokens[end] != ("p", ","):
+                    break
+                start = end + 1
         elif text in FILE_ARGS and depth > 0 and tokens[i + 1] == ("p", "="):
             value, _end = _argument(tokens, i + 2)
             reads.append(("read", value[0][1] if len(value) == 1 and value[0][0] == "str" else None))
