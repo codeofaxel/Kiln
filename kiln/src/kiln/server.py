@@ -23548,7 +23548,7 @@ def smart_reprint(
             extra_overrides=extra_overrides,
             use_ams=detected_use_ams,
             ams_mapping=detected_ams_mapping,
-            brief_id=resolved_brief_id or "",
+            goal_id=resolved_brief_id or "",
             chosen_by=chosen_by,
         )
 
