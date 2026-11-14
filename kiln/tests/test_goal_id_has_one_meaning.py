@@ -168,27 +168,37 @@ class TestTwoDifferentGoalsAreRefusedInWords:
 
 
 class TestTheBridgeDoor:
-    """A call relayed to this computer follows the dispatcher's rule.
+    """The bridge's tool caller follows the dispatcher's rule.
 
-    The bridge runs only the tools on its own list, so the probe tools are
-    put on it for these tests."""
+    No tool on the bridge's list takes a saved goal today, so a relayed call
+    carrying one is refused before the caller is reached; the caller's own
+    rule is tested directly, with the probe tools put on the list, for the
+    day a listed tool takes one."""
 
-    @pytest.fixture(autouse=True)
-    def _probes_on_the_list(self, monkeypatch):
+    def test_a_relayed_call_carries_no_goal_today(self):
+        from kiln import bridge_client
+
+        ran: list[str] = []
+        resp = bridge_client.handle_relay_request(
+            {"request_id": "r1", "tool_name": "monitor_print", "args": {"goal_id": "g-123"}},
+            call_tool=lambda name, args: ran.append(name),
+            fetch_artifact=lambda token: "",
+        )
+        assert resp["ok"] is False and resp["error"]["argument"] == "goal_id"
+        assert ran == []
+
+    def test_the_tool_caller_reads_the_other_name_too(self, monkeypatch):
         from kiln import bridge_client
 
         monkeypatch.setattr(bridge_client, "BRIDGE_TOOLS", bridge_client.BRIDGE_TOOLS | {_BRIEF_TOOL, _GOAL_TOOL})
-
-    def test_a_relayed_call_reads_the_other_name_too(self):
-        from kiln import bridge_client
-
         call = bridge_client._default_tool_caller()
         assert call(_BRIEF_TOOL, {"goal_id": "g-123"})["goal"] == "g-123"
         assert call(_GOAL_TOOL, {"brief_id": "g-123"})["goal"] == "g-123"
 
-    def test_a_relayed_unknown_argument_still_fails(self):
+    def test_the_tool_caller_still_fails_an_unknown_argument(self, monkeypatch):
         from kiln import bridge_client
 
+        monkeypatch.setattr(bridge_client, "BRIDGE_TOOLS", bridge_client.BRIDGE_TOOLS | {_BRIEF_TOOL, _GOAL_TOOL})
         call = bridge_client._default_tool_caller()
         with pytest.raises(TypeError):
             call(_BRIEF_TOOL, {"goal_idd": "g-123"})
