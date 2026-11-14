@@ -125,10 +125,9 @@ def test_the_quick_look_never_changes_the_answer(monkeypatch):
 
 
 #: Runs that start with a digit: ``(run, OpenSCAD reads it as a name, the
-#: reader reads it as a name)``.  The OpenSCAD column is measured (OpenSCAD
-#: 2026.04): a name runs longer than the number it starts with, a tie is a
-#: number, and hex is a number only with a lowercase ``0x``.  The reader
-#: agrees everywhere but hex, which it reads as a name on purpose.
+#: reader reads it as a name)``.  The OpenSCAD column is checked against
+#: OpenSCAD itself by the test below.  The reader agrees everywhere but hex,
+#: which it reads as a name so that no read is missed.
 DIGIT_LED = [
     ("1x", True, True), ("1e", True, True), ("1_a", True, True), ("1e5x", True, True),
     ("9e9e", True, True), ("0x", True, True), ("0xg", True, True), ("0x1g", True, True),
