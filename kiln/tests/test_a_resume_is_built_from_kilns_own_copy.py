@@ -302,6 +302,25 @@ def test_a_wrapped_job_is_judged_by_the_wrap_it_sent(twin):
     assert monitor_twin.active_records()[0]["gcode_sha256"] is None
 
 
+@pytest.mark.parametrize(("sent", "kept"), [(TOOLPATH, True), (OTHER, False)], ids=["the-slice", "other-bytes"])
+def test_a_print_kiln_starts_is_recorded_by_what_it_sent(machine, twin, monkeypatch, sent, kept):
+    """Through the printer's own upload and start: Kiln slices the vase, and
+    what is uploaded under the slice's name is the slice, or other bytes.
+    Only the slice gives the print a record a resume can be built from."""
+    from kiln.printers import print_gate
+
+    monkeypatch.setattr(print_gate, "run_adapter_gate", lambda *_a, **_k: None)
+    machine.status = PrinterStatus.IDLE
+    gcode = _file(twin, "vase.gcode", TOOLPATH)
+    monitor_twin.note_sliced(_file(twin, "vase.stl", b"solid vase"), gcode)
+    elsewhere = twin / "elsewhere"
+    elsewhere.mkdir()
+    machine.upload_file(_file(elsewhere, "vase.gcode", sent))
+    assert machine.start_print("vase.gcode").success
+    [record] = monitor_twin.active_records()
+    assert record["gcode_sha256"] == (hashlib.sha256(TOOLPATH).hexdigest() if kept else None)
+
+
 def test_every_upload_records_the_bytes_sent_under_its_name(machine, tmp_path):
     first = _file(tmp_path, "vase.gcode", TOOLPATH)
     machine.upload_file(first)
