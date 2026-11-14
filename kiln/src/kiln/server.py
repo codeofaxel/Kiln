@@ -17291,11 +17291,6 @@ def await_print_completion(
                     }
                 )
                 last_pct = pct
-            paused = state.state == PrinterStatus.PAUSED
-            if pct is None:
-                _say_progress("Paused" if paused else "Printing", elapsed)
-            else:
-                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
             # A print carrying a hardware plan comes back to the person at its
             # moments: a stop close enough to get ready for, a stop gone past
@@ -17363,6 +17358,14 @@ def await_print_completion(
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                 })
+
+            # Written only while the wait goes on: a print that has ended was
+            # answered above, and is never shown as printing.
+            paused = state.state == PrinterStatus.PAUSED
+            if pct is None:
+                _say_progress("Paused" if paused else "Printing", elapsed)
+            else:
+                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
         except HostedUnavailableError as exc:
             # Only the job_id branch reads the queue; printer-based tracking
