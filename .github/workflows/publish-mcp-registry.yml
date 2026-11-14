@@ -18,22 +18,33 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Validate registry metadata
         run: |
           python -c "import json; d=json.load(open('server.json')); desc=d.get('description',''); assert len(desc) <= 100, f'server.json description is {len(desc)} chars, max is 100'"
 
       - name: Install mcp-publisher
+        # Same fixed release and digest as publish.yml; bump them together.
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.7
+          MCP_PUBLISHER_SHA256: 00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          set -euo pipefail
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
 
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc
 
       - name: Sync server.json version
+        # The input reaches the shell as data, never as script text.
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          jq --arg v "${{ inputs.version }}" '.version = $v | .packages[0].version = $v' server.json > server.tmp
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp
           mv server.tmp server.json
 
       - name: Publish to MCP Registry
