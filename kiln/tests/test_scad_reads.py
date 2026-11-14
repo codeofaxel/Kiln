@@ -13,6 +13,7 @@ libraries named are the ones Kiln ships.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,14 @@ READS = [
     ('function p()="/x/b.dat"; surface(p());', [("read", None)]),
     # A comment between the word and its target hides the target.
     ("include /* x */ </x/b.scad>", [("include", None)]),
+    # A name may start with a digit; it names a file like any other name.
+    ('1x = "/x/b.stl"; import(1x);', [("read", None)]),
+    ('import(convexity=2, 1e5x);', [("read", None)]),
+    ('import([1e5x][0]);', [("read", None)]),
+    ('0XFF = "/x/b.stl"; import(0XFF);', [("read", None)]),
+    ('import("/x/a.stl", 1e5, .5, -1.5e3);', [("read", "/x/a.stl")]),
+    # Hex counts as a name: a read that can only stop the source.
+    ('import("/x/a.stl", 0xFF);', [("read", "/x/a.stl"), ("read", None)]),
 ]
 
 
@@ -113,6 +122,57 @@ def test_the_quick_look_never_changes_the_answer(monkeypatch):
     quick = [scad_reads.file_reads(code) for code in sources]
     monkeypatch.setattr(scad_reads, "_READ_WORDS", ("",))
     assert [scad_reads.file_reads(code) for code in sources] == quick
+
+
+#: Runs that start with a digit: ``(run, OpenSCAD reads it as a name, the
+#: reader reads it as a name)``.  The OpenSCAD column is measured (OpenSCAD
+#: 2026.04): a name runs longer than the number it starts with, a tie is a
+#: number, and hex is a number only with a lowercase ``0x``.  The reader
+#: agrees everywhere but hex, which it reads as a name on purpose.
+DIGIT_LED = [
+    ("1x", True, True), ("1e", True, True), ("1_a", True, True), ("1e5x", True, True),
+    ("9e9e", True, True), ("0x", True, True), ("0xg", True, True), ("0x1g", True, True),
+    ("1E5_", True, True), ("0XFF", True, True), ("0X1", True, True), ("0b101", True, True),
+    ("1_000", True, True), ("0_1", True, True),
+    ("12", False, False), ("1e5", False, False), ("1E5", False, False), ("1.5", False, False),
+    ("0e0", False, False), ("00", False, False), ("01", False, False), ("1e05", False, False),
+    ("0xFF", False, True), ("0xff", False, True), ("0x1F", False, True), ("0x0", False, True),
+]
+
+
+@pytest.mark.parametrize(("run", "openscad_name", "reader_name"), DIGIT_LED)
+def test_a_run_that_starts_with_a_digit_is_read_as_a_name_whenever_openscad_reads_one(
+    run, openscad_name, reader_name,
+):
+    # Never the other way round: a name OpenSCAD reads, taken for a number,
+    # would hide the read it makes.
+    assert reader_name or not openscad_name
+    assert scad_reads._tokens(run) == [("id" if reader_name else "num", run)]
+    reads = scad_reads.file_reads(f"import({run});")
+    assert reads == ([("read", None)] if reader_name else [])
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD not installed")
+def test_the_digit_led_table_is_what_openscad_does(tmp_path):
+    """Each run of :data:`DIGIT_LED` assigned a file and imported: OpenSCAD
+    builds the part exactly when it reads the run as a name, so the table's
+    OpenSCAD column is OpenSCAD's own answer, not a guess."""
+    import subprocess
+
+    import trimesh
+
+    target = tmp_path / "target.stl"
+    trimesh.creation.box(extents=(5, 5, 5)).export(target)
+    for run, openscad_name, _reader_name in DIGIT_LED:
+        source = tmp_path / "probe.scad"
+        source.write_text(f'{run} = "{target}";\nimport({run});\n')
+        made = tmp_path / "probe.stl"
+        made.unlink(missing_ok=True)
+        subprocess.run(
+            [shutil.which("openscad"), "-o", str(made), str(source)],
+            capture_output=True, timeout=120, check=False,
+        )
+        assert (made.exists() and made.stat().st_size > 0) is openscad_name, run
 
 
 def test_the_libraries_named_are_the_ones_kiln_ships():

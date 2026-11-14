@@ -21,6 +21,8 @@ name.  A signed-in install builds such a source on its own computer
 
 from __future__ import annotations
 
+import re
+
 #: The OpenSCAD libraries Kiln ships, as ``include`` / ``use`` name them.
 LIBRARIES: tuple[str, ...] = ("BOSL2", "MCAD")
 
@@ -41,6 +43,17 @@ _OPENERS, _CLOSERS = "([{", ")]}"
 #: Words that are values, never a file, in a reader's positional argument.
 _LITERAL_WORDS = frozenset({"true", "false", "undef"})
 _LITERAL_PUNCT = frozenset({"[", "]", ",", "-", "+", "."})
+
+#: OpenSCAD's decimal numbers (a fraction, an exponent), and the characters a
+#: name is made of.  A run that starts with a digit is a name when the name
+#: runs longer than the number it starts with (``1x``, ``1e``, ``9e9e``,
+#: ``1_000``) and a number when they are the same length (``12``, ``1e5``),
+#: as OpenSCAD itself reads it.  Hex is left out on purpose: OpenSCAD takes
+#: ``0xFF`` as a number and ``0XFF`` as a name, and a release without hex
+#: would take both as names.  Read as a name here, a hex run counts as a
+#: read, which can only stop a source; read as a number, it could hide one.
+_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?|\.[0-9]+(?:[eE][+-]?[0-9]+)?")
+_NAME = re.compile(r"[A-Za-z0-9_]+")
 
 _Token = tuple[str, str]
 
@@ -81,12 +94,17 @@ def _tokens(code: str) -> list[_Token]:
             else:
                 out.append(("id", word))
                 i = j
-        elif c.isdigit():
-            j = i + 1
-            while j < n and (code[j].isalnum() or code[j] == "."):
-                j += 1
-            out.append(("num", code[i:j]))
-            i = j
+        elif c in "0123456789" or (c == "." and code[i + 1:i + 2] in tuple("0123456789")):
+            number = _NUMBER.match(code, i)
+            name = _NAME.match(code, i)
+            number_end = number.end() if number else i
+            name_end = name.end() if name else i
+            if name_end > number_end:
+                out.append(("id", code[i:name_end]))
+                i = name_end
+            else:
+                out.append(("num", code[i:number_end]))
+                i = number_end
         elif code[i:i + 2] in ("==", "!=", "<=", ">=", "&&", "||"):
             out.append(("p", code[i:i + 2]))
             i += 2
