@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-14T20:12:56.540818+00:00",
+  "generated": "2026-11-14T23:12:59.370218+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -29076,7 +29076,7 @@
             "default": false,
             "title": "Applies To Owner",
             "type": "boolean",
-            "description": "A design's rule only.  When true, the rule holds the design's owner too: on Kiln's servers the branch then changes only through a merge that meets the rule, and the owner's own direct changes and pushes to it are refused (``BRANCH_PROTECTED``).  When false (the default), the owner may still change the branch directly.  Each save of the rule sets it again."
+            "description": "A design's rule only.  When true, the rule holds the design's owner too: on Kiln's servers the branch then changes only through a merge that meets the rule, and the owner's own direct changes and pushes to it are refused (``BRANCH_PROTECTED``).  It is kept only where the rules are kept in a Kiln account; anywhere else it is refused (``OWNER_RULE_ACCOUNT_ONLY``) and nothing is saved.  When false (the default), the owner may still change the branch directly. Each save of the rule sets it again."
           }
         },
         "required": [
