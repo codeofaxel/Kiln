@@ -672,9 +672,11 @@ def arrive(
 
     *trip* is what :func:`send_inputs` noted on the way out: where the call
     asked for its outputs.  A resume file a resume-making tool hands over is
-    recorded as Kiln's for *printer_name* (the printer the call was aimed
-    at) unless *record_resumes* is off
-    (:func:`kiln.resume_provenance.record_handed_resumes`).
+    offered to the resume record for *printer_name* (the printer the call
+    was aimed at) unless *record_resumes* is off
+    (:func:`kiln.resume_provenance.record_handed_resumes`); one that is not
+    recorded is named under ``resume_not_recorded``, with why and what
+    starting it takes.
 
     An answer that made nothing (no ``artifact`` block, or an error) comes
     back untouched.  One that did has its server-side paths removed, gains a
@@ -693,7 +695,9 @@ def arrive(
         if record_resumes:
             from kiln.resume_provenance import record_handed_resumes
 
-            record_handed_resumes(tool, answer, printer_name=printer_name)
+            not_recorded = record_handed_resumes(tool, answer, printer_name=printer_name)
+            if not_recorded:
+                answer["resume_not_recorded"] = not_recorded
         _scrub_below_the_top(answer)
         artifact = answer.get("artifact")
         token = (

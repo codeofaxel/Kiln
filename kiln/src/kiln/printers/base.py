@@ -1947,7 +1947,8 @@ class PrinterAdapter(ABC):
                 if refusal := _incomplete_upload_reason(self, file_path):
                     from kiln.printers import PrinterError
                     raise PrinterError(refusal)
-                if digest is not None and file_path == given and _resume_digest(self, file_path) != digest:
+                sent = _resume_digest(self, file_path) if digest is not None else None
+                if digest is not None and file_path == given and sent != digest:
                     digest = None  # the file changed while it was checked: not the recorded bytes
                 try:
                     result = original(self, file_path)
@@ -1955,11 +1956,41 @@ class PrinterAdapter(ABC):
                     _note_resume_upload(self, file_path, None, None)
                     raise
                 ok = bool(getattr(result, "success", True))
-                _note_resume_upload(self, file_path, getattr(result, "file_name", None), digest if ok else None)
+                _note_resume_upload(
+                    self, file_path, getattr(result, "file_name", None), digest if ok else None, sent,
+                )
                 return result
 
             _safe_upload_file._kiln_safety_wrapped = True  # type: ignore[attr-defined]
             cls.upload_file = _safe_upload_file
+
+        # A raw command that writes or deletes a file on the printer, and a
+        # deleted file, leave Kiln not knowing what a name there holds: a
+        # resume file uploaded under it is no longer known to be there.
+        gcode_original = cls.__dict__.get("send_gcode")
+        if gcode_original is not None and not getattr(gcode_original, "_kiln_files_watched", False):
+            import functools
+
+            @functools.wraps(gcode_original)
+            def _watched_send_gcode(self, commands, *args, **kwargs):
+                _note_resume_raw_commands(self, commands)
+                return gcode_original(self, commands, *args, **kwargs)
+
+            _watched_send_gcode._kiln_files_watched = True  # type: ignore[attr-defined]
+            cls.send_gcode = _watched_send_gcode
+        delete_original = cls.__dict__.get("delete_file")
+        if delete_original is not None and not getattr(delete_original, "_kiln_files_watched", False):
+            import functools
+
+            @functools.wraps(delete_original)
+            def _watched_delete_file(self, file_path, *args, **kwargs):
+                try:
+                    return delete_original(self, file_path, *args, **kwargs)
+                finally:
+                    _forget_resume_name(self, file_path)
+
+            _watched_delete_file._kiln_files_watched = True  # type: ignore[attr-defined]
+            cls.delete_file = _watched_delete_file
 
         # ------------------------------------------------------------------
         # ------------------------------------------------------------------
@@ -2266,8 +2297,9 @@ class PrinterAdapter(ABC):
                 )
             try:
                 from kiln.monitor_twin import note_print_started
+                from kiln.registry import machine_fingerprint
 
-                note_print_started(self.name, file_name)
+                note_print_started(self.name, file_name, machine=machine_fingerprint(self))
             except Exception:  # noqa: BLE001 — the twin never affects a print
                 import logging as _logging
 
@@ -4558,19 +4590,40 @@ def _resume_digest(adapter: PrinterAdapter, file_path: str) -> str | None:
 
 def _note_resume_upload(
     adapter: PrinterAdapter, sent_path: str, remote_name: str | None, digest: str | None,
+    sent: str | None = None,
 ) -> None:
     """Tell the resume record what is now saved under this name on the
-    printer (:func:`kiln.resume_provenance.note_upload`)."""
+    printer: the recorded file *digest* names, as the bytes *sent*
+    (:func:`kiln.resume_provenance.note_upload`)."""
     try:
         from kiln.resume_provenance import note_upload
 
-        names = {os.path.basename(str(sent_path or ""))}
-        if remote_name:
-            names.add(os.path.basename(str(remote_name)))
+        saved_as = os.path.basename(str(remote_name or sent_path))
+        names = {os.path.basename(str(sent_path or "")), saved_as}
         for name in names:
-            note_upload(adapter, name, digest=digest if name == os.path.basename(str(remote_name or sent_path)) else None)
+            note_upload(adapter, name, digest=digest if name == saved_as else None, sent=sent)
     except Exception:  # noqa: BLE001 -- bookkeeping never blocks an upload
         logger.debug("resume record: upload not noted", exc_info=True)
+
+
+def _note_resume_raw_commands(adapter: PrinterAdapter, commands: Any) -> None:
+    """:func:`kiln.resume_provenance.note_raw_commands`; never raises."""
+    try:
+        from kiln.resume_provenance import note_raw_commands
+
+        note_raw_commands(adapter, commands)
+    except Exception:  # noqa: BLE001 -- bookkeeping never blocks a command
+        logger.debug("resume record: raw commands not noted", exc_info=True)
+
+
+def _forget_resume_name(adapter: PrinterAdapter, file_path: Any) -> None:
+    """:func:`kiln.resume_provenance.forget_printer_names`; never raises."""
+    try:
+        from kiln.resume_provenance import forget_printer_names
+
+        forget_printer_names(adapter, os.path.basename(str(file_path or "")) or None)
+    except Exception:  # noqa: BLE001 -- bookkeeping never blocks a delete
+        logger.debug("resume record: deleted file not noted", exc_info=True)
 
 
 class _UnsafeUpload(Exception):

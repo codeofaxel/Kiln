@@ -21563,6 +21563,9 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     if refused is not None:
                         return refused
                     answer = ask(step_results=done)
+                    not_recorded = served_steps.resume_notes()
+                    if not_recorded and isinstance(answer, dict):
+                        answer["resume_not_recorded"] = not_recorded
                     if served_steps.wanted(answer):
                         return served_steps._refusal(
                             _name, "LOCAL_STEP_REFUSED",

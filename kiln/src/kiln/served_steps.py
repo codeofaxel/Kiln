@@ -73,6 +73,7 @@ import re
 import subprocess
 import tempfile
 from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -1230,21 +1231,44 @@ def _act(
     return _act_result(answered), None
 
 
+#: What this call's resume record said, for the tool's answer: a sentence
+#: for each resume the servers asked this computer to start that is not
+#: recorded as Kiln's (:func:`_record_served_resumes`).
+_resume_notes: ContextVar[tuple[str, ...]] = ContextVar("kiln_served_resume_notes", default=())
+
+
+def resume_notes() -> list[str]:
+    """The sentences :func:`_record_served_resumes` left for this call's
+    answer, taken (a second read returns none)."""
+    notes = list(_resume_notes.get())
+    _resume_notes.set(())
+    return notes
+
+
 def _record_served_resumes(tool: str, actions: list[dict[str, Any]]) -> None:
-    """Record as Kiln's each file the servers handed over that these actions
-    upload and then start as a resume (``start_print`` with
-    ``resume_from_paused``), for the printer the start names
-    (:func:`kiln.resume_provenance.record_made_resume`).  Only for a
-    resume-making tool (:data:`kiln.resume_provenance.RESUME_MAKERS`), and
-    before the upload runs, so the upload ties the file to its name on the
-    printer.  Never raises."""
+    """Offer to the resume record each file the servers handed over that
+    these actions upload and then start as a resume (``start_print`` with
+    ``resume_from_paused``), for the printer the start names, with the
+    SHA-256 of the G-code the servers say they built it from (the upload
+    step's :data:`kiln.resume_provenance.SOURCE_KEY`).  The record is made
+    only when that is Kiln's own copy of the print the printer is holding
+    (:func:`kiln.resume_provenance.try_record_resume`); otherwise the start
+    is a new print, and the tool's answer says so (:func:`resume_notes`).
+    Only for a resume-making tool, and before the upload runs, so the
+    upload ties the file to its name on the printer.  Never raises."""
+    notes: list[str] = []
     try:
-        from kiln.resume_provenance import RESUME_MAKERS, record_made_resume
+        from kiln.resume_provenance import (
+            RESUME_MAKERS,
+            SOURCE_KEY,
+            not_recorded_sentence,
+            try_record_resume,
+        )
 
         if tool not in RESUME_MAKERS:
             return
         uploads = {
-            str(s.get("id")): s.get("args") or {}
+            str(s.get("id")): s
             for s in actions
             if s.get("tool") == "upload_file" and isinstance(s.get("args"), dict)
         }
@@ -1257,14 +1281,24 @@ def _record_served_resumes(tool: str, actions: list[dict[str, Any]]) -> None:
             named = args.get("file_name")
             if not isinstance(named, dict) or named.get("field") != "file_name":
                 continue
-            upload = uploads.get(str(named.get("from_step")))
-            path = _handed_file((upload or {}).get("file_path"))
+            upload = uploads.get(str(named.get("from_step"))) or {}
+            upload_args = upload.get("args") or {}
+            path = _handed_file(upload_args.get("file_path"))
             if path is None:
                 continue
-            printer = args.get("printer_name") or (upload or {}).get("printer_name")
-            record_made_resume(path, printer_name=printer if isinstance(printer, str) and printer else None, made_by=tool)
+            printer = args.get("printer_name") or upload_args.get("printer_name")
+            aimed = printer if isinstance(printer, str) and printer else None
+            stated = upload.get(SOURCE_KEY) or step.get(SOURCE_KEY)
+            record, why = try_record_resume(
+                path, source_sha256=stated if isinstance(stated, str) else None,
+                printer_name=aimed, made_by=tool,
+            )
+            if record is None and why:
+                notes.append(not_recorded_sentence(path, aimed, why))
     except Exception:  # noqa: BLE001 -- a missing record only means the start is asked about
         logger.debug("served steps: resume not recorded", exc_info=True)
+    finally:
+        _resume_notes.set(tuple(notes))
 
 
 def actions_in(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:

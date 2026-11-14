@@ -1,4 +1,4 @@
-"""The resume files Kiln itself made, and for which paused job.
+"""The resume files Kiln itself made, from which bytes, and for which paused job.
 
 A start that continues a paused print goes ahead without asking the person
 again, without a preview and without the print-time safety gate: the print
@@ -8,23 +8,32 @@ resume file), and never only that the printer is paused, since anything that
 can pause a running print could then start any file as a "resume".  It is a
 record kept here:
 
-* **Made by Kiln.**  :func:`record_made_resume` is called by the code that
-  writes a resume file for a printer, and by the code that saves one Kiln's
-  servers handed over for it.  It keeps the file's SHA-256, the machine, the
-  job the printer was running or holding when the file was made, what made
-  it, and when.  No tool writes a record and no tool argument names one.
+* **Made by Kiln, from the print's own bytes.**  :func:`try_record_resume` is
+  the one call every resume maker makes: the code that writes a resume file
+  for a printer, and the code that saves one Kiln's servers handed over.  The
+  maker names the G-code it built the resume from (the file, or its SHA-256),
+  and the record is made only when that is Kiln's own copy of the print the
+  printer is holding: the toolpath Kiln kept when it started the job
+  (:func:`recorded_job_source`).  A resume built from any other G-code,
+  however it reached the maker, is not recorded; it is a new print, and the
+  maker says so (:func:`not_recorded_sentence`).  A file Kiln rewrites from a
+  recorded resume (a new picture inside it) is recorded through
+  :func:`record_derived_resume`.  No tool writes a record and no tool
+  argument names one.
 * **Followed to the printer.**  Every upload a printer adapter makes passes
   through :func:`digest_for_upload` and :func:`note_upload` (the adapter's
   upload template), which ties a recorded file to the name it was saved
-  under on that machine and unties the name when anything else is saved
-  over it.
+  under on that machine and to the bytes sent there.  Anything else uploaded
+  under that name, a deleted file, and a raw command that writes or deletes
+  a file on the printer untie it (:func:`forget_printer_names`).
 * **Asked at every start.**  :func:`made_for_paused_job` names the record a
   start is: the file being started is the printer-side name a recorded file
-  was uploaded under through Kiln, with nothing saved over it since, its
-  record is recent (:data:`RECENT_SECONDS`), and the job the printer reports
-  now is the job it was made for.  A printer that reports no job gets no
-  record, so nothing it starts is a resume.  :func:`kiln.print_signoff.verified_resume` adds the printer
-  reporting a paused job, and is the one check every start door asks.
+  was uploaded under through Kiln, with nothing saved over it since; a
+  printer that can hand a file back still holds those bytes under that name;
+  the record is recent (:data:`RECENT_SECONDS`); and the job the printer
+  reports now is the job it was made for.
+  :func:`kiln.print_signoff.verified_resume` adds the printer reporting a
+  paused job, and is the one check every start door asks.
 
 Records live in this process's memory, so only Kiln's own code writes one;
 a restart forgets them, and a resume started after a restart is asked about
@@ -48,16 +57,24 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "RECENT_SECONDS",
     "RESUME_MAKERS",
-    "record_handed_resumes",
+    "SOURCE_KEY",
     "ResumeRecord",
     "digest_for_upload",
     "file_sha256",
+    "forget_printer_names",
     "made_for_paused_job",
+    "not_recorded_sentence",
+    "note_raw_commands",
     "note_upload",
     "paused_job_name",
+    "record_derived_resume",
+    "record_handed_resumes",
     "record_made_resume",
+    "recorded_job_source",
     "records_for",
     "report_unrecognized",
+    "stated_source",
+    "try_record_resume",
 ]
 
 #: How long after it was made a resume file may still continue its print
@@ -67,8 +84,10 @@ RECENT_SECONDS = 6 * 60 * 60
 #: The served tools whose job is to build a resume file for the job a
 #: printer is holding.  A printable file Kiln's servers hand over in one of
 #: their answers, or ask this computer to upload and start as a resume, is
-#: recorded as Kiln's.  A tool not named here (one that only rewraps a file
-#: the caller brought, for one) hands over files that are new prints.
+#: offered to the record (:func:`try_record_resume`), with the SHA-256 of the
+#: G-code the servers say they built it from.  A tool not named here (one
+#: that only rewraps a file the caller brought, for one) hands over files
+#: that are new prints.
 RESUME_MAKERS: frozenset[str] = frozenset(
     {
         "add_feature_during_print",
@@ -96,14 +115,26 @@ _MAX_RECORDS = 64
 #: of a start's gates ask about it.
 _REPORT_QUIET_SECONDS = 120.0
 
+#: How long a printer's read-back of a resume file answers for every gate of
+#: one start, so the file is read back once per start, not once per gate.
+_READ_BACK_SECONDS = 30.0
+
+#: Raw commands that write or delete a file on the printer's own storage.
+_FILE_COMMANDS = frozenset({"M28", "M29", "M30"})
+
+#: The key a resume maker's answer (or its upload step) carries for the
+#: SHA-256 of the G-code it built the resume from.
+SOURCE_KEY = "resume_source_sha256"
+
 _CHUNK = 1024 * 1024
 
 
 @dataclass
 class ResumeRecord:
-    """One resume file Kiln made for one machine's job."""
+    """One resume file Kiln made for one machine's job, from that job's bytes."""
 
     sha256: str
+    source_sha256: str
     path: str
     machine: str
     printer_name: str
@@ -112,8 +143,9 @@ class ResumeRecord:
     session: str
     made_at: float
     #: Printer-side names (lowercased base names) this file was uploaded
-    #: under on its machine, and nothing has been saved over since.
-    uploaded_as: set[str] = field(default_factory=set)
+    #: under on its machine, with nothing saved over since, each with the
+    #: SHA-256 of the bytes Kiln sent under it.
+    uploaded_as: dict[str, str] = field(default_factory=dict)
 
     def is_recent(self, now: float | None = None) -> bool:
         return 0 <= (now if now is not None else time.time()) - self.made_at <= RECENT_SECONDS
@@ -122,6 +154,7 @@ class ResumeRecord:
 _lock = threading.Lock()
 _records: list[ResumeRecord] = []
 _reported: dict[tuple[str, str], float] = {}
+_read_back: dict[tuple[str, str, str], tuple[float, bool]] = {}
 
 
 def _hosted() -> bool:
@@ -176,37 +209,85 @@ def paused_job_name(adapter: Any) -> str:
     return _name(getattr(job, "file_name", None))
 
 
-def record_made_resume(
+def recorded_job_source(adapter: Any) -> tuple[str | None, str]:
+    """``(sha256, "")`` of Kiln's own copy of the G-code of the job
+    *adapter*'s printer reports now, or ``(None, why)``.
+
+    Kiln's copy is the toolpath it kept when it started that job on that
+    machine (:func:`kiln.monitor_twin.note_print_started`), named by its
+    SHA-256 then.  A print Kiln did not start, or started from a file it did
+    not slice, has no copy, and nothing can be resumed from it without a yes.
+    """
+    job_now = paused_job_name(adapter)
+    if not job_now:
+        return None, "the printer reports no job"
+    try:
+        machine = _machine(adapter)
+        from kiln.monitor_twin import active_records
+
+        records = active_records()
+    except Exception:  # noqa: BLE001 -- unreadable is no record
+        return None, "Kiln could not read its record of this printer's print"
+    for record in records:
+        if _name(record.get("file_name")) != job_now or str(record.get("machine") or "") != machine:
+            continue
+        digest = str(record.get("gcode_sha256") or "")
+        if not digest:
+            return None, (
+                "Kiln started this print from a file it did not slice here, so it keeps no copy "
+                "of the print's G-code to build a resume from"
+            )
+        return digest, ""
+    return None, "Kiln did not start the print this printer is holding, so it keeps no copy of its G-code"
+
+
+def try_record_resume(
     path: str,
     *,
+    source: str | None = None,
+    source_sha256: str | None = None,
     printer_name: str | None = None,
     adapter: Any = None,
     made_by: str,
     session: str = "",
-) -> ResumeRecord | None:
-    """Record that Kiln made the resume file at *path* for the job the
-    printer (*adapter*, else the one *printer_name* names) is running or
-    holding now.  ``None`` when nothing was recorded: on the shared server,
-    for a file that cannot be read, a printer that cannot be found, or one
-    that reports no job (a resume of no known job continues nothing).
-    Never raises."""
+) -> tuple[ResumeRecord | None, str]:
+    """The one check every resume maker calls: record the resume file at
+    *path* as Kiln's, for the job the printer (*adapter*, else the one
+    *printer_name* names) is running or holding now, when it was built from
+    Kiln's own copy of that job.
+
+    *source* is the G-code the maker built the resume from, or
+    *source_sha256* its digest (a served maker states it in its answer).
+    ``(record, "")``, or ``(None, why)`` when nothing was recorded: the
+    source is not Kiln's own copy of this print (or was not named), Kiln has
+    no copy of the print, the printer reports no job or cannot be found, or
+    the file cannot be read.  On the shared server nothing is recorded and
+    nothing is said.  Never raises."""
     if _hosted():
-        return None
+        return None, ""
     digest = file_sha256(path)
     if digest is None:
-        return None
+        return None, "the resume file could not be read"
     try:
         adapter = _resolve(adapter, printer_name)
         machine = _machine(adapter)
     except Exception:  # noqa: BLE001 -- no printer, no record
         logger.debug("resume record: printer not found for %s", path, exc_info=True)
-        return None
+        return None, "Kiln could not find the printer it was made for"
     job = paused_job_name(adapter)
     if not job:
-        logger.info("resume record: %s not recorded, the printer reports no job", os.path.basename(str(path)))
-        return None
-    record = ResumeRecord(
+        return None, "the printer reports no job, so there is no print for it to continue"
+    stated = str(source_sha256 or "").strip().lower() or (file_sha256(source) if source else None)
+    if not stated:
+        return None, "the maker did not say which G-code it was built from"
+    recorded, why = recorded_job_source(adapter)
+    if recorded is None:
+        return None, why
+    if stated != recorded:
+        return None, "it was built from G-code that is not Kiln's own copy of the print this printer is holding"
+    return _keep(ResumeRecord(
         sha256=digest,
+        source_sha256=recorded,
         path=str(path),
         machine=machine,
         printer_name=str(getattr(adapter, "_kiln_registered_name", None) or printer_name or ""),
@@ -214,28 +295,105 @@ def record_made_resume(
         made_by=str(made_by or ""),
         session=str(session or ""),
         made_at=time.time(),
-    )
+    )), ""
+
+
+def record_made_resume(path: str, **kwargs: Any) -> ResumeRecord | None:
+    """:func:`try_record_resume`, the record alone."""
+    return try_record_resume(path, **kwargs)[0]
+
+
+def record_derived_resume(
+    path: str,
+    *,
+    from_path: str,
+    printer_name: str | None = None,
+    adapter: Any = None,
+    made_by: str,
+) -> tuple[ResumeRecord | None, str]:
+    """Record *path*, a file Kiln rewrote from the recorded resume at
+    *from_path* (the same resume with a new picture inside it), as the same
+    printer's resume of the same job.  ``(None, why)`` unless *from_path* is
+    a recent record for that machine and the printer still reports its job.
+    Never raises."""
+    if _hosted():
+        return None, ""
+    digest, earlier = file_sha256(path), file_sha256(from_path)
+    if digest is None or earlier is None:
+        return None, "the resume file could not be read"
+    try:
+        adapter = _resolve(adapter, printer_name)
+    except Exception:  # noqa: BLE001
+        return None, "Kiln could not find the printer it was made for"
+    job_now = paused_job_name(adapter)
+    parent = next((r for r in records_for(adapter) if r.sha256 == earlier and r.job == job_now), None)
+    if parent is None or not job_now:
+        return None, "it was rewritten from a file that is not a resume Kiln made for the print this printer is holding"
+    return _keep(ResumeRecord(
+        sha256=digest,
+        source_sha256=parent.source_sha256,
+        path=str(path),
+        machine=parent.machine,
+        printer_name=parent.printer_name,
+        job=parent.job,
+        made_by=str(made_by or ""),
+        session=parent.session,
+        made_at=time.time(),
+    )), ""
+
+
+def _keep(record: ResumeRecord) -> ResumeRecord:
     with _lock:
-        _records[:] = [r for r in _records if not (r.machine == machine and r.sha256 == digest)]
+        _records[:] = [r for r in _records if not (r.machine == record.machine and r.sha256 == record.sha256)]
         _records.append(record)
         del _records[:-_MAX_RECORDS]
     return record
 
 
-def record_handed_resumes(tool: str, answer: Any, *, printer_name: str | None = None) -> int:
-    """Record each printable file Kiln's servers handed over in *answer* as
-    a resume file Kiln made, when *tool* is one of :data:`RESUME_MAKERS`.
+def not_recorded_sentence(file_name: str, printer: str | None, why: str) -> str:
+    """What a maker says when the resume it made is not recorded: what the
+    file is now, why, and what starting it takes."""
+    shown = os.path.basename(str(file_name or "")) or "This file"
+    on = f" on {printer}" if printer else ""
+    return (
+        f"{shown} is not a resume of the print{on}: {why}. Starting it is a new print: the "
+        "person is asked, it is previewed, and the print-time safety gate runs."
+    )
+
+
+def stated_source(answer: Any, at: Any) -> str | None:
+    """The source digest a served answer states for the file at *at* (its
+    place in the answer): the one nearest the file, else the answer's own."""
+    found = answer.get(SOURCE_KEY) if isinstance(answer, dict) else None
+    block: Any = answer
+    for key in at if isinstance(at, list) else []:
+        if isinstance(block, dict) and isinstance(key, str):
+            block = block.get(key)
+        elif isinstance(block, list) and isinstance(key, int) and 0 <= key < len(block):
+            block = block[key]
+        else:
+            break
+        if isinstance(block, dict) and block.get(SOURCE_KEY):
+            found = block.get(SOURCE_KEY)
+    return str(found) if isinstance(found, str) and found else None
+
+
+def record_handed_resumes(tool: str, answer: Any, *, printer_name: str | None = None) -> list[str]:
+    """Offer each printable file Kiln's servers handed over in *answer* to
+    the record (:func:`try_record_resume`), when *tool* is one of
+    :data:`RESUME_MAKERS`, with the source digest the answer states for it
+    (:func:`stated_source`).
 
     The printer is the one the file's place in the answer names (a fleet
     answer files each printer's files under its name), else *printer_name*,
-    the printer the call was aimed at.  Returns how many were recorded.
-    Never raises."""
+    the printer the call was aimed at.  Returns the sentence for each file
+    that was not recorded (:func:`not_recorded_sentence`).  Never raises."""
+    notes: list[str] = []
     if tool not in RESUME_MAKERS or not isinstance(answer, dict):
-        return 0
+        return notes
     files = answer.get("files")
     if not isinstance(files, list):
-        return 0
-    count = 0
+        return notes
     for item in files:
         if not isinstance(item, dict) or not item.get("on_this_computer"):
             continue
@@ -247,9 +405,12 @@ def record_handed_resumes(tool: str, answer: Any, *, printer_name: str | None = 
             if isinstance(key, str) and key and _names_a_printer(key):
                 aimed = key
                 break
-        if record_made_resume(path, printer_name=aimed, made_by=tool) is not None:
-            count += 1
-    return count
+        record, why = try_record_resume(
+            path, source_sha256=stated_source(answer, item.get("at")), printer_name=aimed, made_by=tool,
+        )
+        if record is None and why:
+            notes.append(not_recorded_sentence(path, aimed, why))
+    return notes
 
 
 def _names_a_printer(name: str) -> bool:
@@ -286,12 +447,13 @@ def digest_for_upload(adapter: Any, local_path: Any) -> str | None:
     return file_sha256(local_path)
 
 
-def note_upload(adapter: Any, remote_name: Any, *, digest: str | None) -> None:
+def note_upload(adapter: Any, remote_name: Any, *, digest: str | None, sent: str | None = None) -> None:
     """After an upload to *adapter* under *remote_name*: a record whose file
-    has *digest* gains that name, and every other record on the machine
-    loses it (something else is saved there now).  *digest* ``None`` (the
-    upload failed, or no record was asked about) only unties the name.
-    Never raises."""
+    has *digest* gains that name, with *sent* (the SHA-256 of the bytes
+    actually sent, when Kiln's checks sent a cleaned copy; else *digest*),
+    and every other record on the machine loses it (something else is saved
+    there now).  *digest* ``None`` (the upload failed, or no record was
+    asked about) only unties the name.  Never raises."""
     name = _name(remote_name)
     if not name:
         return
@@ -304,9 +466,75 @@ def note_upload(adapter: Any, remote_name: Any, *, digest: str | None) -> None:
             if record.machine != machine:
                 continue
             if digest is not None and record.sha256 == digest:
-                record.uploaded_as.add(name)
+                record.uploaded_as[name] = sent or digest
             else:
-                record.uploaded_as.discard(name)
+                record.uploaded_as.pop(name, None)
+
+
+def forget_printer_names(adapter: Any, name: Any = None) -> None:
+    """Untie *name* (every name, when ``None``) from the records of
+    *adapter*'s machine: the file under it was deleted, or a raw command
+    wrote or deleted a file there, so Kiln no longer knows what the name
+    holds.  Never raises."""
+    try:
+        machine = _machine(adapter)
+    except Exception:  # noqa: BLE001
+        return
+    one = _name(name) if name is not None else None
+    with _lock:
+        for record in _records:
+            if record.machine != machine:
+                continue
+            if one is None:
+                record.uploaded_as.clear()
+            else:
+                record.uploaded_as.pop(one, None)
+
+
+def note_raw_commands(adapter: Any, commands: Any) -> None:
+    """Untie every name on *adapter*'s machine when *commands* (a raw
+    command or a list of them) write or delete a file on the printer
+    (:data:`_FILE_COMMANDS`).  Never raises."""
+    try:
+        lines = [commands] if isinstance(commands, str) else list(commands or [])
+        for line in lines:
+            for part in str(line).splitlines():
+                word = part.split(";", 1)[0].strip().split(" ", 1)[0].upper()
+                if word in _FILE_COMMANDS:
+                    forget_printer_names(adapter)
+                    return
+    except Exception:  # noqa: BLE001
+        logger.debug("resume record: raw commands not read", exc_info=True)
+
+
+def _printer_still_holds(adapter: Any, file_name: str, sent: str) -> bool:
+    """Whether the printer still holds *sent* under *file_name*, read back
+    from the printer when it can hand a file back (once per start).  A
+    printer that cannot hand a file back is taken at Kiln's upload record;
+    one that can and does not, or fails to, does not hold it."""
+    try:
+        from kiln.printers.base import PrinterAdapter
+
+        reader = getattr(type(adapter), "read_print_file", None)
+        if reader is None or reader is PrinterAdapter.read_print_file:
+            return True
+        key = (_machine(adapter), _name(file_name), sent)
+        now = time.monotonic()
+        with _lock:
+            seen = _read_back.get(key)
+        if seen is not None and now - seen[0] < _READ_BACK_SECONDS:
+            return seen[1]
+        try:
+            data = adapter.read_print_file(file_name)
+        except Exception:  # noqa: BLE001 -- not read back is not held
+            logger.debug("resume record: read-back of %s failed", file_name, exc_info=True)
+            data = None
+        held = bool(data) and hashlib.sha256(data).hexdigest() == sent
+        with _lock:
+            _read_back[key] = (now, held)
+        return held
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def made_for_paused_job(file_name: str, *, adapter: Any) -> ResumeRecord | None:
@@ -316,9 +544,10 @@ def made_for_paused_job(file_name: str, *, adapter: Any) -> ResumeRecord | None:
     The file must be the printer-side name a recorded file was uploaded
     under through Kiln, with nothing saved over that name since
     (:func:`note_upload`); a local copy that hashes the same is not the file
-    the printer starts.  The record must be recent, and the printer must
-    report the same job now that it reported when the file was made.
-    Whether the printer is paused is asked by
+    the printer starts.  A printer that can hand a file back must still hold
+    the bytes Kiln sent under that name.  The record must be recent, and the
+    printer must report the same job now that it reported when the file was
+    made.  Whether the printer is paused is asked by
     :func:`kiln.print_signoff.verified_resume`, not here.
     """
     name = _name(file_name)
@@ -331,7 +560,8 @@ def made_for_paused_job(file_name: str, *, adapter: Any) -> ResumeRecord | None:
     if not job_now:
         return None
     for record in records:
-        if record.job == job_now:
+        sent = record.uploaded_as.get(name)
+        if sent and record.job == job_now and _printer_still_holds(adapter, file_name, sent):
             return record
     return None
 
@@ -389,3 +619,4 @@ def _reset_for_tests() -> None:
     with _lock:
         _records.clear()
         _reported.clear()
+        _read_back.clear()

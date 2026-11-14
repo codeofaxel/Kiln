@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kiln import print_signoff, server
+from kiln import monitor_twin, print_signoff, server
 
 try:
     from kiln import resume_provenance
@@ -78,6 +78,8 @@ def machine(monkeypatch, tmp_path):
     # The upload's own file checks are not what is under test here.
     monkeypatch.setattr(printers_base, "_preflight_upload_or_raise", lambda _a, path: path)
     monkeypatch.setattr(printers_base, "_incomplete_upload_reason", lambda _a, _path: None)
+    monkeypatch.setattr(monitor_twin, "_TWIN_DIR", tmp_path / "twin")
+    monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", tmp_path / "twin" / "active.json")
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
     if resume_provenance is not None:
         resume_provenance._reset_for_tests()
@@ -94,10 +96,22 @@ def _file(tmp_path: Path, name: str, body: bytes) -> Path:
     return path
 
 
+def _job_source(machine: _Machine) -> str:
+    """Kiln's own copy of the print *machine* is running (the toolpath it
+    kept when it started the job)."""
+    from tests._kiln_resume import kiln_started
+
+    return kiln_started(machine, machine.job)
+
+
 def _kiln_made(machine: _Machine, tmp_path: Path, name: str = "transformed_resume_ab12.3mf") -> str:
-    """A resume file Kiln made for the paused job, uploaded through Kiln."""
+    """A resume file Kiln made for the paused job, from Kiln's own copy of
+    it, uploaded through Kiln."""
     path = _file(tmp_path, name, b"resume from layer 40 of the vase")
-    assert resume_provenance.record_made_resume(str(path), adapter=machine, made_by="decorate_during_print")
+    record, why = resume_provenance.try_record_resume(
+        str(path), source=_job_source(machine), adapter=machine, made_by="decorate_during_print",
+    )
+    assert record is not None, why
     return machine.upload_file(str(path)).file_name
 
 
@@ -244,16 +258,21 @@ def test_a_local_copy_kiln_did_not_upload_is_not_the_resume(machine, tmp_path):
     """The printer starts what is saved under a name on it; a file on this
     computer that hashes the same is not that."""
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
-    resume_provenance.record_made_resume(str(path), adapter=machine, made_by="get_print_before_edit")
+    resume_provenance.record_made_resume(
+        str(path), source=_job_source(machine), adapter=machine, made_by="get_print_before_edit",
+    )
     assert print_signoff.verified_resume(str(path), {}, adapter=machine) is False
     machine.upload_file(str(path))
     assert print_signoff.verified_resume(str(path), {}, adapter=machine) is True
 
 
 def test_a_printer_that_reports_no_job_gets_no_record(machine, tmp_path):
+    source = _job_source(machine)
     machine.job = None
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
-    assert resume_provenance.record_made_resume(str(path), adapter=machine, made_by="decorate_during_print") is None
+    assert resume_provenance.record_made_resume(
+        str(path), source=source, adapter=machine, made_by="decorate_during_print",
+    ) is None
 
 
 def test_a_resume_needs_the_printer_to_report_its_job_at_the_start(machine, tmp_path):
@@ -264,7 +283,9 @@ def test_a_resume_needs_the_printer_to_report_its_job_at_the_start(machine, tmp_
 
 def test_a_file_changed_while_it_was_checked_is_not_tied_to_its_name(machine, monkeypatch, tmp_path):
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
-    resume_provenance.record_made_resume(str(path), adapter=machine, made_by="decorate_during_print")
+    resume_provenance.record_made_resume(
+        str(path), source=_job_source(machine), adapter=machine, made_by="decorate_during_print",
+    )
 
     def _swap(_adapter, p):
         Path(p).write_bytes(b"swapped after the hash")
@@ -329,7 +350,9 @@ def test_nothing_is_recorded_on_the_shared_server(machine, monkeypatch, tmp_path
 
     monkeypatch.setattr(runtime_env, "is_hosted_multitenant", lambda: True)
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume")
-    assert resume_provenance.record_made_resume(str(path), adapter=machine, made_by="decorate_during_print") is None
+    assert resume_provenance.record_made_resume(
+        str(path), source=_job_source(machine), adapter=machine, made_by="decorate_during_print",
+    ) is None
 
 
 # ---------------------------------------------------------------------------
@@ -342,9 +365,11 @@ def test_a_served_resume_started_through_the_actions_is_recorded(machine, monkey
 
     monkeypatch.setattr(served_makes, "files_dir", lambda: tmp_path)
     handed = _file(tmp_path, "resume-ab12cd.3mf", b"served resume bytes")
+    stated = resume_provenance.file_sha256(_job_source(machine))
     actions = [
         {"kind": served_steps.ACT_KIND, "id": "upload", "tool": "upload_file",
-         "args": {"file_path": str(handed), "printer_name": "garage"}},
+         "args": {"file_path": str(handed), "printer_name": "garage"},
+         resume_provenance.SOURCE_KEY: stated},
         {"kind": served_steps.ACT_KIND, "id": "start", "tool": "start_print", "needs": ["upload"],
          "args": {"file_name": {"from_step": "upload", "field": "file_name"},
                   "printer_name": "garage", "resume_from_paused": True}},
@@ -359,8 +384,10 @@ def test_a_tool_that_makes_no_resume_records_nothing(machine, monkeypatch, tmp_p
 
     monkeypatch.setattr(served_makes, "files_dir", lambda: tmp_path)
     handed = _file(tmp_path, "resume-ab12cd.3mf", b"caller's own bytes, rewrapped")
+    stated = resume_provenance.file_sha256(_job_source(machine))
     actions = [
-        {"kind": served_steps.ACT_KIND, "id": "upload", "tool": "upload_file", "args": {"file_path": str(handed)}},
+        {"kind": served_steps.ACT_KIND, "id": "upload", "tool": "upload_file", "args": {"file_path": str(handed)},
+         resume_provenance.SOURCE_KEY: stated},
         {"kind": served_steps.ACT_KIND, "id": "start", "tool": "start_print",
          "args": {"file_name": {"from_step": "upload", "field": "file_name"}, "resume_from_paused": True}},
     ]
@@ -370,6 +397,11 @@ def test_a_tool_that_makes_no_resume_records_nothing(machine, monkeypatch, tmp_p
 
 def test_a_resume_handed_over_in_an_answer_is_recorded_for_its_printer(machine, tmp_path):
     handed = _file(tmp_path, "transformed_resume-ab12cd.3mf", b"served resume bytes")
-    answer = {"files": [{"on_this_computer": True, "path": str(handed), "at": ["transformed_resume_path"]}]}
-    assert resume_provenance.record_handed_resumes("decorate_during_print", answer, printer_name="garage") == 1
-    assert resume_provenance.record_handed_resumes("wrap_gcode_as_resume_3mf", answer, printer_name="garage") == 0
+    answer = {
+        "files": [{"on_this_computer": True, "path": str(handed), "at": ["transformed_resume_path"]}],
+        resume_provenance.SOURCE_KEY: resume_provenance.file_sha256(_job_source(machine)),
+    }
+    assert resume_provenance.record_handed_resumes("wrap_gcode_as_resume_3mf", answer, printer_name="garage") == []
+    assert resume_provenance._records == []
+    assert resume_provenance.record_handed_resumes("decorate_during_print", answer, printer_name="garage") == []
+    assert [r.made_by for r in resume_provenance._records] == ["decorate_during_print"]
