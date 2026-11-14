@@ -493,7 +493,7 @@ def _execute_tool(name: str, arguments: dict[str, Any]) -> str:
             except Exception:  # noqa: BLE001 -- the answer still goes, said
                 logger.warning("quoted text: could not mark %s", name, exc_info=True)
                 return f"{quoted_text.UNMARKED_WARNING}\n\n{json.dumps(result, default=str)}"
-            return json.dumps(result, default=str, ensure_ascii=False)
+            return quoted_text.dumps(result)
 
         # call_tool returns a list of content objects; extract text
         parts = []

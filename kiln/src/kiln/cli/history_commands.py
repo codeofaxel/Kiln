@@ -47,8 +47,8 @@ def _finish(answer: dict[str, Any], json_mode: bool, say: Callable[[dict[str, An
     except Exception:  # noqa: BLE001 -- the answer is still shown, said
         click.echo(quoted_text.UNMARKED_WARNING, err=True)
     if json_mode:
-        # Unescaped, so the fence reads as the marks it is.
-        click.echo(json.dumps(answer, indent=2, default=str, ensure_ascii=False))
+        # The fence's own marks unescaped, so they read as the marks they are.
+        click.echo(quoted_text.dumps(answer, indent=2))
     failed = not isinstance(answer, dict) or answer.get("status") == "error" or answer.get("success") is False
     if failed:
         if not json_mode:
