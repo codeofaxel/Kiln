@@ -116,6 +116,35 @@ def test_a_source_reading_any_other_file(code):
     assert scad_reads.reads_beyond_bundled_libraries(code)
 
 
+@pytest.mark.parametrize(
+    "target",
+    ["BOSL2/std.scad", "MCAD/involute_gears.scad", "BOSL2/beziers.scad", "MCAD/bearing.scad"],
+)
+def test_a_library_include_names_a_library_file(target):
+    assert scad_reads.is_bundled_library(target)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "BOSL2", "BOSL2/", "bosl2/std.scad", "OTHER/std.scad", "/BOSL2/std.scad",
+        "BOSL2/../secrets.scad", "BOSL2/x/../../y.scad", "BOSL2\\std.scad", "BOSL2/std.scad\x00",
+        "BOSL2/std .scad", "BOSL2/\t/a/b.scad", "MCAD/gears.scad\t/a/b.scad", "BOSL2/x\r/a.scad",
+        "BOSL2/x\n/a.scad", "BOSL2/x\f/a.scad", "BOSL2/x\v/a.scad", "BOSL2/sté.scad",
+    ],
+)
+def test_anything_else_between_the_brackets_is_refused(target):
+    assert not scad_reads.is_bundled_library(target)
+    assert scad_reads.reads_beyond_bundled_libraries(f"include <{target}>")
+
+
+def test_every_file_kiln_ships_in_its_libraries_is_a_library_include():
+    shipped = Path(scad_reads.__file__).parent / "data" / "scad_libraries"
+    files = [p.relative_to(shipped).as_posix() for p in shipped.rglob("*.scad")]
+    assert files
+    assert [f for f in files if not scad_reads.is_bundled_library(f)] == []
+
+
 #: Includes written with `>` before the `<`: each is a read of the file in its
 #: brackets for every check that judges source.
 GT_BEFORE_TARGET = ["include ></abs/t.scad>", "use >>< /abs/t.scad>", "include>>></abs/t.scad>"]

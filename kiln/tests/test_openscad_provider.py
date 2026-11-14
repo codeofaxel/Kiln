@@ -105,6 +105,18 @@ class TestHasOnlySafeIncludes:
     def test_an_include_written_with_more_before_its_target_is_rejected(self, code):
         assert _has_only_safe_includes(code) is False
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "include <BOSL2/\t/a/b.scad>",
+            "use <MCAD/gears.scad\t/a/b.scad>",
+            "include <BOSL2/std .scad>",
+            "include <BOSL2/x\n/a.scad>",
+        ],
+    )
+    def test_a_library_include_with_anything_but_a_file_name_is_rejected(self, code):
+        assert _has_only_safe_includes(code) is False
+
     def test_a_bundled_include_written_with_gt_before_it_is_safe(self):
         assert _has_only_safe_includes("include > <BOSL2/std.scad>\ncube(10);") is True
 

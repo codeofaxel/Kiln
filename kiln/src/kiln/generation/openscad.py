@@ -151,6 +151,8 @@ def _has_only_safe_includes(code: str) -> bool:
             return False
         if not any(path.startswith(prefix) for prefix in _SAFE_LIBRARY_PREFIXES):
             return False
+        if not is_bundled_library(path):
+            return False
     return True
 
 

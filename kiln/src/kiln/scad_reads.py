@@ -204,13 +204,20 @@ def file_reads(code: str) -> list[tuple[str, str | None]]:
     return reads
 
 
+#: A library include names a file in one of :data:`LIBRARIES` with letters,
+#: digits and ``_ . / -`` only, as every file Kiln ships is named.  Anything
+#: else between the brackets (a tab, a line break, a space) is refused.
+_LIBRARY_TARGET = re.compile(
+    r"(?:%s)/[A-Za-z0-9_./-]+" % "|".join(re.escape(name) for name in LIBRARIES)
+)
+
+
 def is_bundled_library(path: str | None) -> bool:
     """Whether an ``include`` / ``use`` target is a file inside one of
     :data:`LIBRARIES`, named from the library's own folder."""
-    if path is None or "\\" in path or "\x00" in path or path.startswith("/"):
+    if path is None or not _LIBRARY_TARGET.fullmatch(path):
         return False
-    parts = path.split("/")
-    return ".." not in parts and parts[0] in LIBRARIES
+    return ".." not in path.split("/")
 
 
 def reads_beyond_bundled_libraries(code: str) -> bool:
