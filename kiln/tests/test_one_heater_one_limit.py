@@ -108,6 +108,37 @@ def test_the_refusal_says_why_the_limit_is_low_and_how_to_raise_it():
     assert "240" in text and "printer_model" in text
 
 
+@pytest.mark.parametrize("model", ["not_a_printer", "Totally Unknown 9000"])
+def test_a_model_kiln_holds_no_profile_for_meets_the_floor(model):
+    """A model name Kiln cannot match is judged by the floor, never by the
+    looser generic limits."""
+    from kiln.gcode import validate_commands
+
+    hotend, bed = _floor()
+    for cmd, limit in (("M104", hotend), ("M140", bed)):
+        assert validate_commands([f"{cmd} S{limit:g}"], model).valid
+        assert not validate_commands([f"{cmd} S{limit + 1:g}"], model).valid
+
+
+def test_with_no_profile_held_at_all_a_command_still_meets_the_floor(monkeypatch):
+    """With not even the default profile held, a named printer's commands
+    are judged by the floor the temperature lookup falls back to, never by
+    the looser generic limits."""
+    from kiln import safety_profiles
+    from kiln.gcode import validate_commands
+
+    def _no_profile(*a, **k):
+        raise KeyError("no profile")
+
+    monkeypatch.setattr(safety_profiles, "get_profile", _no_profile)
+    hotend, bed = safety_profiles.resolve_limits("ender3")
+    for cmd, limit in (("M104", hotend), ("M140", bed)):
+        assert validate_commands([f"{cmd} S{limit:g}"], "ender3").valid
+        refused = validate_commands([f"{cmd} S{limit + 1:g}"], "ender3")
+        assert not refused.valid, refused
+        assert "no safety profile" in " ".join(refused.errors)
+
+
 @patch("kiln.server._get_adapter")
 def test_send_gcode_refuses_a_hotend_past_the_floor_and_sends_nothing(mock_get_adapter):
     """The refusal comes before anything reaches the printer."""

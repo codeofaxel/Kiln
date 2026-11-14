@@ -936,18 +936,19 @@ def validate_gcode(
     return result
 
 
-def _unidentified_printer_ceilings() -> dict[str, tuple[float, str]]:
-    """The heat limits for a printer Kiln has not been told the model of.
+def _unidentified_printer_ceilings(
+    unnamed: str = "Kiln has not been told this printer's model; set printer_model to judge by its own",
+) -> dict[str, tuple[float, str]]:
+    """The heat limits for a printer Kiln cannot judge by its own profile.
 
     Read from :func:`kiln.safety_profiles.resolve_limits`, the floor the
     temperature tool holds the same printer to, so one heater has one limit
     whichever door asks.  The chamber keeps the generic ceiling: there is no
-    floor of its own for it.
+    floor of its own for it.  *unnamed* is the reason the refusal gives.
     """
     from kiln.safety_profiles import resolve_limits  # noqa: E402
 
     hotend, bed = resolve_limits(None)
-    unnamed = "Kiln has not been told this printer's model; set printer_model to judge by its own"
     return {
         "hotend": (hotend, f"the generic hotend temperature floor ({hotend:g}°C: {unnamed})"),
         "bed": (bed, f"the generic bed temperature floor ({bed:g}°C: {unnamed})"),
@@ -1030,7 +1031,13 @@ def validate_gcode_for_printer(
     try:
         profile = get_profile(printer_id)
     except KeyError:
-        return validate_gcode(commands, dialect=dialect)
+        # No profile held at all, not even the default: the floor the
+        # temperature tool falls back to, never the looser generic limits.
+        return validate_gcode(
+            commands,
+            dialect=dialect,
+            ceilings=_unidentified_printer_ceilings("Kiln holds no safety profile for this printer"),
+        )
     bed = _bed_for_bounds(profile, printer_id)
     rules = _command_rules(printer_id)
 
