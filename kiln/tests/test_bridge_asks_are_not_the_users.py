@@ -106,6 +106,19 @@ _CALLER_DECIDES = {
     "_pro_goal_bridge": "asked_by_user",
 }
 
+#: Bridges with more than one served call where the calls answer differently,
+#: keyed by the name each call passes as its tool (its first argument): who
+#: asked, and why.
+_PER_CALL = {
+    "_pro_assembly_bridge": {
+        # The joint sweep IS the check the person asked for when they
+        # validate or compose an assembly, and the parts' files are theirs.
+        "JOINT_SWEEP_TOOL": True,
+        # Kiln Pro's answers for each joint are fetched on Kiln's own.
+        "tool": False,
+    },
+}
+
 
 def test_every_served_bridge_on_disk_is_seen():
     assert {path.stem for path in _SERVED} >= {
@@ -128,16 +141,33 @@ def test_a_bridge_never_counts_its_ask_as_a_persons(path):
                 f"{path.name}:{call.lineno} must forward the caller's {_CALLER_DECIDES[path.stem]!r}"
             )
             continue
-        expected = path.stem in _PERSONS_OWN_ASK
+        if path.stem in _PER_CALL:
+            sent = getattr(call.args[0], "id", None) if call.args else None
+            assert sent in _PER_CALL[path.stem], (
+                f"{path.name}:{call.lineno} sends {sent!r}, which no row of _PER_CALL decides"
+            )
+            expected = _PER_CALL[path.stem][sent]
+        else:
+            expected = path.stem in _PERSONS_OWN_ASK
         assert isinstance(flag, ast.Constant) and flag.value is expected, (
             f"{path.name}:{call.lineno} must pass _asked_by_user={expected}"
         )
 
 
 def test_every_named_own_ask_is_a_served_bridge():
-    assert set(_PERSONS_OWN_ASK) <= {path.stem for path in _SERVED}
-    assert set(_CALLER_DECIDES) <= {path.stem for path in _SERVED}
+    served = {path.stem for path in _SERVED}
+    assert set(_PERSONS_OWN_ASK) <= served
+    assert set(_CALLER_DECIDES) <= served
+    assert set(_PER_CALL) <= served
     assert not set(_CALLER_DECIDES) & set(_PERSONS_OWN_ASK)
+    assert not set(_PER_CALL) & (set(_CALLER_DECIDES) | set(_PERSONS_OWN_ASK))
+
+
+def test_every_per_call_row_names_a_call_the_bridge_makes():
+    for stem, rows in _PER_CALL.items():
+        path = _PACKAGE / f"{stem}.py"
+        sent = {getattr(call.args[0], "id", None) for call in _served_calls(path) if call.args}
+        assert set(rows) == sent, (stem, sorted(rows), sorted(s for s in sent if s))
 
 
 class TestTheFlag:

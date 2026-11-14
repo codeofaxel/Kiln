@@ -99,6 +99,10 @@ class _PrintabilityToolsPlugin:
                     analysis (default ``"pla"``).
                 printer_id: Optional registered printer whose real geometry
                     and calibration should inform the analysis.
+                plate_number: For a slicer project with several plates,
+                    which plate to check (1-based).  Leave unset for a
+                    single-plate file; a project with several plates and
+                    none named is refused with the list of its plates.
             """
             import kiln.server as _srv
             from kiln.printability import analyze_printability as _analyze
@@ -335,6 +339,10 @@ class _PrintabilityToolsPlugin:
                 file_path: Path to an STL or OBJ mesh file.
                 max_overhang_angle: Maximum overhang angle in degrees
                     before supports are needed (default 45).
+                plate_number: For a slicer project with several plates,
+                    which plate to check (1-based).  Leave unset for a
+                    single-plate file; a project with several plates and
+                    none named is refused with the list of its plates.
             """
             # STEP in, mesh out — the one shared door, never a per-tool
             # branch, so the CAD format engineering customers actually send

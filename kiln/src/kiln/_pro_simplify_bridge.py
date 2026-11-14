@@ -73,7 +73,7 @@ def _served(file_path: str, target_ratio: float, output_path: str) -> dict[str, 
             safe_remedy="Your slicer or the program that made the file can simplify it too",
         ),
         "code": miss.code or NOT_SIMPLIFIED_CODE,
-        "retryable": miss.cause != "refused",
+        "retryable": miss.retryable,
         **fields(miss),
     }
     if miss.cause == "signed_out":

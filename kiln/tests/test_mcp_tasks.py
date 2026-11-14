@@ -298,8 +298,10 @@ def test_a_queued_job_is_never_called_printing() -> None:
     assert not any(line.startswith("Printing") for line in lines), lines
 
 
-def test_a_paused_print_says_paused() -> None:
-    """Same lap: a paused print read "42% printed" as if it were moving."""
+def test_a_paused_print_says_paused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A paused print reads "Paused at", and no line the wait writes calls it
+    "% printed", the read where it ends included.  Every line the wait writes
+    is read here, not only those a poll of the task happened to catch."""
     printer = _printer(printing_reads=3)
     printing = printer.get_state.side_effect
 
@@ -308,13 +310,21 @@ def test_a_paused_print_says_paused() -> None:
         return _state(PrinterStatus.PAUSED) if state.state == PrinterStatus.PRINTING else state
 
     printer.get_state.side_effect = paused_then_idle
+    said: list[str] = []
+    real_say = mcp_tasks.say
+
+    def say(line: str) -> None:
+        said.append(line)
+        real_say(line)
+
+    monkeypatch.setattr(mcp_tasks, "say", say)
     host = _TasksClient()
     with mock.patch("kiln.server._get_adapter", return_value=printer):
         _call([host], {"timeout": 30, "poll_interval": 1})
 
     lines = _lines(host)
     assert any(line.startswith("Paused at ") for line in lines), lines
-    assert not any("% printed" in line for line in lines), lines
+    assert said and not any("% printed" in line for line in said), said
 
 
 def test_the_agent_rule_tells_a_background_host_to_wait_per_checkpoint() -> None:

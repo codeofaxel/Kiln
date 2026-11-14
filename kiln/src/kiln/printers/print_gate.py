@@ -524,12 +524,11 @@ def _claims_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
 
 
 def _is_resume_print(file_name: str, kwargs: dict[str, Any], *, adapter: Any = None) -> bool:
-    """True for a resume-mode continuation the printer backs: the start
-    claims to continue a paused print AND the printer it is aimed at reports
-    a paused job right now (:func:`kiln.print_signoff.printer_reports_paused`).
-
-    Both the flag and the name are chosen by whoever starts the print, so a
-    claim the printer does not back is judged as the new print it may be.
+    """True for a resume the printer backs: the start claims to continue a
+    paused print AND the printer it is aimed at reports a paused job now
+    (:func:`kiln.print_signoff.printer_reports_paused`).  The flag and the
+    name are the starter's to choose, so a claim the printer does not back
+    is judged as the new print it may be.
     """
     if not _claims_resume_print(file_name, kwargs):
         return False

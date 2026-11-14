@@ -75,6 +75,10 @@ PARAM_PARITY_EXEMPT: dict[tuple[str, str], str] = {
         "per-part materials already feed the signal (load_bearing_signal("
         "material=p.material) per part); the flagged call is the "
         "interface-level one, which carries joint_type by design",
+    ("validate_gcode", "printer_id"):
+        "the printer-free preview by design: it judges commands for a "
+        "printer whose model Kiln has not been told; validate_gcode_safe "
+        "is its twin that takes printer_id",
 }
 
 # (tool_name, param) -> one-line note.  KNOWN findings owed a product
