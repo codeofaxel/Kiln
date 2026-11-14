@@ -18,6 +18,7 @@ no folder.
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import shutil
 import sys
@@ -308,7 +309,7 @@ def test_a_note_another_tool_said_does_not_use_up_the_signed_out_line(plain_inst
 @pytest.mark.parametrize(
     ("answer", "why"),
     [
-        (OSError(51, "Network is unreachable"), "offline"),
+        (OSError(errno.ENETUNREACH, "Network is unreachable"), "offline"),
         ({"status": "error", "code": "SERVER_UNREACHABLE", "error": "down", "why": "unanswered"}, "unanswered"),
         ({"status": "error", "code": "QUOTA", "error": "No more today."}, "refused"),
         ({"status": "success", "message": "an answer with no session in it"}, "unanswered"),
@@ -333,7 +334,7 @@ def test_every_miss_leaves_the_make_as_it_was_and_says_why_once(plain_install, s
 
 def test_a_cause_a_public_tool_already_said_is_not_said_again(plain_install, servers, made):
     served_public.say_once("analyze_printability", {}, served_answer.Miss("offline", "SERVER_UNREACHABLE"))
-    servers(OSError(51, "Network is unreachable"))
+    servers(OSError(errno.ENETUNREACH, "Network is unreachable"))
     env = {"success": True, "local_path": made}
     _make("download_model", {}, env, made)
     assert env == {"success": True, "local_path": made}

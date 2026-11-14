@@ -17464,9 +17464,10 @@ def compare_print_options(
     # A model that arrived lying down is priced standing up, from a turned
     # copy; the file named is never rewritten.
     priced = file_to_price(file_path) if fulfillment_material_id and size_refusal is None else None
+    service = order_service() if priced is not None else None
     if size_refusal is not None:
         fulfillment_error = size_refusal["message"]
-    elif priced is not None and order_service() is None:
+    elif priced is not None and service is None:
         # No order service on this install: the quote comes through Kiln's
         # servers (kiln._pro_order_bridge), and a miss is said as one.
         from kiln import _pro_order_bridge as served
@@ -17486,10 +17487,11 @@ def compare_print_options(
             else:
                 fulfillment_error = served.words(answer.miss, "quote")
     elif priced is not None:
+        # The order service on this install names its own request and error.
         try:
             provider = _get_fulfillment()
             quote = provider.get_quote(
-                QuoteRequest(
+                service.QuoteRequest(
                     file_path=priced.path,
                     material_id=fulfillment_material_id,
                     quantity=quantity,
@@ -17503,7 +17505,7 @@ def compare_print_options(
             fulfillment_quote_data = quote.to_dict()
             fulfillment_quote_data["kiln_fee"] = fee_calc.to_dict()
             fulfillment_quote_data["total_with_fee"] = float(fee_calc.total_cost)
-        except (FulfillmentError, RuntimeError) as exc:
+        except (service.FulfillmentError, RuntimeError) as exc:
             fulfillment_error = str(exc)
         except Exception as exc:
             fulfillment_error = str(exc)
