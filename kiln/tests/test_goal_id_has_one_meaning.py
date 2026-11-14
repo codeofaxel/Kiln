@@ -168,7 +168,16 @@ class TestTwoDifferentGoalsAreRefusedInWords:
 
 
 class TestTheBridgeDoor:
-    """A call relayed to this computer follows the dispatcher's rule."""
+    """A call relayed to this computer follows the dispatcher's rule.
+
+    The bridge runs only the tools on its own list, so the probe tools are
+    put on it for these tests."""
+
+    @pytest.fixture(autouse=True)
+    def _probes_on_the_list(self, monkeypatch):
+        from kiln import bridge_client
+
+        monkeypatch.setattr(bridge_client, "BRIDGE_TOOLS", bridge_client.BRIDGE_TOOLS | {_BRIEF_TOOL, _GOAL_TOOL})
 
     def test_a_relayed_call_reads_the_other_name_too(self):
         from kiln import bridge_client
