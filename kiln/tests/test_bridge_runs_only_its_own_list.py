@@ -494,10 +494,11 @@ class _Server:
 
 
 def _relay_folders():
-    import tempfile
     from pathlib import Path
 
-    return {p for p in Path(tempfile.gettempdir()).glob("kiln-relay-*")}
+    from kiln.output_paths import kiln_temp_dir
+
+    return {p for p in Path(kiln_temp_dir()).glob("kiln-relay-*")}
 
 
 class TestTheDownloadOfASavedMake:
@@ -552,7 +553,9 @@ class TestTheDownloadOfASavedMake:
         made: list[str] = []
 
         def fetch(token):
-            folder = tempfile.mkdtemp(prefix="kiln-relay-")
+            from kiln.output_paths import kiln_temp_dir
+
+            folder = tempfile.mkdtemp(prefix="kiln-relay-", dir=kiln_temp_dir())
             path = os.path.join(folder, "model.stl")
             with open(path, "wb") as fh:
                 fh.write(b"solid x\nendsolid x\n")

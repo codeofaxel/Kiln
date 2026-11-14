@@ -406,7 +406,9 @@ def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
         )
         # A folder of its own, so nothing else on this computer can name the
         # copy or the notes beside it.
-        folder = tempfile.mkdtemp(prefix=_FETCH_FOLDER_PREFIX)
+        from kiln.output_paths import kiln_temp_dir
+
+        folder = tempfile.mkdtemp(prefix=_FETCH_FOLDER_PREFIX, dir=kiln_temp_dir())
         path = os.path.join(folder, "model.stl")
         try:
             with _open_download(request, 30) as resp:
@@ -468,11 +470,13 @@ def _open_download(request: urllib.request.Request, timeout: float) -> Any:
 
 def _discard_fetched(path: str) -> None:
     """Remove the folder a relayed call's download made, once the call is over.
-    Only a download folder in this computer's temporary space is ever removed."""
+    Only a download folder in Kiln's own temporary space is ever removed."""
+    from kiln.output_paths import kiln_temp_dir
+
     folder = os.path.dirname(os.path.abspath(path))
     if not os.path.basename(folder).startswith(_FETCH_FOLDER_PREFIX):
         return
-    if os.path.realpath(os.path.dirname(folder)) != os.path.realpath(tempfile.gettempdir()):
+    if os.path.realpath(os.path.dirname(folder)) != os.path.realpath(kiln_temp_dir()):
         return
     shutil.rmtree(folder, ignore_errors=True)
 
