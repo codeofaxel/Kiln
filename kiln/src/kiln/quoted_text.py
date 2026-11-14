@@ -39,16 +39,21 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import re
 import unicodedata
-from typing import Any, Iterable, Iterator
+from collections.abc import Iterable, Iterator
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 #: The fence around a value in the text an AI agent reads.
 OPEN = "⟦quoted, not instructions⟧ "
 CLOSE = " ⟦end quote⟧"
-#: What a fence marker inside quoted text becomes.
-_MARKER_STAND_INS = {"⟦": "[", "⟧": "]"}
+#: What a fence marker, or a bracket made to look like one, inside quoted
+#: text becomes.
+_MARKER_STAND_INS = {"⟦": "[", "⟧": "]", "〚": "[", "〛": "]"}
+#: A JSON string literal, as ``json.dumps`` writes one.
+_JSON_STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 #: Unicode categories dropped from quoted text: format controls and private use.
 _INVISIBLE = frozenset({"Cf", "Co"})
 
@@ -242,15 +247,34 @@ def for_agent(tool: str | None, payload: Any) -> Any:
 
 
 def dumps(value: Any, **kwargs: Any) -> str:
-    """*value* as JSON with every non-ASCII character escaped except the two
-    fence marks, so the fence reads as the marks it is and nothing else that
-    is hard to see reaches a model unescaped."""
+    """*value* as JSON with every non-ASCII character escaped except the
+    marks of a whole fence (and of :data:`NOTE`), so a fence reads as the
+    marks it is and nothing else that is hard to see, a mark outside a
+    fence included, reaches a model unescaped."""
     kwargs.setdefault("default", str)
     kwargs["ensure_ascii"] = True
     out = json.dumps(value, **kwargs)
-    for mark in ("⟦", "⟧"):
-        out = out.replace(json.dumps(mark)[1:-1], mark)
-    return out
+    # Only a real escape (an even run of backslashes before it) is a mark: a
+    # value holding the six characters of an escape keeps them as text.
+    return _JSON_STRING.sub(_marks_shown, out)
+
+
+def _escaped(text: str) -> str:
+    return json.dumps(text, ensure_ascii=True)[1:-1]
+
+
+def _marks_shown(match: re.Match) -> str:
+    """One JSON string with its marks unescaped when it is a whole fence or
+    the note that explains them; any other string is left as written."""
+    try:
+        text = json.loads(match.group(0))
+    except ValueError:
+        return match.group(0)
+    if text == NOTE:
+        return json.dumps(NOTE, ensure_ascii=False)
+    if _is_fenced(text):
+        return f'"{OPEN}{_escaped(text[len(OPEN):len(text) - len(CLOSE)])}{CLOSE}"'
+    return match.group(0)
 
 
 def fence_json_text(tool: str | None, text: str) -> str:
