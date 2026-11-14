@@ -23,6 +23,7 @@ import pytest
 
 from kiln import print_signoff, resume_provenance, server
 from kiln.printers.base import PrinterState, PrinterStatus
+from tests._kiln_resume import reset_resume_records
 
 RESUME_FILE = "transformed_resume_ab12.3mf"
 
@@ -41,10 +42,10 @@ def printer(monkeypatch):
     monkeypatch.setattr(server, "_resolve_adapter", lambda *_a, **_k: machine)
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
     print_signoff.clear()
-    resume_provenance._reset_for_tests()
+    reset_resume_records()
     yield machine
     print_signoff.clear()
-    resume_provenance._reset_for_tests()
+    reset_resume_records()
 
 
 def _backed(machine, tmp_path, name: str) -> None:

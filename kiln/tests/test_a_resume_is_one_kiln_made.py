@@ -82,11 +82,13 @@ def machine(monkeypatch, tmp_path):
     monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", tmp_path / "twin" / "active.json")
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
     if resume_provenance is not None:
-        resume_provenance._reset_for_tests()
+        from tests._kiln_resume import reset_resume_records
+
+        reset_resume_records()
     print_signoff.clear()
     yield printer
     if resume_provenance is not None:
-        resume_provenance._reset_for_tests()
+        reset_resume_records()
     print_signoff.clear()
 
 
@@ -258,9 +260,9 @@ def test_a_local_copy_kiln_did_not_upload_is_not_the_resume(machine, tmp_path):
     """The printer starts what is saved under a name on it; a file on this
     computer that hashes the same is not that."""
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
-    resume_provenance.record_made_resume(
+    resume_provenance.try_record_resume(
         str(path), source=_job_source(machine), adapter=machine, made_by="get_print_before_edit",
-    )
+    )[0]
     assert print_signoff.verified_resume(str(path), {}, adapter=machine) is False
     machine.upload_file(str(path))
     assert print_signoff.verified_resume(str(path), {}, adapter=machine) is True
@@ -270,9 +272,9 @@ def test_a_printer_that_reports_no_job_gets_no_record(machine, tmp_path):
     source = _job_source(machine)
     machine.job = None
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
-    assert resume_provenance.record_made_resume(
+    assert resume_provenance.try_record_resume(
         str(path), source=source, adapter=machine, made_by="decorate_during_print",
-    ) is None
+    )[0] is None
 
 
 def test_a_resume_needs_the_printer_to_report_its_job_at_the_start(machine, tmp_path):
@@ -283,9 +285,9 @@ def test_a_resume_needs_the_printer_to_report_its_job_at_the_start(machine, tmp_
 
 def test_a_file_changed_while_it_was_checked_is_not_tied_to_its_name(machine, monkeypatch, tmp_path):
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
-    resume_provenance.record_made_resume(
+    resume_provenance.try_record_resume(
         str(path), source=_job_source(machine), adapter=machine, made_by="decorate_during_print",
-    )
+    )[0]
 
     def _swap(_adapter, p):
         Path(p).write_bytes(b"swapped after the hash")
@@ -350,9 +352,9 @@ def test_nothing_is_recorded_on_the_shared_server(machine, monkeypatch, tmp_path
 
     monkeypatch.setattr(runtime_env, "is_hosted_multitenant", lambda: True)
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume")
-    assert resume_provenance.record_made_resume(
+    assert resume_provenance.try_record_resume(
         str(path), source=_job_source(machine), adapter=machine, made_by="decorate_during_print",
-    ) is None
+    )[0] is None
 
 
 # ---------------------------------------------------------------------------

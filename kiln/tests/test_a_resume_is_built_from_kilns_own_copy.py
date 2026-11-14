@@ -33,6 +33,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from tests._kiln_resume import reset_resume_records
 
 JOB = "vase.gcode.3mf"
 TOOLPATH = b"G28\nG1 Z0.2 F600\n; layer 40 of the vase\n"
@@ -92,7 +93,7 @@ def _machine_fixture(monkeypatch, tmp_path, printer: _Machine) -> _Machine:
     monkeypatch.setattr(monitor_twin, "_TWIN_DIR", tmp_path / "twin")
     monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", tmp_path / "twin" / "active.json")
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
-    resume_provenance._reset_for_tests()
+    reset_resume_records()
     print_signoff.clear()
     return printer
 
@@ -100,14 +101,14 @@ def _machine_fixture(monkeypatch, tmp_path, printer: _Machine) -> _Machine:
 @pytest.fixture()
 def machine(monkeypatch, tmp_path):
     yield _machine_fixture(monkeypatch, tmp_path, _Machine())
-    resume_provenance._reset_for_tests()
+    reset_resume_records()
     print_signoff.clear()
 
 
 @pytest.fixture()
 def reads_back(monkeypatch, tmp_path):
     yield _machine_fixture(monkeypatch, tmp_path, _ReadsBack())
-    resume_provenance._reset_for_tests()
+    reset_resume_records()
     print_signoff.clear()
 
 
@@ -378,7 +379,7 @@ def test_a_handed_resume_is_judged_by_the_source_stated_nearest_it(machine, tmp_
     }
     assert resume_provenance.record_handed_resumes("decorate_during_print_fleet", answer, printer_name="garage") == []
     assert len(resume_provenance._records) == 1
-    resume_provenance._reset_for_tests()
+    reset_resume_records()
     del answer["prepared_sessions"]["garage"][resume_provenance.SOURCE_KEY]
     [note] = resume_provenance.record_handed_resumes("decorate_during_print_fleet", answer, printer_name="garage")
     assert "not Kiln's own copy" in note and resume_provenance._records == []

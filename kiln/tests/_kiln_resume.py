@@ -70,3 +70,13 @@ def made_by_kiln(adapter: Any, file_name: str, *, made_by: str = "decorate_durin
     assert record is not None, f"the record was not made: {why}"
     resume_provenance.note_upload(adapter, os.path.basename(file_name), digest=record.sha256)
     return file_name
+
+
+def reset_resume_records() -> None:
+    """Forget every resume record and what Kiln knows each printer-side name
+    holds, as a new process would."""
+    with resume_provenance._lock:
+        resume_provenance._records.clear()
+        resume_provenance._reported.clear()
+        resume_provenance._read_back.clear()
+        resume_provenance._sent.clear()

@@ -70,7 +70,6 @@ __all__ = [
     "paused_job_name",
     "record_derived_resume",
     "record_handed_resumes",
-    "record_made_resume",
     "recorded_job_source",
     "records_for",
     "report_unrecognized",
@@ -305,11 +304,6 @@ def try_record_resume(
         session=str(session or ""),
         made_at=time.time(),
     )), ""
-
-
-def record_made_resume(path: str, **kwargs: Any) -> ResumeRecord | None:
-    """:func:`try_record_resume`, the record alone."""
-    return try_record_resume(path, **kwargs)[0]
 
 
 def record_derived_resume(
@@ -667,11 +661,3 @@ def report_unrecognized(file_name: str, *, adapter: Any, why: str) -> None:
             )
     except Exception:  # noqa: BLE001
         logger.debug("resume claim: event not published", exc_info=True)
-
-
-def _reset_for_tests() -> None:
-    with _lock:
-        _records.clear()
-        _reported.clear()
-        _read_back.clear()
-        _sent.clear()
