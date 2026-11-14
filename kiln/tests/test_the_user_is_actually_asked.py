@@ -563,7 +563,10 @@ def test_the_consent_record_is_read_in_exactly_one_place():
                     )
                     if name == "consent_for":
                         readers.append(f"{path.name}::{fn.name}")
-    assert sorted(readers) == ["server.py::_obtain_print_consent", "server.py::_preview_gate_error"], (
+    # The gate reads it through ``_said_go``, which the question asked before
+    # a door sends a file to the printer shares, so those two cannot
+    # disagree either.
+    assert sorted(readers) == ["server.py::_obtain_print_consent", "server.py::_said_go"], (
         f"consent should be read only by the gate and the asker; readers: {readers}"
     )
 

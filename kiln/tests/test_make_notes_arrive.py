@@ -107,8 +107,11 @@ def test_the_bridge_prints_a_make_in_the_layer_it_was_designed_in(servers, monke
     from kiln import bridge_client
 
     class _Resp:
-        def read(self):
-            return FULL_BYTES
+        left = FULL_BYTES
+
+        def read(self, size=-1):
+            out, self.left = self.left, b""
+            return out
 
         def __enter__(self):
             return self
@@ -116,7 +119,7 @@ def test_the_bridge_prints_a_make_in_the_layer_it_was_designed_in(servers, monke
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr(bridge_client.urllib.request, "urlopen", lambda request, timeout=0: _Resp())
+    monkeypatch.setattr(bridge_client, "_open_download", lambda request, timeout=0: _Resp())
     monkeypatch.setenv("KILN_API_URL", "https://api.kiln3d.com")
     path = bridge_client._default_artifact_fetcher(lambda: "bearer-token")(TOKEN)
     try:
@@ -164,8 +167,11 @@ def test_the_bridge_keeps_its_copy_in_a_folder_of_its_own(servers, monkeypatch):
     from kiln import bridge_client
 
     class _Resp:
-        def read(self):
-            return FULL_BYTES
+        left = FULL_BYTES
+
+        def read(self, size=-1):
+            out, self.left = self.left, b""
+            return out
 
         def __enter__(self):
             return self
@@ -173,7 +179,7 @@ def test_the_bridge_keeps_its_copy_in_a_folder_of_its_own(servers, monkeypatch):
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr(bridge_client.urllib.request, "urlopen", lambda request, timeout=0: _Resp())
+    monkeypatch.setattr(bridge_client, "_open_download", lambda request, timeout=0: _Resp())
     path = bridge_client._default_artifact_fetcher(lambda: "bearer-token")(TOKEN)
     folder = Path(path).parent
     try:

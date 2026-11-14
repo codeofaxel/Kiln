@@ -15,11 +15,12 @@ the relay server enforces tenant isolation + its own list of the tools it
 relays, so a call can only ever reach its own account's machine.
 
 This computer does not take the server's word for which tools may run: it
-keeps its own list (:data:`BRIDGE_TOOLS`) and its own refused arguments
-(:data:`BRIDGE_REFUSED_ARGS`), and refuses everything else before any work
-starts, whatever a relayed frame names.  Raw G-code, temperatures, fans,
-safety limits, firmware, the credential vault, the install itself and the
-consent settings are not on it, so they never run over the bridge.
+keeps its own list (:data:`BRIDGE_ARGUMENTS`, each tool with the only
+arguments it may carry), and refuses everything else before any work starts,
+whatever a relayed frame names.  Raw G-code, temperatures, fans, safety
+limits, firmware, the credential vault, the install itself and the consent
+settings are not on it, so they never run over the bridge.  The relay server
+reads this same list.
 
 The core (:func:`handle_relay_request`) is pure and injected with its tool caller
 + artifact fetcher, so it is unit-tested without a socket, the cloud, or a
@@ -33,12 +34,16 @@ import contextlib
 import json
 import logging
 import os
+import shutil
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from kiln.cli_command import kiln_command
@@ -76,81 +81,100 @@ ToolCaller = Callable[[str, dict], Any]          # (tool_name, args) -> result
 ArtifactFetcher = Callable[[str], str]           # cloud token -> local file path
 
 
-#: The only tools this computer runs for a relayed call.  Everything the web
-#: app and the AI apps reach through the bridge, and nothing more: status
-#: and camera reads, the tray and spool reads, slice-and-print, watching a
-#: print, pause / resume / cancel (stopping is always the safe direction),
-#: and the four printer-record writes the web's own buttons make (rename,
-#: model, repair mark, the live layer view's upload).  A tool not named here
-#: is refused on this computer even when the server names it, so a server
-#: that misbehaves cannot send G-code, heat a printer, change a safety
-#: limit, flash firmware, read stored credentials, upgrade or restart Kiln,
-#: or change consent settings.  Adding a tool here is a security review.
-BRIDGE_TOOLS: frozenset[str] = frozenset(
+#: Every tool this computer runs for a relayed call, with the only arguments
+#: each may carry.  Everything the web app and the AI apps reach through the
+#: bridge, and nothing more: status and camera reads, the tray and spool
+#: reads, slice-and-print, watching a print, pause / resume / cancel
+#: (stopping is always the safe direction), and the printer-record writes the
+#: web's own buttons make.  A tool or argument not named here is refused on
+#: this computer even when the server names it, before anything is fetched or
+#: run.  Nothing here sets a temperature or fan, moves the head, sends raw
+#: G-code, changes a safety limit or firmware, reads a stored secret,
+#: upgrades or restarts Kiln, registers a printer, or changes consent
+#: settings; no argument here names a file on this computer, skips a check,
+#: holds a heater on or forces a resume.  Adding to it is a security review,
+#: pinned by ``kiln/tests/test_bridge_runs_only_its_own_list.py``.
+BRIDGE_ARGUMENTS: Mapping[str, frozenset[str]] = MappingProxyType(
     {
-        "printer_status",
-        "printer_snapshot",
-        "fleet_status",
-        "queue_summary",
-        "ams_status",
-        "list_spools",
-        "slice_and_print",
-        "monitor_print",
-        "watch_print_status",
-        "pause_print",
-        "resume_print",
-        "cancel_print",
-        "cancel_queued_job",
-        "rename_printer",
-        # The web's model picker, and the bed a printer outside the
-        # catalogue waits for before its first print from the web.  Never
-        # with a file (see BRIDGE_REFUSED_ARGS).
-        "set_printer_model",
-        "publish_print_twin",
-        "set_machine_repair",
+        # Reading the printers and what is loaded in them.
+        "printer_status": frozenset({"printer_name", "detail"}),
+        "printer_snapshot": frozenset({"printer_name"}),
+        "fleet_status": frozenset(),
+        "queue_summary": frozenset(),
+        "ams_status": frozenset(),
+        "list_spools": frozenset(),
+        # Watching a print.
+        "monitor_print": frozenset({"printer_name", "include_snapshot"}),
+        # A print of a saved make, fetched by its token (the only file a
+        # relayed call can print), and the yes it rests on.
+        "slice_and_print": frozenset(
+            {
+                "cloud_artifact_token",
+                "print_authority",
+                "printer_name",
+                "material",
+                "hardware",
+                "color",
+                "version_id",
+                "design_id",
+                "branch_id",
+                "account_sync_id",
+            }
+        ),
+        # Stopping, and resuming what was paused.
+        "pause_print": frozenset({"printer_name"}),
+        "resume_print": frozenset({"printer_name"}),
+        "cancel_print": frozenset({"printer_name"}),
+        "cancel_queued_job": frozenset({"job_id"}),
+        # The printer's own record on this computer: the web's rename button
+        # and its model picker, which names a catalogue model only.
+        "rename_printer": frozenset({"printer_name", "new_name"}),
+        "set_printer_model": frozenset({"printer_model", "printer_name", "replace"}),
+        # The file the printer is printing, for the web's live layer view.
+        "publish_print_twin": frozenset({"printer_name"}),
     }
 )
 
-#: Arguments a relayed call may not carry, by tool.  Each either names a file
-#: on this computer (a place to read or write, which a request from the web
-#: or an app does not choose) or stands for the person or a safety check
-#: here (a confirmation, a forced or skipped check, heaters left on), which
-#: only this computer can give.  A relayed call gets the tool's defaults for
-#: all of them.  ``slice_and_print`` gets its model from the saved make the
-#: call names (the bridge fetches it and fills ``input_path`` itself).
-#: ``kiln/tests/test_bridge_runs_only_its_own_list.py`` fails a listed tool
-#: that gains such an argument without a row here.
-BRIDGE_REFUSED_ARGS: dict[str, frozenset[str]] = {
-    "set_printer_model": frozenset({"slicer_file"}),
-    "slice_and_print": frozenset({"input_path", "profile", "skip_validation"}),
-    "printer_snapshot": frozenset({"save_path"}),
-    "resume_print": frozenset({"force", "hardware_confirmed"}),
-    "cancel_print": frozenset({"preserve_temperatures"}),
-    "pause_print": frozenset({"keep_temps", "leave_nozzle"}),
-}
+#: The tools :data:`BRIDGE_ARGUMENTS` lets a relayed call run.
+BRIDGE_TOOLS: frozenset[str] = frozenset(BRIDGE_ARGUMENTS)
 
-#: The code a refused relayed call carries back to the server.
+#: The code a refused relayed call carries back to the server, for a tool or
+#: an argument off the list; a refused argument also names it (``argument``).
 BRIDGE_REFUSED_CODE = "BRIDGE_TOOL_REFUSED"
 
 
-def bridge_refusal(tool: str, args: dict) -> str | None:
-    """Why this computer will not run *tool* with *args* for a relayed call,
-    or ``None`` when it will.  Judged on the call as it arrived, before the
+def bridge_refusal(tool: str, args: Any) -> dict | None:
+    """The error block for a relayed call this computer will not run, or
+    ``None`` when it will.  Judged on the call as it arrived, before the
     bridge fetches anything or fills any argument itself."""
-    if tool not in BRIDGE_TOOLS:
-        return (
-            f"Kiln on this computer does not run {tool[:64] or 'that tool'} for a request from the "
-            "web or an app. Run it on this computer if you meant to."
-        )
-    refused = sorted(
-        name for name in BRIDGE_REFUSED_ARGS.get(tool, frozenset())
-        if args.get(name) not in (None, "")
-    )
-    if refused:
-        return (
-            f"Kiln on this computer does not take {', '.join(refused)} for {tool} from the web "
-            "or an app: it names a file on this computer, so it is given here."
-        )
+    allowed = BRIDGE_ARGUMENTS.get(tool)
+    if allowed is None:
+        return {
+            "message": (
+                f"Kiln on this computer does not run {tool[:64] or 'that tool'} for a request from the "
+                "web or an app. Run it on this computer if you meant to."
+            ),
+            "tool": tool,
+            "code": BRIDGE_REFUSED_CODE,
+        }
+    if not isinstance(args, dict):
+        return {
+            "message": f"The request for {tool} did not arrive as named arguments. Nothing was run.",
+            "tool": tool,
+            "code": BRIDGE_REFUSED_CODE,
+            "argument": "",
+        }
+    extra = sorted(str(name) for name in args if name not in allowed)
+    if extra:
+        return {
+            "message": (
+                f"Kiln on this computer does not take {extra[0][:64]} for {tool} from the web or an app; "
+                "it is given only on this computer. Nothing was run."
+            ),
+            "tool": tool,
+            "code": BRIDGE_REFUSED_CODE,
+            "argument": extra[0],
+        }
     return None
 
 
@@ -182,22 +206,19 @@ def handle_relay_request(
     are refused before any tool runs: a consent by file name would let a
     re-generated model print under the old approval.
 
-    The list: a tool outside :data:`BRIDGE_TOOLS`, or an argument in
-    :data:`BRIDGE_REFUSED_ARGS`, is refused here before anything else runs
-    (no fetch, no consent, no tool), with :data:`BRIDGE_REFUSED_CODE` so the
-    server knows this computer said no.
+    The list: a tool outside :data:`BRIDGE_ARGUMENTS`, or an argument its
+    entry does not name, is refused here before anything else runs (no fetch,
+    no consent, no tool), with :data:`BRIDGE_REFUSED_CODE` so the server knows
+    this computer said no.
     """
     request_id = req.get("request_id")
     tool = str(req.get("tool_name") or "")
-    args = dict(req.get("args") or {})
-    refusal = bridge_refusal(tool, args)
+    raw_args = req.get("args")
+    refusal = bridge_refusal(tool, {} if raw_args is None else raw_args)
     if refusal is not None:
-        logger.warning("bridge: refused a relayed %r call: %s", tool, refusal)
-        return {
-            "request_id": request_id,
-            "ok": False,
-            "error": {"message": refusal, "tool": tool, "code": BRIDGE_REFUSED_CODE},
-        }
+        logger.warning("bridge: refused a relayed %r call: %s", tool[:64], refusal["message"])
+        return {"request_id": request_id, "ok": False, "error": refusal}
+    args = dict(raw_args or {})
     reset = None
     try:
         token = args.pop("cloud_artifact_token", None)
@@ -347,7 +368,7 @@ def _default_tool_caller() -> ToolCaller:
         # The same list :func:`handle_relay_request` reads, asked again here so
         # a second way into this caller cannot run a tool the list leaves out.
         if name not in BRIDGE_TOOLS:
-            raise ValueError(bridge_refusal(name, args))
+            raise ValueError(bridge_refusal(name, args)["message"])
         tool = _server.mcp._tool_manager._tools.get(name)
         if tool is None:
             raise ValueError(f"tool {name!r} is not available on this machine")
@@ -379,18 +400,40 @@ def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
     api = os.environ.get("KILN_API_URL", _DEFAULT_API_URL).rstrip("/")
 
     def fetch(token: str) -> str:
-        url = f"{api}/api/artifact/{token}"
+        url = f"{api}/api/artifact/{urllib.parse.quote(str(token), safe='')}"
         request = urllib.request.Request(
             url, headers={"Authorization": f"Bearer {get_bearer()}"}
         )
-        with urllib.request.urlopen(request, timeout=30) as resp:  # noqa: S310
-            data = resp.read()
         # A folder of its own, so nothing else on this computer can name the
         # copy or the notes beside it.
-        path = os.path.join(tempfile.mkdtemp(prefix="kiln-relay-"), "model.stl")
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
+        from kiln.output_paths import kiln_temp_dir
+
+        folder = tempfile.mkdtemp(prefix=_FETCH_FOLDER_PREFIX, dir=kiln_temp_dir())
+        path = os.path.join(folder, "model.stl")
+        try:
+            with _open_download(request, 30) as resp:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as fh:
+                    total = 0
+                    while chunk := resp.read(1 << 20):
+                        total += len(chunk)
+                        if total > _ARTIFACT_MAX_BYTES:
+                            raise ValueError(
+                                "The saved make is larger than Kiln downloads for a print from the web or an app. "
+                                "Nothing was printed."
+                            )
+                        fh.write(chunk)
+        except urllib.error.HTTPError as exc:
+            shutil.rmtree(folder, ignore_errors=True)
+            if 300 <= exc.code < 400:
+                raise ValueError(
+                    "The download of the saved make was sent somewhere else, and Kiln does not follow it. "
+                    "Nothing was printed."
+                ) from exc
+            raise
+        except BaseException:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
         # The notes kept with the make (the layer a relief was designed in)
         # go beside the copy, so the slice here prints in its layers.
         from kiln.served_makes import lay_notes_beside
@@ -399,6 +442,43 @@ def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
         return path
 
     return fetch
+
+
+#: The most bytes a saved make's download may be: a bound on an answer that
+#: would otherwise fill this computer's memory or disk, well above any make.
+_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024
+
+#: The name every download folder starts with, so only those are ever removed.
+_FETCH_FOLDER_PREFIX = "kiln-relay-"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A download answered with a redirect is refused, never followed: the
+    redirect would carry this computer's sign-in to whatever address it names."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002, PLR0913
+        return None
+
+
+_DOWNLOAD_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _open_download(request: urllib.request.Request, timeout: float) -> Any:
+    """Open a saved make's download; a redirect is refused, never followed."""
+    return _DOWNLOAD_OPENER.open(request, timeout=timeout)
+
+
+def _discard_fetched(path: str) -> None:
+    """Remove the folder a relayed call's download made, once the call is over.
+    Only a download folder in Kiln's own temporary space is ever removed."""
+    from kiln.output_paths import kiln_temp_dir
+
+    folder = os.path.dirname(os.path.abspath(path))
+    if not os.path.basename(folder).startswith(_FETCH_FOLDER_PREFIX):
+        return
+    if os.path.realpath(os.path.dirname(folder)) != os.path.realpath(kiln_temp_dir()):
+        return
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 def observe_addresses(
@@ -943,9 +1023,20 @@ class BridgeClient:
             def call_tool(name: str, args: dict) -> Any:  # noqa: ARG001
                 raise RuntimeError(message)
 
-        return handle_relay_request(
-            req, call_tool=call_tool, fetch_artifact=self._fetch_artifact,
-        )
+        # The download a call makes is removed when the call is over: the
+        # print has its own copy by then, and nothing piles up on this disk.
+        fetched: list[str] = []
+
+        def fetch(token: str) -> str:
+            path = self._fetch_artifact(token)
+            fetched.append(path)
+            return path
+
+        try:
+            return handle_relay_request(req, call_tool=call_tool, fetch_artifact=fetch)
+        finally:
+            for path in fetched:
+                _discard_fetched(path)
 
     async def _handle_and_reply(self, ws, req: dict) -> None:
         resp = await asyncio.to_thread(self._relay, req)

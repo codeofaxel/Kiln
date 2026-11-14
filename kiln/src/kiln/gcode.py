@@ -765,6 +765,7 @@ def _validate_single(
     *,
     macros: bool = False,
     rules: Any = None,
+    ceilings: dict[str, tuple[float, str]] | None = None,
 ) -> str | None:
     """Validate a single G-code line.
 
@@ -778,7 +779,12 @@ def _validate_single(
 
     When *dialect* is not ``GENERIC``, dialect-specific blocked commands
     are also checked.
+
+    *ceilings* are the heat limits the line is judged against: the generic
+    limits unless a caller names others (:func:`validate_commands`).
     """
+    if ceilings is None:
+        ceilings = _GENERIC_CEILINGS
     cleaned = _strip_comment(raw_line)
     if not cleaned:
         return None  # blank / comment-only line -- skip silently
@@ -788,12 +794,14 @@ def _validate_single(
     if cmd is None:
         if _is_plain_line(dialect, cleaned):
             return cleaned
-        if macros and (judged := _judge_macro_line(cleaned, warnings, errors, blocked, _GENERIC_CEILINGS)) is not None:
+        if macros and (judged := _judge_macro_line(cleaned, warnings, errors, blocked, ceilings)) is not None:
             return None if judged else cleaned
         if macros and _UNNUMBERED_TOOL_RE.match(cleaned):
             return cleaned
         if macros and (runs := _from_first_letter(cleaned)) is not None:
-            return _validate_single(runs, warnings, errors, blocked, dialect, macros=True, rules=rules) if runs else cleaned
+            return _validate_single(
+                runs, warnings, errors, blocked, dialect, macros=True, rules=rules, ceilings=ceilings,
+            ) if runs else cleaned
         if macros and _names_no_command(cleaned):
             return cleaned
         # Not a recognisable G-code command -- block to prevent sending
@@ -823,7 +831,7 @@ def _validate_single(
         return None
 
     # --- Every other command word on the line -----------------------------
-    if _later_command_refused(cmd, cleaned, dialect, rules, warnings, errors, blocked, _GENERIC_CEILINGS):
+    if _later_command_refused(cmd, cleaned, dialect, rules, warnings, errors, blocked, ceilings):
         return None
 
     # --- Warning-level commands ------------------------------------------
@@ -831,7 +839,7 @@ def _validate_single(
         warnings.append(_WARN_COMMANDS[cmd])
 
     # --- Temperature limits (BLOCKING) -----------------------------------
-    if _judge_heat_command(cmd, cleaned, warnings, errors, blocked, _GENERIC_CEILINGS):
+    if _judge_heat_command(cmd, cleaned, warnings, errors, blocked, ceilings):
         return None
 
     # --- Movement safety (WARNING) ---------------------------------------
@@ -867,6 +875,8 @@ def _validate_single(
 def validate_gcode(
     commands: str | list[str],
     dialect: GCodeDialect = GCodeDialect.GENERIC,
+    *,
+    ceilings: dict[str, tuple[float, str]] | None = None,
 ) -> GCodeValidationResult:
     """Parse and validate G-code commands for safety.
 
@@ -879,6 +889,9 @@ def validate_gcode(
         commands: One or more G-code commands.  A string is split on
             newlines; a list is processed element-by-element.
         dialect: Firmware dialect for dialect-specific validation.
+        ceilings: The heat limits to judge against; the generic limits
+            when omitted.  Commands Kiln is asked to send to a printer go
+            through :func:`validate_commands`, which names the right ones.
 
     Returns:
         A :class:`GCodeValidationResult` summarising which commands are
@@ -914,12 +927,55 @@ def validate_gcode(
             result.errors,
             result.blocked_commands,
             dialect=dialect,
+            ceilings=ceilings,
         )
         if cleaned is not None:
             result.commands.append(cleaned)
 
     result.valid = len(result.errors) == 0
     return result
+
+
+def _unidentified_printer_ceilings(
+    unnamed: str = "Kiln has not been told this printer's model; set printer_model to judge by its own",
+) -> dict[str, tuple[float, str]]:
+    """The heat limits for a printer Kiln cannot judge by its own profile.
+
+    Read from :func:`kiln.safety_profiles.resolve_limits`, the floor the
+    temperature tool holds the same printer to, so one heater has one limit
+    whichever door asks.  The chamber keeps the generic ceiling: there is no
+    floor of its own for it.  *unnamed* is the reason the refusal gives.
+    """
+    from kiln.safety_profiles import resolve_limits  # noqa: E402
+
+    hotend, bed = resolve_limits(None)
+    return {
+        "hotend": (hotend, f"the generic hotend temperature floor ({hotend:g}°C: {unnamed})"),
+        "bed": (bed, f"the generic bed temperature floor ({bed:g}°C: {unnamed})"),
+        "chamber": _GENERIC_CEILINGS["chamber"],
+    }
+
+
+def validate_commands(
+    commands: str | list[str],
+    printer_id: str | None = None,
+    dialect: GCodeDialect = GCodeDialect.GENERIC,
+) -> GCodeValidationResult:
+    """Judge G-code a person or an agent asks Kiln to SEND to a printer.
+
+    With the printer's model known (*printer_id*), its own limits
+    (:func:`validate_gcode_for_printer`).  Without one, the floor Kiln holds
+    a printer it cannot identify to -- the same limits ``set_temperature``
+    applies to that printer -- never the looser generic limits, which would
+    let a raw ``M104`` heat a possibly PTFE-lined hotend past what the
+    temperature tool refuses.  Every door that sends commands goes through
+    here.  A print FILE a slicer made is judged by :func:`scan_gcode_file`
+    instead, which keeps the generic limits for a printer whose own are not
+    in hand.
+    """
+    if printer_id:
+        return validate_gcode_for_printer(commands, printer_id, dialect=dialect)
+    return validate_gcode(commands, dialect=dialect, ceilings=_unidentified_printer_ceilings())
 
 
 def _bed_for_bounds(profile: Any, printer_id: str | None) -> tuple[float, float, float] | None:
@@ -975,7 +1031,13 @@ def validate_gcode_for_printer(
     try:
         profile = get_profile(printer_id)
     except KeyError:
-        return validate_gcode(commands, dialect=dialect)
+        # No profile held at all, not even the default: the floor the
+        # temperature tool falls back to, never the looser generic limits.
+        return validate_gcode(
+            commands,
+            dialect=dialect,
+            ceilings=_unidentified_printer_ceilings("Kiln holds no safety profile for this printer"),
+        )
     bed = _bed_for_bounds(profile, printer_id)
     rules = _command_rules(printer_id)
 

@@ -278,8 +278,11 @@ def test_artifact_fetcher_reads_the_bearer_at_fetch_time(monkeypatch):
     seen = {}
 
     class _Resp:
-        def read(self):
-            return b"solid x\nendsolid x\n"
+        left = b"solid x\nendsolid x\n"
+
+        def read(self, size=-1):
+            out, self.left = self.left, b""
+            return out
 
         def __enter__(self):
             return self
@@ -291,7 +294,7 @@ def test_artifact_fetcher_reads_the_bearer_at_fetch_time(monkeypatch):
         seen["auth"] = request.headers.get("Authorization")
         return _Resp()
 
-    monkeypatch.setattr(bridge_client.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(bridge_client, "_open_download", fake_urlopen)
 
     current = {"token": "fresh-at-fetch-time"}
     fetch = bridge_client._default_artifact_fetcher(lambda: current["token"])
