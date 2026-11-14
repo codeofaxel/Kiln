@@ -229,7 +229,7 @@ jobs:
       # listing them here is what let an empty pair overwrite a good one.
       - name: Upload signing artifacts to the GitHub release
         # softprops/action-gh-release v3.0.2
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3
         with:
           files: |
             dist/*.sigstore
