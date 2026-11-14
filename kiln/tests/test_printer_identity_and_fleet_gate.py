@@ -258,9 +258,9 @@ class TestFleetConcurrencyGate:
 class TestGateNeverTouchesSafety:
     def test_resume_prints_are_never_fleet_gated(self, monkeypatch):
         """A mid-print continuation is committed work — blocking it would
-        strand a hot machine.  A continuation is one the printer backs: it
-        reports the paused job (a resume name on an idle printer is judged
-        as the new print it may be)."""
+        strand a hot machine.  A continuation is a resume file Kiln made for
+        the job the printer reports paused (a resume name alone is judged as
+        the new print it may be)."""
         from kiln.printers import print_gate
         from kiln.printers.base import PrinterState, PrinterStatus
 
@@ -268,8 +268,11 @@ class TestGateNeverTouchesSafety:
             print_gate, "_concurrent_fleet_verdict",
             lambda _a: {"blocked": True, "reason": "should never be reached"},
         )
+        from tests._kiln_resume import made_by_kiln
+
         paused = _adapter()
         paused.get_state = lambda: PrinterState(state=PrinterStatus.PAUSED, connected=True)
+        made_by_kiln(paused, "transformed_resume_ab12.3mf")
         assert print_gate.run_adapter_gate(
             paused, "transformed_resume_ab12.3mf", {},
         ) is None

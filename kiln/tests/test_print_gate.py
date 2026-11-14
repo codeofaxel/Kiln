@@ -180,15 +180,19 @@ class TestSwarmFixes:
     """Regressions for the adversarial-verify findings."""
 
     def test_resume_mode_soft_passes_oversize(self, big):
-        # A resume continuation the printer backs (it reports the paused job)
+        # A resume Kiln made for the job the printer reports paused
         # is committed + already validated -> never re-gated, even though
         # `big` is oversize. (false-block fix)
         from kiln.printers.base import PrinterState, PrinterStatus
 
+        from tests._kiln_resume import made_by_kiln
+
         a = _FakeAdapter()
         a.get_state = lambda: PrinterState(state=PrinterStatus.PAUSED, connected=True)
+        made_by_kiln(a, big)
         assert pg.run_adapter_gate(a, big, {"resume_from_paused": True}) is None
-        # ...and via the conventional resume filename (string check; file need not exist)
+        # ...and a resume Kiln made, started by the name it was saved under
+        made_by_kiln(a, "/tmp/foo_resume_plate.3mf")
         assert pg.run_adapter_gate(a, "/tmp/foo_resume_plate.3mf", {}) is None
 
     def test_a_resume_claim_on_an_idle_printer_is_gated_like_a_new_print(self, big):

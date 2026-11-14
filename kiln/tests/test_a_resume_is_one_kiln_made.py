@@ -240,12 +240,39 @@ def test_start_print_continues_a_resume_kiln_made(machine, monkeypatch, tmp_path
     assert seen == {"is_resume": True}
 
 
-def test_a_local_copy_with_the_same_bytes_is_the_same_resume(machine, tmp_path):
+def test_a_local_copy_kiln_did_not_upload_is_not_the_resume(machine, tmp_path):
+    """The printer starts what is saved under a name on it; a file on this
+    computer that hashes the same is not that."""
     path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
     resume_provenance.record_made_resume(str(path), adapter=machine, made_by="get_print_before_edit")
-    assert print_signoff.verified_resume(str(path), {}, adapter=machine) is True
-    path.write_bytes(b"other bytes")
     assert print_signoff.verified_resume(str(path), {}, adapter=machine) is False
+    machine.upload_file(str(path))
+    assert print_signoff.verified_resume(str(path), {}, adapter=machine) is True
+
+
+def test_a_printer_that_reports_no_job_gets_no_record(machine, tmp_path):
+    machine.job = None
+    path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
+    assert resume_provenance.record_made_resume(str(path), adapter=machine, made_by="decorate_during_print") is None
+
+
+def test_a_resume_needs_the_printer_to_report_its_job_at_the_start(machine, tmp_path):
+    name = _kiln_made(machine, tmp_path)
+    machine.job = None
+    assert print_signoff.verified_resume(name, {}, printer_name="garage") is False
+
+
+def test_a_file_changed_while_it_was_checked_is_not_tied_to_its_name(machine, monkeypatch, tmp_path):
+    path = _file(tmp_path, "transformed_resume_ab12.3mf", b"resume bytes")
+    resume_provenance.record_made_resume(str(path), adapter=machine, made_by="decorate_during_print")
+
+    def _swap(_adapter, p):
+        Path(p).write_bytes(b"swapped after the hash")
+        return p
+
+    monkeypatch.setattr(printers_base, "_preflight_upload_or_raise", _swap)
+    machine.upload_file(str(path))
+    assert print_signoff.verified_resume(path.name, {}, printer_name="garage") is False
 
 
 # ---------------------------------------------------------------------------

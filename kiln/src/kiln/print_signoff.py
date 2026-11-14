@@ -182,7 +182,7 @@ def verified_resume(
     claimed = claims_resume(file_name, kwargs)
     shown = os.path.basename(str(file_name or "")) or "a file"
     try:
-        adapter = adapter if adapter is not None else _resolve_target(printer_name)
+        adapter = adapter if adapter is not None else find_printer(printer_name)
     except Exception:  # noqa: BLE001 -- no printer, nothing to continue
         adapter = None
     record = resume_provenance.made_for_paused_job(file_name, adapter=adapter) if adapter is not None else None
@@ -206,10 +206,13 @@ def verified_resume(
     return False
 
 
-def _resolve_target(printer_name: str | None) -> Any:
-    from kiln.server import _resolve_adapter
-
-    return _resolve_adapter(printer_name)
+def find_printer(printer_name: str | None) -> Any:
+    """The adapter *printer_name* names (``None`` is the default printer),
+    through the lookup the server sets (:func:`set_printer_lookup`).
+    Raises ``LookupError`` when no lookup is set."""
+    if _printer_lookup is None:
+        raise LookupError("no printer lookup is set")
+    return _printer_lookup(printer_name)
 
 
 @dataclass(frozen=True)

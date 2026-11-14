@@ -1937,7 +1937,8 @@ class PrinterAdapter(ABC):
             def _safe_upload_file(self, file_path: str):
                 # A resume file Kiln made is followed to the name it is
                 # saved under; anything saved over that name unties it.
-                digest = _resume_digest(self, file_path)
+                given = file_path
+                digest = _resume_digest(self, given)
                 try:
                     file_path = _preflight_upload_or_raise(self, file_path)
                 except _UnsafeUpload as exc:
@@ -1946,6 +1947,8 @@ class PrinterAdapter(ABC):
                 if refusal := _incomplete_upload_reason(self, file_path):
                     from kiln.printers import PrinterError
                     raise PrinterError(refusal)
+                if digest is not None and file_path == given and _resume_digest(self, file_path) != digest:
+                    digest = None  # the file changed while it was checked: not the recorded bytes
                 try:
                     result = original(self, file_path)
                 except BaseException:

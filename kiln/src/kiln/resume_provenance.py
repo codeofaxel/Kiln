@@ -19,11 +19,11 @@ record kept here:
   under on that machine and unties the name when anything else is saved
   over it.
 * **Asked at every start.**  :func:`made_for_paused_job` names the record a
-  start is: the file being started is, byte for byte, a recorded file for
-  this machine (the printer-side name a recorded file was uploaded under, or
-  a local file that hashes the same), its record is recent
-  (:data:`RECENT_SECONDS`), and the job the printer reports now is the job it
-  was made for.  :func:`kiln.print_signoff.verified_resume` adds the printer
+  start is: the file being started is the printer-side name a recorded file
+  was uploaded under through Kiln, with nothing saved over it since, its
+  record is recent (:data:`RECENT_SECONDS`), and the job the printer reports
+  now is the job it was made for.  A printer that reports no job gets no
+  record, so nothing it starts is a resume.  :func:`kiln.print_signoff.verified_resume` adds the printer
   reporting a paused job, and is the one check every start door asks.
 
 Records live in this process's memory, so only Kiln's own code writes one;
@@ -37,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -160,9 +161,9 @@ def _machine(adapter: Any) -> str:
 def _resolve(adapter: Any, printer_name: str | None) -> Any:
     if adapter is not None:
         return adapter
-    from kiln.server import _resolve_adapter
+    from kiln.print_signoff import find_printer
 
-    return _resolve_adapter(printer_name)
+    return find_printer(printer_name)
 
 
 def paused_job_name(adapter: Any) -> str:
@@ -186,7 +187,8 @@ def record_made_resume(
     """Record that Kiln made the resume file at *path* for the job the
     printer (*adapter*, else the one *printer_name* names) is running or
     holding now.  ``None`` when nothing was recorded: on the shared server,
-    for a file that cannot be read, or a printer that cannot be found.
+    for a file that cannot be read, a printer that cannot be found, or one
+    that reports no job (a resume of no known job continues nothing).
     Never raises."""
     if _hosted():
         return None
@@ -199,12 +201,16 @@ def record_made_resume(
     except Exception:  # noqa: BLE001 -- no printer, no record
         logger.debug("resume record: printer not found for %s", path, exc_info=True)
         return None
+    job = paused_job_name(adapter)
+    if not job:
+        logger.info("resume record: %s not recorded, the printer reports no job", os.path.basename(str(path)))
+        return None
     record = ResumeRecord(
         sha256=digest,
         path=str(path),
         machine=machine,
         printer_name=str(getattr(adapter, "_kiln_registered_name", None) or printer_name or ""),
-        job=paused_job_name(adapter),
+        job=job,
         made_by=str(made_by or ""),
         session=str(session or ""),
         made_at=time.time(),
@@ -307,27 +313,26 @@ def made_for_paused_job(file_name: str, *, adapter: Any) -> ResumeRecord | None:
     """The record that makes starting *file_name* on *adapter*'s machine a
     continuation of the job it reports now, or ``None``.
 
-    The file must be a recorded file for this machine: the printer-side
-    name one was uploaded under, or a local file whose bytes hash the same.
-    The record must be recent, and when it names a job, the printer must
-    report that same job now.  Whether the printer is paused is asked by
+    The file must be the printer-side name a recorded file was uploaded
+    under through Kiln, with nothing saved over that name since
+    (:func:`note_upload`); a local copy that hashes the same is not the file
+    the printer starts.  The record must be recent, and the printer must
+    report the same job now that it reported when the file was made.
+    Whether the printer is paused is asked by
     :func:`kiln.print_signoff.verified_resume`, not here.
     """
-    records = records_for(adapter)
+    name = _name(file_name)
+    if not name:
+        return None
+    records = [r for r in records_for(adapter) if name in r.uploaded_as]
     if not records:
         return None
-    name = _name(file_name)
-    local_digest = file_sha256(file_name) if file_name and os.path.isfile(str(file_name)) else None
-    job_now: str | None = None
+    job_now = paused_job_name(adapter)
+    if not job_now:
+        return None
     for record in records:
-        if not (name in record.uploaded_as or (local_digest is not None and local_digest == record.sha256)):
-            continue
-        if record.job:
-            if job_now is None:
-                job_now = paused_job_name(adapter)
-            if job_now != record.job:
-                continue
-        return record
+        if record.job == job_now:
+            return record
     return None
 
 
@@ -356,16 +361,18 @@ def report_unrecognized(file_name: str, *, adapter: Any, why: str) -> None:
         shown, printer or "this printer", why,
     )
     details = {"file": shown, "printer": printer, "why": why}
+    # The server that owns the printers keeps the audit trail and the event
+    # bus; a process that never loaded it has the log line above.
+    server = sys.modules.get("kiln.server")
     try:
-        from kiln.server import _audit
-
-        _audit("start_print", "resume_claim_refused", details=details)
+        if server is not None:
+            server._audit("start_print", "resume_claim_refused", details=details)
     except Exception:  # noqa: BLE001
         logger.debug("resume claim: audit not written", exc_info=True)
     try:
         from kiln.events import Event, EventType
-        from kiln.server import _event_bus
 
+        _event_bus = getattr(server, "_event_bus", None)
         if _event_bus is not None:
             _event_bus.publish(
                 Event(

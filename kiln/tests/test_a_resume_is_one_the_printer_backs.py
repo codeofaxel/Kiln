@@ -49,10 +49,9 @@ def printer(monkeypatch):
 
 def _backed(machine, tmp_path, name: str) -> None:
     """A resume file Kiln made for *machine*, saved there under *name*."""
-    path = tmp_path / name
-    path.write_bytes(b"a resume Kiln made")
-    record = resume_provenance.record_made_resume(str(path), adapter=machine, made_by="decorate_during_print")
-    resume_provenance.note_upload(machine, name, digest=record.sha256)
+    from tests._kiln_resume import made_by_kiln
+
+    made_by_kiln(machine, name)
 
 
 CLAIMS = [
