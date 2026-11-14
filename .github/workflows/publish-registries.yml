@@ -61,13 +61,21 @@ jobs:
       # `verify` is a hard dependency and rejects anything that is not
       # three dot-separated integers, so this ref cannot carry a payload.
       - name: Checkout the released tag
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: v${{ inputs.version }}
 
       - name: Install mcp-publisher
+        # Same fixed release and digest as publish.yml; bump them together.
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.7
+          MCP_PUBLISHER_SHA256: 00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          set -euo pipefail
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
 
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc
@@ -90,12 +98,12 @@ jobs:
       # `verify` is a hard dependency and rejects anything that is not
       # three dot-separated integers, so this ref cannot carry a payload.
       - name: Checkout the released tag
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: v${{ inputs.version }}
 
       - name: Install ClawHub CLI
-        run: npm install -g clawhub
+        run: npm install -g clawhub@0.25.1
 
       - name: Log in to ClawHub
         env:
