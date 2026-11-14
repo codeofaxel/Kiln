@@ -204,12 +204,17 @@ class TestEveryDoor:
         monkeypatch.setattr(server, "ensure_runtime_config", lambda: None)
         call = bridge_client._default_tool_caller()
         conf = home / ".config" / "settings.conf"
-        result = call("repair_mesh", {
-            "file_path": str(home / "Documents" / "cube.stl"),
-            "output_path": str(conf),
-        })
-        assert _refused(result), result
+        # The bridge runs only its own list, and no tool on it takes an
+        # output path: the call is refused before the tool runs.
+        with pytest.raises(ValueError, match="does not run repair_mesh"):
+            call("repair_mesh", {
+                "file_path": str(home / "Documents" / "cube.stl"),
+                "output_path": str(conf),
+            })
         assert conf.read_text() == "IMPORTANT_USER_CONFIG=1\n"
+        assert not any(
+            "output" in arg or arg.endswith("_path") for args in bridge_client.BRIDGE_ARGUMENTS.values() for arg in args
+        )
 
     def test_a_tool_registered_later_is_guarded_too(self):
         from kiln import server

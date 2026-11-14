@@ -4670,16 +4670,17 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
     Commands are validated before sending.  Pass multiple commands as
     separate arguments or as a single newline-separated string.
     """
-    from kiln.gcode import validate_gcode, validate_gcode_for_printer
+    from kiln.gcode import validate_commands
 
     try:
         adapter = _get_adapter_from_ctx(ctx)
 
         cmd_list = list(commands)
         # The saved printer's own limits and firmware rules, as the agent's
-        # door judges a command; the generic limits when no model is saved.
+        # door judges a command; with no model saved, the floor the
+        # temperature commands hold an unidentified printer to.
         model = _saved_printer_model(ctx.obj.get("printer"))
-        validation = validate_gcode_for_printer(cmd_list, model) if model else validate_gcode(cmd_list)
+        validation = validate_commands(cmd_list, model or None)
 
         if not validation.valid:
             data = {

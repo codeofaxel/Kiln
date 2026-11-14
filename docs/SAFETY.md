@@ -161,9 +161,9 @@ profile defines:
   fumes")
 
 Profiles exist for printers from Creality, Prusa, Bambu Lab, Voron, Rat Rig,
-Elegoo, AnkerMake, Artillery, Sovol, FlashForge, and QIDI.  A conservative
-generic/default profile (300 C hotend, 130 C bed) applies when no match is
-found.
+Elegoo, AnkerMake, Artillery, Sovol, FlashForge, and QIDI.  A printer whose
+model Kiln has not been told is held to a conservative floor (240 C hotend,
+80 C bed), whether it is asked to set a temperature or sent raw G-code.
 
 ### How profiles are used
 

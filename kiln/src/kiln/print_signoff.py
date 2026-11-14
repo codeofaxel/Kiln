@@ -120,20 +120,35 @@ def claims_resume(file_name: str, kwargs: dict[str, Any] | None = None) -> bool:
         return "_resume_" in name
 
 
+#: How a printer is found by name for :func:`printer_reports_paused` when no
+#: adapter is handed in.  The server that owns the printers sets it
+#: (:func:`set_printer_lookup`); with none set, no printer can be read, and a
+#: start is judged as the fresh print it might be.
+_printer_lookup: Any = None
+
+
+def set_printer_lookup(lookup: Any) -> None:
+    """Name the function that finds a printer's adapter by name (``None``
+    for the default printer); :func:`printer_reports_paused` asks it."""
+    global _printer_lookup
+    _printer_lookup = lookup
+
+
 def printer_reports_paused(printer_name: str | None = None, *, adapter: Any = None) -> bool:
     """True only when the printer this start is aimed at says, right now,
     that it is connected and holding a paused job.
 
     *adapter* is asked when given; otherwise the printer is found by
-    *printer_name* (``None`` is the default printer).  Anything that cannot
-    be read (no such printer, no answer, an error) is ``False``: the start is
-    then judged as the fresh print it might be.
+    *printer_name* (``None`` is the default printer) through the lookup the
+    server sets (:func:`set_printer_lookup`).  Anything that cannot be read
+    (no lookup, no such printer, no answer, an error) is ``False``: the start
+    is then judged as the fresh print it might be.
     """
     try:
         if adapter is None:
-            from kiln.server import _resolve_adapter
-
-            adapter = _resolve_adapter(printer_name)
+            if _printer_lookup is None:
+                return False
+            adapter = _printer_lookup(printer_name)
         from kiln.printers.base import PrinterStatus
 
         state = adapter.get_state()

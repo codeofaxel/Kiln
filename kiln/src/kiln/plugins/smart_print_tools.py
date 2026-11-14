@@ -390,6 +390,16 @@ class _SmartPrintToolsPlugin:
                         exc_info=True,
                     )
 
+            # A retry that changes the object needs a yes of its own (the same
+            # rule the gate applies before the start): asked before the file is
+            # sent, so a refused retry leaves nothing on the printer.
+            if _srv._retry_changes_the_object(
+                merged_overrides, bool((validation_summary or {}).get("repaired"))
+            ) and (block := _srv._no_yes_before_sending(
+                "retry_print_with_fix", model_path, preview_token, printer_name=printer_name,
+            )):
+                return block
+
             try:
                 upload_result = adapter.upload_file(upload_path)
             except Exception as exc:
