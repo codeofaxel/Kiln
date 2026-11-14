@@ -38,8 +38,17 @@ def _served(tool: str, **kwargs: Any) -> dict[str, Any]:
 
 
 def _finish(answer: dict[str, Any], json_mode: bool, say: Callable[[dict[str, Any]], str]) -> None:
+    # Printed words someone else wrote (a proposal's title, a teammate's
+    # comment) are fenced as quoted data, for an agent reading this terminal.
+    from kiln import quoted_text
+
+    try:
+        answer = quoted_text.for_agent(None, answer)
+    except Exception:  # noqa: BLE001 -- the answer is still shown, said
+        click.echo(quoted_text.UNMARKED_WARNING, err=True)
     if json_mode:
-        click.echo(json.dumps(answer, indent=2, default=str))
+        # Unescaped, so the fence reads as the marks it is.
+        click.echo(json.dumps(answer, indent=2, default=str, ensure_ascii=False))
     failed = not isinstance(answer, dict) or answer.get("status") == "error" or answer.get("success") is False
     if failed:
         if not json_mode:

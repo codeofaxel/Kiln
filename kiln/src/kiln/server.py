@@ -1078,6 +1078,12 @@ def _build_instructions() -> str:
             "Call get_skill_manifest() for the full capability map."
         )
 
+    # What the quote fence on a result means; every fenced result carries the
+    # same sentence, for the clients that truncate before reaching here.
+    from kiln.quoted_text import INSTRUCTIONS_LINE as _QUOTED_TEXT_LINE
+
+    parts.append(_QUOTED_TEXT_LINE)
+
     # Last on purpose: a rule about taking Kiln apart must never push the
     # safety and consent paragraphs past a client's cut.  get_started carries
     # it too, for the clients that truncate before reaching here.
@@ -1561,6 +1567,11 @@ def _install_mcp_request_context_capture() -> None:
         if (retired := retired_message(name)) is not None:
             raise RuntimeError(retired)
         token = _current_mcp_request_context.set(context)
+        # A value an agent copied out of a quote fence (a listing's name, a
+        # part's path) is the value itself, not the marks around it.
+        from kiln.quoted_text import unquote_arguments
+
+        arguments = unquote_arguments(arguments)
         # A mention of one of the person's own printers ("my bambu") becomes
         # the registered name HERE, at the one door every tool passes, so
         # every gate and every key downstream -- the emergency latch, a
@@ -22448,6 +22459,16 @@ def _start() -> None:
     # The line on the reply of a call that named a saved goal by the other
     # tool's argument name for it.
     _install_goal_argument_note()
+
+    # Words someone else wrote (an outside site's listing, a served answer's
+    # named fields) reach the agent fenced as quoted data.  After every
+    # other change above, so it marks the result the agent reads.
+    try:
+        from kiln import quoted_text
+
+        quoted_text.install(mcp)
+    except Exception:
+        logger.warning("quoted-text fence not installed", exc_info=True)
 
     # Last, around every tools/call wrapper above: a slow call from a host
     # that runs tools in the background answers with a task, and the task
