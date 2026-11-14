@@ -63,6 +63,7 @@ _RAW_CALLS = frozenset({"send_gcode"})
 
 #: A raw send is cleared by the validator that refuses print-start words.
 RAW_GATE_HELPERS = frozenset({
+    "validate_commands",
     "validate_gcode",
     "validate_gcode_for_printer",
     "_validate_gcode_impl",
