@@ -92,6 +92,22 @@ class TestHasOnlySafeIncludes:
         )
         assert _has_only_safe_includes(code) is False
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "include ></abs/t.scad>",
+            "use >>< /abs/t.scad>",
+            "include>>></abs/t.scad>",
+            "include > /* note */ </abs/t.scad>",
+            "include /* note */ <parts.scad>",
+        ],
+    )
+    def test_an_include_written_with_more_before_its_target_is_rejected(self, code):
+        assert _has_only_safe_includes(code) is False
+
+    def test_a_bundled_include_written_with_gt_before_it_is_safe(self):
+        assert _has_only_safe_includes("include > <BOSL2/std.scad>\ncube(10);") is True
+
     def test_path_traversal_rejected(self):
         assert _has_only_safe_includes("include <BOSL2/../../etc/passwd>") is False
 

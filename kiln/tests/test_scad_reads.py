@@ -56,6 +56,13 @@ READS = [
     ('function p()="/x/b.dat"; surface(p());', [("read", None)]),
     # A comment between the word and its target hides the target.
     ("include /* x */ </x/b.scad>", [("include", None)]),
+    # `>` before the `<` does not hide the file an include names.
+    ("include ></abs/t.scad>", [("include", "/abs/t.scad")]),
+    ("use >>< /abs/t.scad>", [("include", "/abs/t.scad")]),
+    ("include>>></abs/t.scad>", [("include", "/abs/t.scad")]),
+    ("include > /* x */ </abs/t.scad>", [("include", None)]),
+    ("include > <BOSL2/std.scad>", [("include", "BOSL2/std.scad")]),
+    ("if (include > 2) cube(1);", []),
     # A name may start with a digit; it names a file like any other name.
     ('1x = "/x/b.stl"; import(1x);', [("read", None)]),
     ('import(convexity=2, 1e5x);', [("read", None)]),
@@ -107,6 +114,20 @@ def test_a_source_reading_nothing_but_the_bundled_libraries(code):
 )
 def test_a_source_reading_any_other_file(code):
     assert scad_reads.reads_beyond_bundled_libraries(code)
+
+
+#: Includes written with `>` before the `<`: each is a read of the file in its
+#: brackets for every check that judges source.
+GT_BEFORE_TARGET = ["include ></abs/t.scad>", "use >>< /abs/t.scad>", "include>>></abs/t.scad>"]
+
+
+@pytest.mark.parametrize("code", GT_BEFORE_TARGET)
+def test_an_include_with_gt_before_its_target_is_refused_by_every_check(code):
+    from kiln.generation.openscad import _has_only_safe_includes
+
+    assert scad_reads.file_reads(code) == [("include", "/abs/t.scad")]
+    assert scad_reads.reads_beyond_bundled_libraries(code)
+    assert _has_only_safe_includes(code) is False
 
 
 def test_the_quick_look_never_changes_the_answer(monkeypatch):

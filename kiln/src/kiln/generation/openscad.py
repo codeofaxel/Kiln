@@ -34,7 +34,7 @@ from kiln.generation.base import (
 from kiln.generation.job_records import JobRecord, MemoryJobRecords
 from kiln.openscad_runner import bundled_library_path, run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
-from kiln.scad_reads import LIBRARIES
+from kiln.scad_reads import LIBRARIES, file_reads, is_bundled_library
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +127,18 @@ def _has_only_safe_includes(code: str) -> bool:
 
     Returns ``True`` if the code contains no ``include``/``use`` at all,
     or if every such statement references a path starting with one of the
-    allowed library prefixes (BOSL2/, MCAD/).
+    allowed library prefixes (BOSL2/, MCAD/).  That holds for every include
+    the shared reader finds (:func:`kiln.scad_reads.file_reads`), and for
+    every ``include`` / ``use`` written with spaces or ``>`` before its
+    ``<``, in any letter case, comments and strings included.
 
     Security: rejects path traversal (``..``), absolute paths, null bytes,
     and non-ASCII characters that could bypass filtering.
     """
-    for match in re.finditer(r"\b(?:include|use)\s*<([^>]+)>", code, re.IGNORECASE):
+    for how, path in file_reads(code):
+        if how == "include" and not is_bundled_library(path):
+            return False
+    for match in re.finditer(r"\b(?:include|use)[\s>]*<([^>]+)>", code, re.IGNORECASE):
         path = match.group(1).strip()
         # Reject null bytes and non-ASCII (Unicode tricks)
         if "\x00" in path or not path.isascii():
