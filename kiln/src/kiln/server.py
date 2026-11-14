@@ -2663,6 +2663,13 @@ def _resolve_adapter(printer_name: str | None = None) -> PrinterAdapter:
     return adapter
 
 
+# The print sign-off check asks a printer by name whether it holds a paused
+# job; this server owns the printers, so it hands the check its lookup.
+from kiln import print_signoff as _print_signoff  # noqa: E402
+
+_print_signoff.set_printer_lookup(lambda printer_name: _resolve_adapter(printer_name))
+
+
 def _lifecycle_printer_name(adapter: PrinterAdapter) -> str:
     """The name this adapter's stop-path bookkeeping is filed under.
 
