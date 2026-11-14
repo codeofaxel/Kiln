@@ -389,7 +389,7 @@ def _take_across_processes(root: Path, deadline: float) -> Callable[[], None] | 
     handle = None
     if system is not None:
         try:
-            handle = open(root / _LOCK, "a+")  # noqa: SIM115 -- held until released
+            handle = open(root / _LOCK, "a+", encoding="utf-8")  # noqa: SIM115 -- held until released
         except OSError:
             return None
     elif not root.is_dir():

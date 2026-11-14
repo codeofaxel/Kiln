@@ -193,7 +193,7 @@ KNOWN_IN_PROCESS: frozenset[tuple[str, str, str]] = frozenset({
     ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.rollback_design_version', 'kiln_pro.plugins.git_render_tools'),
     ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.save_design_version', 'kiln_pro.bridge'),
     ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.save_design_version', 'kiln_pro.bridge.pro_features.enrich_version'),
-    ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.save_design_version', 'kiln_pro.bridge.pro_features.register_saved_version'),
+    ('kiln/src/kiln/plugins/version_tools.py', '_register_on_branch', 'kiln_pro.bridge.pro_features.register_saved_version'),
     ('kiln/src/kiln/plugins/version_tools.py', '_VersionToolsPlugin.register.save_design_version', 'kiln_pro.plugins.git_render_tools'),
     ('kiln/src/kiln/print_health_monitor.py', 'PrintHealthMonitor._maybe_record_predictive_signals', 'kiln_pro.recovery.predictive'),
     ('kiln/src/kiln/printability.py', '_analysis_runner', 'kiln_pro.bridge'),

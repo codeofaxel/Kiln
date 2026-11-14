@@ -18247,6 +18247,7 @@ def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
     goal_id: str = "",
+    printer_id: str = "",
 ) -> dict:
     """Build a printable STL from a parametric part, to the user's dimensions.
 
@@ -18295,6 +18296,9 @@ def generate_from_template(
         parameters: Dict of parameter overrides carrying the user's own
             dimensions (e.g. ``{"arm_length": 200, "thickness": 8}``).
             Anything you leave out keeps the template's default.
+        printer_id: The printer the part is for.  Its nozzle sets the
+            template's nozzle size when ``parameters`` leaves it out; leave
+            empty for the only printer Kiln knows of, else a stated default.
     """
     if err := _check_auth("generate"):
         return err
@@ -18341,7 +18345,7 @@ def generate_from_template(
         # the nozzle gets the one on record when the caller named none.
         from kiln.parametric import fill_template_settings, template_refusal
 
-        supplied, nozzle = fill_template_settings(tpl, parameters or {})
+        supplied, nozzle = fill_template_settings(tpl, parameters or {}, printer_id=printer_id or None)
         defaults = {k: v["default"] for k, v in tpl.get("parameters", {}).items()}
         params = {**defaults, **supplied}
 
