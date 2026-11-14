@@ -130,6 +130,13 @@ class Miss:
         if self.cause not in CAUSES:
             raise ValueError(f"not a cause: {self.cause!r}")
 
+    @property
+    def retryable(self) -> bool:
+        """Whether the same call, unchanged, may get an answer later: this
+        computer was offline or the servers did not answer.  Signed out or
+        refused, it gets the same answer until the person acts."""
+        return self.cause in ("offline", "unanswered")
+
 
 # ---------------------------------------------------------------------------
 # what a manifest tool puts on the line

@@ -227,7 +227,7 @@ class TestAMiss:
         assert "petg" in out["error"]
         for figure in ("max_load_n", "load_at_deflection_limit_n", "estimate"):
             assert figure not in out
-        assert out["retryable"] is (why != "refused")
+        assert out["retryable"] is (why in ("offline", "unanswered"))
 
 
 # ---------------------------------------------------------------------------

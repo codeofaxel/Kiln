@@ -96,7 +96,7 @@ def _miss(miss: Any) -> dict[str, Any]:
         "status": "error",
         "code": "DRYING_CHECK_UNAVAILABLE",
         "error": text,
-        "retryable": miss.cause != "refused",
+        "retryable": miss.retryable,
     }
     out.update(served_answer.fields(miss))
     return out

@@ -201,6 +201,6 @@ def _note(miss: Any) -> None:
         wont="used its basic relief instead",
         safe_remedy="Keep this one, or carve it again later",
     )
-    out: dict[str, Any] = {"code": "RELIEF_NOT_SCULPTED", "note": text, "retryable": miss.cause != "refused"}
+    out: dict[str, Any] = {"code": "RELIEF_NOT_SCULPTED", "note": text, "retryable": miss.retryable}
     out.update(served_answer.fields(miss))
     _last_miss.set(out)

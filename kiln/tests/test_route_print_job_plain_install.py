@@ -253,7 +253,7 @@ class TestWhatComesBack:
         text = result["error"]["message"]
         assert text.startswith("Routing picks which of your printers takes this print.")
         assert "won't route it anywhere" in text and "start_print or submit_job" in text
-        assert result["error"]["retryable"] is (why != "refused")
+        assert result["error"]["retryable"] is (why in ("offline", "unanswered"))
 
 
 class TestThePlateReading:

@@ -1596,7 +1596,7 @@ def _plan_hardware_into_print(
         )
         return None, _hardware_refusal(
             reason, code="HARDWARE_PLAN_UNAVAILABLE", answer=answer, miss=miss,
-            retryable=miss.cause in ("offline", "unanswered"),
+            retryable=miss.retryable,
         )
 
     def refuse(reason: str, code: str = "HARDWARE_NOT_PLANNED", **more: Any) -> tuple[None, dict[str, Any]]:
