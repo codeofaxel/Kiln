@@ -59,6 +59,7 @@ import os
 import re
 import signal
 import subprocess
+import tempfile
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -117,10 +118,6 @@ _host_policy: Any = None
 #: checked it.
 _SOURCE_CHECK_MAX_BYTES = 4 * 1024 * 1024
 
-#: Input files OpenSCAD reads as source (a ``.csg`` file is OpenSCAD source
-#: too, and can import files of its own).
-_SOURCE_SUFFIXES = (".scad", ".csg")
-
 _POLICY_FAULT_MESSAGE = (
     "Kiln could not check this OpenSCAD source before compiling it, so it was not compiled."
 )
@@ -173,39 +170,102 @@ def refused_source(source: str, source_dir: str | None = None) -> str | None:
         return _POLICY_FAULT_MESSAGE
 
 
-def _source_inputs(argv: Sequence[str], cwd: str | None) -> list[str]:
-    """The source files a launch of *argv* reads, as paths."""
-    from kiln.scad_main import _VALUE_OPTIONS
+#: OpenSCAD options whose value is the next argument.  An option that takes
+#: a value only after ``=`` (``--render``, ``--preview``) is not one: the
+#: argument after it is read as an input.
+_TAKES_THE_NEXT_ARGUMENT = frozenset({
+    "-o", "-d", "-m", "-p", "-P", "-D", "--D", "--summary-file", "--export-format",
+    "--camera", "--imgsize", "--projection", "--colorscheme", "--view", "--backend",
+    "--enable", "--csglimit", "--summary", "--animate", "--check-parameters",
+    "--check-parameter-ranges",
+})
 
-    found: list[str] = []
-    skip = False
-    for i, arg in enumerate(argv):
-        if i == 0 or skip:
-            skip = False
+#: Inputs OpenSCAD reads as a shape or a picture, never as source.
+_NOT_SOURCE_SUFFIXES = (".stl", ".3mf", ".off", ".obj", ".amf", ".png", ".svg", ".dxf")
+
+
+def _read_launch(
+    argv: Sequence[str], cwd: str | None
+) -> tuple[list[tuple[int, str]], list[str], str | None]:
+    """``(sources, settings, unreadable)`` for a launch of *argv*: each input
+    OpenSCAD reads as source, as ``(argument index, path)``; every ``-D``
+    setting (``-D x``, ``-Dx``, ``--D x``, ``--D=x``), which OpenSCAD reads
+    as one more line of the source; and why the arguments cannot be read for
+    their sources (an input that is not a file, a source on standard input),
+    or ``None``."""
+    sources: list[tuple[int, str]] = []
+    settings: list[str] = []
+    args = list(argv)
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-D", "--D"):
+            if i + 1 < len(args):
+                settings.append(args[i + 1])
+            i += 2
             continue
-        if arg in _VALUE_OPTIONS:
-            skip = True
-        elif not arg.startswith("-") and arg.lower().endswith(_SOURCE_SUFFIXES):
-            found.append(os.path.join(cwd, arg) if cwd and not os.path.isabs(arg) else arg)
-    return found
+        if arg.startswith("--D="):
+            settings.append(arg[4:])
+        elif arg.startswith("-D"):
+            settings.append(arg[2:])
+        elif arg in _TAKES_THE_NEXT_ARGUMENT:
+            i += 2
+            continue
+        elif arg == "-":
+            return sources, settings, "it reads a source from standard input"
+        elif not arg.startswith("-"):
+            path = os.path.join(cwd, arg) if cwd and not os.path.isabs(arg) else arg
+            if not os.path.isfile(path):
+                return sources, settings, f"it names an input that is not a file ({arg!r})"
+            if not arg.lower().endswith(_NOT_SOURCE_SUFFIXES):
+                sources.append((i, path))
+        i += 1
+    return sources, settings, None
 
 
-def _source_refusal(argv: Sequence[str], cwd: str | None) -> str | None:
-    """The host policy's refusal for any source file *argv* would read."""
-    for path in _source_inputs(argv, cwd):
-        real = os.path.realpath(path)
-        try:
+def _source_refusal(
+    argv: Sequence[str], cwd: str | None
+) -> tuple[str | None, list[str], list[str]]:
+    """``(refusal, argv, copies)``: the host policy's refusal for anything a
+    launch of *argv* would read as source, or the argv to start, each source
+    swapped for a private copy of the text the policy judged, beside the file
+    so a relative name in it resolves as before, and those copies.  OpenSCAD
+    then reads exactly what was judged: nothing can change between the two."""
+    sources, settings, unreadable = _read_launch(argv, cwd)
+    if unreadable:
+        return f"Kiln did not compile this: {unreadable}.", list(argv), []
+    out, copies = list(argv), []
+    try:
+        for index, path in sources:
+            real = os.path.realpath(path)
             if os.path.getsize(real) > _SOURCE_CHECK_MAX_BYTES:
-                return _TOO_LARGE_TO_CHECK_MESSAGE
+                return _TOO_LARGE_TO_CHECK_MESSAGE, list(argv), _remove(copies)
             source = Path(real).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            # Nothing to read means nothing for OpenSCAD to read either; it
-            # reports the missing input itself.
-            continue
-        refusal = refused_source(source, os.path.dirname(real))
-        if refusal is not None:
-            return refusal
-    return None
+            refusal = refused_source(source, os.path.dirname(real))
+            if refusal is not None:
+                return refusal, list(argv), _remove(copies)
+            handle, copy = tempfile.mkstemp(
+                dir=os.path.dirname(real), prefix=".checked-", suffix=os.path.splitext(real)[1] or ".scad",
+            )
+            with os.fdopen(handle, "w", encoding="utf-8") as held:
+                held.write(source)
+            copies.append(copy)
+            out[index] = copy
+        if settings:
+            beside = os.path.dirname(os.path.realpath(sources[0][1])) if sources else None
+            refusal = refused_source("".join(f"{s};\n" for s in settings), beside)
+            if refusal is not None:
+                return refusal, list(argv), _remove(copies)
+    except OSError as exc:
+        return f"Kiln could not hold this source to check it ({exc}), so it was not compiled.", list(argv), _remove(copies)
+    return None, out, copies
+
+
+def _remove(paths: list[str]) -> list[str]:
+    for path in paths:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+    return []
 
 
 def _refused_launch(
@@ -328,17 +388,28 @@ def bundled_font_path() -> str:
     return str(Path(__file__).resolve().parent / "data" / "fonts")
 
 
+#: The name of an environment variable that holds a secret: a key, a token, a
+#: password, a database address.  OpenSCAD needs none of them.
+_SECRET_NAME = re.compile(
+    r"SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|PRIVATE|ACCESS_CODE|DSN"
+    r"|DATABASE_URL|(?:^|_)(?:API_?)?KEYS?(?:_|$)",
+    re.IGNORECASE,
+)
+
+
 def openscad_env() -> dict[str, str]:
     """The environment every OpenSCAD launch gets.
 
-    This process's environment, with Kiln's bundled libraries first on
+    This process's environment without a variable whose name says it holds a
+    secret (:data:`_SECRET_NAME`): a source compiled for someone else must
+    find nothing of the server's own there.  Then Kiln's bundled libraries first on
     ``OPENSCADPATH``: first, so ``include <BOSL2/...>`` reaches the copy Kiln
     ships even where another one is installed.  Folders already on the path
     stay, after it.  Kiln's bundled fonts are added on ``OPENSCAD_FONT_PATH``
     the same way, so ``text()`` draws them on a machine that has none of
     them installed.
     """
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items() if not _SECRET_NAME.search(name)}
     library = bundled_library_path()
     if os.path.isdir(library):
         rest = [p for p in env.get("OPENSCADPATH", "").split(os.pathsep) if p and p != library]
@@ -605,20 +676,23 @@ def run_openscad(
     if policy is None:
         return _launch(cmd, timeout=timeout, cwd=cwd, text=text,
                        output_path=output_path, attempts=attempts)
-    refusal = _source_refusal(cmd, cwd)
+    refusal, checked, copies = _source_refusal(cmd, cwd)
     if refusal is not None:
         return _refused_launch(cmd, refusal, text=text)
-    admission = contextlib.ExitStack()
     try:
-        limit = admission.enter_context(policy.admit(timeout))
-    except LaunchRefused as refused:
-        return _refused_launch(cmd, refused.message, text=text, retryable=refused.retryable)
-    except Exception:  # noqa: BLE001 -- a policy that could not judge has not judged
-        logger.exception("OpenSCAD host policy failed while admitting a launch")
-        return _refused_launch(cmd, _POLICY_FAULT_MESSAGE, text=text)
-    with admission:
-        return _launch(cmd, timeout=limit, cwd=cwd, text=text,
-                       output_path=output_path, attempts=attempts)
+        admission = contextlib.ExitStack()
+        try:
+            limit = admission.enter_context(policy.admit(timeout))
+        except LaunchRefused as refused:
+            return _refused_launch(cmd, refused.message, text=text, retryable=refused.retryable)
+        except Exception:  # noqa: BLE001 -- a policy that could not judge has not judged
+            logger.exception("OpenSCAD host policy failed while admitting a launch")
+            return _refused_launch(cmd, _POLICY_FAULT_MESSAGE, text=text)
+        with admission:
+            return _launch(checked, timeout=limit, cwd=cwd, text=text,
+                           output_path=output_path, attempts=attempts)
+    finally:
+        _remove(copies)
 
 
 def _launch(
