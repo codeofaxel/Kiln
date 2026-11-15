@@ -169,8 +169,7 @@ except ImportError:
     FulfillmentProvider = None
     QuoteRequest = None
     get_fulfillment_provider = None
-from kiln.gcode import validate_gcode as _validate_gcode_impl
-from kiln.gcode import validate_gcode_for_printer
+from kiln.gcode import validate_commands
 from kiln.generation import (
     GeminiDeepThinkProvider,
     GenerationError,
@@ -1078,6 +1077,12 @@ def _build_instructions() -> str:
             "Call get_skill_manifest() for the full capability map."
         )
 
+    # What the quote fence on a result means; every fenced result carries the
+    # same sentence, for the clients that truncate before reaching here.
+    from kiln.quoted_text import INSTRUCTIONS_LINE as _QUOTED_TEXT_LINE
+
+    parts.append(_QUOTED_TEXT_LINE)
+
     # Last on purpose: a rule about taking Kiln apart must never push the
     # safety and consent paragraphs past a client's cut.  get_started carries
     # it too, for the clients that truncate before reaching here.
@@ -1484,7 +1489,8 @@ async def _served_or_here(
     # An edit of a design kept on this computer, read before the tool may
     # write over its file (a no-op where kiln-pro keeps edits itself).
     edit = await asyncio.to_thread(edit_lineage.begin_here, name, arguments)
-    entry = served_public.plan(name, arguments)
+    # Off the event loop too: a plan can read the call's own source file.
+    entry = await asyncio.to_thread(served_public.plan, name, arguments)
     tool = (getattr(tool_mgr, "_tools", None) or {}).get(name)
     try:
         if entry is None or tool is None or not _arguments_validate(tool, arguments):
@@ -1561,6 +1567,11 @@ def _install_mcp_request_context_capture() -> None:
         if (retired := retired_message(name)) is not None:
             raise RuntimeError(retired)
         token = _current_mcp_request_context.set(context)
+        # A value an agent copied out of a quote fence (a listing's name, a
+        # part's path) is the value itself, not the marks around it.
+        from kiln.quoted_text import unquote_arguments
+
+        arguments = unquote_arguments(arguments)
         # A mention of one of the person's own printers ("my bambu") becomes
         # the registered name HERE, at the one door every tool passes, so
         # every gate and every key downstream -- the emergency latch, a
@@ -2852,12 +2863,13 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         return None  # one switch turns off consent prompts, as it always did
     file_value = str(arguments.get(arg_name) or "")
     # A resume continues a print that already had its yes, so nobody is
-    # asked again -- but only when the printer itself reports the paused
-    # job.  The flag and the file name are the caller's to choose, and a
-    # claim the printer does not back is asked about like any new print.
+    # asked again -- but only for a resume file Kiln made for the job the
+    # printer reports paused right now (print_signoff.verified_resume).  The
+    # flag and the file name are the caller's to choose, and a start they
+    # alone call a resume is asked about like any new print.
     from kiln import print_signoff
 
-    if print_signoff.claims_resume(file_value, arguments) and await asyncio.to_thread(
+    if await asyncio.to_thread(
         print_signoff.verified_resume, file_value, arguments, printer_name=arguments.get("printer_name"),
     ):
         return None  # already running, already approved
@@ -2884,7 +2896,11 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         standing = consent_for(file_name=file_value, printer_name=printer_name, aimed_at=aimed)
     except Exception:  # noqa: BLE001 — an unreadable store is no window
         standing = None
-    if standing is not None:
+    # A recovery onto the part still on the plate is asked about every time:
+    # a part can lift off the bed as it cools, so no standing window answers
+    # for it (kiln.plate_state.start_hold holds it without this print's yes).
+    on_plate = await asyncio.to_thread(_recovery_plate_line, file_value, printer_name)
+    if standing is not None and not on_plate:
         # A person already said yes for this — inside a window they
         # opened, on purpose.  Asking again would be the dialog the
         # window exists to stop.  The gate reads the same record.
@@ -2940,6 +2956,8 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             # Why they are being asked at all, when always allow was on
             # for this printer and turned itself off.
             "always allow": _always_allow_dialog_row(aimed),
+            # A recovery onto the part still on the plate: what to check.
+            "part on the plate": on_plate,
         },
         window_printer=person_printer if offer_window else None,
         fleet_offered=offer_fleet,
@@ -4246,6 +4264,71 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     return f"{ready} A yes {doors}{always}"
 
 
+def _recovery_plate_line(file_value: str, printer_name: str | None) -> str | None:
+    """The line a person is shown when *file_value* is a recovery Kiln made
+    for the print still on the plate (:func:`kiln.resume_provenance.recovery_on_plate`),
+    else ``None``.  Never raises."""
+    try:
+        from kiln.plate_state import pretty_job_name
+        from kiln.resume_provenance import recovery_on_plate
+
+        record = recovery_on_plate(file_value, printer_name=printer_name)
+    except Exception:  # noqa: BLE001 -- unreadable is not a recovery
+        return None
+    if record is None:
+        return None
+    return (
+        f"This picks {pretty_job_name(record.job)} up again on the part still on the plate. A part "
+        "can lift off the bed as it cools: check it is still stuck down before you say yes."
+    )
+
+
+def _said_go(
+    tool_name: str, file_name: str, printer_name: str | None, *, is_resume: bool = False,
+) -> tuple[Any, str, Any]:
+    """``(exemption, aimed_at, consent)``: the gate's first question, read
+    and nothing else -- whether the call is exempt, which printer it is
+    aimed at, and the consent on record for it (``None`` when nobody said
+    go).  Records nothing, spends nothing, takes no picture."""
+    from kiln import print_signoff
+
+    exempt = print_signoff.exemption_verdict(tool_name, file_name, printer_name, is_resume=is_resume)
+    if exempt is not None:
+        return exempt, printer_name or "", None
+    # SAID GO.  The one reader of the consent record.  An unnamed call is
+    # aimed at the default printer; a window is matched on that name.
+    try:
+        aimed = printer_name or _resolve_effective_printer_name(None)
+    except Exception:  # noqa: BLE001
+        aimed = printer_name or "default"
+    return None, aimed, consent_for(file_name=file_name, printer_name=printer_name, aimed_at=aimed)
+
+
+def _no_yes_error(tool_name: str, file_name: str, preview_token: str | None, aimed: str) -> dict:
+    """The refusal for a print nobody said go to."""
+    from kiln import print_signoff
+
+    if preview_token:
+        # The token is left unspent: it is still good for the call that
+        # carries the yes.
+        return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
+    return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
+
+
+def _no_yes_before_sending(
+    tool_name: str, file_name: str, preview_token: str | None, *, printer_name: str | None = None,
+) -> dict | None:
+    """The refusal for a print nobody said go to, asked BEFORE a door sends
+    its file to the printer, so a refused print leaves no file on it.
+    ``None`` when a yes is on record or the call is exempt: the full
+    gate (:func:`_preview_gate_error`) still judges the print right before
+    it starts, the preview half and any look at the bed included."""
+    exempt, aimed, granted = _said_go(tool_name, file_name, printer_name)
+    if exempt is not None or granted is not None:
+        return None
+    return _no_yes_error(tool_name, file_name, preview_token, aimed)
+
+
 def _preview_gate_error(
     tool_name: str,
     file_name: str,
@@ -4284,7 +4367,7 @@ def _preview_gate_error(
 
     # Neither fact is needed for the audited CI bypass or for a resume
     # continuation; decided first, before anything touches the token.
-    exempt = print_signoff.exemption_verdict(tool_name, file_name, printer_name, is_resume=is_resume)
+    exempt, aimed, granted = _said_go(tool_name, file_name, printer_name, is_resume=is_resume)
     if exempt is not None:
         if exempt.audit == "preview_gate_skipped":
             _audit(
@@ -4294,20 +4377,9 @@ def _preview_gate_error(
             )
         return None
 
-    # SAID GO.  The one reader of the consent record.  An unnamed call is
-    # aimed at the default printer; a window is matched on that name.
-    try:
-        aimed = printer_name or _resolve_effective_printer_name(None)
-    except Exception:  # noqa: BLE001
-        aimed = printer_name or "default"
-    granted = consent_for(file_name=file_name, printer_name=printer_name, aimed_at=aimed)
     if granted is None:
         print_signoff.clear()
-        if preview_token:
-            # The token is left unspent: it is still good for the call
-            # that carries the yes.
-            return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
-        return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
+        return _no_yes_error(tool_name, file_name, preview_token, aimed)
 
     # LOOKED.  Always allow means nobody was asked, so where the machine
     # has a camera the plate has to have been seen clear in a fresh frame.
@@ -9898,12 +9970,11 @@ def start_print(
     # -- Preview confirmation gate -----------------------------------------
     # One helper, six callers: see _preview_gate_error for why this stopped
     # living inside this function.
-    # A resume is a start the printer backs: the caller's flag, or a file
-    # named like a resume file (``transformed_resume_<sid>.3mf`` /
-    # ``original_resume_<sid>.3mf`` from decorate_during_print and
-    # get_print_before_edit), AND the printer reporting a paused job.  A
-    # claim alone is a new print: it gets the yes and the preview, its
-    # pre-flight wants an idle printer, and the plate check applies.
+    # A resume is a resume file Kiln made for the job this printer reports
+    # paused right now (print_signoff.verified_resume): the same bytes, the
+    # same machine, the same job.  The caller's flag and a resume-style file
+    # name are claims only: a start they alone call a resume is a new print,
+    # with the yes, the preview, an idle pre-flight and the plate check.
     from kiln import print_signoff
 
     _is_resume = print_signoff.verified_resume(
@@ -13591,11 +13662,10 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         # Use the live resolver so users who haven't manually set
         # _PRINTER_MODEL (via env or printer_model yaml field) still get
         # the bounds/temperature checks.
+        # A printer whose model Kiln does not know is held to the floor
+        # set_temperature holds it to (kiln.gcode.validate_commands).
         _live_model = _resolve_printer_model_live() or _PRINTER_MODEL
-        if _live_model:
-            validation = validate_gcode_for_printer(cmd_list, _live_model)
-        else:
-            validation = _validate_gcode_impl(cmd_list)
+        validation = validate_commands(cmd_list, _live_model or None)
 
         # Incident #0 hardening: promote bounds-violation warnings to
         # blockers.  Before this, "G1 X-50 Y-50" passed through with a
@@ -14008,10 +14078,8 @@ def _several_printers_read(
         registry = _get_registry()
         # Auto-register the env-configured adapter if registry is empty
         if registry.count == 0:
-            try:
+            with contextlib.suppress(RuntimeError):  # no adapter configured
                 registry.register("default", _get_adapter())
-            except RuntimeError:
-                pass  # No adapter configured
 
         if registry.count == 0:
             empty: dict[str, Any] = {
@@ -17257,11 +17325,6 @@ def await_print_completion(
                     }
                 )
                 last_pct = pct
-            paused = state.state == PrinterStatus.PAUSED
-            if pct is None:
-                _say_progress("Paused" if paused else "Printing", elapsed)
-            else:
-                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
             # A print carrying a hardware plan comes back to the person at its
             # moments: a stop close enough to get ready for, a stop gone past
@@ -17329,6 +17392,14 @@ def await_print_completion(
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                 })
+
+            # Written only while the wait goes on: a print that has ended was
+            # answered above, and is never shown as printing.
+            paused = state.state == PrinterStatus.PAUSED
+            if pct is None:
+                _say_progress("Paused" if paused else "Printing", elapsed)
+            else:
+                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
         except HostedUnavailableError as exc:
             # Only the job_id branch reads the queue; printer-based tracking
@@ -17430,9 +17501,10 @@ def compare_print_options(
     # A model that arrived lying down is priced standing up, from a turned
     # copy; the file named is never rewritten.
     priced = file_to_price(file_path) if fulfillment_material_id and size_refusal is None else None
+    service = order_service() if priced is not None else None
     if size_refusal is not None:
         fulfillment_error = size_refusal["message"]
-    elif priced is not None and order_service() is None:
+    elif priced is not None and service is None:
         # No order service on this install: the quote comes through Kiln's
         # servers (kiln._pro_order_bridge), and a miss is said as one.
         from kiln import _pro_order_bridge as served
@@ -17452,10 +17524,11 @@ def compare_print_options(
             else:
                 fulfillment_error = served.words(answer.miss, "quote")
     elif priced is not None:
+        # The order service on this install names its own request and error.
         try:
             provider = _get_fulfillment()
             quote = provider.get_quote(
-                QuoteRequest(
+                service.QuoteRequest(
                     file_path=priced.path,
                     material_id=fulfillment_material_id,
                     quantity=quantity,
@@ -17469,7 +17542,7 @@ def compare_print_options(
             fulfillment_quote_data = quote.to_dict()
             fulfillment_quote_data["kiln_fee"] = fee_calc.to_dict()
             fulfillment_quote_data["total_with_fee"] = float(fee_calc.total_cost)
-        except (FulfillmentError, RuntimeError) as exc:
+        except (service.FulfillmentError, RuntimeError) as exc:
             fulfillment_error = str(exc)
         except Exception as exc:
             fulfillment_error = str(exc)
@@ -18213,6 +18286,7 @@ def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
     goal_id: str = "",
+    printer_id: str = "",
 ) -> dict:
     """Build a printable STL from a parametric part, to the user's dimensions.
 
@@ -18261,6 +18335,9 @@ def generate_from_template(
         parameters: Dict of parameter overrides carrying the user's own
             dimensions (e.g. ``{"arm_length": 200, "thickness": 8}``).
             Anything you leave out keeps the template's default.
+        printer_id: The printer the part is for.  Its nozzle sets the
+            template's nozzle size when ``parameters`` leaves it out; leave
+            empty for the only printer Kiln knows of, else a stated default.
     """
     if err := _check_auth("generate"):
         return err
@@ -18307,7 +18384,7 @@ def generate_from_template(
         # the nozzle gets the one on record when the caller named none.
         from kiln.parametric import fill_template_settings, template_refusal
 
-        supplied, nozzle = fill_template_settings(tpl, parameters or {})
+        supplied, nozzle = fill_template_settings(tpl, parameters or {}, printer_id=printer_id or None)
         defaults = {k: v["default"] for k, v in tpl.get("parameters", {}).items()}
         params = {**defaults, **supplied}
 
@@ -21543,7 +21620,10 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     # never where the call asked for its OUTPUT: it is not
                     # the person's file, and a step runs only on a file
                     # that is there.
-                    answer = served_makes.arrive(_name, answer)
+                    # A resume file in these steps is recorded where it is
+                    # started (served_steps.carry_out), for the printer the
+                    # start names.
+                    answer = served_makes.arrive(_name, answer, record_resumes=False)
                     steps = served_steps.wanted(answer)
                     acting = bool(served_steps.actions_in(steps))
                     if acting and not approved:
@@ -21560,6 +21640,9 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     if refused is not None:
                         return refused
                     answer = ask(step_results=done)
+                    not_recorded = served_steps.resume_notes()
+                    if not_recorded and isinstance(answer, dict):
+                        answer["resume_not_recorded"] = not_recorded
                     if served_steps.wanted(answer):
                         return served_steps._refusal(
                             _name, "LOCAL_STEP_REFUSED",
@@ -21588,6 +21671,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # here.  Say so, and fetch its look for the stage.
                 return served_makes.arrive(
                     _name, answer, allowance=_PRO_TOOL_QUOTA.get(_name), trip=trip,
+                    printer_name=str(asked_printer) if asked_printer else None,
                 )
             return _stub
 
@@ -22455,6 +22539,16 @@ def _start() -> None:
     # The line on the reply of a call that named a saved goal by the other
     # tool's argument name for it.
     _install_goal_argument_note()
+
+    # Words someone else wrote (an outside site's listing, a served answer's
+    # named fields) reach the agent fenced as quoted data.  After every
+    # other change above, so it marks the result the agent reads.
+    try:
+        from kiln import quoted_text
+
+        quoted_text.install(mcp)
+    except Exception:
+        logger.warning("quoted-text fence not installed", exc_info=True)
 
     # Last, around every tools/call wrapper above: a slow call from a host
     # that runs tools in the background answers with a task, and the task
@@ -23514,7 +23608,7 @@ def smart_reprint(
             extra_overrides=extra_overrides,
             use_ams=detected_use_ams,
             ams_mapping=detected_ams_mapping,
-            brief_id=resolved_brief_id or "",
+            goal_id=resolved_brief_id or "",
             chosen_by=chosen_by,
         )
 

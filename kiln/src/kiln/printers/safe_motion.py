@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kiln.gcode import GCODE_NUMBER, axis_value
-
 from kiln.gcode_objects import is_object_end as _is_object_end
 from kiln.gcode_objects import match_object_start as _match_object_start
 from kiln.untrusted_zip import UntrustedZipFile

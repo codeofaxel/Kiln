@@ -1367,6 +1367,12 @@ class TestEveryDoorThatStartsAPrint:
 
         monkeypatch.setattr(machine, "get_state", lambda: SimpleNamespace(connected=True, state=PrinterStatus.PAUSED))
         srv.start_print(file_name="part.gcode", resume_from_paused=True)
+        assert seen == [(False, "part.gcode")], "a paused printer does not make any file a resume"
+        seen.clear()
+        from tests._kiln_resume import made_by_kiln
+
+        made_by_kiln(machine, "part.gcode")
+        srv.start_print(file_name="part.gcode", resume_from_paused=True)
         assert seen == [(True, "part.gcode")], "the tool tells the gate a resume is a resume, and names the file"
 
     def test_start_monitored_print_refuses(self, machine, monkeypatch):

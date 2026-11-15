@@ -18,6 +18,7 @@ no folder.
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import shutil
 import sys
@@ -308,7 +309,7 @@ def test_a_note_another_tool_said_does_not_use_up_the_signed_out_line(plain_inst
 @pytest.mark.parametrize(
     ("answer", "why"),
     [
-        (OSError(51, "Network is unreachable"), "offline"),
+        (OSError(errno.ENETUNREACH, "Network is unreachable"), "offline"),
         ({"status": "error", "code": "SERVER_UNREACHABLE", "error": "down", "why": "unanswered"}, "unanswered"),
         ({"status": "error", "code": "QUOTA", "error": "No more today."}, "refused"),
         ({"status": "success", "message": "an answer with no session in it"}, "unanswered"),
@@ -333,7 +334,7 @@ def test_every_miss_leaves_the_make_as_it_was_and_says_why_once(plain_install, s
 
 def test_a_cause_a_public_tool_already_said_is_not_said_again(plain_install, servers, made):
     served_public.say_once("analyze_printability", {}, served_answer.Miss("offline", "SERVER_UNREACHABLE"))
-    servers(OSError(51, "Network is unreachable"))
+    servers(OSError(errno.ENETUNREACH, "Network is unreachable"))
     env = {"success": True, "local_path": made}
     _make("download_model", {}, env, made)
     assert env == {"success": True, "local_path": made}
@@ -487,6 +488,35 @@ def test_a_compile_through_the_mcp_dispatch_sends_no_source(plain_install, serve
     assert made_with["file_name"] == Path(out["stl_path"]).name
     wire = repr(sessions[0])
     assert "cylinder" not in wire and "pendant" not in wire and str(Path(out["stl_path"]).parent) not in wire
+    assert out[SAVED_GOAL_KEY]["brief_id"] == "session-1"
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD not installed")
+def test_a_compile_that_imports_a_file_here_still_opens_its_goal(plain_install, servers, tmp_path):
+    """A signed-in install sends compile_scad to Kiln's servers, but not a
+    source that reads a file on this computer: that one is built here from
+    the start.  Nothing was missed on the way, so its model still opens a
+    goal in the person's account, told by its words and never sent."""
+    import json
+
+    import trimesh
+
+    manifest = json.loads((Path(srv.__file__).parent / "pro_tool_manifest.json").read_text())
+    served_public.load(manifest["served_public"])
+    s = servers(_opened())
+    relief = tmp_path / "relief.stl"
+    trimesh.creation.box(extents=(10, 10, 4)).export(relief)
+    out = asyncio.run(
+        srv.mcp._tool_manager.call_tool(
+            "compile_scad", {"scad_code": f'import("{relief}");'}, context=None, convert_result=False,
+        )
+    )
+    out = next(x for x in out if isinstance(x, dict)) if isinstance(out, list) else out
+    assert out.get("success") is True, out
+    assert [tool for tool, _ in s.asks if tool == "compile_scad"] == []
+    sessions = [sent for tool, sent in s.asks if tool == "design_session"]
+    assert len(sessions) == 1 and sessions[0]["verb"] == "join", s.asks
+    assert str(relief) not in repr(s.asks) and "import(" not in repr(s.asks)
     assert out[SAVED_GOAL_KEY]["brief_id"] == "session-1"
 
 

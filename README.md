@@ -496,7 +496,7 @@ Kiln is safety-first infrastructure for controlling physical machines:
 
 - **Pre-flight checks** validate printer state, temperatures, and files before every print
 - **G-code validation** blocks dangerous commands (firmware reset, unsafe temperatures)
-- **Temperature limits** enforce safe maximums (300 °C hotend, 130 °C bed)
+- **Temperature limits** hold each printer to its own maximums, and a printer whose model Kiln has not been told to 240 °C hotend and 80 °C bed, whether the request is a temperature setting or raw G-code
 - **A person says go** before every print — in your AI app's approval dialog, by typing a code Kiln shows on your screen, or at the terminal — unless you chose not to be asked: for a while (a day at most), always on a printer you named yourself (at your own terminal, or on your Kiln account page with two-factor), or by switching on auto-print yourself; stopping, pausing and watching a print never need that yes
 - **Confirmation required** for destructive operations (cancel, raw G-code)
 - **Optional authentication** with scope-based API keys for multi-user setups

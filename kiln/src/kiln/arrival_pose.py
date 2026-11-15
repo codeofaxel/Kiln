@@ -32,6 +32,7 @@ format.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import os
@@ -520,10 +521,8 @@ def _turn_copy(path: str, into: str, record: dict[str, Any], verdict: Any) -> di
         turn_file(into, verdict.turn)
     except Exception as exc:  # noqa: BLE001 -- the part is shown as it arrived, and says so
         logger.warning("arrival pose: no turned copy of %s: %s", path, exc)
-        try:
+        with contextlib.suppress(OSError):
             os.remove(into)
-        except OSError:
-            pass
         record.pop("undo", None)
         record.update(status=ADVISED, said=f"{verdict.advice or _advice(verdict)} (Kiln could not write a turned copy.)")
         return record

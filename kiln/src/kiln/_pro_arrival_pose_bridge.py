@@ -207,6 +207,6 @@ def _turn_in(value: Any) -> dict[str, float] | None:
 
 def _note_miss(miss: Miss | None) -> None:
     global _service_down_until
-    if miss is not None and miss.cause in ("offline", "unanswered"):
+    if miss is not None and miss.no_answer:
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
     logger.debug("arrival pose not judged (%s); shown as it arrived", miss and miss.cause)

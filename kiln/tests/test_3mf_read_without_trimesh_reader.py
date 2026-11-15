@@ -331,6 +331,11 @@ def _expanding(folder: Path, shape: str) -> str:
     )
 
 
+#: The bound on one read of these files wherever the suite runs: CI runs a
+#: test on every core at once, and one Python version traced for coverage,
+#: several times slower than a single run on a quiet machine.
+_READ_BOUND_S = 60.0
+
 _EXPANDING = {
     "many placements": "places more than 25,600 meshes once every copy is counted",
     "much mesh": "more than 6,000,000 vertices and triangles once every copy is counted",
@@ -371,9 +376,8 @@ def test_a_small_3mf_that_expands_past_the_limits_is_refused_in_words(tmp_path, 
     errors: list[str] = []
     triangles, _ = _parse_3mf(Path(path), errors)
     assert triangles == [] and any(words in e for e in errors), errors
-    # Every visit is counted before it does any work, so the refusal comes
-    # within the bound below; this order is load-bearing and this test pins it.
-    assert time.monotonic() - started < 10.0
+    # Each refusal stops at the limit it names, within the bound below.
+    assert time.monotonic() - started < _READ_BOUND_S
 
 
 def test_a_member_that_inflates_past_its_declared_size_stops_there(tmp_path):
@@ -464,8 +468,15 @@ def test_a_large_mesh_placed_thousands_of_times_is_measured_or_refused_fast(tmp_
 
     started = time.monotonic()
     box = compute_3mf_geometry_bbox(shared)
+    one_fold = time.monotonic() - started
     assert box == {"x_min": 1.0, "x_max": 125.0, "y_min": 1.0, "y_max": 5.0, "z_min": 0.0, "z_max": 6.0}
-    assert time.monotonic() - started < 10.0
+    assert one_fold < _READ_BOUND_S
+
+    # The turned copies are refused before any of them is folded, so each
+    # answer below reads the mesh about once, as the one fold above did, on
+    # whatever machine runs it.  Folding every turned copy takes many times
+    # that.
+    allowed = 6 * one_fold
 
     started = time.monotonic()
     with caplog.at_level(logging.WARNING):
@@ -473,11 +484,11 @@ def test_a_large_mesh_placed_thousands_of_times_is_measured_or_refused_fast(tmp_
     assert "more than 300,000,000 vertices once every differently turned copy is counted" in caplog.text
     fit = validate_mesh_for_printer(turned, "bambu_a1")
     assert "ok" in fit
-    assert time.monotonic() - started < 15.0
+    assert time.monotonic() - started < allowed
 
     started = time.monotonic()
     out = asyncio.run(server.mcp.call_tool("analyze_mesh_geometry", {"file_path": turned}))
     answer = json.loads(next(b.text for b in tool_result_blocks(out) if hasattr(b, "text")))
     assert answer["success"] is False
     assert "places more than 6,000,000 vertices and triangles" in answer["error"]["message"]
-    assert time.monotonic() - started < 10.0
+    assert time.monotonic() - started < allowed

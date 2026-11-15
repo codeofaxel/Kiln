@@ -14,12 +14,13 @@ kept word for word (a free band, a tool's own failure), files brought home
 (a made model, a named output, prose that quotes a path), the four misses
 and the once-per-cause note, and the calls that stay here (kiln-pro present,
 a ``stays_here_when`` argument, a tool the block does not name, a missing
-file).
+file, OpenSCAD that reads a file on this computer).
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -471,6 +472,102 @@ class TestCallsThatStayHere:
         result = _call("compile_scad", scad_path=str(tmp_path / "missing.scad"))
         assert result == {"success": False, "error": "File not found"}
         assert servers.calls == []
+
+
+def _servers_refuse_what_reads_a_file_here(servers, monkeypatch) -> None:
+    """Kiln's servers as they answer a build whose source reads a file the
+    caller has: refused at the door (HTTP 400), the way the hosted path
+    guard refuses it."""
+
+    def door(tool_name, _timeout=None, _asked_by_user=True, _http=None, **kwargs):
+        servers.calls.append((tool_name, kwargs))
+        if _http is not None:
+            _http["status"] = 400
+        return {
+            "success": False, "status": "error", "code": "SCAD_FILE_READ_NOT_ALLOWED",
+            "parameter": "scad_code", "error": "OpenSCAD on Kiln's servers cannot open that file.",
+            "retryable": False,
+        }
+
+    monkeypatch.setattr(srv, "_pro_api_call", door)
+
+
+class TestOpenScadThatReadsAFileHereIsBuiltHere:
+    """A build whose OpenSCAD reads a file on this computer (an imported
+    model, a heightmap, a file of its own beside it) is built here from the
+    start.  Kiln's servers cannot open that file and refuse such a source,
+    so sending it would only be refused."""
+
+    @pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD not installed")
+    def test_an_imported_model_is_built_here_and_nothing_is_sent(self, servers, monkeypatch, tmp_path):
+        import trimesh
+
+        # A plain install: no kiln-pro module answers, however it is reached.
+        for name in [n for n in sys.modules if n.startswith("kiln_pro.")]:
+            monkeypatch.setitem(sys.modules, name, None)
+        relief = tmp_path / "relief.stl"
+        trimesh.creation.box(extents=(10, 10, 4)).export(relief)
+        _servers_refuse_what_reads_a_file_here(servers, monkeypatch)
+
+        result = _call("compile_scad", scad_code=f'import("{relief}");')
+
+        assert result["success"] is True, result
+        assert Path(result["stl_path"]).is_file()
+        assert servers.calls == []
+        assert "answered_on_this_computer" not in result
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            'import("/Users/someone/relief.stl");',
+            'surface(file="/Users/someone/height.png", center=true);',
+            "include <parts.scad>\npart();",
+            "use <../shared/lib.scad>\nlib_part();",
+            'f = "/Users/someone/relief.stl"; import(f);',
+        ],
+    )
+    def test_a_source_that_reads_a_file_here_is_never_sent(self, servers, monkeypatch, code):
+        _run_here_answers(monkeypatch, "compile_scad", {"success": True, "from": "here"})
+        result = _call("compile_scad", scad_code=code)
+        assert servers.calls == [] and result == {"success": True, "from": "here"}
+
+    def test_a_scad_file_that_includes_a_file_beside_it_is_built_here(self, servers, monkeypatch, tmp_path):
+        (tmp_path / "parts.scad").write_text("module part() { cube(4); }\n")
+        scad = tmp_path / "assembly.scad"
+        scad.write_text("include <parts.scad>\npart();\n")
+        _run_here_answers(monkeypatch, "compile_scad", {"success": True, "from": "here"})
+        result = _call("compile_scad", scad_path=str(scad))
+        assert servers.calls == [] and result == {"success": True, "from": "here"}
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "cube(10);",
+            "include <BOSL2/std.scad>\ncuboid([10, 10, 10], rounding=1);",
+            '// import("relief.stl") once it is made\ncube(5);',
+        ],
+    )
+    def test_a_source_reading_only_kilns_libraries_is_still_sent(self, servers, code):
+        servers.answer = {"success": True, "message": "compiled"}
+        _call("compile_scad", scad_code=code)
+        assert servers.calls == [("compile_scad", {"scad_code": code})]
+
+    def test_the_text_a_call_gives_is_what_is_judged_not_its_file(self, servers, tmp_path):
+        scad = tmp_path / "old.scad"
+        scad.write_text('import("/Users/someone/relief.stl");\n')
+        servers.answer = {"success": True, "message": "compiled"}
+        _call("compile_scad", scad_code="cube(3);", scad_path=str(scad))
+        assert servers.calls == [("compile_scad", {"scad_code": "cube(3);"})]
+
+    def test_a_kind_of_source_this_build_cannot_read_keeps_the_call_here(self, servers):
+        from kiln import served_public
+
+        served_public.load({
+            "schema_version": served_public.SCHEMA_VERSION,
+            "tools": {"compile_scad": {"stays_here_when_source_reads": {"scad_code": "a_later_kind"}}},
+        })
+        assert served_public.plan("compile_scad", {"scad_code": "cube(1);"}) is None
+        assert served_public.plan("compile_scad", {"scad_path": "box.scad"}) is not None
 
 
 class TestAJobIsAskedAboutSoon:

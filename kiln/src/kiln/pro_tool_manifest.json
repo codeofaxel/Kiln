@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-14T23:12:59.370218+00:00",
+  "generated": "2026-11-15T02:35:09.031653+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -30706,6 +30706,10 @@
           "text": {
             "scad_path": "scad_code"
           }
+        },
+        "stays_here_when_source_reads": {
+          "scad_code": "openscad",
+          "scad_path": "openscad_file"
         }
       },
       "decorate_surface": {
@@ -30715,7 +30719,17 @@
         },
         "asked_by_the_tool": true
       },
-      "generate_from_template": {},
+      "generate_from_template": {
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
+      },
       "import_step_file": {
         "inputs": {
           "files": {

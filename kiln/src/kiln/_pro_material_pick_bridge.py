@@ -126,7 +126,7 @@ def _note_miss(miss: Miss | None) -> None:
     """The servers did not answer (not a refusal): leave the pick alone for a
     while so a make does not wait on it again and again."""
     global _service_down_until
-    if miss is not None and miss.cause in ("offline", "unanswered"):
+    if miss is not None and miss.no_answer:
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
     logger.debug("material pick not served (%s); answering with the safety floor", miss and miss.cause)
 
