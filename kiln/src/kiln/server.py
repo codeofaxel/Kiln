@@ -14078,10 +14078,8 @@ def _several_printers_read(
         registry = _get_registry()
         # Auto-register the env-configured adapter if registry is empty
         if registry.count == 0:
-            try:
+            with contextlib.suppress(RuntimeError):  # no adapter configured
                 registry.register("default", _get_adapter())
-            except RuntimeError:
-                pass  # No adapter configured
 
         if registry.count == 0:
             empty: dict[str, Any] = {

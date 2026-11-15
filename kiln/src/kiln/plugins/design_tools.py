@@ -70,7 +70,7 @@ def _load_figure_miss(material: str, miss: Any) -> dict[str, Any]:
         "load_checked": False,
         "code": "LOAD_FIGURES_UNAVAILABLE",
         "error": text,
-        "retryable": miss.retryable,
+        "retryable": miss.no_answer,
         **served_answer.fields(miss),
     }
 

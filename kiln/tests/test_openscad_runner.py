@@ -395,6 +395,39 @@ def _subprocess_launches(path: Path) -> list[int]:
     return hits
 
 
+#: Shared helpers that launch OpenSCAD through the runner for their caller,
+#: mapped to the module that defines each.  A listed module that calls one
+#: routes through the runner as surely as one calling ``run_openscad``
+#: itself; ``test_each_runner_helper_calls_the_runner`` holds each helper
+#: to that.
+_RUNNER_HELPERS = {"run_resolving": "scad_settings.py"}
+
+
+def _called_names(tree: ast.AST) -> set[str]:
+    """Names called anywhere in *tree*, as ``f(...)`` or ``x.f(...)``.
+
+    A call, not a mention: an import or a comment naming the runner does
+    not count.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.add(node.func.attr)
+    return names
+
+
+def _function_node(path: Path, name: str) -> ast.AST:
+    """The top-level function *name* in *path*."""
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return node
+    raise AssertionError(f"{path.name} defines no top-level function {name}")
+
+
 class TestEveryDoorRoutesThroughTheRunner:
     """The retry is worthless at any site that skipped it."""
 
@@ -413,12 +446,26 @@ class TestEveryDoorRoutesThroughTheRunner:
 
     @pytest.mark.parametrize("module", _OPENSCAD_MODULES)
     def test_module_actually_calls_the_runner(self, module):
-        """The other half: not just 'no subprocess', but 'yes runner'."""
-        source = (_SRC / module).read_text()
-        assert "run_openscad" in source, (
+        """The other half: not just 'no subprocess', but a call to the runner."""
+        called = _called_names(ast.parse((_SRC / module).read_text()))
+        routes = {"run_openscad", *_RUNNER_HELPERS}
+        assert called & routes, (
             f"{module} is listed as an OpenSCAD invocation site but never "
-            f"calls run_openscad — either it stopped launching OpenSCAD "
-            f"(drop it from _OPENSCAD_MODULES) or a call site was missed."
+            f"calls run_openscad or a helper that does "
+            f"({', '.join(sorted(_RUNNER_HELPERS))}) — either it stopped "
+            f"launching OpenSCAD (drop it from _OPENSCAD_MODULES) or a call "
+            f"site was missed."
+        )
+
+    @pytest.mark.parametrize("helper", sorted(_RUNNER_HELPERS))
+    def test_each_runner_helper_calls_the_runner(self, helper):
+        """A helper counts as a route to the runner only while it calls it."""
+        path = _SRC / _RUNNER_HELPERS[helper]
+        assert "run_openscad" in _called_names(_function_node(path, helper)), (
+            f"{_RUNNER_HELPERS[helper]}::{helper} no longer calls run_openscad, "
+            f"so the modules that launch OpenSCAD through it skip the "
+            f"startup-crash retry. Route it back through the runner, or drop "
+            f"it from _RUNNER_HELPERS."
         )
 
     def test_no_unlisted_module_launches_openscad(self):

@@ -208,7 +208,7 @@ def file_reads(code: str) -> list[tuple[str, str | None]]:
 #: digits and ``_ . / -`` only, as every file Kiln ships is named.  Anything
 #: else between the brackets (a tab, a line break, a space) is refused.
 _LIBRARY_TARGET = re.compile(
-    r"(?:%s)/[A-Za-z0-9_./-]+" % "|".join(re.escape(name) for name in LIBRARIES)
+    r"(?:{})/[A-Za-z0-9_./-]+".format("|".join(re.escape(name) for name in LIBRARIES))
 )
 
 

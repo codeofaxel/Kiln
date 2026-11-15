@@ -55,7 +55,6 @@ from kiln.generation.base import (
 )
 from kiln.generation.job_records import JobRecord, MemoryJobRecords
 from kiln.generation.visual_verify import VerificationResult, VisualVerifier
-from kiln.openscad_runner import run_openscad
 
 logger = logging.getLogger(__name__)
 

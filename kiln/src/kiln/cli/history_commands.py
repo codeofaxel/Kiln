@@ -17,7 +17,6 @@ same commands rather than keeping its own.
 
 from __future__ import annotations
 
-import json
 import sys
 from collections.abc import Callable
 from typing import Any

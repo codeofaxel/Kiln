@@ -293,7 +293,7 @@ def _route_miss(miss: Any) -> dict[str, Any]:
         wont="won't route it anywhere",
         safe_remedy="name the printer yourself with start_print or submit_job",
     )
-    out = _srv._error_dict(text, code="ROUTING_UNAVAILABLE", retryable=miss.retryable)
+    out = _srv._error_dict(text, code="ROUTING_UNAVAILABLE", retryable=miss.no_answer)
     out.update(served_answer.fields(miss))
     return out
 

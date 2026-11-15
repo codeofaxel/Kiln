@@ -194,7 +194,7 @@ def _note_miss(miss: Miss | None) -> None:
     """The servers did not answer (not a refusal): leave the ranking alone for
     a while so the next part does not wait on it again."""
     global _service_down_until
-    if miss is not None and miss.cause in ("offline", "unanswered"):
+    if miss is not None and miss.no_answer:
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
     logger.debug("orientation ranking not served (%s); ranking by bed contact", miss and miss.cause)
 

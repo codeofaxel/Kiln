@@ -131,10 +131,12 @@ class Miss:
             raise ValueError(f"not a cause: {self.cause!r}")
 
     @property
-    def retryable(self) -> bool:
-        """Whether the same call, unchanged, may get an answer later: this
-        computer was offline or the servers did not answer.  Signed out or
-        refused, it gets the same answer until the person acts."""
+    def no_answer(self) -> bool:
+        """Whether the call got no answer: this computer was offline or
+        Kiln's servers did not answer.  The same call may get one later, so
+        it is worth retrying, and asking again right away only waits again.
+        Signed out or refused, the same call gets the same miss until the
+        person acts."""
         return self.cause in ("offline", "unanswered")
 
 
