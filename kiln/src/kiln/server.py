@@ -7514,7 +7514,7 @@ def printer_status(
 
     One printer at a time is on every plan (``printer_name``).  Several
     printers' live state in one answer (``printer_names``) is the fleet
-    view, part of Kiln Business (https://kiln3d.com/pricing); a plan
+    view, part of Kiln Business; a plan
     without it gets ``known_printers`` and one ``note``, never a refusal.
 
     Args:
@@ -14019,8 +14019,8 @@ def fleet_status(by_site: bool = False) -> dict:
     """The same answer as ``printer_status(printer_names="all")``, for clients that call it by this name.
 
     Lists the printers set up here on every plan; every printer's live
-    state in one answer is the fleet view, part of Kiln Business
-    (https://kiln3d.com/pricing), and a plan without it gets
+    state in one answer is the fleet view, part of Kiln Business,
+    and a plan without it gets
     ``known_printers`` and one ``note``, never a refusal.  New callers use
     ``printer_status``, which also reads one printer or a chosen few.
 
