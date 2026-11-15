@@ -138,7 +138,7 @@ class TestGenerateQrData:
         from kiln.image_to_surface import generate_qr_data
 
         monkeypatch.setattr(licensing, "check_tier", account_plan.check_tier)  # a machine never signed in
-        with pytest.raises(ImportError, match="needs Kiln Business"):
+        with pytest.raises(ImportError, match="needs Kiln Pro"):
             generate_qr_data("https://kiln3d.com", str(tmp_path))
 
 

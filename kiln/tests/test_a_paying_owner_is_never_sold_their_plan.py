@@ -262,7 +262,6 @@ def _say(door: str) -> str:
 
 #: The plan each door names, where it is not Kiln Pro.
 PLAN_OF = {
-    "QR code": "business",
     "queue held to one printer": "business",
     "window over two printers": "business",
 }
