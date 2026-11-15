@@ -201,9 +201,7 @@ def _private(folder: str) -> bool:
         return False
     if not stat.S_ISDIR(st.st_mode):
         return False
-    if hasattr(os, "getuid") and (st.st_uid != os.getuid() or st.st_mode & 0o022):
-        return False
-    return True
+    return not (hasattr(os, "getuid") and (st.st_uid != os.getuid() or st.st_mode & 0o022))
 
 
 def quote_pose_block(pose: dict[str, Any]) -> dict[str, Any]:

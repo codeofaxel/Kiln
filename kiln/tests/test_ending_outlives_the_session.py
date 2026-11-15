@@ -110,7 +110,7 @@ class TestSpawnGuards:
             assert kw["stdin"] is ending_watch.subprocess.DEVNULL
             return _Proc()
 
-        monkeypatch.setattr(ending_watch.subprocess, "Popen", _popen)
+        monkeypatch.setattr(ending_watch.run_program, "Popen", _popen)
         adapter = _fake_adapter(states=("printing",))
         assert adapter.start_print("a.gcode").success
         assert adapter.start_print("b.gcode").success
@@ -130,7 +130,7 @@ class TestSpawnGuards:
         class _Proc:
             pid = 4242
 
-        monkeypatch.setattr(ending_watch.subprocess, "Popen", lambda *a, **k: calls.append(1) or _Proc())
+        monkeypatch.setattr(ending_watch.run_program, "Popen", lambda *a, **k: calls.append(1) or _Proc())
         assert ending_watch.spawn_ending_watch(_fake_adapter(), "x.gcode") == 4242
         assert calls == [1]
 
@@ -140,7 +140,7 @@ class TestSpawnGuards:
         def _boom(*a, **k):
             raise OSError("no fork for you")
 
-        monkeypatch.setattr(ending_watch.subprocess, "Popen", _boom)
+        monkeypatch.setattr(ending_watch.run_program, "Popen", _boom)
         assert ending_watch.spawn_ending_watch(_fake_adapter(), "x.gcode") is None
         assert _fake_adapter(states=("printing",)).start_print("x.gcode").success
 

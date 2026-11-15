@@ -21,6 +21,9 @@ from kiln.failure_vocabulary import (
     AUTO_CLASSIFY_MIN_CONFIDENCE as _AUTO_CLASSIFY_MIN_CONFIDENCE,
 )
 from kiln.failure_vocabulary import (
+    CAUSES_A_GUESS_NEVER_NAMES as _CAUSES_A_GUESS_NEVER_NAMES,
+)
+from kiln.failure_vocabulary import (
     VALID_FAILURE_MODES as _VALID_FAILURE_MODES,
 )
 from kiln.failure_vocabulary import (
@@ -134,6 +137,7 @@ def _auto_classify_failure(
     canonical = _to_canonical_failure_mode(raw_type)
     stored = (
         canonical is not None
+        and canonical not in _CAUSES_A_GUESS_NEVER_NAMES
         and classification.confidence >= _AUTO_CLASSIFY_MIN_CONFIDENCE
     )
     return {
@@ -313,6 +317,130 @@ def _clear_print_note(job_id: str, outcome: str, notes: str | None) -> dict:
     return {"success": True, "job_id": job_id, "outcome": outcome, "note_cleared": True}
 
 
+def _ending_asked(job_id: str, outcome: str) -> dict:
+    """The person was asked about *job_id*'s ending and had nothing to add:
+    remember that they were asked, and change nothing else.  A cancel Kiln
+    has not finished writing down is written as the person's own word."""
+    import kiln.server as _srv
+    from kiln.persistence import get_db
+
+    db = get_db()
+    row = db.get_print_outcome(job_id)
+    if row is None:
+        return _srv._error_dict(f"No print recorded as {job_id!r}.", code="NOT_FOUND")
+    if row.get("outcome") == "pending" and outcome == "cancelled":
+        db.save_print_outcome({
+            "job_id": job_id, "printer_name": row.get("printer_name"),
+            "outcome": "cancelled", "determined_by": "user_reported",
+        })
+        row = db.get_print_outcome(job_id) or row
+    if row.get("outcome") != outcome:
+        return _srv._error_dict(
+            f"Print {job_id!r} is recorded as {row.get('outcome')}, not {outcome}; nothing was changed.",
+            code="VALIDATION_ERROR",
+        )
+    marked = db.mark_ending_asked(job_id)
+    if marked is None:
+        return {"success": True, "job_id": job_id, "outcome": outcome,
+                "message": "This print's ending already says what happened; nothing was changed."}
+    try:
+        from kiln import outcome_courier
+
+        outcome_courier.push_soon()
+    except Exception:  # noqa: BLE001 -- the next push carries it
+        _logger.debug("outcome courier not offered the answer", exc_info=True)
+    out = {"success": True, "job_id": job_id, "outcome": outcome,
+           "message": "Kept as it is. It will not be asked about again."}
+    said = _ending_said(marked)
+    if said:
+        out["ending_said"] = said
+    return out
+
+
+def _ending_said(row: dict) -> str | None:
+    """The words for *row*'s ending when it is a stop and not a bad print,
+    or a job known only from the printer's own log."""
+    from kiln.failure_vocabulary import printer_log_said, stop_said
+
+    return printer_log_said(row.get("outcome"), row.get("determined_by")) or stop_said(
+        row.get("outcome"), row.get("failure_mode"), row.get("determined_by")
+    )
+
+
+def _endings_to_ask_about(printer_name: str, limit: int) -> list[dict]:
+    """Recent endings on *printer_name* that owe the person a question, each
+    with its ``ask`` block (:mod:`kiln.ending_question`)."""
+    from kiln import ending_question
+    from kiln.persistence import get_db
+
+    out = []
+    for row in _with_ending_said(get_db().list_endings_to_ask_about(printer_name=printer_name, limit=limit)):
+        ask = ending_question.for_row(row)
+        if ask:
+            out.append({**row, "ask": ask})
+    return out
+
+
+def _printer_question(printer_name: str) -> dict | None:
+    """The question waiting about *printer_name* itself
+    (:mod:`kiln._pro_printer_checkin_bridge`), or ``None``."""
+    from kiln._pro_printer_checkin_bridge import listed
+
+    return listed(printer_name)
+
+
+def _repair_windows() -> dict:
+    """This computer's needs-repair windows, or none when they cannot be read."""
+    try:
+        from kiln.persistence import get_db
+
+        return get_db().repair_windows()
+    except Exception:  # noqa: BLE001 -- a record that cannot be read sets nothing aside
+        _logger.debug("repair windows not read", exc_info=True)
+        return {}
+
+
+def _print_and_repairs(row_id: int) -> dict:
+    """The machine and start time on the print row *row_id* and this
+    computer's needs-repair windows: what
+    :func:`kiln.failure_vocabulary.is_judged_ending` reads to set a bad print
+    aside.  Empty when the row cannot be read."""
+    try:
+        from kiln.persistence import get_db
+
+        row = get_db().print_outcome_row(row_id) or {}
+    except Exception:  # noqa: BLE001 -- a row that cannot be read sets nothing aside
+        _logger.debug("print row %s not read", row_id, exc_info=True)
+        return {}
+    return {
+        "machine_fingerprint": row.get("machine_fingerprint"),
+        "started_at": row.get("created_at"),
+        "repair_windows": _repair_windows(),
+    }
+
+
+def _with_ending_said(rows: list[dict]) -> list[dict]:
+    """*rows* with ``ending_said`` on each stop (what to call the ending to
+    the person in place of "failed") and ``repair_said`` on each bad print
+    the repair record sets aside
+    (:func:`kiln.failure_vocabulary.repair_said`)."""
+    from kiln.failure_vocabulary import repair_said
+
+    windows = _repair_windows() if rows else {}
+    out = []
+    for row in rows:
+        said = _ending_said(row)
+        if said:
+            row = {**row, "ending_said": said}
+        set_aside = repair_said(
+            row.get("outcome"), row.get("failure_mode"), row.get("determined_by"),
+            machine_fingerprint=row.get("machine_fingerprint"), started_at=row.get("created_at"),
+            repair_windows=windows,
+        )
+        out.append({**row, "repair_said": set_aside} if set_aside else row)
+    return out
+
+
 def record_print_outcome(
     job_id: str,
     outcome: str,
@@ -336,6 +464,7 @@ def record_print_outcome(
     branch_id: str | None = None,
     note_by: str | None = None,
     clear_note: bool = False,
+    ending_asked: bool = False,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -360,7 +489,10 @@ def record_print_outcome(
     key of the response; it is only STORED as ``failure_mode`` when the
     classifier's confidence meets or exceeds
     ``_AUTO_CLASSIFY_MIN_CONFIDENCE`` (0.75).  Lower-confidence guesses
-    are surfaced to the caller without poisoning the learning database.
+    are surfaced to the caller without poisoning the learning database.  A
+    guessed machine fault or outside cause (``clog``, ``thermal_runaway``,
+    ``mechanical``, ``power_loss``, ``filament_runout``) is echoed and never
+    stored: only the printer or a person names one.
 
     Args:
         job_id: The job ID from the print queue.
@@ -392,6 +524,12 @@ def record_print_outcome(
             wrong print is never changed); nothing else is recorded and the
             ending stays as it was.  The delete reaches the person's Kiln
             account too.
+        ending_asked: The person was asked about this print's ending (an
+            ``ask_the_person`` block, or an entry of ``endings_to_ask_about``
+            in ``get_printer_insights``) and had nothing to add: they cannot
+            say why it stopped, or they just stopped it.  Send the print's
+            ``job_id`` and the ``outcome`` it is recorded with; the ending
+            stays as it was and the print is not asked about again.
         printer_name: Printer used.  Auto-resolved from job if omitted.
         file_name: File printed.  Auto-resolved from job if omitted.
         file_hash: Optional hash of the file for cross-printer comparison.
@@ -474,6 +612,8 @@ def record_print_outcome(
         )
     if clear_note:
         return _clear_print_note(job_id, outcome, notes)
+    if ending_asked:
+        return _ending_asked(job_id, outcome)
 
     if determined_by is None:
         determined_by = "observed" if auto_recorded else "user_reported"
@@ -710,6 +850,7 @@ def record_print_outcome(
                         "quality_grade": _grade_map.get(quality_grade or "") or None,
                         "failure_mode": failure_mode,
                     },
+                    determined_by=determined_by,
                 )
         except Exception:
             pass  # Never let community sync block outcome recording
@@ -724,8 +865,14 @@ def record_print_outcome(
         # the caller supplied them, or the library already has a proven
         # setting for this material that we can re-stamp.  If neither is
         # true we skip silently rather than invent defaults — proven
-        # settings must reflect real prints, not our guesses.
-        if decoration_slug and material_type and outcome in ("success", "failed"):
+        # settings must reflect real prints, not our guesses.  A failure only
+        # counts against the decoration when it is a bad print: a printer's
+        # own stop, a power cut or a run-out spool says nothing about it, and
+        # neither does a bad print on a printer marked as needing repair.
+        from kiln.failure_vocabulary import is_judged_ending
+
+        if (decoration_slug and material_type and outcome in ("success", "failed")
+                and is_judged_ending(outcome, failure_mode, determined_by, **_print_and_repairs(row_id))):
             try:
                 from kiln.decoration_library import (
                     get_decoration,
@@ -1340,6 +1487,41 @@ class _LearningToolsPlugin:
             the user's behalf; an unresolved print stays out of all
             success-rate math until someone who knows answers.
 
+            **Agent contract for ``endings_to_ask_about``**: recent prints
+            the printer stopped without a reason, or that someone stopped
+            before they finished.  Only the person knows whether the part
+            was coming out bad.  Each entry carries ``ask``: the question,
+            and the exact ``record_print_outcome`` call for each thing they
+            can say.  Ask once, at a natural moment, and never pick an
+            answer for them.  The same block rides as ``ask_the_person`` on
+            the tool that reports a print's ending.
+
+            **Agent contract for ``printer_question``**: one question about
+            this printer itself, or ``null``.  ``seen``, ``check`` (when
+            present) and ``question`` are sentences to say to the person as
+            written; ``record`` maps each thing they can say to the exact
+            ``set_machine_repair`` call that records it.  ``check_part``
+            names the part ``check`` is about: offering that part's steps is
+            not an answer.  Ask once, at a natural moment, and never pick an
+            answer for them.  The same block can ride as ``ask_the_person``
+            on the tool that reports a print's ending, when that ending owes
+            no question of its own.
+
+            A row carrying ``ending_said`` ("Stopped: power cut") is a stop,
+            not a bad print: say those words to the person, never "failed".
+            A row carrying ``repair_said`` is a bad print made while the
+            printer was marked needs repair: say those words; it counts
+            about the printer and not against the design or the material.
+
+            ``insights.printer_own_history`` counts jobs Kiln only read off
+            the printer's own log: it neither started nor watched them, and
+            nobody told Kiln how the parts came out.  They are in no success
+            rate.  Say them apart ("your printer's own log lists N earlier
+            jobs, M ran to the end"), never as prints that succeeded.  A row
+            of that kind carries ``ending_said`` with the same meaning.  If
+            the person says how one came out, ``record_print_outcome`` with
+            its ``job_id`` makes it count.
+
             **Note**: Insights are advisory.  They do NOT override safety limits
             or preflight checks.
 
@@ -1351,7 +1533,10 @@ class _LearningToolsPlugin:
                 return err
             try:
                 insights = get_db().get_printer_learning_insights(printer_name)
-                recent = get_db().list_print_outcomes(printer_name=printer_name, limit=limit)
+                # The person's own list: every ending, a stop under its own words.
+                recent = get_db().list_print_outcomes(
+                    printer_name=printer_name, limit=limit, include_stops=True,
+                )
                 unresolved = get_db().list_unresolved_outcomes(
                     printer_name=printer_name, limit=limit,
                 )
@@ -1369,8 +1554,12 @@ class _LearningToolsPlugin:
                     "success": True,
                     "printer_name": printer_name,
                     "insights": insights,
-                    "recent_outcomes": recent,
+                    "recent_outcomes": _with_ending_said(recent),
                     "unresolved_prints": unresolved,
+                    "endings_to_ask_about": (asks := _endings_to_ask_about(printer_name, limit)),
+                    # One question at a time: an ending's own question
+                    # comes first, and the printer's waits for a later read.
+                    "printer_question": None if asks else _printer_question(printer_name),
                     "confidence": confidence,
                     "safety_notice": _LEARNING_SAFETY_NOTICE,
                 }

@@ -42,6 +42,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln import run_program
 from kiln.proc_alive import pid_alive
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,7 @@ def spawn_ending_watch(adapter: Any, file_name: str) -> int | None:
             "--parent", str(os.getpid()),
         ]
         with open(log_path, "ab") as log:
-            proc = subprocess.Popen(  # noqa: S603 -- our own interpreter, our own module
+            proc = run_program.Popen(  # noqa: S603 -- our own interpreter, our own module
                 cmd,
                 stdin=subprocess.DEVNULL,
                 stdout=log,

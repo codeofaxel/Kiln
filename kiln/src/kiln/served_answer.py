@@ -130,6 +130,15 @@ class Miss:
         if self.cause not in CAUSES:
             raise ValueError(f"not a cause: {self.cause!r}")
 
+    @property
+    def no_answer(self) -> bool:
+        """Whether the call got no answer: this computer was offline or
+        Kiln's servers did not answer.  The same call may get one later, so
+        it is worth retrying, and asking again right away only waits again.
+        Signed out or refused, the same call gets the same miss until the
+        person acts."""
+        return self.cause in ("offline", "unanswered")
+
 
 # ---------------------------------------------------------------------------
 # what a manifest tool puts on the line
@@ -525,6 +534,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_print_fix_bridge": ("served_answer", "Kiln Pro's filament for a print refused because the printer cannot melt the one chosen: the closest ones it can melt, checked against the part's saved goal, asked only when the signed-in plan includes Kiln Pro and kept nowhere; a miss says why once and the refusal stands with the filaments the printer runs, never a filament Kiln did not check"),
     "kiln._pro_material_pick_bridge": ("served_answer", "Kiln Pro's material pick for one part, asked only when the signed-in plan includes it and kept nowhere; a miss answers with the safety floor and its warnings"),
     "kiln._pro_orientation_bridge": ("served_answer", "Kiln Pro's order of one part's print poses, asked once per part only when the signed-in plan includes it and kept nowhere; a miss ranks by bed contact"),
+    "kiln._pro_decorate_bridge": ("served_answer", "what Kiln's servers add to a decoration: a depth raised to one that shows (everyone), a recess under a bottom-face decoration (Kiln Pro, asked only when the signed-in plan includes it) and a QR code for a part (Kiln Pro); a miss carves here as always and says why once, and a QR code writes nothing and says which of the four it was"),
     "kiln._pro_arrival_pose_bridge": ("served_answer", "which way up a model that just arrived stands, free at every tier, asked once per arrival and kept nowhere; a miss shows the part exactly as it arrived and says why"),
     "kiln._pro_recovery_bridge": ("served_answer", "Kiln Pro's plan for one failed print (session plan with its G-code, or fix plan), asked only when the signed-in plan includes it and kept nowhere; a miss answers with the safe floor and says why once"),
     "kiln._pro_load_bridge": ("served_answer", "what one part can carry, asked per part and kept nowhere; a miss gives no figure and the door says the part is unchecked, never that it holds"),
@@ -536,6 +546,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_goal_bridge": ("served_answer", "a model made on this computer joining the goal it names, in the person's Kiln account: the model goes up, the goal records it with where it came from and compares it with the goal's pictures; a miss says the make stands, was not added to the goal and was not compared, never joined or matching; a model from outside Kiln that names no goal opens one there the same way (the goal is kept, never the model), an install never signed in is told in one line what signing in keeps, and a miss says the model is here and was not recorded; a model Kiln made here that names no goal opens one from the tool that made it, its fingerprint and the call's naming words, cleaned and capped, never the model or its source: a miss leaves the make as it was and says once per session what was not done, never that no safety note applies"),
     "kiln._pro_goal_material_bridge": ("served_answer", "the filament a saved goal's part printed in, told to the goal in the person's account as the print starts, free at every tier; a door that named the goal says a miss once in its reply and the print runs as started, a start no door waits on records nothing on a miss"),
     "kiln._pro_order_bridge": ("served_answer", "ordering a print from a print service on an install with no order service of its own (materials, a quote, placing, tracking and cancelling an order, the order history), kind action: a quote not given is no quote and an order not placed is said so, never read as placed; the servers' own refusal rides whole with its details"),
+    "kiln._pro_printer_checkin_bridge": ("infrastructure", "one question about a printer, asked for after a print ends on it and never by the person; a miss of any cause (offline, signed out, no answer, refused) asks nothing and says nothing, keeps what was kept, and the next ending asks again"),
     "kiln.history_courier": ("served_answer", "design history pushed to, pulled from and cloned out of the person's account; a miss moves nothing and the history on this computer is untouched"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
     "kiln.stage_cache": ("infrastructure", "the stage document upload behind stage_link; its refusals surface through stage_link"),

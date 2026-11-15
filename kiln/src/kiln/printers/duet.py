@@ -31,6 +31,7 @@ from kiln.printers.base import (
     UploadResult,
 )
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.quoted_text import fence
 
 logger = logging.getLogger(__name__)
 
@@ -843,7 +844,7 @@ class DuetAdapter(PrinterAdapter):
         return UploadResult(
             success=True,
             file_name=target,
-            message=f"Uploaded {filename} to {target}.",
+            message=f"Uploaded {fence(filename)} to {target}.",
         )
 
     def delete_file(self, file_path: str) -> bool:

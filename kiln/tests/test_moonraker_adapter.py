@@ -722,6 +722,7 @@ class TestStartPrint:
         resp = _mock_response(json_data={"result": {}})
 
         with mock.patch("kiln.heater_check_readings.note_print_started"), \
+                mock.patch("kiln.print_evidence.note_start_firmware"), \
                 mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
             result = adapter.start_print("test.gcode")
 
@@ -730,7 +731,8 @@ class TestStartPrint:
         assert "test.gcode" in result.message
 
         # Verify the filename was passed as a query param.  (A start also
-        # reads the heater checks on a thread of its own, stubbed here.)
+        # reads the heater checks and asks the firmware version, each on a
+        # thread of its own, stubbed here.)
         call_kwargs = mock_req.call_args
         assert call_kwargs.kwargs.get("params") == {"filename": "test.gcode"}
 

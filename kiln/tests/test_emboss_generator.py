@@ -1333,3 +1333,37 @@ class TestChecksLeaveNoMeshBehind:
         assert _is_open_mesh(str(closed)) is False
         assert _is_open_mesh(str(opened)) is True  # the arrays answer "open" too
         assert calls == []
+
+
+@needs_openscad
+class TestTheMarginIsNotAWarning:
+    """A share of the face (``scale``) meeting the edge margin is the margin
+    working on a small face, and is not said; a width the caller named that
+    the margin cuts still is."""
+
+    def _margin_warnings(self, tmp_path, **sizing):
+        from kiln.emboss_generator import generate_emboss_scad
+        from kiln.surface_intelligence import find_named_face
+
+        scad = os.path.join(str(tmp_path), "tag.scad")
+        with open(scad, "w") as f:
+            f.write("cylinder(h=3, d=30, $fn=160);")
+        tag = os.path.join(str(tmp_path), "tag.stl")
+        subprocess.run(["openscad", "-o", tag, scad], check=True, capture_output=True)
+        result = generate_emboss_scad(
+            model_path=tag,
+            content_info={"type": "openscad_text", "text": "Bella"},
+            face=find_named_face(tag, "top"),
+            output_dir=str(tmp_path),
+            depth_mm=1.2,
+            mode="emboss",
+            min_edge_margin_mm=6.0,
+            **sizing,
+        )
+        return [w for w in result.get("warnings", []) if "edge margin" in w]
+
+    def test_a_share_of_a_small_face_meeting_the_margin_is_not_said(self, tmp_path):
+        assert self._margin_warnings(tmp_path, scale=0.8) == []
+
+    def test_a_named_width_the_margin_cuts_is_still_said(self, tmp_path):
+        assert self._margin_warnings(tmp_path, absolute_size_mm=26.0)

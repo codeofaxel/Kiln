@@ -57,10 +57,14 @@ def _counts(block: dict) -> dict:
 
 
 def _row(db: KilnDB, job: str, printer: str, outcome: str, *, version: str | None = V1,
-         fingerprint: str | None = "fp", determined_by: str | None = "observed") -> None:
+         fingerprint: str | None = "fp", determined_by: str | None = "observed",
+         failure_mode: str | None = "warping") -> None:
+    """A failed or partial row here is a bad print (a defect named): a
+    printer's own stop is no verdict on the version (kiln.failure_vocabulary)."""
     db._save_print_outcome({
         "job_id": job, "printer_name": printer, "file_name": f"{job}.gcode", "outcome": outcome,
         "determined_by": determined_by, "version_id": version, "machine_fingerprint": fingerprint,
+        "failure_mode": failure_mode if outcome in ("failed", "partial") else None,
     })
 
 

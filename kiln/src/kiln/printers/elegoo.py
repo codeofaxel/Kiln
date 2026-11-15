@@ -40,6 +40,7 @@ from kiln.printers.base import (
     canonical_model_key,
 )
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.quoted_text import fence
 
 logger = logging.getLogger(__name__)
 
@@ -880,7 +881,7 @@ class ElegooAdapter(PrinterAdapter):
         return UploadResult(
             success=True,
             file_name=filename,
-            message=f"Uploaded {filename} to Elegoo printer via SDCP V3 HTTP push.",
+            message=f"Uploaded {fence(filename)} to Elegoo printer via SDCP V3 HTTP push.",
         )
 
     def _upload_file_v2(
@@ -935,7 +936,7 @@ class ElegooAdapter(PrinterAdapter):
             return UploadResult(
                 success=True,
                 file_name=filename,
-                message=f"Uploaded {filename} to Elegoo printer via SDCP V2 pull.",
+                message=f"Uploaded {fence(filename)} to Elegoo printer via SDCP V2 pull.",
             )
         except PrinterError:
             raise

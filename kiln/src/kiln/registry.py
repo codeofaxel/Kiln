@@ -556,8 +556,8 @@ class PrinterRegistry:
     # Fleet queries
     # ------------------------------------------------------------------
 
-    def get_fleet_status(self) -> list[dict]:
-        """Query every printer and return a list of status snapshots.
+    def get_fleet_status(self, names: list[str] | None = None) -> list[dict]:
+        """Query every printer, or only *names*, and return a list of status snapshots.
 
         Each entry contains the printer name, backend type, and current
         state.  Printers that fail to respond are reported as OFFLINE
@@ -570,6 +570,8 @@ class PrinterRegistry:
         Queries are executed in parallel for speed.
         """
         canonical = set(self.list_machines())
+        if names is not None:
+            canonical &= set(names)
         printers = {
             n: a for n, a in self.list_all().items() if n in canonical
         }

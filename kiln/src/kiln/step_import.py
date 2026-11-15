@@ -37,6 +37,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import run_program
 from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
@@ -1182,7 +1183,7 @@ def _convert_via_freecad(
         script_path = f.name
 
     try:
-        result = subprocess.run(
+        result = run_program.run(
             [*freecad_cmd, script_path],
             capture_output=True,
             text=True,
@@ -1238,7 +1239,7 @@ def _convert_via_gmsh(
         script_path = f.name
 
     try:
-        result = subprocess.run(
+        result = run_program.run(
             ["python3", script_path],
             capture_output=True,
             text=True,
@@ -1561,7 +1562,7 @@ def _convert_via_ocp(
         script_path = f.name
 
     try:
-        result = subprocess.run(
+        result = run_program.run(
             # sys.executable, not "python": the kernel lives in the
             # interpreter running Kiln, which may not be first on PATH.
             [sys.executable, script_path],
@@ -2052,7 +2053,7 @@ def read_exact_geometry(path: str) -> ExactGeometry:
         f.write(script)
         script_path = f.name
     try:
-        result = subprocess.run(
+        result = run_program.run(
             [sys.executable, script_path],
             capture_output=True,
             text=True,

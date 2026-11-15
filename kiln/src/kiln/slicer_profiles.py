@@ -29,6 +29,7 @@ Usage::
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import math
@@ -45,7 +46,53 @@ logger = logging.getLogger(__name__)
 _DATA_FILE = Path(__file__).resolve().parent / "data" / "slicer_profiles.json"
 
 # Reuse temp files per printer_id so we don't leak thousands of files.
+# Keyed with the folder the files are written under (see _write_profile),
+# so a cached path is only ever handed back inside the folder it was
+# written for.
 _temp_cache: dict[str, str] = {}
+
+#: Folders this process wrote profiles into, removed at exit.
+_profile_dirs: list[str] = []
+
+
+def _cache_key(key: str) -> str:
+    """*key* scoped to the folder profiles are written under right now."""
+    from kiln.output_paths import kiln_temp_dir
+
+    return f"{kiln_temp_dir()}\0{key}"
+
+
+def _write_profile(content: str, *, prefix: str) -> str:
+    """Write a slicer profile into a fresh folder of its own and return the
+    file's path.
+
+    The folder is made by ``tempfile`` with a random name inside
+    :func:`kiln.output_paths.kiln_temp_dir`: the request's own folder on the
+    shared server, the machine's temp folder elsewhere.  Never a folder with
+    a fixed name, which anything else on the machine could make first.
+    Every folder written here is removed when this process exits.
+    """
+    from kiln.output_paths import kiln_temp_dir
+
+    folder = tempfile.mkdtemp(prefix="kiln_slicer_", dir=kiln_temp_dir())
+    _profile_dirs.append(folder)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=folder, prefix=prefix, suffix=".ini", delete=False,
+    ) as fh:
+        fh.write(content)
+        return fh.name
+
+
+def _remove_profile_dirs() -> None:
+    """Remove every folder :func:`_write_profile` made in this process."""
+    import shutil
+
+    while _profile_dirs:
+        shutil.rmtree(_profile_dirs.pop(), ignore_errors=True)
+    _temp_cache.clear()
+
+
+atexit.register(_remove_profile_dirs)
 
 
 class UnsafeSettingError(ValueError):
@@ -1310,7 +1357,7 @@ def resolve_slicer_profile(
     # stated (an override equal to the printer's own value is still theirs).
     stated = sorted(overrides or ())
     fit_key = _settings_hash({**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True)})
-    cache_key = f"{profile.id}:{fit_key}:{','.join(stated)}:{standing_in_for or ''}"
+    cache_key = _cache_key(f"{profile.id}:{fit_key}:{','.join(stated)}:{standing_in_for or ''}")
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
@@ -1322,21 +1369,7 @@ def resolve_slicer_profile(
         fit,
     )
 
-    tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
-    os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
-
-    # Atomic write via NamedTemporaryFile to prevent symlink attacks
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=tmp_dir,
-        prefix=f"{profile.id}_",
-        suffix=".ini",
-        delete=False,
-    ) as fh:
-        fh.write(ini_content)
-        path = fh.name
-
+    path = _write_profile(ini_content, prefix=f"{profile.id}_")
     _temp_cache[cache_key] = path
     logger.debug("Wrote slicer profile %s → %s", profile.id, path)
     return path
@@ -1438,18 +1471,11 @@ def profile_with_overrides(
 
     content = "\n".join(lines) + "\n"
 
-    cache_key = f"overrides:{_settings_hash({'base': base_profile or '', 'body': content})}"
+    cache_key = _cache_key(f"overrides:{_settings_hash({'base': base_profile or '', 'body': content})}")
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
-    tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
-    os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=tmp_dir,
-        prefix=prefix or "overrides_", suffix=".ini", delete=False,
-    ) as fh:
-        fh.write(content)
-        path = fh.name
+    path = _write_profile(content, prefix=prefix or "overrides_")
     _temp_cache[cache_key] = path
     logger.debug("Wrote override profile (base=%s) → %s", base_profile, path)
     return path
@@ -1734,7 +1760,7 @@ def resolve_multiextruder_profile(
 
     stated = sorted(overrides or ())
     fit_key = _settings_hash({**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True)})
-    cache_key = f"{profile.id}_mme{num_extruders}:{fit_key}:{','.join(stated)}"
+    cache_key = _cache_key(f"{profile.id}_mme{num_extruders}:{fit_key}:{','.join(stated)}")
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
@@ -1748,20 +1774,7 @@ def resolve_multiextruder_profile(
         fit,
     )
 
-    tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
-    os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
-
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=tmp_dir,
-        prefix=f"{profile.id}_mme{num_extruders}_",
-        suffix=".ini",
-        delete=False,
-    ) as fh:
-        fh.write(ini_content)
-        path = fh.name
-
+    path = _write_profile(ini_content, prefix=f"{profile.id}_mme{num_extruders}_")
     _temp_cache[cache_key] = path
     logger.debug(
         "Wrote multi-extruder slicer profile %s×%d → %s",

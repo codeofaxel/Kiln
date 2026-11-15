@@ -150,8 +150,14 @@ def _uploaded_copy(file_name: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def charge_print(adapter: Any, file_name: str | None, kwargs: dict[str, Any] | None = None) -> None:
+def charge_print(
+    adapter: Any, file_name: str | None, kwargs: dict[str, Any] | None = None,
+    *, outcome_job_id: str | None = None,
+) -> None:
     """A print started: take what it will use from the spools that print it.
+
+    *outcome_job_id* names the outcome row the start opened; the spool that
+    feeds the print is written onto it (:func:`kiln.print_evidence.note_start_spool`).
 
     Called from :meth:`PrinterAdapter.start_print`.  The caller's thread
     pays one look at the spool list (the local database); the file's own
@@ -174,7 +180,7 @@ def charge_print(adapter: Any, file_name: str | None, kwargs: dict[str, Any] | N
         # printer read's own timeout.
         worker = threading.Thread(
             target=_charge_worker,
-            args=(adapter, printer, str(file_name), dict(kwargs or {})),
+            args=(adapter, printer, str(file_name), dict(kwargs or {}), outcome_job_id),
             name="kiln-spool-usage",
             daemon=False,
         )
@@ -185,7 +191,9 @@ def charge_print(adapter: Any, file_name: str | None, kwargs: dict[str, Any] | N
         logger.warning("spool count not started", exc_info=True)
 
 
-def _charge_worker(adapter: Any, printer: str, file_name: str, kwargs: dict[str, Any]) -> None:
+def _charge_worker(
+    adapter: Any, printer: str, file_name: str, kwargs: dict[str, Any], outcome_job_id: str | None = None,
+) -> None:
     try:
         with _work_lock:
             _forget(printer)
@@ -193,6 +201,9 @@ def _charge_worker(adapter: Any, printer: str, file_name: str, kwargs: dict[str,
             charges = _take(adapter, printer, usage, kwargs) if usage is not None else []
             if charges:
                 _db().save_spool_charge(printer, file_name, charges, state=_OPEN)
+                from kiln.print_evidence import note_start_spool
+
+                note_start_spool(outcome_job_id, charges)
     except Exception:  # noqa: BLE001 -- a count that fails is a count that missed
         logger.warning("spool count for %s not taken", printer, exc_info=True)
     finally:

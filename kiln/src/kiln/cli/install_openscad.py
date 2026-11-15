@@ -21,6 +21,8 @@ import sys
 
 import click
 
+from kiln import run_program
+
 _SNAPSHOTS_URL = "https://openscad.org/downloads#snapshots"
 
 
@@ -63,7 +65,7 @@ def _min_year() -> int:
 def _run(cmd: list[str]) -> tuple[bool, str]:
     """Run an install command; return ``(ok, combined_output)``.  Never raises."""
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        res = run_program.run(cmd, capture_output=True, text=True, timeout=900)
     except FileNotFoundError:
         return False, f"{cmd[0]}: not found"
     except subprocess.TimeoutExpired:

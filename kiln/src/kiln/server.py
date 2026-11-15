@@ -113,6 +113,7 @@ from kiln.print_consent import (
     why_not_asked,
 )
 from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms, pay_methods, tax_note
+from kiln.quoted_text import fence
 from kiln.server_identity import SERVER_NAME, identity_kwargs
 from kiln.tool_args import parse_json_array, parse_json_object
 from kiln.untrusted_zip import UntrustedZipFile
@@ -169,8 +170,7 @@ except ImportError:
     FulfillmentProvider = None
     QuoteRequest = None
     get_fulfillment_provider = None
-from kiln.gcode import validate_gcode as _validate_gcode_impl
-from kiln.gcode import validate_gcode_for_printer
+from kiln.gcode import validate_commands
 from kiln.generation import (
     GeminiDeepThinkProvider,
     GenerationError,
@@ -844,9 +844,9 @@ def _build_instructions() -> str:
             else:
                 parts.append(
                     f"PRINTERS: {len(printer_names)} registered. "
-                    "`fleet_status` lists them; use "
-                    "`printer_status(printer_name=...)` to read one at a "
-                    "time. Every printer's live state in one view, and "
+                    "`printer_status` lists them and reads one at a "
+                    "time (`printer_name=...`). Several printers' live "
+                    "state in one answer (`printer_names=...`), and "
                     "driving them together, is a Business feature (the "
                     "fleet tools)."
                 )
@@ -1077,6 +1077,12 @@ def _build_instructions() -> str:
             "AGENT RULES: Always use MCP tools (not CLI commands). "
             "Call get_skill_manifest() for the full capability map."
         )
+
+    # What the quote fence on a result means; every fenced result carries the
+    # same sentence, for the clients that truncate before reaching here.
+    from kiln.quoted_text import INSTRUCTIONS_LINE as _QUOTED_TEXT_LINE
+
+    parts.append(_QUOTED_TEXT_LINE)
 
     # Last on purpose: a rule about taking Kiln apart must never push the
     # safety and consent paragraphs past a client's cut.  get_started carries
@@ -1484,7 +1490,8 @@ async def _served_or_here(
     # An edit of a design kept on this computer, read before the tool may
     # write over its file (a no-op where kiln-pro keeps edits itself).
     edit = await asyncio.to_thread(edit_lineage.begin_here, name, arguments)
-    entry = served_public.plan(name, arguments)
+    # Off the event loop too: a plan can read the call's own source file.
+    entry = await asyncio.to_thread(served_public.plan, name, arguments)
     tool = (getattr(tool_mgr, "_tools", None) or {}).get(name)
     try:
         if entry is None or tool is None or not _arguments_validate(tool, arguments):
@@ -1561,6 +1568,11 @@ def _install_mcp_request_context_capture() -> None:
         if (retired := retired_message(name)) is not None:
             raise RuntimeError(retired)
         token = _current_mcp_request_context.set(context)
+        # A value an agent copied out of a quote fence (a listing's name, a
+        # part's path) is the value itself, not the marks around it.
+        from kiln.quoted_text import unquote_arguments
+
+        arguments = unquote_arguments(arguments)
         # A mention of one of the person's own printers ("my bambu") becomes
         # the registered name HERE, at the one door every tool passes, so
         # every gate and every key downstream -- the emergency latch, a
@@ -2663,6 +2675,13 @@ def _resolve_adapter(printer_name: str | None = None) -> PrinterAdapter:
     return adapter
 
 
+# The print sign-off check asks a printer by name whether it holds a paused
+# job; this server owns the printers, so it hands the check its lookup.
+from kiln import print_signoff as _print_signoff  # noqa: E402
+
+_print_signoff.set_printer_lookup(lambda printer_name: _resolve_adapter(printer_name))
+
+
 def _lifecycle_printer_name(adapter: PrinterAdapter) -> str:
     """The name this adapter's stop-path bookkeeping is filed under.
 
@@ -2844,7 +2863,16 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
         return None  # one switch turns off consent prompts, as it always did
     file_value = str(arguments.get(arg_name) or "")
-    if _is_resume_mode_3mf(file_value) or arguments.get("resume_from_paused"):
+    # A resume continues a print that already had its yes, so nobody is
+    # asked again -- but only for a resume file Kiln made for the job the
+    # printer reports paused right now (print_signoff.verified_resume).  The
+    # flag and the file name are the caller's to choose, and a start they
+    # alone call a resume is asked about like any new print.
+    from kiln import print_signoff
+
+    if await asyncio.to_thread(
+        print_signoff.verified_resume, file_value, arguments, printer_name=arguments.get("printer_name"),
+    ):
         return None  # already running, already approved
     note_window_outcome(None)  # nothing from an earlier call rides this result
     note_alerted_devices(None)
@@ -2869,7 +2897,11 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         standing = consent_for(file_name=file_value, printer_name=printer_name, aimed_at=aimed)
     except Exception:  # noqa: BLE001 — an unreadable store is no window
         standing = None
-    if standing is not None:
+    # A recovery onto the part still on the plate is asked about every time:
+    # a part can lift off the bed as it cools, so no standing window answers
+    # for it (kiln.plate_state.start_hold holds it without this print's yes).
+    on_plate = await asyncio.to_thread(_recovery_plate_line, file_value, printer_name)
+    if standing is not None and not on_plate:
         # A person already said yes for this — inside a window they
         # opened, on purpose.  Asking again would be the dialog the
         # window exists to stop.  The gate reads the same record.
@@ -2925,6 +2957,8 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             # Why they are being asked at all, when always allow was on
             # for this printer and turned itself off.
             "always allow": _always_allow_dialog_row(aimed),
+            # A recovery onto the part still on the plate: what to check.
+            "part on the plate": on_plate,
         },
         window_printer=person_printer if offer_window else None,
         fleet_offered=offer_fleet,
@@ -4231,6 +4265,71 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     return f"{ready} A yes {doors}{always}"
 
 
+def _recovery_plate_line(file_value: str, printer_name: str | None) -> str | None:
+    """The line a person is shown when *file_value* is a recovery Kiln made
+    for the print still on the plate (:func:`kiln.resume_provenance.recovery_on_plate`),
+    else ``None``.  Never raises."""
+    try:
+        from kiln.plate_state import pretty_job_name
+        from kiln.resume_provenance import recovery_on_plate
+
+        record = recovery_on_plate(file_value, printer_name=printer_name)
+    except Exception:  # noqa: BLE001 -- unreadable is not a recovery
+        return None
+    if record is None:
+        return None
+    return (
+        f"This picks {pretty_job_name(record.job)} up again on the part still on the plate. A part "
+        "can lift off the bed as it cools: check it is still stuck down before you say yes."
+    )
+
+
+def _said_go(
+    tool_name: str, file_name: str, printer_name: str | None, *, is_resume: bool = False,
+) -> tuple[Any, str, Any]:
+    """``(exemption, aimed_at, consent)``: the gate's first question, read
+    and nothing else -- whether the call is exempt, which printer it is
+    aimed at, and the consent on record for it (``None`` when nobody said
+    go).  Records nothing, spends nothing, takes no picture."""
+    from kiln import print_signoff
+
+    exempt = print_signoff.exemption_verdict(tool_name, file_name, printer_name, is_resume=is_resume)
+    if exempt is not None:
+        return exempt, printer_name or "", None
+    # SAID GO.  The one reader of the consent record.  An unnamed call is
+    # aimed at the default printer; a window is matched on that name.
+    try:
+        aimed = printer_name or _resolve_effective_printer_name(None)
+    except Exception:  # noqa: BLE001
+        aimed = printer_name or "default"
+    return None, aimed, consent_for(file_name=file_name, printer_name=printer_name, aimed_at=aimed)
+
+
+def _no_yes_error(tool_name: str, file_name: str, preview_token: str | None, aimed: str) -> dict:
+    """The refusal for a print nobody said go to."""
+    from kiln import print_signoff
+
+    if preview_token:
+        # The token is left unspent: it is still good for the call that
+        # carries the yes.
+        return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
+    return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
+
+
+def _no_yes_before_sending(
+    tool_name: str, file_name: str, preview_token: str | None, *, printer_name: str | None = None,
+) -> dict | None:
+    """The refusal for a print nobody said go to, asked BEFORE a door sends
+    its file to the printer, so a refused print leaves no file on it.
+    ``None`` when a yes is on record or the call is exempt: the full
+    gate (:func:`_preview_gate_error`) still judges the print right before
+    it starts, the preview half and any look at the bed included."""
+    exempt, aimed, granted = _said_go(tool_name, file_name, printer_name)
+    if exempt is not None or granted is not None:
+        return None
+    return _no_yes_error(tool_name, file_name, preview_token, aimed)
+
+
 def _preview_gate_error(
     tool_name: str,
     file_name: str,
@@ -4269,7 +4368,7 @@ def _preview_gate_error(
 
     # Neither fact is needed for the audited CI bypass or for a resume
     # continuation; decided first, before anything touches the token.
-    exempt = print_signoff.exemption_verdict(tool_name, file_name, printer_name, is_resume=is_resume)
+    exempt, aimed, granted = _said_go(tool_name, file_name, printer_name, is_resume=is_resume)
     if exempt is not None:
         if exempt.audit == "preview_gate_skipped":
             _audit(
@@ -4279,20 +4378,9 @@ def _preview_gate_error(
             )
         return None
 
-    # SAID GO.  The one reader of the consent record.  An unnamed call is
-    # aimed at the default printer; a window is matched on that name.
-    try:
-        aimed = printer_name or _resolve_effective_printer_name(None)
-    except Exception:  # noqa: BLE001
-        aimed = printer_name or "default"
-    granted = consent_for(file_name=file_name, printer_name=printer_name, aimed_at=aimed)
     if granted is None:
         print_signoff.clear()
-        if preview_token:
-            # The token is left unspent: it is still good for the call
-            # that carries the yes.
-            return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
-        return _error_dict(print_signoff.not_confirmed_message(tool_name), code="PREVIEW_NOT_CONFIRMED")
+        return _no_yes_error(tool_name, file_name, preview_token, aimed)
 
     # LOOKED.  Always allow means nobody was asked, so where the machine
     # has a camera the plate has to have been seen clear in a fresh frame.
@@ -7410,18 +7498,37 @@ def _engagement_machine(adapter: Any) -> str:
 def printer_status(
     printer_name: str | None = None,
     detail: str = "full",
+    printer_names: list[str] | str | None = None,
+    by_site: bool = False,
 ) -> dict:
-    """Get printer state, temperatures, job progress, and capabilities.
+    """Get printer state, temperatures, job progress, and capabilities, and list the printers set up here.
 
     Returns a JSON object with:
     - ``printer``: connection status, operational state, tool/bed temperatures
     - ``job``: current file name, completion percentage, elapsed and remaining time
     - ``capabilities``: what this printer backend supports (``full`` only)
+    - ``known_printers``: the printers set up here, by name and model, so
+      this read also answers "which printers do I have?" on every plan
 
     Use this as the first call to understand what the printer is doing.
 
+    One printer at a time is on every plan (``printer_name``).  Several
+    printers' live state in one answer (``printer_names``) is the fleet
+    view, part of Kiln Business (https://kiln3d.com/pricing); a plan
+    without it gets ``known_printers`` and one ``note``, never a refusal.
+
     Args:
         printer_name: Target printer.  Omit for the default printer.
+        printer_names: ``"all"`` or a list of names, for several printers
+            in one answer: ``printers`` (one snapshot each: name, backend,
+            connection, state, temperatures), ``count``, and which are
+            idle, busy, offline or marked as needing repair
+            (``set_machine_repair``).  A printer that does not respond is
+            reported as offline.  ``detail`` does not apply.
+        by_site: With several printers, also group them by the site each
+            one is at (``update_printer_site``): ``sites`` and
+            ``site_count`` when the plan includes it, otherwise the flat
+            answer with one ``note``.
         detail: ``"full"`` (default) for everything, or ``"lite"`` for
             frequent polling during a print — same field names, but
             ``capabilities`` is omitted and ``printer`` is trimmed to the
@@ -7437,6 +7544,17 @@ def printer_status(
             return _error_dict(
                 f"detail must be 'full' or 'lite', got {detail!r}.",
                 code="VALIDATION_ERROR",
+            )
+        if printer_names is not None or by_site:
+            if printer_name:
+                return _error_dict(
+                    "Give printer_name for one printer or printer_names for several, not both.",
+                    code="VALIDATION_ERROR",
+                )
+            return _several_printers_read(
+                "all" if printer_names is None else printer_names,
+                by_site=by_site,
+                asked_through="printer_status",
             )
         adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
         # ONE door for both halves: `get_status` reconciles them so the job
@@ -8317,7 +8435,8 @@ def monitor_print(
                 if progress_pending
                 else f"Print Status — {progress_str}% complete"
             ),
-            f"- File: {file_name}",
+            # The file's name is the file's, not Kiln's: fenced where it enters.
+            f"- File: {fence(file_name) if file_name != 'N/A' else file_name}",
             f"- Layer: {layer_str}",
             f"- Time elapsed: {elapsed_str} | Remaining: {remaining_str}",
             *([f"- Kiln expects: {_learned_left['said']}"] if _learned_left else []),
@@ -8686,7 +8805,7 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
                 "printer_name": target_name,
                 "file_size_bytes": file_size,
                 "message": (
-                    f"Upload of {file_name} ({file_size / 1024:.1f} KB) "
+                    f"Upload of {fence(file_name)} ({file_size / 1024:.1f} KB) "
                     f"to {target_name} requires confirmation. Call "
                     f"upload_file_confirm(token='{token}') to proceed."
                 ),
@@ -8835,7 +8954,7 @@ def analyze_print_file(filename: str) -> dict:
 
         if target is None:
             return _error_dict(
-                f"File not found on printer: {filename!r}. Use printer_files() to list available files.",
+                f"File not found on printer: {fence(filename)}. Use printer_files() to list available files.",
                 code="FILE_NOT_FOUND",
             )
 
@@ -9756,7 +9875,10 @@ def start_print(
             check accepts ``paused`` as a valid state.  Use this when
             starting a resume-mode 3MF (mid-print decoration swap):
             the printer is paused, you upload the resume 3MF, and then
-            ``start_print`` it with this flag.  The file is treated as
+            ``start_print`` it with this flag.  It counts only when the
+            printer reports a paused job; on any other printer the start
+            is a new print and needs the person's yes and a preview.
+            The file is treated as
             a fresh print from the firmware's POV — the resume gcode
             carries its own preamble (heat → safety lift → home X/Y →
             travel → descend to resume Z).  Default ``False``.
@@ -9850,24 +9972,29 @@ def start_print(
     # -- Preview confirmation gate -----------------------------------------
     # One helper, six callers: see _preview_gate_error for why this stopped
     # living inside this function.
-    _is_resume = resume_from_paused or _is_resume_mode_3mf(file_name)
+    # A resume is a resume file Kiln made for the job this printer reports
+    # paused right now (print_signoff.verified_resume): the same bytes, the
+    # same machine, the same job.  The caller's flag and a resume-style file
+    # name are claims only: a start they alone call a resume is a new print,
+    # with the yes, the preview, an idle pre-flight and the plate check.
+    from kiln import print_signoff
+
+    _is_resume = print_signoff.verified_resume(
+        file_name, {"resume_from_paused": resume_from_paused}, printer_name=printer_name,
+    )
     if block := _preview_gate_error(
         "start_print", file_name, preview_token,
         printer_name=printer_name, is_resume=_is_resume,
     ):
         return block
 
-    # Auto-detect resume-mode 3MFs by filename.  Convention: files
-    # produced by decorate_during_print / get_print_before_edit are named
-    # ``transformed_resume_<sid>.3mf`` or ``original_resume_<sid>.3mf``,
-    # both contain the substring ``_resume_``.  When detected, we flip
-    # ``resume_from_paused`` so the printer_idle preflight check accepts
-    # ``paused`` as a valid state.  Caller can still pass it explicitly.
-    is_resume_3mf = _is_resume_mode_3mf(file_name)
-    if is_resume_3mf and not resume_from_paused:
-        resume_from_paused = True
+    # One answer for every gate below: the pre-flight accepts (and then
+    # requires) a paused printer only for a verified resume.
+    is_resume_3mf = _is_resume and _is_resume_mode_3mf(file_name)
+    resume_from_paused = _is_resume
+    if is_resume_3mf:
         logger.info(
-            "start_print: auto-detected resume-mode 3MF %r — accepting paused state in preflight",
+            "start_print: resume-mode 3MF %r on a paused printer — the pre-flight wants the paused state",
             file_name,
         )
 
@@ -10540,6 +10667,15 @@ def _cancel_print_on(
         out["preserved_temperatures"] = restored
         if chamber_restored is not None:
             out["preserved_chamber"] = chamber_restored
+    # Only the person knows whether the part was going wrong when they
+    # stopped it: the result carries the one question (kiln.ending_question).
+    try:
+        from kiln import ending_question
+        from kiln.printers.base import outcome_printer_name
+
+        ending_question.attach(out, outcome_printer_name(adapter), cancelling=True)
+    except Exception as exc:  # pragma: no cover -- best-effort
+        logger.debug("cancel_print: ending question not attached: %s", exc)
     return out
 
 
@@ -12556,10 +12692,10 @@ def preflight_check(
 
         remote_file: Optional filename to verify exists on the printer.
             If provided, checks the printer's file list for a matching file.
-        accept_paused: When ``True``, the ``printer_idle`` check accepts
-            the ``paused`` state in addition to ``idle``.  Used by
-            ``start_print(resume_from_paused=True)`` for mid-print
-            resume 3MFs (which start from a paused-state printer).
+        accept_paused: When ``True``, the ``printer_idle`` check wants
+            the ``paused`` state instead of ``idle``: a resume continues a
+            paused job, so an idle printer has nothing to resume.  Used by
+            ``start_print`` for a resume the printer has backed.
             Default ``False`` — only ``idle`` is accepted.
         start_door_gates_plate: Set by Kiln's own start doors, which judge
             the plate themselves (with the resume and print-beside-a-part
@@ -12606,15 +12742,13 @@ def preflight_check(
         if not is_connected:
             errors.append("Printer is not connected / offline")
 
-        # Idle (not printing or in error).  Resume-mode 3MFs need to
-        # start from a PAUSED printer (the original print was paused
-        # by decorate_during_print before slicing the resume), so
-        # callers may opt to also accept PAUSED here.
-        idle_states = {PrinterStatus.IDLE}
-        if accept_paused:
-            idle_states.add(PrinterStatus.PAUSED)
+        # Idle (not printing or in error).  A resume starts from a PAUSED
+        # printer (the original print was paused by decorate_during_print
+        # before slicing the resume), so for a resume PAUSED is required,
+        # not merely accepted: an idle printer has no job to continue.
+        idle_states = {PrinterStatus.PAUSED} if accept_paused else {PrinterStatus.IDLE}
         is_idle = state.state in idle_states
-        msg_suffix = " (paused accepted for resume-mode start)" if accept_paused and state.state == PrinterStatus.PAUSED else ""
+        msg_suffix = " (a resume needs a paused printer)" if accept_paused else ""
         checks.append(
             {
                 "name": "printer_idle",
@@ -13530,11 +13664,10 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         # Use the live resolver so users who haven't manually set
         # _PRINTER_MODEL (via env or printer_model yaml field) still get
         # the bounds/temperature checks.
+        # A printer whose model Kiln does not know is held to the floor
+        # set_temperature holds it to (kiln.gcode.validate_commands).
         _live_model = _resolve_printer_model_live() or _PRINTER_MODEL
-        if _live_model:
-            validation = validate_gcode_for_printer(cmd_list, _live_model)
-        else:
-            validation = _validate_gcode_impl(cmd_list)
+        validation = validate_commands(cmd_list, _live_model or None)
 
         # Incident #0 hardening: promote bounds-violation warnings to
         # blockers.  Before this, "G1 X-50 Y-50" passed through with a
@@ -13883,47 +14016,74 @@ def confirm_action(token: str) -> dict:
 
 @mcp.tool(annotations=read_only("Fleet status"))
 def fleet_status(by_site: bool = False) -> dict:
-    """List the printers set up here, with live status for one printer or, on Kiln Business, all of them.
+    """The same answer as ``printer_status(printer_names="all")``, for clients that call it by this name.
 
-    Answers "which printers do I have?" on every plan.  With none set up it
-    says so, and with one it returns that printer's snapshot.  With two or
-    more, every printer's live state in one answer is the fleet view, part
-    of Kiln Business (https://kiln3d.com/pricing); a plan without it gets
-    ``known_printers`` (each printer's name, and its model when one is on
-    record, read from this computer's records with no printer contacted)
-    and one ``note``, never a refusal.  ``printer_status`` reads one
-    printer at a time, by ``printer_name``.
+    Lists the printers set up here on every plan; every printer's live
+    state in one answer is the fleet view, part of Kiln Business
+    (https://kiln3d.com/pricing), and a plan without it gets
+    ``known_printers`` and one ``note``, never a refusal.  New callers use
+    ``printer_status``, which also reads one printer or a chosen few.
 
     For historical analytics (success rates, throughput), use ``fleet_analytics``.
-    The fleet view returns a list of printer snapshots including name,
-    backend type, connection status, operational state, and temperatures.
-    Printers that fail to respond are reported as offline rather than raising.
-    A printer the person marked with ``set_machine_repair`` carries a
-    ``repair`` block (needs repair since, or repaired at and what), and
-    ``needs_repair_printers`` lists the ones out of service: routing does
-    not choose them, though they may read as idle.
 
     Args:
-        by_site: Also group the same printers by the site each one is at
-            (``update_printer_site``; printers with no site fall under
-            ``"unassigned"``).  When the plan includes it the answer adds
-            ``sites`` (per site: ``printers``, ``count``, ``idle``, ``busy``,
-            ``needs_repair``) and ``site_count``; otherwise the flat answer
-            comes back with one ``note``, never a refusal.
+        by_site: Also group the printers by the site each one is at, as
+            ``printer_status(printer_names="all", by_site=True)`` does.
+    """
+    return _several_printers_read("all", by_site=by_site, asked_through="fleet_status")
 
-    If no printers are registered yet, the current adapter (from env config)
-    is auto-registered as "default".
+
+def _names_asked_for(printer_names: list[str] | str) -> list[str] | None:
+    """The printers a several-printer read names, in the order given and
+    once each; ``None`` for every printer (``"all"``).
+
+    A list sent as text is read as the list it spells: a JSON array, or
+    names separated by commas.
+    """
+    if isinstance(printer_names, str):
+        given: list[Any] = printer_names.split(",")
+        if printer_names.strip().startswith("["):
+            import json
+
+            try:
+                spelled = json.loads(printer_names)
+            except ValueError:
+                spelled = None
+            if isinstance(spelled, list):
+                given = spelled
+    else:
+        given = list(printer_names)
+    names: list[str] = []
+    for item in given:
+        name = str(item).strip()
+        if name.lower() == "all":
+            return None
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _several_printers_read(
+    printer_names: list[str] | str, *, by_site: bool, asked_through: str
+) -> dict:
+    """Several printers' live state in one answer: every one, or the ones
+    named.  *asked_through* is the tool the caller used, for the counts and
+    the pricing link.
+
+    One printer set up is read on every plan.  With two or more, the read
+    is the fleet view: a plan without it gets the list and one note
+    (:func:`_printers_listed_without_fleet_view`) and no printer is asked
+    anything.  If no printers are registered yet, the current adapter (from
+    env config) is auto-registered as "default".
     """
     try:
+        registry = _get_registry()
         # Auto-register the env-configured adapter if registry is empty
-        if _get_registry().count == 0:
-            try:
-                adapter = _get_adapter()
-                _get_registry().register("default", adapter)
-            except RuntimeError:
-                pass  # No adapter configured
+        if registry.count == 0:
+            with contextlib.suppress(RuntimeError):  # no adapter configured
+                registry.register("default", _get_adapter())
 
-        if _get_registry().count == 0:
+        if registry.count == 0:
             empty: dict[str, Any] = {
                 "success": True,
                 "printers": [],
@@ -13931,16 +14091,56 @@ def fleet_status(by_site: bool = False) -> dict:
                 "message": "No printers registered.",
             }
             if by_site:
-                _attach_sites(empty, [])
+                _attach_sites(empty, [], asked_through=asked_through)
             return empty
 
-        if _get_registry().count > 1:
-            listed = _printers_listed_without_fleet_view()
+        wanted = _names_asked_for(printer_names)
+        if wanted is not None and not wanted:
+            return _error_dict(
+                'printer_names names no printer. Pass "all" for every printer set up here.',
+                code="VALIDATION_ERROR",
+            )
+
+        set_up = registry.list_machines()
+        if len(set_up) > 1:
+            listed = _printers_listed_without_fleet_view(asked_through)
             if listed is not None:
                 return listed
 
-        status = _get_registry().get_fleet_status()
-        idle = _get_registry().get_idle_printers()
+        if wanted is not None:
+            # Each name as the one its machine is listed under: a printer
+            # asked for by another of its names is the same printer.
+            listed_as: list[str] = []
+            unknown: list[str] = []
+            for name in wanted:
+                same_machine = [name] if name in set_up else [n for n in registry.aliases_of(name) if n in set_up]
+                if not same_machine:
+                    unknown.append(name)
+                elif same_machine[0] not in listed_as:
+                    listed_as.append(same_machine[0])
+            if unknown:
+                return _error_dict(
+                    f"No printer named {', '.join(repr(n) for n in unknown)} is set up here. "
+                    f"Set up: {', '.join(set_up)}.",
+                    code="PRINTER_NOT_FOUND",
+                )
+            wanted = listed_as
+
+        status = registry.get_fleet_status(names=wanted)
+        # Printers reply in any order; the answer keeps the order asked
+        # for, or the list's own order for every printer.
+        place = {name: at for at, name in enumerate(set_up if wanted is None else wanted)}
+        status.sort(key=lambda row: place.get(str(row.get("name", "")), len(place)))
+        if wanted is None:
+            idle = registry.get_idle_printers()
+        else:
+            # Read off the rows just fetched: asking the registry would
+            # query the printers nobody named.
+            idle = sorted(
+                str(p.get("name", ""))
+                for p in status
+                if p.get("connected") and str(p.get("state", "")).lower() == PrinterStatus.IDLE.value
+            )
         connected_count = sum(1 for p in status if p.get("connected"))
         disconnected_count = len(status) - connected_count
 
@@ -13986,24 +14186,25 @@ def fleet_status(by_site: bool = False) -> dict:
             "needs_repair_printers": needs_repair_printers,
         }
         if by_site:
-            _attach_sites(result, status)
+            _attach_sites(result, status, asked_through=asked_through)
         return result
     except Exception as exc:
-        logger.exception("Unexpected error in fleet_status")
-        return _error_dict(f"Unexpected error in fleet_status: {exc}", code="INTERNAL_ERROR")
+        logger.exception("Unexpected error in %s", asked_through)
+        return _error_dict(f"Unexpected error in {asked_through}: {exc}", code="INTERNAL_ERROR")
 
 
-def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
-    """The ``fleet_status`` answer for several printers on a plan without
-    the fleet view, or ``None`` when the caller's plan has it.
+def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | None:
+    """The answer to a several-printer read on a plan without the fleet
+    view, or ``None`` when the caller's plan has it.
 
     The CALLER's plan, read through ``kiln.licensing`` at call time.  The
-    list is the one ``printer_status`` carries (``kiln.printer_roster``):
-    names and models from this computer's records, no printer contacted, so
-    it says nothing about what any of them is doing.  The plan is named
-    once, in ``note``, in the plan check's own words for this caller, and
-    the pricing link is attached only when those words point there: a
-    caller told to sign back in or get online is not sent to buy.
+    list is the one a one-printer ``printer_status`` carries
+    (``kiln.printer_roster``): names and models from this computer's
+    records, no printer contacted, so it says nothing about what any of
+    them is doing.  The plan is named once, in ``note``, in the plan
+    check's own words for this caller, and the pricing link is attached
+    only when those words point there: a caller told to sign back in or get
+    online is not sent to buy.
     """
     from kiln import licensing
     from kiln.printer_roster import known_printers
@@ -14016,7 +14217,7 @@ def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
     # view on a plan without it.
     from kiln.account_plan import count_plan_wall
 
-    count_plan_wall("fleet_status")
+    count_plan_wall(asked_through)
     rows = known_printers(_get_registry())
     plan_line = str(said or "").strip() or "This feature is part of Kiln Business."
     listed: dict[str, Any] = {
@@ -14025,17 +14226,19 @@ def _printers_listed_without_fleet_view() -> dict[str, Any] | None:
         "count": len(rows),
         "note": (
             f"{len(rows)} printers are set up here. printer_status(printer_name=...) "
-            "reads one of them at a time. Every printer's live state in one "
+            "reads one of them at a time. Several printers' live state in one "
             f"answer is the fleet view. {plan_line}"
         ),
     }
     if PRICING_URL.split("://", 1)[-1] in plan_line:
-        listed["upgrade_url"] = upgrade_link("fleet_status")
+        listed["upgrade_url"] = upgrade_link(asked_through)
     return listed
 
 
-def _attach_sites(result: dict[str, Any], status: list[dict[str, Any]]) -> None:
-    """Add the by-site grouping to a ``fleet_status`` answer, or the one
+def _attach_sites(
+    result: dict[str, Any], status: list[dict[str, Any]], *, asked_through: str = "fleet_status"
+) -> None:
+    """Add the by-site grouping to a several-printer answer, or the one
     line saying which plan has it.
 
     The CALLER's plan, read through ``kiln.licensing`` at call time: on
@@ -14057,7 +14260,7 @@ def _attach_sites(result: dict[str, Any], status: list[dict[str, Any]]) -> None:
             "Kiln Enterprise. Here is the whole fleet in one list."
         )
         result["note"] = note
-        result["upgrade_url"] = upgrade_link("fleet_status")
+        result["upgrade_url"] = upgrade_link(asked_through)
         result["upgrade_nudge"] = upgrade_nudge_block(
             variant="fleet_by_site",
             tier="enterprise",
@@ -14219,9 +14422,10 @@ def register_printer(
     ``monitor_print``, ``cancel_print``, ``pause_print`` and ``resume_print``
     all take a ``printer_name`` at every tier, one printer at a time: Kiln
     works with one machine until it is handed back (``hand_back_printer``),
-    and each printer's own controls always work.  ``fleet_status`` lists
-    the printers set up here; every one's live state in one view, and
-    driving them together, are Business features.
+    and each printer's own controls always work.  ``printer_status`` lists
+    the printers set up here; several printers' live state in one answer
+    (its ``printer_names``), and driving them together, are Business
+    features.
     """
     if err := _check_auth("admin"):
         return err
@@ -15734,7 +15938,7 @@ def download_and_upload(
                 "KILN_AUTO_PRINT_MARKETPLACE=true to enable auto-print."
             )
             resp["message"] = (
-                f"Downloaded from {source} and uploaded to printer. Call start_print('{file_name}') to begin printing."
+                f"Downloaded from {source} and uploaded to printer. Call start_print with {fence(file_name)} to begin printing."
             )
 
         # Telemetry: count the download.  WHICH marketplace it came from is
@@ -17001,7 +17205,17 @@ def await_print_completion(
         """Add the design_goal block to a terminal-state result, and silently
         contribute the outcome to the community pool.  Both are best-effort;
         the auto-contribution is opt-in-gated and skips non-quality outcomes
-        (timeout/cancelled) inside the helper."""
+        (timeout/cancelled) inside the helper.  An ending that owes the
+        person a question carries it (``ask_the_person``)."""
+        if result.get("outcome") in ("failed", "cancelled"):
+            from kiln import ending_question
+
+            ending_question.attach(result)
+        elif result.get("outcome") == "completed":
+            from kiln import ending_question
+
+            # A finished print owes no question of its own.
+            ending_question.attach(result, ending_can_owe=False)
         if _goal_ctx is not None:
             result["design_goal"] = _goal_ctx
         try:
@@ -17113,11 +17327,6 @@ def await_print_completion(
                     }
                 )
                 last_pct = pct
-            paused = state.state == PrinterStatus.PAUSED
-            if pct is None:
-                _say_progress("Paused" if paused else "Printing", elapsed)
-            else:
-                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
             # A print carrying a hardware plan comes back to the person at its
             # moments: a stop close enough to get ready for, a stop gone past
@@ -17185,6 +17394,14 @@ def await_print_completion(
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                 })
+
+            # Written only while the wait goes on: a print that has ended was
+            # answered above, and is never shown as printing.
+            paused = state.state == PrinterStatus.PAUSED
+            if pct is None:
+                _say_progress("Paused" if paused else "Printing", elapsed)
+            else:
+                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
         except HostedUnavailableError as exc:
             # Only the job_id branch reads the queue; printer-based tracking
@@ -17286,9 +17503,10 @@ def compare_print_options(
     # A model that arrived lying down is priced standing up, from a turned
     # copy; the file named is never rewritten.
     priced = file_to_price(file_path) if fulfillment_material_id and size_refusal is None else None
+    service = order_service() if priced is not None else None
     if size_refusal is not None:
         fulfillment_error = size_refusal["message"]
-    elif priced is not None and order_service() is None:
+    elif priced is not None and service is None:
         # No order service on this install: the quote comes through Kiln's
         # servers (kiln._pro_order_bridge), and a miss is said as one.
         from kiln import _pro_order_bridge as served
@@ -17308,10 +17526,11 @@ def compare_print_options(
             else:
                 fulfillment_error = served.words(answer.miss, "quote")
     elif priced is not None:
+        # The order service on this install names its own request and error.
         try:
             provider = _get_fulfillment()
             quote = provider.get_quote(
-                QuoteRequest(
+                service.QuoteRequest(
                     file_path=priced.path,
                     material_id=fulfillment_material_id,
                     quantity=quantity,
@@ -17325,7 +17544,7 @@ def compare_print_options(
             fulfillment_quote_data = quote.to_dict()
             fulfillment_quote_data["kiln_fee"] = fee_calc.to_dict()
             fulfillment_quote_data["total_with_fee"] = float(fee_calc.total_cost)
-        except (FulfillmentError, RuntimeError) as exc:
+        except (service.FulfillmentError, RuntimeError) as exc:
             fulfillment_error = str(exc)
         except Exception as exc:
             fulfillment_error = str(exc)
@@ -17735,7 +17954,7 @@ def fleet_workflow() -> str:
     """Guide for managing multiple printers in a fleet."""
     return (
         "To manage a fleet of printers:\n\n"
-        "1. Call `fleet_status` to see all registered printers (with every one's live state on Kiln Business)\n"
+        "1. Call `printer_status(printer_names=\"all\")` to see all registered printers (with every one's live state on Kiln Business)\n"
         "2. Use `register_printer` to add new printers ("
         + format_printer_types(quote="", conjunction="or")
         + ")\n"
@@ -18069,6 +18288,7 @@ def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
     goal_id: str = "",
+    printer_id: str = "",
 ) -> dict:
     """Build a printable STL from a parametric part, to the user's dimensions.
 
@@ -18117,6 +18337,9 @@ def generate_from_template(
         parameters: Dict of parameter overrides carrying the user's own
             dimensions (e.g. ``{"arm_length": 200, "thickness": 8}``).
             Anything you leave out keeps the template's default.
+        printer_id: The printer the part is for.  Its nozzle sets the
+            template's nozzle size when ``parameters`` leaves it out; leave
+            empty for the only printer Kiln knows of, else a stated default.
     """
     if err := _check_auth("generate"):
         return err
@@ -18163,7 +18386,7 @@ def generate_from_template(
         # the nozzle gets the one on record when the caller named none.
         from kiln.parametric import fill_template_settings, template_refusal
 
-        supplied, nozzle = fill_template_settings(tpl, parameters or {})
+        supplied, nozzle = fill_template_settings(tpl, parameters or {}, printer_id=printer_id or None)
         defaults = {k: v["default"] for k, v in tpl.get("parameters", {}).items()}
         params = {**defaults, **supplied}
 
@@ -20702,11 +20925,16 @@ def _guarded_for_the_wire(kwargs: dict[str, Any], *, asked_by_user: bool) -> dic
     never made (a bridge fetching something on its own), and the arguments
     this install added from its own reads on one they did.  The person's
     own words and files go as they gave them."""
-    from kiln.outbound_guard import scrub
+    from kiln.outbound_guard import VERSION_FIELDS, scrub
 
     if not asked_by_user:
         return scrub(kwargs)
-    return {key: scrub(value) if key in _MACHINE_READ_ARGS else value for key, value in kwargs.items()}
+    # A served step's print records name their firmware field as a version.
+    versions = {"step_results": VERSION_FIELDS.get("kiln/served_steps.py", frozenset())}
+    return {
+        key: scrub(value, version_keys=versions.get(key, frozenset())) if key in _MACHINE_READ_ARGS else value
+        for key, value in kwargs.items()
+    }
 
 
 def _served_bearer() -> tuple[str, str | None]:
@@ -21394,7 +21622,10 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     # never where the call asked for its OUTPUT: it is not
                     # the person's file, and a step runs only on a file
                     # that is there.
-                    answer = served_makes.arrive(_name, answer)
+                    # A resume file in these steps is recorded where it is
+                    # started (served_steps.carry_out), for the printer the
+                    # start names.
+                    answer = served_makes.arrive(_name, answer, record_resumes=False)
                     steps = served_steps.wanted(answer)
                     acting = bool(served_steps.actions_in(steps))
                     if acting and not approved:
@@ -21411,6 +21642,9 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     if refused is not None:
                         return refused
                     answer = ask(step_results=done)
+                    not_recorded = served_steps.resume_notes()
+                    if not_recorded and isinstance(answer, dict):
+                        answer["resume_not_recorded"] = not_recorded
                     if served_steps.wanted(answer):
                         return served_steps._refusal(
                             _name, "LOCAL_STEP_REFUSED",
@@ -21439,6 +21673,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # here.  Say so, and fetch its look for the stage.
                 return served_makes.arrive(
                     _name, answer, allowance=_PRO_TOOL_QUOTA.get(_name), trip=trip,
+                    printer_name=str(asked_printer) if asked_printer else None,
                 )
             return _stub
 
@@ -22306,6 +22541,16 @@ def _start() -> None:
     # The line on the reply of a call that named a saved goal by the other
     # tool's argument name for it.
     _install_goal_argument_note()
+
+    # Words someone else wrote (an outside site's listing, a served answer's
+    # named fields) reach the agent fenced as quoted data.  After every
+    # other change above, so it marks the result the agent reads.
+    try:
+        from kiln import quoted_text
+
+        quoted_text.install(mcp)
+    except Exception:
+        logger.warning("quoted-text fence not installed", exc_info=True)
 
     # Last, around every tools/call wrapper above: a slow call from a host
     # that runs tools in the background answers with a task, and the task
@@ -23214,7 +23459,7 @@ def smart_reprint(
         if found_path is None:
             searched = ", ".join(d for d in default_dirs if _os.path.isdir(d))
             return _error_dict(
-                f"Could not find model file matching '{file_name}'. "
+                f"Could not find model file matching {fence(file_name)}. "
                 f"Searched directories: {searched}. "
                 f"Provide the full path or add search_dirs.",
                 code="NOT_FOUND",
@@ -23365,7 +23610,7 @@ def smart_reprint(
             extra_overrides=extra_overrides,
             use_ams=detected_use_ams,
             ams_mapping=detected_ams_mapping,
-            brief_id=resolved_brief_id or "",
+            goal_id=resolved_brief_id or "",
             chosen_by=chosen_by,
         )
 
@@ -25013,6 +25258,7 @@ def decorate_surface(
     svg_id: str = "",
     svg_layer: str = "",
     template_id: str = "",
+    font: str = "",
 ) -> dict:
     """Put any image, text, or pattern onto a 3D model surface.
 
@@ -25030,6 +25276,11 @@ def decorate_surface(
 
     - **Image file** (PNG/JPG/SVG): ``"/path/to/photo.jpg"``
     - **Text**: ``"text:KILN"`` or ``"text:Hello World"``
+    - **QR code**: ``"qr:https://example.com"`` (Kiln Pro, made on Kiln's
+      servers).  ``output_3mf`` is one print file holding the part and the
+      code in two colours, with ``print_recipe`` saying which goes in which
+      slot.  ``face`` is ``"top"`` (printed last; the default) or
+      ``"bottom"`` (set flush into the face on the bed, reading from below).
 
     **Image styles** for raster images:
 
@@ -25108,9 +25359,20 @@ def decorate_surface(
         ``mode``, ``scale``, and ``image_style`` from a template's curated
         decoration profile, call ``resolve_template_decoration()`` first
         (kiln-pro) and pass its results explicitly.
-    :returns: Dict with output STL path, preview info, and metadata.
+    :returns: Dict with output STL path, preview info, and metadata.  A
+        text carve also reports the ``font`` it used.  ``changed_for_you``
+        lists anything Kiln adjusted so the decoration prints (a depth
+        raised, a recess added); ``pro_adds`` says what a higher plan would
+        add to this carve, when there is something.
     :param absolute_size_mm: Exact letter height (text) or mark width (marks)
         in mm, overriding *scale*; ``0`` leaves *scale* in charge.
+    :param font: Font for text content: ``"sans"`` (default), ``"mono"``,
+        ``"fredoka"`` (rounded), ``"zilla-slab"`` (slab), ``"oswald"`` (tall
+        and narrow) or ``"saira-stencil"`` (stencil, for a cut-through word).
+        Every font is free on every plan.  When the person names none,
+        carve with the default and tell them which font was used and that
+        they can pick another.  An unknown font is refused naming the
+        accepted list.  Ignored for images.
     """
     if err := _check_auth("design:decorate"):
         return err
@@ -25189,6 +25451,24 @@ def decorate_surface(
     if not os.path.isfile(model_path):
         _refund_decoration_quota(quota_consumed)
         return _error_dict(f"Model not found: {model_path}", code="FILE_NOT_FOUND")
+    # A CAD file is read through the one door every mesh tool shares; the
+    # decoration is carved on the mesh it becomes, and the reply says so.
+    cad_note: str | None = None
+    try:
+        from kiln.step_import import NoBackendError, ensure_mesh_path, is_step_file
+
+        if is_step_file(model_path):
+            try:
+                model_path, cad_note = ensure_mesh_path(model_path)
+            except NoBackendError as exc:
+                _refund_decoration_quota(quota_consumed)
+                return _error_dict(
+                    f"{os.path.basename(model_path)} is a CAD file, and this computer "
+                    f"cannot turn it into a mesh to decorate: {exc}",
+                    code="UNSUPPORTED_FORMAT",
+                )
+    except ImportError:
+        pass
     model_ext = os.path.splitext(model_path)[1].lower()
     if model_ext not in (".stl", ".obj"):
         _refund_decoration_quota(quota_consumed)
@@ -25197,14 +25477,72 @@ def decorate_surface(
             code="VALIDATION_ERROR",
         )
 
+    from kiln.text_fonts import (
+        DEFAULT_TEXT_FONT,
+        UnknownTextFontError,
+        list_text_fonts,
+        resolve_text_font,
+    )
+
+    try:
+        text_font = resolve_text_font(font)
+    except UnknownTextFontError as exc:
+        _refund_decoration_quota(quota_consumed)
+        font_err = _error_dict(str(exc), code="UNKNOWN_FONT")
+        font_err["fonts"] = list_text_fonts()
+        return font_err
+
     from kiln.output_paths import kiln_output_dir
 
     work_dir = kiln_output_dir("kiln_decorate_surface")
     warnings: list[str] = []
+    # What Kiln's servers add to this tool (kiln._pro_decorate_bridge), and
+    # this call as it was made, for the times the servers run it whole.
+    from kiln import _pro_decorate_bridge as _servers_add
+
+    asked = {
+        "model_path": model_path, "content": content, "face": face,
+        "depth_mm": depth_mm, "mode": mode, "scale": scale,
+        "material": material, "content_type": content_type,
+        "offset_x_mm": offset_x_mm, "offset_y_mm": offset_y_mm,
+        "image_style": image_style, "placement": placement,
+        "absolute_size_mm": absolute_size_mm, "font": font,
+    }
+    done: list[str] = []
+    pro_adds: dict[str, Any] | None = None
+    as_given = model_path
+    if cad_note:
+        done.append(cad_note)
 
     try:
         # --- Step 1: Detect content type ---
         ctype = content_type.lower().strip()
+        if ctype == "qr" or (ctype == "auto" and content.lower().startswith("qr:")):
+            # A QR code is made on Kiln's servers.  Here, with kiln-pro in
+            # the process, that is this call; anywhere else the servers are
+            # asked, and a miss writes nothing and says why.
+            if face.lower().strip() not in ("auto", "top", "bottom"):
+                _refund_decoration_quota(quota_consumed)
+                return _error_dict(
+                    f"A QR code goes on the top or the bottom face, not {face!r}: "
+                    "it is printed flat, in a second colour. Use face='top' "
+                    "or face='bottom'.",
+                    code="INVALID_CONTENT",
+                )
+            qr_result = _servers_add.qr_on_part(
+                model_path=model_path, content=content, face=face,
+                size_mm=absolute_size_mm,
+            )
+            if qr_result is None:
+                qr_result, qr_miss = _servers_add.on_servers(asked)
+                if qr_result is None:
+                    qr_result = _servers_add.qr_missed(qr_miss, os.path.basename(model_path))
+            if qr_result.get("status") != "success":
+                _refund_decoration_quota(quota_consumed)
+                return qr_result
+            if warnings:
+                qr_result["warnings"] = [*(qr_result.get("warnings") or []), *warnings]
+            return _finish_decoration_result(qr_result, content=content, before=model_path)
         if ctype == "auto":
             if content.lower().startswith("text:"):
                 ctype = "text"
@@ -25312,6 +25650,13 @@ def decorate_surface(
 
             from kiln.decoration_helpers import TextDoesNotFitError
 
+            wall_prepared = _servers_add.before_carve(
+                model_path=model_path, face_name="wall", touches_bed=False,
+                depth_mm=depth_mm, material=material,
+            )
+            if wall_prepared is not None:
+                done.extend(wall_prepared.get("done") or [])
+                depth_mm = float(wall_prepared.get("depth_mm") or depth_mm)
             wall_depth = depth_mm if depth_mm > 0 else 1.0
             # Placement controls that only mean something on a flat face —
             # say so rather than accepting them and doing nothing.
@@ -25330,6 +25675,10 @@ def decorate_surface(
                 # keeps the default scale (0.7) on the engine's own default
                 # band share.
                 wall_kwargs: dict[str, Any] = {}
+                # The default font is left to the wall engine so a call that
+                # names none is unchanged.
+                if text_font.id != DEFAULT_TEXT_FONT:
+                    wall_kwargs["font"] = text_font.spec
                 if absolute_size_mm > 0:
                     wall_kwargs["target_size_mm"] = absolute_size_mm
                 elif scale > 0:
@@ -25501,6 +25850,10 @@ def decorate_surface(
                 record_event("decorations", detail=wall_event)
             except Exception:
                 pass
+            if ctype == "text":
+                result_dict["font"] = text_font.id
+            if done:
+                result_dict["changed_for_you"] = done
             return _finish_decoration_result(result_dict, content=content, before=model_path)
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
@@ -25510,6 +25863,17 @@ def decorate_surface(
         )
 
         face_lower = face.lower().strip()
+        sketch_wall: str | None = None
+        if ":" in face_lower:
+            # A sketch-built part's own wall name, read on Kiln's servers.
+            try:
+                named = _servers_add.sketch_face(model_path, face.strip())
+            except ValueError as exc:
+                _refund_decoration_quota(quota_consumed)
+                return _error_dict(str(exc), code="VALIDATION_ERROR")
+            if named:
+                face_lower = str(named["face"]).lower()
+                sketch_wall = named.get("sketch_face")
         # This tool names faces by the direction they point.  The product
         # face registry and the template decoration profiles name them by
         # what they are FOR (interior_bed, exterior_bottom, exterior, a flat
@@ -25537,6 +25901,57 @@ def decorate_surface(
         # which picks a tray's UNDERSIDE — its biggest flat face — while
         # every texture tool had already learned better.
         face_info = resolve_decoratable_face(model_path, face_lower)
+        on_the_bed = (
+            face_info.get("face_name") == "bottom"
+            and face_info.get("center", (0, 0, 0))[2] < 0.5
+        )
+        # A recess can go under a decoration cut to one depth everywhere.
+        one_depth = mode == "deboss" and ctype in ("text", "svg")
+        prepared = _servers_add.before_carve(
+            model_path=model_path, face_name=str(face_info.get("face_name") or ""),
+            touches_bed=on_the_bed, depth_mm=depth_mm, material=material,
+            uniform_cut=one_depth,
+        )
+        if prepared is None and on_the_bed and one_depth and _servers_add.plan_includes_recess():
+            # This install's plan includes the bottom recess, which Kiln's
+            # servers add: they run this call whole.  A miss carves here.
+            served, served_miss = _servers_add.on_servers(asked)
+            if served is not None:
+                _refund_decoration_quota(quota_consumed)
+                return served
+            from kiln import served_public as _served_public
+            from kiln.served_answer import sentence as _miss_sentence
+
+            if _served_public.first_this_session(f"decorate_surface:recess:{served_miss.cause}"):
+                warnings.append(_miss_sentence(
+                    served_miss, feature="servers",
+                    on_the_line="Kiln Pro puts a bottom-face decoration in a recess, on Kiln's servers",
+                    cannot="add that recess",
+                    wont="carved straight into the bottom face on this computer",
+                ))
+        recess: dict[str, Any] | None = None
+        if prepared is not None:
+            done.extend(prepared.get("done") or [])
+            warnings.extend(prepared.get("warnings") or [])
+            pro_adds = prepared.get("offer")
+            depth_mm = float(prepared.get("depth_mm") or depth_mm)
+            recess = prepared.get("recess")
+            if recess:
+                # The decoration ends in a recess cut after it: it is carved
+                # that much deeper, and kept inside the recess's rim.
+                face_info = dict(face_info)
+                inset = 2.0 * float(recess.get("rim_mm") or 0.0)
+                for side in ("width_mm", "height_mm"):
+                    if face_info.get(side, 0) > inset:
+                        face_info[side] = face_info[side] - inset
+                if face_info.get("width_mm") and face_info.get("height_mm"):
+                    # An oval recess is fitted as a round face is: the
+                    # decoration stays inside the curve, corners included.
+                    # (An oval fills pi/4 of the box around it.)
+                    face_info["area_mm2"] = (
+                        (0.7853981633974483 if recess.get("oval") else 1.0)
+                        * face_info["width_mm"] * face_info["height_mm"]
+                    )
         if face_lower != "auto" and face_info.get("curvature_warning"):
             warnings.append(face_info["curvature_warning"])
 
@@ -25695,7 +26110,7 @@ def decorate_surface(
             ample_margin = max(4.0, 0.06 * min(fit_w, fit_h))
             if absolute_size_mm <= 0:
                 try:
-                    t_w, t_h, _, _ = measure_text_block_mm(text_content)
+                    t_w, t_h, _, _ = measure_text_block_mm(text_content, text_font.spec)
                     k = t_h / t_w if t_w > 0 else 0.3
                     if is_round:
                         r_use = min(fit_w, fit_h) / 2.0 - ample_margin
@@ -25730,7 +26145,7 @@ def decorate_surface(
                     # inscribed-square factor so corners stay off the rim.
                     usable = min(fit_w, fit_h) - 2.0 * ample_margin
                     absolute_size_mm = max(1.0, usable * (0.71 if is_round else 1.0))
-            content_info = generate_text_image(text_content, work_dir)
+            content_info = generate_text_image(text_content, work_dir, font=text_font.spec)
 
         else:
             _refund_decoration_quota(quota_consumed)
@@ -25740,7 +26155,7 @@ def decorate_surface(
             )
 
         # --- Step 3.5: Print intelligence warnings ---
-        if face_info.get("face_name") == "bottom":
+        if face_info.get("face_name") == "bottom" and not recess:
             center_z = face_info.get("center", (0, 0, 0))[2]
             if center_z < 0.5:
                 warnings.append(
@@ -25772,12 +26187,13 @@ def decorate_surface(
         # --- Step 5: Generate OpenSCAD ---
         from kiln.emboss_generator import generate_emboss_scad
 
+        carve_depth = effective_depth + (float(recess["depth_mm"]) if recess else 0.0)
         scad_result = generate_emboss_scad(
             model_path=os.path.abspath(model_path),
             content_info=content_info,
             face=face_info,
             output_dir=work_dir,
-            depth_mm=effective_depth,
+            depth_mm=carve_depth,
             mode=mode,
             scale=scale,
             absolute_size_mm=absolute_size_mm,
@@ -25912,7 +26328,7 @@ def decorate_surface(
                     content_info=content_info,
                     face=face_info,
                     output_dir=work_dir,
-                    depth_mm=effective_depth,
+                    depth_mm=carve_depth,
                     mode=mode,
                     scale=scale,
                     absolute_size_mm=absolute_size_mm,
@@ -25979,7 +26395,22 @@ def decorate_surface(
 
         # --- Step 7: Build result ---
         output_stl = compile_result["stl_path"]
-        file_size = compile_result.get("file_size", 0)
+        if recess:
+            finished = _servers_add.finish_carve(output_stl, recess)
+            if finished.get("error"):
+                _refund_decoration_quota(quota_consumed)
+                return _error_dict(
+                    "The decoration was carved, but the recess it belongs in "
+                    f"could not be cut ({finished['error']}), so nothing was "
+                    "kept. Try another face, or a shallower depth.",
+                    code="RECESS_FAILED",
+                )
+            output_stl = finished["model_path"]
+            done.extend(finished.get("done") or [])
+        file_size = (
+            os.path.getsize(output_stl) if recess and os.path.isfile(output_stl)
+            else compile_result.get("file_size", 0)
+        )
 
         # The layer height the relief was designed in, kept beside the part
         # so every slice door prints it in those layers (kiln.slicer_layer).
@@ -26006,7 +26437,7 @@ def decorate_surface(
             "message": (
                 f"Successfully {mode}ed content onto "
                 f"{face_info.get('face_name', 'surface')} face of "
-                f"{os.path.basename(model_path)}."
+                f"{os.path.basename(as_given)}."
             ),
             "output_stl": output_stl,
             "file_size_bytes": file_size,
@@ -26037,7 +26468,7 @@ def decorate_surface(
             from kiln.format_conversion import format_conversion_record
 
             result_dict["conversion"] = format_conversion_record(
-                from_path=model_path,
+                from_path=as_given,
                 to_path=output_stl,
                 tool="decorate_surface",
                 reason="decorated through the OpenSCAD pipeline, which writes STL",
@@ -26067,7 +26498,16 @@ def decorate_surface(
         # sees where they stand ("2 of 3 used") before the wall instead of
         # only hitting it as an error next time. Best-effort — never blocks
         # a decoration that already succeeded.
-        return _finish_decoration_result(result_dict, content=content, before=model_path)
+        if ctype == "text":
+            result_dict["font"] = text_font.id
+        if done:
+            result_dict["changed_for_you"] = done
+        if pro_adds:
+            result_dict["pro_adds"] = pro_adds.get("adds")
+            result_dict["upgrade_url"] = pro_adds.get("upgrade_url")
+        if sketch_wall:
+            result_dict["sketch_face"] = sketch_wall
+        return _finish_decoration_result(result_dict, content=content, before=as_given)
 
     except FileNotFoundError as exc:
         _refund_decoration_quota(quota_consumed)

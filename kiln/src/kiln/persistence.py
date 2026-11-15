@@ -39,7 +39,20 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
+from kiln.failure_vocabulary import (
+    ABOUT_THE_MACHINE,
+    FAILED_OUTCOMES,
+    OUTSIDE_CAUSES,
+    PRINTER_LOG,
+    judged_ending_sql,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _sql_words(values: frozenset[str]) -> str:
+    """A fixed vocabulary as a SQL ``IN`` list (sorted, so the text is stable)."""
+    return ", ".join(f"'{v}'" for v in sorted(values))
 
 # ---------------------------------------------------------------------------
 # Default DB location
@@ -544,6 +557,22 @@ FADE_HALF_LIFE_PRINTS = 20
 RECENT_PRINTS = 10
 
 
+def _relabel_printer_log_copies(conn: StorageBackend, prefixes: Sequence[str]) -> None:
+    """Give :data:`kiln.failure_vocabulary.PRINTER_LOG` to every job copied
+    from a printer's own log (its ``job_id`` starts with one of *prefixes*)
+    that still carries ``inferred``.
+
+    It writes only while such a row exists, so a store with none opens
+    without a write, whichever door opens it first.  A row a person answered
+    for carries their own label and is never matched.
+    """
+    for prefix in prefixes:
+        match = f"substr(job_id, 1, {len(prefix)}) = '{prefix}' AND determined_by = 'inferred'"
+        if conn.execute(f"SELECT 1 FROM print_outcomes WHERE {match} LIMIT 1").fetchone() is None:
+            continue
+        conn.execute(f"UPDATE print_outcomes SET determined_by = '{PRINTER_LOG}' WHERE {match}")
+
+
 class KilnDB:
     """Thread-safe persistence wrapper for Kiln.
 
@@ -691,6 +720,14 @@ class KilnDB:
         # string with no label; only a labelled note goes to the account.
         if "note_by" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN note_by TEXT DEFAULT NULL")
+        # A job copied from the printer's own log carries that label.  Rows
+        # copied under the label of a reconnect's reading are moved to it;
+        # one a person has since answered for keeps their word.
+        _relabel_printer_log_copies(self._conn, self.PRINTER_LOG_JOB_PREFIXES)
+        # When the person was asked about this ending and had nothing to add
+        # (``mark_ending_asked``): the row is not asked about again.
+        if "stop_reason_asked" not in columns:
+            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN stop_reason_asked REAL DEFAULT NULL")
         # How long the print took against what the slicer said it would
         # (kiln.learned_print_time).  ``estimated_seconds`` is the slicer's
         # time for the file, read at the START Kiln sent; ``print_seconds``
@@ -710,6 +747,13 @@ class KilnDB:
             if name not in columns:
                 self._conn.execute(
                     f"ALTER TABLE print_outcomes ADD COLUMN {name} TEXT DEFAULT NULL"
+                )
+        # What a print ran with and how far it got (kiln.print_evidence):
+        # each NULL when Kiln had no reading it could vouch for.
+        for name, sql_type in self.PRINT_EVIDENCE_COLUMNS.items():
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE print_outcomes ADD COLUMN {name} {sql_type} DEFAULT NULL"
                 )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_print_outcomes_version ON print_outcomes(version_id)"
@@ -1123,7 +1167,13 @@ class KilnDB:
                     ended_at            REAL DEFAULT NULL,
                     account_sync_id     TEXT DEFAULT NULL,
                     account_pushed_state TEXT DEFAULT NULL,
-                    note_by             TEXT DEFAULT NULL
+                    note_by             TEXT DEFAULT NULL,
+                    stop_reason_asked   REAL DEFAULT NULL,
+                    settings_code       TEXT DEFAULT NULL,
+                    progress_at_end     REAL DEFAULT NULL,
+                    layer_at_end        INTEGER DEFAULT NULL,
+                    spool_id            TEXT DEFAULT NULL,
+                    firmware_version    TEXT DEFAULT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
                     ON print_outcomes(printer_name);
@@ -1385,6 +1435,24 @@ class KilnDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_machine_repairs_machine
                     ON machine_repairs(machine_fingerprint);
+
+                CREATE TABLE IF NOT EXISTS printer_checkins (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    machine_fingerprint TEXT NOT NULL,
+                    printer_name        TEXT NOT NULL,
+                    episode             TEXT NOT NULL,
+                    about               TEXT,
+                    question            TEXT NOT NULL,
+                    asked_job_id        TEXT DEFAULT NULL,
+                    shown_job_id        TEXT DEFAULT NULL,
+                    shown_at            REAL DEFAULT NULL,
+                    received_at         REAL NOT NULL,
+                    answer              TEXT DEFAULT NULL,
+                    answered_at         REAL DEFAULT NULL,
+                    UNIQUE(machine_fingerprint, episode)
+                );
+                CREATE INDEX IF NOT EXISTS idx_printer_checkins_machine
+                    ON printer_checkins(machine_fingerprint);
 
                 CREATE TABLE IF NOT EXISTS printer_renames (
                     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2860,7 +2928,10 @@ class KilnDB:
     #                machine could not honestly say how (a known unknown —
     #                never guessed into a success);
     # ``cancelled``— the user aborted; says nothing about the settings.
-    # Rate math and proven-settings read ONLY the decided three.
+    # Rate math and proven-settings read ONLY judged endings
+    # (:func:`kiln.failure_vocabulary.is_judged_ending`): about the print, a
+    # success or a bad print; about the printer, a machine stop too.  A
+    # power cut or a run-out spool is kept and judged nowhere.
     VALID_OUTCOMES = frozenset(
         {"success", "failed", "partial", "cancelled", "pending", "unknown"}
     )
@@ -2871,9 +2942,20 @@ class KilnDB:
     # at the ending), ``observed`` (a live process watched the terminal
     # edge), ``user_reported`` (the person holding the part said so).  A
     # later record never downgrades a stronger one -- see
-    # ``_resolve_row_locked``.
+    # ``_resolve_row_locked``.  Below them all sits ``printer_log``
+    # (:data:`kiln.failure_vocabulary.PRINTER_LOG`): a job copied from the
+    # printer's own log, which Kiln neither started nor watched.  It says the
+    # job ran to its end or stopped, never how the part came out, so it is a
+    # success for no reader until the person says how it went.
+    #: The words a person, an agent or a watcher may settle something with.
     VALID_DETERMINED_BY = frozenset({"observed", "inferred", "seen", "user_reported"})
-    DETERMINED_BY_RANK = {"inferred": 1, "seen": 2, "observed": 3, "user_reported": 4}
+    #: Those, and the one only a copy of a printer's own log carries.  A
+    #: door that takes a caller's word reads :attr:`VALID_DETERMINED_BY`, so
+    #: nobody can relabel a print they saw as one nobody saw.
+    PRINT_OUTCOME_DETERMINED_BY = VALID_DETERMINED_BY | {PRINTER_LOG}
+    DETERMINED_BY_RANK = {PRINTER_LOG: 0, "inferred": 1, "seen": 2, "observed": 3, "user_reported": 4}
+    #: How a job copied from a printer's own log is named (``job_id``).
+    PRINTER_LOG_JOB_PREFIXES = ("moonraker:",)
     #: The identity a print row carries beyond its label.  One roster: the
     #: fresh schema, the migration, the insert and the resolve all read it.
     PRINT_OUTCOME_IDENTITY_COLUMNS = {
@@ -2893,6 +2975,24 @@ class KilnDB:
     #: Which slicer made the printed file, read from it at the start.
     SLICER_COLUMNS = ("slicer_name", "slicer_version")
 
+    #: Evidence about a print, written beside its ending and never read into
+    #: a verdict here: a one-way code of the settings the sent file was
+    #: sliced with, how far the print had got when it ended (a 0..1 share
+    #: and a layer number), the recorded spool that fed it, and the firmware
+    #: version the printer reported.  See :mod:`kiln.print_evidence`.
+    PRINT_EVIDENCE_COLUMNS = {
+        "settings_code": "TEXT",
+        "progress_at_end": "REAL",
+        "layer_at_end": "INTEGER",
+        "spool_id": "TEXT",
+        "firmware_version": "TEXT",
+    }
+    #: The evidence a start writes, by the job id the start opened.
+    START_EVIDENCE_COLUMNS = ("settings_code", "spool_id", "firmware_version")
+    #: How long after an ending a row with no open start still takes that
+    #: ending's progress reading (seconds).
+    PROGRESS_JUST_ENDED_S = 60.0
+
     def save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
 
@@ -2909,7 +3009,19 @@ class KilnDB:
                 push_soon()
             except Exception:  # noqa: BLE001 -- the account copy never blocks a record
                 pass
+            self._printer_checkin_soon(outcome.get("printer_name"))
         return row_id
+
+    def _printer_checkin_soon(self, printer_name: Any) -> None:
+        """Offer the printer *printer_name* its check-in
+        (:func:`kiln._pro_printer_checkin_bridge.ask_soon`).  Never raises and
+        never waits on the network."""
+        try:
+            from kiln._pro_printer_checkin_bridge import ask_soon
+
+            ask_soon(printer_name, db=self)
+        except Exception:  # noqa: BLE001 -- a check-in never blocks a record
+            pass
 
     def _save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
@@ -2926,7 +3038,7 @@ class KilnDB:
         if outcome_val not in self.VALID_OUTCOMES:
             raise ValueError(f"Invalid outcome {outcome_val!r}. Must be one of: {sorted(self.VALID_OUTCOMES)}")
         determined_by = outcome.get("determined_by")
-        if determined_by and determined_by not in self.VALID_DETERMINED_BY:
+        if determined_by and determined_by not in self.PRINT_OUTCOME_DETERMINED_BY:
             raise ValueError(
                 f"Invalid determined_by {determined_by!r}. Must be one of: {sorted(self.VALID_DETERMINED_BY)}"
             )
@@ -3329,6 +3441,85 @@ class KilnDB:
             self._conn.commit()
             return bool(getattr(cur, "rowcount", 0))
 
+    def set_outcome_evidence(self, job_id: str, column: str, value: str) -> bool:
+        """Write one of a start's own facts (:attr:`START_EVIDENCE_COLUMNS`)
+        onto the print *job_id* names, once: a row that already carries the
+        fact keeps it.  Returns whether a row took it."""
+        if column not in self.START_EVIDENCE_COLUMNS or not job_id:
+            return False
+        if not isinstance(value, str) or not value.strip():
+            return False
+        with self._write_lock:
+            cur = self._conn.execute(
+                f"UPDATE print_outcomes SET {column} = ? WHERE job_id = ? AND {column} IS NULL",
+                (value.strip(), job_id),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
+
+    def record_progress_at_end(
+        self,
+        printer_names: list[str],
+        job_label: str | None,
+        *,
+        fraction: float | None,
+        layer: int | None,
+        settled: bool = False,
+    ) -> bool:
+        """Write how far the print ending under *job_label* had got.
+
+        *fraction* is the share complete (0..1) and *layer* the layer number;
+        either may be ``None``.  With *settled* false the row is the open
+        (``pending``) one this ending belongs to on one of *printer_names*,
+        matched as an arriving ending is; with *settled* true it is a row
+        under that label or file that ended within
+        :attr:`PROGRESS_JUST_ENDED_S`.  A row that already carries either
+        figure keeps both.  Returns whether a row took the reading.
+        """
+        names = [n for n in (printer_names or []) if n]
+        if not names:
+            return False
+        share = None
+        if isinstance(fraction, (int, float)) and not isinstance(fraction, bool) and 0.0 <= fraction <= 1.0:
+            share = float(fraction)
+        layer_no = None
+        if isinstance(layer, int) and not isinstance(layer, bool) and 0 <= layer < 10_000_000:
+            layer_no = int(layer)
+        if share is None and layer_no is None:
+            return False
+        with self._write_lock:
+            row_id = None
+            if not settled:
+                for name in names:
+                    match = self._match_pending_locked(name, job_label)
+                    if match is not None:
+                        row_id = match["id"]
+                        break
+            else:
+                target = _file_stem_token(job_label)
+                marks = ", ".join("?" for _ in names)
+                rows = self._conn.execute(
+                    "SELECT id, job_id, file_name FROM print_outcomes "
+                    f"WHERE printer_name IN ({marks}) AND outcome NOT IN ('pending', 'unknown') "
+                    "AND ended_at IS NOT NULL AND ended_at >= ? ORDER BY ended_at DESC LIMIT 5",
+                    (*names, time.time() - self.PROGRESS_JUST_ENDED_S),
+                ).fetchall()
+                for row in rows:
+                    if row[1] == job_label or (target and target in (
+                        _file_stem_token(row[1]), _file_stem_token(row[2]),
+                    )):
+                        row_id = row[0]
+                        break
+            if row_id is None:
+                return False
+            cur = self._conn.execute(
+                "UPDATE print_outcomes SET progress_at_end = ?, layer_at_end = ? "
+                "WHERE id = ? AND progress_at_end IS NULL AND layer_at_end IS NULL",
+                (share, layer_no, row_id),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
+
     def _set_print_time(self, column: str, job_id: str, seconds: float) -> bool:
         if column not in self.PRINT_TIME_COLUMNS or not job_id:
             return False
@@ -3411,9 +3602,10 @@ class KilnDB:
         These are the prints that started (or ended unseen) while no
         Kiln process was watching.  Surfaced so the next session can ask
         the human, who is holding the part and can settle what the
-        machine could not.
+        machine could not.  A job known only from the printer's own log is
+        never one: Kiln had no part in it.
         """
-        clauses = ["outcome IN ('pending', 'unknown')"]
+        clauses = ["outcome IN ('pending', 'unknown')", f"COALESCE(determined_by, '') <> '{PRINTER_LOG}'"]
         params: list[Any] = []
         if printer_name:
             clauses.append("printer_name = ?")
@@ -3425,6 +3617,76 @@ class KilnDB:
             params,
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
+
+    #: How long after an ending the person is still asked about it.
+    STOP_ASK_WINDOW_S = 14 * 24 * 3600
+
+    def list_endings_to_ask_about(
+        self,
+        printer_name: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Recent prints whose ending owes the person a question nobody has
+        asked yet (``kiln.failure_vocabulary.ending_wants_a_question``): the
+        printer stopped it and named no cause, or someone stopped it.  Only
+        the person knows whether the part was coming out bad."""
+        from kiln.failure_vocabulary import FAILED_OUTCOMES, ending_wants_a_question
+
+        words = [*sorted(FAILED_OUTCOMES), "cancelled"]
+        marks = ", ".join("?" for _ in words)
+        clauses = [f"outcome IN ({marks})", "stop_reason_asked IS NULL",
+                   "COALESCE(ended_at, created_at) >= ?"]
+        params: list[Any] = [*words, time.time() - self.STOP_ASK_WINDOW_S]
+        if printer_name:
+            clauses.append("printer_name = ?")
+            params.append(printer_name)
+        rows = self._conn.execute(
+            f"SELECT * FROM print_outcomes WHERE {' AND '.join(clauses)} "
+            "ORDER BY created_at DESC",
+            params,
+        ).fetchall()
+        out = []
+        for raw in rows:
+            row = self._outcome_row_to_dict(raw)
+            if ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+                out.append(row)
+                if len(out) >= limit:
+                    break
+        return out
+
+    def latest_outcome_row(self, printer_name: str) -> dict[str, Any] | None:
+        """The newest print row on *printer_name*, whatever its ending."""
+        raw = self._conn.execute(
+            "SELECT * FROM print_outcomes WHERE printer_name = ? ORDER BY created_at DESC LIMIT 1",
+            (printer_name,),
+        ).fetchone()
+        return self._outcome_row_to_dict(raw) if raw is not None else None
+
+    def mark_ending_asked(self, job_id: str) -> dict[str, Any] | None:
+        """Record that the person was asked about *job_id*'s ending and had
+        nothing to add, and return the row, or ``None`` when there is no such
+        print or its ending owes no question.  The ending is not touched; the
+        row is owed to the account again so the answer follows it there."""
+        from kiln.failure_vocabulary import ending_wants_a_question
+
+        with self._write_lock:
+            raw = self._conn.execute(
+                "SELECT * FROM print_outcomes WHERE job_id = ? ORDER BY created_at DESC LIMIT 1",
+                (job_id,),
+            ).fetchone()
+            if raw is None:
+                return None
+            row = self._outcome_row_to_dict(raw)
+            if not ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+                return None
+            self._conn.execute(
+                "UPDATE print_outcomes SET stop_reason_asked = COALESCE(stop_reason_asked, ?), "
+                "account_pushed_state = NULL WHERE id = ?",
+                (time.time(), row["id"]),
+            )
+            self._conn.commit()
+        self._printer_checkin_soon(row.get("printer_name"))
+        return self.get_print_outcome(job_id)
 
     def clear_print_note(self, job_id: str) -> dict[str, Any] | None:
         """Delete the note on *job_id*'s print and return the row as it now
@@ -3535,17 +3797,33 @@ class KilnDB:
         include_all: bool = False,
         version_ids: list[str] | None = None,
         design_id: str | None = None,
+        include_stops: bool = False,
+        count_repair_excused: bool = False,
+        witnessed_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Return outcome records, optionally filtered.
 
         ``version_ids`` / ``design_id`` keep the prints of those versions or
         of that design: a version's print history read off the one row.
 
-        By default only DECIDED, learning-bearing outcomes (success /
-        failed / partial) are returned — every rate and proven-settings
-        consumer reads through here, and a pending, unknown, or
-        cancelled row is not a verdict on settings.  An explicit
+        By default only JUDGED endings are returned (a success, or a failed /
+        partial ending that is a bad print: :func:`kiln.failure_vocabulary.ending_verdict`)
+        — every rate and proven-settings consumer reads through here, and a
+        pending, unknown or cancelled row, or a failure an outside cause
+        stopped, is not a verdict on settings.  ``include_stops`` keeps every
+        success, failed and partial ending whatever its cause, for a reader
+        that applies the rule per subject itself (the print history an
+        install sends with a call).  An explicit
         ``outcome=`` filter or ``include_all=True`` sees everything.
+
+        A bad print the repair record sets aside (:meth:`excused_by_repair`)
+        is not a judged ending about the print and is left out by default;
+        ``count_repair_excused`` keeps it, for a reader of the printer's own
+        record.  A job known only from the printer's own log
+        (:data:`kiln.failure_vocabulary.PRINTER_LOG`) is never a judged
+        ending, so the default leaves it out.  ``include_stops``,
+        ``include_all`` and an ``outcome=`` filter keep it, for the person's
+        own list; ``witnessed_only`` leaves it out of those too.
         """
         clauses: list[str] = []
         params: list[Any] = []
@@ -3567,8 +3845,12 @@ class KilnDB:
         if outcome:
             clauses.append("outcome = ?")
             params.append(outcome)
+        elif include_stops:
+            clauses.append(f"outcome IN ('success', {_sql_words(FAILED_OUTCOMES)})")
         elif not include_all:
-            clauses.append("outcome IN ('success', 'failed', 'partial')")
+            clauses.append(self._DECIDED if count_repair_excused else self.decided_sql())
+        if witnessed_only:
+            clauses.append(f"COALESCE(determined_by, '') <> '{PRINTER_LOG}'")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
         rows = self._conn.execute(
@@ -3577,17 +3859,56 @@ class KilnDB:
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
 
-    # Aggregate denominators count only decided outcomes.  A pending or
+    # Aggregate denominators count only judged endings.  A pending or
     # unknown row is a print whose result NOBODY knows — counting it as a
     # non-success would manufacture failures; counting it as success would
     # be the false-success bias this vocabulary exists to prevent.  A
     # cancelled print carries no verdict on the settings either way.
-    _DECIDED = "outcome IN ('success', 'failed', 'partial')"
+    # ``_DECIDED`` judges the print (design, version, material, settings):
+    # a printer stopping itself is not a verdict on any of them.
+    # ``_MACHINE_DECIDED`` judges the printer, which a machine stop is.
+    # Neither counts a power cut or a run-out spool (kiln.failure_vocabulary).
+    # A reader judging the print asks ``decided_sql()``, which also leaves
+    # out a bad print the repair record sets aside; ``_DECIDED`` alone is the
+    # rule before the repair record.
+    _DECIDED = judged_ending_sql()
+    _MACHINE_DECIDED = judged_ending_sql(about=ABOUT_THE_MACHINE)
+
+    def printer_log_summary(self, printer_name: str) -> dict[str, int]:
+        """The jobs on *printer_name* known only from the printer's own log
+        (:data:`kiln.failure_vocabulary.PRINTER_LOG`), counted by how the
+        log says each ended: ``jobs``, ``ran_to_end``, ``stopped``,
+        ``cancelled`` and ``not_known``.  Kiln saw none of these parts, so
+        none of them is in any rate; this is where they are counted."""
+        rows = self._conn.execute(
+            "SELECT outcome, COUNT(*) FROM print_outcomes "
+            f"WHERE printer_name = ? AND determined_by = '{PRINTER_LOG}' GROUP BY outcome",
+            (printer_name,),
+        ).fetchall()
+        by_word = {row[0]: int(row[1]) for row in rows}
+        jobs = sum(by_word.values())
+        ran = by_word.get("success", 0)
+        stopped = sum(by_word.get(word, 0) for word in FAILED_OUTCOMES)
+        cancelled = by_word.get("cancelled", 0)
+        return {
+            "jobs": jobs,
+            "ran_to_end": ran,
+            "stopped": stopped,
+            "cancelled": cancelled,
+            "not_known": jobs - ran - stopped - cancelled,
+        }
 
     def get_printer_learning_insights(self, printer_name: str) -> dict[str, Any]:
-        """Return aggregated outcome insights for a single printer."""
+        """Return aggregated outcome insights for a single printer.
+
+        Every rate counts only endings something of Kiln's or the person
+        saw.  Jobs known only from the printer's own log are counted apart,
+        under ``printer_own_history`` (:meth:`printer_log_summary`), present
+        when there are any."""
+        own_log = self.printer_log_summary(printer_name)
+        apart = {"printer_own_history": own_log} if own_log["jobs"] else {}
         total = self._conn.execute(
-            f"SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND {self._DECIDED}",
+            f"SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND {self._MACHINE_DECIDED}",
             (printer_name,),
         ).fetchone()[0]
         if total == 0:
@@ -3596,27 +3917,39 @@ class KilnDB:
                 "total_outcomes": 0,
                 "success_rate": 0.0,
                 "failure_breakdown": {},
+                "stopped_early": {},
                 "material_stats": {},
+                **apart,
             }
         successes = self._conn.execute(
-            "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND outcome = 'success'",
+            "SELECT COUNT(*) FROM print_outcomes "
+            f"WHERE printer_name = ? AND outcome = 'success' AND {self._MACHINE_DECIDED}",
             (printer_name,),
         ).fetchone()[0]
-        # Failure breakdown
+        # Failure breakdown: what went wrong on this printer, its own stops
+        # included.  A power cut or a run-out spool is counted apart.
         failure_rows = self._conn.execute(
             "SELECT failure_mode, COUNT(*) FROM print_outcomes "
-            "WHERE printer_name = ? AND outcome = 'failed' AND failure_mode IS NOT NULL "
+            f"WHERE printer_name = ? AND outcome = 'failed' AND failure_mode IS NOT NULL AND {self._MACHINE_DECIDED} "
             "GROUP BY failure_mode ORDER BY COUNT(*) DESC",
             (printer_name,),
         ).fetchall()
         failure_breakdown = {row[0]: row[1] for row in failure_rows}
+        stopped_rows = self._conn.execute(
+            "SELECT failure_mode, COUNT(*) FROM print_outcomes "
+            f"WHERE printer_name = ? AND outcome IN ({_sql_words(FAILED_OUTCOMES)}) "
+            f"AND failure_mode IN ({_sql_words(OUTSIDE_CAUSES)}) "
+            "GROUP BY failure_mode ORDER BY COUNT(*) DESC",
+            (printer_name,),
+        ).fetchall()
+        stopped_early = {row[0]: row[1] for row in stopped_rows}
         # Material stats
         material_rows = self._conn.execute(
             "SELECT material_type, "
             "  COUNT(*) as total, "
             "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
             "FROM print_outcomes "
-            f"WHERE printer_name = ? AND material_type IS NOT NULL AND {self._DECIDED} "
+            f"WHERE printer_name = ? AND material_type IS NOT NULL AND {self.decided_sql()} "
             "GROUP BY material_type ORDER BY total DESC",
             (printer_name,),
         ).fetchall()
@@ -3631,7 +3964,9 @@ class KilnDB:
             "total_outcomes": total,
             "success_rate": round(successes / total, 2) if total else 0.0,
             "failure_breakdown": failure_breakdown,
+            "stopped_early": stopped_early,
             "material_stats": material_stats,
+            **apart,
         }
 
     #: A print whose ending is SETTLED: it ended one of the three ways a print
@@ -3682,7 +4017,8 @@ class KilnDB:
         """
         if not isinstance(version_id, str) or not version_id.strip():
             return {}
-        clauses = ["p.version_id = ?", "p.machine_fingerprint IS NOT NULL", self._SETTLED.replace("outcome", "p.outcome").replace("determined_by", "p.determined_by")]
+        clauses = ["p.version_id = ?", "p.machine_fingerprint IS NOT NULL",
+                   f"{judged_ending_sql('p')} AND p.determined_by IS NOT NULL"]
         params: list[Any] = [version_id.strip()]
         if machine_fingerprint:
             clauses.append("p.machine_fingerprint = ?")
@@ -3691,7 +4027,7 @@ class KilnDB:
             "SELECT p.machine_fingerprint, p.outcome, p.created_at, "
             "  (SELECT COUNT(*) FROM print_outcomes q "
             "    WHERE q.machine_fingerprint = p.machine_fingerprint AND q.id > p.id "
-            f"      AND q.{self._DECIDED}) "
+            f"      AND {judged_ending_sql('q', about=ABOUT_THE_MACHINE)}) "
             f"FROM print_outcomes p WHERE {' AND '.join(clauses)}",
             params,
         ).fetchall()
@@ -3721,7 +4057,7 @@ class KilnDB:
         """The machine's last :data:`RECENT_PRINTS` settled prints of any
         version, counted by ending; only prints started at or after *since*
         (the machine's latest repair) when one is given."""
-        clauses = ["machine_fingerprint = ?", self._SETTLED]
+        clauses = ["machine_fingerprint = ?", f"{self._MACHINE_DECIDED} AND determined_by IS NOT NULL"]
         params: list[Any] = [machine_fingerprint]
         if since is not None:
             clauses.append("created_at >= ?")
@@ -3854,6 +4190,220 @@ class KilnDB:
         elif current is not None:
             out["state"] = "repaired"
         return out
+
+    @staticmethod
+    def needs_repair_windows(standing: list[dict[str, Any]]) -> list[tuple[float, float | None]]:
+        """The times a machine stood marked as needing repair, from its
+        standing marks (:meth:`standing_repair_marks`) in the order of their
+        moments: each ``(from, until)``, opened by a ``needed`` and closed by
+        the next ``done``; ``until`` is ``None`` for a mark still standing.
+        A ``done`` with no ``needed`` before it opens and closes nothing."""
+        windows: list[tuple[float, float | None]] = []
+        since: float | None = None
+        for mark in standing:
+            if mark["status"] == "needed":
+                if since is None:
+                    since = float(mark["marked_at"])
+            elif mark["status"] == "done" and since is not None:
+                windows.append((since, float(mark["marked_at"])))
+                since = None
+        if since is not None:
+            windows.append((since, None))
+        return windows
+
+    def repair_windows(self) -> dict[str, list[tuple[float, float | None]]]:
+        """Every machine's needs-repair windows (:meth:`needs_repair_windows`),
+        by fingerprint: what :func:`kiln.failure_vocabulary.excused_by_repair`
+        and its SQL form read.  Machines with no window are left out, and so
+        is one whose fingerprint cannot be named in a SQL condition.  A record
+        that cannot be read gives no windows, so nothing is set aside."""
+        from kiln.failure_vocabulary import plain_fingerprint
+
+        try:
+            rows = self._conn.execute(
+                "SELECT DISTINCT machine_fingerprint FROM machine_repairs WHERE status = 'needed'"
+            ).fetchall()
+            out: dict[str, list[tuple[float, float | None]]] = {}
+            for (fingerprint,) in rows:
+                if not plain_fingerprint(fingerprint):
+                    logger.debug("repair windows not read for a machine whose fingerprint is not plain")
+                    continue
+                windows = self.needs_repair_windows(
+                    self.standing_repair_marks(self.machine_repair_marks(fingerprint))
+                )
+                if windows:
+                    out[fingerprint] = windows
+            return out
+        except Exception:  # noqa: BLE001 -- a record that cannot be read sets nothing aside
+            logger.debug("repair windows not read", exc_info=True)
+            return {}
+
+    # ------------------------------------------------------------------
+    # Printer check-ins: one question about a printer, and its answer
+    # (kiln._pro_printer_checkin_bridge)
+    # ------------------------------------------------------------------
+
+    _CHECKIN_COLUMNS = (
+        "id, machine_fingerprint, printer_name, episode, about, question, asked_job_id, "
+        "shown_job_id, shown_at, received_at, answer, answered_at"
+    )
+
+    @staticmethod
+    def _checkin_row(raw: Any) -> dict[str, Any]:
+        keys = ("id", "machine_fingerprint", "printer_name", "episode", "about", "question",
+                "asked_job_id", "shown_job_id", "shown_at", "received_at", "answer", "answered_at")
+        return dict(zip(keys, tuple(raw), strict=True))
+
+    def machine_print_rows(self, machine_fingerprint: str, limit: int = 400) -> list[dict[str, Any]]:
+        """The newest *limit* print rows of one machine, newest first,
+        whatever their ending."""
+        rows = self._conn.execute(
+            "SELECT * FROM print_outcomes WHERE machine_fingerprint = ? ORDER BY created_at DESC LIMIT ?",
+            (machine_fingerprint, int(limit)),
+        ).fetchall()
+        return [self._outcome_row_to_dict(r) for r in rows]
+
+    def set_printer_checkin(
+        self, machine_fingerprint: str, printer_name: str, question: dict[str, Any] | None,
+        *, asked_job_id: str,
+    ) -> None:
+        """Keep the one question waiting for a machine, as Kiln's servers
+        answered at the ending *asked_job_id*; ``None`` leaves none waiting.
+
+        Every unanswered question of the machine stops waiting.  *question*
+        (its ``episode`` is the key) then waits at *asked_job_id*; a question
+        already shown at that same ending keeps that it was shown.  An
+        answered episode is never made to wait again."""
+        now = time.time()
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE printer_checkins SET asked_job_id = NULL "
+                "WHERE machine_fingerprint = ? AND answer IS NULL AND (episode != ? OR asked_job_id != ?)",
+                (machine_fingerprint, (question or {}).get("episode") or "", asked_job_id),
+            )
+            if question:
+                episode = str(question["episode"])
+                held = self._conn.execute(
+                    "SELECT id, answer, asked_job_id FROM printer_checkins "
+                    "WHERE machine_fingerprint = ? AND episode = ?",
+                    (machine_fingerprint, episode),
+                ).fetchone()
+                text = json.dumps(question)
+                if held is None:
+                    self._conn.execute(
+                        "INSERT INTO printer_checkins (machine_fingerprint, printer_name, episode, about, "
+                        "question, asked_job_id, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (machine_fingerprint, printer_name, episode, question.get("about"), text,
+                         asked_job_id, now),
+                    )
+                elif held[1] is None:
+                    self._conn.execute(
+                        "UPDATE printer_checkins SET printer_name = ?, about = ?, question = ?, "
+                        "asked_job_id = ?, received_at = ? WHERE id = ?",
+                        (printer_name, question.get("about"), text, asked_job_id, now, held[0]),
+                    )
+            self._conn.commit()
+
+    def printer_checkin_waiting(self, machine_fingerprint: str) -> dict[str, Any] | None:
+        """The question waiting for a machine, or ``None``."""
+        raw = self._conn.execute(
+            f"SELECT {self._CHECKIN_COLUMNS} FROM printer_checkins WHERE machine_fingerprint = ? "
+            "AND answer IS NULL AND asked_job_id IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1",
+            (machine_fingerprint,),
+        ).fetchone()
+        return self._checkin_row(raw) if raw is not None else None
+
+    def get_printer_checkin(self, episode: str) -> dict[str, Any] | None:
+        """The newest question kept under *episode*, or ``None``."""
+        raw = self._conn.execute(
+            f"SELECT {self._CHECKIN_COLUMNS} FROM printer_checkins WHERE episode = ? "
+            "ORDER BY received_at DESC, id DESC LIMIT 1",
+            (episode,),
+        ).fetchone()
+        return self._checkin_row(raw) if raw is not None else None
+
+    def mark_printer_checkin_shown(self, row_id: int, job_id: str) -> None:
+        """Record that a question was shown to the person at the ending *job_id*."""
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE printer_checkins SET shown_job_id = ?, shown_at = ? WHERE id = ?",
+                (job_id, time.time(), int(row_id)),
+            )
+            self._conn.commit()
+
+    def answer_printer_checkin(self, row_id: int, answer: str, *, answered_at: float | None = None) -> None:
+        """Record the person's answer to a question; it stops waiting.  The
+        first answer stands."""
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE printer_checkins SET answer = ?, answered_at = ?, asked_job_id = NULL "
+                "WHERE id = ? AND answer IS NULL",
+                (answer, float(time.time() if answered_at is None else answered_at), int(row_id)),
+            )
+            self._conn.commit()
+
+    def printer_checkins_answered(self, machine_fingerprint: str, limit: int = 200) -> list[dict[str, Any]]:
+        """Every answered question of a machine, newest first: ``episode``,
+        ``about``, ``answer``, ``answered_at``."""
+        rows = self._conn.execute(
+            "SELECT episode, about, answer, answered_at FROM printer_checkins "
+            "WHERE machine_fingerprint = ? AND answer IS NOT NULL ORDER BY answered_at DESC, id DESC LIMIT ?",
+            (machine_fingerprint, int(limit)),
+        ).fetchall()
+        return [
+            {"episode": r[0], "about": r[1], "answer": r[2], "answered_at": float(r[3]) if r[3] is not None else None}
+            for r in rows
+        ]
+
+    def decided_sql(self, alias: str = "") -> str:
+        """The endings that count about the print, as a SQL condition over
+        ``print_outcomes``: :attr:`_DECIDED` less the bad prints this
+        computer's repair record sets aside (:meth:`repair_windows`).  Takes
+        no parameters.  Every reader that judges a design, a version, a
+        material or settings asks here."""
+        return judged_ending_sql(alias, repair_windows=self.repair_windows())
+
+    def excused_by_repair(self, row: dict[str, Any] | None) -> bool:
+        """Whether *row* (a ``print_outcomes`` row) is a bad print the repair
+        record sets aside (:func:`kiln.failure_vocabulary.excused_by_repair`)."""
+        from kiln.failure_vocabulary import excused_by_repair
+
+        if not isinstance(row, dict) or not row.get("machine_fingerprint"):
+            return False
+        return excused_by_repair(
+            row.get("outcome"), row.get("failure_mode"), row.get("determined_by"),
+            machine_fingerprint=row.get("machine_fingerprint"), started_at=row.get("created_at"),
+            repair_windows=self.repair_windows(),
+        )
+
+    #: How many of the newest print rows an ending is looked for among.
+    _ENDING_ROW_SEARCH = 50
+
+    def print_row_for_ending(self, job_id: str | None, file_name: str | None = None) -> dict[str, Any] | None:
+        """The newest print row, by start time, that an ending under
+        *job_id* (a job label) or *file_name* belongs to: its job id is that
+        label, or its file is that file with or without its folder and
+        extensions.  Looked for among the :attr:`_ENDING_ROW_SEARCH` newest
+        rows; ``None`` when none of them is it."""
+        keys = {k for k in (job_id, file_name) if isinstance(k, str) and k}
+        stems = {_file_stem_token(k) for k in keys} - {""}
+        if not keys:
+            return None
+        rows = self._conn.execute(
+            "SELECT * FROM print_outcomes ORDER BY created_at DESC LIMIT ?", (self._ENDING_ROW_SEARCH,)
+        ).fetchall()
+        for raw in rows:
+            row = self._outcome_row_to_dict(raw)
+            if row.get("job_id") in keys or stems & {
+                _file_stem_token(row.get("job_id")), _file_stem_token(row.get("file_name")),
+            }:
+                return row
+        return None
+
+    def print_outcome_row(self, row_id: int) -> dict[str, Any] | None:
+        """The print row with id *row_id*, or ``None``."""
+        raw = self._conn.execute("SELECT * FROM print_outcomes WHERE id = ?", (row_id,)).fetchone()
+        return self._outcome_row_to_dict(raw) if raw is not None else None
 
     # The account's copy of a repair mark (kiln.machine_repair_courier)
 
@@ -3992,7 +4542,7 @@ class KilnDB:
             "  COUNT(*) as total, "
             "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
             "FROM print_outcomes "
-            f"WHERE file_hash = ? AND {self._DECIDED} "
+            f"WHERE file_hash = ? AND {self._MACHINE_DECIDED} "
             "GROUP BY printer_name ORDER BY (CAST(wins AS REAL) / total) DESC, total DESC",
             (file_hash,),
         ).fetchall()
@@ -4018,7 +4568,7 @@ class KilnDB:
         material_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return printers ranked by success rate for the given criteria."""
-        clauses: list[str] = [self._DECIDED]
+        clauses: list[str] = [self._MACHINE_DECIDED]
         params: list[Any] = []
         if file_hash:
             clauses.append("file_hash = ?")
@@ -4861,6 +5411,14 @@ def _db_path_in_force() -> str:
 
 def _stale(db: KilnDB | None, wanted: str) -> bool:
     return db is None or db._db_path != wanted
+
+
+def db_if_open() -> KilnDB | None:
+    """The module-level :class:`KilnDB` singleton when this process has
+    already opened it for the path in force, else ``None``.  Never opens or
+    builds one, so a reader on a tool's way out costs no schema setup."""
+    held = _db
+    return None if _stale(held, _db_path_in_force()) else held
 
 
 def get_db() -> KilnDB:

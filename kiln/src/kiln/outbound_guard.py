@@ -44,11 +44,17 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "SENDERS",
+    "VERSION_FIELDS",
     "machine_code",
+    "spool_code",
+    "file_code",
+    "file_hash_code",
+    "job_code",
     "is_listing_link",
     "redact_text",
     "scrub",
     "scrub_relayed",
+    "version_text",
 ]
 
 #: Keys whose value is a secret, or where a machine is: dropped.  Exact
@@ -104,6 +110,45 @@ def machine_code(value: Any) -> str | None:
     return "id:" + hmac.new(_key(), text.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
 
 
+def spool_code(value: Any) -> str | None:
+    """A stable one-way code for a recorded spool's id on this computer,
+    made as :func:`machine_code` is, under its own label so a spool and a
+    machine never share a code.  The same spool gives the same code every
+    time here; the code reveals nothing about the id."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    return "sp:" + hmac.new(_key(), b"spool|" + text.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+
+
+def _labelled_code(prefix: str, label: bytes, text: str) -> str | None:
+    if not text:
+        return None
+    return prefix + hmac.new(_key(), label + b"|" + text.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+
+
+def file_code(value: Any) -> str | None:
+    """A stable one-way code for a printed file's name on this computer,
+    made as :func:`machine_code` is, under its own label.  The name is read
+    without its folder; the same file name gives the same code every time
+    here, and the code reveals nothing about the name."""
+    text = str(value or "").strip().replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+    return _labelled_code("fc:", b"file", text)
+
+
+def file_hash_code(value: Any) -> str | None:
+    """A stable one-way code for a printed file's fingerprint on this
+    computer, under its own label: two prints of the same bytes share it,
+    and the fingerprint itself never leaves."""
+    return _labelled_code("fh:", b"file-hash", str(value or "").strip().lower())
+
+
+def job_code(value: Any) -> str | None:
+    """A stable one-way code for a print's job id on this computer, under
+    its own label.  A job id is often a file's name; the code is not."""
+    return _labelled_code("pj:", b"job", str(value or "").strip())
+
+
 def redact_text(text: str) -> str:
     """*text* read off a machine, as it may leave for Kiln's servers
     (:func:`kiln.redaction.redact_machine_text`).  A report keeps the links
@@ -127,8 +172,8 @@ def is_listing_link(value: Any) -> bool:
     try:
         from urllib.parse import urlsplit
 
-        from kiln.marketplaces.base import listing_hosts
         import kiln.marketplaces  # noqa: F401 -- the adapters declare their sites as they load
+        from kiln.marketplaces.base import listing_hosts
 
         parts = urlsplit(value.strip())
         return (
@@ -301,8 +346,68 @@ def scrub_relayed(value: Any) -> Any:
     return _relayed(value, own, 0)
 
 
-def scrub(value: Any, _depth: int = 0) -> Any:
+#: A version as firmware states one: an optional short word, an optional
+#: ``v``, two to five dot-separated numbers, and up to three short suffixes
+#: each led by a dash, an underscore or a space (``01.07.00.00``,
+#: ``Marlin 2.1.2.1``, ``v0.12.0-85-gd785b396``).
+_VERSION_TEXT = re.compile(
+    r"(?:[A-Za-z]{1,12}[ _-])?[vV]?\d{1,6}(?:\.\d{1,6}){1,4}(?:[-_ ][A-Za-z0-9]{1,12}){0,3}"
+)
+_VERSION_MAX_CHARS = 40
+#: A run of letters and digits this long inside a version is checked for
+#: being a piece of one of this computer's printer values.
+_OWN_PIECE_MIN = 6
+
+#: The fields a sender may pass through :func:`scrub` as a version, by the
+#: sender's module: named here, and nowhere else.  Such a field is sent only
+#: when :func:`version_text` accepts it, and is dropped otherwise.
+VERSION_FIELDS: dict[str, frozenset[str]] = {
+    "kiln/outcome_courier.py": frozenset({"firmware"}),
+    "kiln/served_steps.py": frozenset({"firmware"}),
+    "kiln/_pro_printer_checkin_bridge.py": frozenset({"firmware"}),
+}
+
+
+def version_text(value: Any) -> str | None:
+    """*value* as a version that may leave as written, or ``None``.
+
+    It must be nothing but a version (:data:`_VERSION_TEXT`, at most
+    :data:`_VERSION_MAX_CHARS` characters) and must hold none of the
+    addresses, serials or codes this computer keeps for its printers.  A
+    value that fails either test, or one that cannot be checked against this
+    computer's printers, is ``None``: it is dropped, never cleaned.  A piece
+    of one of those values (:data:`_OWN_PIECE_MIN` characters or more) inside
+    the version fails it too.
+    """
+    text = value.strip() if isinstance(value, str) else ""
+    if not text or len(text) > _VERSION_MAX_CHARS or _VERSION_TEXT.fullmatch(text) is None:
+        return None
+    try:
+        own = _own_printer_values()
+    except Exception:  # noqa: BLE001 -- a value that cannot be checked is not sent
+        logger.debug("outbound guard: own printer values unreadable", exc_info=True)
+        return None
+    lowered = text.lower()
+    squeezed = re.sub(r"[^a-z0-9]", "", lowered)
+    pieces = [run for run in re.findall(r"[a-z0-9]+", lowered) if len(run) >= _OWN_PIECE_MIN]
+    for _phrase, held in own:
+        mine = str(held).strip().lower()
+        mine_squeezed = re.sub(r"[^a-z0-9]", "", mine)
+        if mine and (mine in lowered or (mine_squeezed and mine_squeezed in squeezed)):
+            return None
+        if any(piece in mine_squeezed for piece in pieces):
+            return None
+    return text
+
+
+def scrub(value: Any, _depth: int = 0, *, version_keys: frozenset[str] = frozenset()) -> Any:
     """*value* with nothing that locates, identifies or unlocks a machine.
+
+    *version_keys* names the fields a sender declared in
+    :data:`VERSION_FIELDS`: each is kept as written when
+    :func:`version_text` accepts it and dropped with its value otherwise, at
+    any depth.  A version of four numbers reads as a network address to the
+    text rules, so it is judged whole here and never passed through them.
 
     Never raises.  Numbers, flags and ordinary words pass unchanged.
     """
@@ -316,6 +421,11 @@ def scrub(value: Any, _depth: int = 0) -> Any:
             name = str(key)
             if _SECRET_OR_PLACE.match(name):
                 continue
+            if name in version_keys:
+                version = version_text(item)
+                if version is not None:
+                    out[key] = version
+                continue
             if name == LISTING_LINK_KEY:
                 # Judged by key AND value: a marketplace's public page goes
                 # as it is, anything else under this key goes nowhere.
@@ -325,10 +435,10 @@ def scrub(value: Any, _depth: int = 0) -> Any:
             if _IDENTITY.match(name):
                 out[key] = machine_code(item) if isinstance(item, (str, int)) and not isinstance(item, bool) else None
                 continue
-            out[key] = scrub(item, _depth + 1)
+            out[key] = scrub(item, _depth + 1, version_keys=version_keys)
         return out
     if isinstance(value, (list, tuple)):
-        return [scrub(item, _depth + 1) for item in value]
+        return [scrub(item, _depth + 1, version_keys=version_keys) for item in value]
     return value
 
 
@@ -344,7 +454,13 @@ SENDERS: dict[str, tuple[str, str]] = {
     "kiln/server.py": (
         "scrubbed",
         "the served door: machine-read call arguments, the facts and answers a "
-        "served step sends, and a bug report's log tail pass through scrub; so "
+        "served step sends, and a bug report's log tail pass through scrub; the "
+        "print records kiln/served_steps.py reads for a served learning tool ride "
+        "it too (what was printed in, how it went, settings and conditions, and "
+        "when held: set_aside, a one-way code of the sliced settings, the spool as "
+        "spool_code(), how far the print got, and the firmware version, declared in "
+        "VERSION_FIELDS so it leaves only when version_text() accepts it; never a "
+        "file, a spool id or a note); so "
         "does every value of an ask the person never made, which is how the words "
         "of a model Kiln made here that names no goal leave (kiln/make_words.py, "
         "sent by kiln/_pro_goal_bridge.py: the tool, the model's fingerprint, the "
@@ -394,12 +510,30 @@ SENDERS: dict[str, tuple[str, str]] = {
         "not kept; its request "
         "helper also carries kiln/outcome_courier.py's print endings, built field by field "
         "(a random id, version ids, the machine as machine_code(), model and material "
-        "words, nozzle, ending, who settled it, a failure word, two times) and scrubbed; "
+        "words, nozzle, ending, who settled it, a failure word, two times, a one-way code "
+        "of the sliced file's settings, how far the print got, the spool as spool_code() "
+        "and the firmware version) and scrubbed; the firmware field is declared in "
+        "VERSION_FIELDS, so it leaves only when version_text() accepts it (a bare "
+        "version holding none of this computer's printer addresses, serials or codes) "
+        "and is dropped otherwise; "
         "and kiln/machine_repair_courier.py's repair marks and printer announcements "
         "(a random id, the machine as machine_code(), a status word, a kind word, two "
-        "times; per printer its code, model word and a one-way shared code -- never the "
-        "note, the name, the serial or the access code) and the person's answer to an "
-        "identity question (a question id and same/different), scrubbed",
+        "times; per printer its code, model word, a one-way shared code and a one-way "
+        "controller code, each a slow one-way function of a secret or a board id that "
+        "stays here -- never the note, the name, the serial, the board id or the access code) and the person's answer to an "
+        "identity question (a question id and same/different), scrubbed; "
+        "and kiln/_pro_printer_checkin_bridge.py's check-in on one printer after a "
+        "print ends there, built field by field and scrubbed: the machine as "
+        "machine_code(), the name the person gave the printer (cut to 40 characters, and "
+        "left out when it holds one of this computer's printer addresses, serials or codes), "
+        "its repair mark (a state word, a kind word, times), the episode keys the "
+        "person has answered and when, and per print record a one-way code of the job "
+        "id (job_code()), the ending, who settled it, a failure word, two times, the "
+        "design id, the file's name as file_code() and its fingerprint as "
+        "file_hash_code(), the material word, the nozzle size, a one-way code of the "
+        "sliced settings, the spool as spool_code(), how far the print got, and the "
+        "firmware version, declared in VERSION_FIELDS -- never a file's name, path or "
+        "fingerprint, a job id, a serial, an address, a note, or settings",
     ),
     "kiln/account_plan.py": ("own_schema", "asks which plan the signed-in account holds; sends only the sign-in"),
     "kiln/plugins/spend_cap_tools.py": (

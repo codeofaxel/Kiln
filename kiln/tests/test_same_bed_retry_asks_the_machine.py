@@ -358,9 +358,17 @@ def test_the_contract_does_not_rescue_a_material_the_hotend_cannot_reach(retry_f
 
 
 def test_resume_exemption_is_untouched(retry_file):
+    # The exemption holds for a resume Kiln made for the job the printer
+    # reports paused; a bare claim is judged as new.
+    from kiln.printers.base import PrinterState, PrinterStatus
+
     adapter = _RetryAdapter()
     adapter.homed = None
-    assert pg.run_adapter_gate(adapter, retry_file(), {"resume_from_paused": True}) is None
+    adapter.get_state = lambda: PrinterState(state=PrinterStatus.PAUSED, connected=True)
+    from tests._kiln_resume import made_by_kiln
+
+    path = made_by_kiln(adapter, retry_file())
+    assert pg.run_adapter_gate(adapter, path, {"resume_from_paused": True}) is None
     assert adapter.homed_reads == 0
 
 

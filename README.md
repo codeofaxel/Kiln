@@ -443,8 +443,8 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 88
   - Linear history is free; branching and merges are free on the designs you keep in a free Kiln account and on every design with Pro; signed releases are Pro
 - **export_step**
   - Export a finished design as a real STEP CAD file — analytic B-rep a machine shop can open and measure
-- **fleet_status**
-  - Lists the printers you have set up; live status of every printer in one view (state, temperatures, connection) is part of Kiln Business
+- **printer_status**
+  - What a printer is doing right now, and the list of printers you have set up; several printers' live status in one answer (state, temperatures, connection) is part of Kiln Business
 - **fulfillment_quote**
   - Get a manufacturing quote from Craftcloud's network — printing without owning a printer
 
@@ -496,7 +496,7 @@ Kiln is safety-first infrastructure for controlling physical machines:
 
 - **Pre-flight checks** validate printer state, temperatures, and files before every print
 - **G-code validation** blocks dangerous commands (firmware reset, unsafe temperatures)
-- **Temperature limits** enforce safe maximums (300 °C hotend, 130 °C bed)
+- **Temperature limits** hold each printer to its own maximums, and a printer whose model Kiln has not been told to 240 °C hotend and 80 °C bed, whether the request is a temperature setting or raw G-code
 - **A person says go** before every print — in your AI app's approval dialog, by typing a code Kiln shows on your screen, or at the terminal — unless you chose not to be asked: for a while (a day at most), always on a printer you named yourself (at your own terminal, or on your Kiln account page with two-factor), or by switching on auto-print yourself; stopping, pausing and watching a print never need that yes
 - **Confirmation required** for destructive operations (cancel, raw G-code)
 - **Optional authentication** with scope-based API keys for multi-user setups

@@ -538,6 +538,8 @@ class _IntelligenceToolsPlugin:
                         material=material,
                         print_time_seconds=print_time_seconds,
                         extra=record.to_dict(),
+                        # The caller is reporting a print they ran.
+                        determined_by="user_reported",
                     )
                 except Exception:
                     pass  # Never let sync failure affect local contribution

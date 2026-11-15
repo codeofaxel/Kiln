@@ -527,6 +527,37 @@ class TestPrintHistoryStep:
         for private in ("private-name", "fingerprint-", "a private note", "someone", "job-"):
             assert private not in sent
 
+    def test_a_record_carries_only_what_a_served_tool_reads(self, history):
+        """What this computer holds beside the record (the settings code, the
+        spool, the firmware, how far it got) is not a served tool's to have."""
+        history._conn.execute(
+            "UPDATE print_outcomes SET settings_code = ?, spool_id = ?, firmware_version = ?, "
+            "progress_at_end = ? WHERE job_id = 'job-3'",
+            ("ab" * 16, "spool-raw-id-77", "01.07.00.00", 0.42),
+        )
+        history._conn.commit()
+        facts = self._read(printer_name="garage")[0]["print_history"]["data"]
+        for record in facts["outcomes"]:
+            assert set(record) <= set(served_steps._HISTORY_FIELDS) | {"set_aside"}
+        sent = json.dumps(facts)
+        for held in ("spool-raw-id-77", "abab", "01.07.00.00", "settings_code", "spool_code", "firmware", "progress_at_end"):
+            assert held not in sent
+
+    def test_a_bad_print_the_repair_record_sets_aside_is_sent_and_marked(self, history):
+        history._conn.execute("UPDATE print_outcomes SET machine_fingerprint = 'fp-garage' WHERE printer_name = 'garage'")
+        history._conn.commit()
+        # Marked needs repair between the second and the fourth print.
+        history.add_machine_repair("fp-garage", "garage", "needed", marked_at=1_700_000_002.5)
+        facts = self._read(printer_name="garage")[0]["print_history"]["data"]
+        by_start = {r["created_at"]: r for r in facts["outcomes"]}
+        assert len(by_start) == 5
+        assert by_start[1_700_000_003.0]["set_aside"] is True
+        # A bad print before the mark, and a print that came out after it, are not.
+        assert "set_aside" not in by_start[1_700_000_001.0]
+        assert "set_aside" not in by_start[1_700_000_004.0] and "set_aside" not in by_start[1_700_000_002.0]
+        for row in history.list_print_outcomes(include_stops=True):
+            assert bool(by_start[row["created_at"]].get("set_aside")) is history.excused_by_repair(row)
+
     @pytest.mark.parametrize("asked", ["default", "", "active"])
     def test_my_printer_is_named_for_the_server(self, history, asked):
         done, _ = self._read(printer_name=asked)

@@ -34,6 +34,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from kiln import quoted_text
 from kiln.printers.bambu import BambuAdapter
 from kiln.printers.base import (
     PrinterError,
@@ -4197,7 +4198,7 @@ class TestMonitorPrint:
 
         assert "Print Status" in result
         assert "45% complete" in result
-        assert "File: test_model.gcode" in result
+        assert f"File: {quoted_text.fence('test_model.gcode')}" in result
         assert "Layer: 50 / 120" in result
         assert "Time elapsed:" in result
         assert "Remaining:" in result

@@ -36,6 +36,8 @@ import logging
 import os
 from typing import Any
 
+from kiln.quoted_text import fence
+
 _logger = logging.getLogger(__name__)
 
 _COLOR_ALIASES: dict[str, str] = {
@@ -415,7 +417,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str) -> dict[str, Any]:
             if not os.path.exists(stl_path):
                 return {
                     "status": "error",
-                    "error": f"STL not found for part '{part.name}': {stl_path}",
+                    "error": f"STL not found for part {fence(part.name)}: {stl_path}",
                     "code": "FILE_NOT_FOUND",
                 }
             try:
@@ -423,7 +425,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str) -> dict[str, Any]:
             except Exception as exc:
                 return {
                     "status": "error",
-                    "error": f"Slicing failed for part '{part.name}': {exc}",
+                    "error": f"Slicing failed for part {fence(part.name)}: {exc}",
                     "code": "SLICE_ERROR",
                 }
             part_results.append({

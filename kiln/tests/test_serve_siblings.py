@@ -52,7 +52,7 @@ def _fake_ps(stdout: str):
             self.stdout = stdout
 
     stack = contextlib.ExitStack()
-    stack.enter_context(patch.object(serve_siblings.subprocess, "run", return_value=_Result()))
+    stack.enter_context(patch.object(serve_siblings.run_program, "run", return_value=_Result()))
     stack.enter_context(patch.object(serve_siblings, "_process_table_kind", return_value="ps"))
     if not hasattr(os, "getuid"):
         stack.enter_context(patch.object(serve_siblings.os, "getuid", lambda: _MY_UID, create=True))
@@ -66,7 +66,7 @@ def _fake_cim(stdout: str):
         def __init__(self) -> None:
             self.stdout = stdout
 
-    return patch.object(serve_siblings.subprocess, "run", return_value=_Result())
+    return patch.object(serve_siblings.run_program, "run", return_value=_Result())
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ class TestListServeProcesses:
     def test_ps_failure_returns_none_not_zero(self) -> None:
         """Unknown must never masquerade as healthy-zero."""
         with patch.object(
-            serve_siblings.subprocess, "run", side_effect=OSError("no ps")
+            serve_siblings.run_program, "run", side_effect=OSError("no ps")
         ), patch.object(serve_siblings, "_process_table_kind", return_value="ps"):
             assert serve_siblings._list_serve_processes() is None
 
@@ -201,10 +201,10 @@ class TestListServeProcessesWindows:
             assert serve_siblings._list_serve_processes_windows() == []
 
     def test_a_missing_powershell_or_a_timeout_is_unknown(self) -> None:
-        with patch.object(serve_siblings.subprocess, "run", side_effect=FileNotFoundError("powershell")):
+        with patch.object(serve_siblings.run_program, "run", side_effect=FileNotFoundError("powershell")):
             assert serve_siblings._list_serve_processes_windows() is None
         with patch.object(
-            serve_siblings.subprocess, "run",
+            serve_siblings.run_program, "run",
             side_effect=serve_siblings.subprocess.TimeoutExpired("powershell", 8),
         ):
             assert serve_siblings._list_serve_processes_windows() is None
@@ -242,7 +242,7 @@ class TestListServeProcessesWindows:
 
             return _Result()
 
-        with patch.object(serve_siblings.subprocess, "run", _run):
+        with patch.object(serve_siblings.run_program, "run", _run):
             procs = serve_siblings._list_serve_processes_windows()
         assert procs is not None and [p["pid"] for p in procs] == [5]
         assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"

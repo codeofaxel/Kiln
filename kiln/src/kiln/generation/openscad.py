@@ -34,17 +34,27 @@ from kiln.generation.base import (
 from kiln.generation.job_records import JobRecord, MemoryJobRecords
 from kiln.openscad_runner import bundled_library_path, run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
+from kiln.scad_reads import LIBRARIES, file_reads, is_bundled_library
 
 logger = logging.getLogger(__name__)
 
 # Bundled OpenSCAD library whitelist — only these prefixes are allowed
 # in include/use statements for security.
-_SAFE_LIBRARY_PREFIXES = ("BOSL2/", "MCAD/")
+_SAFE_LIBRARY_PREFIXES = tuple(f"{name}/" for name in LIBRARIES)
 
 # File-IO patterns that need path validation before compiling.
 _FILE_IO_PATTERN = re.compile(
     r"\b(import|surface)\s*\(\s*\"([^\"]+)\"", re.IGNORECASE
 )
+
+
+class SourceReadRefused(GenerationError, ValueError):
+    """The host refused a file this source would read.  A refusal, not a
+    fault: it carries its own code, and it is a :class:`ValueError` for the
+    callers that already answer a refused source as invalid input."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="SCAD_FILE_READ_NOT_ALLOWED")
 
 
 def _check_scad_security(code: str, *, allow_local_files: bool = True) -> None:
@@ -55,12 +65,27 @@ def _check_scad_security(code: str, *, allow_local_files: bool = True) -> None:
     that already exist on the local filesystem.  This is safe because
     the agent already has filesystem access.
 
+    Where the process has a host policy for OpenSCAD
+    (:func:`kiln.openscad_runner.set_host_policy`), the policy judges the
+    files the code reads first, and its answer is the one given: a path it
+    refuses gets the same answer whether or not a file is there.
+
     Raises :class:`ValueError` on violations.
     """
     if len(code) > 100_000:
         raise ValueError("OpenSCAD code too large (max 100KB).")
 
-    for match in _FILE_IO_PATTERN.finditer(code):
+    from kiln import openscad_runner
+
+    refusal = openscad_runner.refused_source(code)
+    if refusal is not None:
+        raise SourceReadRefused(refusal)
+    # With a host judging every read by where it points (one answer whether
+    # or not a file is there), asking the disk here would answer that
+    # question for any path, so the existence check below is skipped.
+    judged_by_host = allow_local_files and openscad_runner.host_policy() is not None
+
+    for match in ([] if judged_by_host else _FILE_IO_PATTERN.finditer(code)):
         func_name = match.group(1)
         file_ref = match.group(2)
         if not allow_local_files:
@@ -102,12 +127,18 @@ def _has_only_safe_includes(code: str) -> bool:
 
     Returns ``True`` if the code contains no ``include``/``use`` at all,
     or if every such statement references a path starting with one of the
-    allowed library prefixes (BOSL2/, MCAD/).
+    allowed library prefixes (BOSL2/, MCAD/).  That holds for every include
+    the shared reader finds (:func:`kiln.scad_reads.file_reads`), and for
+    every ``include`` / ``use`` written with spaces or ``>`` before its
+    ``<``, in any letter case, comments and strings included.
 
     Security: rejects path traversal (``..``), absolute paths, null bytes,
     and non-ASCII characters that could bypass filtering.
     """
-    for match in re.finditer(r"\b(?:include|use)\s*<([^>]+)>", code, re.IGNORECASE):
+    for how, path in file_reads(code):
+        if how == "include" and not is_bundled_library(path):
+            return False
+    for match in re.finditer(r"\b(?:include|use)[\s>]*<([^>]+)>", code, re.IGNORECASE):
         path = match.group(1).strip()
         # Reject null bytes and non-ASCII (Unicode tricks)
         if "\x00" in path or not path.isascii():
@@ -119,6 +150,8 @@ def _has_only_safe_includes(code: str) -> bool:
         if path.startswith("/") or path.startswith("\\"):
             return False
         if not any(path.startswith(prefix) for prefix in _SAFE_LIBRARY_PREFIXES):
+            return False
+        if not is_bundled_library(path):
             return False
     return True
 

@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any
 from kiln.print_signoff import grant_from_record
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printers.base import PrinterEngagementError
+from kiln.quoted_text import fence
 
 if TYPE_CHECKING:
     from kiln.plugins.validation_pipeline_tools import PrintGate
@@ -133,10 +134,10 @@ def _start_print_step_message(verdict: Any, remote_name: str) -> str:
     printer answered, including when it answered nothing, lies.
     """
     if verdict.confirmed:
-        return f"Print started: {remote_name}"
+        return f"Print started: {fence(remote_name)}"
     if verdict.ok:
-        return f"Print command accepted, not yet confirmed running: {remote_name}"
-    return f"Printer did not start {remote_name}. {verdict.message}"
+        return f"Print command accepted, not yet confirmed running: {fence(remote_name)}"
+    return f"Printer did not start {fence(remote_name)}. {verdict.message}"
 
 
 # ---------------------------------------------------------------------------

@@ -163,7 +163,6 @@ NOT_A_MAKE_DOOR: dict[str, str] = {
     "compose_assembly_parts": "arranges parts that were already made into an assembly",
     "compose_models": "merges meshes that already exist",
     "compose_multicolor_3mf": "packs meshes that already exist into one multi-colour print file",
-    "generate_qr_decoration": "a decoration for a product that already exists",
     "merge_decoration_preset_branches": "merges versions of a preset that exists",
     "merge_design_branches": "merges versions of a design that exists",
     "merge_feature_branches": "merges versions of a feature that exists",
@@ -173,7 +172,6 @@ NOT_A_MAKE_DOOR: dict[str, str] = {
     "rebase_preset_branch": "rewrites history of a preset that exists",
     "rollback_design_version": "returns a design that exists to an earlier version",
     "rollback_feature": "returns a feature that exists to an earlier version",
-    "smart_decorate": "decorates a product that already exists (path rides its arguments dict)",
     # Make-shaped names that make no object.
     "build_generation_prompt": "writes a prompt; makes nothing",
     "build_material_overrides": "slicer settings for a material; makes nothing",

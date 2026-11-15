@@ -448,7 +448,9 @@ def _resolve_local_job(file_name: str, kwargs: dict[str, Any]) -> str | None:
 
 def with_judged_plate(file_name: str, kwargs: dict[str, Any], kept: list[str]) -> dict[str, Any]:
     """The start's arguments."""
-    if kwargs.get("local_file_path") or _is_resume_print(file_name, kwargs):
+    # Routing help only: the gate has already judged this start, so the
+    # claim is enough to leave a continuation's arguments as they came.
+    if kwargs.get("local_file_path") or _claims_resume_print(file_name, kwargs):
         return kwargs
     plate = _resolve_local_job(file_name, kwargs) or (kept[0] if kept else None)
     return {**kwargs, "local_file_path": plate} if plate else kwargs
@@ -509,13 +511,25 @@ def _resolve_material(kwargs: dict[str, Any]) -> str | None:
     return None
 
 
-def _is_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
-    """True for a resume-mode continuation (mid-print decoration / recovery)."""
-    if kwargs.get("resume_from_paused"):
-        return True
-    name = (file_name or "").lower()
-    return "_resume_" in name or name.startswith(
-        ("transformed_resume", "original_resume")
+def _claims_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
+    """Whether a start SAYS it is a resume-mode continuation: the caller's
+    flag or a resume-style file name (:func:`kiln.print_signoff.claims_resume`).
+    A claim only; see :func:`_is_resume_print`."""
+    from kiln.print_signoff import claims_resume
+
+    return claims_resume(file_name, kwargs)
+
+
+def _is_resume_print(file_name: str, kwargs: dict[str, Any], *, adapter: Any = None) -> bool:
+    """True only for a resume file Kiln made for the job paused on this
+    printer right now: :func:`kiln.print_signoff.verified_resume`, the one
+    check every start door asks.  Anything else, whatever it calls itself,
+    is judged here as the new print it may be."""
+    from kiln.print_signoff import verified_resume
+
+    return verified_resume(
+        file_name, kwargs, adapter=adapter,
+        printer_name=None if adapter is not None else kwargs.get("printer_name"),
     )
 
 
@@ -1596,7 +1610,7 @@ def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any], *, keep: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Universal print-time backstop, called from ``PrinterAdapter.start_print``."""
-    if _is_resume_print(file_name, kwargs):
+    if _is_resume_print(file_name, kwargs, adapter=adapter):
         return None
 
     if fleet_blocked := _concurrent_fleet_verdict(adapter):

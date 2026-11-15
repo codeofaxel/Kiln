@@ -96,7 +96,7 @@ class FakeOpenSCAD:
 def fake_run(monkeypatch):
     """Install a :class:`FakeOpenSCAD` in place of the runner's subprocess.run."""
     def install(fake: FakeOpenSCAD) -> FakeOpenSCAD:
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         return fake
 
     return install
@@ -395,6 +395,39 @@ def _subprocess_launches(path: Path) -> list[int]:
     return hits
 
 
+#: Shared helpers that launch OpenSCAD through the runner for their caller,
+#: mapped to the module that defines each.  A listed module that calls one
+#: routes through the runner as surely as one calling ``run_openscad``
+#: itself; ``test_each_runner_helper_calls_the_runner`` holds each helper
+#: to that.
+_RUNNER_HELPERS = {"run_resolving": "scad_settings.py"}
+
+
+def _called_names(tree: ast.AST) -> set[str]:
+    """Names called anywhere in *tree*, as ``f(...)`` or ``x.f(...)``.
+
+    A call, not a mention: an import or a comment naming the runner does
+    not count.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.add(node.func.attr)
+    return names
+
+
+def _function_node(path: Path, name: str) -> ast.AST:
+    """The top-level function *name* in *path*."""
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return node
+    raise AssertionError(f"{path.name} defines no top-level function {name}")
+
+
 class TestEveryDoorRoutesThroughTheRunner:
     """The retry is worthless at any site that skipped it."""
 
@@ -413,12 +446,26 @@ class TestEveryDoorRoutesThroughTheRunner:
 
     @pytest.mark.parametrize("module", _OPENSCAD_MODULES)
     def test_module_actually_calls_the_runner(self, module):
-        """The other half: not just 'no subprocess', but 'yes runner'."""
-        source = (_SRC / module).read_text()
-        assert "run_openscad" in source, (
+        """The other half: not just 'no subprocess', but a call to the runner."""
+        called = _called_names(ast.parse((_SRC / module).read_text()))
+        routes = {"run_openscad", *_RUNNER_HELPERS}
+        assert called & routes, (
             f"{module} is listed as an OpenSCAD invocation site but never "
-            f"calls run_openscad — either it stopped launching OpenSCAD "
-            f"(drop it from _OPENSCAD_MODULES) or a call site was missed."
+            f"calls run_openscad or a helper that does "
+            f"({', '.join(sorted(_RUNNER_HELPERS))}) — either it stopped "
+            f"launching OpenSCAD (drop it from _OPENSCAD_MODULES) or a call "
+            f"site was missed."
+        )
+
+    @pytest.mark.parametrize("helper", sorted(_RUNNER_HELPERS))
+    def test_each_runner_helper_calls_the_runner(self, helper):
+        """A helper counts as a route to the runner only while it calls it."""
+        path = _SRC / _RUNNER_HELPERS[helper]
+        assert "run_openscad" in _called_names(_function_node(path, helper)), (
+            f"{_RUNNER_HELPERS[helper]}::{helper} no longer calls run_openscad, "
+            f"so the modules that launch OpenSCAD through it skip the "
+            f"startup-crash retry. Route it back through the runner, or drop "
+            f"it from _RUNNER_HELPERS."
         )
 
     def test_no_unlisted_module_launches_openscad(self):
@@ -638,14 +685,14 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
     def test_a_closed_fast_compile_runs_once(self, monkeypatch, tmp_path):
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [_CLOSED_STL])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         run_openscad(_fast(out), output_path=str(out))
         assert len(fake.argvs) == 1
 
     def test_an_open_fast_compile_is_rebuilt_without_the_flag(self, monkeypatch, tmp_path):
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [_OPEN_STL, _CLOSED_STL])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         result = run_openscad(_fast(out), output_path=str(out))
         assert result.returncode == 0
         assert len(fake.argvs) == 2
@@ -658,7 +705,7 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
         out = tmp_path / "out.stl"
         fast_file = _OPEN_STL.replace("solid t", "solid fast", 1)
         fake = _EngineFake(out, [fast_file, _OPEN_STL])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         result = run_openscad(_fast(out), output_path=str(out))
         assert result.returncode == 0
         assert out.read_text() == fast_file
@@ -666,7 +713,7 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
     def test_an_exact_engine_past_its_budget_leaves_the_fast_file(self, monkeypatch, tmp_path):
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [_OPEN_STL, subprocess.TimeoutExpired("openscad", 60)])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         result = run_openscad(_fast(out), timeout=600, output_path=str(out))
         assert result.returncode == 0
         assert out.read_text() == _OPEN_STL
@@ -677,7 +724,7 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
         stood), so it is not started; neither is the closure check."""
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [_OPEN_STL, _CLOSED_STL])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         monkeypatch.setattr("kiln.openscad_runner._EXACT_ENGINE_MAX_TRIANGLES", 2, raising=False)
         checked: list[str] = []
         monkeypatch.setattr("kiln.openscad_runner._is_open_mesh", lambda p: checked.append(p) or True)
@@ -690,7 +737,7 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
     def test_a_mesh_within_the_limit_is_still_rebuilt(self, monkeypatch, tmp_path):
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [_OPEN_STL, _CLOSED_STL])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         monkeypatch.setattr("kiln.openscad_runner._EXACT_ENGINE_MAX_TRIANGLES", 3, raising=False)
         run_openscad(_fast(out), output_path=str(out))
         assert len(fake.argvs) == 2
@@ -699,7 +746,7 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
     def test_a_compile_on_the_exact_engine_is_not_checked(self, monkeypatch, tmp_path):
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [_OPEN_STL])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         run_openscad(["/fake/openscad", "--backend=cgal", "-o", str(out), "in.scad"],
                      output_path=str(out))
         assert len(fake.argvs) == 1
@@ -708,7 +755,7 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
         """OpenSCAD 2024+ compiles on the fast engine when none is named."""
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [_OPEN_STL, _CLOSED_STL])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         run_openscad(["/fake/openscad", "-o", str(out), "in.scad"], output_path=str(out))
         assert fake.argvs[1][:2] == ["/fake/openscad", "--backend=cgal"]
         assert out.read_text() == _CLOSED_STL
@@ -716,7 +763,7 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
     def test_a_picture_is_not_checked(self, monkeypatch, tmp_path):
         out = tmp_path / "out.png"
         fake = _EngineFake(out, ["not a mesh"])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         run_openscad(_fast(out), output_path=str(out))
         assert len(fake.argvs) == 1
 
@@ -768,7 +815,7 @@ class TestTheExactEngineMustKeepThePart:
         plain, _carved, opened = self._parts()
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [self._stl(opened), self._stl(plain)])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         result = run_openscad(_fast(out), output_path=str(out))
         assert result.returncode == 0 and len(fake.argvs) == 2
         assert out.read_text() == self._stl(opened), "the carve must not be traded for a closed file"
@@ -778,7 +825,7 @@ class TestTheExactEngineMustKeepThePart:
         _plain, carved, opened = self._parts()
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [self._stl(opened), self._stl(carved)])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
         run_openscad(_fast(out), output_path=str(out))
         assert out.read_text() == self._stl(carved)
 
@@ -833,7 +880,7 @@ class TestTrianglesCollapsedToALineOrAPoint:
         fast = _binary_stl(np.vstack([box.triangles, _collapsed_on(box)]))
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [fast, _CLOSED_STL])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
 
         result = run_openscad(_fast(out), output_path=str(out))
 
@@ -851,7 +898,7 @@ class TestTrianglesCollapsedToALineOrAPoint:
         left, right = _box(), _box(at=(40.0, 0.0, 0.0))
         fast = _binary_stl(np.vstack([left.triangles, _collapsed_on(left), right.triangles, _collapsed_on(right)]))
         out = tmp_path / "out.stl"
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", _EngineFake(out, [fast]))
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", _EngineFake(out, [fast]))
 
         run_openscad(_fast(out), output_path=str(out))
 
@@ -871,7 +918,7 @@ class TestTrianglesCollapsedToALineOrAPoint:
         fast = _binary_stl(np.vstack([opened, on_the_rim]))
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [fast, fast])
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
 
         run_openscad(_fast(out), output_path=str(out))
 
@@ -882,7 +929,7 @@ class TestTrianglesCollapsedToALineOrAPoint:
         box = _box()
         fast = _binary_stl(_collapsed_on(box))
         out = tmp_path / "out.stl"
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", _EngineFake(out, [fast, fast]))
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", _EngineFake(out, [fast, fast]))
 
         run_openscad(_fast(out), output_path=str(out))
 
@@ -931,7 +978,7 @@ class TestASharedBedPlaneCompilesClosed:
             launches.append(list(argv))
             return real(argv, *args, **kwargs)
 
-        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", spy)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", spy)
         source = _SHARED_BED_PLANE.replace("{slices}", str(slices)).replace("{step}", str(step))
         stl = compile_scad_code(source, output_path=str(tmp_path / "part.stl"))
         return trimesh.load(stl, force="mesh"), launches

@@ -180,12 +180,30 @@ class TestSwarmFixes:
     """Regressions for the adversarial-verify findings."""
 
     def test_resume_mode_soft_passes_oversize(self, big):
-        # A resume continuation is committed + already validated -> never re-gated,
-        # even though `big` is oversize. (false-block fix)
+        # A resume Kiln made for the job the printer reports paused
+        # is committed + already validated -> never re-gated, even though
+        # `big` is oversize. (false-block fix)
+        from kiln.printers.base import PrinterState, PrinterStatus
+
+        from tests._kiln_resume import made_by_kiln
+
         a = _FakeAdapter()
+        a.get_state = lambda: PrinterState(state=PrinterStatus.PAUSED, connected=True)
+        made_by_kiln(a, big)
         assert pg.run_adapter_gate(a, big, {"resume_from_paused": True}) is None
-        # ...and via the conventional resume filename (string check; file need not exist)
+        # ...and a resume Kiln made, started by the name it was saved under
+        made_by_kiln(a, "/tmp/foo_resume_plate.3mf")
         assert pg.run_adapter_gate(a, "/tmp/foo_resume_plate.3mf", {}) is None
+
+    def test_a_resume_claim_on_an_idle_printer_is_gated_like_a_new_print(self, big):
+        # This test used to assert the claim alone soft-passed.  The flag and
+        # the name are whatever the caller chose, so on a printer with no
+        # paused job the oversize file is judged and blocked like any other.
+        from kiln.printers.base import PrinterState, PrinterStatus
+
+        a = _FakeAdapter()
+        a.get_state = lambda: PrinterState(state=PrinterStatus.IDLE, connected=True)
+        assert pg.run_adapter_gate(a, big, {"resume_from_paused": True}) is not None
 
     def test_override_is_single_use(self, big):
         a = _FakeAdapter()

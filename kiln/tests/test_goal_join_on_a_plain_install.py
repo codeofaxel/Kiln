@@ -15,6 +15,7 @@ Kiln's servers stood in at the one served door (``kiln.server._pro_api_call``).
 
 from __future__ import annotations
 
+import errno
 import sys
 from pathlib import Path
 
@@ -184,7 +185,7 @@ def test_a_goal_not_in_this_account_is_said(plain_install, servers, made):
     ("setup", "why"),
     [
         ({"signed_in": False, "answer": None}, "signed_out"),
-        ({"answer": OSError(51, "Network is unreachable")}, None),
+        ({"answer": OSError(errno.ENETUNREACH, "Network is unreachable")}, None),
         ({"answer": {"status": "error", "code": "SERVER_UNREACHABLE", "error": "down", "retryable": True}}, "unanswered"),
         ({"answer": {"status": "error", "code": "QUOTA", "error": "No more today."}}, "refused"),
     ],

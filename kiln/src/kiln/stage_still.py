@@ -67,6 +67,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from kiln import run_program
+
 logger = logging.getLogger(__name__)
 
 #: A caller-requested filament colour the stage can honour.  OpenSCAD also
@@ -407,7 +409,7 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
         f"file://{harness_path}",
     ]
     try:
-        proc = subprocess.Popen(
+        proc = run_program.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except OSError as exc:

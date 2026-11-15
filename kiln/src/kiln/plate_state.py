@@ -136,6 +136,11 @@ START_NOT_YET_CODE = "PLATE_OCCUPIED_START_NOT_YET"
 #: A quiet-start file planned for a plate that is not this one any more:
 #: something was printed, cleared or moved since the plan was made.
 PLATE_CHANGED_CODE = "PLATE_CHANGED_SINCE_PLAN"
+#: A recovery file Kiln made for the print still on the plate, started
+#: without a person's yes to this print itself (a standing window, always
+#: allow, a queued job): a part can lift off the bed as it cools, so the
+#: person looks first.
+RECOVERY_NEEDS_A_YES_CODE = "RECOVERY_NEEDS_A_YES"
 #: What a person is told when the plate holds a part and the file has no
 #: quiet-start plan to open with.  The wrap says it when it refuses to write
 #: a printer file (a file with the printer's own start would home Z onto the
@@ -476,6 +481,17 @@ class PlateState:
             "record now, so it won't start it. Slice it again beside what is there, or clear the plate and say so."
         )
 
+    def recovery_needs_a_yes_sentence(self, file_name: str | None, look: str = "") -> str:
+        """Why a recovery of the print on the plate waits for the person."""
+        shown = os.path.basename(str(file_name or "")) or "This file"
+        job = pretty_job_name(self.job.file) if self.job is not None else "the print"
+        return (
+            f"{shown} picks {job} up again on the part still on the plate. Kiln starts it onto that "
+            "part only when you say yes to this print itself, not through a standing window, always "
+            "allow or a queued job: a part can lift off the bed as it cools. Check the part is still "
+            f"stuck down, then start it again and say yes. {look}"
+        ).strip()
+
     def start_refusal_sentence(self) -> str:
         """Why no print starts while the plate holds the last one."""
         return (
@@ -608,6 +624,14 @@ def start_hold(
     -- the queue, every few seconds while a job waits -- and must not take a
     camera frame each time.  Reads the record and the file's header only;
     never raises.
+
+    A RECOVERY passes too: a resume file Kiln built from its own copy of
+    the print still recorded on this plate, and nothing else on it
+    (:func:`kiln.resume_provenance.recovery_on_plate`), started with the
+    person's yes to this print itself
+    (:func:`kiln.resume_provenance.yes_for_this_print`).  Started on any
+    other yes it is held with :data:`RECOVERY_NEEDS_A_YES_CODE`.  Any other
+    file, or a recovery of a different job, is held as before.
     """
     if resume:
         return None
@@ -624,7 +648,24 @@ def start_hold(
         if planned_plate == fingerprint(state) and planned_machine and planned_machine == _machine_contract_id(adapter):
             return None
         return PLATE_CHANGED_CODE, state
+    if file_name and _recovery_of_this_plate(adapter, file_name):
+        from kiln.resume_provenance import yes_for_this_print
+
+        if yes_for_this_print(file_name, getattr(adapter, "_kiln_registered_name", None) or None):
+            return None
+        return RECOVERY_NEEDS_A_YES_CODE, state
     return START_NOT_YET_CODE, state
+
+
+def _recovery_of_this_plate(adapter: Any, file_name: str) -> bool:
+    """Whether *file_name* is a recovery Kiln made for the print still on
+    this plate (:func:`kiln.resume_provenance.recovery_on_plate`)."""
+    try:
+        from kiln.resume_provenance import recovery_on_plate
+
+        return recovery_on_plate(file_name, adapter=adapter) is not None
+    except Exception:  # noqa: BLE001 -- unreadable is not a recovery
+        return False
 
 
 def start_refusal(
@@ -658,6 +699,21 @@ def start_refusal(
     if held is None:
         return None
     code, state = held
+    if code == RECOVERY_NEEDS_A_YES_CODE:
+        # The part is meant to be there; whether it is still stuck down is
+        # what the person checks, from the picture, before saying yes.
+        offer = offer_look(adapter, state)
+        return {
+            "success": False,
+            "error": {
+                "code": RECOVERY_NEEDS_A_YES_CODE,
+                "message": state.recovery_needs_a_yes_sentence(file_name, offer.sentence),
+                "retryable": False,
+            },
+            "plate": state.to_dict(),
+            "occupancy": state.occupancy(None),
+            **offer.fields(),
+        }
     if code == PLATE_CHANGED_CODE:
         # Planned beside a part and the plate has changed since: the remedy
         # is the plan's, not a look.

@@ -477,9 +477,19 @@ class TestAdapterBackstop:
         PrinterRegistry().register("garage", printer)
         assert print_signoff.signoff_required(printer)
 
-    def test_resume_and_ci_bypass_still_pass(self, monkeypatch):
+    def test_resume_on_a_paused_printer_and_ci_bypass_still_pass(self, monkeypatch):
+        # This test once let a resume-named file through on an idle printer.
+        # A name is the file maker's choice, so a resume passes the backstop
+        # only when it is a file Kiln made for the job the printer reports
+        # paused.
         printer = _Printer()
         print_signoff.require_signoff(printer)
+        assert printer.start_print("transformed_resume_1.3mf").success is False
+        monkeypatch.setattr(printer, "get_state", lambda: PrinterState(state=PrinterStatus.PAUSED, connected=True))
+        assert printer.start_print("transformed_resume_1.3mf").success is False, "paused is not enough"
+        from tests._kiln_resume import made_by_kiln
+
+        made_by_kiln(printer, "transformed_resume_1.3mf")
         assert printer.start_print("transformed_resume_1.3mf").success is True
         monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
         assert printer.start_print("part.gcode").success is True

@@ -40,6 +40,7 @@ from kiln.printers.base import (
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.safe_motion import build_firmware_resume_positioning
+from kiln.quoted_text import fence
 
 logger = logging.getLogger(__name__)
 
@@ -644,7 +645,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return UploadResult(
             success=True,
             file_name=filename,
-            message=f"Uploaded {filename} to SD card.",
+            message=f"Uploaded {fence(filename)} to SD card.",
         )
 
     # ------------------------------------------------------------------
@@ -667,7 +668,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         self._current_file = file_name
         return PrintResult(
             success=True,
-            message=f"Started printing {file_name} from SD card.",
+            message=f"Started printing {fence(file_name)} from SD card.",
         )
 
     def cancel_print(self) -> PrintResult:
@@ -1037,7 +1038,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return PrintResult(
             success=True,
             message=(
-                f"Firmware resume positioning complete for {file_name}{layer_info}. "
+                f"Firmware resume positioning complete for {fence(file_name)}{layer_info}. "
                 f"Z={z_height_mm}mm, hotend={hotend_temp_c}\u00b0C, bed={bed_temp_c}\u00b0C. "
                 f"Printer is positioned and ready \u2014 start the resume file via start_print."
             ),

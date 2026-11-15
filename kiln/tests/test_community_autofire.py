@@ -129,7 +129,10 @@ def test_completed_contributes_success_with_geo_signature():
     assert "file_hash" not in record
 
 
-def test_failed_contributes_failed_with_defaults():
+def test_a_monitors_bare_failure_is_the_printers_stop_and_is_not_pooled():
+    """A monitor sees the printer end the job, not the part: a bare "failed"
+    from it is the printer stopping itself, which says nothing about the
+    model, the material or the nozzle the pool counts by."""
     from kiln import community_autofire as ca
 
     with mock.patch(
@@ -138,9 +141,23 @@ def test_failed_contributes_failed_with_defaults():
     ), mock.patch(
         "kiln.community_outbox.contribute", return_value={"queued": True}
     ) as contrib:
-        ca.auto_contribute_completion(outcome="failed", printer_file_name="p.gcode")
+        result = ca.auto_contribute_completion(outcome="failed", printer_file_name="p.gcode")
+    assert not contrib.called
+    assert result == {"contributed": False, "reason": "not_about_the_print"}
+
+
+def test_a_completion_contributes_with_defaults():
+    from kiln import community_autofire as ca
+
+    with mock.patch(
+        "kiln.community_autofire.geometric_signatures_for",
+        return_value=("geo16char0000000", "v2:geo16char00000"),
+    ), mock.patch(
+        "kiln.community_outbox.contribute", return_value={"queued": True}
+    ) as contrib:
+        ca.auto_contribute_completion(outcome="completed", printer_file_name="p.gcode", job_id="job-1")
     _key, record = contrib.call_args.args
-    assert record["outcome"] == "failed"
+    assert record["outcome"] == "success"
     assert record["printer_model"] == "unknown"
     assert record["material"] == "unknown"
     assert "print_time_seconds" not in record

@@ -129,10 +129,9 @@ def _answer(**over: Any) -> dict[str, Any]:
 
 
 def _written_answer(tmp_path: Path, **over: Any) -> dict[str, Any]:
-    """An answer that hands back a written file, which sits in a folder of its own."""
-    folder = tmp_path / "written"
-    folder.mkdir(exist_ok=True)
-    path = folder / "out-with-pauses.gcode"
+    """An answer naming a written file where a planner on this computer writes
+    it: beside the sliced file (``out.gcode``), under its name."""
+    path = tmp_path / "out-with-pauses.gcode"
     path.write_bytes(WRITTEN)
     return _answer(
         written_file=str(path),
@@ -341,9 +340,7 @@ def test_a_wrapped_upload_is_what_the_planner_reads_and_what_is_replaced(slicer_
     written = _three_mf(WRITTEN)
 
     def answer(_kw):
-        folder = tmp_path / "written"
-        folder.mkdir(exist_ok=True)
-        path = folder / "plate-with-pauses.3mf"
+        path = tmp_path / "out-with-pauses.3mf"
         path.write_bytes(written)
         return _answer(written_file=str(path), written_note="Print this file, not the original.")
 
@@ -832,3 +829,61 @@ def test_a_pause_missing_from_one_layer_is_still_refused(slicer_tools, tmp_path,
     resp = _run(slicer_tools, tmp_path, monkeypatch, printer, _Planner(_answer(stops=stops)))
     assert resp["success"] is False and resp["error"]["code"] == "HARDWARE_PAUSE_NOT_WRITTEN"
     assert printer.uploads == []
+
+
+# ---------------------------------------------------------------------------
+# A written file the answer names is printed only when it is the planner's
+# own for this print; any other file on this computer is left as it was.
+# ---------------------------------------------------------------------------
+
+
+def _victim(path: Path, content: bytes = b"the person's own notes\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
+
+
+@pytest.mark.parametrize("where", ["documents/notes.txt", "elsewhere/earlier-print.gcode"])
+def test_a_file_elsewhere_on_this_computer_is_never_printed_or_removed(slicer_tools, tmp_path, monkeypatch, where):
+    victim = _victim(tmp_path.parent / f"{tmp_path.name}-outside" / where)
+    printer = _Printer()
+    planner = _Planner(lambda _kw: _answer(written_file=str(victim)))
+    resp = _run(slicer_tools, tmp_path, monkeypatch, printer, planner)
+
+    assert resp["success"] is False
+    _sent_nothing(printer)
+    assert resp["error"]["code"] == "HARDWARE_PAUSE_NOT_WRITTEN"
+    assert "not one Kiln wrote for this print" in resp["error"]["message"]
+    assert victim.read_bytes() == b"the person's own notes\n"
+
+
+def test_an_earlier_print_beside_this_one_is_never_printed_or_removed(slicer_tools, tmp_path, monkeypatch):
+    import os
+    import time
+
+    earlier = _victim(tmp_path / "out-earlier-print.gcode", b"G28\nM104 S280\n")
+    old = time.time() - 3600
+    os.utime(earlier, (old, old))
+    printer = _Printer()
+    planner = _Planner(lambda _kw: _answer(written_file=str(earlier)))
+    resp = _run(slicer_tools, tmp_path, monkeypatch, printer, planner)
+
+    assert resp["success"] is False
+    _sent_nothing(printer)
+    assert resp["error"]["code"] == "HARDWARE_PAUSE_NOT_WRITTEN"
+    assert earlier.read_bytes() == b"G28\nM104 S280\n"
+
+
+def test_another_name_beside_this_print_is_never_printed_or_removed(slicer_tools, tmp_path, monkeypatch):
+    printer = _Printer()
+
+    def answer(_kw):
+        other = _victim(tmp_path / "someone-elses.gcode", b"G28\n")
+        return _answer(written_file=str(other))
+
+    planner = _Planner(answer)
+    resp = _run(slicer_tools, tmp_path, monkeypatch, printer, planner)
+
+    assert resp["success"] is False
+    _sent_nothing(printer)
+    assert (tmp_path / "someone-elses.gcode").read_bytes() == b"G28\n"

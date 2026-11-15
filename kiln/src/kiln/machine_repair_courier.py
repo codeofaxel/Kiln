@@ -15,9 +15,12 @@ on this computer, meaningless anywhere else), the status, the kind, and when
 it was made -- never the note (a note can name a serial or a place) and never
 the printer's name.  Beside the marks, one announcement per printer this
 computer has set up: its code, its model word, and, for a printer whose own
-secret both computers already hold, a shared code
-(:func:`kiln.machine_repairs.shared_code`) that lets the account tell two
-computers are looking at one machine without either serial leaving.
+secret both computers already hold or whose own board reports an id, a
+shared code (:func:`kiln.machine_repairs.shared_code`) that lets the account
+tell two computers are looking at one machine without either serial leaving;
+and, for a printer run from a controller that reports an id, a controller
+code (:func:`kiln.machine_repairs.controller_code`) that lets the account
+tell two printers on two controllers apart.
 
 What comes down: the account's marks for this computer's printers, resolved
 through the account's links, absorbed into this computer's record under the
@@ -161,9 +164,11 @@ def _model_of(adapter: Any) -> str | None:
 
 def announcements(registry: Any = None) -> list[dict[str, Any]]:
     """One announcement per printer set up here that Kiln can tell apart:
-    ``{"fingerprint", "name", "machine_code", "model", "shared_code"}``.
-    The fingerprint and name never leave; they key what comes back."""
-    from kiln.machine_repairs import shared_code
+    ``{"fingerprint", "name", "machine_code", "model", "shared_code",
+    "controller_code"}``.  The fingerprint and name never leave; they key
+    what comes back.  A shared code two printers here both carry is left off
+    both."""
+    from kiln.machine_repairs import controller_code, shared_code
     from kiln.outbound_guard import machine_code
     from kiln.registry import stable_machine_fingerprint
 
@@ -188,7 +193,18 @@ def announcements(registry: Any = None) -> list[dict[str, Any]]:
         shared = shared_code(adapter)
         if shared:
             entry["shared_code"] = shared
+        controller = controller_code(adapter)
+        if controller:
+            entry["controller_code"] = controller
         out.append(entry)
+    # One shared code on two of this computer's printers names neither.
+    carried: dict[str, int] = {}
+    for entry in out:
+        if entry.get("shared_code"):
+            carried[entry["shared_code"]] = carried.get(entry["shared_code"], 0) + 1
+    for entry in out:
+        if carried.get(entry.get("shared_code") or "", 0) > 1:
+            del entry["shared_code"]
     return out
 
 
@@ -311,7 +327,7 @@ def sync(*, db: Any = None, registry: Any = None, limit: int = MAX_ROWS,
         sent_ids[sync_id] = row["id"]
     body = {
         "marks": marks,
-        "machines": [{k: v for k, v in p.items() if k in ("machine_code", "model", "shared_code")} for p in printers],
+        "machines": [{k: v for k, v in p.items() if k in ("machine_code", "model", "shared_code", "controller_code")} for p in printers],
     }
     answer = _request(TOOL, "POST", SYNC_PATH, scrub(body), timeout=timeout or _WAIT_S)
     if answer.get("success") is False or answer.get("status") == "error":

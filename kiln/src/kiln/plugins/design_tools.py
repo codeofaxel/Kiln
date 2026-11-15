@@ -70,7 +70,7 @@ def _load_figure_miss(material: str, miss: Any) -> dict[str, Any]:
         "load_checked": False,
         "code": "LOAD_FIGURES_UNAVAILABLE",
         "error": text,
-        "retryable": miss.cause != "refused",
+        "retryable": miss.no_answer,
         **served_answer.fields(miss),
     }
 
@@ -1730,7 +1730,7 @@ class _DesignToolsPlugin:
                     moves on its own, like drawers in a case); ``"gears"`` (optional) lists
                     ``{"parts": [a, b], "teeth": [na, nb], "carrier": the piece
                     holding both axes, "inside": true when b is a ring with its
-                    teeth inside}``.  Checked with a goal (``brief_id``) on a make
+                    teeth inside}``.  Checked with a goal (``goal_id``) on a make
                     Kiln's servers answer; then the stage on this computer plays it
                     too.  Elsewhere the reply carries no ``motion``.
             """

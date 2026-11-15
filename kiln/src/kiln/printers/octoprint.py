@@ -38,6 +38,7 @@ from kiln.printers.base import (
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.safe_motion import build_firmware_resume_positioning
+from kiln.quoted_text import fence
 
 try:
     import websocket as _ws_mod  # websocket-client
@@ -849,7 +850,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
         return PrintResult(
             success=True,
-            message=f"Started printing {file_name}.",
+            message=f"Started printing {fence(file_name)}.",
         )
 
     def cancel_print(self) -> PrintResult:
@@ -935,7 +936,7 @@ class OctoPrintAdapter(PrinterAdapter):
         return PrintResult(
             success=True,
             message=(
-                f"Firmware resume positioning complete for {file_name}{layer_info}. "
+                f"Firmware resume positioning complete for {fence(file_name)}{layer_info}. "
                 f"Z={z_height_mm}mm, hotend={hotend_temp_c}°C, bed={bed_temp_c}°C. "
                 f"Printer is positioned and ready — start the resume file via start_print."
             ),

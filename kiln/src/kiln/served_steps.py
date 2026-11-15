@@ -37,8 +37,11 @@ reads, and nothing here tells it where the printer is or how to reach it.
 
 ``print_history``: this install's own recent print records, for a served
 tool that learns from them -- which printer and material, how the print
-went, and the settings and conditions it ran under.  Never a file's name or
-fingerprint, a note, or who recorded it.  They go with the one call that
+went, and the settings and conditions it ran under; and, when this computer
+holds them, whether the person's repair record sets a bad print aside, a
+one-way code of the sliced settings, the spool as a one-way code, the
+firmware version and how far the print got.  Never a file's name or
+fingerprint, a spool's id, a note, or who recorded it.  They go with the one call that
 asked and the servers keep none of it.
 
 ``act``: one of a short, fixed list of this install's OWN printer tools,
@@ -70,10 +73,11 @@ import re
 import subprocess
 import tempfile
 from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-from kiln import callers_printers
+from kiln import callers_printers, run_program
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +173,7 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
     out = Path(tempfile.mkdtemp(prefix="kiln_step_")) / "slice.gcode"
     cmd = [slicer.path, "--export-gcode", str(model), "--output", str(out), *args]
     try:
-        run = subprocess.run(  # noqa: S603 — argv built above from checked parts
+        run = run_program.run(  # noqa: S603 — argv built above from checked parts
             cmd, capture_output=True, text=True, timeout=_SLICE_TIMEOUT_S, stdin=subprocess.DEVNULL,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
@@ -898,13 +902,34 @@ def _mark_same_machines(facts: list[dict[str, Any]], built: dict[str, Any]) -> N
 #: it went, and the settings and conditions it ran under.  Never which file
 #: it was, its name, its notes or who recorded it.
 _HISTORY_FIELDS = (
-    "printer_name", "material_type", "outcome", "failure_mode",
+    "printer_name", "material_type", "outcome", "failure_mode", "determined_by",
     "quality_grade", "settings", "environment", "created_at",
 )
+#: What a record carries beside those, only when it holds: ``set_aside``,
+#: true for a bad print the person's repair record sets aside.  A served
+#: tool is sent what it reads and nothing more.
+_HISTORY_EVIDENCE = ("set_aside",)
+#: This module's name in :data:`kiln.outbound_guard.VERSION_FIELDS`.
+SENDER = "kiln/served_steps.py"
 #: The most recent records sent, and the most they may weigh as JSON (the
 #: servers refuse a reading step over a megabyte).
 _HISTORY_RECORDS = 400
 _HISTORY_BYTES = 900_000
+
+
+def _history_record(row: dict[str, Any], repair_windows: Any) -> dict[str, Any]:
+    """One print row as a served tool receives it: :data:`_HISTORY_FIELDS`,
+    then each of :data:`_HISTORY_EVIDENCE` this computer holds for it."""
+    from kiln.failure_vocabulary import excused_by_repair
+
+    out: dict[str, Any] = {k: row.get(k) for k in _HISTORY_FIELDS}
+    if excused_by_repair(
+        row.get("outcome"), row.get("failure_mode"), row.get("determined_by"),
+        machine_fingerprint=row.get("machine_fingerprint"), started_at=row.get("created_at"),
+        repair_windows=repair_windows,
+    ):
+        out["set_aside"] = True
+    return out
 
 
 def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -925,7 +950,13 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
         except Exception:  # noqa: BLE001 — an install with no printer set up
             target = ""
     try:
-        rows = get_db().list_print_outcomes(limit=_HISTORY_RECORDS + 1)
+        # Every ending with a verdict, whatever its cause, and who settled it:
+        # the servers apply the ending rule per question, as this store does.
+        db = get_db()
+        # A job known only from the printer's own log carries no verdict and
+        # is not sent.
+        rows = db.list_print_outcomes(limit=_HISTORY_RECORDS + 1, include_stops=True, witnessed_only=True)
+        repair_windows = db.repair_windows()
     except Exception:  # noqa: BLE001 — said, never guessed
         return None, _refusal(
             tool, "PRINT_HISTORY_NOT_READ",
@@ -933,7 +964,7 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             "not read its own record of it. Nothing was sent.",
         )
     complete = len(rows) <= _HISTORY_RECORDS
-    sent = [{k: row.get(k) for k in _HISTORY_FIELDS} for row in rows[:_HISTORY_RECORDS]]
+    sent = [_history_record(row, repair_windows) for row in rows[:_HISTORY_RECORDS]]
     while sent and len(json.dumps(sent, default=str)) > _HISTORY_BYTES:
         # Oldest first: the list is newest-first, and recent prints say the
         # most about the printer as it is now.
@@ -1198,6 +1229,76 @@ def _act(
         logger.debug("served steps: %s raised", name, exc_info=True)
         answered = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
     return _act_result(answered), None
+
+
+#: What this call's resume record said, for the tool's answer: a sentence
+#: for each resume the servers asked this computer to start that is not
+#: recorded as Kiln's (:func:`_record_served_resumes`).
+_resume_notes: ContextVar[tuple[str, ...]] = ContextVar("kiln_served_resume_notes", default=())
+
+
+def resume_notes() -> list[str]:
+    """The sentences :func:`_record_served_resumes` left for this call's
+    answer, taken (a second read returns none)."""
+    notes = list(_resume_notes.get())
+    _resume_notes.set(())
+    return notes
+
+
+def _record_served_resumes(tool: str, actions: list[dict[str, Any]]) -> None:
+    """Offer to the resume record each file the servers handed over that
+    these actions upload and then start as a resume (``start_print`` with
+    ``resume_from_paused``), for the printer the start names, with the
+    SHA-256 of the G-code the servers say they built it from (the upload
+    step's :data:`kiln.resume_provenance.SOURCE_KEY`).  The record is made
+    only when that is Kiln's own copy of the print the printer is holding
+    (:func:`kiln.resume_provenance.try_record_resume`); otherwise the start
+    is a new print, and the tool's answer says so (:func:`resume_notes`).
+    Only for a resume-making tool, and before the upload runs, so the
+    upload ties the file to its name on the printer.  Never raises."""
+    notes: list[str] = []
+    try:
+        from kiln.resume_provenance import (
+            RESUME_MAKERS,
+            SOURCE_KEY,
+            not_recorded_sentence,
+            try_record_resume,
+        )
+
+        if tool not in RESUME_MAKERS:
+            return
+        uploads = {
+            str(s.get("id")): s
+            for s in actions
+            if s.get("tool") == "upload_file" and isinstance(s.get("args"), dict)
+        }
+        for step in actions:
+            args = step.get("args") or {}
+            if step.get("tool") != "start_print" or not isinstance(args, dict):
+                continue
+            if args.get("resume_from_paused") is not True:
+                continue
+            named = args.get("file_name")
+            if not isinstance(named, dict) or named.get("field") != "file_name":
+                continue
+            upload = uploads.get(str(named.get("from_step"))) or {}
+            upload_args = upload.get("args") or {}
+            path = _handed_file(upload_args.get("file_path"))
+            if path is None:
+                continue
+            printer = args.get("printer_name") or upload_args.get("printer_name")
+            aimed = printer if isinstance(printer, str) and printer else None
+            stated = upload.get(SOURCE_KEY) or step.get(SOURCE_KEY)
+            record, why = try_record_resume(
+                path, source_sha256=stated if isinstance(stated, str) else None,
+                printer_name=aimed, made_by=tool,
+            )
+            if record is None and why:
+                notes.append(not_recorded_sentence(path, aimed, why))
+    except Exception:  # noqa: BLE001 -- a missing record only means the start is asked about
+        logger.debug("served steps: resume not recorded", exc_info=True)
+    finally:
+        _resume_notes.set(tuple(notes))
 
 
 def actions_in(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1483,6 +1584,7 @@ def carry_out(
                 f"{tool} asked this computer to act on your printer in a way "
                 "Kiln does not carry out for a served tool. Nothing was run.",
             )
+    _record_served_resumes(tool, actions)
     done: dict[str, dict[str, Any]] = {}
     for step in actions:
         step_id = str(step.get("id"))

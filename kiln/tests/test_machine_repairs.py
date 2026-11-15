@@ -60,12 +60,14 @@ def _machine(name: str) -> SimpleNamespace:
 
 def _row(db: KilnDB, job: str, printer: str, outcome: str, *, version: str | None = V1,
          fingerprint: str | None = "fp", determined_by: str | None = "observed",
-         started_at: float | None = None) -> None:
+         failure_mode: str | None = "warping", started_at: float | None = None) -> None:
     """Same shape as the routing tests' helper, plus WHEN the print started
-    (``created_at`` is the row's start time)."""
+    (``created_at`` is the row's start time).  A failed or partial row is a
+    bad print (a defect named)."""
     row = {
         "job_id": job, "printer_name": printer, "file_name": f"{job}.gcode", "outcome": outcome,
         "determined_by": determined_by, "version_id": version, "machine_fingerprint": fingerprint,
+        "failure_mode": failure_mode if outcome in ("failed", "partial") else None,
     }
     if started_at is not None:
         row["created_at"] = started_at

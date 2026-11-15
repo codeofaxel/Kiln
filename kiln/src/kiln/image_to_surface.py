@@ -19,6 +19,8 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+from kiln import run_program
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -887,7 +889,7 @@ def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int
         try:
             # Try macOS sips
             try:
-                subprocess.run(
+                run_program.run(
                     ["sips", "-s", "format", "png", abs_path, "--out", tmp_png],
                     check=True,
                     capture_output=True,
@@ -900,7 +902,7 @@ def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int
 
             # Try ImageMagick convert
             try:
-                subprocess.run(
+                run_program.run(
                     ["convert", abs_path, tmp_png],
                     check=True,
                     capture_output=True,
@@ -1214,7 +1216,7 @@ def _auto_convert_heic(src: str, work_dir: str) -> str:
         )
     out = os.path.join(work_dir, f"heic_converted_{os.path.basename(src)}.jpg")
     try:
-        _sp.run(
+        run_program.run(
             ["sips", "-s", "format", "jpeg", src, "--out", out],
             check=True, capture_output=True, timeout=30,
         )
@@ -2139,7 +2141,11 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
 
 
 def generate_text_image(
-    text: str, output_dir: str, *, font_size: int | None = None
+    text: str,
+    output_dir: str,
+    *,
+    font_size: int | None = None,
+    font: str = "Liberation Sans:style=Bold",
 ) -> dict:
     """Return metadata for OpenSCAD native text() module.
 
@@ -2162,23 +2168,29 @@ def generate_text_image(
         edges of a 90mm coaster.  Pass a size only when the caller owns
         the layout (multi-line typography); even then the generator
         clamps it down if its measured bbox would overflow the face.
+    font : str
+        The face the text is drawn in, as the text engine names it
+        (see :mod:`kiln.text_fonts`).
 
     Returns
     -------
     dict
-        Keys: type, text, openscad_fragment — plus font_size when given.
+        Keys: type, text, font, openscad_fragment — plus font_size when
+        given.
     """
     # Escape quotes for OpenSCAD string literal
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     nominal = font_size if font_size else 48
+    escaped_font = font.replace("\\", "\\\\").replace('"', '\\"')
     fragment = (
         f'text("{escaped}", size={nominal}, '
         f'halign="center", valign="center", '
-        f'font="Liberation Sans:style=Bold");'
+        f'font="{escaped_font}");'
     )
     info: dict = {
         "type": "openscad_text",
         "text": text,
+        "font": font,
         "openscad_fragment": fragment,
     }
     if font_size:
@@ -2235,7 +2247,7 @@ def rasterize_svg_to_png(
     # --- Try rsvg-convert ---
     rsvg = shutil.which("rsvg-convert")
     if rsvg:
-        result = subprocess.run(
+        result = run_program.run(
             [rsvg, "-w", str(width_px), "-o", abs_png, abs_svg],
             capture_output=True, text=True, timeout=30,
         )
@@ -2246,7 +2258,7 @@ def rasterize_svg_to_png(
     sips = shutil.which("sips")
     if sips:
         # sips can convert SVG to PNG on macOS
-        result = subprocess.run(
+        result = run_program.run(
             [sips, "-s", "format", "png", "-z", str(width_px), str(width_px),
              abs_svg, "--out", abs_png],
             capture_output=True, text=True, timeout=30,
@@ -2257,7 +2269,7 @@ def rasterize_svg_to_png(
     # --- Try ImageMagick convert ---
     convert = shutil.which("magick") or shutil.which("convert")
     if convert:
-        result = subprocess.run(
+        result = run_program.run(
             [convert, "-background", "white", "-flatten",
              "-resize", f"{width_px}x", abs_svg, abs_png],
             capture_output=True, text=True, timeout=30,
@@ -2268,7 +2280,7 @@ def rasterize_svg_to_png(
     # --- Try Inkscape ---
     inkscape = shutil.which("inkscape")
     if inkscape:
-        result = subprocess.run(
+        result = run_program.run(
             [inkscape, "--export-type=png", f"--export-filename={abs_png}",
              f"--export-width={width_px}", abs_svg],
             capture_output=True, text=True, timeout=30,

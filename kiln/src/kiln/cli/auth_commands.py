@@ -55,11 +55,12 @@ import os
 import stat
 import sys
 import time
-import webbrowser
 from pathlib import Path
 from typing import Any
 
 import click
+
+from kiln import run_program
 
 
 # Default API base — override with ``KILN_API_URL`` for local dev.
@@ -163,6 +164,14 @@ def _complete_signin(data: dict[str, Any], *, door: str = "other") -> None:
         from kiln._pro_catalogue_bridge import forget
 
         forget()
+    except Exception:  # noqa: BLE001
+        pass
+    # The printer question likewise forgets what it was told while signed
+    # out, so the next ending asks the servers for the account now signed in.
+    try:
+        from kiln._pro_printer_checkin_bridge import forget as forget_checkins
+
+        forget_checkins()
     except Exception:  # noqa: BLE001
         pass
     from kiln import terms
@@ -414,7 +423,7 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     browser_opened = False
     if not no_browser:
         try:
-            browser_opened = bool(webbrowser.open(verification_uri, new=1, autoraise=True))
+            browser_opened = run_program.open_url(verification_uri, new=1, autoraise=True)
         except Exception:
             browser_opened = False
 
@@ -844,12 +853,11 @@ def _sniff_client_from_parent_process() -> str:
     sandbox, truncated stat, unknown parent name).
     """
     try:
-        import subprocess as _sp
         ppid = os.getppid()
         if ppid <= 0:
             return ""
         # -p: filter by pid; -o comm=: just the executable name, no header.
-        result = _sp.run(
+        result = run_program.run(
             ["ps", "-p", str(ppid), "-o", "comm="],
             capture_output=True, text=True, timeout=2.0,
         )

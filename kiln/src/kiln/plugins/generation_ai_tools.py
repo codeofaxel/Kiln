@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
+from kiln.quoted_text import fence
 from kiln.tool_annotations import creates, destructive, read_only
 from kiln.tool_results import unwrap_tool_result
 
@@ -1163,7 +1164,7 @@ class _GenerationAIToolsPlugin:
                     )
                     resp["message"] = (
                         f"Generated '{prompt[:80]}' via {gen.display_name}, "
-                        f"sliced, and uploaded. Call start_print('{file_name}') "
+                        f"sliced, and uploaded. Call start_print with {fence(file_name)} "
                         f"to begin printing after review."
                     )
 
@@ -1332,6 +1333,7 @@ class _GenerationAIToolsPlugin:
             template_id: str,
             variation_count: int = 3,
             parameter_ranges: dict[str, list[float]] | None = None,
+            printer_id: str = "",
         ) -> dict:
             """Generate multiple variations of a parametric template.
 
@@ -1342,6 +1344,9 @@ class _GenerationAIToolsPlugin:
             :param template_id: Template ID (e.g. ``"phone_stand"``).
             :param variation_count: Number of variations (1-10, default 3).
             :param parameter_ranges: Optional overrides ``{param: [min, max]}``.
+            :param printer_id: The printer the part is for.  Its nozzle sets
+                the template's nozzle size; leave empty for the only printer
+                Kiln knows of, else a stated default.
             :returns: Dict with list of generated variations and their files.
             """
             from kiln.generation import GenerationError
@@ -1372,7 +1377,7 @@ class _GenerationAIToolsPlugin:
 
                 from kiln.parametric import fill_template_settings, sweepable_parameters, template_refusal
 
-                held, _ = fill_template_settings(tpl, {})
+                held, _ = fill_template_settings(tpl, {}, printer_id=printer_id or None)
                 sweepable = sweepable_parameters(tpl)
                 for i in range(variation_count):
                     params: dict[str, Any] = {}

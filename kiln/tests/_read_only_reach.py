@@ -771,6 +771,14 @@ DECIDED: dict[str, str] = {
         "refused for the person's plan; the same ledger every tool call is "
         "counted in, and nothing the person made or set changes."
     ),
+    "kiln.persistence._relabel_printer_log_copies: SQL write UPDATE": (
+        "Kiln's own record of whose word a print row is: jobs copied from a "
+        "printer's own log that still carry the label of a reconnect's "
+        "reading are given the printer-log label, so they stop counting as "
+        "prints Kiln saw.  It writes only while such a row exists, whichever "
+        "door opens the store first, and changes no outcome, note or answer; "
+        "a row the person answered for is never matched."
+    ),
     "kiln._pro_order_bridge.remember_quote: SQL write INSERT": (
         "keeps the quote Kiln's servers gave in this computer's quote cache, "
         "so an order placed from it is the one the person was shown; nothing "

@@ -33,6 +33,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.quoted_text import fence
 from kiln.registry import PrinterRegistry
 
 
@@ -250,7 +251,7 @@ def test_a_refused_start_is_a_failure_and_starts_no_monitor():
 
     assert result["success"] is False
     assert result["print_start"] == "failed"
-    assert "did not start part.gcode" in result["message"]
+    assert f"did not start {fence('part.gcode')}" in result["message"]
     assert bench.started == []
     assert server._first_layer_monitors == {}
 

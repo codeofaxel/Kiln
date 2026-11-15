@@ -120,7 +120,8 @@ def slicer_seconds_for(file_name: str | None) -> float | None:
 
 def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
     """Write what the sent file says onto the outcome row a start just opened:
-    the slicer's time for it, and which slicer made it.
+    the slicer's time for it, which slicer made it, and a one-way code of the
+    settings it was sliced with (:func:`kiln.print_evidence.settings_code`).
 
     Called from ``PrinterAdapter.start_print``.  The file is read once; a
     figure the file does not state is left empty, never guessed.  Never raises.
@@ -140,6 +141,9 @@ def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
         made_by = slicer_made_by("\n".join(lines))
         if made_by is not None:
             get_db().set_outcome_slicer(job_id, made_by.name, made_by.version)
+        from kiln.print_evidence import note_start_settings
+
+        note_start_settings(job_id, lines)
     except Exception:  # noqa: BLE001 -- bookkeeping never affects a print
         logger.debug("the sent file's figures were not written for %s", job_id, exc_info=True)
 

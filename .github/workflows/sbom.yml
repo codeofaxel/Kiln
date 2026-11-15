@@ -57,8 +57,10 @@ jobs:
         run: cd kiln && python -m build --outdir ../dist/
 
       - name: Install syft
+        # The installer is read at the commit tagged v1.18.1, not from a
+        # moving branch, so the script that runs is the one reviewed.
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/5e16e5031a13f8a11057feb8544decebfc43b4ed/install.sh \
             | sh -s -- -b /usr/local/bin v1.18.1
           syft version
 

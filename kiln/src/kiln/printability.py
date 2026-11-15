@@ -4655,7 +4655,9 @@ def _analyze_downward_regions(
         sup_d = d_seg[supported_arr]
         sup_len_sq = np.maximum((sup_d ** 2).sum(axis=1), 1e-18)
 
-        def _to_held(x: float, y: float) -> float:
+        def _to_held(
+            x: float, y: float, sup_a: Any = sup_a, sup_d: Any = sup_d, sup_len_sq: Any = sup_len_sq,
+        ) -> float:
             """How far (x, y) is from the nearest supported boundary segment."""
             if not len(sup_a):
                 return float("inf")

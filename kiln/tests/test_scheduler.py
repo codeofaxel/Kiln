@@ -37,6 +37,7 @@ from kiln.printers.base import (
     PrintResult,
 )
 from kiln.queue import JobStatus, PrintQueue
+from kiln.quoted_text import fence
 from kiln.registry import PrinterRegistry
 from kiln.scheduler import JobScheduler
 
@@ -713,7 +714,7 @@ class TestStartPrintFailure:
         # An adapter that fails without saying why still produces a usable
         # error: the shared print-start resolver names the file.
         assert len(result["failed"]) == 1
-        assert "did not start test.gcode" in result["failed"][0]["error"]
+        assert f"did not start {fence('test.gcode')}" in result["failed"][0]["error"]
 
 
 # ---------------------------------------------------------------------------

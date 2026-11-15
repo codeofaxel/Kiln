@@ -49,7 +49,7 @@ class _GcodeValidationToolsPlugin:
 
         @mcp.tool(annotations=read_only("Validate G-code"))
         def validate_gcode(commands: str | list[str]) -> dict:
-            """Validate G-code syntax and basic safety (generic, no printer-specific limits).
+            """Validate G-code syntax and basic safety (no printer-specific limits).
 
             For printer-specific safety validation (PTFE temp caps, speed limits),
             use ``validate_gcode_safe`` with a ``printer_id`` instead.
@@ -65,9 +65,12 @@ class _GcodeValidationToolsPlugin:
             - ``warnings``: non-blocking advisories (Z below bed, high feedrate)
             - ``blocked_commands``: specific commands that were blocked
 
-            Use this to preview what ``send_gcode`` would accept or reject.
+            Use this to preview what ``send_gcode`` would accept or reject
+            for a printer whose model Kiln does not know: temperatures are
+            judged against the same floor ``set_temperature`` holds that
+            printer to.
             """
-            from kiln.gcode import validate_gcode as _validate_gcode_impl
+            from kiln.gcode import validate_commands
 
             if isinstance(commands, list):
                 commands = "\n".join(str(c) for c in commands)
@@ -77,7 +80,7 @@ class _GcodeValidationToolsPlugin:
             if not cmd_list:
                 return _srv._error_dict("No commands provided.", code="INVALID_ARGS")
 
-            result = _validate_gcode_impl(cmd_list)
+            result = validate_commands(cmd_list)
             return {
                 "success": True,
                 "valid": result.valid,
@@ -100,15 +103,14 @@ class _GcodeValidationToolsPlugin:
 
             Preferred over ``validate_gcode`` when you know the target printer — uses
             that printer's safety profile for accurate limits.  Without a printer_id,
-            falls back to conservative generic defaults.
+            judges against the floor Kiln holds a printer it cannot identify to.
 
             Args:
                 commands: G-code commands: a newline-separated string, or a
                     list of command strings.
                 printer_id: Optional printer model ID for profile-aware validation.
             """
-            from kiln.gcode import validate_gcode as _validate_gcode_impl
-            from kiln.gcode import validate_gcode_for_printer
+            from kiln.gcode import validate_commands, validate_gcode_for_printer
             from kiln.safety_profiles import get_profile, limits_provenance_note
 
             if err := _srv._check_auth("gcode"):
@@ -129,7 +131,7 @@ class _GcodeValidationToolsPlugin:
                         "limits_provenance": limits_provenance_note(profile),
                     }
                 else:
-                    result = _validate_gcode_impl(commands)
+                    result = validate_commands(commands, printer_id=printer_id or None)
                     profile_info = {"id": "default", "display_name": "Generic defaults"}
 
                 return {

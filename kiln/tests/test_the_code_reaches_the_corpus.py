@@ -160,15 +160,18 @@ def test_the_door_normalizes_the_code_once():
         community_outbox, "contribute",
         lambda key, record, **k: sent.append(record) or {"queued": True},
     ):
+        # The person reports the part failed; the printer's code rides along.
         community_outbox.contribute_print_outcome(
             outcome="failed",
             geometric_signature="sig-abc",
             print_error="50348044",          # a digit string is still a code
+            determined_by="user_reported",
         )
         community_outbox.contribute_print_outcome(
             outcome="failed",
             geometric_signature="sig-def",
             print_error=0,                   # no fault to name
+            determined_by="user_reported",
         )
 
     assert sent[0]["print_error"] == _Z_HOMING_FAILED

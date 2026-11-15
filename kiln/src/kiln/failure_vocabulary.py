@@ -19,6 +19,11 @@ column.  The failure classifier (:mod:`kiln.failure_recovery`
 
 from __future__ import annotations
 
+import math
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
+
 # ---------------------------------------------------------------------------
 # Canonical vocabulary
 # ---------------------------------------------------------------------------
@@ -140,6 +145,379 @@ def normalize_failure_type(value: str | None) -> str | None:
         return None
     return to_canonical(stripped)
 
+
+
+# ---------------------------------------------------------------------------
+# What a print ending says, and about what
+# ---------------------------------------------------------------------------
+#
+# A print that did not finish well is one of three things.  A BAD PRINT came
+# out wrong: the part is defective, whether it ran to the end or was stopped
+# because it was going wrong.  A MACHINE STOP is the printer stopping itself:
+# a fault it named (a heater or safety stop, a mechanical or electronics
+# fault, a blocked nozzle), or a failure it reported without a cause that nobody who saw the
+# part has described.  An OUTSIDE STOP is something outside the print and the
+# printer: the power went out, or the filament ran out.  A print the person
+# stopped is ``cancelled`` and is none of these.
+#
+# Each reader judges one subject.  About the PRINT (a design, a version, a
+# material, settings; shared pools and public pages): a success or a bad
+# print counts, nothing else.  About the MACHINE (a printer's own record and
+# which printer to send a print to): a machine stop counts against the
+# printer too.  An outside stop counts toward neither and stays in the
+# person's history with its cause.  Every reader in both packages asks here
+# and never keeps its own list.
+#
+# One more thing keeps a bad print from counting about the PRINT: the person
+# had marked the printer as needing repair when the print started
+# (:func:`excused_by_repair`).  The print stays in their history and still
+# counts about the MACHINE.  A success is never set aside.
+
+#: Causes that are the print itself coming out wrong.
+PRINT_DEFECTS: frozenset[str] = frozenset({
+    "spaghetti",
+    "layer_shift",
+    "warping",
+    "adhesion",
+    "stringing",
+    "under_extrusion",
+    "over_extrusion",
+})
+
+#: Causes that are the printer stopping itself for a fault.
+MACHINE_FAULTS: frozenset[str] = frozenset({
+    "thermal_runaway",
+    "mechanical",
+    "clog",
+})
+
+#: Causes outside the print and the printer.
+OUTSIDE_CAUSES: frozenset[str] = frozenset({
+    "power_loss",
+    "filament_runout",
+})
+
+#: Causes a classifier's guess is never stored as: a machine fault or an
+#: outside cause.  Either takes the ending off the print, and only the
+#: printer or a person names one.
+CAUSES_A_GUESS_NEVER_NAMES: frozenset[str] = MACHINE_FAULTS | OUTSIDE_CAUSES
+
+#: The cause word that names no cause.
+UNNAMED_CAUSE = "other"
+
+#: Who can call a part bad without naming why: the person holding it, or a
+#: camera that saw it.  A printer's own "failed" is not one of them.
+SAW_THE_PART: frozenset[str] = frozenset({"user_reported", "seen"})
+
+#: Who settled an ending that was read off the printer's own job log after
+#: the fact.  No person and nothing of Kiln's was there: the log says the
+#: job ran to its end or stopped, never how the part came out.
+PRINTER_LOG = "printer_log"
+
+#: Outcome words that carry a failed ending.
+FAILED_OUTCOMES: frozenset[str] = frozenset({"failed", "partial"})
+
+#: The two subjects a reader can judge.
+ABOUT_THE_PRINT = "print"
+ABOUT_THE_MACHINE = "machine"
+
+#: The endings each subject counts.
+JUDGED_ENDINGS: dict[str, frozenset[str]] = {
+    ABOUT_THE_PRINT: frozenset({"success", "bad_print"}),
+    ABOUT_THE_MACHINE: frozenset({"success", "bad_print", "machine_stop"}),
+}
+
+
+def failed_ending_kind(failure_mode: str | None, determined_by: str | None) -> str:
+    """``"bad_print"``, ``"machine_stop"`` or ``"outside_stop"`` for a failed
+    or partial ending with this cause word, settled by *determined_by*.
+
+    A named cause decides, whoever said it.  No cause, or ``other``, is a
+    ``bad_print`` when someone who saw the part said so
+    (:data:`SAW_THE_PART`) and a ``machine_stop`` when only the printer did.
+    Never raises.
+    """
+    mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
+    if mode in OUTSIDE_CAUSES:
+        return "outside_stop"
+    if mode in MACHINE_FAULTS:
+        return "machine_stop"
+    if mode in PRINT_DEFECTS:
+        return "bad_print"
+    return "bad_print" if determined_by in SAW_THE_PART else "machine_stop"
+
+
+def ending_verdict(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+) -> str | None:
+    """What a print ending is: ``"success"``, ``"bad_print"``,
+    ``"machine_stop"`` or ``"outside_stop"``, or ``None`` for an ending that
+    carries no verdict at all (cancelled, pending, unknown, or a word outside
+    the vocabulary).  The account's word for a finished print, ``completed``,
+    reads as ``success``.
+
+    A job known only from the printer's own log (:data:`PRINTER_LOG`)
+    carries no verdict either, whatever word the log gave it: nobody saw the
+    part, so it counts for and against nothing, the printer included.  It
+    takes a verdict when the person says how it came out."""
+    if determined_by == PRINTER_LOG:
+        return None
+    if outcome in ("success", "completed"):
+        return "success"
+    if outcome in FAILED_OUTCOMES:
+        return failed_ending_kind(failure_mode, determined_by)
+    return None
+
+
+#: The times a machine stood marked as needing repair, by its fingerprint:
+#: each ``(from, until)`` in epoch seconds, ``until`` ``None`` for a mark
+#: still standing.  Read off the repair record by
+#: ``KilnDB.repair_windows`` (:mod:`kiln.persistence`).
+RepairWindows = Mapping[str, Sequence[tuple[float, float | None]]]
+
+#: A machine fingerprint that may be written into a SQL condition as it is.
+_PLAIN_FINGERPRINT = re.compile(r"[A-Za-z0-9_.:\-\[\]@ /]{1,256}")
+
+#: What a bad print set aside by the repair record is called, to the person
+#: whose print it was.
+REPAIR_EXCUSED_WORDS = (
+    "Bad print while this printer was marked needs repair: "
+    "not counted against the design or the material"
+)
+
+
+def plain_fingerprint(machine_fingerprint: Any) -> bool:
+    """Whether *machine_fingerprint* can be named in :func:`judged_ending_sql`.
+    A repair window is read for such a machine only, in both forms of the
+    rule, so the two never disagree."""
+    return isinstance(machine_fingerprint, str) and _PLAIN_FINGERPRINT.fullmatch(machine_fingerprint) is not None
+
+
+def _moment(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def excused_by_repair(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+    *, machine_fingerprint: str | None = None, started_at: float | None = None,
+    repair_windows: RepairWindows | None = None,
+) -> bool:
+    """Whether a bad print is set aside, about the print, by its machine's
+    repair record: it started at or after the moment the person marked that
+    machine as needing repair and before the repair that followed (or the
+    mark still stands).
+
+    Only a ``bad_print`` (:func:`ending_verdict`) is ever set aside.  A print
+    whose machine or start time is not on record is not, and neither is one
+    on a machine that was repaired without first being marked.  Never raises.
+    """
+    if not repair_windows or ending_verdict(outcome, failure_mode, determined_by) != "bad_print":
+        return False
+    if not plain_fingerprint(machine_fingerprint):
+        return False
+    started = _moment(started_at)
+    if started is None:
+        return False
+    for since, until in repair_windows.get(machine_fingerprint) or ():
+        begin, end = _moment(since), _moment(until)
+        if begin is not None and begin <= started and (end is None or started < end):
+            return True
+    return False
+
+
+def repair_said(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+    *, machine_fingerprint: str | None = None, started_at: float | None = None,
+    repair_windows: RepairWindows | None = None,
+) -> str | None:
+    """The words for a bad print the repair record sets aside
+    (:data:`REPAIR_EXCUSED_WORDS`), or ``None`` for every other ending.  What
+    a person's own history shows beside the ending.  Never raises."""
+    excused = excused_by_repair(
+        outcome, failure_mode, determined_by,
+        machine_fingerprint=machine_fingerprint, started_at=started_at, repair_windows=repair_windows,
+    )
+    return REPAIR_EXCUSED_WORDS if excused else None
+
+
+def is_judged_ending(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+    *, about: str = ABOUT_THE_PRINT,
+    machine_fingerprint: str | None = None, started_at: float | None = None,
+    repair_windows: RepairWindows | None = None,
+) -> bool:
+    """Whether the ending counts for a reader judging *about*
+    (:data:`ABOUT_THE_PRINT` or :data:`ABOUT_THE_MACHINE`).
+
+    About the print, a bad print on a machine standing marked as needing
+    repair does not count (:func:`excused_by_repair`): a reader hands in the
+    row's ``machine_fingerprint``, its start time and the repair windows.
+    About the machine the repair record changes nothing here."""
+    if ending_verdict(outcome, failure_mode, determined_by) not in JUDGED_ENDINGS[about]:
+        return False
+    return about != ABOUT_THE_PRINT or not excused_by_repair(
+        outcome, failure_mode, determined_by,
+        machine_fingerprint=machine_fingerprint, started_at=started_at, repair_windows=repair_windows,
+    )
+
+
+def _repair_sql(col: str, repair_windows: RepairWindows) -> str:
+    """:func:`excused_by_repair` as a SQL condition over a row already known
+    to be a success or a bad print, or ``""`` when no window is given."""
+    machines = []
+    for fingerprint in sorted(repair_windows):
+        if not plain_fingerprint(fingerprint):
+            raise ValueError(f"not a fingerprint that can be named in SQL: {fingerprint!r}")
+        spans = []
+        for since, until in repair_windows[fingerprint] or ():
+            begin, end = _moment(since), _moment(until)
+            if begin is None:
+                continue
+            span = f"{col}created_at >= {begin!r}"
+            if end is not None:
+                span += f" AND {col}created_at < {end!r}"
+            spans.append(f"({span})")
+        if spans:
+            machines.append(
+                f"(COALESCE({col}machine_fingerprint, '') = '{fingerprint}' "
+                f"AND {col}created_at IS NOT NULL AND ({' OR '.join(spans)}))"
+            )
+    if not machines:
+        return ""
+    return f" AND NOT ({col}outcome <> 'success' AND ({' OR '.join(machines)}))"
+
+
+def judged_ending_sql(
+    alias: str = "", *, about: str = ABOUT_THE_PRINT, repair_windows: RepairWindows | None = None,
+) -> str:
+    """:func:`is_judged_ending` as a SQL condition over a ``print_outcomes``
+    row (its ``outcome``, ``failure_mode`` and ``determined_by`` columns),
+    every column qualified with *alias* when one is given.  Stored cause
+    words are already canonical, so no translation is needed here.
+
+    With *repair_windows*, about the print, the condition also reads the
+    row's ``machine_fingerprint`` and ``created_at`` (its start) and leaves
+    out what :func:`excused_by_repair` sets aside.  The windows are written
+    into the condition, so it takes no parameters."""
+    if alias and not alias.isidentifier():
+        raise ValueError(f"not a table alias: {alias!r}")
+    if about not in JUDGED_ENDINGS:
+        raise ValueError(f"not a subject: {about!r}")
+    col = f"{alias}." if alias else ""
+
+    def words(values: Iterable[str]) -> str:
+        return ", ".join(f"'{v}'" for v in sorted(values))
+
+    if about == ABOUT_THE_MACHINE:
+        failure = f"COALESCE({col}failure_mode, '') NOT IN ({words(OUTSIDE_CAUSES)})"
+    else:
+        failure = (
+            f"({col}failure_mode IN ({words(PRINT_DEFECTS)}) OR "
+            f"(COALESCE({col}failure_mode, '') IN ('', '{UNNAMED_CAUSE}') "
+            f"AND {col}determined_by IN ({words(SAW_THE_PART)})))"
+        )
+    witnessed = f"COALESCE({col}determined_by, '') <> '{PRINTER_LOG}'"
+    judged = (
+        f"({witnessed} AND "
+        f"({col}outcome = 'success' OR ({col}outcome IN ({words(FAILED_OUTCOMES)}) AND {failure})))"
+    )
+    if about != ABOUT_THE_PRINT or not repair_windows:
+        return judged
+    set_aside = _repair_sql(col, repair_windows)
+    return f"({judged}{set_aside})" if set_aside else judged
+
+
+def pooled_row_is_about_the_print(outcome: str | None, failure_mode: str | None) -> bool:
+    """Whether a row in the shared pool counts about the print.
+
+    A shared row carries no word for who settled its ending, and the pool
+    accepts a failure only when it is a bad print, so a pooled failure counts
+    unless its cause names a machine fault or an outside cause.
+    """
+    if outcome in ("success", "completed"):
+        return True
+    if outcome not in FAILED_OUTCOMES:
+        return False
+    mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
+    return mode not in MACHINE_FAULTS | OUTSIDE_CAUSES
+
+
+#: What a stop that is not a bad print is called, to the person whose print
+#: it was.  Keyed by cause word; the empty key is a stop with no cause.
+STOP_WORDS: dict[str, str] = {
+    "power_loss": "Stopped: power cut",
+    "filament_runout": "Stopped: filament ran out",
+    "thermal_runaway": "Stopped: heating fault",
+    "mechanical": "Stopped: printer fault",
+    "clog": "Stopped: nozzle clogged",
+    "": "Stopped: printer gave no reason",
+}
+
+
+#: What the printer's own log says about a job, in the person's history.
+PRINTER_LOG_WORDS: dict[str, str] = {
+    "success": "Ran to the end, by the printer's own log (Kiln did not see the part)",
+    "failed": "Stopped by the printer, by its own log",
+    "partial": "Stopped by the printer, by its own log",
+    "cancelled": "Cancelled, by the printer's own log",
+}
+_PRINTER_LOG_UNKNOWN = "Listed in the printer's own log, ending not known"
+
+
+def printer_log_said(outcome: str | None, determined_by: str | None = None) -> str | None:
+    """The words for a job known only from the printer's own log
+    (:data:`PRINTER_LOG`), or ``None`` for every other row.  What a person's
+    own history shows in place of the bare outcome word.  Never raises."""
+    if determined_by != PRINTER_LOG:
+        return None
+    return PRINTER_LOG_WORDS.get(outcome or "", _PRINTER_LOG_UNKNOWN)
+
+
+def ending_wants_a_question(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+) -> str | None:
+    """Which question an ending owes the person: ``"stop"`` (the printer
+    stopped it and named no cause), ``"cancel"`` (someone stopped it), or
+    ``None``.  Only the person knows whether the part was coming out bad.
+    A job known only from the printer's own log (:data:`PRINTER_LOG`) owes
+    none: Kiln had no part in it."""
+    if determined_by == PRINTER_LOG:
+        return None
+    if outcome == "cancelled":
+        return "cancel"
+    return "stop" if stop_wants_a_reason(outcome, failure_mode, determined_by) else None
+
+
+#: The causes a person can name when asked why a print stopped: something
+#: outside the print, or the printer itself.
+STOP_CAUSES_A_PERSON_NAMES: frozenset[str] = OUTSIDE_CAUSES | {"mechanical", "clog"}
+
+
+def stop_said(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+) -> str | None:
+    """The words for a failed or partial ending that is a stop, not a bad
+    print ("Stopped: power cut"), or ``None`` for every other ending.  What a
+    person's own history shows in place of "failed".  Never raises."""
+    kind = ending_verdict(outcome, failure_mode, determined_by)
+    if kind not in ("machine_stop", "outside_stop"):
+        return None
+    mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
+    return STOP_WORDS.get(mode or "", STOP_WORDS[""])
+
+
+def stop_wants_a_reason(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+) -> bool:
+    """Whether the ending is a stop only the printer reported, with no cause
+    named: the one stop worth asking the person about, since they may know
+    whether the part came out bad or something outside the print stopped it."""
+    if ending_verdict(outcome, failure_mode, determined_by) != "machine_stop":
+        return False
+    mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
+    return mode not in MACHINE_FAULTS
 
 # Severity ladder normalization — the parallel three-vocabulary problem.
 # kiln.print_recovery uses free-form strings like "low/medium/high/critical".

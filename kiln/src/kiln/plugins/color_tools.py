@@ -1840,7 +1840,7 @@ class _ColorToolsPlugin:
 
             Use after any decoration door (``decorate_surface``,
             ``apply_decoration``, ``apply_decoration_preset``,
-            ``smart_decorate``, ``batch_decorate``…) — they all record
+            ``batch_decorate``…) — they all record
             the sidecar.  For meshes with no sidecar (older files,
             hand-made carves), fall back to ``segment_mesh_regions`` +
             ``paint_mesh_regions``.

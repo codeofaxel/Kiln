@@ -1519,11 +1519,16 @@ def generate_emboss_scad(
     margin_clamped_w = max(face_w - 2.0 * min_edge_margin_mm, 1.0)
     margin_clamped_h = max(face_h - 2.0 * min_edge_margin_mm, 1.0)
     if target_w > margin_clamped_w:
-        warnings.append(
-            f"text width clamped from {target_w:.1f}mm to "
-            f"{margin_clamped_w:.1f}mm to preserve "
-            f"{min_edge_margin_mm:.1f}mm edge margin on a {face_w:.0f}mm-wide face"
-        )
+        # A width the caller named, cut to keep the margin, is a warning:
+        # they asked for that number.  A share of the face (``scale``)
+        # meeting the margin is the margin doing its job on a small face,
+        # so it is not said.
+        if absolute_size_mm > 0:
+            warnings.append(
+                f"text width clamped from {target_w:.1f}mm to "
+                f"{margin_clamped_w:.1f}mm to preserve "
+                f"{min_edge_margin_mm:.1f}mm edge margin on a {face_w:.0f}mm-wide face"
+            )
         target_w = margin_clamped_w
     if target_h > margin_clamped_h:
         target_h = margin_clamped_h
@@ -2774,8 +2779,8 @@ def generate_qr_openscad_module(
 
     QR codes are drawn on Kiln's servers.  Where this module cannot draw one
     it raises :class:`ImportError` with a sentence true for the caller's
-    plan: a Business account is pointed at the tools that make QR codes on
-    its plan, and nobody already on the plan is told to upgrade.
+    plan: an account whose plan includes QR codes is pointed at the tool that
+    makes them, and nobody already on the plan is told to upgrade.
     """
     try:
         from kiln_pro.decoration.qr_openscad import generate_qr_openscad_module as _impl
@@ -2789,12 +2794,12 @@ def _qr_unavailable_message() -> str:
     from kiln.licensing import LicenseTier, check_tier
 
     try:
-        on_plan, refusal = check_tier(LicenseTier.BUSINESS)
+        on_plan, refusal = check_tier(LicenseTier.PRO)
     except Exception:  # noqa: BLE001 -- an unreadable plan is Free
         on_plan, refusal = False, None
     if on_plan:
         return (
             "QR codes are made on Kiln's servers, not in this install. Your plan "
-            "includes them: use the generate_qr_decoration or add_qr_to_product tool."
+            "includes them: use decorate_surface with content='qr:https://...'."
         )
-    return refusal or "QR codes are part of Kiln Business: https://kiln3d.com/pricing"
+    return refusal or "A QR code on a part is part of Kiln Pro: https://kiln3d.com/pricing"

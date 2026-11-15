@@ -379,7 +379,7 @@ def test_freecad_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir)
     mock_proc.stdout = f"some output\nKILN_RESULT:{kiln_result}\n"
     mock_proc.stderr = ""
 
-    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+    with patch("kiln.step_import.run_program.run", return_value=mock_proc):
         result = convert_step_to_stl(str(sample_step_file))
 
     assert result.body_count == 1
@@ -410,7 +410,7 @@ def test_gmsh_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir):
     mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
     mock_proc.stderr = ""
 
-    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+    with patch("kiln.step_import.run_program.run", return_value=mock_proc):
         result = convert_step_to_stl(str(sample_step_file))
 
     # Fused by default: two parts, one STL.
@@ -464,7 +464,7 @@ def test_gmsh_fallback(mock_cq, mock_gmsh, mock_fc, sample_step_file):
     mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
     mock_proc.stderr = ""
 
-    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+    with patch("kiln.step_import.run_program.run", return_value=mock_proc):
         result = convert_step_to_stl(str(sample_step_file))
         assert result.body_count == 1
 
@@ -630,7 +630,7 @@ def test_gmsh_keeps_parts_apart(mock_cq, mock_gmsh, mock_fc, sample_step_file):
     mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
     mock_proc.stderr = ""
 
-    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+    with patch("kiln.step_import.run_program.run", return_value=mock_proc):
         result = convert_step_to_stl(
             str(sample_step_file), merge_bodies=False
         )
@@ -788,7 +788,7 @@ def test_freecad_failure_falls_to_gmsh(mock_cq, mock_gmsh, mock_fc, sample_step_
             raise RuntimeError("FreeCAD crashed")
         return mock_proc
 
-    with patch("kiln.step_import.subprocess.run", side_effect=side_effect):
+    with patch("kiln.step_import.run_program.run", side_effect=side_effect):
         result = convert_step_to_stl(str(sample_step_file))
         assert result.body_count == 1
         assert any("FreeCAD failed" in w for w in result.warnings)
@@ -808,7 +808,7 @@ def test_a_converter_that_crashes_hands_the_file_on(mock_cq, mock_ocp, mock_gmsh
     out = tmp_dir / "body_0.stl"
     out.write_bytes(b"\x00" * 100)
 
-    with patch("kiln.step_import.subprocess.run", return_value=crashed), patch(
+    with patch("kiln.step_import.run_program.run", return_value=crashed), patch(
         "kiln.step_import._convert_via_cadquery", return_value=_BackendParts(outputs=[str(out)])
     ):
         result = convert_step_to_stl(str(sample_step_file), output_dir=str(tmp_dir / "out"))
@@ -823,7 +823,7 @@ def test_a_converter_that_crashes_hands_the_file_on(mock_cq, mock_ocp, mock_gmsh
 @patch("kiln.step_import._cadquery_available", return_value=True)
 def test_when_every_converter_fails_the_error_names_each(mock_cq, mock_ocp, mock_gmsh, mock_fc, sample_step_file):
     crashed = MagicMock(returncode=1, stdout="", stderr="mesher gave up")
-    with patch("kiln.step_import.subprocess.run", return_value=crashed), patch(
+    with patch("kiln.step_import.run_program.run", return_value=crashed), patch(
         "kiln.step_import._convert_via_cadquery", side_effect=StepImportError("cadquery could not read it")
     ):
         with pytest.raises(StepImportError) as caught:
@@ -1461,7 +1461,7 @@ def test_ocp_conversion_times_out_rather_than_hanging(monkeypatch, sample_step_f
     def _hang(*args, **kwargs):
         raise _sp.TimeoutExpired(cmd="python", timeout=kwargs.get("timeout", 1))
 
-    monkeypatch.setattr("kiln.step_import.subprocess.run", _hang)
+    monkeypatch.setattr("kiln.step_import.run_program.run", _hang)
 
     with pytest.raises(StepImportError) as exc_info:
         _convert_via_ocp(Path(str(sample_step_file)), tmp_dir)
@@ -1498,7 +1498,7 @@ def test_ocp_runs_out_of_process(monkeypatch, sample_step_file, tmp_dir):
 
     from kiln.step_import import _convert_via_ocp
 
-    monkeypatch.setattr("kiln.step_import.subprocess.run", _fake_run)
+    monkeypatch.setattr("kiln.step_import.run_program.run", _fake_run)
     _convert_via_ocp(Path(str(sample_step_file)), tmp_dir)
 
     from kiln.step_import import SUBPROCESS_TIMEOUT_S
@@ -2429,7 +2429,7 @@ def test_gmsh_script_carries_a_density_bound(monkeypatch, sample_step_file, tmp_
             stderr="",
         )
 
-    monkeypatch.setattr("kiln.step_import.subprocess.run", _fake_run)
+    monkeypatch.setattr("kiln.step_import.run_program.run", _fake_run)
     _convert_via_gmsh(Path(str(sample_step_file)), tmp_dir)
 
     script = seen["script"]
@@ -2472,7 +2472,7 @@ def test_gmsh_too_old_to_bound_falls_through_instead_of_failing(
             stderr="this gmsh does not accept Mesh.MeshSizeFromCurvature\n",
         )
 
-    with patch("kiln.step_import.subprocess.run", _old_gmsh_then_cadquery), patch(
+    with patch("kiln.step_import.run_program.run", _old_gmsh_then_cadquery), patch(
         "kiln.step_import._convert_via_cadquery",
         return_value=_BackendParts(outputs=[str(out_stl)]),
     ) as fallback:
@@ -2586,7 +2586,7 @@ def test_freecad_records_a_linear_only_bound(
     mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
     mock_proc.stderr = ""
 
-    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+    with patch("kiln.step_import.run_program.run", return_value=mock_proc):
         result = convert_step_to_stl(str(sample_step_file))
 
     from kiln.step_import import TESSELLATION_TOLERANCE
@@ -2624,7 +2624,7 @@ def test_gmsh_records_its_bound_in_the_only_unit_it_accepts(
     mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
     mock_proc.stderr = ""
 
-    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+    with patch("kiln.step_import.run_program.run", return_value=mock_proc):
         result = convert_step_to_stl(str(sample_step_file))
 
     assert result.conversion is not None
@@ -2673,7 +2673,7 @@ def test_record_names_the_backend_that_RAN_not_the_one_first_in_line(
         return ok
 
     with patch(
-        "kiln.step_import.subprocess.run",
+        "kiln.step_import.run_program.run",
         side_effect=_freecad_is_installed_but_broken,
     ):
         result = convert_step_to_stl(str(sample_step_file))
@@ -3608,7 +3608,7 @@ def test_the_console_flag_reaches_the_subprocess(tmp_path):
     step = tmp_path / "part.step"
     step.write_text("ISO-10303-21;\nENDSEC;\nEND-ISO-10303-21;\n")
 
-    with patch("kiln.step_import.subprocess.run", side_effect=fake_run):
+    with patch("kiln.step_import.run_program.run", side_effect=fake_run):
         step_import._convert_via_freecad(
             step, tmp_path, ["/Applications/FreeCAD.app/Contents/MacOS/FreeCAD", "-c"]
         )

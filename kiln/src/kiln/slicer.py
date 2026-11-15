@@ -42,6 +42,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from kiln import run_program
 from kiln.openscad_runner import present_signals
 from kiln.output_paths import kiln_output_dir
 from kiln.slicer_filament import LOADED_OBSERVED, SliceFilament, ensure_profile_filament
@@ -466,7 +467,7 @@ def _get_version(slicer_path: str) -> str | None:
     if bundled:
         return bundled
     try:
-        result = subprocess.run(
+        result = run_program.run(
             [slicer_path, "--version"],
             capture_output=True,
             text=True,
@@ -639,6 +640,17 @@ def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal
             kind=kind, code="OBJECTS_COLLIDE", slicer=slicer_name, objects=objects,
         )
     return None
+
+
+def _printer_name_of(profile: str | None) -> str | None:
+    """The name of the printer whose bundled profile Kiln built *profile*
+    from, or ``None`` for a profile that is the caller's own."""
+    from kiln.slicer_profiles import profile_origin, raw_profile
+
+    origin = profile_origin(profile)
+    printer_id = origin.printer_id or origin.standing_in_for
+    name = (raw_profile(printer_id) or {}).get("display_name") if printer_id else None
+    return str(name) if name else None
 
 
 def _signal_of(returncode: int) -> int:
@@ -1109,7 +1121,7 @@ def _run_slicer_with_startup_retry(
         try:
             # No input: a slicer that stops to ask something reads end of
             # file and goes on, rather than waiting on the server's own stdin.
-            result = subprocess.run(
+            result = run_program.run(
                 cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd,
                 stdin=subprocess.DEVNULL,
             )
@@ -1279,14 +1291,24 @@ def _slice_with_orca(
         )
 
         if result.returncode in _ORCA_SIGSEGV_RETURNCODES and not crashed_after_finishing:
+            slicer_name = os.path.basename(slicer.path)
+            printer_name = _printer_name_of(profile)
+            if printer_name and printer_name.startswith("Bambu Lab"):
+                raise SlicerError(
+                    f"{slicer_name} crashed while slicing. This is a "
+                    f"known crash in BambuStudio and OrcaSlicer themselves, on Bambu Lab "
+                    f"printer profiles specifically — their own bundled Bambu presets "
+                    f"crash the same way, and the same Kiln code slices other printers "
+                    f"fine. Slice this printer with PrusaSlicer instead; Kiln wraps the "
+                    f"result as a Bambu 3MF itself, so nothing about the print is lost.\n"
+                    f"{_INSTALL_SLICER}"
+                )
+            for_printer = f" for the {printer_name}" if printer_name else ""
             raise SlicerError(
-                f"{os.path.basename(slicer.path)} crashed while slicing. This is a "
-                f"known crash in BambuStudio and OrcaSlicer themselves, on Bambu Lab "
-                f"printer profiles specifically — their own bundled Bambu presets "
-                f"crash the same way, and the same Kiln code slices other printers "
-                f"fine. Slice this printer with PrusaSlicer instead; Kiln wraps the "
-                f"result as a Bambu 3MF itself, so nothing about the print is lost.\n"
-                f"{_INSTALL_SLICER}"
+                f"{slicer_name} crashed while slicing{for_printer} (it was stopped by "
+                f"signal {_signal_of(result.returncode)}): the slicer failed, not the "
+                f"print. Slice again; if it crashes the same way, slice this printer "
+                f"with PrusaSlicer instead.\n{_INSTALL_SLICER}"
             )
 
         if result.returncode != 0 and not crashed_after_finishing:

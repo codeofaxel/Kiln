@@ -210,6 +210,27 @@ def _material_stats(outcomes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     return result
 
 
+def _about_the_print(outcomes: list[dict[str, Any]], db: Any) -> list[dict[str, Any]]:
+    """*outcomes* less the bad prints made while their printer stood marked
+    as needing repair.  A store that cannot say gives them all back."""
+    from kiln.failure_vocabulary import excused_by_repair
+
+    try:
+        windows = db.repair_windows()
+    except Exception:  # noqa: BLE001 -- a record that cannot be read sets nothing aside
+        return outcomes
+    if not isinstance(windows, dict) or not windows:
+        return outcomes
+    return [
+        r for r in outcomes
+        if not excused_by_repair(
+            r.get("outcome"), r.get("failure_mode"), r.get("determined_by"),
+            machine_fingerprint=r.get("machine_fingerprint"), started_at=r.get("created_at"),
+            repair_windows=windows,
+        )
+    ]
+
+
 def _compute_health_score(
     success_rate: float,
     failure_trend: str,
@@ -269,7 +290,8 @@ def analyze_printer_trends(
     history.reverse()
 
     # Fetch outcome records (returned newest-first; reverse to chronological)
-    outcomes = db.list_print_outcomes(printer_name=printer_name, limit=500)
+    # The printer's own record: a bad print made while it needed repair is part of it.
+    outcomes = db.list_print_outcomes(printer_name=printer_name, limit=500, count_repair_excused=True)
     outcomes = [r for r in outcomes if r.get("created_at", 0) >= cutoff]
     outcomes.reverse()
 
@@ -296,8 +318,9 @@ def analyze_printer_trends(
     # Failure modes (from outcomes — has failure_mode)
     top_failures = _failure_mode_counts(outcomes)
 
-    # Material reliability
-    mat_stats = _material_stats(outcomes)
+    # Material reliability: about the print, so a bad print the repair record
+    # sets aside is left out (kiln.failure_vocabulary.excused_by_repair).
+    mat_stats = _material_stats(_about_the_print(outcomes, db))
 
     # Health score
     health = _compute_health_score(rate, failure_trend, dur_trend, total)

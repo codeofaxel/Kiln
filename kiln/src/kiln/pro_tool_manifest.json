@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-11T22:37:57.151129+00:00",
-  "tool_count": 421,
+  "generated": "2026-11-15T02:35:09.031653+00:00",
+  "tool_count": 418,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3222,77 +3222,6 @@
       }
     },
     {
-      "name": "generate_qr_decoration",
-      "description": "Generate a QR code heightmap for embossing onto 3D models (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
-      "tier": "business",
-      "access": "business",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "content": {
-            "title": "Content",
-            "type": "string",
-            "description": "What the code encodes -- a URL or any text."
-          },
-          "output_dir": {
-            "title": "Output Dir",
-            "type": "string",
-            "description": "Folder the heightmap (``qr_heightmap.dat``) is written to."
-          },
-          "target_size_mm": {
-            "default": 0.0,
-            "title": "Target Size Mm",
-            "type": "number",
-            "description": "How wide the code will be printed, in mm.  Give it and the answer says whether the code will still scan at that size; leave it at 0 to get the heightmap alone."
-          },
-          "nozzle_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nozzle Mm",
-            "description": "Nozzle diameter the scan check is judged for.  Leave it out to use the nozzle on record for your printer (else 0.4); the answer's ``nozzle`` block says which size it used."
-          }
-        },
-        "required": [
-          "content",
-          "output_dir"
-        ],
-        "title": "generate_qr_decorationArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Generate QR decoration",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "qr_branding_v1",
-        "variant": "qr_branding",
-        "feature": "QR codes on printed products",
-        "headline": "Put a scannable QR on this product.",
-        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
-        "free_included": "The product itself still generates without the QR."
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "inputs": {
-        "image": "content",
-        "outputs": {
-          "output_dir": "folder"
-        }
-      }
-    },
-    {
       "name": "paint_mesh_regions",
       "description": "Paint mesh regions by name or id and write a painted 3MF. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
@@ -3539,107 +3468,6 @@
       },
       "inputs": {
         "mesh": "input_path"
-      }
-    },
-    {
-      "name": "smart_decorate",
-      "description": "Intelligent decoration with auto-fix for printability (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
-      "tier": "pro",
-      "access": "pro",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "model_path": {
-            "title": "Model Path",
-            "type": "string",
-            "description": "Path to the STL model to decorate."
-          },
-          "content": {
-            "title": "Content",
-            "type": "string",
-            "description": "What to put on the surface: an image or SVG path, ``\"text:...\"`` for text, or ``\"qr:...\"`` for a QR code."
-          },
-          "face": {
-            "default": "auto",
-            "title": "Face",
-            "type": "string",
-            "description": "Which face to decorate.  ``\"auto\"`` (default) picks the largest flat face; also ``\"top\"``, ``\"bottom\"``, ``\"front\"``, ``\"back\"``, ``\"left\"``, ``\"right\"``, a sketch-built part's own wall name (``\"side:l2\"``), or ``\"wall\"`` to wrap text or a line-art mark around the round wall of a cup, jar or vase."
-          },
-          "depth_mm": {
-            "default": 0.0,
-            "title": "Depth Mm",
-            "type": "number",
-            "description": "Emboss/deboss depth in mm.  0 (default) picks a depth for *material*; a depth too shallow for it is raised and said."
-          },
-          "mode": {
-            "default": "deboss",
-            "title": "Mode",
-            "type": "string",
-            "description": "``\"deboss\"`` (cut in, default) or ``\"emboss\"`` (raised). ``face=\"wall\"`` is deboss only."
-          },
-          "scale": {
-            "default": 0.7,
-            "title": "Scale",
-            "type": "number",
-            "description": "Share of the face the decoration covers, 0.0-1.0 (default 0.7).  A QR too small to scan at this scale is enlarged."
-          },
-          "material": {
-            "default": "PLA",
-            "title": "Material",
-            "type": "string",
-            "description": "Material the depth is judged for (default ``\"PLA\"``)."
-          },
-          "content_type": {
-            "default": "auto",
-            "title": "Content Type",
-            "type": "string",
-            "description": "``\"auto\"`` (default, read from *content*), or ``\"text\"``, ``\"qr\"``, ``\"svg\"``, ``\"image\"``."
-          },
-          "offset_x_mm": {
-            "default": 0.0,
-            "title": "Offset X Mm",
-            "type": "number",
-            "description": "Move the decoration across the face, in mm (default 0)."
-          },
-          "offset_y_mm": {
-            "default": 0.0,
-            "title": "Offset Y Mm",
-            "type": "number",
-            "description": "Move the decoration along the face, in mm (default 0)."
-          },
-          "absolute_size_mm": {
-            "default": 0.0,
-            "title": "Absolute Size Mm",
-            "type": "number",
-            "description": "``face=\"wall\"`` only: the size in mm instead of a share of the wall (letter height for text, width for a mark). 0 (default) uses *scale*."
-          },
-          "image_style": {
-            "default": "auto",
-            "title": "Image Style",
-            "type": "string",
-            "description": "``face=\"wall\"`` only: ``\"stencil\"`` or ``\"logo\"`` to carve an image as a line-art mark; ``\"auto\"`` (default) tells a mark from a photo by looking."
-          }
-        },
-        "required": [
-          "model_path",
-          "content"
-        ],
-        "title": "smart_decorateArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Smart decorate",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "inputs": {
-        "mesh": "model_path",
-        "image": "content"
       }
     },
     {
@@ -5698,12 +5526,13 @@
           "pattern_family": {
             "title": "Pattern Family",
             "type": "string",
-            "description": "The kind of decoration: ``\"procedural_texture\"``, ``\"photo_emboss\"``, ``\"photo_deboss\"``, ``\"logo_emboss\"``, ``\"logo_deboss\"``, ``\"brand_asset\"`` or ``\"custom_image\"``.  Any other value is refused."
+            "description": "The kind of decoration: ``\"procedural_texture\"``, ``\"photo_emboss\"``, ``\"photo_deboss\"``, ``\"logo_emboss\"``, ``\"logo_deboss\"``, ``\"brand_asset\"``, ``\"custom_image\"``, ``\"text_deboss\"`` (a word cut into the surface) or ``\"text_emboss\"`` (a word raised from it).  Any other value is refused."
           },
           "pattern_id": {
+            "default": "",
             "title": "Pattern Id",
             "type": "string",
-            "description": "Which pattern within the family, e.g. ``\"wave\"`` or ``\"hex_grid\"``, or for an image family a content hash or asset file name.  Must not be empty."
+            "description": "Which pattern within the family, e.g. ``\"wave\"`` or ``\"hex_grid\"``, or for an image family a content hash or asset file name.  Must not be empty, except for a text family, where it is left out and ``text`` is passed instead."
           },
           "depth_mm": {
             "default": 1.2,
@@ -5835,12 +5664,23 @@
             "title": "Notes",
             "type": "string",
             "description": "Free-form editorial note stored on the version.  Omit it for none."
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string",
+            "description": "The words of a text decoration, one line of at most 80 characters.  Required for a text family and refused for any other.  The reply's ``preset`` repeats it as ``text``."
+          },
+          "font": {
+            "default": "",
+            "title": "Font",
+            "type": "string",
+            "description": "Font for a text decoration: ``\"sans\"`` (default), ``\"mono\"``, ``\"fredoka\"`` (rounded), ``\"zilla-slab\"`` (slab), ``\"oswald\"`` (tall and narrow) or ``\"saira-stencil\"`` (stencil).  The preset records it, so the word is carved in the same font every time it is applied.  A font not on the list is refused naming the list.  Refused for a family that is not text."
           }
         },
         "required": [
           "name",
-          "pattern_family",
-          "pattern_id"
+          "pattern_family"
         ],
         "title": "create_decoration_presetArguments",
         "type": "object"
@@ -8637,6 +8477,19 @@
             "default": null,
             "title": "Pr Id",
             "description": "Optional explicit pull-request id to satisfy the gate with.  Omitted \u2192 the open/approved PR on this exact source\u2192target pair is used."
+          },
+          "expected_head_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Head Version Id",
+            "description": "The source branch's newest version as the person last saw it (a request's proposed part, a branch list).  If the branch has a newer one now, nothing is merged (``SOURCE_HEAD_MOVED``).  Omitted: the branch as it is."
           }
         },
         "required": [
@@ -20405,7 +20258,7 @@
             "default": 0.0,
             "title": "Requested Depth Mm",
             "type": "number",
-            "description": "The decoration depth the originating tool call asked for.  Used to compute the ``depth_gap_mm`` and fire ``DEPTH_SHY`` when the achievable depth falls short.  Pass 0.0 (default) to skip depth warnings \u2014 the per-layer breakdown + carve metrics still populate."
+            "description": "The decoration depth the originating tool call asked for.  Used to compute the ``depth_gap_mm`` and fire ``DEPTH_SHY`` / ``DEPTH_OVER`` when the file carves less or more than that by over half a layer.  Pass 0.0 (default) to skip depth warnings \u2014 the per-layer breakdown + carve metrics still populate."
           }
         },
         "title": "analyze_mid_print_impactArguments",
@@ -21201,7 +21054,7 @@
           "current_layer": {
             "title": "Current Layer",
             "type": "integer",
-            "description": "1-indexed layer the printer is paused at. The deboss starts at ``current_layer + 1`` so the carve never touches the layer currently being laid down."
+            "description": "1-indexed layer the printer is paused at. The print continues from this layer; the carve begins above it."
           },
           "depth_mm": {
             "default": 1.2,
@@ -21220,25 +21073,25 @@
             ],
             "default": null,
             "title": "Top Layers",
-            "description": "Reserved override for the top-layer count. ``None`` (default) uses the value detected from ``analyze_top_region`` (TYPE:Top tags or solid-infill inference)."
+            "description": "Not used.  The layers that can be carved are read from the print's own file."
           },
           "image_scale": {
             "default": 0.7,
             "title": "Image Scale",
             "type": "number",
-            "description": "Heightmap-to-bed scale factor \u2014 0.7 means the image fills 70% of the carved region's bounding box."
+            "description": "0.7 means the image fills 70% of the top face's shorter side."
           },
           "aspect_policy": {
             "default": "auto_crop",
             "title": "Aspect Policy",
             "type": "string",
-            "description": "How to fit a non-matching aspect ratio onto the carve region.  ``\"auto_crop\"`` crops the image to match (default), ``\"auto_scale\"`` letterboxes it, ``\"strict\"`` rejects mismatches."
+            "description": "How to fit an image whose shape differs from the top face: ``\"auto_crop\"`` (default), ``\"auto_scale\"`` or ``\"strict\"`` (refuse a mismatch)."
           },
           "printer_z_known": {
             "default": false,
             "title": "Printer Z Known",
             "type": "boolean",
-            "description": "REQUIRED ``True``.  Same safety gate as ``generate_recovery_gcode`` \u2014 if the printer's Z isn't trustworthy, refuses with ``PRINTER_Z_UNKNOWN``."
+            "description": "REQUIRED ``True``: your confirmation that the printer has not been power-cycled or re-homed since it paused.  Otherwise refused with ``PRINTER_Z_UNKNOWN``."
           },
           "resume_z_mm": {
             "anyOf": [
@@ -21251,19 +21104,19 @@
             ],
             "default": null,
             "title": "Resume Z Mm",
-            "description": "Explicit resume Z height in mm.  ``None`` means the resume scanner derives it from the carved G-code at ``current_layer + 1``."
+            "description": "The height you believe the print is at.  The file's own height for that layer is used; a different number here is said in ``warnings``."
           },
           "threshold": {
             "default": 0.35,
             "title": "Threshold",
             "type": "number",
-            "description": "Heightmap value above which a pixel is treated as carved-away (0.0\u20131.0, default 0.35)."
+            "description": "How dark a pixel must be to be cut (0.0-1.0, default 0.35)."
           },
           "bevel": {
             "default": true,
             "title": "Bevel",
             "type": "boolean",
-            "description": "Add a 1-layer bevel ring around the deboss for cleaner visual edges.  Default ``True``."
+            "description": "Soften the walls of the cut.  Default ``True``."
           },
           "output_dir": {
             "anyOf": [
@@ -21276,19 +21129,19 @@
             ],
             "default": null,
             "title": "Output Dir",
-            "description": "Output directory for the carved + resume files.  ``None`` uses the system temp dir."
+            "description": "Where to write the files.  Left out, a new session folder is used."
           },
           "package_as_3mf": {
             "default": true,
             "title": "Package As 3Mf",
             "type": "boolean",
-            "description": "When ``True`` (default), the tool also wraps the resume gcode as a Bambu resume-mode 3MF and returns its path as ``resume_3mf_path``.  Disable for non-Bambu targets or when you want to inspect the carved gcode before packaging.  On failure the error is surfaced via ``warnings`` \u2014 the .gcode path is still returned so the caller can recover."
+            "description": "For a Bambu printer the edited print is packaged as a 3MF and returned as ``resume_3mf_path``; pass ``False`` to leave that field empty and use ``resume_gcode_path``.  Other printers get G-code either way."
           },
           "source_3mf_path": {
             "default": "",
             "title": "Source 3Mf Path",
             "type": "string",
-            "description": "Passed through to the 3MF wrapper. Supplying the original job's .3mf preserves its thumbnail and 3D model preview on the printer's display."
+            "description": "The original job's .3mf, for its thumbnail on the printer's screen."
           },
           "hotend_temp": {
             "anyOf": [
@@ -21301,7 +21154,7 @@
             ],
             "default": null,
             "title": "Hotend Temp",
-            "description": "Hotend setpoint for the resume 3MF metadata.  Leave unset to use the temperature the print's own file heats to; a value that differs from it is kept and said in ``warnings``."
+            "description": "Nozzle temperature.  Leave unset to use the one the print's own file heats to; a value that differs from it is kept and said in ``warnings``."
           },
           "bed_temp": {
             "anyOf": [
@@ -21314,7 +21167,7 @@
             ],
             "default": null,
             "title": "Bed Temp",
-            "description": "Bed setpoint for the 3MF metadata, read the same way as ``hotend_temp``."
+            "description": "Bed temperature, read the same way."
           },
           "filament_type": {
             "anyOf": [
@@ -21327,7 +21180,19 @@
             ],
             "default": null,
             "title": "Filament Type",
-            "description": "The print's material, for 3MF metadata. Leave it out and Kiln reads the print's own material; when nothing says which, the call is refused (``PRINT_MATERIAL_UNKNOWN``)."
+            "description": "The print's material.  Leave it out and Kiln reads the print's own; when nothing says which, the call is refused (``PRINT_MATERIAL_UNKNOWN``)."
+          },
+          "accept_bridge_cascade_risk": {
+            "default": false,
+            "title": "Accept Bridge Cascade Risk",
+            "type": "boolean",
+            "description": "Yes to a carve that cuts into the layer where the print bridges across its infill, when an answer of ``needs_acceptance`` names it."
+          },
+          "accept_subtle_depth": {
+            "default": false,
+            "title": "Accept Subtle Depth",
+            "type": "boolean",
+            "description": "Yes to a carve shallower than reads clearly, when an answer of ``needs_acceptance`` names it."
           }
         },
         "required": [
@@ -21519,7 +21384,13 @@
             "default": false,
             "title": "Accept Bridge Cascade Risk",
             "type": "boolean",
-            "description": "THIRD safety gate on top of ``start_layer_override`` + ``accept_unsafe_depth``. Required when the override drops below ``band_floor`` AND any layer in ``[override, last_layer]`` is tagged ``;TYPE:Bridge infill`` or ``;TYPE:Internal infill`` in the source gcode.  Crossing one of those layers removes the substrate the solid infill above was going to cool against, cascading into a cap failure. Without it the engine raises ``BRIDGE_CASCADE_RISK``."
+            "description": "THIRD safety gate on top of ``start_layer_override`` + ``accept_unsafe_depth``. Required when the override drops below ``band_floor`` AND any layer in ``[override, last_layer]`` is tagged ``;TYPE:Bridge infill`` or ``;TYPE:Internal infill`` in the source gcode.  Crossing one of those layers removes the substrate the solid infill above was going to cool against, cascading into a cap failure. Without it the engine raises ``BRIDGE_CASCADE_RISK``. Also accepts a carve that, at the depth asked for, cuts into the layer where the print bridges across its infill."
+          },
+          "accept_subtle_depth": {
+            "default": false,
+            "title": "Accept Subtle Depth",
+            "type": "boolean",
+            "description": "Accept a carve shallower than reads clearly (a faint mark).  Without it such a carve is not handed over.  Defaults to ``False``."
           },
           "target_ams_slot": {
             "default": -1,
@@ -22939,7 +22810,7 @@
             "default": 1.2,
             "title": "Depth Mm",
             "type": "number",
-            "description": "Deboss depth in mm, (0, 5]. Defaults to 1.2."
+            "description": "Deboss depth in mm, (0, 5]. Defaults to 1.2. It decides how far down the carve reaches; when the print cannot give it, the answer says how deep the carve is and why."
           },
           "image_scale": {
             "default": 0.7,
@@ -23048,31 +22919,31 @@
             "default": 0,
             "title": "Start Layer Override",
             "type": "integer",
-            "description": "Recorded on the returned ``plan`` when non-zero. This tool does not pass it to the carve, so the planned artifacts start at the analyzer's own floor; use ``decorate_during_print`` to carve deeper. Defaults to ``0``."
+            "description": "The first layer to carve, instead of the one ``depth_mm`` reaches. Passed to the carve exactly as ``decorate_during_print`` takes it. Defaults to ``0`` (let the depth decide)."
           },
           "accept_unsafe_depth": {
             "default": false,
             "title": "Accept Unsafe Depth",
             "type": "boolean",
-            "description": "Accept a ``DEPTH_UNSAFE`` plan warning so it no longer blocks; recorded on the plan. Defaults to ``False``."
+            "description": "Accept a carve deeper than 2 mm, or one started below the print's solid top. Defaults to ``False``."
           },
           "accept_bridge_cascade_risk": {
             "default": false,
             "title": "Accept Bridge Cascade Risk",
             "type": "boolean",
-            "description": "Accept a ``CARVE_CROSSES_BRIDGE`` plan warning so it no longer blocks; recorded on the plan. Defaults to ``False``."
+            "description": "Accept a carve that cuts into the layer where the print bridges across its infill. Defaults to ``False``."
           },
           "accept_subtle_depth": {
             "default": false,
             "title": "Accept Subtle Depth",
             "type": "boolean",
-            "description": "Accept a carve whose effective depth is below the legibility threshold. Without it such a plan carries a blocking ``DEPTH_SUBTLE`` warning. Defaults to ``False``."
+            "description": "Accept a carve shallower than reads clearly (a faint mark). Defaults to ``False``."
           },
           "strict": {
             "default": true,
             "title": "Strict",
             "type": "boolean",
-            "description": "When True (the default), run the analyzer-invariant checks before returning.  Any failure raises a structured error envelope (``status=\"error\"``, ``code=\"STRICT_INVARIANT_FAILED\"``, ``invariant_failures=[...]``) instead of a malformed \"ok\" \u2014 every check pins one shape the envelope must satisfy (bridge_safe agreement, depth gap within tolerance, feature-mush floor, resolver token match, carve reaches last layer, contiguous band, required preview views exist, etc.).  You almost never want to set this to False; the checks exist because the analyzer envelope IS allowed to be inconsistent in subtle ways and an agent can't always tell from the response alone.  The off-switch is kept only for development scenarios where you're deliberately exercising the analyzer with pathological inputs."
+            "description": "When True (the default), the file Kiln made is checked against its plan before the answer leaves, and a disagreement is an error (``status=\"error\"``, ``code=\"STRICT_INVARIANT_FAILED\"``, ``error`` saying what does not agree, ``invariant_failures=[...]`` naming each check with its ``detail``).  A session that fails here is refused by ``apply_mid_print_decoration_plan``.  The off-switch is kept only for development: with it off the same disagreement comes back as ``needs_acceptance`` with the underlying envelope, and the session is still held back."
           },
           "target_ams_slot": {
             "default": -1,
@@ -24978,7 +24849,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Pro. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25192,7 +25063,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Pro. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25494,7 +25365,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Pro. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -26095,7 +25966,7 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Pro. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -26347,10 +26218,17 @@
             "description": "Back config \u2014 ``\"plain\"``, ``\"qr:URL\"``, or ``\"text:...\"``."
           },
           "diameter_mm": {
-            "default": 30.0,
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Diameter Mm",
-            "type": "number",
-            "description": "Tag diameter/width in mm (default 30)."
+            "description": "Tag diameter/width in mm.  Leave it out and Kiln sizes the tag to the text: the standard size when the name reads there, larger when it needs it, and the answer's ``sizing.note`` says so (tell the user).  A size you set is kept; text that won't read at it is refused with ``fits_at_mm``, the size that fits."
           },
           "thickness_mm": {
             "default": 3.0,
@@ -26776,92 +26654,6 @@
       },
       "inputs": {
         "image": "photo"
-      }
-    },
-    {
-      "name": "add_qr_to_product",
-      "description": "Add a scannable QR code to any product STL (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
-      "tier": "business",
-      "access": "business",
-      "category": "product_intelligence",
-      "parameters": {
-        "properties": {
-          "product_stl_path": {
-            "title": "Product Stl Path",
-            "type": "string",
-            "description": "Path to the base product STL."
-          },
-          "qr_content": {
-            "title": "Qr Content",
-            "type": "string",
-            "description": "URL or text to encode in the QR code."
-          },
-          "placement": {
-            "default": "bottom",
-            "title": "Placement",
-            "type": "string",
-            "description": "``'bottom'``, ``'top'``, or ``'pocket'``."
-          },
-          "product_type": {
-            "default": "",
-            "title": "Product Type",
-            "type": "string",
-            "description": "Template key for profile lookup (optional)."
-          },
-          "size_mm": {
-            "default": 0,
-            "title": "Size Mm",
-            "type": "number",
-            "description": "QR size override in mm (0 = auto from product)."
-          },
-          "pad_height_mm": {
-            "default": 0.5,
-            "title": "Pad Height Mm",
-            "type": "number",
-            "description": "Height of the QR pads in mm, default 0.5."
-          },
-          "nozzle_mm": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nozzle Mm",
-            "description": "Nozzle diameter in mm; the QR's smallest module is sized from it so the code prints cleanly. Leave unset to use the only printer Kiln knows of, else 0.4; ``nozzle`` in the reply says which was used."
-          }
-        },
-        "required": [
-          "product_stl_path",
-          "qr_content"
-        ],
-        "title": "add_qr_to_productArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Add a QR code to a product",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "qr_branding_v1",
-        "variant": "qr_branding",
-        "feature": "QR codes on printed products",
-        "headline": "Put a scannable QR on this product.",
-        "outcome_preview": "Kiln Business would generate the QR geometry, pocket it into the product, and keep it scannable at print size.",
-        "free_included": "The product itself still generates without the QR."
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "inputs": {
-        "mesh": "product_stl_path"
       }
     },
     {
@@ -29286,6 +29078,12 @@
             "title": "Allow Unsatisfiable",
             "type": "boolean",
             "description": "When true, keep a gate whose rules ask for more qualifying reviewers than the org has, with the problem reported under ``rule_warnings``.  When false (the default), such a gate is refused and nothing is saved."
+          },
+          "applies_to_owner": {
+            "default": false,
+            "title": "Applies To Owner",
+            "type": "boolean",
+            "description": "A design's rule only.  When true, the rule holds the design's owner too: on Kiln's servers the branch then changes only through a merge that meets the rule, and the owner's own direct changes and pushes to it are refused (``BRANCH_PROTECTED``).  It is kept only where the rules are kept in a Kiln account; anywhere else it is refused (``OWNER_RULE_ACCOUNT_ONLY``) and nothing is saved.  When false (the default), the owner may still change the branch directly. Each save of the rule sets it again."
           }
         },
         "required": [
@@ -30915,9 +30713,30 @@
           "text": {
             "scad_path": "scad_code"
           }
+        },
+        "stays_here_when_source_reads": {
+          "scad_code": "openscad",
+          "scad_path": "openscad_file"
         }
       },
-      "generate_from_template": {},
+      "decorate_surface": {
+        "inputs": {
+          "mesh": "model_path",
+          "image": "content"
+        },
+        "asked_by_the_tool": true
+      },
+      "generate_from_template": {
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "nozzle"
+            ]
+          }
+        ],
+        "printer_param": "printer_id"
+      },
       "import_step_file": {
         "inputs": {
           "files": {
@@ -30974,13 +30793,6 @@
         "says": "Rounded the edges",
         "inputs": [
           "file_path"
-        ],
-        "outputs": []
-      },
-      "add_qr_to_product": {
-        "says": "Added a QR code",
-        "inputs": [
-          "product_stl_path"
         ],
         "outputs": []
       },
@@ -31158,13 +30970,6 @@
         "says": "Simplified the surface",
         "inputs": [
           "file_path"
-        ],
-        "outputs": []
-      },
-      "smart_decorate": {
-        "says": "Decorated the surface",
-        "inputs": [
-          "model_path"
         ],
         "outputs": []
       },

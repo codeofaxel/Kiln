@@ -92,8 +92,12 @@ def test_print_fetch_failure_is_reported_not_raised():
     assert "artifact expired" in resp["error"]["message"]
 
 
-def test_local_slice_and_print_does_not_trigger_a_fetch():
-    # A local-path slice_and_print (not from the web) is a plain passthrough.
+def test_a_relayed_slice_and_print_naming_a_local_path_is_refused():
+    # This test once asserted that a relayed ``input_path`` passed straight
+    # through.  The web and the AI apps never send one: the bridge fills it
+    # from the saved make it fetches.  A path a relayed call chooses would
+    # let the server print any file already on this computer, so it is now
+    # refused on this computer, before any fetch and before the tool.
     recorded = []
     resp = handle_relay_request(
         {
@@ -104,8 +108,9 @@ def test_local_slice_and_print_does_not_trigger_a_fetch():
         call_tool=_recording_caller(recorded),
         fetch_artifact=_never_fetch,
     )
-    assert resp["ok"] is True
-    assert recorded[0][1] == {"input_path": "/local/a.stl"}
+    assert resp["ok"] is False
+    assert resp["error"]["code"] == "BRIDGE_TOOL_REFUSED"
+    assert recorded == []
 
 
 class TestHandshake403NamesTheFix:

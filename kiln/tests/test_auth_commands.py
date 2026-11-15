@@ -225,7 +225,7 @@ class TestLoginProviderHint:
 
         monkeypatch.setattr(auth_commands, "_http_post", fake_post)
         # Don't pop a real browser open during the test.
-        monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+        monkeypatch.setattr(auth_commands.run_program, "open_url", lambda *a, **k: False)
 
         g = click.Group("kiln")
         register_auth_cli(g)
@@ -301,7 +301,7 @@ def signin_cli(auth_home, monkeypatch):
 
     clock = _FakeClock()
     monkeypatch.setattr(auth_commands, "time", clock)
-    monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+    monkeypatch.setattr(auth_commands.run_program, "open_url", lambda *a, **k: False)
     # The sign-in's own follow-ups (the Terms hand-over and the account
     # agreement pull) are not what these tests are about and must not reach
     # out over the network.
@@ -541,7 +541,7 @@ def test_signin_pulls_the_accounts_terms_agreement(auth_home, monkeypatch):
     seen: list[dict] = []
     monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: False)
     monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: seen.append(k) or True)
-    monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+    monkeypatch.setattr(auth_commands.run_program, "open_url", lambda *a, **k: False)
     monkeypatch.setattr(auth_commands.time, "sleep", lambda s: None)
 
     def fake_post(path, payload, *, bearer=None, timeout=15.0):
@@ -579,7 +579,7 @@ def test_a_completed_signin_clears_the_lapsed_verdict(auth_home, monkeypatch):
 
     monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: False)
     monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: True)
-    monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+    monkeypatch.setattr(auth_commands.run_program, "open_url", lambda *a, **k: False)
     monkeypatch.setattr(auth_commands.time, "sleep", lambda s: None)
 
     def fake_post(path, payload, *, bearer=None, timeout=15.0):
@@ -1352,7 +1352,7 @@ class TestMachineCredentialDoors:
                     "email": "maker@example.com", "tier": "pro", "auth_uid": "uid-1", "has_entitlement": True}
 
         monkeypatch.setattr(auth_commands, "_http_post", fake_post)
-        monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+        monkeypatch.setattr(auth_commands.run_program, "open_url", lambda *a, **k: False)
         monkeypatch.setattr(auth_commands, "_hostname_label", lambda: "shop-pc")
         monkeypatch.setattr(auth_commands, "_sniff_client_from_parent_process", lambda: "")
         monkeypatch.setattr(auth_commands, "_is_stdin_tty", lambda: True)

@@ -143,6 +143,8 @@ def auto_contribute_completion(
             printer_file_name=printer_file_name,
             printer_model=printer_model,
             material=material,
+            # A monitor watched the machine end the job; it did not see the part.
+            determined_by="observed",
         )
     except Exception:
         logger.debug("auto community contribution skipped (best-effort)", exc_info=True)
@@ -345,6 +347,8 @@ def contribute_resolved_outcome(
             material=material,
             print_error=print_error,
             extra=extra,
+            # Read off the machine's state after the fact.
+            determined_by="inferred",
         )
     except Exception:
         logger.debug(

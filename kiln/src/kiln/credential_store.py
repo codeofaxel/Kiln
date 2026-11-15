@@ -49,6 +49,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from kiln import run_program
+
 try:
     from cryptography.exceptions import InvalidTag
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -199,7 +201,7 @@ class CredentialStore:
             parts = shlex.split(cmd)
             if not parts:
                 raise CredentialStoreError(f"{_MASTER_KEY_COMMAND_ENV} is set but empty after parsing")
-            output = subprocess.check_output(parts, text=True, stderr=subprocess.STDOUT)
+            output = run_program.check_output(parts, text=True, stderr=subprocess.STDOUT)
             key = output.strip()
             if not key:
                 raise CredentialStoreError(f"{_MASTER_KEY_COMMAND_ENV} produced an empty key")

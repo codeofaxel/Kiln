@@ -70,7 +70,7 @@ def _miss_refusal(feature: str, miss: Miss) -> dict[str, Any]:
         "success": False,
         "error": text,
         "code": "FLEET_ANSWER_UNAVAILABLE",
-        "retryable": miss.cause != "refused",
+        "retryable": miss.no_answer,
         **fields(miss),
     }
 

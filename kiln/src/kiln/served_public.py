@@ -5,8 +5,9 @@ Kiln's servers than on this computer alone: there they run with Kiln's own
 checks beside them, the same way they run for Kiln's hosted connector.  The
 bundled manifest names those tools (the ``served_public`` block of
 ``pro_tool_manifest.json``, written by kiln-pro, https://kiln3d.com), what
-each needs sent, and which calls stay on this computer.  Nothing here keeps
-a list of its own.
+each needs sent, and which calls stay on this computer: a call naming a value
+kept here, or one whose OpenSCAD reads a file here (:mod:`kiln.scad_reads`),
+since Kiln's servers cannot open it.  Nothing here keeps a list of its own.
 
 On an install without kiln-pro, signed in, a call to a named tool is three
 steps: the files it names are sent (:func:`kiln.served_makes.send_inputs`),
@@ -89,14 +90,78 @@ def _kiln_pro_here() -> bool:
 def plan(name: str, arguments: dict[str, Any] | None) -> dict[str, Any] | None:
     """The manifest entry when this call is run on Kiln's servers, else
     ``None``: the tool is not named, kiln-pro is here, or the call's own
-    arguments reach something kept on this computer."""
+    arguments reach something kept on this computer -- a value the entry
+    names (``stays_here_when``), or source that reads a file here
+    (``stays_here_when_source_reads``, :func:`_source_reads_here`)."""
     entry = _tools.get(name)
-    if entry is None or _kiln_pro_here():
+    if entry is None or _kiln_pro_here() or entry.get("asked_by_the_tool"):
+        # ``asked_by_the_tool``: the tool runs here and asks the servers
+        # itself, for the calls that need them (:func:`answer_or_missed`).
         return None
     for param, values in (entry.get("stays_here_when") or {}).items():
         if isinstance(values, list) and (arguments or {}).get(param) in values:
             return None
+    if _source_reads_here(entry, arguments or {}):
+        return None
     return entry
+
+
+#: Kinds of source a manifest entry's ``stays_here_when_source_reads`` names:
+#: OpenSCAD written in the argument, or a ``.scad`` file the argument names.
+_OPENSCAD_TEXT = "openscad"
+_OPENSCAD_FILE = "openscad_file"
+
+
+def _source_reads_here(entry: dict[str, Any], arguments: dict[str, Any]) -> bool:
+    """Whether the source this call builds reads a file other than Kiln's
+    bundled OpenSCAD libraries (:func:`kiln.scad_reads.reads_beyond_bundled_libraries`).
+    Such a file is on this computer, so the build is too.
+
+    The entry's ``stays_here_when_source_reads`` maps each argument that
+    carries source to its kind.  A file is skipped when the call also gives
+    the source as text (the text is what is built,
+    :func:`kiln.served_makes.send_inputs`), and when it cannot be read whole
+    here: sending it is refused here too, and the tool says why.  A kind
+    this build cannot read keeps any call that sets it here."""
+    sources = entry.get("stays_here_when_source_reads")
+    if not isinstance(sources, dict) or not sources:
+        return False
+    from kiln import scad_reads
+
+    as_text = (entry.get("inputs") or {}).get("text") or {}
+    for param, kind in sources.items():
+        value = arguments.get(param)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if kind == _OPENSCAD_TEXT:
+            source = value
+        elif kind == _OPENSCAD_FILE:
+            twin = as_text.get(param) if isinstance(as_text, dict) else None
+            given = arguments.get(twin) if isinstance(twin, str) else None
+            if isinstance(given, str) and given.strip():
+                continue
+            source = _file_text(value)
+            if source is None:
+                continue
+        else:
+            return True
+        if scad_reads.reads_beyond_bundled_libraries(source):
+            return True
+    return False
+
+
+def _file_text(value: str) -> str | None:
+    """The text of the file *value* names, read the way it would be sent
+    (:func:`kiln.served_makes.send_inputs`), or ``None`` when it cannot be."""
+    from kiln import served_makes
+
+    try:
+        local = Path(value.strip()).expanduser()
+        if not local.is_file() or local.stat().st_size > served_makes.MAX_UPLOAD_BYTES:
+            return None
+        return local.read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError, RuntimeError):
+        return None
 
 
 def ask(

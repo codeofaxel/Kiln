@@ -63,6 +63,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.quoted_text import fence
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -261,13 +263,15 @@ def resolve_print_start(
     adapter_message = str(getattr(result, "message", "") or "")
     job_id = getattr(result, "job_id", None)
     name = file_name or "the file"
+    # In a sentence the file's name is fenced: the name is the file's, not Kiln's.
+    said = fence(file_name) if file_name else "the file"
 
     if not adapter_ok and getattr(result, "refused_before_send", False) is True:
         # Kiln refused before any command went out.  Nothing was sent, so
         # the printer has nothing to confirm or refute and is not asked.
         return PrintStartVerdict(
             state=FAILED,
-            message=adapter_message or f"Kiln did not start {name}, and sent the printer nothing.",
+            message=adapter_message or f"Kiln did not start {said}, and sent the printer nothing.",
             job_id=job_id,
             evidence={
                 "corroboration": "not_needed",
@@ -288,7 +292,7 @@ def resolve_print_start(
         state = STARTED if status in _RUNNING else ACCEPTED
         return PrintStartVerdict(
             state=state,
-            message=adapter_message or f"Print command accepted for {name}.",
+            message=adapter_message or f"Print command accepted for {said}.",
             job_id=job_id,
             evidence=evidence,
             # The printer has the job, so its start routine is what happens
@@ -301,7 +305,7 @@ def resolve_print_start(
     if status in _REFUTES_START:
         return PrintStartVerdict(
             state=FAILED,
-            message=adapter_message or f"The printer did not start {name}.",
+            message=adapter_message or f"The printer did not start {said}.",
             job_id=job_id,
             evidence=evidence,
         )
@@ -319,7 +323,7 @@ def resolve_print_start(
     return PrintStartVerdict(
         state=ACCEPTED,
         message=(
-            f"Print command accepted for {name}. {detail} The start check's "
+            f"Print command accepted for {said}. {detail} The start check's "
             f"failure verdict came from a reading that does not postdate this "
             f"command, so it is not evidence about this job — call "
             f"printer_status() to confirm."

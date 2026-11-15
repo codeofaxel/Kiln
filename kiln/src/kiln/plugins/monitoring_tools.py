@@ -27,6 +27,7 @@ from kiln.auto_record_hook import note_cancel_requested
 from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
 from kiln.print_start_verdict import resolve_print_start
+from kiln.quoted_text import fence
 from kiln.tool_annotations import destructive, read_only
 from kiln.tool_results import unwrap_tool_result
 
@@ -284,7 +285,7 @@ class _PrintWatcher:
             self._thread.join(timeout=5)
         with self._lock:
             if self._result is not None:
-                return self._result
+                return self._with_ending_question(self._result)
             elapsed = round(time.time() - self._start_time, 1)
             return {
                 "success": True,
@@ -312,6 +313,8 @@ class _PrintWatcher:
                 "finished": self._result is not None,
                 "result": self._result,
             }
+        if data["result"] is not None:
+            data["result"] = self._with_ending_question(data["result"])
 
         # Cost estimate (outside lock — calls adapter)
         try:
@@ -331,6 +334,31 @@ class _PrintWatcher:
         return data
 
     # -- internal ----------------------------------------------------------
+
+    #: Watch outcomes whose ending can owe the person a question.
+    _ENDINGS_THAT_ASK = frozenset({"failed", "auto_cancelled", "cancelling"})
+
+    def _with_ending_question(self, result: dict) -> dict:
+        """*result* with the one question its ending owes the person
+        (:mod:`kiln.ending_question`), read when the result is read: the
+        print's row may settle after the watch notices the ending.  A print
+        that finished owes none of its own and carries the one waiting about
+        its printer, when there is one.  Never raises."""
+        finished = result.get("outcome") == "completed"
+        if "ask_the_person" in result or not (finished or result.get("outcome") in self._ENDINGS_THAT_ASK):
+            return result
+        try:
+            from kiln import ending_question
+            from kiln.printers.base import outcome_printer_name
+
+            ending_question.attach(
+                result, outcome_printer_name(self._adapter),
+                cancelling=not finished and result.get("outcome") != "failed",
+                ending_can_owe=not finished,
+            )
+        except Exception:  # noqa: BLE001
+            _logger.debug("watch: ending question not attached", exc_info=True)
+        return result
 
     def _finish(self, result: dict) -> None:
         """Store the final result and publish a completion event."""
@@ -1512,11 +1540,14 @@ class _MonitoringToolsPlugin:
             try:
                 # The same consent rule start_print applies: this starts a
                 # print on a file already on the printer, which is the same
-                # act under a different name.
+                # act under a different name.  A resume claim is judged by
+                # the one check (print_signoff.verified_resume).
+                from kiln import print_signoff as _print_signoff
+
                 if block := _srv._preview_gate_error(
                     "start_monitored_print", file_name, preview_token,
                     printer_name=printer_name,
-                    is_resume=_srv._is_resume_mode_3mf(file_name),
+                    is_resume=_print_signoff.claims_resume(file_name),
                 ):
                     return block
                 # Same door as the control verbs: config.yaml fallback included.
@@ -1576,7 +1607,7 @@ class _MonitoringToolsPlugin:
                         "print_result": verdict.to_dict(),
                         "monitor_status": "not_started",
                         "message": (
-                            f"The printer did not start {file_name}. {verdict.message} "
+                            f"The printer did not start {fence(file_name)}. {verdict.message} "
                             "No first-layer monitor was started."
                         ),
                     }

@@ -155,9 +155,11 @@ def test_a_partial_write_from_a_crashed_run_never_poses_as_the_result(
     assert "AFTER writing complete G-code" not in result.message
 
 
-def test_orca_keeps_its_deterministic_bambu_verdict_unretried(tmp_path: Path) -> None:
-    """-11 on the Orca dialect is a real answer with a real message; the
-    retry must not crash the same way twice more to say the same thing."""
+def _orca_sigsegv(tmp_path: Path, printer_id: str) -> tuple[SlicerError, int]:
+    """Slice through a stand-in BambuStudio that dies of SIGSEGV, with a Kiln
+    profile built for *printer_id*; the error and how many launches it took."""
+    from kiln.slicer_profiles import _KILN_HEADER, _PRINTER_LINE
+
     binary = tmp_path / "BambuStudio"
     binary.write_text("#!/bin/sh\n")
     binary.chmod(0o755)
@@ -181,7 +183,25 @@ def test_orca_keeps_its_deterministic_bambu_verdict_unretried(tmp_path: Path) ->
         presets.return_value.process_path = tmp_path / "p.json"
         presets.return_value.filament_path = tmp_path / "f.json"
         profile = tmp_path / "profile.ini"
-        profile.write_text("[print]\n")
-        with pytest.raises(SlicerError, match="known crash"):
+        profile.write_text(f"{_KILN_HEADER}{printer_id}\n{_PRINTER_LINE}{printer_id}\n[print]\n")
+        with pytest.raises(SlicerError) as raised:
             slice_file(str(stl), output_dir=str(tmp_path / "out"), profile=str(profile))
-    assert launches["n"] == 1
+    return raised.value, launches["n"]
+
+
+def test_orca_keeps_its_deterministic_bambu_verdict_unretried(tmp_path: Path) -> None:
+    """-11 on the Orca dialect is a real answer with a real message; the
+    retry must not crash the same way twice more to say the same thing."""
+    error, launches = _orca_sigsegv(tmp_path, "bambu_x1c")
+    assert "known crash" in str(error)
+    assert launches == 1
+
+
+def test_an_orca_crash_on_another_printer_names_that_printer_not_bambu(tmp_path: Path) -> None:
+    """The Bambu explanation belongs to Bambu printers; a crash slicing a
+    Creality says it crashed, for that printer, and blames no Bambu preset."""
+    error, launches = _orca_sigsegv(tmp_path, "k2_pro")
+    said = str(error)
+    assert "Creality K2 Pro" in said and "signal 11" in said
+    assert "known crash" not in said and "Bambu Lab printer profiles" not in said
+    assert launches == 1

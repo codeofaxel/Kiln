@@ -48,7 +48,7 @@ This module records the answer instead of guessing it later:
 The single caller is :func:`kiln.emboss_generator.compile_embossed_model`,
 the one chokepoint every decoration door in both repos already funnels
 through (``decorate_surface``, ``apply_decoration``, preset apply,
-``smart_decorate``, ``batch_decorate``, wall text, procedural-texture
+``batch_decorate``, wall text, procedural-texture
 carves).  Hooking there means every door records face provenance via ONE
 shared helper — no per-door branches to drift.
 """

@@ -44,6 +44,7 @@ from typing import NamedTuple
 
 import click
 
+from kiln import run_program
 from kiln.bridge_client import (
     REFUSAL_TOOLS_UNAVAILABLE,
     _read_license,
@@ -469,7 +470,7 @@ def _spawn_supervised_bridge() -> int:
         kwargs["start_new_session"] = True  # leave the controlling terminal
     else:  # Windows: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         kwargs["creationflags"] = 0x00000008 | 0x00000200
-    proc = subprocess.Popen(
+    proc = run_program.Popen(
         [sys.executable, "-m", "kiln.bridge_supervisor"], **kwargs
     )
     return proc.pid
@@ -648,8 +649,8 @@ def _install_service() -> tuple[bool, str]:
     if sys.platform == "darwin":
         path = _plist_path()
         _atomic_write(path, _render_plist(sys.executable, _LOG_FILE))
-        subprocess.run(["launchctl", "unload", path], capture_output=True, text=True)
-        r = subprocess.run(
+        run_program.run(["launchctl", "unload", path], capture_output=True, text=True)
+        r = run_program.run(
             ["launchctl", "load", "-w", path], capture_output=True, text=True
         )
         if r.returncode != 0:
@@ -657,10 +658,10 @@ def _install_service() -> tuple[bool, str]:
         return True, ""
     if sys.platform.startswith("linux"):
         _atomic_write(_systemd_path(), _render_systemd_unit(sys.executable))
-        subprocess.run(
+        run_program.run(
             ["systemctl", "--user", "daemon-reload"], capture_output=True, text=True
         )
-        r = subprocess.run(
+        r = run_program.run(
             ["systemctl", "--user", "enable", "--now", _UNIT],
             capture_output=True,
             text=True,
@@ -689,18 +690,18 @@ def _remove_service() -> None:
     if sys.platform == "darwin":
         path = _plist_path()
         if os.path.exists(path):
-            subprocess.run(["launchctl", "unload", "-w", path], capture_output=True, text=True)
+            run_program.run(["launchctl", "unload", "-w", path], capture_output=True, text=True)
             with contextlib.suppress(OSError):
                 os.unlink(path)
     elif sys.platform.startswith("linux") and os.path.exists(_systemd_path()):
-        subprocess.run(
+        run_program.run(
             ["systemctl", "--user", "disable", "--now", _UNIT],
             capture_output=True,
             text=True,
         )
         with contextlib.suppress(OSError):
             os.unlink(_systemd_path())
-        subprocess.run(
+        run_program.run(
             ["systemctl", "--user", "daemon-reload"], capture_output=True, text=True
         )
     elif sys.platform == "win32":

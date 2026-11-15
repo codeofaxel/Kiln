@@ -210,7 +210,7 @@ class TestArrival:
         """The servers tried twice to store the make and say so.  That is
         heard as the same retryable failure, whatever keys the answer has."""
         answer = served_makes.arrive(
-            "smart_decorate",
+            "batch_decorate",
             {
                 "status": "success",
                 "result_file": "/tmp/kiln_decorate_x1/out.bin",
