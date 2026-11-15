@@ -186,7 +186,7 @@ def _answer_in(answer: Any) -> dict[str, Any] | None:
 
 def _note_miss(miss: Miss | None) -> None:
     global _service_down_until
-    if miss is not None and miss.cause in ("offline", "unanswered"):
+    if miss is not None and miss.no_answer:
         with _lock:
             _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
     logger.debug("print warning not judged (%s)", miss and miss.cause)

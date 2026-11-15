@@ -118,7 +118,7 @@ def qr_missed(miss: Any, model_name: str) -> dict[str, Any]:
             safe_remedy="",
         ),
         "code": miss.code or NO_QR_CODE,
-        "retryable": miss.retryable,
+        "retryable": miss.no_answer,
         **fields(miss),
     }
     if miss.cause == "signed_out":

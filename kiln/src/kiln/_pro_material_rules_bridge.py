@@ -102,7 +102,7 @@ def _miss(miss: Any, requirements: list[str]) -> dict[str, Any]:
         "requirements": list(requirements),
         "error": text,
         "code": "RULE_CHECK_UNAVAILABLE",
-        "retryable": miss.retryable,
+        "retryable": miss.no_answer,
     }
     out.update(served_answer.fields(miss))
     return out

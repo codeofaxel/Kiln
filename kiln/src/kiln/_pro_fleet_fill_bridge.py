@@ -122,6 +122,6 @@ def _miss(miss: Any, *, failed: bool = False) -> dict[str, Any]:
             wont="won't plan or queue any copies",
             safe_remedy="print copies on one printer with multi_copy_print",
         )
-    out = _srv._error_dict(text, code="FLEET_FILL_UNAVAILABLE", retryable=miss.retryable)
+    out = _srv._error_dict(text, code="FLEET_FILL_UNAVAILABLE", retryable=miss.no_answer)
     out.update(served_answer.fields(miss))
     return out

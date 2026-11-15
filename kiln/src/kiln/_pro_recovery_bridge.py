@@ -176,7 +176,7 @@ def _note_miss(miss: Miss | None) -> Asked:
     while so every answer about a failure does not wait on it again."""
     global _service_down_until
     miss = miss or Miss("unanswered", detail="an answer with no plan in it")
-    if miss.cause in ("offline", "unanswered"):
+    if miss.no_answer:
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
     logger.debug("recovery plan not served (%s); answering with the safe floor", miss.cause)
     return Asked(included=True, miss=miss)
