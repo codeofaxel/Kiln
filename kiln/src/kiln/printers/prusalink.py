@@ -34,6 +34,7 @@ from kiln.printers.base import (
     UploadResult,
 )
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.quoted_text import fence
 
 logger = logging.getLogger(__name__)
 
@@ -784,7 +785,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         return UploadResult(
             success=True,
             file_name=filename,
-            message=f"Uploaded {filename} to Prusa Link.",
+            message=f"Uploaded {fence(filename)} to Prusa Link.",
         )
 
     # ------------------------------------------------------------------

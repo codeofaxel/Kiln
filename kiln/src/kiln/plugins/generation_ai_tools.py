@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
+from kiln.quoted_text import fence
 from kiln.tool_annotations import creates, destructive, read_only
 from kiln.tool_results import unwrap_tool_result
 
@@ -1163,7 +1164,7 @@ class _GenerationAIToolsPlugin:
                     )
                     resp["message"] = (
                         f"Generated '{prompt[:80]}' via {gen.display_name}, "
-                        f"sliced, and uploaded. Call start_print('{file_name}') "
+                        f"sliced, and uploaded. Call start_print with {fence(file_name)} "
                         f"to begin printing after review."
                     )
 

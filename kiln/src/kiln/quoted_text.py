@@ -14,8 +14,9 @@ is replaced, so a value can never close its own fence early.
 
 Which values are fenced is named by field paths.  Keys joined by ``.``;
 ``name[]`` is every item of the list at ``name``; ``*`` is every value of a
-mapping; ``{}`` is every KEY of the mapping at that point.  The paths come
-from two places, and a result is fenced at the union of both:
+mapping; ``{}`` is every KEY of the mapping at that point; ``**`` is any
+depth, so ``**.file_name`` is every ``file_name`` anywhere in the result.
+The paths come from two places, and a result is fenced at the union of both:
 
 * :data:`TOOL_FIELDS`, for the tools this package ships;
 * the result's own :data:`FIELD` block (``{"fields": [...], "note": ...}``),
@@ -23,6 +24,10 @@ from two places, and a result is fenced at the union of both:
   of that answer that can hold someone else's words.
 
 A block can only add fencing, never remove it.
+
+A sentence of Kiln's that names one of these values (a branch, a face, a
+part, a file) fences the name where it enters the sentence, with
+:func:`fence`: the rest of the sentence is Kiln's, the name is not.
 
 The agent-facing doors on a person's own computer call
 :func:`fence_call_result` (the MCP connection, through :func:`install`),
@@ -78,6 +83,19 @@ UNMARKED_WARNING = (
 )
 
 _MARKET_MODEL = ("name", "creator", "description", "instructions", "tags[]", "license", "category")
+#: A file name a printer or a job record reports, wherever the answer holds
+#: it: the printer's own job, a queued job, a print record.  The name is the
+#: file's, and a downloaded file keeps the name its uploader gave it.
+PRINTER_FILE_FIELDS = ("**.file_name", "**.filename")
+#: The tools that answer with what a printer or a job record reports.
+_PRINTER_FILE_TOOLS = (
+    "analyze_print_failure", "annotate_print", "await_print_completion", "cancel_print",
+    "cancel_queued_job", "cancel_queued_jobs", "check_print_health", "estimate_print_progress",
+    "fleet_status", "fleet_utilization", "job_status", "monitor_print", "monitor_print_vision",
+    "plan_multi_copy_split", "preflight_check", "print_history", "print_plate_object",
+    "printer_status", "queue_summary", "record_print_outcome", "route_print_job", "smart_reprint",
+    "start_print", "validate_print_quality", "watch_print",
+)
 
 #: The tools this package ships whose results can carry an outside site's or
 #: a file author's words: tool name -> field paths.  A path that names a file
@@ -100,6 +118,11 @@ TOOL_FIELDS: dict[str, tuple[str, ...]] = {
     "list_plate_objects": ("objects[].name",),
     "step_file_info": ("products[]", "description", "author", "original_file_name", "originating_system"),
     "extract_file_metadata": ("metadata.*",),
+    # The files on the printer: names and paths, and what each file's header
+    # says made it.
+    "printer_files": ("files[].name", "files[].path", "files[].slicer", "files[].material"),
+    "analyze_print_file": ("path", "metadata.*", *PRINTER_FILE_FIELDS),
+    **{tool: PRINTER_FILE_FIELDS for tool in _PRINTER_FILE_TOOLS},
 }
 
 
@@ -167,6 +190,14 @@ def _visit(node: Any, steps: list[str]) -> Iterator[tuple[Any, Any, bool]]:
     if not steps:
         return
     step, rest = steps[0], steps[1:]
+    if step == "**":
+        # Here, and below every value of a mapping or list, at any depth.
+        yield from _visit(node, rest)
+        children = node.values() if isinstance(node, dict) else node if isinstance(node, list) else ()
+        for child in list(children):
+            if isinstance(child, (dict, list)):
+                yield from _visit(child, steps)
+        return
     if step == "[]":
         if isinstance(node, list):
             for i, item in enumerate(node):
@@ -347,6 +378,7 @@ __all__ = [
     "INSTRUCTIONS_LINE",
     "NOTE",
     "OPEN",
+    "PRINTER_FILE_FIELDS",
     "TOOL_FIELDS",
     "UNMARKED_WARNING",
     "block",

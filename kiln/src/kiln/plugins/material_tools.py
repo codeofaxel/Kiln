@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.quoted_text import fence
 from kiln.tool_annotations import read_only
 
 _logger = logging.getLogger(__name__)
@@ -500,7 +501,7 @@ class _MaterialToolsPlugin:
                     else:
                         progress_parts.append(f"~{mins_left}m remaining")
                 if job.file_name:
-                    progress_parts.append(f"file: {job.file_name}")
+                    progress_parts.append(f"file: {fence(job.file_name)}")
                 # When it should really end, by this printer's own record.
                 from kiln.learned_print_time import attach_time_left
 

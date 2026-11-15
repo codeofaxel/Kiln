@@ -82,6 +82,7 @@ from kiln.printers.base import (
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
+from kiln.quoted_text import fence
 from kiln.snapshot_analysis import picture_format
 from kiln.untrusted_zip import UntrustedZipFile
 
@@ -3177,7 +3178,7 @@ class BambuAdapter(PrinterAdapter):
             return UploadResult(
                 success=True,
                 file_name=filename,
-                message=f"Uploaded {filename} to {storage_path}/ on Bambu printer via FTPS.",
+                message=f"Uploaded {fence(filename)} to {storage_path}/ on Bambu printer via FTPS.",
             )
         except PermissionError as exc:
             raise PrinterError(

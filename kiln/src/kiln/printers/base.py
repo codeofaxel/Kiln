@@ -22,6 +22,7 @@ from kiln import run_program
 from kiln.cli_command import kiln_command
 from kiln.printer_backends import need_where
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.quoted_text import fence
 
 logger = logging.getLogger(__name__)
 
@@ -2211,7 +2212,7 @@ class PrinterAdapter(ABC):
             if quiet_contract is not None:
                 blocked = {
                     "reason": (
-                        f"{file_name} was planned beside a part on the plate, and the safety gate that "
+                        f"{fence(file_name)} was planned beside a part on the plate, and the safety gate that "
                         "judges such a start against the printer could not run; it was not started. "
                         "Try again in a moment, or clear the plate and say so, then print it the ordinary way."
                     ),

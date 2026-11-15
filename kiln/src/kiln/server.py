@@ -113,6 +113,7 @@ from kiln.print_consent import (
     why_not_asked,
 )
 from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms, pay_methods, tax_note
+from kiln.quoted_text import fence
 from kiln.server_identity import SERVER_NAME, identity_kwargs
 from kiln.tool_args import parse_json_array, parse_json_object
 from kiln.untrusted_zip import UntrustedZipFile
@@ -8434,7 +8435,8 @@ def monitor_print(
                 if progress_pending
                 else f"Print Status — {progress_str}% complete"
             ),
-            f"- File: {file_name}",
+            # The file's name is the file's, not Kiln's: fenced where it enters.
+            f"- File: {fence(file_name) if file_name != 'N/A' else file_name}",
             f"- Layer: {layer_str}",
             f"- Time elapsed: {elapsed_str} | Remaining: {remaining_str}",
             *([f"- Kiln expects: {_learned_left['said']}"] if _learned_left else []),
@@ -8803,7 +8805,7 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
                 "printer_name": target_name,
                 "file_size_bytes": file_size,
                 "message": (
-                    f"Upload of {file_name} ({file_size / 1024:.1f} KB) "
+                    f"Upload of {fence(file_name)} ({file_size / 1024:.1f} KB) "
                     f"to {target_name} requires confirmation. Call "
                     f"upload_file_confirm(token='{token}') to proceed."
                 ),
@@ -8952,7 +8954,7 @@ def analyze_print_file(filename: str) -> dict:
 
         if target is None:
             return _error_dict(
-                f"File not found on printer: {filename!r}. Use printer_files() to list available files.",
+                f"File not found on printer: {fence(filename)}. Use printer_files() to list available files.",
                 code="FILE_NOT_FOUND",
             )
 
@@ -15936,7 +15938,7 @@ def download_and_upload(
                 "KILN_AUTO_PRINT_MARKETPLACE=true to enable auto-print."
             )
             resp["message"] = (
-                f"Downloaded from {source} and uploaded to printer. Call start_print('{file_name}') to begin printing."
+                f"Downloaded from {source} and uploaded to printer. Call start_print with {fence(file_name)} to begin printing."
             )
 
         # Telemetry: count the download.  WHICH marketplace it came from is
@@ -23457,7 +23459,7 @@ def smart_reprint(
         if found_path is None:
             searched = ", ".join(d for d in default_dirs if _os.path.isdir(d))
             return _error_dict(
-                f"Could not find model file matching '{file_name}'. "
+                f"Could not find model file matching {fence(file_name)}. "
                 f"Searched directories: {searched}. "
                 f"Provide the full path or add search_dirs.",
                 code="NOT_FOUND",

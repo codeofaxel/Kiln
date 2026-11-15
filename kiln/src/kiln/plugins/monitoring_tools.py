@@ -27,6 +27,7 @@ from kiln.auto_record_hook import note_cancel_requested
 from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
 from kiln.print_start_verdict import resolve_print_start
+from kiln.quoted_text import fence
 from kiln.tool_annotations import destructive, read_only
 from kiln.tool_results import unwrap_tool_result
 
@@ -1606,7 +1607,7 @@ class _MonitoringToolsPlugin:
                         "print_result": verdict.to_dict(),
                         "monitor_status": "not_started",
                         "message": (
-                            f"The printer did not start {file_name}. {verdict.message} "
+                            f"The printer did not start {fence(file_name)}. {verdict.message} "
                             "No first-layer monitor was started."
                         ),
                     }

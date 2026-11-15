@@ -14,6 +14,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from kiln.events import Event, EventType
+from kiln.quoted_text import fence
 from kiln.tool_annotations import destructive, read_only
 
 if TYPE_CHECKING:  # imported lazily everywhere else in this module
@@ -238,7 +239,7 @@ def submit_job(
     except Exception as exc:
         _logger.exception("Unexpected error in submit_job")
         return _srv._error_dict(
-            f"Failed to submit job for '{file_name}': {exc}. "
+            f"Failed to submit job for {fence(file_name)}: {exc}. "
             "Verify the file exists on the printer with 'printer_files()'.",
             code="INTERNAL_ERROR",
         )

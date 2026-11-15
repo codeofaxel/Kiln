@@ -40,6 +40,7 @@ from kiln.printers.base import (
     UploadResult,
 )
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.quoted_text import fence
 
 try:
     import websocket as _ws_mod  # websocket-client
@@ -1035,7 +1036,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
         return PrintResult(
             success=True,
-            message=f"Started printing {file_name}.",
+            message=f"Started printing {fence(file_name)}.",
         )
 
     def cancel_print(self) -> PrintResult:
