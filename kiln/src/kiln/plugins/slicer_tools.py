@@ -1489,6 +1489,33 @@ def _ask_hardware_planner(**kwargs: Any) -> Any:
     return tool.fn(**kwargs)
 
 
+def _written_for_this_print(written: str, upload_path: str, answer: dict[str, Any]) -> bool:
+    """Whether *written* is the planner's file for this print: one Kiln's
+    servers handed back with this answer, or one a planner on this computer
+    wrote beside the sliced file, under its name, after it was sliced.  Any
+    other file on this computer is never copied into the print or removed."""
+    try:
+        where = Path(written).resolve()
+        handed = answer.get("files")
+        if isinstance(handed, list) and any(
+            isinstance(item, dict)
+            and item.get("on_this_computer") is True
+            and isinstance(item.get("path"), str)
+            and Path(item["path"]).resolve() == where
+            for item in handed
+        ):
+            return True
+        sliced = Path(upload_path).resolve()
+        return (
+            where.parent == sliced.parent
+            and where != sliced
+            and where.name.startswith(sliced.stem)
+            and where.stat().st_mtime >= sliced.stat().st_mtime
+        )
+    except (OSError, ValueError):
+        return False
+
+
 def _swap_in_written_file(written: str, upload_path: str) -> None:
     """Put the bytes of *written* at *upload_path*, in one step.
 
@@ -1569,7 +1596,7 @@ def _plan_hardware_into_print(
         )
         return None, _hardware_refusal(
             reason, code="HARDWARE_PLAN_UNAVAILABLE", answer=answer, miss=miss,
-            retryable=miss.cause in ("offline", "unanswered"),
+            retryable=miss.retryable,
         )
 
     def refuse(reason: str, code: str = "HARDWARE_NOT_PLANNED", **more: Any) -> tuple[None, dict[str, Any]]:
@@ -1612,6 +1639,12 @@ def _plan_hardware_into_print(
             return refuse(
                 "Kiln wrote the file with the pause in it, but it did not reach this computer. Try again.",
                 "HARDWARE_PAUSE_NOT_WRITTEN", retryable=True,
+            )
+        if not _written_for_this_print(written, upload_path, answer):
+            return refuse(
+                "The file named to print with the pause in it is not one Kiln wrote for this print, "
+                "so nothing was changed or sent to the printer.",
+                "HARDWARE_PAUSE_NOT_WRITTEN",
             )
         if written.lower().endswith(".3mf") != upload_path.lower().endswith(".3mf"):
             return refuse(

@@ -131,7 +131,7 @@ class _GcodeValidationToolsPlugin:
                         "limits_provenance": limits_provenance_note(profile),
                     }
                 else:
-                    result = validate_commands(commands)
+                    result = validate_commands(commands, printer_id=printer_id or None)
                     profile_info = {"id": "default", "display_name": "Generic defaults"}
 
                 return {

@@ -15,6 +15,7 @@ uses.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 
 import sys
@@ -167,7 +168,7 @@ def test_never_signed_in_is_one_plain_line_and_nothing_is_sent(plain_install, se
     ("setup", "why", "says"),
     [
         ({"bearer": ("", "Your Kiln session has expired.")}, "signed_out", "sign back in"),
-        ({"answer": OSError(51, "Network is unreachable")}, None, ""),
+        ({"answer": OSError(errno.ENETUNREACH, "Network is unreachable")}, None, ""),
         (
             {"answer": {"status": "error", "code": "SERVER_UNREACHABLE", "error": "down", "retryable": True}},
             "unanswered", "",

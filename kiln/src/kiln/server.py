@@ -1077,6 +1077,12 @@ def _build_instructions() -> str:
             "Call get_skill_manifest() for the full capability map."
         )
 
+    # What the quote fence on a result means; every fenced result carries the
+    # same sentence, for the clients that truncate before reaching here.
+    from kiln.quoted_text import INSTRUCTIONS_LINE as _QUOTED_TEXT_LINE
+
+    parts.append(_QUOTED_TEXT_LINE)
+
     # Last on purpose: a rule about taking Kiln apart must never push the
     # safety and consent paragraphs past a client's cut.  get_started carries
     # it too, for the clients that truncate before reaching here.
@@ -1561,6 +1567,11 @@ def _install_mcp_request_context_capture() -> None:
         if (retired := retired_message(name)) is not None:
             raise RuntimeError(retired)
         token = _current_mcp_request_context.set(context)
+        # A value an agent copied out of a quote fence (a listing's name, a
+        # part's path) is the value itself, not the marks around it.
+        from kiln.quoted_text import unquote_arguments
+
+        arguments = unquote_arguments(arguments)
         # A mention of one of the person's own printers ("my bambu") becomes
         # the registered name HERE, at the one door every tool passes, so
         # every gate and every key downstream -- the emergency latch, a
@@ -17316,11 +17327,6 @@ def await_print_completion(
                     }
                 )
                 last_pct = pct
-            paused = state.state == PrinterStatus.PAUSED
-            if pct is None:
-                _say_progress("Paused" if paused else "Printing", elapsed)
-            else:
-                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
             # A print carrying a hardware plan comes back to the person at its
             # moments: a stop close enough to get ready for, a stop gone past
@@ -17388,6 +17394,14 @@ def await_print_completion(
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                 })
+
+            # Written only while the wait goes on: a print that has ended was
+            # answered above, and is never shown as printing.
+            paused = state.state == PrinterStatus.PAUSED
+            if pct is None:
+                _say_progress("Paused" if paused else "Printing", elapsed)
+            else:
+                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
         except HostedUnavailableError as exc:
             # Only the job_id branch reads the queue; printer-based tracking
@@ -17489,9 +17503,10 @@ def compare_print_options(
     # A model that arrived lying down is priced standing up, from a turned
     # copy; the file named is never rewritten.
     priced = file_to_price(file_path) if fulfillment_material_id and size_refusal is None else None
+    service = order_service() if priced is not None else None
     if size_refusal is not None:
         fulfillment_error = size_refusal["message"]
-    elif priced is not None and order_service() is None:
+    elif priced is not None and service is None:
         # No order service on this install: the quote comes through Kiln's
         # servers (kiln._pro_order_bridge), and a miss is said as one.
         from kiln import _pro_order_bridge as served
@@ -17511,10 +17526,11 @@ def compare_print_options(
             else:
                 fulfillment_error = served.words(answer.miss, "quote")
     elif priced is not None:
+        # The order service on this install names its own request and error.
         try:
             provider = _get_fulfillment()
             quote = provider.get_quote(
-                QuoteRequest(
+                service.QuoteRequest(
                     file_path=priced.path,
                     material_id=fulfillment_material_id,
                     quantity=quantity,
@@ -17528,7 +17544,7 @@ def compare_print_options(
             fulfillment_quote_data = quote.to_dict()
             fulfillment_quote_data["kiln_fee"] = fee_calc.to_dict()
             fulfillment_quote_data["total_with_fee"] = float(fee_calc.total_cost)
-        except (FulfillmentError, RuntimeError) as exc:
+        except (service.FulfillmentError, RuntimeError) as exc:
             fulfillment_error = str(exc)
         except Exception as exc:
             fulfillment_error = str(exc)
@@ -18272,6 +18288,7 @@ def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
     goal_id: str = "",
+    printer_id: str = "",
 ) -> dict:
     """Build a printable STL from a parametric part, to the user's dimensions.
 
@@ -18320,6 +18337,9 @@ def generate_from_template(
         parameters: Dict of parameter overrides carrying the user's own
             dimensions (e.g. ``{"arm_length": 200, "thickness": 8}``).
             Anything you leave out keeps the template's default.
+        printer_id: The printer the part is for.  Its nozzle sets the
+            template's nozzle size when ``parameters`` leaves it out; leave
+            empty for the only printer Kiln knows of, else a stated default.
     """
     if err := _check_auth("generate"):
         return err
@@ -18366,7 +18386,7 @@ def generate_from_template(
         # the nozzle gets the one on record when the caller named none.
         from kiln.parametric import fill_template_settings, template_refusal
 
-        supplied, nozzle = fill_template_settings(tpl, parameters or {})
+        supplied, nozzle = fill_template_settings(tpl, parameters or {}, printer_id=printer_id or None)
         defaults = {k: v["default"] for k, v in tpl.get("parameters", {}).items()}
         params = {**defaults, **supplied}
 
@@ -22522,6 +22542,16 @@ def _start() -> None:
     # tool's argument name for it.
     _install_goal_argument_note()
 
+    # Words someone else wrote (an outside site's listing, a served answer's
+    # named fields) reach the agent fenced as quoted data.  After every
+    # other change above, so it marks the result the agent reads.
+    try:
+        from kiln import quoted_text
+
+        quoted_text.install(mcp)
+    except Exception:
+        logger.warning("quoted-text fence not installed", exc_info=True)
+
     # Last, around every tools/call wrapper above: a slow call from a host
     # that runs tools in the background answers with a task, and the task
     # completes with the same finished result a blocking call returns.
@@ -23580,7 +23610,7 @@ def smart_reprint(
             extra_overrides=extra_overrides,
             use_ams=detected_use_ams,
             ams_mapping=detected_ams_mapping,
-            brief_id=resolved_brief_id or "",
+            goal_id=resolved_brief_id or "",
             chosen_by=chosen_by,
         )
 

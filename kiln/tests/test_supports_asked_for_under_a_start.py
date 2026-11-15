@@ -105,8 +105,11 @@ def _tower_with_a_chamfered_foot(tmp_path: Path, up: float = 0.3) -> str:
     profile = np.asarray([(0.0, 0.0), (5.0, 0.0), (8.0, 6.0), (8.0, 26.0), (0.0, 26.0)], dtype=float)
     foot = trimesh.creation.revolve(profile, sections=48)
     foot.apply_translation((20.0, 0.0, up))
+    # 10 mm across, so a 39 degree lean rises 10 / tan(39) mm: under the
+    # 45 degree limit with or without a per-material one.
+    top = 4.0 + 10.0 / math.tan(math.radians(39.0))
     strut = trimesh.convex.convex_hull(np.asarray([
-        (3.0, -2.0, 4.0), (3.0, 2.0, 4.0), (3.0, -2.0, 14.0), (3.0, 2.0, 14.0), (13.0, -2.0, 14.0), (13.0, 2.0, 14.0),
+        (3.0, -2.0, 4.0), (3.0, 2.0, 4.0), (3.0, -2.0, top), (3.0, 2.0, top), (13.0, -2.0, top), (13.0, 2.0, top),
     ]))
     path = tmp_path / "foot.stl"
     body = trimesh.util.concatenate([tower, foot, strut])

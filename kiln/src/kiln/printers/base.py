@@ -55,12 +55,11 @@ def _discard_copies(paths: list[str]) -> None:
 
 
 def is_resume_mode_3mf(file_name: str) -> bool:
-    """Return True if ``file_name`` looks like a mid-print resume 3MF.
+    """True if ``file_name`` looks like a mid-print resume 3MF.
 
-    A name is whatever whoever made the file chose, so this is a claim and
-    never enough on its own to skip a person's yes or the preview: the
-    start gates ask :func:`kiln.print_signoff.verified_resume`, which also
-    needs the printer to report a paused job.
+    A name is the file maker's claim, never enough alone to skip a person's
+    yes or the preview: the start gates need a resume Kiln made for the job
+    the printer reports paused (:func:`kiln.print_signoff.verified_resume`).
     """
     if not file_name:
         return False

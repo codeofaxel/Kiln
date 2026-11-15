@@ -150,6 +150,43 @@ def _note_not_in_history(result: dict, registration: dict | None) -> None:
         result["warnings"] = [*(result.get("warnings") or []), NOT_IN_HISTORY]
 
 
+def _file_version_here(
+    result: dict,
+    design_id: str,
+    recipe: Any,
+    scad_source: str | None,
+    saving: ExitStack,
+    *,
+    enrich: dict[str, Any] | None = None,
+) -> None:
+    """File a version a door just saved, into *result*.
+
+    With kiln-pro on this computer: its provenance when *enrich* is given,
+    then the design's branch record (:func:`_register_on_branch`).  Without
+    it: this computer's history, and the person's account when they turned
+    automatic saving on (:func:`_after_save_here`).  Every door in this
+    module that saves a version files it here.
+    """
+    try:
+        from kiln_pro.bridge import pro_features
+
+        if enrich is not None:
+            enriched = pro_features.enrich_version(result["version"], **enrich)
+            result["version"] = enriched
+            mesh_diff = enriched.get("mesh_diff")
+            if mesh_diff and mesh_diff.get("warnings"):
+                result["warnings"] = mesh_diff["warnings"]
+        registration = _register_on_branch(pro_features, design_id, recipe, scad_source, saving)
+        _note_not_in_history(result, registration)
+        if registration:
+            result["version"]["branch"] = registration
+            if registration.get("warnings"):
+                result["warnings"] = [*(result.get("warnings") or []), *registration["warnings"]]
+    except ImportError as missing:
+        saving.close()
+        result.update(_after_save_here(design_id, missing))
+
+
 def _register_on_branch(
     pro_features: Any, design_id: str, recipe: Any, scad_source: str | None, saving: ExitStack | None = None,
 ) -> dict | None:
@@ -424,52 +461,18 @@ class _VersionToolsPlugin:
                     # describe another source, so they are not recorded.
                     result["version"]["parameters_not_in_source"] = left_out
 
-                # Pro enrichment: fingerprinting, sidecar, provenance
-                try:
-                    from kiln_pro.bridge import pro_features
-
-                    enriched = pro_features.enrich_version(
-                        result["version"],
-                        stl_path=stl_path or None,
-                        provenance=provenance,
-                        parent_version_id=parent_version_id or None,
-                    )
-                    result["version"] = enriched
-                    # Surface regression warnings prominently
-                    mesh_diff = enriched.get("mesh_diff")
-                    if mesh_diff and mesh_diff.get("warnings"):
-                        result["warnings"] = mesh_diff["warnings"]
-
-                    # Register the saved version with the branch system so
-                    # it becomes a branch-linked, pushable commit — the
-                    # same registration external-mesh imports perform. This
-                    # is LOCAL only: it advances the on-device branch head
-                    # so the version can be pushed later; it does NOT push.
-                    # ``getattr`` so an older kiln-pro that predates this
-                    # hook degrades to recipe-only, exactly like free tier
-                    # (a missing attribute is not an error here).
-                    registration = _register_on_branch(
-                        pro_features, design_id, recipe, scad_source, saving
-                    )
-                    _note_not_in_history(result, registration)
-                    if registration is not None:
-                        if registration:
-                            result["version"]["branch"] = registration
-                            # What the filing has to say about the version
-                            # (a model the account can never keep, for one)
-                            # is said at the top, beside the save's own.
-                            if registration.get("warnings"):
-                                result["warnings"] = [
-                                    *(result.get("warnings") or []),
-                                    *registration["warnings"],
-                                ]
-                except ImportError as missing:
-                    # No kiln-pro: no provenance enrichment or branch
-                    # registration.  This computer's history keeps the
-                    # version, and the person's account gets it too when
-                    # they turned automatic saving on.
-                    saving.close()
-                    result.update(_after_save_here(design_id, missing))
+                _file_version_here(
+                    result,
+                    design_id,
+                    recipe,
+                    scad_source,
+                    saving,
+                    enrich={
+                        "stl_path": stl_path or None,
+                        "provenance": provenance,
+                        "parent_version_id": parent_version_id or None,
+                    },
+                )
                 saving.close()
 
                 try:
@@ -686,17 +689,11 @@ class _VersionToolsPlugin:
                         "stl_path": new_recipe.stl_path,
                     },
                 }
+                # A rollback is a new version: it is filed the way a save
+                # is, under the number on its recipe.
+                _file_version_here(result, design_id, new_recipe, new_recipe.source_scad, saving)
+                saving.close()
                 try:
-                    from kiln_pro.bridge import pro_features
-
-                    # A rollback is a new version: it joins the branch the
-                    # way a save does, under the number on its recipe.
-                    registration = _register_on_branch(
-                        pro_features, design_id, new_recipe, new_recipe.source_scad, saving
-                    )
-                    _note_not_in_history(result, registration)
-                    if registration:
-                        result["version"]["branch"] = registration
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
                     )
@@ -706,11 +703,7 @@ class _VersionToolsPlugin:
                         level="full",
                         source_path=target_recipe.stl_path or None,
                     )
-                except ImportError as missing:
-                    # The rollback is a new version saved here: on an
-                    # install without kiln-pro it goes the way a save does.
-                    saving.close()
-                    result.update(_after_save_here(design_id, missing))
+                except ImportError:
                     return result
             except HostedUnavailableError as exc:
                 return {"ok": False, "error": str(exc)}
