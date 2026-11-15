@@ -1519,11 +1519,16 @@ def generate_emboss_scad(
     margin_clamped_w = max(face_w - 2.0 * min_edge_margin_mm, 1.0)
     margin_clamped_h = max(face_h - 2.0 * min_edge_margin_mm, 1.0)
     if target_w > margin_clamped_w:
-        warnings.append(
-            f"text width clamped from {target_w:.1f}mm to "
-            f"{margin_clamped_w:.1f}mm to preserve "
-            f"{min_edge_margin_mm:.1f}mm edge margin on a {face_w:.0f}mm-wide face"
-        )
+        # A width the caller named, cut to keep the margin, is a warning:
+        # they asked for that number.  A share of the face (``scale``)
+        # meeting the margin is the margin doing its job on a small face,
+        # so it is not said.
+        if absolute_size_mm > 0:
+            warnings.append(
+                f"text width clamped from {target_w:.1f}mm to "
+                f"{margin_clamped_w:.1f}mm to preserve "
+                f"{min_edge_margin_mm:.1f}mm edge margin on a {face_w:.0f}mm-wide face"
+            )
         target_w = margin_clamped_w
     if target_h > margin_clamped_h:
         target_h = margin_clamped_h
