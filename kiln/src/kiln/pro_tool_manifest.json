@@ -26218,10 +26218,17 @@
             "description": "Back config \u2014 ``\"plain\"``, ``\"qr:URL\"``, or ``\"text:...\"``."
           },
           "diameter_mm": {
-            "default": 30.0,
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Diameter Mm",
-            "type": "number",
-            "description": "Tag diameter/width in mm (default 30)."
+            "description": "Tag diameter/width in mm.  Leave it out and Kiln sizes the tag to the text: the standard size when the name reads there, larger when it needs it, and the answer's ``sizing.note`` says so (tell the user).  A size you set is kept; text that won't read at it is refused with ``fits_at_mm``, the size that fits."
           },
           "thickness_mm": {
             "default": 3.0,
