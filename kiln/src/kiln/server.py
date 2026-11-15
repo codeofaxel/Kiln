@@ -2885,7 +2885,11 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         standing = consent_for(file_name=file_value, printer_name=printer_name, aimed_at=aimed)
     except Exception:  # noqa: BLE001 — an unreadable store is no window
         standing = None
-    if standing is not None:
+    # A recovery onto the part still on the plate is asked about every time:
+    # a part can lift off the bed as it cools, so no standing window answers
+    # for it (kiln.plate_state.start_hold holds it without this print's yes).
+    on_plate = await asyncio.to_thread(_recovery_plate_line, file_value, printer_name)
+    if standing is not None and not on_plate:
         # A person already said yes for this — inside a window they
         # opened, on purpose.  Asking again would be the dialog the
         # window exists to stop.  The gate reads the same record.
@@ -2941,6 +2945,8 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             # Why they are being asked at all, when always allow was on
             # for this printer and turned itself off.
             "always allow": _always_allow_dialog_row(aimed),
+            # A recovery onto the part still on the plate: what to check.
+            "part on the plate": on_plate,
         },
         window_printer=person_printer if offer_window else None,
         fleet_offered=offer_fleet,
@@ -4245,6 +4251,25 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     if signin:
         return f"{ready} {signin} For this print, a yes {doors}{always}"
     return f"{ready} A yes {doors}{always}"
+
+
+def _recovery_plate_line(file_value: str, printer_name: str | None) -> str | None:
+    """The line a person is shown when *file_value* is a recovery Kiln made
+    for the print still on the plate (:func:`kiln.resume_provenance.recovery_on_plate`),
+    else ``None``.  Never raises."""
+    try:
+        from kiln.plate_state import pretty_job_name
+        from kiln.resume_provenance import recovery_on_plate
+
+        record = recovery_on_plate(file_value, printer_name=printer_name)
+    except Exception:  # noqa: BLE001 -- unreadable is not a recovery
+        return None
+    if record is None:
+        return None
+    return (
+        f"This picks {pretty_job_name(record.job)} up again on the part still on the plate. A part "
+        "can lift off the bed as it cools: check it is still stuck down before you say yes."
+    )
 
 
 def _said_go(

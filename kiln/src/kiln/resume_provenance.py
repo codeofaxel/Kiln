@@ -35,6 +35,14 @@ record kept here:
   :func:`kiln.print_signoff.verified_resume` adds the printer reporting a
   paused job, and is the one check every start door asks.
 
+The same record serves a recovery: a resume file Kiln built for a print that
+was cancelled, or stopped when the power went, whose part is still on the
+plate.  The printer is not paused then, so it is a new print (the person's
+yes, the preview, the safety gate), and :func:`recovery_on_plate` is what lets
+it start onto that part: the plate holds exactly the job the file was made
+for, and the person said yes to this print itself
+(:func:`kiln.plate_state.start_hold`).
+
 Records live in this process's memory, so only Kiln's own code writes one;
 a restart forgets them, and a resume started after a restart is asked about
 and previewed like a new print.  On Kiln's shared server nothing is recorded:
@@ -52,10 +60,19 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.print_consent import (
+    SOURCE_CI_BYPASS,
+    SOURCE_CODE,
+    SOURCE_ELICITED,
+    SOURCE_HOSTED_APPROVAL,
+    SOURCE_TERMINAL,
+)
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "RECENT_SECONDS",
+    "PERSON_SOURCES",
     "RESUME_MAKERS",
     "SOURCE_KEY",
     "ResumeRecord",
@@ -72,6 +89,8 @@ __all__ = [
     "record_handed_resumes",
     "recorded_job_source",
     "records_for",
+    "recovery_on_plate",
+    "yes_for_this_print",
     "report_unrecognized",
     "sent_sha256",
     "stated_source",
@@ -217,16 +236,16 @@ def paused_job_name(adapter: Any) -> str:
     return _name(getattr(job, "file_name", None))
 
 
-def recorded_job_source(adapter: Any) -> tuple[str | None, str]:
-    """``(sha256, "")`` of Kiln's own copy of the G-code of the job
-    *adapter*'s printer reports now, or ``(None, why)``.
+def recorded_job_source(adapter: Any, job: str | None = None) -> tuple[str | None, str]:
+    """``(sha256, "")`` of Kiln's own copy of the G-code of *job* (the job
+    *adapter*'s printer reports now, when not named), or ``(None, why)``.
 
     Kiln's copy is the toolpath it kept when it started that job on that
     machine (:func:`kiln.monitor_twin.note_print_started`), named by its
     SHA-256 then.  A print Kiln did not start, or started from a file it did
     not slice, has no copy, and nothing can be resumed from it without a yes.
     """
-    job_now = paused_job_name(adapter)
+    job_now = _name(job) if job else paused_job_name(adapter)
     if not job_now:
         return None, "the printer reports no job"
     try:
@@ -282,16 +301,26 @@ def try_record_resume(
     except Exception:  # noqa: BLE001 -- no printer, no record
         logger.debug("resume record: printer not found for %s", path, exc_info=True)
         return None, "Kiln could not find the printer it was made for"
-    job = paused_job_name(adapter)
-    if not job:
-        return None, "the printer reports no job, so there is no print for it to continue"
+    jobs = list(dict.fromkeys(j for j in (paused_job_name(adapter), plate_job(adapter)) if j))
+    if not jobs:
+        return None, (
+            "the printer reports no job and Kiln has no print on record on its plate, so there is "
+            "no print for it to continue"
+        )
     stated = str(source_sha256 or "").strip().lower() or (file_sha256(source) if source else None)
     if not stated:
         return None, "the maker did not say which G-code it was built from"
-    recorded, why = recorded_job_source(adapter)
-    if recorded is None:
-        return None, why
-    if stated != recorded:
+    job = ""
+    recorded = None
+    why = ""
+    for candidate in jobs:
+        recorded, why = recorded_job_source(adapter, candidate)
+        if recorded is not None and recorded == stated:
+            job = candidate
+            break
+    if not job:
+        if recorded is None and why:
+            return None, why
         return None, "it was built from G-code that is not Kiln's own copy of the print this printer is holding"
     return _keep(ResumeRecord(
         sha256=digest,
@@ -343,6 +372,70 @@ def record_derived_resume(
         session=parent.session,
         made_at=time.time(),
     )), ""
+
+
+def plate_job(adapter: Any) -> str:
+    """The job Kiln's plate record says is on *adapter*'s plate, when the
+    plate holds that one part only (lowercased base name), else ``""``."""
+    try:
+        from kiln.plate_state import read
+
+        state = read(adapter)
+    except Exception:  # noqa: BLE001 -- unreadable is no record
+        return ""
+    if not getattr(state, "occupied", False):
+        return ""
+    names = {_name(getattr(job, "file", "")) for job in getattr(state, "jobs", ()) or ()}
+    return names.pop() if len(names) == 1 else ""
+
+
+def recovery_on_plate(file_name: str, *, adapter: Any = None, printer_name: str | None = None) -> ResumeRecord | None:
+    """The record that makes starting *file_name* a recovery of the print
+    whose part is still on the plate, or ``None``.
+
+    The file must be the printer-side name a recorded file was uploaded
+    under through Kiln, with nothing saved over it, and still held by a
+    printer that can hand it back; the record must be recent; and Kiln's
+    plate record must hold exactly the job the file was made for, and no
+    other part.  Never raises."""
+    try:
+        adapter = _resolve(adapter, printer_name)
+    except Exception:  # noqa: BLE001
+        return None
+    name = _name(file_name)
+    on_plate = plate_job(adapter)
+    if not name or not on_plate:
+        return None
+    for record in records_for(adapter):
+        sent = record.uploaded_as.get(name)
+        if sent and record.job == on_plate and _printer_still_holds(adapter, file_name, sent):
+            return record
+    return None
+
+
+#: The yes a person gives for one print, in person: the host's dialog, a
+#: terminal, a code typed after a banner, their account's approval; and the
+#: audited CI bypass an operator sets.  Not a standing window, always allow,
+#: a delegation or a queued job: nobody looked at the plate for that start.
+PERSON_SOURCES: frozenset[str] = frozenset(
+    {SOURCE_ELICITED, SOURCE_TERMINAL, SOURCE_CODE, SOURCE_HOSTED_APPROVAL, SOURCE_CI_BYPASS}
+)
+
+
+def yes_for_this_print(file_name: str, printer_name: str | None = None) -> bool:
+    """Whether the clearance this call carries for *file_name* is a person's
+    yes to this print itself (:data:`PERSON_SOURCES`)."""
+    try:
+        from kiln.print_signoff import current
+
+        clearance = current()
+        return bool(
+            clearance is not None
+            and clearance.covers(file_name=file_name, printer_name=printer_name)
+            and clearance.source in PERSON_SOURCES
+        )
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _keep(record: ResumeRecord) -> ResumeRecord:
