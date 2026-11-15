@@ -172,8 +172,8 @@ def is_listing_link(value: Any) -> bool:
     try:
         from urllib.parse import urlsplit
 
-        from kiln.marketplaces.base import listing_hosts
         import kiln.marketplaces  # noqa: F401 -- the adapters declare their sites as they load
+        from kiln.marketplaces.base import listing_hosts
 
         parts = urlsplit(value.strip())
         return (

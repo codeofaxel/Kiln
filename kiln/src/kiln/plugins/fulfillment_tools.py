@@ -12,7 +12,6 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -246,7 +245,6 @@ def _served_waiting(answer: _served.Answer) -> dict[str, Any]:
     yes: nothing was placed, the question and the page where they answer
     beside the sentence, and what the agent does next."""
     import kiln.server as _srv
-
     from kiln import action_yes
 
     waiting = dict(answer.waiting or {})

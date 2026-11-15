@@ -578,7 +578,7 @@ def plan_numbers(
     version's record and stays.
     """
     final: dict[str, int] = {}
-    for key, n in local.items():
+    for key in local:
         given = _whole(account.get(key))
         if given is not None:
             final[key] = given
