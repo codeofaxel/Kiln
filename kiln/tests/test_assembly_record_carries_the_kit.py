@@ -215,7 +215,9 @@ class TestTheOfferReadsTheCallersPlan:
     def test_a_free_caller_reads_the_caution_and_the_offer(self, tools, _kit, monkeypatch):
         reply = self._checked(tools, _kit, monkeypatch, paid=False)
         assert "upgrade_recommendation" in reply
-        assert "kiln3d.com/pricing" in reply["load_bearing_note"]
+        note = reply["load_bearing_note"]
+        # The caution, then the offer in the plan check's own words.
+        assert "load-test it" in note and note.rstrip().endswith("needs Kiln Pro")
 
     def test_a_paying_caller_reads_the_caution_and_no_offer(self, tools, _kit, monkeypatch):
         reply = self._checked(tools, _kit, monkeypatch, paid=True)
