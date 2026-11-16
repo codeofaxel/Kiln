@@ -597,6 +597,27 @@ def sent_sha256(adapter: Any, file_name: Any) -> str | None:
         return _sent.get(key)
 
 
+def continuation_started(adapter: Any, file_name: Any) -> tuple[str, str] | None:
+    """When *file_name* on *adapter*'s machine holds a file Kiln made to
+    carry on one of that machine's prints: ``(the file's path on this
+    machine, the SHA-256 of the print's file it was made from)``.
+
+    ``None`` when the name holds anything else, or bytes other than the ones
+    Kiln sent under it.  Never raises.
+    """
+    try:
+        name = _name(file_name)
+        sent = sent_sha256(adapter, file_name)
+        if not name or not sent:
+            return None
+        for record in records_for(adapter):
+            if record.uploaded_as.get(name) == sent and record.path and record.source_sha256:
+                return record.path, record.source_sha256
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def forget_printer_names(adapter: Any, name: Any = None) -> None:
     """Untie *name* (every name, when ``None``) from the records of
     *adapter*'s machine: the file under it was deleted, or a raw command

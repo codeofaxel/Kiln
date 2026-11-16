@@ -100,6 +100,21 @@ _SLICE_FLAGS: dict[str, str | None] = {
     "--skirts": r"\d{1,2}",
     "--brim-type": r"no_brim",
     "--first-layer-height": _NUMBER,
+    "--use-relative-e-distances": None,
+    # The settings of the print a part is being added to, so what is laid
+    # on it matches what is under it.
+    "--layer-height": _NUMBER,
+    "--nozzle-diameter": _NUMBER,
+    "--perimeters": r"\d{1,2}",
+    "--top-solid-layers": r"\d{1,2}",
+    "--bottom-solid-layers": r"\d{1,2}",
+    "--fill-density": r"\d{1,3}%",
+    "--fill-pattern": r"[a-z0-9]{3,20}",
+    "--support-material": None,
+    "--first-layer-speed": r"\d{1,3}%",
+    "--elefant-foot-compensation": _NUMBER,
+    "--raft-first-layer-expansion": _NUMBER,
+    "--disable-fan-first-layers": r"\d{1,2}",
 }
 
 
@@ -112,7 +127,7 @@ def _refusal(tool: str, code: str, message: str) -> dict[str, Any]:
 
 def _checked_slicer_args(args: Any) -> list[str] | None:
     """*args* when every flag is an allowed one with a well-formed value."""
-    if not isinstance(args, list) or len(args) > 16:
+    if not isinstance(args, list) or len(args) > 40:
         return None
     out: list[str] = []
     i = 0

@@ -595,3 +595,25 @@ class TestPrintHistoryStep:
         facts = self._read(printer_name="garage")[0]["print_history"]["data"]
         assert facts["outcomes"] == [] and facts["complete"] is True
         db.close()
+
+
+class TestThePrintsOwnSettings:
+    """A part added to a print is sliced to match what is under it."""
+
+    def test_the_settings_of_the_print_are_flags_a_slice_may_carry(self):
+        args = [
+            "--dont-arrange", "--use-relative-e-distances", "--layer-height", "0.16",
+            "--perimeters", "3", "--fill-density", "15%", "--fill-pattern", "gyroid",
+            "--top-solid-layers", "5", "--bottom-solid-layers", "4", "--support-material",
+            "--first-layer-speed", "100%", "--elefant-foot-compensation", "0",
+            "--raft-first-layer-expansion", "0", "--disable-fan-first-layers", "0",
+            "--nozzle-diameter", "0.4",
+        ]
+        assert served_steps._checked_slicer_args(args) == args
+
+    @pytest.mark.parametrize("bad", [
+        ["--fill-pattern", "../x"], ["--fill-density", "15"], ["--layer-height", "0.2;rm"],
+        ["--load", "x.ini"], ["--post-process", "x"], ["--output", "/tmp/x"],
+    ])
+    def test_nothing_that_names_a_file_or_runs_anything_is_let_through(self, bad):
+        assert served_steps._checked_slicer_args(bad) is None

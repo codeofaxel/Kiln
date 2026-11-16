@@ -2298,11 +2298,12 @@ class PrinterAdapter(ABC):
             try:
                 from kiln.monitor_twin import note_print_started
                 from kiln.registry import machine_fingerprint
-                from kiln.resume_provenance import sent_sha256
+                from kiln.resume_provenance import continuation_started, sent_sha256
 
                 note_print_started(
                     self.name, file_name, machine=machine_fingerprint(self),
                     sent_sha256=sent_sha256(self, file_name),
+                    continues=continuation_started(self, file_name),
                 )
             except Exception:  # noqa: BLE001 — the twin never affects a print
                 import logging as _logging
