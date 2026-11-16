@@ -594,6 +594,30 @@ def _require_person() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _not_the_fleet_tier(what: str, one_printer: str) -> NotTheFleetTier:
+    """The refusal of *what* below the tier that runs several machines at
+    once: that plan and its page to someone who would buy it, the plan
+    check's own words to someone who pays for it already, and the one-printer
+    form either way."""
+    from kiln.tiers_and_terms import plan_offer
+
+    offer = plan_offer("business", what)
+    if not offer.sells:
+        return NotTheFleetTier(f"{offer.words} {one_printer} meanwhile.")
+    return NotTheFleetTier(
+        f"{what} is a Business feature — running more than one printer at once is what that "
+        f"tier adds. {one_printer}, or see https://kiln3d.com/pricing."
+    )
+
+
+def _always_allow_refusal() -> str:
+    """:data:`ALWAYS_ALLOW_NEEDS_PRO` to someone who would buy the plan; the
+    plan check's own words to someone who pays for it already."""
+    from kiln.tiers_and_terms import plan_offer
+
+    return plan_offer("pro", "Always allow").tail(ALWAYS_ALLOW_NEEDS_PRO)
+
+
 def _checked_scope(scope: Any) -> Scope:
     """The scope a window may be written for.  A yes over several
     machines is the fleet tier's, the same way running several machines
@@ -604,10 +628,8 @@ def _checked_scope(scope: Any) -> Scope:
     if normalized is None:
         raise ValueError("a window names the printer(s) it covers, or the fleet")
     if (normalized == SCOPE_FLEET or len(normalized) > 1) and not _fleet_tier_allows():
-        raise NotTheFleetTier(
-            "A window over several printers, or the whole fleet, is a Business feature — "
-            "running more than one printer at once is what that tier adds. Open a window "
-            "for one printer (--printer NAME), or see https://kiln3d.com/pricing."
+        raise _not_the_fleet_tier(
+            "A window over several printers or the whole fleet", "Open a window for one printer (--printer NAME)"
         )
     return normalized
 
@@ -930,7 +952,7 @@ def open_always(*, printer_name: str, typed_name: str, told_no_camera: bool = Fa
     if not name:
         raise ValueError("always allow is for one printer; name it")
     if not always_allow_is_yours():
-        raise NotTheProTier(ALWAYS_ALLOW_NEEDS_PRO)
+        raise NotTheProTier(_always_allow_refusal())
     if _norm(typed_name) != _norm(name):
         raise ValueError(f"that is not this printer's name ({name}); always allow was not turned on")
     machine = _machine_for_always(name)
@@ -965,10 +987,8 @@ def open_always_for_several(
     if len({_norm(n) for n in names}) != len(names):
         raise ValueError("a printer is named twice; name each one once")
     if not _fleet_tier_allows():
-        raise NotTheFleetTier(
-            "Always allow on several printers at once is a Business feature — running more than "
-            "one printer at once is what that tier adds. Turn it on for one printer "
-            "(--always --printer NAME), or see https://kiln3d.com/pricing."
+        raise _not_the_fleet_tier(
+            "Always allow on several printers at once", "Turn it on for one printer (--always --printer NAME)"
         )
     if str(typed_count or "").strip() != str(len(names)):
         raise ValueError(f"that is not the number of printers named ({len(names)}); always allow was not turned on")

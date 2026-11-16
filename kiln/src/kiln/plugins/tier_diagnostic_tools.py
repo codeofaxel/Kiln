@@ -234,19 +234,26 @@ def _build_response(
     elif effective_tier.lower() == "free":
         from kiln.tiers_and_terms import (
             ALREADY_SUBSCRIBED_LINE,
+            plan_offer,
             signin_hint_fields,
         )
 
-        hint_fields = signin_hint_fields()
-        # Written in second person, so this is the USER's half however it is
-        # labelled: it says what's true and what it would take, and the
-        # command travels in agent_hint alongside it.
-        agent_summary = (
-            f"You're on the Free tier. Why: {matched_detail}. "
-            f"{ALREADY_SUBSCRIBED_LINE} "
-            "Free-tier features still work via api.kiln3d.com once you're "
-            "signed in. See what the paid tiers include at kiln3d.com/pricing"
-        )
+        offer = plan_offer("pro", "Everything Kiln adds on a paid plan")
+        if not offer.sells:
+            # A paid plan this machine could not confirm (or a sign-in the
+            # server refused): the step that brings it back, not the plans.
+            agent_summary = f"This machine runs Kiln Free for now. {offer.words}"
+        else:
+            hint_fields = signin_hint_fields()
+            # Written in second person, so this is the USER's half however it is
+            # labelled: it says what's true and what it would take, and the
+            # command travels in agent_hint alongside it.
+            agent_summary = (
+                f"You're on the Free tier. Why: {matched_detail}. "
+                f"{ALREADY_SUBSCRIBED_LINE} "
+                "Free-tier features still work via api.kiln3d.com once you're "
+                "signed in. See what the paid tiers include at kiln3d.com/pricing"
+            )
     elif effective_tier.lower() == "pro":
         agent_summary = (
             f"You're on the Pro tier. Source: {matched_detail}. "

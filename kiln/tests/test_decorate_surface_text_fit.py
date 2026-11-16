@@ -221,3 +221,90 @@ class TestPlacementStaysInsideTheRim:
         band = [v for v in verts if top - 2.5 < v[2] < top - 0.2]
         y_mid = (max(v[1] for v in band) + min(v[1] for v in band)) / 2.0
         assert y_mid > 15.0, f"band placement lost: carve centered at y={y_mid:.1f}"
+
+
+# A keychain tag: 60x20x3 mm with a 5 mm lanyard hole near its left end.
+_TAG_W, _TAG_H, _TAG_T = 60.0, 20.0, 3.0
+_HOLE_X, _HOLE_R = -24.0, 2.5
+# The engine's default margin from an edge, outer or opening.
+_EDGE_MARGIN = 4.0
+
+
+def _tag(dirpath: str, hole_x: float = _HOLE_X, w: float = _TAG_W) -> str:
+    scad = os.path.join(dirpath, "tag.scad")
+    with open(scad, "w") as f:
+        f.write(
+            "difference() {"
+            f" translate([{-w / 2}, {-_TAG_H / 2}, 0]) cube([{w}, {_TAG_H}, {_TAG_T}]);"
+            f" translate([{hole_x}, 0, -1]) cylinder(h={_TAG_T + 2}, r={_HOLE_R}, $fn=64);"
+            " }"
+        )
+    stl = os.path.join(dirpath, "tag.stl")
+    subprocess.run(["openscad", "-o", stl, scad], check=True, capture_output=True)
+    return stl
+
+
+def _carve_box(stl: str) -> tuple[float, float, float, float]:
+    """(xmin, xmax, ymin, ymax) of the letters cut into the top face."""
+    verts = _stl_vertices(stl)
+    top = max(v[2] for v in verts)
+    band = [v for v in verts if top - 2.5 < v[2] < top - 0.2]
+    assert band, "no carve found below the top face"
+    xs = [v[0] for v in band]
+    ys = [v[1] for v in band]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def _distance_to_box(px: float, py: float, box: tuple[float, float, float, float]) -> float:
+    xmin, xmax, ymin, ymax = box
+    dx = max(xmin - px, 0.0, px - xmax)
+    dy = max(ymin - py, 0.0, py - ymax)
+    return math.hypot(dx, dy)
+
+
+@needs_openscad
+class TestTextKeepsClearOfOpenings:
+    """A word fitted to a face with a hole in it is fitted around the hole.
+
+    The word is placed and sized inside the largest part of the face clear
+    of the hole, with the same margin from the hole's edge as from the
+    outer edge, and no smaller than that part allows.  Where no clear part
+    holds legible text, the word stays where the outline fit puts it.
+    """
+
+    def test_word_on_a_keychain_tag_clears_the_lanyard_hole(self, tmp_path):
+        from kiln.emboss_generator import measure_text_block_mm
+
+        res = _decorate_text(_tag(str(tmp_path)), "BELLA")
+        assert res.get("success"), res.get("message")
+        box = _carve_box(res["output_stl"])
+
+        clearance = _distance_to_box(_HOLE_X, 0.0, box) - _HOLE_R
+        assert clearance >= _EDGE_MARGIN - 0.5, (
+            f"letters come within {clearance:.2f}mm of the lanyard hole"
+        )
+        # Still inside the outer margin on the far side.
+        assert box[1] <= _TAG_W / 2 - _EDGE_MARGIN + 0.5
+        assert box[3] - box[2] <= _TAG_H - 2 * _EDGE_MARGIN + 0.5
+
+        # No smaller than the clear part allows: right of the hole there is
+        # (tag edge - margin) - (hole edge + margin) of width and the face
+        # height less both margins, filled at the word's own proportions.
+        t_w, t_h, _, _ = measure_text_block_mm("BELLA", font_size=48.0)
+        clear_w = (_TAG_W / 2 - _EDGE_MARGIN) - (_HOLE_X + _HOLE_R + _EDGE_MARGIN)
+        clear_h = _TAG_H - 2 * _EDGE_MARGIN
+        best_w = min(clear_w, clear_h * t_w / t_h)
+        carved_w = box[1] - box[0]
+        assert carved_w >= 0.95 * best_w, (
+            f"word carved {carved_w:.1f}mm wide where {best_w:.1f}mm fits"
+        )
+
+    def test_no_legible_clear_part_keeps_the_outline_fit(self, tmp_path):
+        # A short tag with the hole in its middle: either side of the hole
+        # is too narrow for text at the legibility floor, so the word stays
+        # centred where the outline fit put it, across the hole.
+        res = _decorate_text(_tag(str(tmp_path), hole_x=0.0, w=24.0), "BELLA")
+        assert res.get("success"), res.get("message")
+        box = _carve_box(res["output_stl"])
+        assert box[0] < -_HOLE_R and box[1] > _HOLE_R
+        assert abs((box[0] + box[1]) / 2.0) < 1.0

@@ -31,10 +31,11 @@ DRY_MODE_STOP = 0
 DRY_MODE_START = 1
 
 #: The one line pointing at the paid half, said once per session.
-_ADVISOR_TIP = (
-    "Kiln Pro's drying_advisor tells you the exact temperature and time for your "
-    "material, and whether it needs drying at all. https://kiln3d.com/pricing"
+_ADVISOR_POINTER = (
+    "drying_advisor tells you the exact temperature and time for your "
+    "material, and whether it needs drying at all."
 )
+_ADVISOR_TIP = f"Kiln Pro's {_ADVISOR_POINTER} https://kiln3d.com/pricing"
 
 
 def _unit_module(adapter: Any, ams_id: int) -> str:
@@ -160,7 +161,10 @@ def ams_filament_drying(
         ),
     }
     if started and claim_once("ams_filament_drying.advisor_tip"):
-        result["pro_tip"] = _ADVISOR_TIP
+        from kiln.tiers_and_terms import plan_offer
+
+        offer = plan_offer("pro", "Knowing the exact drying temperature and time for your material")
+        result["pro_tip"] = _ADVISOR_POINTER if offer.covered else offer.tail(_ADVISOR_TIP)
     return result
 
 

@@ -566,11 +566,13 @@ class _DesignToolsPlugin:
                                 "for_details_use": "recommend_adhesive",
                             }
                         elif b.get("hard_to_bond"):  # free common-knowledge floor
-                            result["bonding"] = {
-                                "material": primary_slug,
-                                "hard_to_bond": True,
-                                "upgrade_url": "https://kiln3d.com/pricing",
-                            }
+                            from kiln.tiers_and_terms import plan_offer
+
+                            result["bonding"] = {"material": primary_slug, "hard_to_bond": True}
+                            # The caveat below words the plan; the link rides
+                            # only for a caller who would buy it.
+                            if plan_offer("pro", "The adhesive that will hold it").buying:
+                                result["bonding"]["upgrade_url"] = "https://kiln3d.com/pricing"
                         caveat = profile.bonding_caveat()
                         if caveat:
                             result.setdefault("warnings", []).insert(0, caveat)
@@ -712,12 +714,17 @@ class _DesignToolsPlugin:
                 # served one query at a time by check_chemical_resistance
                 # (kiln-pro, locally or via the hosted API) — this surface
                 # carries only the pointer, never the curated matrix.
+                from kiln.tiers_and_terms import plan_offer
+
+                plan = plan_offer("pro", "A cited verdict for a specific reagent").nudge(
+                    "Safety warnings are free; "
+                    "curated verdicts are part of Kiln Pro: "
+                    "https://kiln3d.com/pricing."
+                )
                 result["cited_chemical_resistance"] = (
                     "For a specific reagent (diesel, acetone, bleach, vinegar, "
                     "UV …) with a cited verdict and the as-printed caveat, use "
-                    "check_chemical_resistance. Safety warnings are free; "
-                    "curated verdicts are a kiln-pro feature — "
-                    "https://kiln3d.com/pricing."
+                    "check_chemical_resistance." + (f" {plan}" if plan else "")
                 )
                 if requirements:
                     from kiln._pro_material_rules_bridge import rule_checks

@@ -714,3 +714,184 @@ class TestApplyDecorationMaterialDetection:
         assert result["success"] is True
         resolve.assert_not_called()
         assert decorate.call_args.kwargs["material"] == "ABS"
+
+
+# ---------------------------------------------------------------------------
+# A saved word keeps its font
+# ---------------------------------------------------------------------------
+
+
+def _library_tools() -> dict:
+    from kiln.plugins.decoration_library_tools import plugin
+
+    class _MockMCP:
+        def __init__(self):
+            self.tools = {}
+
+        def tool(self, **_kwargs):
+            def decorator(fn):
+                self.tools[fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    mcp = _MockMCP()
+    plugin.register(mcp)
+    return mcp.tools
+
+
+def _openscad_available() -> bool:
+    import subprocess
+
+    try:
+        subprocess.run(["openscad", "--version"], capture_output=True, check=True)
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+
+class TestTextDecorationFont:
+    """Recording the font: on disk, read back, the default when none is
+    named, an unknown font refused before anything is written, a record with
+    no font, and the font kept across a new version."""
+
+    def test_saved_font_is_recorded_on_disk(self):
+        import json
+
+        dec = save_decoration(
+            "Part Label", content_type="text", content_data="A-12", font="mono",
+        )
+        assert dec.font == "mono"
+        manifest = get_library_dir() / dec.slug / "manifest.json"
+        assert json.loads(manifest.read_text())["font"] == "mono"
+        assert get_decoration("Part Label").font == "mono"
+
+    def test_font_id_is_read_without_case_or_spaces(self):
+        dec = save_decoration(
+            "Shouty", content_type="text", content_data="HI", font="  Oswald ",
+        )
+        assert dec.font == "oswald"
+
+    def test_text_saved_without_a_font_records_the_default(self):
+        from kiln.text_fonts import DEFAULT_TEXT_FONT
+
+        dec = save_decoration("Plain Word", content_type="text", content_data="hi")
+        assert dec.font == DEFAULT_TEXT_FONT
+        assert get_decoration("Plain Word").font == DEFAULT_TEXT_FONT
+
+    def test_unknown_font_is_refused_and_nothing_is_written(self):
+        from kiln.text_fonts import UnknownTextFontError
+
+        with pytest.raises(UnknownTextFontError, match="comic"):
+            save_decoration(
+                "Bad Font", content_type="text", content_data="hi", font="comic",
+            )
+        assert not (get_library_dir() / "bad-font").exists()
+
+    def test_an_image_decoration_records_no_font(self, tmp_path: Path):
+        src = _make_source_file(tmp_path)
+        dec = save_decoration(
+            "Picture", content_type="photo", source_path=str(src), font="mono",
+        )
+        assert dec.font is None
+        assert "font" not in dec.to_dict()
+
+    def test_record_without_a_font_still_loads(self):
+        dec = Decoration.from_dict({
+            "name": "Old Word", "slug": "old-word", "content_type": "text",
+            "created": "2025-01-01T00:00:00", "content_data": "hi",
+        })
+        assert dec.font is None
+        assert "font" not in dec.to_dict()
+
+    def test_font_survives_a_new_version(self):
+        import json
+
+        from kiln import _pro_decoration_bridge as bridge
+
+        dec = save_decoration(
+            "Versioned Word", content_type="text", content_data="hi", font="fredoka",
+        )
+        deco_dir = get_library_dir() / dec.slug
+        manifest = bridge.carry_out(deco_dir, dec.slug, {
+            "archive": [{"as": "manifest.v1.json"}],
+            "set": {"version": 2, "parent_version": 1},
+        })
+        assert manifest["font"] == "fredoka"
+        assert json.loads((deco_dir / "manifest.json").read_text())["font"] == "fredoka"
+
+
+class TestTextDecorationFontThroughTheTools:
+    """The save and apply tools: the save door records the font or refuses
+    an unknown one, and the apply door carves in the font the decoration
+    recorded (the default for a record that has none)."""
+
+    def _model(self, tmp_path: Path) -> Path:
+        model = tmp_path / "target.stl"
+        model.write_text("solid x\nendsolid x\n")
+        return model
+
+    def test_save_tool_refuses_an_unknown_font(self, tmp_path: Path):
+        out = _library_tools()["save_decoration"](
+            name="Bad Font", model_path=str(self._model(tmp_path)),
+            content_type="text", content_data="hi", font="comic",
+        )
+        assert out["success"] is False
+        assert out["error"]["code"] == "UNKNOWN_FONT"
+        assert [f["id"] for f in out["fonts"]][0] == "sans"
+        assert get_decoration("Bad Font") is None
+
+    def test_apply_tool_carves_an_old_record_in_the_default(self, tmp_path: Path):
+        import json
+        from unittest.mock import patch
+
+        folder = get_library_dir() / "old-word"
+        folder.mkdir(parents=True)
+        (folder / "manifest.json").write_text(json.dumps({
+            "name": "Old Word", "slug": "old-word", "content_type": "text",
+            "created": "2025-01-01T00:00:00", "content_data": "hi",
+        }))
+        with patch(
+            "kiln.server.decorate_surface",
+            return_value={"success": True, "output_stl": str(tmp_path / "out.stl")},
+        ) as decorate:
+            result = _library_tools()["apply_decoration"](
+                name="Old Word", model_path=str(self._model(tmp_path)),
+            )
+        assert result["success"] is True
+        assert decorate.call_args.kwargs["font"] == ""
+        assert decorate.call_args.kwargs["content"] == "text:hi"
+
+    @pytest.mark.skipif(not _openscad_available(), reason="OpenSCAD required for a real carve")
+    def test_reapplying_carves_in_the_saved_font(self, tmp_path: Path):
+        import subprocess
+        from unittest.mock import patch
+
+        import kiln.server as server
+        from kiln.mesh_frame import load_mesh
+
+        scad = tmp_path / "disc.scad"
+        scad.write_text("cylinder(h=4, d=80, $fn=96);", encoding="utf-8")
+        disc = tmp_path / "disc.stl"
+        subprocess.run(["openscad", "-o", str(disc), str(scad)], check=True, capture_output=True)
+
+        tools = _library_tools()
+        saved = tools["save_decoration"](
+            name="Shop Label", model_path=str(disc), content_type="text",
+            content_data="KILN", font="mono",
+        )
+        assert saved["success"] is True, saved
+        assert saved["decoration"]["font"] == "mono"
+
+        with patch("kiln.server.decorate_surface", wraps=server.decorate_surface) as spy:
+            applied = tools["apply_decoration"](name="Shop Label", model_path=str(disc), face="top")
+        assert applied.get("success"), applied
+        assert applied["font"] == "mono"
+
+        asked = dict(spy.call_args.kwargs)
+        default = server.decorate_surface(**{**asked, "font": ""})
+        assert default.get("success"), default
+        assert default["font"] == "sans"
+        assert load_mesh(applied["output_stl"]).volume != pytest.approx(
+            load_mesh(default["output_stl"]).volume, rel=1e-4,
+        )

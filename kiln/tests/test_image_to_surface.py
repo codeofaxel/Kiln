@@ -128,15 +128,17 @@ class TestGenerateTextImage:
 # ---------------------------------------------------------------------------
 
 class TestGenerateQrData:
-    def test_names_the_tier_that_actually_includes_it(self, tmp_path):
+    def test_names_the_tier_that_actually_includes_it(self, tmp_path, monkeypatch):
         """The stub refuses, and must name the RIGHT tier.
 
         It names the tier every gate in kiln-pro checks: a refusal that
         misdirects the upgrade is worse than a refusal.
         """
+        from kiln import account_plan, licensing
         from kiln.image_to_surface import generate_qr_data
 
-        with pytest.raises(ImportError, match="Business feature"):
+        monkeypatch.setattr(licensing, "check_tier", account_plan.check_tier)  # a machine never signed in
+        with pytest.raises(ImportError, match="needs Kiln Pro"):
             generate_qr_data("https://kiln3d.com", str(tmp_path))
 
 

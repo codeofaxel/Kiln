@@ -179,6 +179,9 @@ _TIER_PRODUCT_NAMES: dict[str, str] = {
 # so it is the honest generic: it never asks a user to buy more than they need.
 _DEFAULT_UPGRADE_PRODUCT = "Kiln Pro"
 
+#: The plan each product name is, for asking the plan check about it.
+_TIER_OF_PRODUCT: dict[str, str] = {name: tier for tier, name in _TIER_PRODUCT_NAMES.items()}
+
 
 def _upgrade_product_name(kind: str) -> str:
     """Which Kiln product actually carries the depth withheld for *kind*.
@@ -281,10 +284,13 @@ def unestablished_caution(
     :returns: The caution, or ``""`` in state 3 only.
     """
     if not _engineering_overlay_loaded(overlay_kind):
-        tail = _UNESTABLISHED_TAIL.format(
-            product=_upgrade_product_name(overlay_kind)
+        from kiln.tiers_and_terms import plan_offer
+
+        product = _upgrade_product_name(overlay_kind)
+        tail = plan_offer(_TIER_OF_PRODUCT.get(product, "pro"), "The curated note for this").nudge(
+            _UNESTABLISHED_TAIL.format(product=product)
         )
-        return f"{what_is_unknown} {tail}"
+        return f"{what_is_unknown} {tail}" if tail else what_is_unknown
     if curated_entry_exists is False:
         return f"{what_is_unknown} {_UNCURATED_ENTRY_TAIL}"
     return ""
@@ -337,9 +343,25 @@ _UPGRADE_HINT_TEMPLATES: dict[str, str] = {
 }
 
 
+#: What each hint offers, as the plan check names it to someone who already
+#: pays for the plan.
+_HINT_SUBJECTS: dict[str, str] = {
+    "material_troubleshooting": "A diagnostic playbook for this symptom",
+    "post_processing": "The step-by-step procedure",
+    "environment_compatibility": "The curated note on each rating",
+}
+
+
 def _upgrade_hint(kind: str) -> str:
-    """The free-tier hint for *kind*, naming the tier that would unlock it."""
-    return _UPGRADE_HINT_TEMPLATES[kind].format(product=_upgrade_product_name(kind))
+    """The free-tier hint for *kind*, naming the tier that would unlock it,
+    to a caller who would buy it; the plan check's words to one who pays for
+    it already, and nothing to one whose plan includes it."""
+    from kiln.tiers_and_terms import plan_offer
+
+    product = _upgrade_product_name(kind)
+    return plan_offer(_TIER_OF_PRODUCT.get(product, "pro"), _HINT_SUBJECTS[kind]).nudge(
+        _UPGRADE_HINT_TEMPLATES[kind].format(product=product)
+    )
 
 
 # The default rendering of each hint: what a public-only install shows, and
@@ -361,8 +383,9 @@ _UPGRADE_HINT_ENVIRONMENT = _UPGRADE_HINT_TEMPLATES["environment_compatibility"]
 # The withheld depth is the materials overlay's own `bonding` block, so
 # `{product}` resolves against that kind rather than naming a tier outright:
 # copy that hardcodes one cannot follow the gate if the band ever moves.
+_BONDING_FLOOR_WARNING = "{name} bonds poorly with common glues."
 _BONDING_FLOOR_NUDGE = (
-    "{name} bonds poorly with common glues. {product} names the adhesive "
+    "{product} names the adhesive "
     "and surface prep that will actually hold it. See https://kiln3d.com/pricing"
 )
 
@@ -524,10 +547,14 @@ class MaterialProfile:
                 "Use recommend_adhesive for specific adhesives and surface prep."
             )
         if self.bonding.get("hard_to_bond"):
-            return _BONDING_FLOOR_NUDGE.format(
-                name=self.display_name,
-                product=_upgrade_product_name("materials"),
+            from kiln.tiers_and_terms import plan_offer
+
+            product = _upgrade_product_name("materials")
+            plan = plan_offer(_TIER_OF_PRODUCT.get(product, "pro"), "The adhesive that will hold it").nudge(
+                _BONDING_FLOOR_NUDGE.format(product=product)
             )
+            warning = _BONDING_FLOOR_WARNING.format(name=self.display_name)
+            return f"{warning} {plan}" if plan else warning
         return ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -1994,15 +2021,23 @@ def _format_upgrade_nudge(verdict: Any) -> str:
     ``MaterialRecommendation.warnings``.  Funnel-allowed per
     CLAUDE.md "Trademark + cross-repo discipline" — naming kiln-pro
     and linking kiln3d.com from public Kiln is a funnel, not a leak.
+    The caution is said to every caller; the plan line only to one who would
+    buy the plan, and the plan check's own words to one who pays for it.
     """
-    return (
+    from kiln.tiers_and_terms import plan_offer
+
+    caution = (
         "This appears to be a load-bearing application; the safety-floor "
         "recommendation above doesn't account for cross-section shape, "
-        "buckling, fatigue, creep, or FDM anisotropy. For real-engineering "
+        "buckling, fatigue, creep, or FDM anisotropy."
+    )
+    plan = plan_offer("pro", "The engineering math for this part").nudge(
+        "For real-engineering "
         "math (beam mechanics with FoS control, ISO 286 fits, fatigue + "
         "creep derating, calibrated tolerances), see "
         "https://kiln3d.com/pricing."
     )
+    return f"{caution} {plan}" if plan else caution
 
 
 def recommend_material_for_design(

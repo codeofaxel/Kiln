@@ -343,9 +343,11 @@ READ_ONLY_TOOLS: set[str] = {
     "find_printers_with_material",
     "forecast_material_consumption",
     "get_fleet_material_summary",
+    "material_on_hand",
     "get_material_consumption_history",
     "get_restock_suggestions",
     "optimize_fleet_assignment",
+    "assign_jobs",
     "suggest_spool_swaps",
 
     # material_tools.py -- status queries

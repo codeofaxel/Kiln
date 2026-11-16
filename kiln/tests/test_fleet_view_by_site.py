@@ -37,16 +37,22 @@ _ORDER = ("free", "pro", "business", "enterprise")
 
 
 def _plan(monkeypatch, tier: str) -> None:
-    """Put the caller on *tier*, whichever licensing module answers."""
+    """Put the caller on *tier*, whichever licensing module answers, signed
+    in: a plan that does not include something is refused in the plan
+    check's own words for a signed-in caller."""
+    from kiln.tiers_and_terms import plan_does_not_include_message
 
     def covers(required) -> bool:
         needed = getattr(required, "value", str(required)).lower()
         return _ORDER.index(tier) >= _ORDER.index(needed)
 
-    monkeypatch.setattr(
-        "kiln.licensing.check_tier",
-        lambda required, *_a, **_k: (True, None) if covers(required) else (False, f"needs {required}"),
-    )
+    def check_tier(required, *_a, subject="This feature", **_k):
+        if covers(required):
+            return True, None
+        needed = getattr(required, "value", str(required)).lower()
+        return False, plan_does_not_include_message(subject, needed, tier)
+
+    monkeypatch.setattr("kiln.licensing.check_tier", check_tier)
     monkeypatch.setattr("kiln.account_plan._covers", covers)
 
 

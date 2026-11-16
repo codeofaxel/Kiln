@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import re
 import threading
+from dataclasses import dataclass
 
 from kiln.cli_command import kiln_command
 
@@ -639,6 +640,79 @@ def upgrade_nudge_block(
 
 
 PRICING_URL = "https://kiln3d.com/pricing"
+
+
+@dataclass(frozen=True)
+class PlanOffer:
+    """What a door says about the plan that includes what it holds back.
+
+    ``words`` is the plan check's own sentence for this caller about the
+    thing: how a subscriber connects a machine that is signed out, to sign
+    back in after a refused sign-in, to get online when a paid plan has gone
+    unconfirmed, and which plan includes it for anyone else.  ``sells`` is
+    whether those words send the caller to the pricing page.  A door attaches
+    its pitch (an upgrade link, a nudge, the price) only when ``sells`` is
+    true: a person who already pays for the plan is never sold it.
+    ``words`` is empty when the plan check could not be asked, or says the
+    caller's plan includes it after all (``covered``); a refusal's own
+    sentence stands then, and so does its pitch (:meth:`tail`), while a
+    nudge beside an answer says nothing (:meth:`nudge`).
+    """
+
+    words: str
+    sells: bool
+    covered: bool = False
+
+    def tail(self, pitch: str) -> str:
+        """The plan sentence a refusal ends on: the door's own *pitch* where
+        the caller would buy, the plan check's words where they pay for the
+        plan already."""
+        return pitch if self.sells else self.words
+
+    def nudge(self, pitch: str) -> str:
+        """The same for a nudge beside an answer, which says nothing to a
+        caller whose plan includes what it points at."""
+        return "" if self.covered else self.tail(pitch)
+
+    @property
+    def buying(self) -> bool:
+        """Whether a nudge beside an answer carries its pitch fields (a link,
+        the plan it names): the caller would be buying the plan, neither
+        holding it nor paying for it already."""
+        return self.sells and not self.covered
+
+
+def plan_offer(required: object, subject: str = "This feature") -> PlanOffer:
+    """The plan check's words, for this caller, about *subject* at *required*.
+
+    *subject* starts the sentence the plan check says ("... needs Kiln Pro",
+    "... is part of your Pro plan"), so it reads as one thing: a singular
+    phrase ("A QR code") or an -ing phrase ("Running printers side by side").
+
+    The one place a door that holds something back learns what to say about
+    the plan: the plan check knows whether this machine is signed out, on a
+    sign-in the server refused, on a paid plan it has not been able to
+    confirm, or on a smaller plan, and words each one.  Never raises.
+    """
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        tier = LicenseTier(str(getattr(required, "value", required)).lower())
+        try:
+            covered, said = check_tier(tier, subject=subject)
+        except TypeError:
+            # A plan reader that takes no subject: its own generic line.
+            covered, said = check_tier(tier)
+    except Exception:  # noqa: BLE001 -- an unreadable plan keeps the door's own words
+        return PlanOffer("", True)
+    if covered:
+        return PlanOffer("", True, covered=True)
+    words = str(said or "").strip()
+    if not words:
+        return PlanOffer("", True)
+    if subject != "This feature" and words.startswith("This feature"):
+        words = subject + words[len("This feature"):]
+    return PlanOffer(words, PRICING_URL.split("://", 1)[-1] in words)
 
 
 def upgrade_link(tool: str = "", src: str = "agent") -> str:

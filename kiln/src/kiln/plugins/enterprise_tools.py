@@ -42,7 +42,8 @@ def _encryption_not_installed() -> dict[str, Any]:
     Encryption is applied by the machine that stores the G-code, so there
     is nothing to ask anywhere else: a file written here is not encrypted.
     The files kept in the account are another machine's -- Kiln's servers
-    encrypt those -- and the answer says so beside the local verdict.
+    encrypt those -- and the answer says so beside the local verdict.  It
+    names no plan: no plan makes this machine encrypt the G-code it stores.
     """
     import importlib.util
 
@@ -51,7 +52,6 @@ def _encryption_not_installed() -> dict[str, Any]:
     if key_set:
         message += f" {_ENCRYPTION_KEY_ENV} is set, but nothing on this machine uses it."
     message += f" {_ACCOUNT_FILES_SENTENCE}"
-    message += " Encryption at rest is part of Kiln Enterprise: https://kiln3d.com/pricing"
     return {
         "success": True,
         "encryption": {

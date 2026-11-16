@@ -256,16 +256,21 @@ class DecorationQuota:
 
 def _quota_exceeded_error(status: QuotaStatus) -> dict[str, Any]:
     """Build the standard quota-exceeded error dict."""
-    return {
+    from kiln.tiers_and_terms import plan_offer
+
+    offer = plan_offer("pro", "Decorating past the free allowance")
+    error = {
         "status": "error",
         "error": (
             f"Free tier limit reached ({status.used}/{FREE_TIER_DECORATION_LIMIT} "
-            f"decorations this month). Upgrade to Pro for unlimited decorations."
+            "decorations this month). " + offer.tail("Upgrade to Pro for unlimited decorations.")
         ),
         "code": "DECORATION_QUOTA_EXCEEDED",
         "quota": status.to_dict(),
-        "upgrade_url": _UPGRADE_URL,
     }
+    if offer.sells:
+        error["upgrade_url"] = _UPGRADE_URL
+    return error
 
 
 # ---------------------------------------------------------------------------

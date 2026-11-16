@@ -917,14 +917,18 @@ def _refuse_a_watcher_over_every_printer(names: list[str], json_mode: bool) -> N
     the watcher is allowed.
     """
     from kiln.printers.engagement import multi_machine_tier
+    from kiln.tiers_and_terms import plan_offer
 
     if len(names) <= 1 or multi_machine_tier():
         return
+    offer = plan_offer("business", "Sending dropped files to every printer")
+    plan_line = (
+        "Kiln Business sends them to every printer: https://kiln3d.com/pricing" if offer.sells else offer.words
+    )
     click.echo(
         format_error(
             "On this plan the watcher sends files to one printer: add --printer NAME "
-            f"(one of {', '.join(sorted(names))}). Kiln Business sends them to every printer: "
-            "https://kiln3d.com/pricing",
+            f"(one of {', '.join(sorted(names))}). {plan_line}".rstrip(),
             code="ONE_PRINTER_WATCHER",
             json_mode=json_mode,
         )
@@ -12774,9 +12778,14 @@ def _account_plan_summary() -> dict:
 
 def _echo_account_plan(json_mode: bool, *, title: str = "Kiln plan") -> None:
     """Print the plan of the signed-in account (an install without kiln-pro)."""
-    from kiln.tiers_and_terms import upgrade_link
+    from kiln.tiers_and_terms import plan_offer, upgrade_link
 
     data = _account_plan_summary()
+    offer = plan_offer("pro", "Everything Kiln adds on a paid plan") if data["tier"] == "free" else None
+    if offer is not None and not offer.sells:
+        # A paid plan this machine could not confirm, or a sign-in the server
+        # refused: the step that brings it back, never the plans.
+        data["plan_note"] = offer.words
     if json_mode:
         import json as _json
 
@@ -12793,7 +12802,9 @@ def _echo_account_plan(json_mode: bool, *, title: str = "Kiln plan") -> None:
         return
     else:
         click.echo("  Account: not signed in")
-    if data["tier"] == "free":
+    if data.get("plan_note"):
+        click.echo(f"\n  {data['plan_note']}")
+    elif data["tier"] == "free":
         if not data["signed_in"]:
             click.echo("\n  Already subscribed?  Run `kiln signin` to connect this machine.")
         click.echo(f"  See the plans:       {upgrade_link(src='cli')}")
@@ -12834,10 +12845,10 @@ def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode:
     click.echo(f"  Tier:   {info.tier.value.title()}")
     click.echo(f"  Source: {info.source}")
     if info.tier == LicenseTier.FREE:
-        click.echo("\n  Upgrade to Pro for fleet management, job queue,")
-        click.echo("  analytics, and more.")
+        from kiln.skill_manifest import pro_tier_line
+
+        click.echo(f"\n  Kiln Pro: {pro_tier_line()}")
         click.echo("\n  Already subscribed?  Run `kiln signin` to sync this machine.")
-        click.echo("  New?                 https://kiln3d.com/pricing")
     else:
         click.echo("\n  ✓ Active and valid.")
 
