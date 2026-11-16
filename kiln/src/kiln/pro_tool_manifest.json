@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-16T08:45:38.344268+00:00",
+  "generated": "2026-11-16T21:17:11.223580+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -19906,7 +19906,7 @@
     },
     {
       "name": "add_feature_during_print",
-      "description": "Add a new shape to a paused print, then finish the print with it (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
+      "description": "Add a new shape to a paused print (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
@@ -20088,6 +20088,18 @@
             "title": "Manual Material Change Confirmed",
             "type": "boolean",
             "description": "Non-Bambu safety gate for material/color changes. Set True only after the target material is loaded in the active feed path; otherwise Kiln refuses before emitting an artifact."
+          },
+          "replace_rest_of_print": {
+            "default": false,
+            "title": "Replace Rest Of Print",
+            "type": "boolean",
+            "description": "The person agreed that the layers the print still had will not be printed.  Left False, a print with layers left is refused with what would be lost."
+          },
+          "print_model": {
+            "default": "",
+            "title": "Print Model",
+            "type": "string",
+            "description": "Path to the model this print was sliced from.  Given, the rest of the print is kept and ``feature`` is read in this model's coordinates."
           }
         },
         "required": [
