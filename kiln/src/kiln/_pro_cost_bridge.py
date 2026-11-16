@@ -21,7 +21,8 @@ The served request, by keyword::
     gcode_gz_b64            the file's G-code, gzipped then base64-encoded:
                             a .gcode/.gco/.g file itself, or the plate a
                             sliced 3MF prints; never sent when it is over
-                            MAX_SENT_BYTES before compression
+                            MAX_SENT_BYTES before compression or
+                            MAX_SENT_GZ_BYTES after it
     file_name               the file's base name
     filaments               the estimate's per-filament entries
     total_cost_usd          the estimate's total, a float
@@ -67,6 +68,10 @@ WIRE_TOOL = "print_cost_intelligence"
 _CONSULT_TIMEOUT_S: float = 30.0
 #: A file whose G-code is larger than this, before compression, is not sent.
 MAX_SENT_BYTES: int = 64 * 1024 * 1024
+#: The most the compressed G-code may weigh when sent.  Kiln's servers take
+#: their limit for this request from this number, so a file under it is one
+#: they read, and a file over it is said here, without uploading it.
+MAX_SENT_GZ_BYTES: int = 8 * 1024 * 1024
 #: After the service fails to answer, how long it is left alone.  Same
 #: backoff the nozzle and cutter bridges use.
 SERVICE_BACKOFF_S: float = 300.0
@@ -172,6 +177,9 @@ def _served(
         from kiln.server import _pro_api_call
     except Exception:  # noqa: BLE001
         return None, Miss("unanswered", _NOT_ASKED, "this install could not open its connection to Kiln's servers")
+    packed = gzip.compress(body, compresslevel=6)
+    if len(packed) > MAX_SENT_GZ_BYTES:
+        return None, Miss("unanswered", _NOT_ASKED, _TOO_LARGE)
     try:
         # The person asked for an estimate; this enrichment rides along with
         # it, so a signed-out install does not count it as reaching for it.
@@ -179,7 +187,7 @@ def _served(
             WIRE_TOOL,
             _timeout=_CONSULT_TIMEOUT_S,
             _asked_by_user=False,
-            gcode_gz_b64=base64.b64encode(gzip.compress(body, compresslevel=6)).decode("ascii"),
+            gcode_gz_b64=base64.b64encode(packed).decode("ascii"),
             file_name=os.path.basename(file_path),
             filaments=filaments,
             total_cost_usd=float(total_cost_usd),

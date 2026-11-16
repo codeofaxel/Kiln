@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import gzip
 import json
+import os
 import sys
 import types
 import zipfile
@@ -101,6 +102,26 @@ class TestTheServedRequest:
             assert bridge.consult_print_cost(path, filaments=[], total_cost_usd=0.0, estimated_time_seconds=None) is None
         door.assert_not_called()
         assert "too large" in bridge.unanswered()["message"]
+
+    def test_a_file_over_the_compressed_bound_is_said_here_not_uploaded(self, tmp_path):
+        """Kiln's servers read up to MAX_SENT_GZ_BYTES of compressed G-code
+        for this request.  A file under the uncompressed bound whose gzip is
+        over it is not uploaded, and the estimate says it is too large."""
+        path = tmp_path / "plate.gcode"
+        path.write_bytes(base64.b64encode(os.urandom(9 * 1024 * 1024)))   # gzips to about 9 MB
+        assert path.stat().st_size < bridge.MAX_SENT_BYTES
+        with patch("kiln.server._pro_api_call") as door:
+            assert bridge.consult_print_cost(str(path), filaments=[], total_cost_usd=0.0, estimated_time_seconds=None) is None
+        assert door.call_count == 0, "uploaded a file Kiln's servers refuse"   # not assert_not_called: it prints the upload
+        assert "too large" in bridge.unanswered()["message"]
+
+    def test_a_file_at_the_compressed_bound_is_sent(self, tmp_path, monkeypatch):
+        path = _plate(tmp_path)
+        packed = len(gzip.compress(Path(path).read_bytes(), compresslevel=6))
+        monkeypatch.setattr(bridge, "MAX_SENT_GZ_BYTES", packed, raising=False)
+        with patch("kiln.server._pro_api_call", return_value={"success": True}) as door:
+            assert bridge.consult_print_cost(path, filaments=[], total_cost_usd=0.0, estimated_time_seconds=None)
+        door.assert_called_once()
 
     def test_a_dead_link_is_left_alone_for_a_while(self, tmp_path):
         path = _plate(tmp_path)
