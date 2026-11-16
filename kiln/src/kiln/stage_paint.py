@@ -177,6 +177,7 @@ class _Look:
         self.canvas_w = int(recipe["studioCanvas"]["width"])
         cam = recipe["camera"]
         self.fov_deg = float(cam["fov"])
+        self.opening_az = float(cam["openingAz"])
         self.still_dist_factor = float(cam["stillDistFactor"])
         self.el_clamp = (float(cam["elClamp"][0]), float(cam["elClamp"][1]))
         bloom = recipe["bloom"]
@@ -730,7 +731,7 @@ def _view_projection(look, eye, w: int, h: int):
 
 
 def _shade(look, albedo_lin, normals, view, geometry_roughness=None, *,
-           studio=None, gloss=None):
+           studio=None, gloss=None, turn_deg=0.0):
     """Per-pixel LINEAR radiance: three r160's MeshPhysicalMaterial, verbatim.
 
     ``RE_Direct_Physical`` per directional light, ``RE_IndirectDiffuse``
@@ -758,8 +759,21 @@ def _shade(look, albedo_lin, normals, view, geometry_roughness=None, *,
     *geometry_roughness* is three's per-pixel ``geometryRoughness``
     (:func:`_geometry_roughness`), added to the material's roughness as
     the shader adds it; ``None`` is a surface that does not curve.
+
+    *turn_deg* turns the lights and the studio about the vertical by that
+    many degrees of the camera's azimuth, as a still's are turned with its
+    camera; it is applied as the opposite turn of the normals and the view.
     """
     np = _np
+    if turn_deg:
+        t = math.radians(turn_deg)
+        c, s = math.cos(t), math.sin(t)
+
+        def unturn(d):
+            return np.stack([d[:, 0] * c - d[:, 2] * s, d[:, 1], d[:, 2] * c + d[:, 0] * s], axis=1)
+
+        normals = unturn(normals)
+        view = unturn(np.broadcast_to(view, normals.shape))
     metalness = look.metalness
     env_intensity = look.studio if studio is None else studio
     spec_intensity = look.gloss if gloss is None else gloss
@@ -1180,7 +1194,7 @@ def _pair_count(tris_px, tris_py, tris_invz, w, h) -> _ViewCost:
 
 
 def _rasterize(look, tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
-               w, h, pair_cap=None, device_scale=1.0, studio=None, gloss=None):
+               w, h, pair_cap=None, device_scale=1.0, studio=None, gloss=None, turn_deg=0.0):
     """One z-buffered pass over a triangle soup.
 
     ``attrs`` carries, per triangle vertex, either a unit NORMAL scaled by
@@ -1343,7 +1357,8 @@ def _rasterize(look, tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye
                 tris_px, tris_py, tris_invz, attrs, t_sel[smooth], raw, ln, n,
                 izs[smooth], basis, 1.0 / device_scale,
             )
-            rgb[smooth] = _filmic(_shade(look, albedo, n, view, rough, studio=studio, gloss=gloss))
+            rgb[smooth] = _filmic(_shade(look, albedo, n, view, rough, studio=studio, gloss=gloss,
+                                         turn_deg=turn_deg))
 
         buf[hit] = rgb
     return buf.reshape(h, w, 3)
@@ -1487,10 +1502,13 @@ def _paint_view(look, v, f, az_deg, el_deg, *, width, height, albedo_lin,
     if cost_only:
         return _pair_count(px_all, py_all, iz_all, width, height).total
 
+    # A still's studio turns with its camera, so every still is lit as the
+    # stage's opening view is, the stage's own stills included.
     hdr = _rasterize(
         look, px_all, py_all, iz_all,
         np.vstack(all_at), plate_tex_np, albedo_lin, eye, width, height,
         device_scale=device_scale, studio=studio, gloss=gloss,
+        turn_deg=az_deg - look.opening_az,
     )
     if hdr is None:
         return None
