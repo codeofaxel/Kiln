@@ -99,6 +99,13 @@ _HASH_CHUNK = 1024 * 1024
 #: carried, and the value; Kiln's answer carries the same pair when it did.
 _MESH_TRANSPORT = "mesh_transport"
 _BY_FINGERPRINT = "by_sha256"
+#: The field of a push's request that says whose id this Kiln keeps a branch
+#: under, and the answer it gives: the account's.
+_BRANCH_IDS = "branch_ids"
+_ACCOUNTS = "account"
+#: The code of the account's refusal of a push whose branch name another
+#: live branch of the design has there.
+_NAME_TAKEN = "BRANCH_NAME_TAKEN"
 #: The longest wait on the API's request rate one model's fetch sits out
 #: (seconds), and how many times it waits for the same model.  A longer wait
 #: is an allowance for the day: said, never sat out.
@@ -1012,7 +1019,10 @@ def _bring_recipes(tool: str, design_id: str, vault: Any) -> dict[str, Any]:
     return {"in_account": len(rows), "files_changed": vault.merge_proven_rows(design_id, rows)}
 
 
-def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_for: str | None = None, vault: Any = None) -> dict[str, Any]:
+def push(
+    tool: str, design_id: str, branch_id: str | None = None, *, make_room_for: str | None = None,
+    vault: Any = None, _names_settled: bool = False,
+) -> dict[str, Any]:
     """Send one branch of this computer's history, and the design's proven
     recipes, to the person's Kiln account.
 
@@ -1041,7 +1051,13 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
             return locked
         recipes = vault.proven_rows(design_id)
         vault.sync_from_library(design_id)
-        branch = vault.branch(branch_id) if branch_id else vault.branch_named(design_id, "main")
+        if branch_id:
+            branch = vault.branch(branch_id)
+        else:
+            # The main this computer's saves continue, when it holds more
+            # than one branch of that name.
+            saving = vault.checked_out(design_id)
+            branch = saving if (saving or {}).get("name") == "main" else vault.branch_named(design_id, "main")
         if branch is None or branch.get("design_id") != design_id:
             return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id or 'main'} of {design_id} on this computer.")
         members = vault.memberships(branch["branch_id"])
@@ -1078,6 +1094,8 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
         # synced with none: Kiln's servers refuse a push into another design,
         # or into one sharing no version with it, before they keep anything.
         **design_tie.push_fields(_design_folder(design_id), held_here, design_id=design_id),
+        # This Kiln keeps a branch under the id the account gives it.
+        _BRANCH_IDS: _ACCOUNTS,
     }
     if make_room_for:
         body["make_room_for"] = make_room_for
@@ -1089,14 +1107,40 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     if answer.get("http_status") == design_tie.REFUSED_STATUS and _judged_push(body):
         # Nothing was kept there and nothing changes here.
         return _push_refusal(tool, design_id, body, answer)
-    if _diverged(answer):
-        out = _keep_as_this_computers(tool, design_id, branch, body, answer, vault=None if own else vault)
+    if answer.get("code") == _NAME_TAKEN and not _names_settled:
+        # The account keeps another branch under this name.  When that
+        # branch is one this computer has since renamed or retired, the
+        # account hears of that first, and the push is sent once more.
+        told = _tell_of_rename(
+            tool, design_id, branch, answer.get("held_by"), answer.get("held_head"), None if own else vault,
+        )
+        if told:
+            return push(
+                tool, design_id, branch["branch_id"], make_room_for=make_room_for,
+                vault=None if own else vault, _names_settled=True,
+            )
+    if _diverged(answer) or _name_taken(answer):
+        # The account's branch moved on, or another branch there holds this
+        # name: either way this computer's work is kept as a copy of its own.
+        out = _keep_as_this_computers(
+            tool, design_id, branch, body, answer, vault=None if own else vault, taken=_name_taken(answer),
+        )
         if out.get("status") == "error":
             return out
     elif answer.get("status") == "error":
         return answer
     else:
-        out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": branch["branch_id"]}
+        kept_as = _branch_kept_as(design_id, branch["branch_id"], answer, None if own else vault)
+        out = {"status": "success", "push": answer, "design_id": design_id, "branch_id": kept_as}
+        if answer.get("behind"):
+            # The account's branch is ahead of this computer's: nothing was
+            # sent, and the answer never reads as a save.
+            pull = kiln_command("cloud pull", design_id)
+            out["behind"] = True
+            out["said"] = (
+                f"Nothing was sent: {branch.get('name') or 'main'} of {design_id} in your Kiln account is "
+                f"ahead of this computer's. Run `{pull}` to bring it here."
+            )
         made_room = answer.get("made_room") if isinstance(answer, dict) else None
         if isinstance(made_room, dict) and made_room.get("note"):
             # Which of their designs was archived to make room, said at the
@@ -1135,6 +1179,43 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     return out
 
 
+def _tell_of_rename(
+    tool: str, design_id: str, pushed: dict[str, Any], held_by: Any, held_head: Any, vault: Any,
+) -> bool:
+    """Tell the account that the branch it keeps under the pushed branch's
+    name has been renamed or retired on this computer; whether it took that.
+
+    Only the branch's name and whether it is retired are sent, on the head
+    the account already holds: none of its versions here are pushed.  A
+    branch this computer does not have, or has under that same live name,
+    is another branch, and nothing is sent.
+    """
+    if not isinstance(held_by, str) or not held_by or held_by == pushed.get("branch_id"):
+        return False
+    with _opened(vault) as v:
+        other = v.branch(held_by)
+    if other is None or other.get("design_id") != design_id or other.get("branch_id") != held_by:
+        return False
+    if other.get("name") == pushed.get("name") and other.get("status") != "retired":
+        return False
+    answer = _request(
+        tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push",
+        {"branch": {**other, "head_version_id": held_head}, "versions": [], "memberships": [],
+         "provenance_sidecars": [], _BRANCH_IDS: _ACCOUNTS},
+    )
+    return answer.get("status") != "error"
+
+
+def _branch_kept_as(design_id: str, sent_id: str, answer: dict[str, Any], vault: Any) -> str:
+    """The id the account keeps the pushed branch under; when it is not the
+    id sent, the branch here is kept under it from now on."""
+    kept = answer.get("branch_id")
+    if not isinstance(kept, str) or not kept or kept == sent_id:
+        return sent_id
+    with _opened(vault) as v:
+        return kept if v.take_account_branch_id(design_id, sent_id, kept) else sent_id
+
+
 def _judged_push(body: dict[str, Any]) -> bool:
     """Whether a push's request carries what Kiln's servers judge its design by."""
     from kiln import design_tie
@@ -1163,6 +1244,12 @@ def _diverged(answer: dict[str, Any]) -> bool:
     )
 
 
+def _name_taken(answer: dict[str, Any]) -> bool:
+    """Whether a push was refused because another branch of the design, in
+    the account, holds the pushed branch's name."""
+    return answer.get("status") == "error" and answer.get("code") == _NAME_TAKEN
+
+
 def _plan_refusal(answer: dict[str, Any]) -> bool:
     """Whether a refusal is the person's plan not including what was asked."""
     code = str(answer.get("code") or "")
@@ -1179,10 +1266,12 @@ def _own_branch_id(branch_id: str, computer: str) -> str:
 
 def _keep_as_this_computers(
     tool: str, design_id: str, branch: dict[str, Any], body: dict[str, Any], refused: dict[str, Any],
-    *, vault: Any = None,
+    *, vault: Any = None, taken: bool = False,
 ) -> dict[str, Any]:
     """Keep this computer's versions of a branch the account moved on, as
     ``<branch>@<computer>``: a branch of their own, the moved one untouched.
+    With *taken*, the account holds another branch under this name (made
+    elsewhere), and the copy is kept the same way; that branch is untouched.
 
     A refusal of the plan's (a design the plan does not keep) leaves the
     server's own answer (*refused*) as it was; nothing is recorded here
@@ -1194,9 +1283,11 @@ def _keep_as_this_computers(
         name = str(branch.get("name") or "main")
         if name.endswith(f"@{computer}"):
             return refused
-        own_id = _own_branch_id(branch["branch_id"], computer)
         own_name = f"{name}@{computer}"
-        before = v.branch(own_id) or {}
+        # The copy this computer already keeps under that name, by whichever
+        # id it is kept under; else a new one.
+        before = v.branch_named(design_id, own_name) or {}
+        own_id = before.get("branch_id") or _own_branch_id(branch["branch_id"], computer)
     own = {
         **branch,
         "branch_id": own_id,
@@ -1215,8 +1306,31 @@ def _keep_as_this_computers(
         if _plan_refusal(answer):
             return refused
         return {**refused, "kept_as_refused": {"code": answer.get("code"), "error": answer.get("error")}}
+    kept_id = answer.get("branch_id")
+    if isinstance(kept_id, str) and kept_id and kept_id != own_id:
+        # The account keeps this computer's copy under an id of its own.
+        own, own_id = {**own, "branch_id": kept_id}, kept_id
+        members = [{**m, "branch_id": kept_id} for m in members]
     with _opened(vault) as v:
         v.keep_branch_copy(own, members)
+    if taken:
+        return {
+            "status": "success",
+            "push": answer,
+            "design_id": design_id,
+            "branch_id": own_id,
+            "kept_as": own_name,
+            "name_taken": {
+                "branch": name,
+                "branch_id": branch["branch_id"],
+                "held_by": refused.get("held_by"),
+            },
+            "said": (
+                f"Your Kiln account already keeps another branch named {name} in {design_id}, made "
+                f"elsewhere, so Kiln kept this computer's work there as {own_name} and replaced nothing. "
+                f"Nothing was merged."
+            ),
+        }
     pull_cmd = kiln_command("cloud pull", design_id, *(() if name == "main" else ("--branch", name)))
     check = kiln_command("merge check", design_id, own_name, name)
     run = kiln_command("merge run", design_id, own_name, name)
@@ -1403,6 +1517,12 @@ def pull(
 ) -> dict[str, Any]:
     """Bring one branch of the person's Kiln account, and the design's proven
     recipes, onto this computer."""
+    from kiln.history_vault import _main_branch_id
+
+    if branch_id == _main_branch_id(design_id):
+        # The id this computer makes for ``main`` before the account has
+        # given one: the account knows the branch by its name.
+        branch_id, branch_name = None, branch_name or "main"
     if not branch_id and not branch_name:
         branch_name = "main"
     body = {"branch_id": branch_id, "branch_name": branch_name, "since_version_id": since_version_id}
@@ -1503,11 +1623,37 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any, *, doing: str) 
         out["tie"] = tie
         if tie.get("said"):
             out["said_tie"] = tie["said"]
+    kept_heads = (applied.get("heads_kept_here") or {}) if isinstance(applied, dict) else {}
+    followed = (applied.get("heads_followed_here") or {}) if isinstance(applied, dict) else {}
+    said_heads = [_said_head_kept(design_id, name, why) for name, why in sorted(kept_heads.items())]
+    said_heads += [
+        f"{name} of {design_id} now follows your Kiln account. This computer's own versions are on "
+        f"{copy}: nothing was merged or lost."
+        for name, copy in sorted(followed.items())
+    ]
+    if said_heads:
+        out["said_heads"] = " ".join(said_heads)
     if models is not None:
         out["models"] = models
     if notes:
         out["notes"] = notes
     return out
+
+
+def _said_head_kept(design_id: str, name: str, why: str) -> str:
+    """What a person is told when a pull left a branch here where it was."""
+    if why == "went another way":
+        push = kiln_command("cloud push", design_id)
+        pull = kiln_command("cloud pull", design_id)
+        return (
+            f"{name} of {design_id} on this computer and in your Kiln account went different ways, so "
+            f"it stayed as it is here and nothing was merged. Run `{push}` first: your account keeps "
+            f"this computer's work as a branch of its own. Then `{pull}` brings the account's {name} here."
+        )
+    return (
+        f"{name} of {design_id} on this computer has versions your Kiln account does not, so it stayed "
+        "on them. Push the branch to send them."
+    )
 
 
 def _notes_carried(answer: dict[str, Any]) -> dict[str, dict[str, bytes]]:
@@ -1887,7 +2033,7 @@ def _auto_push(changed: dict[str, list[str]], vault: Any) -> dict[str, Any]:
             name = (vault.branch(branch_id) or {}).get("name") or branch_id
             answer = push(_AUTO_PUSH_TOOL, design_id, branch_id, vault=vault)
             row: dict[str, Any] = {
-                "design_id": design_id, "branch_id": branch_id, "branch": name,
+                "design_id": design_id, "branch_id": answer.get("branch_id") or branch_id, "branch": name,
                 "pushed": answer.get("status") == "success",
             }
             if answer.get("kept_as"):

@@ -345,6 +345,31 @@ def test_a_dark_parts_studio_reflection_follows_its_gloss(view_deg: float) -> No
     assert high / low == pytest.approx(2.0, abs=0.05), (low, high)
 
 
+def test_a_stills_studio_turns_with_its_camera(tmp_path: Path) -> None:
+    """A still is lit as the stage's opening view is, from any azimuth: the
+    lights and the studio keep their place relative to the camera.  A black
+    cube, the same from every quarter turn, paints the same from the opening
+    azimuth and from a quarter turn round."""
+    trimesh = pytest.importorskip("trimesh")
+    cube = tmp_path / "cube.stl"
+    trimesh.creation.box(extents=(20.0, 20.0, 20.0)).export(cube)
+    opening = _look().opening_az
+
+    def paint(az: float, colour: str) -> np.ndarray:
+        out = tmp_path / f"{az:.0f}{colour.strip('#')}"
+        views = try_paint_stage_views(
+            str(cube), [("v", "v")], {"v": (60.0, 0.0, az)},
+            output_dir=str(out), width=400, height=300, color=colour,
+        )
+        assert views, "the painter declined"
+        return _img(views)
+
+    inside = paint(opening, "#ffffff").mean(axis=2) > 150   # the cube, the same from both
+    assert inside.sum() > 5_000
+    turned = np.abs(paint(opening, "#000000") - paint(opening + 90.0, "#000000")).mean(axis=2)
+    assert turned[inside].mean() < 1.5, turned[inside].mean()
+
+
 def test_the_environment_is_brightest_overhead_and_lit_underneath() -> None:
     """The term has to VARY with the normal — that is the whole fix.
 
