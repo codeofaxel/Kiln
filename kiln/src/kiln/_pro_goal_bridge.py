@@ -20,8 +20,11 @@ one the same way (:func:`open_for`): the step is sent the model, where it
 came from and what was asked for it, with no goal id, and the servers open
 a goal whose first version it is.  Only the goal is kept there -- the idea,
 the source, the version -- never the model, which stays on this computer.
-The goal is noted beside the file, so the next make of the same model adds
-to it instead of opening another.
+The one exception is a model with separate parts on an install that sends
+those (:mod:`kiln.import_motion`): a copy goes so the way its parts move can
+be worked out, what plays it comes back and is kept beside the file here,
+and the reply says so the first time.  The goal is noted beside the file, so
+the next make of the same model adds to it instead of opening another.
 
 A model Kiln made HERE that names no goal opens one through the same step
 (:func:`_open_for_made_here`).  It has no source to state, so it says the
@@ -163,8 +166,9 @@ def join(
             "note": GOAL_NOTES["no_file"].format(brief_id=brief_id),
         }
         return
+    send_file, motion, tell = _for_motion(mesh, send_file)
     answer, miss = _ask(brief_id, mesh, _made_with(envelope, mesh, fingerprint=not send_file), asked_by_user,
-                        send_file=send_file)
+                        send_file=send_file, motion=motion)
     if miss is not None:
         _say_miss(brief_id, envelope, miss)
         return
@@ -191,6 +195,7 @@ def join(
     envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
     _carry_notes(answer, envelope)
     _carry_motion(answer, envelope, mesh)
+    _tell(envelope, tell)
     compared = answer.get(REFERENCE_KEY)
     if isinstance(compared, dict):
         # The servers' comparison replaces a "not compared" an earlier door
@@ -228,6 +233,40 @@ def _stated_motion() -> dict[str, Any] | None:
     return {"statement": theirs, "note": "reply"}
 
 
+#: What a copy that states nothing asks for: the motion worked out from the
+#: file, and what plays it back in the answer.
+_WORK_IT_OUT: dict[str, Any] = {"statement": None, "note": "reply"}
+
+
+def _for_motion(mesh: str, send_file: bool) -> tuple[bool, Any, str]:
+    """``(send_file, motion, tell)`` for a model about to be sent to its
+    goal: whether the file goes to Kiln's servers after all, the ``motion``
+    that rides with it, and which once-only line the reply carries
+    (``"sent"``, ``"off"``, or ``""``).  A make that states how it moves sends
+    its statement instead (:func:`_ask`), and a model in one piece changes
+    nothing."""
+    from kiln import import_motion
+
+    if _stated_motion() is not None or not import_motion.has_separate_parts(mesh):
+        return send_file, None, ""
+    if send_file:
+        # The file goes anyway, as the person's own ask: nothing to tell.
+        return True, _WORK_IT_OUT, ""
+    if import_motion.sending():
+        return True, _WORK_IT_OUT, "sent"
+    return False, None, "off"
+
+
+def _tell(envelope: dict[str, Any], tell: str) -> None:
+    """The once-only line about a model's copy, when there is one to say."""
+    from kiln import import_motion
+
+    if tell == "sent":
+        import_motion.tell_sent(envelope)
+    elif tell == "off":
+        import_motion.tell_off(envelope)
+
+
 def _keep_motion_note(mesh: str, note: dict[str, Any]) -> bool:
     """Keep what plays *mesh* beside it: one mechanism, or the joints of
     parts that each move on their own.  ``False`` when nothing was kept."""
@@ -253,7 +292,8 @@ def _carry_motion(answer: dict[str, Any], envelope: dict[str, Any], mesh: str) -
     said = answer.get(MOTION_KEY)
     if not isinstance(said, dict) or MOTION_KEY in envelope:
         return
-    shown = {k: said[k] for k in ("plays", "says", "detail", "still_checking", "upgrade") if k in said}
+    shown = {k: said[k] for k in ("plays", "says", "detail", "still_checking", "worked_out", "guess", "upgrade")
+             if k in said}
     note = said.get("note")
     if shown.get("plays") is True:
         kept = isinstance(note, dict) and _keep_motion_note(mesh, note)
@@ -323,9 +363,12 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
         # Noted under another account: this one gets a goal of its own.
         envelope.pop(SAVED_GOAL_KEY, None)
     # Only the goal is opened, in the person's account: the model itself
-    # stays on this computer and its fingerprint goes in its place.
+    # stays on this computer and its fingerprint goes in its place, unless
+    # it has separate parts this install sends (:func:`_for_motion`).
+    send_file, motion, tell = _for_motion(mesh, False)
     answer, miss = _ask(
-        "", mesh, _made_with(envelope, mesh, asked=came_from.prompt, fingerprint=True), False, send_file=False,
+        "", mesh, _made_with(envelope, mesh, asked=came_from.prompt, fingerprint=True), False,
+        send_file=send_file, motion=motion,
     )
     if miss is None:
         block = answer.get(SAVED_GOAL_KEY)
@@ -342,6 +385,7 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
     envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
     _carry_notes(answer, envelope)
     _carry_motion(answer, envelope, mesh)
+    _tell(envelope, tell)
     opened = block.get("brief_id")
     if block.get("opened") is True and isinstance(opened, str) and opened:
         arrival.note_goal(mesh, opened)
@@ -443,12 +487,14 @@ def _not_compared_status() -> str:
 
 def _ask(
     brief_id: str, mesh: str, made_with: dict[str, str], asked_by_user: bool, *, send_file: bool = True,
-    timeout: float = CONSULT_TIMEOUT_S,
+    timeout: float = CONSULT_TIMEOUT_S, motion: Any = None,
 ) -> tuple[dict[str, Any], Any]:
     """``(answer, None)`` from the servers, or ``({}, miss)``.  An empty
     *brief_id* asks the step to open a goal for the model.  Without
     *send_file* nothing but *made_with* leaves this computer.  *timeout* is
-    how long the make's reply waits on it."""
+    how long the make's reply waits on it.  *motion* rides with a file that
+    states nothing about how it moves (:func:`_for_motion`); a statement the
+    make carries is sent in its place."""
     from kiln import served_answer, served_makes
 
     try:
@@ -466,6 +512,8 @@ def _ask(
             stated = _stated_motion()
             if stated is not None:
                 kwargs["motion"] = stated
+            elif motion is not None:
+                kwargs["motion"] = motion
         answer = _srv._pro_api_call(
             WIRE_TOOL,
             # A make that states how it moves also waits on that being checked.
