@@ -27,6 +27,7 @@ from typing import Any
 
 from kiln import _vec
 from kiln.openscad_runner import crashed_on_startup, run_openscad
+from kiln.quoted_text import fence
 
 _logger = logging.getLogger(__name__)
 
@@ -2098,7 +2099,7 @@ def generate_emboss_scad(
                     text_cov = _material_coverage(text_w_mm, text_h_mm)
                     warnings.append(
                         f"the text was placed clear of an opening in the "
-                        f"{face.get('face_name', 'target')} face: "
+                        f"{fence(face.get('face_name', 'target'))} face: "
                         f"{text_w_mm:.1f}x{text_h_mm:.1f}mm at offset "
                         f"({final_offset_x:.1f}, {final_offset_y:.1f})mm, "
                         f"{min_edge_margin_mm:.1f}mm from the opening's edge"
