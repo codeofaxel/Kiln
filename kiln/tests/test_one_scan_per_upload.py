@@ -144,8 +144,9 @@ def test_kiln_upload_refuses_bare_gcode_that_heats_past_the_printer(tmp_path, mo
     assert "GCODE_BLOCKED" in result.output and "M104 S400 exceeds" in result.output
     assert printer.uploads == []
     # A plugin calling the adapter directly meets the same refusal.
-    with pytest.raises(PrinterError, match="GCODE_BLOCKED"):
+    with pytest.raises(PrinterError, match="was not uploaded") as refused:
         printer.upload_file(str(hot))
+    assert refused.value.code == "GCODE_BLOCKED" and "GCODE_BLOCKED" not in str(refused.value)
     assert printer.uploads == []
 
 

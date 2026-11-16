@@ -483,5 +483,6 @@ class TestGenerateAndPrint:
             adapter.start_print.assert_called_once_with("model.gcode")
         else:
             assert result.exit_code != 0
-            assert "PREVIEW_NOT_CONFIRMED" in result.output
+            said = " ".join(result.output.replace("│", " ").split())
+            assert "PREVIEW_NOT_CONFIRMED" not in said and "refuses to proceed without a preview confirmation" in said, said
             adapter.start_print.assert_not_called()

@@ -45,6 +45,7 @@ from kiln.cli.auth_commands import (
     _http_get,
     _http_post,
 )
+from kiln.cli.output import NO_SENTENCE, said_to_a_person
 
 # Where the user toggles the opt-in flag — printed in every "opt-in
 # off" error message so they know exactly where to go next.
@@ -102,7 +103,9 @@ def _surface_envelope_error(resp: dict[str, Any], default: str) -> click.ClickEx
     a human-friendly message that calls out OPT_IN_REQUIRED /
     RATE_LIMITED specially."""
     code = str(resp.get("error") or "ERROR").upper()
-    msg = resp.get("message") or resp.get("error") or default
+    # The server's ``error`` is a code word; a person reads its ``message``,
+    # or the command's own sentence.
+    msg = said_to_a_person(resp.get("message")) if resp.get("message") else default
     if code == "OPT_IN_REQUIRED":
         url = resp.get("enable_url") or _ENABLE_URL
         return click.ClickException(
@@ -134,14 +137,18 @@ def _surface_envelope_error(resp: dict[str, Any], default: str) -> click.ClickEx
             "details, and write to adam@kiln3d.com if it wasn't you."
         )
     if code == "BELOW_FLOOR":
-        cap = resp.get("cap") or "?"
-        floor = resp.get("floor_cents")
+        which = {"per_order": "per-order cap", "monthly": "monthly cap"}.get(str(resp.get("cap") or ""), "cap")
+        try:
+            floor = f" of ${int(resp.get('floor_cents')) / 100:,.0f}"
+        except (TypeError, ValueError):
+            floor = ""
         return click.ClickException(
-            f"That value is below the protective floor.  cap={cap}, "
-            f"floor_cents={floor}.  You can RAISE caps; you cannot "
-            "LOWER them below the default ($500 / $2,000)."
+            f"That's below the lowest your {which} can go{floor}. You can raise "
+            "a cap, but not set it below its default ($500 per order, $2,000 a month)."
         )
-    return click.ClickException(f"{msg}  (code={code})")
+    if msg == NO_SENTENCE:
+        msg = default
+    return click.ClickException(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +189,9 @@ def cmd_show(as_json: bool) -> None:
             "Session expired.  Run `kiln signin` to sign in again."
         )
     if code >= 400 or not body.get("success"):
+        loaded = said_to_a_person(body.get("message"))
         raise click.ClickException(
-            body.get("error") or f"Could not load spend caps (HTTP {code})."
+            loaded if loaded != NO_SENTENCE else "Kiln couldn't load your spend caps just now. Try again in a moment."
         )
     if as_json:
         click.echo(json.dumps(body, indent=2, sort_keys=True))

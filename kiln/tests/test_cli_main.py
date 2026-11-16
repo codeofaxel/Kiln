@@ -1585,7 +1585,7 @@ class TestLicenseCommands:
         with patch("kiln.cli.main._license_manager_or_none", return_value=mgr):
             result = runner.invoke(cli, ["upgrade", "--key", "kiln_pro_abc123"])
         assert result.exit_code == 1
-        assert "SIGN_IN_INSTEAD" in result.output
+        assert "SIGN_IN_INSTEAD" not in result.output  # a code is for --json, never the person
         assert "License keys are retired" in result.output
         mgr.activate_license.assert_not_called()
 

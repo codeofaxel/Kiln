@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import sys
 from datetime import datetime
 from io import StringIO
 from typing import Any
@@ -121,6 +123,23 @@ def _render(renderable: Any) -> str:
 # Envelope
 # ---------------------------------------------------------------------------
 
+#: What a person reads when an error came with no sentence, only a code word.
+NO_SENTENCE = "Kiln couldn't finish that. Run the command again with --json for the details."
+
+# One word in snake or shouting case ("unauthorized", "NOT_FOUND") is a code,
+# not a sentence.
+_CODE_WORD = re.compile(r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*")
+
+
+def said_to_a_person(message: Any) -> str:
+    """*message* when it is a sentence; :data:`NO_SENTENCE` when it is empty
+    or a bare code word, which a person cannot act on."""
+    text = str(message or "").strip()
+    if not text or (_CODE_WORD.fullmatch(text) and (text.isupper() or "_" in text or text.islower())):
+        return NO_SENTENCE
+    return text
+
+
 
 def format_response(
     status: str,
@@ -139,15 +158,11 @@ def format_response(
         return json.dumps(envelope, indent=2, sort_keys=False)
 
     if status == "error" and error:
-        code = error.get("code", "UNKNOWN")
-        msg = error.get("message", "An unknown error occurred.")
+        # A person reads the sentence; the code is for --json and agents.
+        msg = said_to_a_person(error.get("message"))
         if RICH_AVAILABLE:
-            t = Text()
-            t.append("Error", style="bold red")
-            t.append(f" [{code}]: ", style="red")
-            t.append(msg)
-            return _render(Panel(t, title="Error", border_style="red"))
-        return f"Error [{code}]: {msg}"
+            return _render(Panel(Text(msg), title="Error", border_style="red"))
+        return f"Error: {msg}"
 
     if data:
         if RICH_AVAILABLE:
@@ -177,6 +192,13 @@ def format_error(
     in the command's "verify the material ID".
     """
     error: dict[str, Any] = {"code": code, "message": message}
+    try:
+        from kiln.failure_kind import named_code
+
+        # Built inside an except: the refusal names itself, not the door.
+        error["code"] = named_code(sys.exc_info()[1]) or code
+    except Exception:  # noqa: BLE001 -- an error message never fails to print
+        pass
     try:
         from kiln.printers.engagement import refusal_in_flight, refusal_words
 

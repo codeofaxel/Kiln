@@ -78,12 +78,21 @@ def is_resume_mode_3mf(file_name: str) -> bool:
 
 
 class PrinterError(Exception):
-    """Base exception for all printer-related errors; ``detail`` holds specifics for an agent, not a person."""
+    """Base exception for all printer-related errors.
 
-    def __init__(self, message: str, *, cause: Exception | None = None, detail: str = "") -> None:
+    The message is the sentence a person reads.  ``detail`` holds specifics
+    for an agent, not a person, and ``code`` names the refusal for an agent
+    or a script (:func:`kiln.failure_kind.named_code`); neither belongs in
+    the message.
+    """
+
+    def __init__(
+        self, message: str, *, cause: Exception | None = None, detail: str = "", code: str | None = None
+    ) -> None:
         super().__init__(message)
         self.cause = cause
         self.detail = detail
+        self.code = code
 
 
 class UnsupportedCommand(PrinterError):
@@ -1800,8 +1809,7 @@ class CameraStreamError(PrinterError):
     """A camera gave no picture: the reason in words for a person, the specifics in ``detail``."""
 
     def __init__(self, message: str, *, code: str, detail: str = "") -> None:
-        super().__init__(message, detail=detail)
-        self.code = code
+        super().__init__(message, detail=detail, code=code)
 
 
 NOT_A_PICTURE = "CAMERA_NOT_A_PICTURE"
@@ -1943,7 +1951,7 @@ class PrinterAdapter(ABC):
                     file_path = _preflight_upload_or_raise(self, file_path)
                 except _UnsafeUpload as exc:
                     from kiln.printers import PrinterError
-                    raise PrinterError(str(exc)) from None
+                    raise PrinterError(str(exc), code=exc.code) from None
                 if refusal := _incomplete_upload_reason(self, file_path):
                     from kiln.printers import PrinterError
                     raise PrinterError(refusal)
@@ -4645,7 +4653,11 @@ def _forget_resume_name(adapter: PrinterAdapter, file_path: Any) -> None:
 
 
 class _UnsafeUpload(Exception):
-    """Internal sentinel raised by the pre-upload safety check."""
+    """Internal sentinel raised by the pre-upload safety check: a sentence, and the refusal's ``code``."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def _incomplete_upload_reason(adapter: PrinterAdapter, file_path: str) -> str | None:
@@ -4713,11 +4725,8 @@ def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> str:
             if not result.get("ok", True):
                 code = result.get("error_code")
                 if code in ("OFF_BED_GEOMETRY", "EXCEEDS_BED", "NO_HOMING_SEQUENCE"):
-                    raise _UnsafeUpload(
-                        f"Upload refused ({code}): "
-                        f"{result.get('error_message', 'unsafe file')}. "
-                        f"This would have been the incident #0 class of crash."
-                    )
+                    said = str(result.get("error_message") or "this file is not safe to print").rstrip(". ")
+                    raise _UnsafeUpload(f"Upload refused: {said}.", code=code)
         from kiln.printers.print_file_scan import (
             REFUSAL_CODE,
             dialect_for,
@@ -4732,8 +4741,8 @@ def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> str:
         )
         if scan is not None and not scan.valid:
             raise _UnsafeUpload(
-                f"Upload refused ({REFUSAL_CODE}): "
-                + refusal_sentence(file_path, scan, verb="uploaded", printer_id=printer_id)
+                "Upload refused: " + refusal_sentence(file_path, scan, verb="uploaded", printer_id=printer_id),
+                code=REFUSAL_CODE,
             )
         return file_path
     except _UnsafeUpload:

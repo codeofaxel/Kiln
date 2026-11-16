@@ -206,7 +206,7 @@ def test_the_adapters_own_upload_door_refuses_a_hot_plate_for_every_backend(tmp_
     printer = _Printer()
     with pytest.raises(PrinterError) as refused:
         printer.upload_file(str(_plate(tmp_path, 330)))
-    assert f"Upload refused ({REFUSAL_CODE})" in str(refused.value)
+    assert str(refused.value).startswith("Upload refused: ") and refused.value.code == REFUSAL_CODE
     assert HOT_LINE in str(refused.value) and "was not uploaded" in str(refused.value)
     assert printer.uploads == []
     assert printer.upload_file(str(_plate(tmp_path, 220))).success is True
@@ -247,8 +247,9 @@ def test_the_real_bambu_adapter_refuses_a_hot_plate_at_both_of_its_doors(tmp_pat
     assert result.success is False and result.refused_before_send is True
     assert HOT_LINE in result.message
     assert _started(a1) is None
-    with pytest.raises(PrinterError, match="GCODE_BLOCKED"):
+    with pytest.raises(PrinterError, match="was not uploaded") as refused:
         a1.upload_file(str(hot))
+    assert refused.value.code == "GCODE_BLOCKED" and "GCODE_BLOCKED" not in str(refused.value)
     cool = _plate(tmp_path, 220)
     assert a1.start_print(cool.name, local_file_path=str(cool)).success is True
 
