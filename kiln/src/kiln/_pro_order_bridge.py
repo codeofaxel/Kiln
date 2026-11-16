@@ -347,14 +347,18 @@ def quote(
     business_tax_id: str = "",
     sent_file: str = "",
     as_sent: bool = False,
+    source_artifact_token: str = "",
 ) -> Answer:
     """A quote for one part, priced by the print service through Kiln's servers.
 
     The model goes up as a file from this computer: that file is what the
-    person previews and approves, so the order step can bind the two.  (The
-    hosted connector also quotes a make by its server-side artifact token;
-    no public door takes one, so this bridge does not either -- a path saved
-    beside a quote made from a token would not be the file that was quoted.)
+    person previews and approves, so the order step can bind the two.
+
+    *source_artifact_token* names a model that is still on Kiln's servers (a
+    repair made there, say): nothing is uploaded, the servers price that
+    model exactly as it is, and *file_path* is this computer's look at it
+    (:func:`kiln.served_makes.arrival_path`), which is what the person
+    previews and what the order binds to.
     A path that is not a file raises :class:`FileNotFoundError`; one that
     resolves (symlinks followed) to something other than a model file
     (:data:`QUOTE_FILE_SUFFIXES`) raises :class:`ValueError` before it is
@@ -379,6 +383,16 @@ def quote(
     }
     if as_sent:
         form["price_as_sent"] = "1"
+    token = str(source_artifact_token or "").strip()
+    if token:
+        form["source_artifact_token"] = token
+        form["price_as_sent"] = "1"
+        answer = _ask("POST", "/api/fulfillment/quote", data=form, timeout=_QUOTE_TIMEOUT_S)
+        if answer.ok:
+            remember_quote(answer.body, file_path=str(file_path or ""), material_id=material_id,
+                           quantity=int(quantity or 1), shipping_country=shipping_country, provider=provider,
+                           source_artifact_token=token)
+        return answer
     path = Path(str(file_path or "")).expanduser()
     if not path.is_file():
         raise FileNotFoundError(f"Model file not found: {path}")
@@ -514,6 +528,7 @@ _TOKEN_KEY = "quote_token"
 def remember_quote(
     body: dict[str, Any], *, file_path: str = "", material_id: str = "", quantity: int = 1,
     shipping_country: str = "", provider: str = DEFAULT_PROVIDER, sent_file: str = "",
+    source_artifact_token: str = "",
 ) -> None:
     """Keep the servers' quote token beside the quote, under the print
     service's quote id, in this computer's quote cache -- the record the
@@ -541,6 +556,7 @@ def remember_quote(
                 # Absolute: the reader compares absolute paths.
                 "file_path": os.path.abspath(file_path) if file_path else "",
                 "sent_file_path": os.path.abspath(sent_file) if sent_file else "",
+                "source_artifact_token": str(source_artifact_token or ""),
                 "shipping_country": shipping_country,
                 "shipping_options": list(quoted.get("shipping_options") or []),
                 "served": True,

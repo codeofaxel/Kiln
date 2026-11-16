@@ -479,6 +479,10 @@ _SRC = Path(__file__).resolve().parents[1] / "src" / "kiln"
 #: The print-service providers themselves: they price exactly what they are
 #: handed, which the door chose.
 _PROVIDERS = {("_pro_order_bridge.py", "get_quote")}
+#: Doors that price a model still on Kiln's servers, exactly as the person
+#: previews it: a repair made there already set how it stands, and turning a
+#: copy here would price a different file from the one shown.
+_PRICED_AS_PREPARED = {("fulfillment_tools.py", "_served_quote_of_token")}
 
 
 def _asks_for_a_price(call: ast.Call) -> bool:
@@ -521,7 +525,7 @@ def _unsettled_doors(root: Path) -> list[str]:
                 if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     chain.append(cur)
                 cur = parents.get(cur)
-            if not chain or (path.name, chain[0].name) in _PROVIDERS:
+            if not chain or (path.name, chain[0].name) in _PROVIDERS | _PRICED_AS_PREPARED:
                 continue
             if not any(_settles(fn) for fn in chain):
                 found.append(f"{path.relative_to(root)}::{chain[0].name}")

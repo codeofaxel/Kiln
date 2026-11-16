@@ -1015,3 +1015,65 @@ class TestTheOrderWaitsForThePersonsYes:
         lines = out.output.splitlines()
         assert any(line.endswith(APPROVE_AT) for line in lines), out.output
         assert QUESTION in lines and "order place" in out.output and "Failed to place order" not in out.output
+
+
+# ---------------------------------------------------------------------------
+# a model that is still on Kiln's servers (a repair made there) is quoted by
+# its token, and the order binds to this computer's look at it
+# ---------------------------------------------------------------------------
+
+REPAIR_TOKEN = "repaired0123456789abcdef"
+
+
+def _repair_on_kiln_servers(monkeypatch, tmp_path: Path) -> Path:
+    """A repair Kiln made on its servers: the token, and the look this
+    computer fetched so the stage can show it (``served_makes.arrive``)."""
+    from kiln import served_makes
+
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "kiln-home"))
+    look = tmp_path / "kiln-home" / "served" / "arrivals" / "repaired.stl"
+    look.parent.mkdir(parents=True)
+    look.write_bytes(TETRAHEDRON_STL)
+    served_makes._remember(REPAIR_TOKEN, tool="make_printable", kind="stl", arrival=str(look))
+    return look
+
+
+class TestARepairOnKilnsServersIsQuotedByItsToken:
+    def test_the_token_goes_up_and_no_file_does(self, plain_install, servers, tools, tmp_path, monkeypatch):
+        """Fails without the token path: the door treats the token as a
+        missing file and nothing reaches the servers."""
+        look = _repair_on_kiln_servers(monkeypatch, tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        reply = tools["fulfillment_quote"](file_path=REPAIR_TOKEN, material_id="pla-grey")
+        assert reply["success"] is True, reply
+        sent = servers.calls[-1]
+        assert sent.url.endswith("/api/fulfillment/quote")
+        assert sent.data["source_artifact_token"] == REPAIR_TOKEN
+        assert sent.data["price_as_sent"] == "1", "priced exactly as the person sees it"
+        assert not sent.files, "nothing is uploaded"
+        assert reply["preview_file_path"] == str(look)
+        assert bridge.quoted_file_for("cc-quote-1") == str(look)
+
+    def test_the_order_binds_to_the_look_the_person_previewed(self, plain_install, servers, tools, tmp_path, monkeypatch):
+        from kiln.plugins.fulfillment_tools import _served_order_checks
+
+        look = _repair_on_kiln_servers(monkeypatch, tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        tools["fulfillment_quote"](file_path=REPAIR_TOKEN, material_id="pla-grey")
+        token, refused = _served_order_checks(quote_id="cc-quote-1", quote_token="", preview_file_path=str(look))
+        assert refused is None and token == QUOTE_REPLY["quote_token"]
+        other = _model(tmp_path)
+        _token, refused = _served_order_checks(quote_id="cc-quote-1", quote_token="", preview_file_path=str(other))
+        assert refused is not None and refused["error"]["code"] == "PREVIEW_NOT_CONFIRMED"
+
+    def test_a_token_this_computer_never_saw_is_a_missing_file(self, plain_install, servers, tools):
+        reply = tools["fulfillment_quote"](file_path="neverseen0123456789abcd", material_id="pla-grey")
+        assert reply["success"] is False and reply["error"]["code"] == "FILE_NOT_FOUND"
+        assert not servers.calls
+
+    def test_a_real_file_always_wins_over_a_token_shaped_name(self, plain_install, servers, tools, tmp_path, monkeypatch):
+        _repair_on_kiln_servers(monkeypatch, tmp_path)
+        model = _model(tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        tools["fulfillment_quote"](file_path=str(model), material_id="pla-grey")
+        assert "source_artifact_token" not in servers.calls[-1].data

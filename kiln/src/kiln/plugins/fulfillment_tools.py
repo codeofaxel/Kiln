@@ -95,6 +95,47 @@ def _size_not_chosen(file_path: str) -> dict[str, Any] | None:
     return _srv._error_dict(refusal["message"], code=refusal["code"], extra=extra)
 
 
+def _model_on_kiln_servers(file_path: str) -> str:
+    """The ``artifact_token`` *file_path* names when it is a model still on
+    Kiln's servers (a served make's answer says to pass its token where a
+    tool takes a model's path), else ``""``.  A real file always wins."""
+    from kiln import served_makes
+
+    text = str(file_path or "").strip()
+    if not text or Path(text).expanduser().is_file():
+        return ""
+    return text if served_makes._TOKEN_SHAPE.match(text) and served_makes._known(text) else ""
+
+
+def _served_quote_of_token(
+    token: str, material_id: str, quantity: int, shipping_country: str,
+    jurisdiction: str = "", business_tax_id: str = "",
+) -> dict[str, Any]:
+    """A quote for a model that is on Kiln's servers, priced exactly as it
+    is.  The person previews this computer's look at it, and the order binds
+    to that look (``preview_file_path``)."""
+    from kiln import served_makes
+
+    look = served_makes.arrival_path(token) or ""
+    answer = _served.quote(
+        look, material_id, quantity, shipping_country,
+        jurisdiction=jurisdiction, business_tax_id=business_tax_id, source_artifact_token=token,
+    )
+    if not answer.ok:
+        return _served_miss("quote", answer)
+    reply: dict[str, Any] = {"success": True}
+    tell = answer.body.get("tell_the_person")
+    if isinstance(tell, list) and tell:
+        reply["tell_the_person"] = tell
+    reply["quote"] = _served.folded(answer.body, "quote")
+    reply["quote_token"] = str(answer.body.get("quote_token") or "")
+    if look:
+        # The file the person previews before the order, and the one the
+        # order's preview must name.
+        reply["preview_file_path"] = look
+    return reply
+
+
 def _said_about_the_model(reply: dict[str, Any], priced: PricedFile) -> dict[str, Any]:
     """Add to a successful quote *reply* what the person is told about the
     model that was priced: which way up it stands (``pose``, its line FIRST
@@ -589,7 +630,12 @@ class _FulfillmentToolsPlugin:
             """Get a manufacturing quote for a 3D model from Craftcloud.
 
             Args:
-                file_path: Absolute path to the model file (STL, 3MF, OBJ).
+                file_path: Absolute path to the model file (STL, 3MF, OBJ),
+                    or the ``artifact_token`` of a model still on Kiln's
+                    servers (a repair Kiln made, say).  A model on the
+                    servers is priced exactly as it is, nothing is uploaded,
+                    and the reply's ``preview_file_path`` is the look to show
+                    the person and to name in ``fulfillment_order``.
                 material_id: Material ID from ``fulfillment_materials``.
                 quantity: Number of copies to print (default 1).
                 shipping_country: ISO country code for shipping (default "US").
@@ -642,6 +688,17 @@ class _FulfillmentToolsPlugin:
             """
             import kiln.server as _srv
 
+            if token := _model_on_kiln_servers(file_path):
+                if order_service() is not None:
+                    return _srv._error_dict(
+                        "That model is on Kiln's servers; this install quotes files on this "
+                        "computer. Keep it first (keep_design), then quote the kept file.",
+                        code="MODEL_NOT_ON_THIS_COMPUTER",
+                    )
+                return _served_quote_of_token(
+                    token, material_id, quantity, shipping_country,
+                    jurisdiction=jurisdiction, business_tax_id=business_tax_id,
+                )
             if (refusal := _size_not_chosen(file_path)) is not None:
                 return refusal
             priced = file_to_price(file_path, keep_as_sent=keep_as_sent)
