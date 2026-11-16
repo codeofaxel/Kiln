@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-16T05:13:36.065355+00:00",
+  "generated": "2026-11-16T07:54:31.516083+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -10233,6 +10233,18 @@
             "title": "Body",
             "type": "string",
             "description": "Comment text.  Required for ``COMMENT``; optional for the verdicts."
+          },
+          "expected_head_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Head Version Id"
           }
         },
         "required": [
