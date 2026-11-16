@@ -758,6 +758,8 @@ def open_pending_outcome(
             material_type=material_type,
             identity=identity,
         )
+        if row_id is not None and identity and identity.get("lineage_id"):
+            get_db().set_outcome_part(job_id, identity.get("lineage_id"), identity.get("part_source"))
         return job_id if row_id is not None else None
     except Exception as exc:
         _logger.debug("open_pending_outcome failed (non-fatal): %s", exc)
@@ -780,10 +782,6 @@ def _identity_of_models(models: list[Any]) -> dict[str, Any]:
     try:
         import hashlib
 
-        from kiln.history_vault import HistoryVault, _kiln_home
-
-        if not (_kiln_home() / "history_vault.db").is_file():
-            return {}
         shas: list[str] = []
         for model in models:
             if isinstance(model, str) and os.path.isfile(model):
@@ -792,7 +790,19 @@ def _identity_of_models(models: list[Any]) -> dict[str, Any]:
                     for chunk in iter(lambda: fh.read(1 << 20), b""):
                         digest.update(chunk)
                 shas.append(digest.hexdigest())
-        if not shas:
+    except Exception:  # noqa: BLE001 -- identity never blocks a print
+        _logger.debug("version of the model not resolved", exc_info=True)
+        return {}
+    return _identity_of_mesh_shas(shas)
+
+
+def _identity_of_mesh_shas(shas: list[str]) -> dict[str, Any]:
+    """The kept version whose model's content hash is one of *shas*, by the
+    rule :func:`_identity_of_models` states."""
+    try:
+        from kiln.history_vault import HistoryVault, _kiln_home
+
+        if not shas or not (_kiln_home() / "history_vault.db").is_file():
             return {}
         vault = HistoryVault()
         try:
@@ -877,6 +887,25 @@ def print_identity_at_start(
     # kept version it is, exactly or not at all (_version_of_sliced_model).
     if "version_id" not in out and "design_id" not in out:
         out.update(_version_of_sliced_model(file_name))
+    # Which part this file is a print of, by the one resolver
+    # (kiln.print_lineage): the slice's record, a file with no model behind
+    # it, or nothing.  Pinned to this start, so the ending is answered by
+    # the same record.
+    try:
+        from kiln import print_lineage
+
+        part = print_lineage.resolve(file_name, local_paths=print_lineage.local_copies(file_name, kwargs))
+        if part.get("lineage_id"):
+            out["lineage_id"] = part["lineage_id"]
+            out["part_source"] = part["part"]
+            print_lineage.note_print_started(file_name, part["lineage_id"])
+            # The slice ledger keeps the last few slices; the slice's own
+            # record keeps the model's bytes by their hash, so an older
+            # slice still lands on the version it printed.
+            if "version_id" not in out and "design_id" not in out and part.get("model_sha256"):
+                out.update(_identity_of_mesh_shas([part["model_sha256"]]))
+    except Exception:  # noqa: BLE001 -- identity never blocks a print
+        _logger.debug("print lineage not resolved at start", exc_info=True)
     # The row's id on the person's account, when the door that started the
     # print already opened it there (the connector's print_design): the
     # account and this row then name the same print from the start.
