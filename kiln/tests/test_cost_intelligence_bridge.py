@@ -108,12 +108,30 @@ class TestTheServedRequest:
         for this request.  A file under the uncompressed bound whose gzip is
         over it is not uploaded, and the estimate says it is too large."""
         path = tmp_path / "plate.gcode"
-        path.write_bytes(base64.b64encode(os.urandom(9 * 1024 * 1024)))   # gzips to about 9 MB
+        # Random bytes do not shrink, so this gzips to just over the bound.
+        path.write_bytes(base64.b64encode(os.urandom(bridge.MAX_SENT_GZ_BYTES + 1024 * 1024)))
         assert path.stat().st_size < bridge.MAX_SENT_BYTES
         with patch("kiln.server._pro_api_call") as door:
             assert bridge.consult_print_cost(str(path), filaments=[], total_cost_usd=0.0, estimated_time_seconds=None) is None
         assert door.call_count == 0, "uploaded a file Kiln's servers refuse"   # not assert_not_called: it prints the upload
         assert "too large" in bridge.unanswered()["message"]
+
+    def test_a_large_plate_that_shrinks_little_is_sent(self, tmp_path):
+        """A real plate's G-code shrinks 3 to 14 times; one of random moves
+        shrinks least, about 2.6 times.  A 24 MB plate of them is sent."""
+        import random
+
+        rng = random.Random(7)
+        path = tmp_path / "plate.gcode"
+        with path.open("w") as out:
+            out.write("G28\nG90\nM83\n")
+            while out.tell() < 24 * 1024 * 1024:
+                out.write(f"G1 X{rng.uniform(0, 256):.3f} Y{rng.uniform(0, 256):.3f} E{rng.uniform(0.01, 0.9):.5f}\n")
+        packed = len(gzip.compress(path.read_bytes(), compresslevel=6))
+        assert packed > 8 * 1024 * 1024   # over what Kiln's servers once took
+        with patch("kiln.server._pro_api_call", return_value={"success": True}) as door:
+            assert bridge.consult_print_cost(str(path), filaments=[], total_cost_usd=0.0, estimated_time_seconds=None)
+        door.assert_called_once()
 
     def test_a_file_at_the_compressed_bound_is_sent(self, tmp_path, monkeypatch):
         path = _plate(tmp_path)

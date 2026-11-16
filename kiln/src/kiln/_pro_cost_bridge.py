@@ -70,8 +70,10 @@ _CONSULT_TIMEOUT_S: float = 30.0
 MAX_SENT_BYTES: int = 64 * 1024 * 1024
 #: The most the compressed G-code may weigh when sent.  Kiln's servers take
 #: their limit for this request from this number, so a file under it is one
-#: they read, and a file over it is said here, without uploading it.
-MAX_SENT_GZ_BYTES: int = 8 * 1024 * 1024
+#: they read, and a file over it is said here, without uploading it.  Sized
+#: so that any G-code under :data:`MAX_SENT_BYTES` fits: G-code shrinks at
+#: least 2.5 times under gzip.
+MAX_SENT_GZ_BYTES: int = MAX_SENT_BYTES * 2 // 5
 #: After the service fails to answer, how long it is left alone.  Same
 #: backoff the nozzle and cutter bridges use.
 SERVICE_BACKOFF_S: float = 300.0
