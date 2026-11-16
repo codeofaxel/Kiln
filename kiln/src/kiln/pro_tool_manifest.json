@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-16T21:17:11.223580+00:00",
+  "generated": "2026-11-16T22:09:07.883893+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -20095,9 +20095,9 @@
             "type": "boolean",
             "description": "The person agreed that the layers the print still had will not be printed.  Left False, a print with layers left is refused with what would be lost."
           },
-          "print_model": {
+          "print_model_path": {
             "default": "",
-            "title": "Print Model",
+            "title": "Print Model Path",
             "type": "string",
             "description": "Path to the model this print was sliced from.  Given, the rest of the print is kept and ``feature`` is read in this model's coordinates."
           }
@@ -20124,7 +20124,8 @@
         "files": {
           "feature": "inline",
           "gcode_path": "one",
-          "source_3mf_path": "one"
+          "source_3mf_path": "one",
+          "print_model_path": "one"
         },
         "outputs": {
           "output_dir": "folder"
