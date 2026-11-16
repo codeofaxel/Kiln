@@ -21,6 +21,7 @@ from kiln.load_bearing_detector import (
     detect_load_bearing,
     extract_load_in_newtons,
 )
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 
 class TestExtractLoadInNewtons:
@@ -147,6 +148,7 @@ class TestDetectLoadBearingDoesNotTrip:
 class TestUpgradeRecommendation:
     """The Kiln Pro upgrade-nudge attached when the detector trips."""
 
+    @pytest.mark.usefixtures("free_caller")
     def test_trip_includes_upgrade_recommendation(self):
         v = detect_load_bearing("wall mount that holds 8 pounds")
         assert v.is_load_bearing is True

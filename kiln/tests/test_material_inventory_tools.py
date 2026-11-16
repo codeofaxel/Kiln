@@ -99,6 +99,8 @@ class TestMaterialInventoryPluginMeta:
 
     def test_registers_all_tools(self, registered_tools) -> None:
         expected = {
+            "material_on_hand",
+            "assign_jobs",
             "get_fleet_material_summary",
             "get_material_consumption_history",
             "forecast_material_consumption",
@@ -346,6 +348,14 @@ class TestFleetScopeGate:
         one a reviewer happened to look at."""
         fleet_of(machines=4, cap=1)
         result = registered_tools[tool_name](**kwargs)
+        if tool_name in ("get_fleet_material_summary", "optimize_fleet_assignment"):
+            # These two can answer for one named printer, so they ask which
+            # one; the answer for every printer at once is still withheld.
+            assert result["success"] is True and result["ask"] == "Which printer?"
+            assert result["count"] == 4 and "Kiln Business" in result["note"]
+            assert "summary" not in result and "assignments" not in result
+            assert "pricing" in result["upgrade_url"]
+            return
         assert result["success"] is False
         assert result["code"] == "TIER_FLEET_SCOPE"
         assert result["machines"] == 4

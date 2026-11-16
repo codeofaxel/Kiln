@@ -51,6 +51,7 @@ from kiln.printers.bambu import (
     read_bambu_fault,
 )
 from kiln.printers.base import PrinterStatus, describe_screen_faults
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 #: The two codes, as the wire carries them and as the screen spells them.
 HOMING_DECIMAL = 50348032  # 0x03004000
@@ -433,6 +434,7 @@ class TestTheSymptomDoorHearsEveryCode:
         assert "codes_without_a_playbook" not in out
         assert out["fault_readings"][0]["code"] == HOMING_SCREEN
 
+    @pytest.mark.usefixtures("free_caller")
     def test_the_nudge_does_not_deny_a_reading_it_just_attached(
         self, no_playbook: None, bridge_answers: list[tuple[str, str]]
     ) -> None:
@@ -455,6 +457,7 @@ class TestTheSymptomDoorHearsEveryCode:
         assert "can't read a fault code" not in hint
         assert "kiln3d.com" in hint
 
+    @pytest.mark.usefixtures("free_caller")
     def test_the_nudge_still_names_the_gap_when_nothing_was_read(
         self, no_playbook: None
     ) -> None:

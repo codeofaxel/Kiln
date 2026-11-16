@@ -141,6 +141,15 @@ def on_pro(signed_in, tmp_path):
     return signed_in
 
 
+@pytest.fixture
+def plan_check_reads_the_account(monkeypatch):
+    """The plan check a pitch asks reads the account signed in here, as the
+    plan every gate reads does in these tests."""
+    from kiln import account_plan, licensing
+
+    monkeypatch.setattr(licensing, "check_tier", account_plan.check_tier)
+
+
 @pytest.fixture(autouse=True)
 def _no_host_on_record():
     from kiln import agent_host
@@ -528,7 +537,7 @@ class TestTheRefusal:
         assert "an alert went" in first.text and "an alert went" in again.text
 
     @responses.activate
-    def test_the_phone_is_never_promised_from_anywhere(self, signed_in, model):
+    def test_the_phone_is_never_promised_from_anywhere(self, signed_in, model, plan_check_reads_the_account):
         """Said beside the phone, and only there: it works on the printer's
         own network on every plan, and from elsewhere on one plan."""
         _may_i()
@@ -552,7 +561,7 @@ class TestTheRefusal:
         assert "You cannot turn it on" in r.text and "ask me first" in r.text
 
     @responses.activate
-    def test_below_pro_the_way_open_to_them_is_named_and_no_plan(self, signed_in, model):
+    def test_below_pro_the_way_open_to_them_is_named_and_no_plan(self, signed_in, model, plan_check_reads_the_account):
         """Always allow is Kiln Pro's; below it the person is told what they
         can do -- allow prints for a while -- and the plan is not named on
         this text (it is said beside the phone, and at always allow's own

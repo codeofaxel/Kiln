@@ -415,8 +415,20 @@ def _build_upgrade_recommendation(trip_reasons: list[str]) -> dict[str, Any]:
 
     Wording is factual and specific: names what the heuristic does
     NOT account for so the user can judge if it matters for their
-    case.  Not fear-mongering, not vague.
+    case.  Not fear-mongering, not vague.  The caution is said to every
+    caller; the plan line only to one who would buy the plan, and the plan
+    check's own words to one who pays for it already.
     """
+    from kiln.tiers_and_terms import plan_offer
+
+    offer = plan_offer("pro", "The full load check for this part")
+    plan = offer.nudge(
+        "Kiln Pro shows the real safety factor, fatigue + creep checks, and your "
+        "printer's calibrated tolerances → https://kiln3d.com/pricing"
+    )
+    pro_upgrade: dict[str, Any] = {"available": True, "tool": "design_for_load"}
+    if offer.buying:
+        pro_upgrade["upgrade_url"] = _PRO_UPGRADE_URL
     return {
         "code": "LOAD_BEARING_DETECTED",
         "tier": "free",
@@ -426,15 +438,12 @@ def _build_upgrade_recommendation(trip_reasons: list[str]) -> dict[str, Any]:
             "test of your actual printed part — and not enough for anything "
             "that could hurt someone if it fails (overhead or climbing loads, "
             "child or vehicle parts).  Print it, load-test it, and for "
-            "high-stakes parts get an engineer's sign-off.  Kiln Pro shows the "
-            "real safety factor, fatigue + creep checks, and your printer's "
-            "calibrated tolerances → https://kiln3d.com/pricing"
+            "high-stakes parts get an engineer's sign-off."
+            + (f"  {plan}" if plan else "")
         ),
         "trip_reasons": trip_reasons,
         "pro_upgrade": {
-            "available": True,
-            "tool": "design_for_load",
-            "upgrade_url": _PRO_UPGRADE_URL,
+            **pro_upgrade,
             "what_youd_get": [
                 "Real beam mechanics (sigma = Mc/I) with cross-section shape awareness",
                 "Application-class factor of safety (1.5 prototype to 4-10 life-safety)",

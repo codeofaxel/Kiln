@@ -159,24 +159,32 @@ def submit_job(
         if pending >= free_tier_max_queued_jobs:
             from kiln.tiers_and_terms import (
                 ALREADY_SUBSCRIBED_LINE,
+                plan_offer,
                 signin_hint_fields,
             )
 
-            return {
+            held = (
+                f"Job queue is limited to {free_tier_max_queued_jobs} pending jobs on the Free tier "
+                f"(you have {pending}). Wait for jobs to complete"
+            )
+            offer = plan_offer("pro", "A deeper job queue")
+            refusal = {
                 "success": False,
-                "error": (
-                    f"Job queue is limited to {free_tier_max_queued_jobs} pending jobs on the Free tier "
-                    f"(you have {pending}). Wait for jobs to complete, "
-                    "or upgrade to Kiln Pro for unlimited queue depth with multi-printer scheduling. "
-                    f"{ALREADY_SUBSCRIBED_LINE} "
-                    "Otherwise, see what Pro includes at kiln3d.com/pricing"
-                ),
+                "error": f"{held}. {offer.words}",
                 "code": "FREE_TIER_LIMIT",
                 "pending_count": pending,
                 "max_allowed": free_tier_max_queued_jobs,
-                "upgrade_url": "https://kiln3d.com/pricing",
                 **signin_hint_fields(),
             }
+            if offer.sells:
+                refusal["error"] = (
+                    f"{held}, "
+                    "or upgrade to Kiln Pro for unlimited queue depth. "
+                    f"{ALREADY_SUBSCRIBED_LINE} "
+                    "Otherwise, see what Pro includes at kiln3d.com/pricing"
+                )
+                refusal["upgrade_url"] = "https://kiln3d.com/pricing"
+            return refusal
     try:
         outcome = _srv._get_queue().submit_result(
             file_name=file_name,

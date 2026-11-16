@@ -23,6 +23,7 @@ import pytest
 trimesh = pytest.importorskip("trimesh")
 
 from tests import _real_exports as rx  # noqa: E402
+from tests._plan_callers import free_caller  # noqa: E402, F401 -- a fixture
 from tests.test_edge_finish import _box, _cut, _cyl, _fuse, _write_step, needs_cad_kernel  # noqa: E402
 
 pytestmark = needs_cad_kernel
@@ -108,6 +109,7 @@ def test_a_rim_the_chooser_leaves_alone_is_listed_with_its_reason(tmp_path, monk
     assert len(said) == 2 and all(s["corner"] == "outside" for s in said)
 
 
+@pytest.mark.usefixtures("free_caller")
 def test_a_free_caller_who_named_a_fastener_is_told_the_holes_were_left_as_drawn(tmp_path, monkeypatch):
     """Through the tool a person calls, as a plain install answers it: the
     holes are left as drawn, and the tier that prepares them is named once."""

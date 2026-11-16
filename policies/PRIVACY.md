@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-11-15 · Version 2.47*
+*Last updated: 2026-11-15 · Version 2.48*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -255,7 +255,10 @@ tag on the link you followed. If you land on kiln3d.com first and sign
 in from there, the site works the word out on the first page you open.
 It keeps the word in your browser for that tab only, so it's gone when
 you close the tab, and it isn't a cookie. It also adds the word to the
-site's links into the Kiln app. We keep only the word, on your account's
+site's links into the Kiln app. Beside the word, the site notes which
+kiln3d.com page you opened first (for example, /printers). That page name
+is shown once to Kiln's founder in the alert about a new account. It isn't
+saved on your account or in Kiln's database. We keep only the word, on your account's
 sign-up record. It isn't sent to Google, Meta or anyone else, and it's
 deleted with your account. Accounts created before version 2.12 of this
 policy carry no such word.

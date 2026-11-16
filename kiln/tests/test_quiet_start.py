@@ -950,7 +950,7 @@ class TestWhereItFitsIsThePaidHalf:
 
         stands = {"record": {"printer_id": "bambu_a1", "quiet_start": True}}
         assert _spots_clause({"spots": [], "spots_found": 3, **stands}) == (
-            " 3 spots beside it would fit; printing around what is on the plate is a kiln-pro feature "
+            " 3 spots beside it would fit; printing around what is on the plate is part of Kiln Pro "
             "(https://kiln3d.com/pricing)."
         )
         assert " 1 spot beside it would fit;" in _spots_clause({"spots": [], "spots_found": 1, **stands}), "singular reads right"

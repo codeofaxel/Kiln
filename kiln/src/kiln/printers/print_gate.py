@@ -10,7 +10,7 @@ from typing import Any
 
 from kiln.nozzle_size_check import MISMATCH_CODE as NOZZLE_SIZE_MISMATCH
 from kiln.printer_model_check import MISMATCH_CODE as PRINTER_MODEL_MISMATCH
-from kiln.tiers_and_terms import upgrade_nudge_block
+from kiln.tiers_and_terms import plan_offer, upgrade_nudge_block
 from kiln.untrusted_zip import UntrustedZipFile
 
 _logger = logging.getLogger(__name__)
@@ -582,19 +582,20 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
             free_path = way_on
             headline = "Coordinate this job with the printer that is waiting for you."
             free_included = f"The job has not started. {waiting_line} {way_on}"
+        # The plan that runs printers side by side, in the plan check's words
+        # for this caller: someone who pays for it is never sold it.
+        offer = plan_offer("business", "Running printers side by side")
         verdict = {
             "blocked": True,
             "reason": reason,
             "override_hint": (
-                f"{free_path} "
-                "Kiln Business runs your printers in parallel — "
-                "https://kiln3d.com/pricing"
+                f"{free_path} Kiln Business runs your printers in parallel — https://kiln3d.com/pricing"
+                if offer.sells else " ".join(part for part in (free_path, offer.words) if part)
             ),
             "code": "TIER_CONCURRENT_PRINT_LIMIT",
         }
-        verdict.setdefault(
-            "upgrade_nudge",
-            upgrade_nudge_block(
+        if offer.sells:
+            verdict["upgrade_nudge"] = upgrade_nudge_block(
                 variant="concurrent_queue",
                 tier="business",
                 feature="Coordinated multi-printer queue",
@@ -605,8 +606,7 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
                 ),
                 free_included=free_included,
                 moment="resource_threshold",
-            ),
-        )
+            )
         return verdict
     except Exception:  # noqa: BLE001 — a licensing check never breaks a print
         _logger.debug("concurrent-fleet gate soft-passed", exc_info=True)

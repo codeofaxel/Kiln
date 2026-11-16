@@ -276,6 +276,15 @@ TURN_UPGRADE = "Kiln Business runs your printers side by side: https://kiln3d.co
 QUEUE_ON_ONE_PRINTER_CODE = "QUEUE_ON_ONE_PRINTER"
 
 
+def turn_plan_line() -> str:
+    """What a queue held to one printer says about the plan that runs them
+    side by side: :data:`TURN_UPGRADE` to someone who would buy it, the plan
+    check's own words to someone who pays for it already."""
+    from kiln.tiers_and_terms import plan_offer
+
+    return plan_offer("business", "Running your printers side by side").tail(TURN_UPGRADE)
+
+
 def switch_wait_sentence(file_name: str, printer_name: str, on: str, *, label: str | None = None) -> str:
     """What a job for another printer says while the queue stays on *on*."""
     name = label or _file_label(file_name)
@@ -1305,9 +1314,10 @@ class JobScheduler:
             running = set(self._active_jobs.values())
         busy = frozenset(n for n in registered if n not in idle and n != printer_name) | (running - {printer_name})
         sentence = turn_wait_sentence(job.file_name, printer_name, sorted(busy), label=_job_label(job))
+        plan = turn_plan_line()
         note = {
             "kind": WAIT_TURN, "code": code, "printers": [printer_name], "waiting_for": sorted(busy),
-            "sentence": sentence, "upgrade": TURN_UPGRADE,
+            "sentence": sentence, "upgrade": plan,
         }
         announce = self._turn_wait is None
         self._turn_wait = TurnWait(busy=busy, started=self._clock(), note=note)
@@ -1317,7 +1327,7 @@ class JobScheduler:
                 EventType.JOB_WAITING,
                 {
                     "job_id": job.id, "file_name": job.file_name, "printer_name": printer_name,
-                    "kind": WAIT_TURN, "waiting_for": sorted(busy), "message": f"{sentence} {TURN_UPGRADE}",
+                    "kind": WAIT_TURN, "waiting_for": sorted(busy), "message": f"{sentence} {plan}",
                 },
                 source="scheduler",
             )
@@ -1368,12 +1378,14 @@ class JobScheduler:
             )
         turn = self._turn_wait
         switching: list[Any] = []
+        plan = ""  # asked once, and only when a job waits for another printer
         for job in queued:
             wait = waits.get(job.id)
             if wait is None and queue_on is not None and job.printer_name and job.printer_name not in queue_on.names:
+                plan = plan or turn_plan_line()
                 wait = {
                     "kind": WAIT_SWITCH, "code": QUEUE_ON_ONE_PRINTER_CODE, "printers": [job.printer_name],
-                    "on": queue_on.label, "upgrade": TURN_UPGRADE,
+                    "on": queue_on.label, "upgrade": plan,
                     "sentence": switch_wait_sentence(
                         job.file_name, job.printer_name, queue_on.label, label=_job_label(job),
                     ),
@@ -1400,7 +1412,7 @@ class JobScheduler:
                 {
                     "job_id": first.id, "file_name": first.file_name, "printer_name": first.printer_name,
                     "kind": WAIT_SWITCH, "waiting_jobs": [job.id for job in fresh],
-                    "message": f"{sentence} {TURN_UPGRADE}",
+                    "message": f"{sentence} {plan or turn_plan_line()}",
                 },
                 source="scheduler",
             )

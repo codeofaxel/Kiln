@@ -27,6 +27,7 @@ from typing import Any
 
 from kiln import _vec
 from kiln.openscad_runner import crashed_on_startup, run_openscad
+from kiln.quoted_text import fence
 
 _logger = logging.getLogger(__name__)
 
@@ -696,6 +697,160 @@ def material_under_footprint(
         if stretches:
             columns.append((round(sx, 3), round(sy, 3), stretches))
     return {"checked": True, "columns": columns}
+
+
+#: Finest grid :func:`fit_box_clear_of_openings` reads a face on, and the
+#: most samples it takes along either axis (a big face gets a coarser grid
+#: rather than an unbounded one).
+_CLEAR_FIT_PITCH_MM = 0.25
+_CLEAR_FIT_MAX_SAMPLES_PER_AXIS = 241
+
+#: Height above the face plane a point's material is read from: the same
+#: lift :func:`footprint_material_coverage` casts its rays from, so the two
+#: agree about what counts as part under the face.
+_CLEAR_FIT_LIFT_MM = 0.5
+
+
+def _face_material_grid(
+    model_path: str,
+    face: dict[str, Any],
+    anchor: tuple[float, float, float],
+    face_w: float,
+    face_h: float,
+) -> tuple[Any, Any, Any] | None:
+    """Where the part lies under the face's outline, on a regular grid.
+
+    The grid spans the outline (``±face_w/2`` by ``±face_h/2`` about
+    *anchor*) in the content's own frame, the frame offsets are measured
+    in.  A sample is material when the part reaches up to the face there,
+    which is what :func:`footprint_material_coverage` asks of one point,
+    answered for the whole outline at once by laying every triangle flat
+    in that frame.
+
+    :returns: ``(xs, ys, material)``, with ``material[j, i]`` for the
+        sample at ``(xs[i], ys[j])``; ``None`` when the mesh cannot be read.
+    """
+    if face_w <= 0 or face_h <= 0:
+        return None
+    from kiln.surface_intelligence import _parse_mesh
+
+    try:
+        import numpy as np
+
+        parsed = _parse_mesh(str(model_path))
+    except Exception as exc:  # noqa: BLE001 — logged, deliberately non-fatal
+        _logger.warning("clear-fit skipped — could not read %s: %s", model_path, exc)
+        return None
+    if not parsed:
+        return None
+
+    pitch = max(_CLEAR_FIT_PITCH_MM, max(face_w, face_h) / (_CLEAR_FIT_MAX_SAMPLES_PER_AXIS - 1))
+    nx = max(2, int(math.ceil(face_w / pitch)) + 1)
+    ny = max(2, int(math.ceil(face_h / pitch)) + 1)
+    xs = np.linspace(-face_w / 2.0, face_w / 2.0, nx)
+    ys = np.linspace(-face_h / 2.0, face_h / 2.0, ny)
+    material = np.zeros((ny, nx), dtype=bool)
+
+    rot = np.array(_rotation_matrix_for_normal(list(_vec.normalize(face["normal"]))), dtype=float)
+    tris = np.array([tri["vertices"] for tri in parsed], dtype=float)
+    # world = anchor + R @ local, so local = (world - anchor) @ R.
+    local = (tris - np.array(anchor, dtype=float)) @ rot
+    px, py, pz = local[:, :, 0], local[:, :, 1], local[:, :, 2]
+    det = (py[:, 1] - py[:, 2]) * (px[:, 0] - px[:, 2]) + (px[:, 2] - px[:, 1]) * (py[:, 0] - py[:, 2])
+    keep = (
+        (np.abs(det) > 1e-12)  # edge-on triangles cover no area
+        & (pz.min(axis=1) <= _CLEAR_FIT_LIFT_MM)
+        & (px.max(axis=1) >= xs[0]) & (px.min(axis=1) <= xs[-1])
+        & (py.max(axis=1) >= ys[0]) & (py.min(axis=1) <= ys[-1])
+    )
+    tol = -1e-9
+    for k in np.nonzero(keep)[0]:
+        i0, i1 = np.searchsorted(xs, [px[k].min() - 1e-9, px[k].max() + 1e-9])
+        j0, j1 = np.searchsorted(ys, [py[k].min() - 1e-9, py[k].max() + 1e-9])
+        if i0 >= i1 or j0 >= j1:
+            continue
+        gx, gy = np.meshgrid(xs[i0:i1], ys[j0:j1])
+        dx, dy = gx - px[k, 2], gy - py[k, 2]
+        l1 = ((py[k, 1] - py[k, 2]) * dx + (px[k, 2] - px[k, 1]) * dy) / det[k]
+        l2 = ((py[k, 2] - py[k, 0]) * dx + (px[k, 0] - px[k, 2]) * dy) / det[k]
+        l3 = 1.0 - l1 - l2
+        z = l1 * pz[k, 0] + l2 * pz[k, 1] + l3 * pz[k, 2]
+        hit = (l1 >= tol) & (l2 >= tol) & (l3 >= tol) & (z <= _CLEAR_FIT_LIFT_MM + 1e-6)
+        material[j0:j1, i0:i1] |= hit
+    return xs, ys, material
+
+
+def fit_box_clear_of_openings(
+    model_path: str,
+    face: dict[str, Any],
+    anchor: tuple[float, float, float],
+    face_w: float,
+    face_h: float,
+    *,
+    aspect: float,
+    max_h: float,
+    margin_mm: float,
+    prefer: tuple[float, float] = (0.0, 0.0),
+) -> tuple[float, float, float] | None:
+    """The largest box of one shape that lies on the part, clear of openings.
+
+    The box is *aspect* times as wide as it is tall and no taller than
+    *max_h*.  It keeps *margin_mm* from the face's outline and from the
+    edge of every opening inside it (a lanyard hole, a window, a slot):
+    the box grown by the margin on every side lies wholly on material.
+    Of the places the largest such box fits, the one nearest *prefer*
+    (an offset in the content's frame) is taken.
+
+    :returns: ``(height, offset_x, offset_y)`` for the box, or ``None``
+        when the face cannot be read or no box of any size fits.
+    """
+    if aspect <= 0 or max_h <= 0:
+        return None
+    grid = _face_material_grid(model_path, face, anchor, face_w, face_h)
+    if grid is None:
+        return None
+    import numpy as np
+
+    xs, ys, material = grid
+    ny, nx = material.shape
+    step_x = float(xs[1] - xs[0])
+    step_y = float(ys[1] - ys[0])
+    # Summed-area table of the samples that are NOT material: a window of
+    # samples is clear when its sum is zero.
+    blocked = np.zeros((ny + 1, nx + 1), dtype=np.int64)
+    blocked[1:, 1:] = (~material).astype(np.int64).cumsum(axis=0).cumsum(axis=1)
+
+    def _clear_windows(h: float) -> tuple[int, int, Any] | None:
+        # Samples a window must span so the box plus its margin lies
+        # between its outermost samples.
+        kx = int(math.ceil((aspect * h + 2.0 * margin_mm) / step_x - 1e-9)) + 1
+        ky = int(math.ceil((h + 2.0 * margin_mm) / step_y - 1e-9)) + 1
+        if kx > nx or ky > ny:
+            return None
+        sums = blocked[ky:, kx:] - blocked[:-ky, kx:] - blocked[ky:, :-kx] + blocked[:-ky, :-kx]
+        clear = sums == 0
+        return (kx, ky, clear) if clear.any() else None
+
+    best = _clear_windows(max_h)
+    height = max_h
+    if best is None:
+        lo, hi = 0.0, max_h
+        for _ in range(30):
+            mid = (lo + hi) / 2.0
+            found = _clear_windows(mid)
+            if found is None:
+                hi = mid
+            else:
+                lo, best = mid, found
+        height = lo
+    if best is None or height <= 0:
+        return None
+    kx, ky, clear = best
+    jj, ii = np.nonzero(clear)
+    cx = (xs[ii] + xs[ii + kx - 1]) / 2.0
+    cy = (ys[jj] + ys[jj + ky - 1]) / 2.0
+    pick = int(np.argmin((cx - prefer[0]) ** 2 + (cy - prefer[1]) ** 2))
+    return float(height), float(cx[pick]), float(cy[pick])
 
 
 class _FlatTriangle:
@@ -1579,12 +1734,18 @@ def generate_emboss_scad(
     # only the rows that carve (set in the heightmap branch below).
     carve_footprint: Callable[[float, float], bool] | None = None
 
-    def _check_content_on_material(content_w: float, content_h: float) -> None:
-        cov = footprint_material_coverage(
+    def _material_coverage(content_w: float, content_h: float) -> dict[str, Any]:
+        return footprint_material_coverage(
             model_path, face, (cx, cy, cz),
             content_w, content_h, final_offset_x, final_offset_y,
             carves=carve_footprint,
         )
+
+    def _check_content_on_material(
+        content_w: float, content_h: float, cov: dict[str, Any] | None = None,
+    ) -> None:
+        if cov is None:
+            cov = _material_coverage(content_w, content_h)
         if not cov["checked"] or not cov["missed"]:
             return
         where = cov["worst"]
@@ -1898,8 +2059,55 @@ def generate_emboss_scad(
                 text_w_mm *= rim_k
                 text_h_mm *= rim_k
 
-        # After the rim guard, so it judges the run that will be cut.
-        _check_content_on_material(text_w_mm, text_h_mm)
+        # Openings: the fit above reads the face's OUTLINE, which cannot
+        # see a hole inside it (a tag's lanyard hole, a keychain's ring).
+        # When an auto-sized run at the face's centre lands over one, it
+        # is re-fitted into the largest part of the face clear of every
+        # opening, keeping the same margin from an opening's edge as from
+        # the outer edge.  It only moves and shrinks: never larger than
+        # the fit above.  A size or position the caller named is kept,
+        # and so is the fitted run when no clear part holds text at the
+        # legibility floor; the material check below then says it crosses.
+        text_cov = _material_coverage(text_w_mm, text_h_mm)
+        if (
+            text_cov["checked"]
+            and text_cov["missed"]
+            and not explicit_font_size
+            and placement == "center"
+            and not offset_x_mm
+            and not offset_y_mm
+            and text_w_mm > 0
+            and text_h_mm > 0
+        ):
+            from kiln.decoration_helpers import _FDM_TEXT_LEGIBILITY_FLOOR_MM
+
+            clear = fit_box_clear_of_openings(
+                model_path, face, (cx, cy, cz), face_w, face_h,
+                aspect=text_w_mm / text_h_mm,
+                max_h=text_h_mm,
+                margin_mm=min_edge_margin_mm,
+                prefer=(final_offset_x, final_offset_y),
+            )
+            if clear is not None:
+                fit_h, fit_x, fit_y = clear
+                k = fit_h / text_h_mm
+                if chosen * k >= _FDM_TEXT_LEGIBILITY_FLOOR_MM:
+                    chosen *= k
+                    text_w_mm *= k
+                    text_h_mm *= k
+                    final_offset_x, final_offset_y = fit_x, fit_y
+                    text_cov = _material_coverage(text_w_mm, text_h_mm)
+                    warnings.append(
+                        f"the text was placed clear of an opening in the "
+                        f"{fence(face.get('face_name', 'target'))} face: "
+                        f"{text_w_mm:.1f}x{text_h_mm:.1f}mm at offset "
+                        f"({final_offset_x:.1f}, {final_offset_y:.1f})mm, "
+                        f"{min_edge_margin_mm:.1f}mm from the opening's edge"
+                    )
+
+        # After the rim guard and the opening fit, so it judges the run
+        # that will be cut.
+        _check_content_on_material(text_w_mm, text_h_mm, text_cov)
         _meet_the_surface(text_w_mm, text_h_mm)
         _check_floor_under_cut(text_w_mm, text_h_mm)
 
@@ -2791,15 +2999,12 @@ def generate_qr_openscad_module(
 
 def _qr_unavailable_message() -> str:
     """Why no QR code was drawn here, worded for the caller's plan."""
-    from kiln.licensing import LicenseTier, check_tier
+    from kiln.tiers_and_terms import plan_offer
 
-    try:
-        on_plan, refusal = check_tier(LicenseTier.PRO)
-    except Exception:  # noqa: BLE001 -- an unreadable plan is Free
-        on_plan, refusal = False, None
-    if on_plan:
+    offer = plan_offer("pro", "A QR code on a part")
+    if offer.covered:
         return (
             "QR codes are made on Kiln's servers, not in this install. Your plan "
             "includes them: use decorate_surface with content='qr:https://...'."
         )
-    return refusal or "A QR code on a part is part of Kiln Pro: https://kiln3d.com/pricing"
+    return offer.words or "A QR code on a part is part of Kiln Pro: https://kiln3d.com/pricing"

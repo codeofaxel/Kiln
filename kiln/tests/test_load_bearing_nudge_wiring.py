@@ -26,6 +26,7 @@ from kiln.load_bearing_detector import (
     is_engineering_material,
     load_bearing_signal,
 )
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 # ---------------------------------------------------------------------------
 # Helpers — capture the registered tool functions off a fake MCP
@@ -115,6 +116,7 @@ class TestLoadBearingSignal:
 
 
 class TestAttachLoadBearingNudge:
+    @pytest.mark.usefixtures("free_caller")
     def test_force_attaches_structured_and_string(self):
         out = attach_load_bearing_nudge({"success": True}, force=True)
         assert out["upgrade_recommendation"]["engineering_grade"] == "heuristic"

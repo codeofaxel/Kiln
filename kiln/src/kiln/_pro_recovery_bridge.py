@@ -105,9 +105,17 @@ def floor_note(asked: Asked, pro_adds: str) -> dict[str, Any]:
         note["sign_in_again"] = lapsed
         return note
     if pro_adds:
+        from kiln.tiers_and_terms import plan_offer, upgrade_link
+
         note["pro_adds"] = pro_adds
-        note["required_tier"] = "pro"
-        note["upgrade_url"] = _upgrade_url()
+        offer = plan_offer("pro", "A recovery plan for this failure")
+        if offer.sells:
+            note["required_tier"] = "pro"
+            note["upgrade_url"] = upgrade_link(_PRICING_TOOL)
+        else:
+            # A paid plan this machine has not been able to confirm: get
+            # online, never "upgrade".
+            note["plan_note"] = offer.words
     return note
 
 
@@ -189,15 +197,6 @@ def _lapsed_signin() -> str:
         return lapsed_signin_message()
     except Exception:  # noqa: BLE001
         return ""
-
-
-def _upgrade_url() -> str:
-    try:
-        from kiln.tiers_and_terms import upgrade_link
-
-        return upgrade_link(_PRICING_TOOL)
-    except Exception:  # noqa: BLE001
-        return "https://kiln3d.com/pricing"
 
 
 __all__ = ["LOCAL_MODULE", "WIRE_TOOL", "Asked", "ask", "floor_note"]

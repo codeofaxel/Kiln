@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kiln.parametric import ScadBuild
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1217,6 +1218,7 @@ class TestRecommendDesignMaterial:
 
     @patch("kiln.design_intelligence.get_material_profile")
     @patch("kiln.design_intelligence.recommend_material_for_design")
+    @pytest.mark.usefixtures("free_caller")
     def test_bonding_floor_nudge_free_tier(self, mock_rec, mock_profile, registered_tools):
         # Free tier with the public common-knowledge floor flag (no overlay):
         # a minimal bonding block (hard_to_bond + upgrade_url, no Pro fields)

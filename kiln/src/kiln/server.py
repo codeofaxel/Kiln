@@ -4147,9 +4147,12 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
             if (alerted_devices() or 0) > 0
             else ""
         )
+        from kiln.tiers_and_terms import plan_offer
+
+        plan = plan_offer("pro", "Approving from anywhere but the printer's Wi-Fi").nudge(_PHONE_PLAN_LINE)
         monitor = (
             "tap Approve in Kiln on their phone or any signed-in browser at kiln3d.com/monitor"
-            f"{alert}, then start again. {_PHONE_PLAN_LINE}"
+            f"{alert}, then start again." + (f" {plan}" if plan else "")
         )
     signed_out = False
     if not pending:
@@ -4809,6 +4812,19 @@ def _watched_machines(exclude: PrinterAdapter | None = None) -> set[str]:
     return seen
 
 
+def _drying_advisor_line(after: str = "") -> str:
+    """Where the safe drying temperature and time for a material come from,
+    with *after* said to every caller: ``drying_advisor``'s plan and page
+    only to a caller who would buy it, the plan check's own words to one who
+    pays for it already, and the tool alone to one whose plan includes it."""
+    from kiln.tiers_and_terms import plan_offer
+
+    offer = plan_offer("pro", "Knowing the safe drying temperature and time for your material")
+    plan = " (Kiln Pro, https://kiln3d.com/pricing)" if offer.buying else ""
+    said = f"drying_advisor{plan} gives the safe drying temperature and time for your material{after}."
+    return said if offer.sells else f"{said} {offer.words}"
+
+
 def _watch_capacity_error(adapter: PrinterAdapter, target_name: str) -> dict | None:
     """Refuse a NEW persistent watch beyond the tier's machine limit.
 
@@ -4848,6 +4864,8 @@ def _watch_capacity_error(adapter: PrinterAdapter, target_name: str) -> dict | N
         if len(already) < cap:
             return None
 
+        from kiln.tiers_and_terms import plan_offer
+
         watching = ", ".join(sorted(already)[:3])
         _audit("watch_capacity", "blocked", details={"printer_name": target_name})
         return _error_dict(
@@ -4857,9 +4875,10 @@ def _watch_capacity_error(adapter: PrinterAdapter, target_name: str) -> dict | N
             + f" Stop that watch to move it to {target_name!r}, or check "
             "this machine any time with printer_status(printer_name=...), "
             "monitor_print(...) or printer_snapshot(...) — those are free "
-            "on every machine, and so is stopping any machine. Kiln "
-            "Business watches your printers together: "
-            "https://kiln3d.com/pricing",
+            "on every machine, and so is stopping any machine. "
+            + plan_offer("business", "Watching several printers at once").tail(
+                "Kiln Business watches your printers together: https://kiln3d.com/pricing"
+            ),
             code="TIER_CONCURRENT_WATCH_LIMIT",
             retryable=False,
         )
@@ -13014,8 +13033,7 @@ def preflight_check(
                         f"{expected_material.upper()} readily absorbs moisture. "
                         "If the spool has been open or stored in humid air, a wet "
                         "spool prints rough/weak — consider drying first. "
-                        "drying_advisor (kiln-pro) gives the safe temp and time "
-                        "for your material."
+                        + _drying_advisor_line()
                     ),
                 }
             )
@@ -14206,12 +14224,11 @@ def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | 
     only when those words point there: a caller told to sign back in or get
     online is not sent to buy.
     """
-    from kiln import licensing
     from kiln.printer_roster import known_printers
-    from kiln.tiers_and_terms import PRICING_URL
+    from kiln.tiers_and_terms import plan_offer
 
-    fleet_view, said = licensing.check_tier(LicenseTier.BUSINESS)
-    if fleet_view:
+    offer = plan_offer(LicenseTier.BUSINESS)
+    if offer.covered:
         return None
     # Counted the way a plan refusal is: this caller reached for the fleet
     # view on a plan without it.
@@ -14219,7 +14236,7 @@ def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | 
 
     count_plan_wall(asked_through)
     rows = known_printers(_get_registry())
-    plan_line = str(said or "").strip() or "This feature is part of Kiln Business."
+    plan_line = offer.words or "This feature is part of Kiln Business."
     listed: dict[str, Any] = {
         "success": True,
         "known_printers": rows,
@@ -14230,7 +14247,7 @@ def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | 
             f"answer is the fleet view. {plan_line}"
         ),
     }
-    if PRICING_URL.split("://", 1)[-1] in plan_line:
+    if offer.sells:
         listed["upgrade_url"] = upgrade_link(asked_through)
     return listed
 
@@ -14249,16 +14266,19 @@ def _attach_sites(
     (and already carry their ``repair`` block), so grouping is a sort, not a
     second round of printer calls.
     """
-    from kiln.licensing import LicenseTier as _Tier
-    from kiln.licensing import check_tier as _check_tier
+    from kiln.tiers_and_terms import plan_offer
 
-    enterprise, _ = _check_tier(_Tier.ENTERPRISE)
-    if not enterprise:
+    offer = plan_offer("enterprise", "Grouping printers by site")
+    if not offer.covered:
         note = (
             "Grouped by site, each site would list its own printers with "
             "their idle, busy and needs-repair names; that view is part of "
             "Kiln Enterprise. Here is the whole fleet in one list."
         )
+        if not offer.sells:
+            # Someone who pays for the grouping is told the step that brings it back.
+            result["note"] = f"{offer.words} Here is the whole fleet in one list."
+            return
         result["note"] = note
         result["upgrade_url"] = upgrade_link(asked_through)
         result["upgrade_nudge"] = upgrade_nudge_block(
@@ -14455,12 +14475,17 @@ def register_printer(
             and name not in _get_registry()
             and _get_registry().count >= tier_cap
         ):
+            from kiln.tiers_and_terms import plan_offer
+
+            offer = plan_offer("business", "Running printers in parallel")
             fleet_note = (
                 f"Registered. On the {tier_label} tier Kiln runs "
                 f"{tier_cap} printer at a time — this machine is ready to "
                 "use whenever your others are idle. Kiln Business runs "
                 "printers in parallel (3 included, up to 50): "
                 "https://kiln3d.com/pricing"
+                if offer.sells
+                else f"Registered — this machine is ready to use whenever your others are idle. {offer.words}"
             )
         # Agents call this with whatever the docs they read said, and older
         # docs say "serial".  Normalize before anything branches on it, so
@@ -17745,10 +17770,11 @@ def analyze_print_failure(job_id: str) -> dict:
             )
             recommendations.append(
                 "If you see stringing, popping, or weak/rough layers, the filament "
-                "may be wet. drying_advisor (kiln-pro, https://kiln3d.com) gives the "
-                "safe drying temperature and time for your exact material before a "
-                "reprint — drying protects future prints but can't restore strength "
-                "already lost in the failed part."
+                "may be wet. "
+                + _drying_advisor_line(
+                    " before a reprint — drying protects future prints but can't restore "
+                    "strength already lost in the failed part"
+                )
             )
 
         # Default if no specific analysis
@@ -19836,6 +19862,7 @@ def troubleshoot_printer(
                 # "which side of the hot end", not "step 5 is upstream of
                 # the melt zone", which would sell it and give it away at
                 # once.
+                subject = "Reading this printer's fault codes"
                 text = (
                     "Kiln's free tier can't read a fault code or a wizard "
                     "step here — it still tells you it's a filament-path "
@@ -19845,13 +19872,17 @@ def troubleshoot_printer(
                     "https://kiln3d.com/pricing"
                 )
             else:
+                subject = "Knowing what goes wrong on your exact printer model"
                 text = (
                     "Kiln Pro adds the known failures for your exact printer "
                     "model — what goes wrong, and what fixed it. "
                     "See https://kiln3d.com/pricing"
                 )
+            from kiln.tiers_and_terms import plan_offer
+
+            said = plan_offer("pro", subject).nudge(text)
             upgrade_hint = (
-                text if claim_once("troubleshoot_printer.upgrade_hint") else ""
+                said if said and claim_once("troubleshoot_printer.upgrade_hint") else ""
             )
         result = {
             "success": True,
@@ -20329,7 +20360,7 @@ def multi_copy_print(
     plate once this one is taken off and the plate is said to be clear,
     plate after plate until all are done; ``cancel_queued_job`` stops the
     rest.  How many fit is answered on every tier; placing copies beside a
-    part still on the plate is a kiln-pro feature.
+    part still on the plate is part of Kiln Pro.
 
     Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
     The printer must be idle and connected.
@@ -22862,10 +22893,14 @@ def get_material_properties(material_id: str) -> dict:
         # acetone / bleach / vinegar / UV …) is served one query at a
         # time by check_chemical_resistance — this bulk response carries
         # only the free safety floor, never the curated matrix.
+        from kiln.tiers_and_terms import plan_offer
+
         result["chemical_resistance"] = {
             "per_reagent_tool": "check_chemical_resistance",
-            "note": "Safety warnings are always free; cited survival "
-            "verdicts are a kiln-pro feature — https://kiln3d.com/pricing.",
+            "note": plan_offer("pro", "A cited survival verdict for one reagent").nudge(
+                "Safety warnings are always free; cited survival "
+                "verdicts are part of Kiln Pro: https://kiln3d.com/pricing."
+            ) or "Ask check_chemical_resistance for a cited verdict on one reagent.",
         }
         return result
     except Exception as exc:
@@ -25240,6 +25275,16 @@ def _photo_relief_auto_depth(model_path: str, face_info: dict) -> float:
     return photo_relief_depth(extent)
 
 
+def _unknown_font_error(exc: Exception) -> dict[str, Any]:
+    """The refusal for a font that is not on the list, naming every font a
+    word can be carved in.  One answer for every door that takes a font."""
+    from kiln.text_fonts import list_text_fonts
+
+    refusal = _error_dict(str(exc), code="UNKNOWN_FONT")
+    refusal["fonts"] = list_text_fonts()
+    return refusal
+
+
 @mcp.tool(annotations=destructive("Decorate a surface"))
 def decorate_surface(
     model_path: str,
@@ -25480,7 +25525,6 @@ def decorate_surface(
     from kiln.text_fonts import (
         DEFAULT_TEXT_FONT,
         UnknownTextFontError,
-        list_text_fonts,
         resolve_text_font,
     )
 
@@ -25488,13 +25532,14 @@ def decorate_surface(
         text_font = resolve_text_font(font)
     except UnknownTextFontError as exc:
         _refund_decoration_quota(quota_consumed)
-        font_err = _error_dict(str(exc), code="UNKNOWN_FONT")
-        font_err["fonts"] = list_text_fonts()
-        return font_err
+        return _unknown_font_error(exc)
 
     from kiln.output_paths import kiln_output_dir
 
-    work_dir = kiln_output_dir("kiln_decorate_surface")
+    # A folder of this call's own inside the results folder: every file the
+    # carve writes is named after the model, so two carves of same-named
+    # models must never share a folder.
+    work_dir = tempfile.mkdtemp(prefix="carve_", dir=kiln_output_dir("kiln_decorate_surface"))
     warnings: list[str] = []
     # What Kiln's servers add to this tool (kiln._pro_decorate_bridge), and
     # this call as it was made, for the times the servers run it whole.
@@ -25641,10 +25686,9 @@ def decorate_surface(
             except ImportError:
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
-                    "Curved-wall wrapping runs on the engine that ships "
-                    "with kiln-pro — included on the hosted service "
-                    "(api.kiln3d.com) on every tier. Locally without it, "
-                    "decorate a flat face instead (face='front', 'top', ...).",
+                    "Curved-wall wrapping runs on Kiln's hosted service "
+                    "(api.kiln3d.com), included on every plan. On this "
+                    "install, decorate a flat face instead (face='front', 'top', ...).",
                     code="ENGINE_UNAVAILABLE",
                 )
 

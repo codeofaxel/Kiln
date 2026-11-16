@@ -251,8 +251,26 @@ def _get_purchase_urls(
     return {"amazon": f"https://www.amazon.com/s?k={query}"}
 
 
+def _plan_covering(machines: int) -> str:
+    """The smallest plan Kiln sells whose printer cap covers *machines*,
+    read from the same caps the across-machines refusal is decided by."""
+    from kiln.account_plan import LicenseTier
+
+    try:
+        from kiln.licensing import max_printers_for_tier
+    except Exception:  # noqa: BLE001 -- the plan check's own caps
+        from kiln.account_plan import max_printers_for_tier
+
+    for plan in LicenseTier:
+        cap = max_printers_for_tier(plan.value)
+        if cap is None or cap >= machines:
+            return plan.value
+    return LicenseTier.ENTERPRISE.value
+
+
 def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
-    """Refuse a FLEET-WIDE material answer below Business; ``None`` allows.
+    """Refuse a FLEET-WIDE material answer below the plan that covers the
+    machines; ``None`` allows.
 
     Every tool here that answers ACROSS machines calls this one helper —
     a per-door branch is how the drift starts.
@@ -266,6 +284,16 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
     refused here even when it drives them one at a time.  Per-machine
     questions stay open at every tier — scope to one printer and this
     gate never fires.
+
+    The refusal is worded by the plan check, through
+    :func:`kiln.tiers_and_terms.plan_offer`, asked about the smallest plan
+    whose printer cap covers every machine, so it says what is true of this
+    caller: signed out, how a subscriber connects this machine; signed in on
+    a smaller plan, which account and plan Kiln sees; a sign-in the server
+    refused, to sign back in; a paid plan Kiln has not confirmed for too
+    long, to get online.  The pricing link (``upgrade_hint``) and the nudge
+    are attached only when those words sell the plan.  A plan check that
+    gives no words leaves the standing refusal, link and nudge included.
 
     Two failure modes, deliberately opposite:
 
@@ -294,19 +322,30 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
         if cap is None or cap <= 0 or machines <= cap:
             return None
 
-        verdict = {
+        from kiln.tiers_and_terms import plan_offer
+
+        plan = _plan_covering(machines)
+        named = feature[:1].lower() + feature[1:] if feature[1:2].islower() else feature
+        offer = plan_offer(plan, f"Seeing the {named} across all {machines} of your machines")
+        if not offer.words:
+            plan = "business"  # the standing refusal, which names Business
+        verdict: dict[str, Any] = {
             "success": False,
-            "error": (
+            "error": offer.words or (
                 f"{feature} answers across all {machines} of your machines, "
                 f"and fleet views are a Kiln Business feature."
             ),
             "code": "TIER_FLEET_SCOPE",
             "machines": machines,
-            "upgrade_hint": (
-                "Ask about one printer to stay on your current plan, or see "
-                "https://kiln3d.com/pricing for fleet-wide answers."
-            ),
         }
+        if not offer.sells:
+            # Someone who pays for the plan is told the step that brings it
+            # back (sign back in, get online), never sold it.
+            return verdict
+        verdict["upgrade_hint"] = (
+            "Ask about one printer to stay on your current plan, or see "
+            "https://kiln3d.com/pricing for fleet-wide answers."
+        )
         # Structured twin of the sentences above, for a surface that renders
         # rather than prints.  Additive: the per-printer free path stays the
         # first thing named, and every door that funnels here inherits the
@@ -318,16 +357,16 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
                 "upgrade_nudge",
                 upgrade_nudge_block(
                     variant="cross_machine_inventory",
-                    tier="business",
+                    tier=plan,
                     feature="Cross-machine material inventory",
                     headline=(
                         "Answer this material question across every machine "
                         "at once."
                     ),
                     outcome_preview=(
-                        "Kiln Business would compare spools and capability "
-                        "across the registered machines and prepare one "
-                        "cross-machine answer."
+                        f"Kiln {plan.title()} would compare spools and "
+                        "capability across the registered machines and "
+                        "prepare one cross-machine answer."
                     ),
                     free_included="The per-printer answer stays available.",
                     moment="resource_threshold",
@@ -832,8 +871,11 @@ def _machine_slot(loaded: list[dict[str, Any]]) -> dict[str, Any] | None:
     return next((m for m in slots if m.get("printer_name") in names), slots[0])
 
 
-def plan_jobs_for_one_machine(db: Any, *, jobs: list[dict[str, Any]]) -> list[FleetAssignment]:
-    """Which of *jobs* the machine's loaded spool can take, in order.
+def plan_jobs_for_one_machine(
+    db: Any, *, jobs: list[dict[str, Any]], printer_name: str | None = None,
+) -> list[FleetAssignment]:
+    """Which of *jobs* the machine's loaded spool can take, in order.  With
+    *printer_name*, the machine is that one.
 
     Each job: ``file_name``, ``material_type``, ``required_grams``, optional
     ``color``.  A job is taken when the first-tool spool is that material
@@ -842,7 +884,10 @@ def plan_jobs_for_one_machine(db: Any, *, jobs: list[dict[str, Any]]) -> list[Fl
     """
     if not jobs:
         return []
-    slot = _machine_slot(_get_all_materials(db))
+    loaded = _get_all_materials(db)
+    if printer_name is not None:
+        loaded = [m for m in loaded if m.get("printer_name") == printer_name]
+    slot = _machine_slot(loaded)
     capacity = (weight_on_record(db, slot) or 0.0) if slot is not None else 0.0
     out: list[FleetAssignment] = []
     for job in jobs:
@@ -945,6 +990,76 @@ FLEET_QUESTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: The questions one named printer answers for itself, on every plan.
+ONE_PRINTER_QUESTIONS: frozenset[str] = frozenset({"summary", "assign"})
+
+
+def summary_for_one_printer(db: Any, printer_name: str) -> list[FleetMaterialSummary]:
+    """Per-material totals for *printer_name*: what it has loaded, and the
+    shelf.  A spool loaded on another printer is left out; a shelved spool
+    counts, since it can be swapped in."""
+    loaded = _loaded_rows(db)
+    elsewhere = {m.get("spool_id") for m in loaded if m.get("spool_id") and m.get("printer_name") != printer_name}
+    return summarize(
+        [s for s in _spool_rows(db) if s.get("id") not in elsewhere],
+        [m for m in loaded if m.get("printer_name") == printer_name],
+    )
+
+
+def _one_named_printer(question: str, db: Any, printer_name: str, params: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
+    """*question* answered for one printer from this install's own rows, or
+    the refusal for a name that is not set up here."""
+    try:
+        from kiln.registry import get_registry
+
+        set_up = sorted(get_registry().list_names())
+    except Exception:  # noqa: BLE001 -- no registry to check the name against
+        set_up = [printer_name]
+    if printer_name not in set_up:
+        return None, {
+            "success": False,
+            "error": f"No printer named {printer_name!r} is set up here. Set up: {', '.join(set_up) or 'none'}.",
+            "code": "PRINTER_NOT_FOUND",
+        }
+    if question == "summary":
+        return [s.to_dict() for s in summary_for_one_printer(db, printer_name)], None
+    return [a.to_dict() for a in plan_jobs_for_one_machine(db, jobs=params["jobs"], printer_name=printer_name)], None
+
+
+def ask_which_printer(refused: dict[str, Any], *, tool: str, what: str) -> dict[str, Any]:
+    """What a door that can answer for one printer says in place of the
+    across-machines refusal *refused*: the printers set up here and the
+    question, with the plan that answers for all of them named once, in
+    the refusal's own words (:func:`fleet_scope_verdict`).  The pricing
+    link is attached only when the refusal carried one.  Any other refusal
+    comes back as it is."""
+    if refused.get("code") != "TIER_FLEET_SCOPE":
+        return refused
+    from kiln.account_plan import count_plan_wall
+    from kiln.printer_roster import known_printers
+    from kiln.registry import get_registry
+    from kiln.tiers_and_terms import upgrade_link
+
+    count_plan_wall(tool)
+    try:
+        rows = known_printers(get_registry())
+    except Exception:  # noqa: BLE001 -- the question is still asked without the list
+        logger.debug("printer list unavailable", exc_info=True)
+        rows = []
+    count = len(rows) or int(refused.get("machines") or 0)
+    said = str(refused.get("error") or "").strip()
+    answer: dict[str, Any] = {
+        "success": True,
+        "ask": "Which printer?",
+        "known_printers": rows,
+        "count": count,
+        "note": f"{count} printers are set up here. Name one (printer_name=...) for {what}. {said}".rstrip(),
+    }
+    if refused.get("upgrade_hint"):
+        answer["upgrade_url"] = upgrade_link(tool)
+    return answer
+
+
 def registered_machines() -> int:
     """How many machines are registered here; ``1`` when the registry cannot
     be read, so a broken registry never stands between a person and their
@@ -980,8 +1095,13 @@ def _one_machine(question: str, db: Any, params: dict[str, Any]) -> Any:
     raise ValueError(f"not a material question: {question!r}")
 
 
-def inventory_answer(question: str, db: Any, *, feature: str, **params: Any) -> tuple[Any, dict[str, Any] | None]:
+def inventory_answer(
+    question: str, db: Any, *, feature: str, printer_name: str | None = None, **params: Any,
+) -> tuple[Any, dict[str, Any] | None]:
     """``(answer, None)``, or ``(None, refusal)`` for a door to return as it is.
+
+    With *printer_name* the answer is that one printer's own, from this
+    install's rows on every plan (:data:`ONE_PRINTER_QUESTIONS`).
 
     The one router: on an install with one machine the answer is worked out
     here from this install's rows, offline and with no sign-in.  Across
@@ -994,6 +1114,10 @@ def inventory_answer(question: str, db: Any, *, feature: str, **params: Any) -> 
     """
     if question not in FLEET_QUESTIONS:
         raise ValueError(f"not a material question: {question!r}")
+    if printer_name is not None:
+        if question not in ONE_PRINTER_QUESTIONS:
+            raise ValueError(f"not a question one named printer answers: {question!r}")
+        return _one_named_printer(question, db, printer_name, params)
     if registered_machines() <= 1:
         return _one_machine(question, db, params), None
     refused = fleet_scope_verdict(feature)

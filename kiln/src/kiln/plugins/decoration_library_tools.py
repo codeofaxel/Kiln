@@ -108,6 +108,7 @@ class _DecorationLibraryPlugin:
             image_style: str | None = None,
             material: str | None = None,
             tags: str = "",
+            font: str = "",
         ) -> dict:
             """Save a proven decoration to the library for reuse on future models.
 
@@ -131,6 +132,11 @@ class _DecorationLibraryPlugin:
             :param material: Material used (e.g. PLA, PETG).  Omitted, the
                 recipe sidecar's material is used when it has one, else PLA.
             :param tags: Comma-separated tags for filtering.
+            :param font: For text: the font the word was carved in, as
+                ``decorate_surface`` reported it (``"sans"``, ``"mono"``, ...).
+                Empty records the default font.  ``apply_decoration`` carves
+                the word in this font again.  An unknown font is refused
+                naming the accepted list, and nothing is saved.
             :returns: Dict with saved decoration details and library path.
             """
             import kiln.server as _srv
@@ -152,6 +158,7 @@ class _DecorationLibraryPlugin:
             from kiln.decoration_library import (
                 save_decoration as _save,
             )
+            from kiln.text_fonts import UnknownTextFontError
 
             # --- Auto-extract settings from recipe sidecar ---
             recipe_data: dict[str, Any] = {}
@@ -221,7 +228,10 @@ class _DecorationLibraryPlugin:
                     source_path=source_path if source_path and os.path.isfile(source_path) else None,
                     processing=pipeline if pipeline else None,
                     tags=tag_list,
+                    font=font or None,
                 )
+            except UnknownTextFontError as exc:
+                return _srv._unknown_font_error(exc)
             except ValueError as exc:  # what the call asked for cannot make a decoration
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
 
@@ -361,7 +371,9 @@ class _DecorationLibraryPlugin:
                 lists it) whose loaded spool decides the material when
                 ``material`` is empty.  Omit to use the decoration's proven
                 material.
-            :returns: Dict with decorated model path and settings used.
+            :returns: Dict with decorated model path and settings used.  A
+                saved word is carved in the font it was saved with (the
+                default font when it recorded none), and ``font`` says which.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
@@ -436,6 +448,7 @@ class _DecorationLibraryPlugin:
                     material=settings["material"],
                     image_style=settings["image_style"],
                     content_type=decoration.content_type,
+                    font=decoration.font or "",
                 )
             except Exception as exc:
                 _logger.debug("decorate_surface failed: %s", exc)
