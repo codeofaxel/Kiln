@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-11-15 · Version 2.48*
+*Last updated: 2026-11-16 · Version 2.49*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
