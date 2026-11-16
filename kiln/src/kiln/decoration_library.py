@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln.text_fonts import resolve_text_font
+
 _logger = logging.getLogger(__name__)
 
 _MANIFEST_FILENAME = "manifest.json"
@@ -168,6 +170,9 @@ class Decoration:
     #: Prints already counted into ``proven_settings``, so a print reported
     #: twice counts once.  Kept by decoration memory (Kiln Pro).
     counted_jobs: list[str] = field(default_factory=list)
+    #: For a typed word: the id of the font it is carved in
+    #: (:mod:`kiln.text_fonts`).  ``None`` carves in the default font.
+    font: str | None = None
 
     @property
     def category(self) -> str:
@@ -202,6 +207,8 @@ class Decoration:
             d["texture_params"] = self.texture_params
         if self.counted_jobs:
             d["counted_jobs"] = self.counted_jobs
+        if self.font is not None:
+            d["font"] = self.font
         return d
 
     @classmethod
@@ -218,6 +225,7 @@ class Decoration:
             proven = {
                 k: ProvenSetting.from_dict(v) for k, v in proven_raw.items()
             }
+        font = d.get("font")
         return cls(
             name=d["name"],
             slug=d["slug"],
@@ -238,6 +246,7 @@ class Decoration:
             counted_jobs=[
                 str(j) for j in (d.get("counted_jobs") or []) if isinstance(j, str)
             ],
+            font=font if isinstance(font, str) and font else None,
         )
 
 
@@ -356,10 +365,16 @@ def save_decoration(
     material: str | None = None,
     tags: list[str] | None = None,
     texture_params: dict[str, Any] | None = None,
+    font: str | None = None,
 ) -> Decoration:
     """Save a decoration to the library.
 
+    :param font: For a typed word (``content_type="text"``): the id of the
+        font it is carved in (:func:`kiln.text_fonts.list_text_fonts`).
+        Empty records the default font.  Not recorded for any other kind.
     :raises ValueError: on invalid inputs.
+    :raises kiln.text_fonts.UnknownTextFontError: *font* is not on the list;
+        nothing is written.
     :raises FileNotFoundError: if *source_path* or *content_path* does not exist.
     """
     if not name or not name.strip():
@@ -374,6 +389,7 @@ def save_decoration(
             "At least one of source_path, content_path, or content_data "
             "is required to provide content for the decoration"
         )
+    text_font = resolve_text_font(font)
 
     slug = _slugify(name)
     lib = get_library_dir()
@@ -425,6 +441,7 @@ def save_decoration(
         tags=tags or [],
         print_count=0,
         texture_params=texture_params,
+        font=text_font.id if content_type == "text" else None,
     )
     _write_manifest(slug, dec.to_dict())
     _logger.debug("Saved decoration %r to %s", name, deco_dir)

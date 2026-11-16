@@ -25275,6 +25275,16 @@ def _photo_relief_auto_depth(model_path: str, face_info: dict) -> float:
     return photo_relief_depth(extent)
 
 
+def _unknown_font_error(exc: Exception) -> dict[str, Any]:
+    """The refusal for a font that is not on the list, naming every font a
+    word can be carved in.  One answer for every door that takes a font."""
+    from kiln.text_fonts import list_text_fonts
+
+    refusal = _error_dict(str(exc), code="UNKNOWN_FONT")
+    refusal["fonts"] = list_text_fonts()
+    return refusal
+
+
 @mcp.tool(annotations=destructive("Decorate a surface"))
 def decorate_surface(
     model_path: str,
@@ -25515,7 +25525,6 @@ def decorate_surface(
     from kiln.text_fonts import (
         DEFAULT_TEXT_FONT,
         UnknownTextFontError,
-        list_text_fonts,
         resolve_text_font,
     )
 
@@ -25523,9 +25532,7 @@ def decorate_surface(
         text_font = resolve_text_font(font)
     except UnknownTextFontError as exc:
         _refund_decoration_quota(quota_consumed)
-        font_err = _error_dict(str(exc), code="UNKNOWN_FONT")
-        font_err["fonts"] = list_text_fonts()
-        return font_err
+        return _unknown_font_error(exc)
 
     from kiln.output_paths import kiln_output_dir
 
