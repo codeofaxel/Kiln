@@ -237,7 +237,7 @@ def _capture_mating(monkeypatch) -> list:
 
     seen: list = []
 
-    def fake_view(joint_type, *, material, printer_id, mating=None, cache=None):
+    def fake_view(joint_type, *, material, printer_id, mating=None, cache=None, same_print=True):
         seen.append(mating)
         return None
 

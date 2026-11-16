@@ -525,7 +525,37 @@ def attach_load_bearing_nudge(
         reasons.append(f"structural joint '{joint_type}'")
     if applied_load_n is not None and applied_load_n >= _LOW_LOAD_THRESHOLD_N:
         reasons.append(f"applied load {applied_load_n:.1f} N")
+    if _caller_holds_pro():
+        # The caution is for everyone; the offer is for a plan the caller
+        # does not hold.  A paying caller is told which tool answers it.
+        response["load_bearing_note"] = _PAID_NOTE
+        return response
     nudge = _build_upgrade_recommendation(reasons)
     response["upgrade_recommendation"] = nudge
     response["load_bearing_note"] = nudge["warning"]
     return response
+
+
+#: The same caution a Free caller reads, without the offer: said to a
+#: caller whose plan already includes the engineering tools.
+_PAID_NOTE = (
+    "This part looks load-bearing.  This is a quick heuristic, not a test of "
+    "your actual printed part — and not enough for anything that could hurt "
+    "someone if it fails (overhead or climbing loads, child or vehicle "
+    "parts).  Print it, load-test it, and for high-stakes parts get an "
+    "engineer's sign-off.  design_for_load works out the safety factor, "
+    "fatigue and creep for it."
+)
+
+
+def _caller_holds_pro() -> bool:
+    """True when the CALLER's plan is Kiln Pro or above (on Kiln's servers,
+    the plan of the request; on an install, of the signed-in account).  An
+    unreadable plan is Free."""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        allowed, _ = check_tier(LicenseTier.PRO)
+    except Exception:  # noqa: BLE001 -- an unreadable plan is Free
+        return False
+    return bool(allowed)

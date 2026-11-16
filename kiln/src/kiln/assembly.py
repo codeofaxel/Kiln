@@ -55,6 +55,43 @@ _DEFAULT_JOINT_CLEARANCES: dict[str, tuple[float, float]] = {
     "loose": (0.5, 5.0),
 }
 
+#: Every joint type an assembly's record may name: the one list.  The
+#: validator's rules, the clearance recommendation and the assembly guide
+#: all read this.
+JOINT_TYPES: tuple[str, ...] = (
+    "snap_fit",
+    "press_fit",
+    "interference_fit",
+    "clearance_fit",
+    "loose",
+    "tongue_groove",
+    "threaded",
+    "glued",
+    "magnetic",
+    "heat_set",
+    "heat_set_insert",
+)
+
+#: What a fastener's ``surface_type`` reads when its screw turns in a brass
+#: insert (lower case, ``_`` for a space or hyphen).  Every reader of the
+#: record asks :func:`threads_into_insert`.
+INSERT_SURFACES: frozenset[str] = frozenset({"brass", "brass_insert", "insert", "heat_set_insert"})
+
+
+def threads_into_insert(surface_type: Any) -> bool:
+    """True when *surface_type* says the screw turns in a brass insert."""
+    word = str(surface_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return word in INSERT_SURFACES
+
+
+#: Hardware families that are set in a pocket, not driven: they are never
+#: sized a thread in the print.
+_SET_NOT_DRIVEN: frozenset[str] = frozenset({"heat_set_insert", "magnet"})
+
+#: A threaded insert melted into one part for a screw to turn in.  It is
+#: declared beside the screw's own joint on the same pair of parts.
+INSERT_JOINT_TYPES: frozenset[str] = frozenset({"heat_set", "heat_set_insert"})
+
 # Materials too flexible for press-fit or snap-fit load-bearing
 _FLEXIBLE_MATERIALS: frozenset[str] = frozenset({"TPU", "TPE", "SILICONE"})
 # Materials too brittle for snap-fit
@@ -85,14 +122,35 @@ class AssemblyPart:
     #: The colour the part is shown in on the stage, ``#rrggbb``; ``None``
     #: leaves the choice to the stage.  The caller's own statement.
     color: str | None = None
+    #: Parts that have to be in place before this one goes on (their ids).
+    #: The one way a record states build order; an assembly guide keeps it.
+    install_after: list[str] = field(default_factory=list)
+    #: The direction this part travels to its seat, as x, y, z in the
+    #: assembly's frame, or ``None`` when the record does not say.
+    insertion_axis: tuple[float, float, float] | None = None
+    #: What a person calls the part ("hare lever"), as its maker wrote it;
+    #: ``None`` leaves readers to word the part from its id.
+    name: str | None = None
 
     def __post_init__(self) -> None:
         self.color = _part_color(self.color, self.part_id)
+        self.name = " ".join(str(self.name).split()) or None if self.name is not None else None
+        self.install_after = _part_id_list(self.install_after, "install_after")
+        if self.part_id in self.install_after:
+            raise ValueError(f"Part '{self.part_id}' cannot be installed after itself.")
+        if self.insertion_axis is not None:
+            axis = _three_numbers(self.insertion_axis, "insertion_axis")
+            if not any(axis):
+                raise ValueError("insertion_axis must not be zero: it is a direction.")
+            self.insertion_axis = axis
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         if self.color is None:
             del data["color"]
+        data["insertion_axis"] = list(self.insertion_axis) if self.insertion_axis is not None else None
+        if self.name is None:
+            del data["name"]
         return data
 
 
@@ -136,6 +194,13 @@ class FastenerSpec:
     notes: str = ""
     driver: str | None = None
     product: str | None = None
+    #: The hole or pocket this hardware goes into, as the kit's designer
+    #: drew it (an insert's pocket, a magnet's seat): width and depth.
+    hole_diameter_mm: float | None = None
+    hole_depth_mm: float | None = None
+    #: The iron temperature an insert is set at, as its maker or the kit's
+    #: designer states it: one value, or a low and a high.
+    install_temp_c: tuple[float, float] | None = None
 
     def __post_init__(self) -> None:
         self.size = str(self.size).strip()
@@ -161,6 +226,22 @@ class FastenerSpec:
             if value is not None:
                 value = str(value).strip()
                 setattr(self, field_name, value or None)
+        for field_name in ("hole_diameter_mm", "hole_depth_mm"):
+            value = getattr(self, field_name)
+            if value is not None:
+                value = float(value)
+                if value <= 0:
+                    raise ValueError(f"FastenerSpec.{field_name} must be positive")
+                setattr(self, field_name, value)
+        if self.install_temp_c is not None:
+            temp = self.install_temp_c
+            pair = tuple(temp) if isinstance(temp, (list, tuple)) else (temp, temp)
+            if len(pair) != 2:
+                raise ValueError("FastenerSpec.install_temp_c is one value or a low and a high")
+            lo, hi = float(pair[0]), float(pair[1])
+            if lo <= 0 or lo > hi:
+                raise ValueError("FastenerSpec.install_temp_c must be positive and ordered")
+            self.install_temp_c = (lo, hi)
         self.quantity_per_interface = int(self.quantity_per_interface)
         if self.quantity_per_interface < 1:
             raise ValueError("FastenerSpec.quantity_per_interface must be >= 1")
@@ -181,6 +262,9 @@ class FastenerSpec:
             "notes": self.notes,
             "driver": self.driver,
             "product": self.product,
+            "hole_diameter_mm": self.hole_diameter_mm,
+            "hole_depth_mm": self.hole_depth_mm,
+            "install_temp_c": list(self.install_temp_c) if self.install_temp_c is not None else None,
         }
 
     @classmethod
@@ -205,6 +289,9 @@ class FastenerSpec:
             notes=str(data.get("notes") or ""),
             driver=data.get("driver"),
             product=data.get("product"),
+            hole_diameter_mm=data.get("hole_diameter_mm"),
+            hole_depth_mm=data.get("hole_depth_mm"),
+            install_temp_c=data.get("install_temp_c"),
         )
 
 
@@ -535,6 +622,22 @@ def _finite_number(value: Any, name: str) -> float:
     return number
 
 
+def _part_id_list(value: Any, name: str) -> list[str]:
+    """A list of part ids, from a list or one id; empty for nothing."""
+    if value is None or value == "":
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{name} must be a list of part ids.")
+    out: list[str] = []
+    for item in value:
+        pid = str(item).strip()
+        if pid and pid not in out:
+            out.append(pid)
+    return out
+
+
 def _three_numbers(value: Any, name: str) -> tuple[float, float, float]:
     if not isinstance(value, (list, tuple)) or len(value) != 3:
         raise ValueError(f"{name} must be three numbers (x, y, z)")
@@ -572,6 +675,10 @@ class MatingInterface:
     magnet_polarity_aligned: bool | None = None
     fastener_spec: FastenerSpec | None = None
     motion: JointMotion | None = None
+    #: ``True`` when the two parts are printed apart and put together by
+    #: hand.  A gap between them cannot fuse on the plate, so it is judged
+    #: as a fit to assemble, not as a print-in-place gap.
+    prints_separately: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -710,6 +817,9 @@ class Assembly:
                     material=p.get("material", "PLA"),
                     role=p.get("role", "structural"),
                     color=p.get("color"),
+                    install_after=p.get("install_after") or [],
+                    insertion_axis=p.get("insertion_axis"),
+                    name=p.get("name"),
                 )
             )
         for i in data.get("interfaces", []):
@@ -726,6 +836,7 @@ class Assembly:
                         i.get("fastener_spec") or i.get("fastener")
                     ),
                     motion=JointMotion.from_dict(i.get("motion")),
+                    prints_separately=bool(i.get("prints_separately", False)),
                 )
             )
         for c in data.get("clearance_checks", []):
@@ -1144,11 +1255,12 @@ def _validate_joint(
                 f"recommended range {clearance_range[0]}-{clearance_range[1]} mm."
             )
 
-        rules_checked.append("fine_thread_warning")
-        recommendations.append(
-            "FDM printers struggle with fine threads (< 1.5 mm pitch). "
-            "Use coarse threads (2 mm+) or heat-set inserts for metal screws."
-        )
+        if not _screw_turns_in_insert(interface, interfaces):
+            rules_checked.append("fine_thread_warning")
+            recommendations.append(
+                "FDM printers struggle with fine threads (< 1.5 mm pitch). "
+                "Use coarse threads (2 mm+) or heat-set inserts for metal screws."
+            )
 
     elif jtype == "clearance_fit":
         rules_checked.append("clearance_range")
@@ -1156,16 +1268,26 @@ def _validate_joint(
         # the two disagree and a design passes a check it will fail on
         # the plate: the static minimum is one number for every machine,
         # so a gap it calls fine can still be one this printer closes.
-        running_view = _running_clearance_view(
+        # Parts printed apart: one that does not move is judged by the
+        # standard minimum, one that moves by the gap for separate prints.
+        separately = bool(getattr(interface, "prints_separately", False))
+        running_view = None if separately and motion is None else _running_clearance_view(
             jtype,
             material=mat_a,
             printer_id=printer_id,
             mating=mating,
             cache=_clearance_cache,
+            same_print=not separately,
         )
         if running_view is not None:
             minimum_mm, running_detail = running_view
-            if interface.clearance_mm < minimum_mm:
+            if interface.clearance_mm < minimum_mm and separately:
+                issues.append(
+                    f"Clearance {interface.clearance_mm:.2f} mm is below the "
+                    f"{minimum_mm:.2f} mm these parts need to go together and "
+                    f"still move, printed apart on this printer in {mat_a}."
+                )
+            elif interface.clearance_mm < minimum_mm:
                 issues.append(
                     f"Clearance {interface.clearance_mm:.2f} mm is below the "
                     f"{minimum_mm:.2f} mm these parts need to still move on "
@@ -1213,6 +1335,39 @@ def _validate_joint(
                 f"typical minimum {clearance_range[0]} mm."
             )
 
+    elif jtype == "interference_fit":
+        rules_checked.append("interference_sign")
+        if interface.clearance_mm >= 0:
+            issues.append(
+                f"Interference-fit clearance is {interface.clearance_mm:.2f} mm, "
+                "not negative. The part is meant to be larger than its socket, "
+                "so the clearance is a negative number; as declared it will be loose."
+            )
+
+    elif jtype == "tongue_groove":
+        rules_checked.append("known_joint_type")
+
+    elif jtype in INSERT_JOINT_TYPES:
+        # An insert's pocket is sized to the insert, never to a clearance.
+        rules_checked.append("insert_pocket")
+        spec = getattr(interface, "fastener_spec", None)
+        declared_d = getattr(spec, "hole_diameter_mm", None)
+        declared_depth = getattr(spec, "hole_depth_mm", None)
+        thread = str(getattr(spec, "size", "") or "").strip() or _pair_screw_size(interface, interfaces)
+        if declared_d is not None:
+            deep = f", {declared_depth:g} mm deep" if declared_depth is not None else ""
+            recommendations.append(
+                f"{thread + ' ' if thread else ''}insert pocket as declared: "
+                f"{declared_d:g} mm wide{deep}."
+            )
+        else:
+            named = f"'{thread} heat-set insert'" if thread else "the insert's thread, e.g. 'M3 heat-set insert'"
+            recommendations.append(
+                "The record does not give this insert's pocket. "
+                f"recommend_hole(screw_name={named}) sizes it; pass the width and "
+                "depth as hole_diameter_mm and hole_depth_mm on the insert's fastener."
+            )
+
     elif jtype == "magnetic":
         rules_checked.append("magnet_pocket_material")
         for mat_label, mat_val in [("Part A", mat_a), ("Part B", mat_b)]:
@@ -1225,7 +1380,10 @@ def _validate_joint(
                 )
 
     else:
-        issues.append(f"Unknown joint type '{jtype}' — no design rules available for validation.")
+        issues.append(
+            f"Unknown joint type '{jtype}' — no design rules available for validation. "
+            f"Known joint types: {', '.join(JOINT_TYPES)}."
+        )
 
     # -- Material compatibility from design_templates.json ----------------
     if template and "material_compatibility" in template:
@@ -1248,9 +1406,16 @@ def _validate_joint(
     # INTO a printed part, attach the compensated self-threading hole
     # (diameter, engagement, torque, chamfer).  When there is none to
     # give, this is None and nothing else changes.
-    screw_hole = _screw_hole_detail_for_joint(
-        getattr(interface, "fastener_spec", None), mat_a, printer_id,
-    )
+    screw_hole = None
+    spec_family = str(getattr(getattr(interface, "fastener_spec", None), "family", "") or "").lower()
+    if (
+        jtype not in INSERT_JOINT_TYPES
+        and spec_family not in _SET_NOT_DRIVEN
+        and not _screw_turns_in_insert(interface, interfaces)
+    ):
+        screw_hole = _screw_hole_detail_for_joint(
+            getattr(interface, "fastener_spec", None), mat_a, printer_id,
+        )
     if screw_hole is not None:
         rules_checked.append("compensated_screw_hole")
         recommendations.append(_screw_hole_recommendation(screw_hole))
@@ -1268,8 +1433,10 @@ def _validate_joint(
                 _running_clearance_view(
                     jtype, material=mat_a, printer_id=printer_id, mating=mating,
                     cache=_clearance_cache,
+                    same_print=not getattr(interface, "prints_separately", False),
                 ),
                 mat_a,
+                separately=bool(getattr(interface, "prints_separately", False)),
             )
 
     valid = len(issues) == 0
@@ -1285,32 +1452,86 @@ def _validate_joint(
     )
 
 
+def _same_pair(a: Any, b: Any) -> bool:
+    return {a.part_a_id, a.part_b_id} == {b.part_a_id, b.part_b_id}
+
+
+def _screw_turns_in_insert(interface: Any, interfaces: list[Any] | None) -> bool:
+    """True when this joint's screw threads into a brass insert: its own
+    record says so, or another joint on the same two parts declares the
+    insert.  Such a screw cuts no thread in the print."""
+    spec = getattr(interface, "fastener_spec", None)
+    if threads_into_insert(getattr(spec, "surface_type", None)):
+        return True
+    return any(
+        other is not interface
+        and getattr(other, "joint_type", "") in INSERT_JOINT_TYPES
+        and _same_pair(other, interface)
+        for other in interfaces or ()
+    )
+
+
+def _pair_screw_size(interface: Any, interfaces: list[Any] | None) -> str:
+    """The thread of the screw declared on the same two parts, or ``""``."""
+    for other in interfaces or ():
+        spec = getattr(other, "fastener_spec", None)
+        if other is not interface and spec is not None and _same_pair(other, interface):
+            return str(getattr(spec, "size", "") or "").strip()
+    return ""
+
+
 def _judge_measured_gap(
     motion_sweep: dict[str, Any],
     declared_mm: float,
     issues: list[str],
     running_view: tuple[float, dict[str, Any]] | None,
     material: str,
+    separately: bool = False,
 ) -> None:
     """The gap the parts are modelled with, judged by the rule the declared
     clearance meets: Kiln Pro's gap for this printer and material when it
     arrived, else the clearance-fit minimum.  A record can declare one gap
-    and the geometry hold another; what prints is the geometry."""
+    and the geometry hold another; what prints is the geometry.
+
+    A rule stated across a joint (a bore's diameter less its pin's) is held
+    at half its value against the measured gap between surfaces.  For parts
+    printed apart (*separately*) too small a gap is a fit that may not go
+    together."""
     gap = motion_sweep.get("printed_gap_mm")
     if gap is None or motion_sweep.get("printed_touching"):
         return  # far apart, or already said: modelled as one piece
     if running_view is not None:
         floor_mm = running_view[0]
-        needed = f"the {floor_mm:.2f} mm these parts need to still move on this printer in {material}"
+        quantity = str(running_view[1].get("modeled_quantity") or "")
+        if _stated_across_the_joint(quantity):
+            floor_mm = floor_mm / 2.0
+            needed = f"the {floor_mm:.2f} mm a side these parts need"
+        else:
+            needed = f"the {floor_mm:.2f} mm these parts need"
+        needed += (
+            f" to go together and still move, printed apart on this printer in {material}"
+            if separately else f" to still move on this printer in {material}"
+        )
     else:
         floor_mm = _DEFAULT_JOINT_CLEARANCES["clearance_fit"][0]
         needed = f"the {floor_mm:.2f} mm minimum for parts that move"
     if gap < floor_mm:
+        outcome = (
+            "they may not go together, or be too stiff to move." if separately
+            else "they are likely to come off the plate fused, or too stiff to move."
+        )
         issues.append(
             f"As modelled its parts are only {gap:.2f} mm apart (the joint declares "
-            f"{declared_mm:.2f} mm), under {needed}: they are likely to come off the "
-            "plate fused, or too stiff to move."
+            f"{declared_mm:.2f} mm), under {needed}: {outcome}"
         )
+
+
+def _stated_across_the_joint(modeled_quantity: str) -> bool:
+    """True when a running clearance is the difference of two sizes (a
+    diameter less a diameter, a width less a width), so a centred part has
+    half of it on each side."""
+    words = modeled_quantity.lower()
+    return "diametral" in words or " minus " in words
 
 
 def _sweep_motion(
@@ -1377,7 +1598,10 @@ def validate_assembly(
     from kiln.joint_record import MAX_JOINTS_PER_CHECK
 
     moving = 0
-    with asking():
+    with asking() as servers:
+        from kiln.joint_record import riding_pairs
+
+        servers.riding(riding_pairs(assembly.interfaces, assembly.mechanism))
         for iface in assembly.interfaces:
             if getattr(iface, "motion", None) is not None:
                 moving += 1
@@ -1409,9 +1633,55 @@ def validate_assembly(
             f"The mechanism cannot be played as declared: {problem}."
             for problem in assembly.mechanism.problems(assembly.interfaces)
         )
+    order_problems = build_order_problems(assembly)
+    if order_problems:
+        assembly.overall_valid = False
+        all_recs.extend(order_problems)
     assembly.recommendations = all_recs
 
     return assembly
+
+
+def build_order_problems(assembly: Assembly) -> list[str]:
+    """What is wrong with the build order the parts declare
+    (``install_after``): a part id nothing in the assembly has, or a ring
+    of parts each waiting for the next.  Empty when the order can be kept."""
+    known = {p.part_id for p in assembly.parts}
+    problems: list[str] = []
+    waits: dict[str, list[str]] = {}
+    for part in assembly.parts:
+        for other in part.install_after:
+            if other not in known:
+                problems.append(
+                    f"Part '{part.part_id}' is to be installed after '{other}', "
+                    "which is not a part of this assembly."
+                )
+            else:
+                waits.setdefault(part.part_id, []).append(other)
+    state: dict[str, int] = {}
+
+    def ring_from(pid: str, trail: list[str]) -> list[str] | None:
+        state[pid] = 1
+        for nxt in waits.get(pid, ()):
+            if state.get(nxt) == 1:
+                return trail[trail.index(nxt):] + [nxt] if nxt in trail else [pid, nxt]
+            if state.get(nxt) is None:
+                found = ring_from(nxt, trail + [nxt])
+                if found:
+                    return found
+        state[pid] = 2
+        return None
+
+    for pid in sorted(waits):
+        if state.get(pid) is None:
+            ring = ring_from(pid, [pid])
+            if ring:
+                problems.append(
+                    "The build order goes in a ring, so no part of it can go first: "
+                    + " after ".join(f"'{p}'" for p in ring) + "."
+                )
+                break
+    return problems
 
 
 def compose_assembly(
@@ -1599,6 +1869,9 @@ def _record_joints(
     said = []
     parts_by_id = {p.part_id: p for p in assembly.parts}
     with asking() as servers:  # every moving joint asked at once, a miss said once
+        from kiln.joint_record import riding_pairs
+
+        servers.riding(riding_pairs(assembly.interfaces, assembly.mechanism))
         swept = {
             id(iface): servers.joint_sweep(iface, parts_by_id, assembly.interfaces)
             for iface in moving if iface.part_b_id in spans
@@ -1677,6 +1950,25 @@ def get_clearance_recommendation(
     servers; when it does not arrive, the static answer stands and
     ``warnings`` says why.
     """
+    if joint_type in INSERT_JOINT_TYPES:
+        # An insert has no clearance to recommend: its pocket is sized to
+        # the insert.  Say where that size comes from, never a made-up gap.
+        return {
+            "joint_type": joint_type,
+            "material_a": material_a,
+            "material_b": material_b,
+            "recommended_clearance_mm": None,
+            "tolerance_mm": None,
+            "clearance_range_mm": None,
+            "rationale": (
+                "A heat-set insert is not a clearance joint: its pocket is sized "
+                "to the insert. recommend_hole(screw_name='<thread> heat-set insert') "
+                "gives the pocket's width and depth for the material."
+            ),
+            "warnings": [],
+            "calibration_used": {},
+            "running_clearance": {},
+        }
     clearance_range = _DEFAULT_JOINT_CLEARANCES.get(joint_type, (0.1, 0.5))
     base_clearance = (clearance_range[0] + clearance_range[1]) / 2.0
     tolerance = abs(clearance_range[1] - clearance_range[0]) / 2.0
@@ -1937,8 +2229,11 @@ def _running_clearance_view(
     printer_id: str | None,
     mating: str | None = None,
     cache: dict[Any, Any] | None = None,
+    same_print: bool = True,
 ) -> tuple[float, dict[str, Any]] | None:
     """Machine-aware running clearance for a joint that has to move.
+
+    ``same_print`` is ``False`` for parts printed apart and fitted by hand.
 
     The static table above answers every printer and every material with
     one number.  Kiln Pro derives the gap from the material's own
@@ -1973,7 +2268,7 @@ def _running_clearance_view(
     # unchanging fact.  The cache is supplied by the CALLER and lives for
     # one call on purpose: a longer-lived one would answer a later call
     # from profiles the user has since edited.
-    key = (joint_type, material, printer_id, mating)
+    key = (joint_type, material, printer_id, mating, same_print)
     if cache is not None and key in cache:
         return cache[key]
     if not _has_pro_license():
@@ -1988,7 +2283,7 @@ def _running_clearance_view(
         from kiln._pro_assembly_bridge import current
 
         verdict = current().running_clearance(
-            mating or _DEFAULT_MOVING_MATING, material, printer_id,
+            mating or _DEFAULT_MOVING_MATING, material, printer_id, same_print=same_print,
         )
     else:
         try:
@@ -1996,6 +2291,7 @@ def _running_clearance_view(
                 mating or _DEFAULT_MOVING_MATING,
                 material,
                 printer_id=printer_id,
+                same_print=same_print,
             )
         except Exception:
             verdict = None
@@ -2014,6 +2310,7 @@ def _running_clearance_view(
         "mating_assumed": mating is None,
         "printer_id": printer_id,
         "printer_resolved": printer_resolved,
+        "same_print": same_print,
     }
     result = (verdict.recommended_mm, detail)
     if cache is not None:
