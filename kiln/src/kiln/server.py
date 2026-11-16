@@ -25529,7 +25529,10 @@ def decorate_surface(
 
     from kiln.output_paths import kiln_output_dir
 
-    work_dir = kiln_output_dir("kiln_decorate_surface")
+    # A folder of this call's own inside the results folder: every file the
+    # carve writes is named after the model, so two carves of same-named
+    # models must never share a folder.
+    work_dir = tempfile.mkdtemp(prefix="carve_", dir=kiln_output_dir("kiln_decorate_surface"))
     warnings: list[str] = []
     # What Kiln's servers add to this tool (kiln._pro_decorate_bridge), and
     # this call as it was made, for the times the servers run it whole.
