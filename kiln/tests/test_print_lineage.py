@@ -210,7 +210,6 @@ class TestSliceThenPrintThenFinish:
         without ``resolve`` in the start's identity, this fails."""
         from kiln import community_outbox, print_lineage
         from kiln.auto_record_hook import reconcile_pending_outcomes
-        from kiln.print_dna import fingerprint_model
 
         model, out = _slice_here(home)
         os.remove(model)  # the record holds the part, not a path to it
@@ -227,17 +226,13 @@ class TestSliceThenPrintThenFinish:
             printer_name="fake-printer", gcode_state="finish", current_job_label="part.gcode",
         )
         assert [r["outcome"] for r in resolved] == ["success"]
-        expected = fingerprint_model(_cube_stl(home / "again.stl"))
         assert len(sent) == 1
-        assert sent[0]["geometric_signature"] == expected.geometric_signature
-        assert sent[0]["geometric_signature_v2"] == expected.geometric_signature_v2
-        # What leaves is the fields it always was: no name, no hash of a file.
-        assert set(sent[0]) == {
-            "geometric_signature", "geometric_signature_v2", "printer_model", "material", "outcome",
-            "print_time_seconds",
-        }
+        # A shared result says how the print went and nothing about the part,
+        # even with the slice record's switch on: no signature, no name, no hash.
+        assert not {"geometric_signature", "geometric_signature_v2"} & set(sent[0])
+        assert set(sent[0]) <= {"printer_model", "material", "outcome", "print_time_seconds"}
 
-    def test_nothing_new_is_shared_while_the_wording_switch_is_off(self, home, monkeypatch):
+    def test_nothing_about_the_part_is_shared_while_the_wording_switch_is_off(self, home, monkeypatch):
         from kiln import community_outbox, print_lineage
         from kiln.auto_record_hook import reconcile_pending_outcomes
 
@@ -247,7 +242,7 @@ class TestSliceThenPrintThenFinish:
         sent: list[Any] = []
         monkeypatch.setattr(community_outbox, "contribute", lambda key, record, **kw: sent.append(record) or {})
         reconcile_pending_outcomes(printer_name="fake-printer", gcode_state="finish", current_job_label="part.gcode")
-        assert sent == []
+        assert all(not {"geometric_signature", "geometric_signature_v2"} & set(r) for r in sent)
         assert print_lineage.signatures_for("part.gcode")[0], "the part is known here all the same"
 
     def test_a_later_slice_to_the_same_name_does_not_take_the_ending(self, home):
