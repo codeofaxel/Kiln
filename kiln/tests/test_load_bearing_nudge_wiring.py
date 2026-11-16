@@ -28,6 +28,16 @@ from kiln.load_bearing_detector import (
 )
 from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
+@pytest.fixture(autouse=True)
+def _a_free_caller(monkeypatch):
+    """The offer is for a caller below Kiln Pro, so these tests are one.  The
+    suite otherwise runs every tool as a paying caller, who reads the caution
+    without it; a test about a paying caller sets its own plan."""
+    import kiln.licensing as licensing
+
+    monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (False, "needs Kiln Pro"))
+
+
 # ---------------------------------------------------------------------------
 # Helpers — capture the registered tool functions off a fake MCP
 # ---------------------------------------------------------------------------

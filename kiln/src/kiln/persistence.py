@@ -755,6 +755,14 @@ class KilnDB:
                 self._conn.execute(
                     f"ALTER TABLE print_outcomes ADD COLUMN {name} {sql_type} DEFAULT NULL"
                 )
+        # Which part the printed file is a print of, as the start resolved
+        # it (``kiln.print_lineage``): NULL for a print started before this
+        # column, or a file Kiln could not see.  Kept on this computer.
+        for name in self.PART_COLUMNS:
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE print_outcomes ADD COLUMN {name} TEXT DEFAULT NULL"
+                )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_print_outcomes_version ON print_outcomes(version_id)"
         )
@@ -2992,6 +3000,10 @@ class KilnDB:
     #: How long after an ending a row with no open start still takes that
     #: ending's progress reading (seconds).
     PROGRESS_JUST_ENDED_S = 60.0
+    #: Which slice record the printed file resolved to at the start, and
+    #: what kind of part that is (``kiln.print_lineage``).  Kept on this
+    #: computer; not among the fields that go to the account.
+    PART_COLUMNS = ("lineage_id", "part_source")
 
     def save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
@@ -3516,6 +3528,23 @@ class KilnDB:
                 "UPDATE print_outcomes SET progress_at_end = ?, layer_at_end = ? "
                 "WHERE id = ? AND progress_at_end IS NULL AND layer_at_end IS NULL",
                 (share, layer_no, row_id),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
+
+    def set_outcome_part(self, job_id: str, lineage_id: str | None, part_source: str | None) -> bool:
+        """Write which part the print *job_id* names is a print of, once.
+
+        The start's own answer (``kiln.print_lineage.resolve``): a row that
+        already carries one keeps it.  Returns whether a row took it.
+        """
+        if not job_id or not isinstance(lineage_id, str) or not lineage_id.strip():
+            return False
+        with self._write_lock:
+            cur = self._conn.execute(
+                "UPDATE print_outcomes SET lineage_id = ?, part_source = ? "
+                "WHERE job_id = ? AND lineage_id IS NULL",
+                (lineage_id.strip(), part_source if isinstance(part_source, str) and part_source else None, job_id),
             )
             self._conn.commit()
             return bool(getattr(cur, "rowcount", 0))

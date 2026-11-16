@@ -192,6 +192,14 @@ def note_wrapped(gcode_path: str, wrapped_path: str) -> None:
             _write_json(_SLICES_FILE, kept)
     except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
         logger.debug("monitor_twin.note_wrapped failed", exc_info=True)
+    # The package is a print of the part its G-code is (kiln.print_lineage);
+    # here, because both wrap doors already report to this function.
+    try:
+        from kiln.print_lineage import note_wrapped as _lineage_wrapped
+
+        _lineage_wrapped(gcode_path, wrapped_path)
+    except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
+        logger.debug("wrap lineage note failed", exc_info=True)
 
 
 def sliced_entry_for(file_name: str) -> dict[str, Any] | None:

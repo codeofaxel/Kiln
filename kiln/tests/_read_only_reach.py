@@ -792,6 +792,11 @@ DECIDED: dict[str, str] = {
         "remembers, paths only, which model a slice was drawn from, so a print "
         "started from it later can show that model; nothing is copied."
     ),
+    "kiln.print_lineage.record_slice: store write _save": (
+        "remembers, on this computer, which model a file Kiln just sliced was "
+        "made from, and ends that new file with one comment line naming the "
+        "record; no command in it changes and nothing is sent."
+    ),
     "kiln.community_sync.fetch_community_insights: store write _write_cache": (
         "an hour's cache of a summary Kiln's servers computed, so the same "
         "question does not ask the network twice."
