@@ -306,6 +306,45 @@ def test_a_flat_environment_convolves_to_itself(
         assert np.allclose(table, want, atol=1e-4)
 
 
+def _studio_only() -> "stage_paint._Look":
+    """The stand-in look with every lamp off: what a face shows is the studio."""
+    stage_paint._deps()
+    look = stage_paint._Look(_stage_stub.RIG, _stage_stub.LIFT, _stage_stub.RECIPE)
+    look.lights = ()
+    look.ambient = (look.ambient[0], 0.0)
+    look.hemisphere = (look.hemisphere[0], look.hemisphere[1], 0.0)
+    return look
+
+
+def test_a_face_turned_to_the_bounce_card_catches_it() -> None:
+    """The studio's bounce card sits at one azimuth.  A black face that
+    mirrors it, seen head-on, is lit by it; the same face turned to the
+    opposite azimuth, at the same height, is not."""
+    look = _studio_only()
+    card = _stage_stub.RIG["bounce"]
+    lon = (card["u"] - 0.5) * 2 * np.pi
+    lat = (card["v"] - 0.5) * np.pi
+    toward = np.array([np.cos(lat) * np.cos(lon), np.sin(lat), np.cos(lat) * np.sin(lon)])
+    away = toward * np.array([-1.0, 1.0, -1.0])
+    faces = np.stack([toward, away])
+    lit = stage_paint._shade(look, np.zeros(3), faces, faces, studio=1.0, gloss=0.5)
+    assert lit[0].mean() > 1.2 * lit[1].mean(), lit
+
+
+@pytest.mark.parametrize("view_deg", [0.0, 60.0])
+def test_a_dark_parts_studio_reflection_follows_its_gloss(view_deg: float) -> None:
+    """three's split sum for a dielectric: the reflection's base is 0.04
+    times the specular intensity and its grazing value the specular
+    intensity itself.  With no diffuse colour the studio's reflection is
+    proportional to the gloss, seen head-on and at a grazing view alike."""
+    look = _studio_only()
+    normal = np.array([[0.0, 0.0, 1.0]])
+    view = np.array([[0.0, np.sin(np.radians(view_deg)), np.cos(np.radians(view_deg))]])
+    low = stage_paint._shade(look, np.zeros(3), normal, view, studio=1.0, gloss=0.25)[0].mean()
+    high = stage_paint._shade(look, np.zeros(3), normal, view, studio=1.0, gloss=0.5)[0].mean()
+    assert high / low == pytest.approx(2.0, abs=0.05), (low, high)
+
+
 def test_the_environment_is_brightest_overhead_and_lit_underneath() -> None:
     """The term has to VARY with the normal — that is the whole fix.
 
@@ -318,7 +357,7 @@ def test_the_environment_is_brightest_overhead_and_lit_underneath() -> None:
     stage_paint._deps()
     look = _look()
     diffuse, _spec = stage_paint._env_tables(look)
-    down, horizon, up = diffuse[0].mean(), diffuse[128].mean(), diffuse[-1].mean()
+    down, horizon, up = diffuse[0].mean(), diffuse[len(diffuse) // 2].mean(), diffuse[-1].mean()
     assert up > horizon > down > 0.0, (up, horizon, down)
     assert up / down > 3.0, f"too flat to be the gradient: {up / down:.2f}"
     # Underneath, the environment is the only light there is: it must be

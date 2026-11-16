@@ -326,8 +326,6 @@ def _filmic(rgb):
     return np.clip(v, 0.0, 1.0)
 
 
-#: Knots of the ``(diffuse, levels)`` lookup tables over the direction's y.
-_ENV_TABLE_N = 257  # the curves are smooth; 257 knots resolve them to <0.1/255
 
 
 def _env_gradient_srgb(look, s):
@@ -402,21 +400,21 @@ def _roughness_to_mip(roughness, lod_max: int):
     return np.clip(mip, _CUBEUV_KNOTS[0][1], float(lod_max))
 
 
-def _env_level_lookup(levels, y, mip, lod_max: int):
-    """``textureCubeUV`` from the level tables: two levels, mixed by the mip's fraction."""
+def _env_level_lookup(levels, dirs, mip, lod_max: int):
+    """``textureCubeUV`` from the level fields along unit *dirs* ``(N, 3)``:
+    two levels, mixed by the mip's fraction."""
     np = _np
     mip_int = np.floor(mip)
     frac = (mip - mip_int)[:, None]
     coarse = (lod_max - mip_int).astype(np.int64)  # mip m is level lod_max - m
     fine = np.maximum(coarse - 1, 0)
-    idx = np.clip((y + 1.0) * 0.5 * (_ENV_TABLE_N - 1), 0, _ENV_TABLE_N - 1.001)
-    lo = idx.astype(np.int64)
-    t = (idx - lo)[:, None]
-
-    def at(level):
-        return levels[level, lo] * (1.0 - t) + levels[level, lo + 1] * t
-
-    return at(coarse) * (1.0 - frac) + at(fine) * frac
+    out = np.zeros((len(dirs), 3))
+    for level in np.unique(np.concatenate([coarse, fine])):
+        for which, weight in ((coarse, 1.0 - frac), (fine, frac)):
+            sel = which == level
+            if sel.any():
+                out[sel] += weight[sel] * _latlong_sample(levels[level], dirs[sel])
+    return out
 
 
 def _latlong_sample(field, dirs):
@@ -487,9 +485,9 @@ def _build_env_tables(look):
     The chain runs as the generator runs it -- each level blurred from the
     last by ``sqrt(sigma_i^2 - sigma_(i-1)^2)``, latitudinal then
     longitudinal, about the next of its ten pole axes -- on a lat-long
-    grid rather than cube faces.  The gradient varies with elevation
-    alone and the result stays within 0.02 of that symmetry, so each level
-    is averaged over azimuth into a table over the direction's y.
+    grid rather than cube faces.  Every level is kept whole and read by
+    direction: the studio's bounce card sits at one azimuth, so only a face
+    turned toward it catches it.
     """
     np = _np
     lod_max, sizes, sigmas = _pmrem_plan(look)
@@ -501,39 +499,28 @@ def _build_env_tables(look):
                      np.cos(lat_g) * np.cos(lon_g)], axis=-1)
 
     field = _env_radiance(look, dirs.reshape(-1, 3)).reshape(rows, cols, 3)
-    levels = [field.mean(axis=1)]
+    levels = [field]
     for i in range(1, len(sizes)):
         sigma = math.sqrt(sigmas[i] ** 2 - sigmas[i - 1] ** 2)
         pole = _PMREM_AXES[(i - 1) % len(_PMREM_AXES)]
         field = _pmrem_half_blur(field, dirs, sigma, sizes[i - 1], pole, True)
         field = _pmrem_half_blur(field, dirs, sigma, sizes[i], pole, False)
-        levels.append(field.mean(axis=1))
+        levels.append(field)
 
-    knots = np.linspace(-1.0, 1.0, _ENV_TABLE_N)
-    lat_y = np.sin(lat)
-    tables = np.stack([
-        np.stack([np.interp(knots, lat_y, level[:, ch]) for ch in range(3)], axis=-1)
-        for level in levels
-    ])
+    levels = np.stack(levels)
+    flat = dirs.reshape(-1, 3)
     diffuse = _env_level_lookup(
-        tables, knots, np.full(len(knots), _roughness_to_mip(1.0, lod_max)), lod_max
-    )
-    return diffuse, tables
+        levels, flat, np.full(len(flat), _roughness_to_mip(1.0, lod_max)), lod_max
+    ).reshape(rows, cols, 3)
+    return diffuse, levels
 
 
 def _env_tables(look):
-    """``(diffuse, levels)``: the roughness-1 table and every PMREM level, built once per look."""
+    """``(diffuse, levels)``: the roughness-1 field and every PMREM level, as
+    lat-long fields ``(rows, cols, 3)``, built once per look."""
     if look.env_tables is None:
         look.env_tables = _build_env_tables(look)
     return look.env_tables
-
-
-def _env_lookup(table, y):
-    """Linear RGB from a direction-y table, linearly interpolated."""
-    idx = _np.clip((y + 1.0) * 0.5 * (_ENV_TABLE_N - 1), 0, _ENV_TABLE_N - 1.001)
-    lo = idx.astype(_np.int64)
-    t = (idx - lo)[:, None]
-    return table[lo] * (1.0 - t) + table[lo + 1] * t
 
 
 _np = None  # populated by _deps(); module import stays dependency-free
@@ -823,7 +810,7 @@ def _shade(look, albedo_lin, normals, view, geometry_roughness=None, *,
     # compensation follows, and the diffuse half is attenuated by what the
     # specular half took.
     diff_tbl, levels = _env_tables(look)
-    env_d = env_intensity * _env_lookup(diff_tbl, normals[:, 1])
+    env_d = env_intensity * _latlong_sample(diff_tbl, normals)
     # reflect(-view, normal) on the RAW dot: a smooth normal near the
     # silhouette can face away from the eye, and three does not clamp here.
     refl = 2.0 * ndv[:, None] * normals - view
@@ -831,13 +818,13 @@ def _shade(look, albedo_lin, normals, view, geometry_roughness=None, *,
     refl = refl / np.maximum(np.linalg.norm(refl, axis=1), 1e-12)[:, None]
     lod_max = _pmrem_plan(look)[0]
     env_s = env_intensity * _env_level_lookup(
-        levels, refl[:, 1], _roughness_to_mip(roughness, lod_max), lod_max
+        levels, refl, _roughness_to_mip(roughness, lod_max), lod_max
     )
     r_x = 1.0 - roughness
     a004 = np.minimum(r_x * r_x, np.exp2(-9.28 * nv)) * r_x + (-0.0275 * roughness + 0.0425)
     fab_x = (-1.04 * a004 + (-0.572 * roughness + 1.04))[:, None]
     fab_y = (1.04 * a004 + (0.022 * roughness - 0.04))[:, None]
-    fss_ess = f0 * fab_x + fab_y
+    fss_ess = f0 * fab_x + f90 * fab_y
     ems = 1.0 - (fab_x + fab_y)
     favg = f0 + (1.0 - f0) * 0.047619
     multi = fss_ess * favg / (1.0 - ems * favg) * ems
