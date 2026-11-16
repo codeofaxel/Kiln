@@ -90,6 +90,8 @@ MAX_ACT_STEPS = 24
 _SLICE_TIMEOUT_S = 300
 
 _NUMBER = r"\d+(?:\.\d+)?"
+#: A slicer value given as millimetres or as a share of another (``45%``).
+_NUMBER_OR_SHARE = rf"{_NUMBER}%?"
 #: Slicer flags a placement may carry, each with the shape its value must
 #: have (``None``: the flag takes no value).  Nothing that names a file, a
 #: script or an output place is here, so a step cannot make the slicer
@@ -105,13 +107,28 @@ _SLICE_FLAGS: dict[str, str | None] = {
     # on it matches what is under it.
     "--layer-height": _NUMBER,
     "--nozzle-diameter": _NUMBER,
+    "--filament-diameter": _NUMBER,
+    "--extrusion-multiplier": _NUMBER,
     "--perimeters": r"\d{1,2}",
     "--top-solid-layers": r"\d{1,2}",
     "--bottom-solid-layers": r"\d{1,2}",
     "--fill-density": r"\d{1,3}%",
     "--fill-pattern": r"[a-z0-9]{3,20}",
     "--support-material": None,
-    "--first-layer-speed": r"\d{1,3}%",
+    "--extrusion-width": _NUMBER_OR_SHARE,
+    "--perimeter-extrusion-width": _NUMBER_OR_SHARE,
+    "--external-perimeter-extrusion-width": _NUMBER_OR_SHARE,
+    "--infill-extrusion-width": _NUMBER_OR_SHARE,
+    "--solid-infill-extrusion-width": _NUMBER_OR_SHARE,
+    "--top-infill-extrusion-width": _NUMBER_OR_SHARE,
+    "--first-layer-extrusion-width": _NUMBER_OR_SHARE,
+    "--perimeter-speed": _NUMBER_OR_SHARE,
+    "--external-perimeter-speed": _NUMBER_OR_SHARE,
+    "--infill-speed": _NUMBER_OR_SHARE,
+    "--solid-infill-speed": _NUMBER_OR_SHARE,
+    "--top-solid-infill-speed": _NUMBER_OR_SHARE,
+    "--travel-speed": _NUMBER,
+    "--first-layer-speed": _NUMBER_OR_SHARE,
     "--elefant-foot-compensation": _NUMBER,
     "--raft-first-layer-expansion": _NUMBER,
     "--disable-fan-first-layers": r"\d{1,2}",
@@ -125,9 +142,16 @@ def _refusal(tool: str, code: str, message: str) -> dict[str, Any]:
     }
 
 
+def accepted_slice_flags() -> list[str]:
+    """Every slicer flag a served slice step may carry, in the order kept
+    here.  Sent with each served call, so the servers ask this install only
+    for a slice it will make."""
+    return list(_SLICE_FLAGS)
+
+
 def _checked_slicer_args(args: Any) -> list[str] | None:
     """*args* when every flag is an allowed one with a well-formed value."""
-    if not isinstance(args, list) or len(args) > 40:
+    if not isinstance(args, list) or len(args) > 80:
         return None
     out: list[str] = []
     i = 0
