@@ -469,3 +469,114 @@ class TestEveryPathBelongsToItsNewestSlice:
         assert entry is not None
         assert entry["input"] == str(mesh)
         assert monitor_twin.active_twin("p1")["gcode"] is None
+
+
+class TestAPrintCarriedOn:
+    """A file Kiln made to carry on the print on the printer keeps that
+    print's toolpath beside it, so the Monitor can show the whole print."""
+
+    def _started(self, twin_dir, tmp_path):
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("bambu_a1", "part.gcode")
+        return mesh, gcode
+
+    def test_the_original_is_kept_beside_the_file_that_carries_it_on(self, twin_dir, tmp_path):
+        mesh, gcode = self._started(twin_dir, tmp_path)
+        rest = tmp_path / "part_resume_L12.gcode"
+        rest.write_text("; the rest of the print\nG1 X20 Y20 E1\n")
+
+        monitor_twin.note_print_started(
+            "bambu_a1", rest.name, continues=(str(rest), monitor_twin._sha256(gcode)),
+        )
+
+        rec = monitor_twin.active_twin("bambu_a1")
+        assert Path(rec["gcode"]).read_text() == rest.read_text()
+        assert Path(rec["original"]).read_text() == gcode.read_text()
+        assert Path(rec["mesh"]).read_bytes() == mesh.read_bytes()
+
+    def test_a_file_made_from_another_print_keeps_nothing_of_this_one(self, twin_dir, tmp_path):
+        self._started(twin_dir, tmp_path)
+        rest = tmp_path / "other_resume_L3.gcode"
+        rest.write_text("G1 X1 Y1 E1\n")
+
+        monitor_twin.note_print_started("bambu_a1", rest.name, continues=(str(rest), "0" * 64))
+
+        rec = monitor_twin.active_twin("bambu_a1")
+        assert rec["gcode"] is None and rec["mesh"] is None
+        assert "original" not in rec
+        assert not (twin_dir / "bambu_a1-original.gcode").exists()
+
+    def test_a_new_print_leaves_no_original_behind(self, twin_dir, tmp_path):
+        _, gcode = self._started(twin_dir, tmp_path)
+        rest = tmp_path / "part_resume_L12.gcode"
+        rest.write_text("G1 X20 Y20 E1\n")
+        monitor_twin.note_print_started(
+            "bambu_a1", rest.name, continues=(str(rest), monitor_twin._sha256(gcode)),
+        )
+
+        monitor_twin.note_print_started("bambu_a1", "part.gcode")
+
+        rec = monitor_twin.active_twin("bambu_a1")
+        assert "original" not in rec
+        assert not list(twin_dir.glob("*-original.gcode"))
+
+    def test_a_print_carried_on_twice_holds_the_file_being_printed_alone(self, twin_dir, tmp_path):
+        _, gcode = self._started(twin_dir, tmp_path)
+        first = tmp_path / "part_resume_L12.gcode"
+        first.write_text("G1 X20 Y20 E1\n")
+        monitor_twin.note_print_started(
+            "bambu_a1", first.name, continues=(str(first), monitor_twin._sha256(gcode)),
+        )
+        second = tmp_path / "part_resume_L20.gcode"
+        second.write_text("G1 X30 Y30 E1\n")
+
+        monitor_twin.note_print_started(
+            "bambu_a1", second.name, continues=(str(second), monitor_twin._sha256(first)),
+        )
+
+        assert "original" not in monitor_twin.active_twin("bambu_a1")
+
+    def test_publish_sends_the_original_with_the_file_being_printed(self, twin_dir, tmp_path, monkeypatch):
+        _, gcode = self._started(twin_dir, tmp_path)
+        rest = tmp_path / "part_resume_L12.gcode"
+        rest.write_text("; the rest\nG1 X20 Y20 E1\n")
+        monitor_twin.note_print_started(
+            "bambu_a1", rest.name, continues=(str(rest), monitor_twin._sha256(gcode)),
+        )
+
+        import urllib.request
+        from types import SimpleNamespace
+
+        sent: dict = {}
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "status": "success", "gcode_url": "/g", "original_gcode_url": "/o",
+                }).encode()
+
+        def fake_open(request, timeout=None):
+            sent["body"] = request.data
+            return _Resp()
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_open)
+        monkeypatch.setattr(
+            "kiln.auth_session.resolve_api_bearer", lambda: SimpleNamespace(token="t" * 20),
+        )
+
+        answer = monitor_twin.publish("bambu_a1")
+
+        assert answer.get("success") is True, answer
+        assert answer["original_gcode_url"] == "/o"
+        body = sent["body"]
+        assert b'name="original_gcode"' in body
+        start = body.index(b"\r\n\r\n", body.index(b'name="original_gcode"')) + 4
+        packed = body[start: body.index(b"\r\n--", start)]
+        assert gzip.GzipFile(fileobj=io.BytesIO(packed)).read().decode() == gcode.read_text()

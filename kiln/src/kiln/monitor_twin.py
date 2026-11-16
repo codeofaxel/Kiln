@@ -348,7 +348,12 @@ def _written_after(path: str, since: float | None) -> bool:
 
 
 def note_print_started(
-    printer_name: str, file_name: str, *, machine: str = "", sent_sha256: str | None = None,
+    printer_name: str,
+    file_name: str,
+    *,
+    machine: str = "",
+    sent_sha256: str | None = None,
+    continues: tuple[str, str] | None = None,
 ) -> None:
     """A print just started: join the printer-side name to the sliced pair
     and retain copies of the toolpath (+ mesh) for the Monitor's twin.
@@ -367,12 +372,21 @@ def note_print_started(
     wrap when the wrap is not older than the slice) is, byte for byte, what
     Kiln sent under that name (*sent_sha256*); otherwise the job is not
     known to be that slice, and nothing can be resumed from it.
+
+    *continues* is given when the file being started is one Kiln made to
+    carry on the print already on this printer: ``(path of that file on this
+    machine, SHA-256 of the print's file it was made from)``.  When the
+    record held for this printer is of that very print, its toolpath is kept
+    beside the new one as ``original`` and its model stays, so the Monitor
+    can show the whole print.  A print carried on a second time keeps no
+    original: the record holds the file being printed alone.
     """
     try:
         base = os.path.basename(str(file_name or ""))
         match = sliced_entry_for(file_name)
 
         slug = _slug(printer_name)
+        carried = _carry_original(slug, continues)
         record: dict[str, Any] = {
             "file_name": base,
             "printer_name": printer_name or "default",
@@ -413,6 +427,24 @@ def note_print_started(
                 shutil.copy2(src_mesh, dst_mesh)
                 record["mesh"] = str(dst_mesh)
 
+        if carried is not None and continues is not None:
+            made = str(continues[0] or "")
+            if (
+                record["gcode"] is None
+                and made.lower().endswith((".gcode", ".gco", ".g"))
+                and os.path.isfile(made)
+                and os.path.getsize(made) <= _MAX_GCODE_BYTES
+            ):
+                dst_gcode = _TWIN_DIR / f"{slug}-current.gcode"
+                shutil.copy2(made, dst_gcode)
+                record["gcode"] = str(dst_gcode)
+            if record["gcode"] is not None:
+                record["original"] = carried["original"]
+                if record["mesh"] is None:
+                    record["mesh"] = carried["mesh"]
+        if not record.get("original"):
+            (_TWIN_DIR / f"{slug}-original.gcode").unlink(missing_ok=True)
+
         active = _read_json(_ACTIVE_FILE, {})
         if not isinstance(active, dict):
             active = {}
@@ -420,6 +452,29 @@ def note_print_started(
         _write_json(_ACTIVE_FILE, active)
     except Exception:  # noqa: BLE001 — retention never blocks a print
         logger.debug("monitor_twin.note_print_started failed", exc_info=True)
+
+
+def _carry_original(slug: str, continues: tuple[str, str] | None) -> dict[str, Any] | None:
+    """Set aside the toolpath of the print the record for *slug* holds, when
+    *continues* says the file being started carries that very print on.
+
+    Returns ``{"original": path, "mesh": path or None}``, or ``None`` when
+    there is nothing to carry: no such claim, no record, a record of another
+    print, or a record that is itself a print carried on.
+    """
+    if not continues or not continues[1]:
+        return None
+    active = _read_json(_ACTIVE_FILE, {})
+    held = active.get(slug) if isinstance(active, dict) else None
+    if not isinstance(held, dict) or held.get("original"):
+        return None
+    kept = str(held.get("gcode") or "")
+    if not kept or not os.path.isfile(kept) or _sha256(kept) != continues[1]:
+        return None
+    original = _TWIN_DIR / f"{slug}-original.gcode"
+    shutil.copy2(kept, original)
+    mesh = str(held.get("mesh") or "")
+    return {"original": str(original), "mesh": mesh if mesh and os.path.isfile(mesh) else None}
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +566,7 @@ def rename_printer(old_name: str, new_name: str) -> bool:
     record = active.pop(old_slug)
     if isinstance(record, dict):
         record["printer_name"] = new_name
-        for key in ("gcode", "mesh"):
+        for key in ("gcode", "mesh", "original"):
             path = record.get(key)
             if isinstance(path, str) and path and os.path.isfile(path):
                 target = _TWIN_DIR / os.path.basename(path).replace(f"{old_slug}-", f"{new_slug}-", 1)
@@ -654,6 +709,21 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
                 "",
             ),
         ]
+        original_path = rec.get("original")
+        if original_path and os.path.isfile(str(original_path)):
+            # The print this one carries on, when it fits: without it the
+            # Monitor shows the file being printed alone.
+            whole = io.BytesIO()
+            with (
+                open(str(original_path), "rb") as src,
+                gzip.GzipFile(fileobj=whole, mode="wb", compresslevel=6) as zf,
+            ):
+                while chunk := src.read(_GZIP_CHUNK):
+                    zf.write(chunk)
+                    if whole.tell() + len(gz) > _MAX_GCODE_GZ_UPLOAD:
+                        break
+            if whole.tell() + len(gz) <= _MAX_GCODE_GZ_UPLOAD:
+                fields.append(("original_gcode", "original.gcode.gz", whole.getvalue(), "application/gzip"))
         mesh_path = rec.get("mesh")
         if mesh_path and os.path.isfile(str(mesh_path)):
             mesh_name = os.path.basename(str(mesh_path))
@@ -696,6 +766,7 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
         "artifact_token": answer.get("artifact_token"),
         "stl_url": answer.get("stl_url"),
         "gcode_url": answer.get("gcode_url"),
+        "original_gcode_url": answer.get("original_gcode_url"),
         "format": answer.get("format"),
         "expires_in": answer.get("expires_in"),
         "file_name": rec.get("file_name"),
