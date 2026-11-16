@@ -617,3 +617,38 @@ class TestThePrintsOwnSettings:
     ])
     def test_nothing_that_names_a_file_or_runs_anything_is_let_through(self, bad):
         assert served_steps._checked_slicer_args(bad) is None
+
+
+class TestTheServersAreToldWhichFlagsThisInstallTakes:
+    """Each served call names every slicer flag this install accepts, so a
+    slice is asked for only in words it will run."""
+
+    def test_a_served_call_carries_the_flag_list(self, monkeypatch, tmp_path):
+        from tests._signed_in import sign_in
+
+        sign_in(monkeypatch, tmp_path, "lk")
+        monkeypatch.setenv("KILN_API_URL", "https://api.test")
+        from kiln import server
+
+        seen: list = []
+
+        class _Resp:
+            def read(self):
+                return b"{}"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def _open(req, timeout=None):
+            seen.append(req)
+            return _Resp()
+
+        monkeypatch.setattr("urllib.request.urlopen", _open)
+        server._pro_api_call("generate_coaster", size_mm=80)
+
+        sent = {k.lower(): v for k, v in seen[0].header_items()}["x-kiln-slice-flags"].split(",")
+        assert sent == served_steps.accepted_slice_flags()
+        assert set(sent) == set(served_steps._SLICE_FLAGS)

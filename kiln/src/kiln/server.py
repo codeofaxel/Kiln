@@ -21169,8 +21169,16 @@ def _pro_api_call(
         headers[_SERVED_JOB_HEADER] = "1"
         # This install saves the files an answer names (kiln.served_makes).
         headers[_SERVED_FILES_HEADER] = "1"
-        # ...and carries out the steps a tool may ask of it (kiln.served_steps).
+        # ...and carries out the steps a tool may ask of it (kiln.served_steps),
+        # naming the slicer flags it will take, so a slice is asked for only
+        # in words this install accepts.
         headers[_SERVED_STEPS_HEADER] = "1"
+        try:
+            from kiln.served_steps import accepted_slice_flags
+
+            headers[_SERVED_SLICE_FLAGS_HEADER] = ",".join(accepted_slice_flags())
+        except Exception:  # noqa: BLE001 — a missing list means the servers ask nothing extra
+            pass
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
@@ -21233,6 +21241,7 @@ _LOCAL_STEPS_SCHEMA_VERSION = 1
 _SERVED_JOB_HEADER = "X-Kiln-Tool-Async"
 _SERVED_FILES_HEADER = "X-Kiln-Result-Files"
 _SERVED_STEPS_HEADER = "X-Kiln-Local-Steps"
+_SERVED_SLICE_FLAGS_HEADER = "X-Kiln-Slice-Flags"
 #: How long a job is waited for: the servers stop one at fifteen minutes.
 _SERVED_JOB_WAIT_S = 15 * 60 + 30
 #: How often a job is asked about: soon after it is accepted (many finish
