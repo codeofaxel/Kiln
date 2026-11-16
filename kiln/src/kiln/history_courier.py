@@ -1119,8 +1119,12 @@ def push(
                 tool, design_id, branch["branch_id"], make_room_for=make_room_for,
                 vault=None if own else vault, _names_settled=True,
             )
-    if _diverged(answer):
-        out = _keep_as_this_computers(tool, design_id, branch, body, answer, vault=None if own else vault)
+    if _diverged(answer) or _name_taken(answer):
+        # The account's branch moved on, or another branch there holds this
+        # name: either way this computer's work is kept as a copy of its own.
+        out = _keep_as_this_computers(
+            tool, design_id, branch, body, answer, vault=None if own else vault, taken=_name_taken(answer),
+        )
         if out.get("status") == "error":
             return out
     elif answer.get("status") == "error":
@@ -1240,6 +1244,12 @@ def _diverged(answer: dict[str, Any]) -> bool:
     )
 
 
+def _name_taken(answer: dict[str, Any]) -> bool:
+    """Whether a push was refused because another branch of the design, in
+    the account, holds the pushed branch's name."""
+    return answer.get("status") == "error" and answer.get("code") == _NAME_TAKEN
+
+
 def _plan_refusal(answer: dict[str, Any]) -> bool:
     """Whether a refusal is the person's plan not including what was asked."""
     code = str(answer.get("code") or "")
@@ -1256,10 +1266,12 @@ def _own_branch_id(branch_id: str, computer: str) -> str:
 
 def _keep_as_this_computers(
     tool: str, design_id: str, branch: dict[str, Any], body: dict[str, Any], refused: dict[str, Any],
-    *, vault: Any = None,
+    *, vault: Any = None, taken: bool = False,
 ) -> dict[str, Any]:
     """Keep this computer's versions of a branch the account moved on, as
     ``<branch>@<computer>``: a branch of their own, the moved one untouched.
+    With *taken*, the account holds another branch under this name (made
+    elsewhere), and the copy is kept the same way; that branch is untouched.
 
     A refusal of the plan's (a design the plan does not keep) leaves the
     server's own answer (*refused*) as it was; nothing is recorded here
@@ -1301,6 +1313,24 @@ def _keep_as_this_computers(
         members = [{**m, "branch_id": kept_id} for m in members]
     with _opened(vault) as v:
         v.keep_branch_copy(own, members)
+    if taken:
+        return {
+            "status": "success",
+            "push": answer,
+            "design_id": design_id,
+            "branch_id": own_id,
+            "kept_as": own_name,
+            "name_taken": {
+                "branch": name,
+                "branch_id": branch["branch_id"],
+                "held_by": refused.get("held_by"),
+            },
+            "said": (
+                f"Your Kiln account already keeps another branch named {name} in {design_id}, made "
+                f"elsewhere, so Kiln kept this computer's work there as {own_name} and replaced nothing. "
+                f"Nothing was merged."
+            ),
+        }
     pull_cmd = kiln_command("cloud pull", design_id, *(() if name == "main" else ("--branch", name)))
     check = kiln_command("merge check", design_id, own_name, name)
     run = kiln_command("merge run", design_id, own_name, name)

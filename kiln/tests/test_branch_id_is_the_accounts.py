@@ -374,3 +374,85 @@ class TestWhatAPushSays:
 
         assert account.pushes[0]["branch"]["branch_id"] == made_as
         assert [m["version_id"] for m in account.pushes[0]["memberships"]] == IDS
+
+
+class _NameTakenAccount(_Account):
+    """An account that keeps another branch, made elsewhere, under the first name pushed."""
+
+    OTHER = "0th3" * 8
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.taken = True
+
+    def request(self, tool, method, path, body=None, **kw):
+        if path.endswith("/branches/push") and self.taken and "@" not in body["branch"]["name"]:
+            self.pushes.append(body)
+            return {"status": "error", "http_status": 409, "code": "BRANCH_NAME_TAKEN",
+                    "error": f"another branch of this design is named {body['branch']['name']}",
+                    "held_by": self.OTHER, "held_head": "e" * 32}
+        return super().request(tool, method, path, body, **kw)
+
+
+@pytest.fixture
+def taken(home, monkeypatch):
+    stand_in = _NameTakenAccount()
+    monkeypatch.setattr(courier, "_request", stand_in.request)
+    return stand_in
+
+
+class TestANameTakenElsewhereKeepsThisComputersWork:
+    """Another branch of the design, made elsewhere, already holds the name:
+    this computer's work is kept in the account as its own copy, under a name
+    of its own, as when the account's branch moved on; nothing is replaced."""
+
+    def test_the_work_is_kept_as_this_computers_copy(self, home, taken):
+        _made_here(home)
+
+        out = courier.push("cloud_push_branch", "vase")
+
+        assert out["status"] == "success" and out["kept_as"].startswith("main@")
+        assert taken.pushes[-1]["branch"]["name"] == out["kept_as"]
+        assert [v["version_id"] for v in taken.pushes[-1]["versions"]] == IDS
+        vault = HistoryVault()
+        try:
+            kept = vault.branch_named("vase", out["kept_as"])
+            assert [m["version_id"] for m in vault.memberships(kept["branch_id"])] == IDS
+        finally:
+            vault.close()
+
+    def test_the_answer_says_another_branch_has_the_name(self, home, taken):
+        _made_here(home)
+
+        out = courier.push("cloud_push_branch", "vase")
+
+        assert "another branch named main" in out["said"]
+        assert "moved on" not in out["said"]
+        assert out["name_taken"]["held_by"] == _NameTakenAccount.OTHER
+        assert "diverged" not in out
+
+    def test_a_second_push_finds_the_same_copy(self, home, taken):
+        _made_here(home)
+        first = courier.push("cloud_push_branch", "vase")
+
+        second = courier.push("cloud_push_branch", "vase")
+
+        assert second["kept_as"] == first["kept_as"] and second["branch_id"] == first["branch_id"]
+
+    def test_a_copy_name_also_taken_is_refused_as_it_was(self, home, taken, monkeypatch):
+        _made_here(home)
+        real = taken.request
+
+        def every_name_taken(tool, method, path, body=None, **kw):
+            if path.endswith("/branches/push"):
+                taken.pushes.append(body)
+                return {"status": "error", "http_status": 409, "code": "BRANCH_NAME_TAKEN",
+                        "error": "taken", "held_by": _NameTakenAccount.OTHER, "held_head": "e" * 32}
+            return real(tool, method, path, body, **kw)
+
+        monkeypatch.setattr(courier, "_request", every_name_taken)
+
+        out = courier.push("cloud_push_branch", "vase")
+
+        assert out["status"] == "error" and out["code"] == "BRANCH_NAME_TAKEN"
+        assert out["kept_as_refused"]["code"] == "BRANCH_NAME_TAKEN"
