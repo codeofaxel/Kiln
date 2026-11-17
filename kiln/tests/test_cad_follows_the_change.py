@@ -216,6 +216,47 @@ def test_a_turn_keeps_the_cad(tools, tmp_path):
     assert after["box"] == pytest.approx(_mesh_box(reply["output_path"]), abs=0.05)
 
 
+def test_the_reply_says_what_the_change_was_as_one_map(tools, tmp_path):
+    """Every corner of the part's CAD as it was, sent through the reply's
+    map, lands on the CAD as it is: for a resize, a turn and a mirror."""
+    import hashlib
+    import itertools
+
+    for door, kwargs, key in (
+        ("scale_mesh_to_fit", {"max_x_mm": 15.0, "max_y_mm": 15.0, "max_z_mm": 15.0, "output_path": "o.stl"}, "path"),
+        ("rotate_model", {"rotation_z": 90.0, "rotation_x": 30.0, "output_path": "o.stl"}, "output_path"),
+        ("mirror_mesh_model", {"axis": "y", "output_path": "o.stl"}, "path"),
+    ):
+        folder = tmp_path / door
+        folder.mkdir()
+        step, stl = _cad_part(folder)
+        kwargs = {**kwargs, "output_path": str(folder / kwargs["output_path"])}
+        name = "input_path" if door == "rotate_model" else "file_path"
+        reply = tools[door](**{name: stl}, **kwargs)
+        after = _followed(reply)
+        change = reply["cad_change"]
+        assert change["kind"] == "placed"
+        assert change["mirrored"] is (door == "mirror_mesh_model")
+        assert change["from_sha256"] == hashlib.sha256(Path(step).read_bytes()).hexdigest()
+        m = [change["matrix"][i * 4:i * 4 + 4] for i in range(4)]
+        assert m[3] == [0.0, 0.0, 0.0, 1.0]
+        was = _read(step)["box"]
+        corners = [
+            [sum(m[i][j] * c[j] for j in range(3)) + m[i][3] for i in range(3)]
+            for c in itertools.product((was[0], was[3]), (was[1], was[4]), (was[2], was[5]))
+        ]
+        lows = [min(c[i] for c in corners) for i in range(3)]
+        highs = [max(c[i] for c in corners) for i in range(3)]
+        if door != "rotate_model":  # a tilted box's corners bound it loosely
+            assert (*lows, *highs) == pytest.approx(after["box"], abs=1e-3)
+        det = (
+            m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+        )
+        assert det == pytest.approx(after["volume"] / _read(step)["volume"] * (-1 if change["mirrored"] else 1), rel=1e-6)
+
+
 def test_a_turn_onto_its_side_keeps_the_cad(tools, tmp_path):
     _step, stl = _cad_part(tmp_path)
     reply = tools["rotate_model"](

@@ -11,8 +11,9 @@ CONTRACT
   overwrite its input.  It reads the input's size and finds its CAD file; it
   never raises and never changes a file.
 - :meth:`Watched.follow` is called AFTER the door wrote its output.  It
-  returns the reply fields to merge in: ``step_path`` and ``cad_kept`` True
-  when the CAD followed; ``cad_kept`` False and a ``cad_note`` sentence when
+  returns the reply fields to merge in: ``step_path``, ``cad_kept`` True and
+  ``cad_change`` (the map from the CAD as it was to the CAD as it is, and
+  the hash of the CAD it was applied to) when the CAD followed; ``cad_kept`` False and a ``cad_note`` sentence when
   the part had CAD and this change could not be made to it; nothing at all
   for a part with no CAD.  It never raises: the mesh edit stands either way.
 - The CAD is only kept when the changed solid measures the same as the
@@ -122,7 +123,7 @@ class Watched:
         scratch = tempfile.mkdtemp(prefix="kiln_cad_follow_")
         try:
             scratch_step = os.path.join(scratch, "followed.step")
-            run_in_child(
+            made = run_in_child(
                 __file__,
                 {
                     "step": os.path.abspath(self.source),
@@ -146,6 +147,15 @@ class Watched:
         return {
             "cad_kept": True,
             "step_path": step_path,
+            # The one map that takes the part's CAD as it was to the CAD beside
+            # the changed mesh: a 4x4, row by row, in mm.
+            "cad_change": {
+                "kind": "placed",
+                "matrix": [v for row in made["matrix"] for v in row],
+                "scale": made["scale"],
+                "mirrored": mirror is not None,
+                "from_sha256": _sha256(self.source),
+            },
             "cad_note": f"The part's exact CAD followed this change: {os.path.basename(step_path)}, beside the mesh.{beside}",
         }
 
@@ -198,6 +208,16 @@ def _even_scale(before: Any, after: Any) -> float | None:
     if factor <= 0 or any(abs(r - factor) > _EVEN_SCALE_TOLERANCE * max(1.0, factor) + 1e-6 / was for was, r in ratios):
         return None
     return factor
+
+
+def _sha256(path: str) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _mark_as_converted(mesh_path: str) -> None:
@@ -257,7 +277,10 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
         return {"refused": "the changed solid does not hold the volume the change implies"}
     if not k.write_step(result, request["out_step"]):
         return {"refused": "the changed CAD could not be written"}
-    return {"scale": scale, "volume_mm3": after, "box": list(got)}
+    matrix = [
+        [scale * m[i][0], scale * m[i][1], scale * m[i][2], shift[i]] for i in range(3)
+    ] + [[0.0, 0.0, 0.0, 1.0]]
+    return {"scale": scale, "volume_mm3": after, "box": list(got), "matrix": matrix}
 
 
 if __name__ == "__main__":
