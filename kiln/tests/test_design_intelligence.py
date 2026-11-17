@@ -957,8 +957,8 @@ class TestEnvironmentCompatibility:
         assert report.overall_verdict == "not_recommended"
         assert any("outside service range" in warning.lower() for warning in report.warnings)
 
-    def test_polycarbonate_110c_is_within_range(self):
-        report = check_environment_compatibility("polycarbonate", "operates at 110C")
+    def test_polycarbonate_100c_is_within_range(self):
+        report = check_environment_compatibility("polycarbonate", "operates at 100C")
         assert report is not None
         assert report.overall_verdict in ("recommended", "conditional")
         assert "temperature_range" in report.per_category_ratings

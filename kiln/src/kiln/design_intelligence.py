@@ -2572,6 +2572,13 @@ def check_environment_compatibility(
         temp = material_data.get("temperature_range", {})
         min_service = float(temp.get("min_service_c", -273.0))
         max_service = float(temp.get("max_service_c", 1000.0))
+        # The material's own record states a highest service temperature too.
+        # A part is held to the lower of the two.
+        stated = ((kb.materials.get(material_key) or {}).get("thermal") or {}).get(
+            "max_service_temp_c"
+        )
+        if isinstance(stated, (int, float)) and stated > 0:
+            max_service = min(max_service, float(stated))
         per_category["temperature_range"] = {
             "min_service_c": min_service,
             "max_service_c": max_service,
