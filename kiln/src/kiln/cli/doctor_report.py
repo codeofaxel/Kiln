@@ -48,7 +48,9 @@ def _passing(check: dict[str, Any]) -> bool:
 
 
 def _line(check: dict[str, Any]) -> str:
-    detail = str(check.get("detail", ""))
+    # Cleaned before it is cut: a cut through an address or a serial leaves
+    # half of it, which no longer looks like one and would ride out.
+    detail = clean(str(check.get("detail", "")))
     if len(detail) > LINE_ROOM:
         detail = detail[: LINE_ROOM - 1] + "…"
     return f"[{_mark(check)}] {str(check.get('name', '')).replace('_', ' ')}: {detail}"

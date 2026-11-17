@@ -101,6 +101,18 @@ def test_what_locates_or_unlocks_a_machine_never_reaches_the_report(monkeypatch,
     assert "[FAILED] printer:" in report and "[warning] config:" in report
 
 
+def test_a_long_detail_is_cleaned_before_it_is_cut(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("KILN_PRINTER_SERIAL", "01P00C123456789")
+    pad = doctor_report.LINE_ROOM - 8
+    for straddler in ("192.168.1.40", "01P00C123456789"):
+        detail = "x" * pad + " " + straddler + " and more after it"
+        report = doctor_report.build_report([{"name": "printer", "ok": False, "detail": detail}], kiln_version="9.9.9")
+        # Cut first, the tail of the address or serial would be gone and what
+        # is left no longer looks like one, so it would ride out half-written.
+        assert "192.168" not in report and "01P00C" not in report, (straddler, report[-120:])
+
+
 def test_a_long_checkup_keeps_every_problem_and_fits_the_form():
     problems = [{"name": f"broken_{i}", "ok": False, "detail": "did not work"} for i in range(5)]
     passing = [{"name": f"fine_{i}", "ok": True, "detail": "x" * 300} for i in range(60)]
