@@ -10,7 +10,9 @@ cannot refuse something harmful without it.
 
 The gate recognises a table by its SHAPE, not by a list of today's
 materials: a mapping with several keys that are material names, or a list of
-rows that each name a material, in a bundled data file or in Python source.
+rows that each name a material, in a bundled data file or in Python source;
+and, in source, a function that makes the same call several times with a
+material beside a figure or a sentence each time.
 Material names are the bundled catalogue's own ids and short forms, plus any
 names in the file ``KILN_EXTRA_MATERIAL_NAMES`` points at (one per line),
 so names that are not public are never written here.
@@ -24,8 +26,9 @@ Every table found is one of, in ``scripts/public_material_tables.yaml``:
 A table in neither list fails.  So does a stale entry, a ``keep`` with no
 door or reason, and a baseline that grew.
 
-Bounds: it finds tables by material names in keys and in a row's
-``material`` field, so a table keyed another way is unseen; a table split
+Bounds: it finds tables by material names in keys, in a row's
+``material`` field and in literal arguments, so a table keyed another way,
+or built from names held in variables, is unseen; a table split
 across several small mappings (fewer names each than the floor) is unseen;
 it reads ``kiln/src/kiln`` only, and skips vendored libraries.
 
@@ -149,6 +152,54 @@ def tables_in_python(source: str, names: set[str]) -> Iterator[tuple[str, int]]:
                 if k is not None and _is_material(_literal_key(k), names) and _has_literal(v)]
         if len(hits) >= MIN_MATERIALS:
             yield targets.get(id(node), f"dict@{node.lineno}"), len(hits)
+    yield from _rule_calls(tree, names)
+    yield from _row_lists(tree, names)
+
+
+def _names_a_material_and_more(node: ast.AST, names: set[str]) -> bool:
+    """A material name beside another literal: one row of a table."""
+    constants = [n.value for n in ast.walk(node) if isinstance(n, ast.Constant)]
+    named = any(_is_material(c, names) for c in constants)
+    other = any(
+        (isinstance(c, (int, float)) and not isinstance(c, bool))
+        or (isinstance(c, str) and not _is_material(c, names) and len(c) > 12)
+        for c in constants
+    )
+    return named and other
+
+
+def _rule_calls(tree: ast.AST, names: set[str]) -> Iterator[tuple[str, int]]:
+    """A table written as repeated calls: one function body that calls the
+    same callee several times, each call naming a material beside a figure
+    or a sentence."""
+    for scope in ast.walk(tree):
+        if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+            continue
+        counts: dict[str, int] = {}
+        for stmt in scope.body:
+            call = stmt.value if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) else None
+            if call is None or not _names_a_material_and_more(call, names):
+                continue
+            callee = ast.unparse(call.func)
+            counts[callee] = counts.get(callee, 0) + 1
+        where = getattr(scope, "name", "(module)")
+        for callee, count in counts.items():
+            if count >= MIN_MATERIALS:
+                yield f"{where}:{callee}()", count
+
+
+def _row_lists(tree: ast.AST, names: set[str]) -> Iterator[tuple[str, int]]:
+    """A table written as a list or tuple of rows that each name a material."""
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, (ast.List, ast.Tuple)):
+            continue
+        rows = [
+            e for e in node.value.elts
+            if not isinstance(e, ast.Constant) and _names_a_material_and_more(e, names)
+        ]
+        if len(rows) >= MIN_MATERIALS:
+            target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+            yield f"{ast.unparse(target)}[]", len(rows)
 
 
 def discover(src: Path = SRC, names: set[str] | None = None) -> dict[str, int]:

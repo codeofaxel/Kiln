@@ -52,6 +52,34 @@ def test_a_material_keyed_table_in_source_is_found(tmp_path):
     assert gate.discover(src, NAMES) == {"shrink.py::_SHRINK": 3}
 
 
+def test_a_table_written_as_repeated_calls_is_found(tmp_path):
+    source = (
+        "def build(self):\n"
+        '    self.add("pla", "petg", score=0.8)\n'
+        '    self.add("petg", "abs", score=0.6)\n'
+        '    self.add("abs", "nylon", score=0.4)\n'
+    )
+    src = _tree(tmp_path, {"swaps.py": source})
+    assert gate.discover(src, NAMES) == {"swaps.py::build:self.add()": 3}
+
+
+def test_a_table_written_as_a_list_of_rows_in_source_is_found(tmp_path):
+    source = '_RULES = [("pla", 0.3), ("petg", 0.4), ("abs", 0.7)]\n'
+    src = _tree(tmp_path, {"rules.py": source})
+    assert gate.discover(src, NAMES) == {"rules.py::_RULES[]": 3}
+
+
+def test_a_plain_list_of_material_names_is_not_a_table(tmp_path):
+    src = _tree(tmp_path, {"names.py": '_KNOWN = ["pla", "petg", "abs", "nylon"]\n'})
+    assert gate.discover(src, NAMES) == {}
+
+
+def test_calls_that_only_name_a_material_are_not_a_table(tmp_path):
+    source = 'def f(log):\n    log("pla")\n    log("petg")\n    log("abs")\n'
+    src = _tree(tmp_path, {"logs.py": source})
+    assert gate.discover(src, NAMES) == {}
+
+
 def test_a_pair_key_names_its_materials(tmp_path):
     doc = {"pairs": {"pla/petg": "poor", "pla/abs": "poor", "petg/abs": "fair"}}
     src = _tree(tmp_path, {"data/pairs.json": json.dumps(doc)})
