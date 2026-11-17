@@ -53,8 +53,10 @@ _VOLUME_TOLERANCE = 1e-6
 #: this (mm) plus this share of the part's longest side.  Two boxes agree for
 #: a part turned the wrong way round; their balance points do not, unless the
 #: part is the same either way round.
-_SAME_CENTRE_MM = 0.1
-_SAME_CENTRE_SHARE = 0.001
+# Held as tight as the box check: a solid wrongly refused only loses its
+# CAD, a solid wrongly kept is CAD that does not match the part.
+_SAME_CENTRE_MM = _SAME_BOX_MM
+_SAME_CENTRE_SHARE = 0.0005
 
 _NOT_EVEN = (
     "This change stretched the part differently along different axes, which round holes "
