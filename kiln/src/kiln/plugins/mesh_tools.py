@@ -22,6 +22,16 @@ from kiln.tool_annotations import creates, destructive, read_only
 _logger = logging.getLogger(__name__)
 
 
+def _same_file(a: str, b: str) -> bool:
+    """Whether two paths name one file (a door that wrote over its input)."""
+    import os
+
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.abspath(a) == os.path.abspath(b)
+
+
 def _resolve_tool_build_volume(
     printer_id: str | None,
 ) -> tuple[str, tuple[float, float, float]] | None:
@@ -241,6 +251,11 @@ class _MeshToolsPlugin:
             A note of where the model came from (``kiln.arrival``) follows the
             rescaled file; any option but ``max_dimension_mm`` marks its size
             as one the person chose.
+
+            A part with its CAD file beside it stays a CAD part through an
+            even resize: the reply's ``step_path`` is the resized CAD.  A
+            per-axis stretch is made on the mesh only, and ``cad_note`` says
+            so.
             """
             from kiln.arrival import hold
             from kiln.server import _check_auth, _error_dict, logger
@@ -248,9 +263,11 @@ class _MeshToolsPlugin:
             if err := _check_auth("generate"):
                 return err
             try:
+                from kiln.cad_follow import watch
                 from kiln.generation.validation import rescale_stl
 
                 held = hold(file_path)
+                watched = watch(file_path)
                 result = rescale_stl(
                     file_path,
                     target_height_mm=target_height_mm,
@@ -271,6 +288,7 @@ class _MeshToolsPlugin:
                         if isinstance(result["scale_applied"], dict)
                         else f"Model rescaled by {result['scale_applied']}x."
                     ),
+                    **watched.follow(result.get("path") or file_path, resized=True),
                 }
                 try:
                     from kiln_pro.plugins.git_render_tools import (
@@ -823,19 +841,23 @@ class _MeshToolsPlugin:
             :param file_path: Path to the STL file.
             :param axis: Axis to mirror ("x", "y", or "z", default "x").
             :param output_path: Output path (defaults to overwriting input).
-            :returns: Dict with mirror info.
+            :returns: Dict with mirror info; ``step_path`` is the mirrored
+                CAD when the part's CAD file sat beside it.
             """
             from kiln.server import _check_auth, _error_dict
 
             if err := _check_auth("generate"):
                 return err
             try:
+                from kiln.cad_follow import watch
                 from kiln.generation.validation import mirror_mesh
 
+                watched = watch(file_path)
                 response = {
                     "success": True,
                     **mirror_mesh(file_path, axis=axis, output_path=output_path or None),
                 }
+                response.update(watched.follow(response.get("path") or output_path or file_path, mirror=axis))
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -1135,7 +1157,9 @@ class _MeshToolsPlugin:
                 name of a printer set up in Kiln.  When provided, its recorded
                 build volume replaces the explicit dimensions.
             :param output_path: Output path. Defaults to overwriting input.
-            :returns: Dict with original/new dimensions and scale factor.
+            :returns: Dict with original/new dimensions and scale factor;
+                ``step_path`` is the resized CAD when the part's CAD file
+                sat beside it, so a CAD part stays a CAD part.
             """
             from kiln.arrival import hold
             from kiln.server import _check_auth, _error_dict
@@ -1143,8 +1167,10 @@ class _MeshToolsPlugin:
             if err := _check_auth("generate"):
                 return err
             try:
+                from kiln.cad_follow import watch
                 from kiln.generation.validation import scale_to_fit
                 held = hold(file_path)
+                watched = watch(file_path)
                 resolved_model_id = None
                 resolved_volume = _resolve_tool_build_volume(printer_id)
                 if resolved_volume:
@@ -1162,6 +1188,9 @@ class _MeshToolsPlugin:
                     ),
                 }
                 held.follow(response.get("path") or output_path or file_path)
+                made = response.get("path") or output_path or file_path
+                if not response.get("already_fits") or not _same_file(made, file_path):
+                    response.update(watched.follow(made, resized=not response.get("already_fits")))
                 if resolved_model_id:
                     response["bed_size_source"] = "printer_intelligence"
                     response["bed_size_model_id"] = resolved_model_id
@@ -1208,7 +1237,9 @@ class _MeshToolsPlugin:
             if err := _check_auth("generate"):
                 return err
             try:
+                from kiln.cad_follow import watch
                 from kiln.generation.validation import center_on_bed
+                watched = watch(file_path)
                 resolved_model_id = None
                 resolved_volume = _resolve_tool_build_volume(printer_id)
                 if resolved_volume:
@@ -1224,6 +1255,7 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                response.update(watched.follow(response.get("path") or output_path or file_path))
                 if resolved_model_id:
                     response["bed_size_source"] = "printer_intelligence"
                     response["bed_size_model_id"] = resolved_model_id

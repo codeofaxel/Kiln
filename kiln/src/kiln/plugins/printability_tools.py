@@ -265,12 +265,14 @@ class _PrintabilityToolsPlugin:
             # works here instead of failing several layers down.
             from kiln.step_import import resolve_mesh_input
 
+            _given = file_path
             file_path, _conversion, _refusal = resolve_mesh_input(file_path)
             if _refusal:
                 return _refusal
 
             import kiln.server as _srv
             from kiln.auto_orient import (
+                _build_rotation_matrix,
                 _kiln_pro_ranking_note,
                 apply_orientation,
                 describe_orientation_change,
@@ -300,6 +302,9 @@ class _PrintabilityToolsPlugin:
                     resp["upgrade_hint"] = note
 
                 if apply:
+                    from kiln.cad_follow import watch
+
+                    watched = watch(file_path, given=_given)
                     oriented_path = apply_orientation(
                         file_path,
                         result.best.rotation_x,
@@ -308,6 +313,12 @@ class _PrintabilityToolsPlugin:
                         output_path=output_path,
                     )
                     resp["oriented_file"] = oriented_path
+                    resp.update(watched.follow(
+                        oriented_path,
+                        turn=_build_rotation_matrix(
+                            result.best.rotation_x, result.best.rotation_y, result.best.rotation_z,
+                        ),
+                    ))
                     resp["message"] += f"  Reoriented file: {oriented_path}"
 
                 return resp
