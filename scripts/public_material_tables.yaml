@@ -44,3 +44,15 @@ baseline:
   - 'server.py::mat_aliases'
   - 'server.py::mat_type_map'
   - 'support_assessment.py::MATERIAL_ALIASES'
+
+# Public tools that return a material's whole record, or most of a table, when
+# asked about a material.  Checked by kiln/tests/test_no_whole_material_record_leaves.py.
+# keep: stays, with a reason.  baseline: present when the check was added;
+# listed, not judged; it only shrinks and a new tool may not join it.
+whole_record_doors:
+  baseline_count: 3
+  keep: {}
+  baseline:
+    - 'check_multi_material_pairing::data/design_knowledge/multi_material_pairing.json::co_print_compatibility'
+    - 'get_material_design_profile::data/design_knowledge/materials.json::(top)'
+    - 'get_material_properties::data/design_knowledge/materials.json::(top)'
