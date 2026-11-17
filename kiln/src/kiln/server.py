@@ -26583,7 +26583,15 @@ def decorate_surface(
         )
 
 
-_ensure_internal_tool_plugins_registered()
+# The tool plugins load here, at import, so every process that imports this
+# module sees the whole tool list.  A process that imports it to run ONE
+# function and serves no tools can set KILN_DEFER_TOOL_PLUGINS=1 before the
+# import: the plugins then load on the first call to
+# _ensure_internal_tool_plugins_registered() (or its alias), which every
+# door that lists or serves tools already makes.  Pinned by
+# tests/test_defer_tool_plugins.py.
+if os.environ.get("KILN_DEFER_TOOL_PLUGINS", "") != "1":
+    _ensure_internal_tool_plugins_registered()
 
 
 # ---------------------------------------------------------------------------
