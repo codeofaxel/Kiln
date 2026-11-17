@@ -92,6 +92,8 @@ def thicken_part(
                 # The thickened CAD beside the thickened mesh: the next edit
                 # of this part starts from CAD again.
                 reply["step_path"], beside = keep_step_beside(scratch_step, output_path, source)
+                if reply["step_path"]:
+                    reply["cad_change"] = _cad_change(reply, amount_mm, keep_hole_size, source)
                 reply = _worded(reply, amount_mm, keep_hole_size)
                 if reply["step_path"]:
                     reply["note"] += f" The thickened CAD is {os.path.basename(reply['step_path'])}, beside the mesh.{beside}"
@@ -118,6 +120,26 @@ def thicken_part(
     if cad_failure:
         reply["cad_failure"] = f"The CAD route was tried first and could not be used: {cad_failure}."
     return _worded(reply, amount_mm, keep_hole_size)
+
+
+def _cad_change(reply: dict[str, Any], amount_mm: float, keep_hole_size: bool, source: str) -> dict[str, Any]:
+    """What the thickening was, as data: the amount, whether holes kept their
+    size, where the thickened CAD was placed afterwards (a 4x4, row by row,
+    in mm), and the hash of the CAD it was made from."""
+    import hashlib
+
+    lift = float(reply.pop("lift_mm", 0.0) or 0.0)
+    digest = hashlib.sha256()
+    with open(source, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return {
+        "kind": "thickened",
+        "amount_mm": float(amount_mm),
+        "keep_hole_size": bool(keep_hole_size),
+        "matrix": [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, lift, 0.0, 0.0, 0.0, 1.0],
+        "from_sha256": digest.hexdigest(),
+    }
 
 
 def _worded(reply: dict[str, Any], amount_mm: float, keep_hole_size: bool) -> dict[str, Any]:
