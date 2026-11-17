@@ -138,7 +138,12 @@ class Watched:
                 what="the CAD kernel",
                 error=CadFollowError,
             )
+            plain = Path(output_path).with_suffix(".step")
+            over_its_own_cad = plain.exists() and os.path.samefile(plain, self.source)
             step_path, beside = keep_step_beside(scratch_step, output_path, self.source)
+            if over_its_own_cad:
+                # The file left alone is the part's own CAD as it was: nothing to explain.
+                beside = ""
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
         if not step_path:

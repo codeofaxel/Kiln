@@ -151,6 +151,7 @@ def test_a_resize_to_fit_the_bed_keeps_the_cad(tools, tmp_path):
     assert after["holes"] == pytest.approx([1.5], abs=1e-3)  # the 3 mm hole, at half size, still a hole
     assert after["kinds"] == before["kinds"]  # flat stays flat, round stays round
     assert after["box"] == pytest.approx(_mesh_box(reply["path"]), abs=0.05)
+    assert "not a file Kiln made" not in reply["cad_note"]  # the file left alone is the part's own CAD
     # The caller's own STEP is as it was; the resized CAD is a file beside it.
     assert _read(step)["size"] == before["size"]
     assert os.path.realpath(reply["step_path"]) != os.path.realpath(step)
