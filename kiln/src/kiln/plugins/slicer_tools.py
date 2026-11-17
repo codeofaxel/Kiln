@@ -4192,12 +4192,10 @@ class _SlicerToolsPlugin:
                             upload_path, effective_printer_id,
                         )
                         if not safety["ok"]:
+                            said = str(safety.get("error_message") or "it is not safe to print").rstrip(". ")
                             return _srv._error_dict(
-                                f"Sliced 3MF failed safety verification before upload: "
-                                f"{safety.get('error_message', 'unknown issue')}. "
-                                f"Failed checks: {', '.join(safety['failed'])}. "
-                                f"This would have been the incident #0 class of crash.",
-                                code=safety.get("error_code", "UNSAFE_3MF"),
+                                f"The sliced file was not sent to the printer: {said}.",
+                                code=safety.get("error_code") or "UNSAFE_3MF",
                             )
                 except Exception as _exc:
                     _logger.warning("slice_and_print safety check skipped: %s", _exc)

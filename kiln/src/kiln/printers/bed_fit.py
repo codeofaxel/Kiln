@@ -1026,14 +1026,13 @@ def check_gcode_has_homing(
             "ok": False,
             "error_code": "NO_HOMING_SEQUENCE",
             "error_message": (
-                f"{source.capitalize()} file has no G28 (homing) before the "
-                f"first print move at line {first_print_move + 1}. "
-                f"The printer would execute G1 moves without a known position "
-                f"reference, likely crashing the nozzle into the printer frame "
-                f"or bed (incident #0 class).  Re-slice through slice_and_print "
-                f"(which uses the adapter's wrap_gcode_as_3mf that adds Bambu "
-                f"start-gcode), or manually wrap the gcode via "
-                f"wrap_gcode_as_3mf() with the correct printer profile."
+                f"{source.capitalize()} file starts printing at line "
+                f"{first_print_move + 1} without homing the printer first (no "
+                f"G28), so the printer does not know where the nozzle is and "
+                f"could drive it into the bed or frame.  Slice it again through "
+                f"slice_and_print, which adds the printer's own start "
+                f"sequence, or wrap the G-code with wrap_gcode_as_3mf for "
+                f"this printer."
             ),
         }
     return {"ok": True, "error_code": None, "error_message": None}

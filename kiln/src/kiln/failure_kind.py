@@ -92,6 +92,23 @@ def retryable(exc: BaseException | None) -> bool | None:
     return None
 
 
+def named_code(exc: BaseException | None) -> str | None:
+    """The code an exception names for itself (a :class:`kiln.printers.PrinterError`
+    raised with ``code=``), or ``None``.
+
+    The sentence a person reads never carries the code; this is how an agent
+    envelope or a ``--json`` reply still gets the specific one rather than
+    the door's generic label.
+    """
+    from kiln.printers.base import PrinterError
+
+    for link in _chain(exc):
+        code = getattr(link, "code", None) if isinstance(link, PrinterError) else None
+        if isinstance(code, str) and code:
+            return code
+    return None
+
+
 def refusal_code(exc: BaseException | None) -> str | None:
     """The code for a caller's input failure, or ``None`` for anything else.
 

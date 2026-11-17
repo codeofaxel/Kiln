@@ -441,4 +441,4 @@ class TestThePlanCommands:
     def test_a_key_is_answered_with_how_a_plan_applies_here(self, cli):
         result = cli("upgrade", "--key", "kiln_pro_abc")
         assert result.exit_code == 1
-        assert "SIGN_IN_INSTEAD" in result.output and "kiln signin" in result.output
+        assert "SIGN_IN_INSTEAD" not in result.output and "kiln signin" in result.output

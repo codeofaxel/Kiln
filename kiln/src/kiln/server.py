@@ -7057,6 +7057,12 @@ def _error_dict(
                 message = _UNEXPECTED_PREFIX.sub("", message)
     if retryable is None:
         retryable = code in _RETRYABLE_CODES
+    if refusal is None:
+        # A failure that names its own code (its sentence never carries it)
+        # is answered with that code rather than the door's wrapper label.
+        from kiln import failure_kind as _failure_kind
+
+        code = _failure_kind.named_code(sys.exc_info()[1]) or code
     payload: dict[str, Any] = {
         "success": False,
         "error": {
