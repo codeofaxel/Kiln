@@ -1911,6 +1911,32 @@ class TestFreePathCautions:
         )
         assert "kiln3d.com/pricing" in said
 
+    def test_a_pair_with_a_verdict_and_no_written_reasons_says_so(self, monkeypatch):
+        """A bare verdict is not a checked silence.
+
+        The pair has a verdict and nobody has written its reasons, at any
+        tier.  The reply says that, and does not point at pricing.
+        """
+        notes = {"co_print_compatibility": {"pla": {"petg": {"notes": "Written reasons."}}}}
+        self._overlay(monkeypatch, {"multi_material_pairing": notes})
+        report = check_multi_material_compatibility("pla", "pp")
+        assert report.notes == ""
+        assert "No curated note has been established" in report.caution
+        assert "pricing" not in report.caution
+
+    def test_a_pair_with_written_reasons_gets_no_caution(self, monkeypatch):
+        notes = {"co_print_compatibility": {"pla": {"petg": {"notes": "Written reasons."}}}}
+        self._overlay(monkeypatch, {"multi_material_pairing": notes})
+        report = check_multi_material_compatibility("pla", "petg")
+        assert report.notes == "Written reasons."
+        assert report.caution == ""
+
+    @pytest.mark.usefixtures("free_caller")
+    def test_a_bare_verdict_still_points_a_free_caller_at_the_plan(self, monkeypatch):
+        self._overlay(monkeypatch, None)
+        report = check_multi_material_compatibility("pla", "pp")
+        assert "kiln3d.com/pricing" in report.caution
+
     def test_curated_entry_exists_is_false_when_the_overlay_is_refused(
         self, monkeypatch
     ):

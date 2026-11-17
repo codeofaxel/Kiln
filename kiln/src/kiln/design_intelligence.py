@@ -3902,13 +3902,16 @@ def check_multi_material_compatibility(
 
     def _verdict_caution() -> str:
         """A verdict with no notes: yes/no, and nothing about what actually
-        goes wrong at the interface or how to work around it."""
+        goes wrong at the interface or how to work around it.  The notes are
+        the pair's only written reasons, so a pair without them has none
+        written, and the caution says so."""
         return unestablished_caution(
             "multi_material_pairing",
             "The verdict is here, but not the reasoning behind it — what "
             "goes wrong at the interface, and what to do about temperatures "
             "and purging if you try the pair anyway. Run a small test piece "
             "before committing to a long print.",
+            curated_entry_exists=False,
         )
 
     if pair_data:
@@ -3959,6 +3962,7 @@ def check_multi_material_compatibility(
             "that would let you reason it out are not available either. "
             "Treat it as untested rather than fine — a test piece is the "
             "only thing that will tell you.",
+            curated_entry_exists=False,
         ),
     )
 
