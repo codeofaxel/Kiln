@@ -84,6 +84,8 @@ scripts/*
 # test so public source can never ship a curated cross-vendor capability /
 # SME table (curated depth belongs in the private tier or a pro overlay).
 !scripts/audit_public_sme_leak.py
+!scripts/audit_public_material_tables.py
+!scripts/public_material_tables.yaml
 # …and its ledger of bundled data files that may carry a table keyed by
 # several printer makers, each with its classification and reason.
 !scripts/public_data_allowed.yaml

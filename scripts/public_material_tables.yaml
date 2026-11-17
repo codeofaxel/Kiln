@@ -1,0 +1,45 @@
+# Per-material tables in the public package, and why each is there.
+# Enforced by scripts/audit_public_material_tables.py.
+#
+# keep:      stays public; names the offline door that needs it.
+# baseline:  present when the gate was added; listed, not judged.  The list
+#            only shrinks: a table leaves it when it is served instead, or
+#            when it earns a keep row.  A new table may not join it.
+baseline_count: 29
+keep:
+  'gcode.py::_MATERIAL_TEMPS':
+    door: the live-printer filament load, unload, purge and wipe commands
+    why: with no server they must refuse a nozzle temperature outside the material's range
+  'catalog_keys.py::_MATERIAL_ABBREVIATIONS':
+    door: every material lookup
+    why: a spelling map from short names to catalogue ids; it carries no figure or judgement
+baseline:
+  - 'adaptive_slicer.py::_MATERIAL_PROFILES'
+  - 'ambient_safety.py::_ALIASES'
+  - 'ambient_safety.py::_MATERIAL_THERMAL_PROFILES'
+  - 'cli/main.py::_MATERIAL_ALIASES'
+  - 'cli/main.py::_MATERIAL_TEMPS'
+  - 'cost_estimator.py::BUILTIN_MATERIALS'
+  - 'data/design_knowledge/environment_compatibility.json::(top)'
+  - 'data/design_knowledge/load_tables.json::(top)'
+  - 'data/design_knowledge/material_troubleshooting.json::(top)'
+  - 'data/design_knowledge/materials.json::(top)'
+  - 'data/design_knowledge/multi_material_pairing.json::co_print_compatibility'
+  - 'data/design_knowledge/multi_material_pairing.json::support_pairs[]'
+  - 'data/design_knowledge/post_processing.json::(top)'
+  - 'data/design_knowledge/printer_material_compatibility.json::default'
+  - 'data/design_knowledge/skin_contact.json::(top)'
+  - 'data/printer_intelligence.json::default.materials'
+  - 'data/support_profiles.json::(top)'
+  - 'design_reasoning.py::_MATERIAL_DEFAULTS'
+  - 'emboss_generator.py::MATERIAL_DEPTHS'
+  - 'material_routing.py::_CATALOG_ALIASES'
+  - 'material_routing.py::_MATERIALS'
+  - 'material_safety.py::MATERIAL_PROCESS'
+  - 'materials.py::MATERIAL_TEMPS'
+  - 'materials.py::_MATERIAL_ALIASES'
+  - 'printability.py::_UNVOUCHED_ON_A_STANDARD_BED'
+  - 'printers/bambu_3mf.py::_TABLE_ROW_TO_BAMBU'
+  - 'server.py::mat_aliases'
+  - 'server.py::mat_type_map'
+  - 'support_assessment.py::MATERIAL_ALIASES'
