@@ -295,6 +295,33 @@ class TestPhoneNumbers:
             assert redaction.redact_places(kept) == kept, kept
 
 
+class TestIpv6Addresses:
+    """An IPv6 address is written short far more often than long: the run
+    of zero groups becomes ``::``.  Either way it says where a machine sits,
+    so it goes from text leaving for Kiln's servers."""
+
+    def test_the_short_forms_go(self):
+        for written in (
+            "fe80::1ff:fe23:4567:890a", "fe80::1", "2001:db8::8a2e:370:7334", "::ffff:c0a8",
+            "fe80::1ff:fe23:4567:890a%en0", "[fe80::2]:7125",
+        ):
+            for redact in (redaction.redact_places, redaction.redact_local_network):
+                out = redact(f"reached {written} then stopped")
+                assert "fe80" not in out and "db8" not in out and "::" not in out, (redact.__name__, written, out)
+                assert "[a network address]" in out and out.endswith("then stopped"), (redact.__name__, written, out)
+
+    def test_the_long_form_still_goes(self):
+        out = redaction.redact_places("at 2001:0db8:85a3:0000:0000:8a2e:0370:7334 now")
+        assert out == "at [a network address] now"
+
+    def test_double_colons_that_are_not_addresses_stay(self):
+        for kept in (
+            "std::vector", "Note:: read this", "made at 15:20:06", "a :: b", "kiln::doctor",
+            "segs[0::6] + segs[3::6]", "loopback ::1",
+        ):
+            assert redaction.redact_places(kept) == kept, kept
+
+
 class TestWithoutFolders:
     """Words about a file that leave without the file name it, and never
     say where it sits."""

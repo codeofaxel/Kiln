@@ -103,7 +103,18 @@ _WINDOWS_HOME_RE = re.compile(
 _URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"\x27<>]+", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
 _ANY_IPV4_RE = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?![\w.])")
-_IPV6_RE = re.compile(r"(?<![\w:])(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}(?![\w:])", re.IGNORECASE)
+_HEX4 = r"[0-9a-f]{1,4}"
+# The long form, or the short form where ``::`` stands for a run of zero
+# groups (``fe80::1``, ``2001:db8::7334``), with an optional zone (``%en0``).
+# The short form must hold two hex digits side by side, so a bare ``::`` in
+# prose, a Python slice (``segs[0::6]``) and the loopback ``::1``, which
+# locates nothing, stay.
+_IPV6_RE = re.compile(
+    rf"(?<![\w:])(?:(?:{_HEX4}:){{3,7}}{_HEX4}"
+    rf"|(?=[0-9a-f:]*[0-9a-f]{{2}})(?:{_HEX4}(?::{_HEX4}){{0,6}})?::(?:{_HEX4}(?::{_HEX4}){{0,6}})?)"
+    rf"(?:%[\w.-]+)?(?![\w:])",
+    re.IGNORECASE,
+)
 _MAC_RE = re.compile(r"(?<![\w:-])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![\w:-])", re.IGNORECASE)
 _LOCAL_HOST_RE = re.compile(
     r"\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:local|lan|home|internal|localdomain)\b", re.IGNORECASE,
