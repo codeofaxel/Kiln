@@ -17,7 +17,8 @@ CONTRACT
   the part had CAD and this change could not be made to it; nothing at all
   for a part with no CAD.  It never raises: the mesh edit stands either way.
 - The CAD is only kept when the changed solid measures the same as the
-  changed mesh, is a valid solid, and holds the volume the change implies.
+  changed mesh, balances at the same point as it, is a valid solid, and
+  holds the volume the change implies.
 
 INVARIANT (pinned by ``tests/test_cad_follows_the_change.py``): a change that
 is not the same in every direction (a stretch along one axis) never keeps
@@ -48,6 +49,12 @@ _SAME_BOX_MM = 0.05
 _EVEN_SCALE_TOLERANCE = 1e-6
 #: The volume the change implies, within this share.
 _VOLUME_TOLERANCE = 1e-6
+#: The changed solid and the changed mesh balance at the same point, within
+#: this (mm) plus this share of the part's longest side.  Two boxes agree for
+#: a part turned the wrong way round; their balance points do not, unless the
+#: part is the same either way round.
+_SAME_CENTRE_MM = 0.1
+_SAME_CENTRE_SHARE = 0.001
 
 _NOT_EVEN = (
     "This change stretched the part differently along different axes, which round holes "
@@ -131,6 +138,9 @@ class Watched:
                     "linear": linear,
                     "scale": scale,
                     "box": [list(after[0]), list(after[1])],
+                    "centre": _balance_point(output_path),
+                    "same_centre_mm": _SAME_CENTRE_MM,
+                    "same_centre_share": _SAME_CENTRE_SHARE,
                     "same_box_mm": _SAME_BOX_MM,
                     "volume_tolerance": _VOLUME_TOLERANCE,
                 },
@@ -195,6 +205,20 @@ def _bounds(mesh_path: str) -> tuple[tuple[float, float, float], tuple[float, fl
         low, high = load_mesh(mesh_path, force="mesh").bounds
         return (tuple(float(v) for v in low), tuple(float(v) for v in high))  # type: ignore[return-value]
     except Exception:  # noqa: BLE001 -- unreadable is "no size", said by the caller
+        return None
+
+
+def _balance_point(mesh_path: str) -> list[float] | None:
+    """Where a sealed mesh balances (its centre of mass), or ``None`` for a
+    mesh with no inside to weigh; the box check then stands alone."""
+    try:
+        from kiln.mesh_frame import load_mesh
+
+        mesh = load_mesh(mesh_path, force="mesh")
+        if not mesh.is_volume:
+            return None
+        return [float(v) for v in mesh.center_mass]
+    except Exception:  # noqa: BLE001 -- unweighable is "no balance point"
         return None
 
 
@@ -276,6 +300,18 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
         return {"refused": f"the changed solid sits {max(off):.3f} mm away from the changed mesh"}
     if not BRepCheck_Analyzer(result).IsValid():
         return {"refused": "the changed solid is not a valid solid"}
+    centre = request.get("centre")
+    if centre is not None:
+        from OCP.BRepGProp import BRepGProp
+        from OCP.GProp import GProp_GProps
+
+        props = GProp_GProps()
+        BRepGProp.VolumeProperties_s(result, props)
+        at = props.CentreOfMass()
+        apart = max(abs(at.X() - centre[0]), abs(at.Y() - centre[1]), abs(at.Z() - centre[2]))
+        longest = max(high[i] - low[i] for i in range(3))
+        if apart > float(request["same_centre_mm"]) + float(request["same_centre_share"]) * longest:
+            return {"refused": f"the changed solid sits a different way round from the changed mesh ({apart:.2f} mm apart at the balance point)"}
     before, after = k.volume(solid), k.volume(result)
     implied = before * scale**3
     if implied <= 0 or abs(after - implied) > float(request["volume_tolerance"]) * implied + 1e-9:

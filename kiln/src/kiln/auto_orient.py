@@ -1159,11 +1159,18 @@ def _compose_3mf_transform(
 
     The 3x3 rotation is applied to the top-left 3x3 block and to the
     translation row, producing a new 4x3 transform.
+
+    A 3MF transform multiplies a point written as a ROW (``p' = p . M``),
+    and *rot* turns a point written as a column, so *rot* goes in
+    transposed, after the transform already there.  Pinned by
+    ``tests/test_auto_orient.py``: a 3MF and an STL of one part, turned
+    the same way, land the same way.
     """
     rot3 = existing[:3]  # 3x3 rotation part
     t = existing[3]      # translation row
 
-    new_rot = _mat_mul(rot, rot3)
+    rot_as_rows = [[rot[j][i] for j in range(3)] for i in range(3)]
+    new_rot = _mat_mul(rot3, rot_as_rows)
     # Rotate the translation vector too.
     new_t = _apply_rotation(tuple(t), rot)
 

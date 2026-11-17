@@ -361,3 +361,101 @@ def test_a_solid_that_does_not_match_the_mesh_is_never_kept(tmp_path):
     assert "step_path" not in reply
     assert "away from the changed mesh" in reply["cad_note"]
     assert sorted(p.name for p in tmp_path.glob("*.step")) == ["bracket.step"]
+
+
+# ---------------------------------------------------------------------------
+# A part that is not the same either way round
+#
+# Every part above has its hole in the middle, so a turn made the wrong way
+# round gives the same box and passed.  These parts have it off to one side.
+# ---------------------------------------------------------------------------
+
+
+def _step_block_with_hole_to_one_side(path: Path) -> str:
+    """30 x 20 x 10 mm with a 3 mm through-hole near one corner, as exact CAD."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    block = BRepPrimAPI_MakeBox(30.0, 20.0, 10.0).Shape()
+    bore = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(5.0, 4.0, -2.0), gp_Dir(0, 0, 1)), 1.5, 14.0).Shape()
+    cut = BRepAlgoAPI_Cut(block, bore)
+    cut.Build()
+    writer = STEPControl_Writer()
+    writer.Transfer(cut.Shape(), STEPControl_AsIs)
+    writer.Write(str(path))
+    return str(path)
+
+
+def _lopsided_part(folder: Path) -> tuple[str, str]:
+    source = folder / "source" / "lopsided.step"
+    source.parent.mkdir()
+    _step_block_with_hole_to_one_side(source)
+    return _cad_part(folder, "lopsided", source)
+
+
+def test_a_turned_lopsided_part_keeps_cad_that_faces_the_same_way(tools, tmp_path):
+    from kiln.mesh_frame import load_mesh
+
+    _step, stl = _lopsided_part(tmp_path)
+    reply = tools["rotate_model"](input_path=stl, rotation_z=90.0, output_path=str(tmp_path / "turned.stl"))
+    _followed(reply)
+    from kiln import cad_kernel as k
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    solid, _ = k.read_one_solid(reply["step_path"], verb="reads")
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(solid, props)
+    at = props.CentreOfMass()
+    mesh = load_mesh(reply["output_path"], force="mesh")
+    assert (at.X(), at.Y(), at.Z()) == pytest.approx(tuple(mesh.center_mass), abs=0.05)
+
+
+def test_cad_turned_the_other_way_round_is_never_kept(tmp_path):
+    """The mesh was turned a quarter one way and the door says the other way:
+    the two boxes agree, the parts do not."""
+    from kiln.auto_orient import _build_rotation_matrix, rotate_stl_file
+    from kiln.cad_follow import watch
+
+    _step, stl = _lopsided_part(tmp_path)
+    watched = watch(stl)
+    assert watched.source is not None
+    turned = str(tmp_path / "turned.stl")
+    rotate_stl_file(stl, turned, rotation_z=90.0)
+
+    reply = watched.follow(turned, turn=_build_rotation_matrix(0.0, 0.0, -90.0))
+    assert reply["cad_kept"] is False, reply
+    assert "step_path" not in reply
+    assert "different way round" in reply["cad_note"]
+
+
+def test_a_3mf_and_an_stl_of_one_part_turn_the_same_way(tools, tmp_path):
+    """The same quarter turn asked of the same part in two file kinds."""
+    slab = trimesh.creation.box(extents=(40, 20, 5))
+    slab.apply_translation((20, 10, 2.5))
+    nub = trimesh.creation.box(extents=(4, 4, 10))
+    nub.apply_translation((36, 16, 5))
+    part = trimesh.util.concatenate([slab, nub])
+    landed = {}
+    for kind in ("stl", "3mf"):
+        source = str(tmp_path / f"part.{kind}")
+        part.export(source)
+        reply = tools["rotate_model"](
+            input_path=source, rotation_z=90.0, output_path=str(tmp_path / f"turned.{kind}")
+        )
+        assert reply["success"] is True, reply
+        landed[kind] = _tall_end(reply["output_path"])
+    assert landed["3mf"] == pytest.approx(landed["stl"], abs=0.01)
+    # And it is a real quarter turn: the tall end moved from +X,+Y to -X,+Y.
+    assert landed["stl"][0] < 0 < landed["stl"][1]
+
+
+def _tall_end(path: str) -> tuple[float, float]:
+    """Where the part's tallest points sit in XY, from the middle of its box."""
+    from kiln.mesh_frame import load_mesh
+
+    mesh = load_mesh(path, force="mesh")
+    top = mesh.vertices[mesh.vertices[:, 2] > mesh.vertices[:, 2].max() - 1e-6]
+    return tuple(float(v) for v in (top.mean(axis=0) - mesh.bounds.mean(axis=0))[:2])
