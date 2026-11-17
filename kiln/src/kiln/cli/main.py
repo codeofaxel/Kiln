@@ -12083,8 +12083,16 @@ def _doctor_camera_check(printer: str, adapter: Any) -> dict[str, Any] | None:
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.option("--deep", is_flag=True, help="Run deep network diagnostics when printer is unreachable.")
+@click.option(
+    "--bug-report",
+    is_flag=True,
+    help=(
+        "Copy the checkup as a bug report, with network addresses, keys and your user name "
+        "taken out, and open Kiln's support page to send it. Nothing is sent for you."
+    ),
+)
 @click.pass_context
-def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
+def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) -> None:
     """Run pre-flight system checks to verify Kiln is ready to use."""
     import json as _json
     import platform
@@ -12718,8 +12726,18 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
         )
 
     # --- Output ---
+    report = None
+    if bug_report:
+        from kiln import __version__ as kiln_version
+        from kiln.cli import doctor_report
+
+        report = doctor_report.build_report(checks, kiln_version=kiln_version)
     if json_mode:
-        click.echo(_json.dumps({"status": "ok", "checks": checks}, indent=2))
+        payload: dict = {"status": "ok", "checks": checks}
+        if report is not None:
+            # A script asked: the report rides in the JSON; no clipboard, no browser.
+            payload["bug_report"] = {"text": report, "send_at": doctor_report.SUPPORT_URL}
+        click.echo(_json.dumps(payload, indent=2))
     else:
         for c in checks:
             label = c["name"].replace("_", " ").title()
@@ -12733,6 +12751,11 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
         passed = sum(1 for c in checks if c["ok"])
         total = len(checks)
         click.echo(f"\n  {passed}/{total} checks passed.")
+
+        if report is not None:
+            copied, opened = doctor_report.hand_over(report)
+            for line in doctor_report.words(report, copied=copied, opened=opened):
+                click.echo(line)
 
         if any(not c["ok"] for c in checks):
             sys.exit(1)
