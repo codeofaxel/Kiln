@@ -282,6 +282,12 @@ def classify_answer(answer: Any) -> Miss | None:
     text = text.strip()[:_DETAIL_LIMIT]
     why = answer.get("why")
     if why in CAUSES:
+        # An envelope that already decided why carries the server's own words
+        # in ``why_detail``; its ``error`` is that envelope's whole sentence,
+        # which would read as a second sentence inside the door's own.
+        if "why_detail" in answer:
+            raw = answer.get("why_detail")
+            text = str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else ""
         return Miss(why, code, text)
     if code in SIGNED_OUT_CODES:
         return Miss("signed_out", code, text)
