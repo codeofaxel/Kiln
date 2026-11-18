@@ -439,37 +439,3 @@ def test_one_helper_owns_the_consent_rule():
                     if "preview" in seg.lower():
                         offenders.append(f"{path.name}::{fn.name}:{node.lineno}")
     assert offenders == [], f"preview gate validated outside the helper: {offenders}"
-
-
-# ---------------------------------------------------------------------------
-# A retry is gated on whether the object changed, not on whether it retried
-# ---------------------------------------------------------------------------
-
-
-def test_a_reprint_of_the_same_object_is_not_re_asked():
-    """Hotter nozzle, same shape: this is the print already approved."""
-    assert server._retry_changes_the_object({"temperature": "215"}, False) is False
-    assert server._retry_changes_the_object({}, False) is False
-    assert server._retry_changes_the_object(None, False) is False
-
-
-def test_a_repaired_mesh_is_a_different_object():
-    assert server._retry_changes_the_object({"temperature": "215"}, True) is True
-
-
-def test_an_override_we_do_not_recognise_counts_as_a_change():
-    """The allowlist is deliberately the safe way round.
-
-    Naming the geometry-changing keys means an incomplete list prints an
-    unapproved shape.  Naming the harmless ones means an incomplete list
-    asks one extra question.
-    """
-    assert server._retry_changes_the_object({"support_material": "1"}, False) is True
-    assert server._retry_changes_the_object({"a_key_from_2027": "x"}, False) is True
-
-
-def test_the_allowlist_holds_only_appearance_neutral_settings():
-    """Guard against someone adding a geometry key to the safe list."""
-    banned = ("support", "raft", "brim", "orient", "rotate", "scale", "layer_height")
-    for key in server._APPEARANCE_NEUTRAL_OVERRIDES:
-        assert not any(b in key for b in banned), f"{key} changes the object"

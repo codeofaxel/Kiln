@@ -11015,15 +11015,22 @@ def generate_and_print_cmd(
                 printer_name=ctx.obj.get("printer"), json_mode=json_mode,
             )
             # The yes was about the model; the printer is handed the slice
-            # made from it.  Re-aim the clearance at that file, keeping the
-            # source and door the gate recorded.
-            from kiln.print_signoff import current, grant
+            # made from it.  Re-aim the clearance at that file, keeping who
+            # said yes, the door, and the printers it covers.  No clearance,
+            # no start: a yes is never written here on its own.
+            from kiln.print_signoff import CODE_NOT_CONFIRMED, current, grant
 
             cleared = current()
+            if cleared is None:
+                click.echo(format_error(
+                    "Nothing was started: no yes is on record for this print.",
+                    code=CODE_NOT_CONFIRMED, json_mode=json_mode,
+                ))
+                sys.exit(1)
             grant(
                 "kiln generate-and-print", remote, ctx.obj.get("printer"),
-                source=cleared.source if cleared else "unrecorded",
-                door=cleared.door if cleared else "",
+                source=cleared.source, door=cleared.door, scope=cleared.scope,
+                window_id=cleared.window_id, identity=cleared.identity,
             )
             _local = slice_result.output_path
             adapter.start_print(

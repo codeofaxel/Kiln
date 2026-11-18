@@ -75,8 +75,8 @@ __all__ = [
 
 #: A job cleared when it entered the queue; the scheduler dispatches on that.
 SOURCE_QUEUED = "queued_job"
-#: A retry of the same object with new print settings leans on the approval
-#: the first print got.
+#: A start that leans on an earlier print's approval.  Nothing in it names
+#: that print or who approved it, so no public door writes it.
 SOURCE_PRIOR_APPROVAL = "prior_approval"
 #: A resume file Kiln made continues a print that already had its yes
 #: (granted only after :func:`verified_resume`).

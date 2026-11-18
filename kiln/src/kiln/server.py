@@ -4633,54 +4633,6 @@ def _always_allow_could_not_see(aimed: str) -> str:
     return consent_window_note.could_not_see_line(aimed, look.why)
 
 
-# Slicer settings that change how the object is MADE but not what it is.
-# Deliberately an allowlist rather than a list of geometry-changing keys:
-# an incomplete allowlist asks for one confirmation nobody needed, while an
-# incomplete geometry list prints an unapproved shape.  Anything not named
-# here — including a key Kiln has never seen — counts as a change to the
-# object.
-_APPEARANCE_NEUTRAL_OVERRIDES = frozenset({
-    "temperature",
-    "first_layer_temperature",
-    "bed_temperature",
-    "first_layer_bed_temperature",
-    "fan_speed",
-    "min_fan_speed",
-    "max_fan_speed",
-    "cooling",
-    "print_speed",
-    "perimeter_speed",
-    "infill_speed",
-    "travel_speed",
-    "first_layer_speed",
-    "retract_length",
-    "retract_speed",
-    "filament_flow_ratio",
-    "extrusion_multiplier",
-})
-
-
-def _retry_changes_the_object(overrides: dict[str, Any] | None, mesh_repaired: bool) -> bool:
-    """True when a retry prints something other than what was approved.
-
-    A reprint of the same object with a hotter nozzle is the print the user
-    already said yes to.  A reprint whose mesh was auto-repaired, or whose
-    overrides move supports, orientation or scale, is a different object
-    wearing the same file name — and the approval it is leaning on was
-    given for the old one.
-
-    Unknown keys count as a change.  The cost of being wrong that way is a
-    confirmation the user did not strictly need; the cost of the other way
-    is a shape they never approved.
-    """
-    if mesh_repaired:
-        return True
-    return any(
-        str(key).strip().lower() not in _APPEARANCE_NEUTRAL_OVERRIDES
-        for key in (overrides or {})
-    )
-
-
 def _note_print_started(adapter: PrinterAdapter, result: Any = None) -> None:
     """Tell the heater watchdog a print began — if it is watching *adapter*.
 
