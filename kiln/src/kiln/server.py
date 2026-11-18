@@ -22781,12 +22781,9 @@ def find_material_substitute(
 ) -> dict:
     """Find substitute filament materials when your preferred material is unavailable (returns ranked list).
 
-    Kiln's servers rank the alternatives and describe what each swap trades
-    away, for any signed-in Kiln account (a free one included).  Signed out,
-    offline or unanswered, the reply is a basic list instead (``basic:
-    true``): the other filaments of the same family in Kiln's catalogue,
-    unranked, with a ``note`` saying why and how to get the ranked list.  For
-    a single best match, use ``get_best_material_substitute`` instead.
+    Checks a built-in knowledge base of FDM filament compatibility and returns
+    ranked alternatives with trade-off descriptions.  For a single best match,
+    use ``get_best_material_substitute`` instead.
 
     Args:
         material: The original filament material (e.g. "PLA", "PETG", "ABS").
@@ -22794,6 +22791,11 @@ def find_material_substitute(
             (unavailable, cost, strength, finish_quality, heat_resistance, lead_time).
         min_score: Minimum compatibility score threshold (0.0–1.0).
     """
+    # The ranked substitutes and their trade-offs are Kiln's servers' answer
+    # (kiln._pro_substitution_bridge), free on every plan for a signed-in
+    # account.  With no answer (signed out, offline, unanswered, refused) the
+    # reply is the basic list: the same family from the bundled catalogue,
+    # unranked, ``basic: true`` and a ``note`` saying why.
     try:
         from kiln import _pro_substitution_bridge as substitution
 
@@ -22859,16 +22861,14 @@ def find_material_substitute(
 def get_best_material_substitute(material: str) -> dict:
     """Get the single best substitute for a filament material (quick shortcut).
 
-    Returns one top-ranked alternative, ranked by Kiln's servers for any
-    signed-in Kiln account.  Signed out, offline or unanswered, no best is
-    named: the reply is the basic list (``basic: true``) of same-family
-    filaments, unranked, with a ``note`` saying why.  For a full ranked list
-    with trade-off details and filtering, use ``find_material_substitute``
-    instead.
+    Returns one top-ranked alternative. For a full ranked list with trade-off
+    details and filtering, use ``find_material_substitute`` instead.
 
     Args:
         material: The original filament material (e.g. "PLA", "PETG").
     """
+    # The best substitute is Kiln's servers' answer (the same bridge).  With
+    # no answer no best is named: the reply is the basic list, as above.
     try:
         from kiln import _pro_substitution_bridge as substitution
 
