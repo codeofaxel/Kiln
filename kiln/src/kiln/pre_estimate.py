@@ -571,7 +571,20 @@ def _changes_by_kind(filament_map: list[int], layers: int) -> tuple[int, int]:
     """``(nozzle switches, filament swaps)`` for *layers* layers that each
     print every filament once, in filament order and back again on the next
     layer, with filament ``i + 1`` on nozzle ``filament_map[i]``.  A nozzle
-    starts holding the first filament mapped to it."""
+    starts holding the first filament mapped to it.
+
+    Counted in closed form: a layer there and back ends where it began, so
+    every such pair counts the same, and an odd layer left over counts as
+    the first layer did.  Nothing here grows with the layer count."""
+    layers = max(0, int(layers))
+    one = _walk_layers(filament_map, 1)
+    pair = _walk_layers(filament_map, 2)
+    pairs, odd = divmod(layers, 2)
+    return pairs * pair[0] + odd * one[0], pairs * pair[1] + odd * one[1]
+
+
+def _walk_layers(filament_map: list[int], layers: int) -> tuple[int, int]:
+    """:func:`_changes_by_kind` for one or two layers, walked change by change."""
     loaded: dict[int, int] = {}
     for filament, nozzle in enumerate(filament_map):
         loaded.setdefault(nozzle, filament)
@@ -674,6 +687,16 @@ def estimate_from_dimensions(
         materials = ["PLA"]
 
     num_materials = len(materials)
+    if layer_height_mm:
+        from kiln.slicer_profiles import _layer_window_mm
+
+        low, high = _layer_window_mm(nozzle_mm)
+        if not low <= layer_height_mm <= high:
+            raise ValueError(
+                f"A {nozzle_mm:g} mm nozzle lays layers from {low:g} to {high:g} mm, so a "
+                f"{layer_height_mm:g} mm layer height cannot be estimated. Give one in that range, "
+                "or leave it out for the printer's own."
+            )
     timing = None if tool_changer_addon else _nozzle_timing(printer_id)
     if filament_map:
         from kiln.slicer import NozzleMapError, checked_filament_map

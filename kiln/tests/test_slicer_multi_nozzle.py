@@ -983,3 +983,59 @@ class TestASlicerThatRunsTooLong:
             slice_file(_plate(tmp_path, filaments=1), output_dir=str(tmp_path / "out"),
                        profile=_profile(tmp_path, None), timeout=1)
         assert refused.value.code == "SLICE_TOOK_TOO_LONG"
+
+
+class TestTheChangeCountIsBounded:
+    @staticmethod
+    def _walked(filament_map, layers):
+        """Every change, walked one at a time: the count to agree with."""
+        loaded: dict[int, int] = {}
+        for filament, nozzle in enumerate(filament_map):
+            loaded.setdefault(nozzle, filament)
+        current, switches, swaps = 0, 0, 0
+        order = list(range(len(filament_map)))
+        for layer in range(layers):
+            for filament in order if layer % 2 == 0 else order[::-1]:
+                if filament == current:
+                    continue
+                nozzle = filament_map[filament]
+                switches += nozzle != filament_map[current]
+                if loaded[nozzle] != filament:
+                    swaps += 1
+                    loaded[nozzle] = filament
+                current = filament
+        return switches, swaps
+
+    @pytest.mark.parametrize("filament_map", [[1, 2], [1, 1], [1, 2, 1], [2, 1, 2, 1], [1, 2, 2, 1, 2]])
+    @pytest.mark.parametrize("layers", [0, 1, 2, 3, 7, 50])
+    def test_it_agrees_with_walking_every_change(self, filament_map, layers):
+        from kiln.pre_estimate import _changes_by_kind
+
+        assert _changes_by_kind(filament_map, layers) == self._walked(filament_map, layers)
+
+    def test_an_enormous_layer_count_returns_at_once(self):
+        import signal
+
+        from kiln.pre_estimate import _changes_by_kind
+
+        def _too_slow(*_args):
+            raise TimeoutError("the count walked every layer")
+
+        old = signal.signal(signal.SIGALRM, _too_slow)
+        signal.alarm(2)
+        try:
+            switches, swaps = _changes_by_kind([1, 2, 1], 10**12)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+        assert (switches, swaps) == (2 * 10**12, 10**12)
+
+    def test_a_layer_height_the_nozzle_cannot_lay_is_refused(self, monkeypatch):
+        from kiln import pre_estimate
+
+        monkeypatch.setattr(pre_estimate, "_profile_row", lambda printer_id: dict(_TIMED_ROW) if printer_id else {})
+        with pytest.raises(ValueError, match="cannot be estimated"):
+            pre_estimate.estimate_from_dimensions(
+                40, 40, 1e6, materials=["PLA", "PLA"], printer_id="invented_two", layer_height_mm=1e-9,
+                filament_map=[1, 2],
+            )
