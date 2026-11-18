@@ -22772,6 +22772,44 @@ def _print_startup_banner() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _substitutes_food_safety(material: str, sub_dicts: list[dict]) -> dict | None:
+    """Food-safety preservation for a list of substitutes.
+
+    If the source material is rated food safe, mark each substitute's rating
+    on it (``food_safe``) and name every one that is NOT as a safety
+    regression, so callers don't silently swap a pet bowl's PETG for ABS.
+    Public Kiln's rating, so every install flags the same swaps.  ``None``
+    when the source is not rated food safe.
+    """
+    from kiln.material_safety import food_safe_rating
+
+    if food_safe_rating(material) != "yes":
+        return None
+    regressions: list[str] = []
+    for d in sub_dicts:
+        sub_name = (
+            d.get("substitute_material")
+            or d.get("substitute")
+            or d.get("material")
+            or d.get("name")
+        )
+        if not sub_name:
+            continue
+        sub_food_safe = food_safe_rating(str(sub_name))
+        d["food_safe"] = sub_food_safe
+        if sub_food_safe != "yes":
+            regressions.append(str(sub_name))
+    return {
+        "source_food_safe": "yes",
+        "regressions": regressions,
+        "warning": (
+            "Source material is food_safe=yes but some substitutes are "
+            f"NOT: {regressions}. Do not silently swap for food-contact "
+            "products (pet bowls, kitchen items). Filter or disclose."
+        ) if regressions else None,
+    }
+
+
 @mcp.tool(annotations=read_only("Find material substitute"))
 def find_material_substitute(
     material: str,
@@ -22807,37 +22845,7 @@ def find_material_substitute(
             return _error_dict(asked.refusal["error"], code=asked.refusal["code"])
         basic = asked.miss is not None
         sub_dicts = substitution.basic_substitutes(material) if basic else list(asked.substitutes or [])
-        # Food-safety preservation: if the source material is rated food
-        # safe, mark any substitute that is NOT as a safety regression so
-        # callers don't silently swap a pet bowl's PETG for ABS.  Public
-        # Kiln's rating, so every install flags the same swaps.
-        from kiln.material_safety import food_safe_rating
-
-        food_safety_check: dict | None = None
-        if food_safe_rating(material) == "yes":
-            regressions: list[str] = []
-            for d in sub_dicts:
-                sub_name = (
-                    d.get("substitute_material")
-                    or d.get("substitute")
-                    or d.get("material")
-                    or d.get("name")
-                )
-                if not sub_name:
-                    continue
-                sub_food_safe = food_safe_rating(str(sub_name))
-                d["food_safe"] = sub_food_safe
-                if sub_food_safe != "yes":
-                    regressions.append(str(sub_name))
-            food_safety_check = {
-                "source_food_safe": "yes",
-                "regressions": regressions,
-                "warning": (
-                    "Source material is food_safe=yes but some substitutes are "
-                    f"NOT: {regressions}. Do not silently swap for food-contact "
-                    "products (pet bowls, kitchen items). Filter or disclose."
-                ) if regressions else None,
-            }
+        food_safety_check = _substitutes_food_safety(material, sub_dicts)
         result = {
             "success": True,
             "material": material,
@@ -22879,9 +22887,10 @@ def get_best_material_substitute(material: str) -> dict:
         if asked.refusal is not None:
             return _error_dict(asked.refusal["error"], code=asked.refusal["code"])
         if asked.miss is not None:
-            # Without Kiln's ranking no best is named: the basic list instead.
+            # Without Kiln's ranking no best is named: the basic list instead,
+            # with the same food-safety marking the list door gives it.
             basic = substitution.basic_substitutes(material)
-            return {
+            reply = {
                 "success": True,
                 "material": material,
                 "basic": True,
@@ -22889,6 +22898,10 @@ def get_best_material_substitute(material: str) -> dict:
                 "note": substitution.basic_line(asked.miss, material, found=bool(basic)),
                 **substitution.miss_fields(asked.miss),
             }
+            food_safety_check = _substitutes_food_safety(material, basic)
+            if food_safety_check is not None:
+                reply["food_safety"] = food_safety_check
+            return reply
         subs = asked.substitutes or []
         if not subs:
             return {"success": True, "material": material, "substitute": None, "message": "No substitutes found"}
