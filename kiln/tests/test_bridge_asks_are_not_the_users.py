@@ -58,6 +58,10 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks what material a part should be, on a "
         "plan that includes Kiln Pro; the pick is the feature they reached for"
     ),
+    "_pro_routing_bridge": (
+        "runs only when the person asks recommend_material for a material or "
+        "list_available_materials for the list; the answer is what they reached for"
+    ),
     "_pro_orientation_bridge": (
         "runs only when the person asks how to lay a part on the bed, on a plan "
         "that includes Kiln Pro; the ranking is the feature they reached for"

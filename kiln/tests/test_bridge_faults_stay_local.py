@@ -170,6 +170,16 @@ def test_the_substitution_ranking(monkeypatch, caplog):
     _assert_kept_local(out, caplog)
 
 
+def test_the_material_recommendation(monkeypatch, caplog):
+    from kiln import _pro_routing_bridge as bridge
+    from kiln.material_routing import material_list, recommend_material
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, for_the_wire=_raise)
+    out = {"pick": recommend_material("strong").to_dict(), "list": material_list()}
+    assert out["pick"]["basic"] is True and out["list"]["basic"] is True
+    _assert_kept_local(out, caplog)
+
+
 def test_the_placement_check(monkeypatch, caplog):
     from kiln import _pro_placement_bridge as bridge
     from kiln import served_answer

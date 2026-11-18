@@ -1,53 +1,44 @@
-"""Smart material routing for 3D printing.
+"""Which material to print a part in, from what it is for.
 
-Translates user intent ("make it strong", "make it pretty", "make it cheap")
-into optimal material + settings combinations based on historical data,
-material properties, and printer capabilities.
+:func:`recommend_material` answers "what should I print this in?" from a few
+words of intent ("make it strong", "a flexible gasket"), the printer's
+enclosure and heated bed, a budget and, when asked, the materials on hand.
+The pick, its runners-up and the sentence saying why it wins are Kiln's
+material recommendation (https://kiln3d.com), asked through
+:mod:`kiln._pro_routing_bridge`.  This module adds what only this computer
+knows -- where each material physically is, the nozzle on record -- and the
+cautions every install says (abrasive filament, skin contact).
+:func:`material_list` is the list behind it.
+
+When Kiln's servers give no answer there is no pick.  The reply is basic: the
+plastics the printer can melt, read from the nozzle temperature table Kiln
+ships with, unranked, with the food-contact floor and the skin-contact caution
+applied as for any pick, and one sentence saying why and what fixes it.
 """
 
 from __future__ import annotations
 
 import logging
-import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from kiln.served_answer import Miss
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Data model
+# The replies
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class MaterialProperties:
-    """Physical and practical properties of a 3D printing material."""
-
-    name: str
-    display_name: str
-    strength: float  # 0-1
-    flexibility: float  # 0-1
-    heat_resistance: float  # 0-1
-    surface_quality: float  # 0-1
-    ease_of_print: float  # 0-1
-    cost_per_kg_usd: float
-    typical_hotend_temp: int
-    typical_bed_temp: int
-    requires_enclosure: bool
-    requires_heated_bed: bool
-    suitable_for: list[str]  # ["functional", "decorative", "prototyping", etc.]
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
 class MaterialRecommendation:
-    """A scored material recommendation for a given intent."""
+    """A material pick for a given intent, as Kiln's recommendation gave it,
+    with where the material is when the materials on hand were asked."""
 
-    material: MaterialProperties
-    score: float  # 0-100
+    material: dict[str, Any]
+    score: float
     reasoning: str
     settings: dict[str, Any]  # layer_height, speed, temps
     estimated_cost_usd: float | None
@@ -56,386 +47,39 @@ class MaterialRecommendation:
     availability: dict[str, Any] | None = None  # on-hand attribution, if asked
 
     def to_dict(self) -> dict[str, Any]:
-        data = asdict(self)
-        data["material"] = self.material.to_dict()
-        return data
-
-
-@dataclass
-class IntentMapping:
-    """Maps a user intent keyword to attribute weights."""
-
-    intent: str  # user's words
-    primary_attribute: str  # "strength", "surface_quality", etc.
-    weights: dict[str, float]  # attribute weights
-
-    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-# ---------------------------------------------------------------------------
-# Built-in material database
-# ---------------------------------------------------------------------------
+@dataclass
+class BasicMaterials:
+    """No pick: the plastics the printer can melt, unranked, and why Kiln
+    did not pick one."""
 
-_MATERIALS: dict[str, MaterialProperties] = {
-    "pla": MaterialProperties(
-        name="pla",
-        display_name="PLA",
-        strength=0.5,
-        flexibility=0.2,
-        heat_resistance=0.2,
-        surface_quality=0.8,
-        ease_of_print=0.95,
-        cost_per_kg_usd=20,
-        typical_hotend_temp=200,
-        typical_bed_temp=60,
-        requires_enclosure=False,
-        requires_heated_bed=False,
-        suitable_for=["decorative", "prototyping", "cosplay"],
-    ),
-    "petg": MaterialProperties(
-        name="petg",
-        display_name="PETG",
-        strength=0.7,
-        flexibility=0.4,
-        heat_resistance=0.5,
-        surface_quality=0.6,
-        ease_of_print=0.8,
-        cost_per_kg_usd=22,
-        typical_hotend_temp=235,
-        typical_bed_temp=80,
-        requires_enclosure=False,
-        requires_heated_bed=True,
-        suitable_for=["functional", "outdoor", "food_safe"],
-    ),
-    "abs": MaterialProperties(
-        name="abs",
-        display_name="ABS",
-        strength=0.7,
-        flexibility=0.3,
-        heat_resistance=0.7,
-        surface_quality=0.5,
-        ease_of_print=0.5,
-        cost_per_kg_usd=20,
-        typical_hotend_temp=240,
-        typical_bed_temp=100,
-        requires_enclosure=True,
-        requires_heated_bed=True,
-        suitable_for=["functional", "automotive", "enclosures"],
-    ),
-    "tpu": MaterialProperties(
-        name="tpu",
-        display_name="TPU",
-        strength=0.4,
-        flexibility=0.95,
-        heat_resistance=0.4,
-        surface_quality=0.5,
-        ease_of_print=0.4,
-        cost_per_kg_usd=30,
-        typical_hotend_temp=225,
-        typical_bed_temp=50,
-        requires_enclosure=False,
-        requires_heated_bed=False,
-        suitable_for=["flexible", "wearable", "phone_cases", "gaskets"],
-    ),
-    "asa": MaterialProperties(
-        name="asa",
-        display_name="ASA",
-        strength=0.7,
-        flexibility=0.3,
-        heat_resistance=0.7,
-        surface_quality=0.6,
-        ease_of_print=0.5,
-        cost_per_kg_usd=25,
-        typical_hotend_temp=240,
-        typical_bed_temp=100,
-        requires_enclosure=True,
-        requires_heated_bed=True,
-        suitable_for=["outdoor", "uv_resistant", "functional"],
-    ),
-    "nylon": MaterialProperties(
-        name="nylon",
-        display_name="Nylon (PA)",
-        strength=0.9,
-        flexibility=0.6,
-        heat_resistance=0.6,
-        surface_quality=0.5,
-        ease_of_print=0.3,
-        cost_per_kg_usd=40,
-        typical_hotend_temp=260,
-        typical_bed_temp=80,
-        requires_enclosure=True,
-        requires_heated_bed=True,
-        suitable_for=["functional", "mechanical", "gears", "high_strength"],
-    ),
-    "pc": MaterialProperties(
-        name="pc",
-        display_name="Polycarbonate",
-        strength=0.95,
-        flexibility=0.3,
-        heat_resistance=0.9,
-        surface_quality=0.5,
-        ease_of_print=0.2,
-        cost_per_kg_usd=45,
-        typical_hotend_temp=280,
-        typical_bed_temp=110,
-        requires_enclosure=True,
-        requires_heated_bed=True,
-        suitable_for=["high_strength", "high_temp", "optical", "safety"],
-    ),
-    "pla_plus": MaterialProperties(
-        name="pla_plus",
-        display_name="PLA+",
-        strength=0.6,
-        flexibility=0.3,
-        heat_resistance=0.3,
-        surface_quality=0.8,
-        ease_of_print=0.9,
-        cost_per_kg_usd=22,
-        typical_hotend_temp=210,
-        typical_bed_temp=60,
-        requires_enclosure=False,
-        requires_heated_bed=False,
-        suitable_for=["prototyping", "functional_light", "decorative"],
-    ),
-}
+    plastics: list[str]
+    note: str
+    miss: Miss
+    hotend_limit_c: float | None = None
+    cautions: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        from kiln.served_answer import fields
+
+        out: dict[str, Any] = {
+            "success": True,
+            "basic": True,
+            "message": "\n\n".join([*self.cautions, self.note]),
+            "plastics": list(self.plastics),
+        }
+        if self.hotend_limit_c is not None:
+            out["hotend_limit_c"] = self.hotend_limit_c
+        out["retryable"] = self.miss.no_answer
+        out.update(fields(self.miss))
+        return out
 
 
 # ---------------------------------------------------------------------------
-# Intent mapping
+# What this computer adds
 # ---------------------------------------------------------------------------
-
-_INTENT_MAP: dict[str, IntentMapping] = {
-    "strong": IntentMapping(
-        intent="strong",
-        primary_attribute="strength",
-        weights={
-            "strength": 0.5,
-            "heat_resistance": 0.2,
-            "flexibility": 0.1,
-            "ease_of_print": 0.1,
-            "cost_per_kg_usd": 0.1,
-        },
-    ),
-    "pretty": IntentMapping(
-        intent="pretty",
-        primary_attribute="surface_quality",
-        weights={
-            "surface_quality": 0.5,
-            "ease_of_print": 0.2,
-            "cost_per_kg_usd": 0.1,
-            "strength": 0.1,
-            "flexibility": 0.1,
-        },
-    ),
-    "cheap": IntentMapping(
-        intent="cheap",
-        primary_attribute="cost_per_kg_usd",
-        weights={
-            "cost_per_kg_usd": 0.5,
-            "ease_of_print": 0.3,
-            "surface_quality": 0.1,
-            "strength": 0.1,
-        },
-    ),
-    "flexible": IntentMapping(
-        intent="flexible",
-        primary_attribute="flexibility",
-        weights={
-            "flexibility": 0.5,
-            "ease_of_print": 0.2,
-            "strength": 0.1,
-            "cost_per_kg_usd": 0.1,
-            "surface_quality": 0.1,
-        },
-    ),
-    "durable": IntentMapping(
-        intent="durable",
-        primary_attribute="strength",
-        weights={
-            "strength": 0.3,
-            "heat_resistance": 0.3,
-            "flexibility": 0.2,
-            "ease_of_print": 0.1,
-            "cost_per_kg_usd": 0.1,
-        },
-    ),
-    "easy": IntentMapping(
-        intent="easy",
-        primary_attribute="ease_of_print",
-        weights={
-            "ease_of_print": 0.5,
-            "cost_per_kg_usd": 0.2,
-            "surface_quality": 0.2,
-            "strength": 0.1,
-        },
-    ),
-    "outdoor": IntentMapping(
-        intent="outdoor",
-        primary_attribute="heat_resistance",
-        weights={
-            "heat_resistance": 0.4,
-            "strength": 0.3,
-            "surface_quality": 0.1,
-            "ease_of_print": 0.1,
-            "cost_per_kg_usd": 0.1,
-        },
-    ),
-    "food_safe": IntentMapping(
-        intent="food_safe",
-        primary_attribute="surface_quality",
-        weights={
-            "surface_quality": 0.3,
-            "ease_of_print": 0.3,
-            "cost_per_kg_usd": 0.2,
-            "strength": 0.2,
-        },
-    ),
-}
-
-# Default weights when no intent matches
-_DEFAULT_WEIGHTS: dict[str, float] = {
-    "strength": 0.2,
-    "flexibility": 0.1,
-    "heat_resistance": 0.1,
-    "surface_quality": 0.2,
-    "ease_of_print": 0.2,
-    "cost_per_kg_usd": 0.2,
-}
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def parse_intent(user_text: str) -> IntentMapping:
-    """Fuzzy-match user text to a known intent.
-
-    Checks for substring matches of known intent keywords within the
-    user's text.  Falls back to a balanced default mapping if no match.
-
-    :param user_text: Natural language user input (e.g. ``"make it strong"``).
-    """
-    lower = user_text.lower()
-
-    for keyword, mapping in _INTENT_MAP.items():
-        if keyword in lower:
-            return mapping
-
-    return IntentMapping(
-        intent="balanced",
-        primary_attribute="ease_of_print",
-        weights=_DEFAULT_WEIGHTS,
-    )
-
-
-def _score_material(
-    mat: MaterialProperties,
-    weights: dict[str, float],
-) -> float:
-    """Score a material against the given attribute weights (0-100)."""
-    score = 0.0
-
-    for attr, weight in weights.items():
-        if attr == "cost_per_kg_usd":
-            # Invert cost: lower cost = higher score
-            # Normalise to 0-1 range using max cost of 50 USD/kg
-            cost_score = max(0.0, 1.0 - mat.cost_per_kg_usd / 50.0)
-            score += cost_score * weight
-        else:
-            val = getattr(mat, attr, 0.0)
-            score += val * weight
-
-    return round(score * 100, 2)
-
-
-#: What each intent asks for, as the part a person is making.
-_PURPOSE: dict[str, str] = {
-    "strong": "a strong part",
-    "pretty": "a good-looking part",
-    "cheap": "a low-cost part",
-    "flexible": "a flexible part",
-    "durable": "a durable part",
-    "easy": "an easy print",
-    "outdoor": "a part that lives outdoors",
-    "food_safe": "a part that touches food",
-    "balanced": "a general-purpose part",
-}
-
-#: How one material is better than another on each property a pick weighs,
-#: in a fixed order.  A 0-1 property counts when one is ahead by a tenth of
-#: the scale or more, so a near-tie is never called a difference; cost
-#: counts at $2/kg.
-_BETTER_AT: tuple[tuple[str, str], ...] = (
-    ("strength", "is stronger"),
-    ("flexibility", "is more flexible"),
-    ("heat_resistance", "takes more heat"),
-    ("surface_quality", "prints a finer surface"),
-    ("ease_of_print", "is easier to print"),
-)
-_PROPERTY_STEP = 0.1
-_COST_STEP_USD = 2.0
-
-
-def _better_at(a: MaterialProperties, b: MaterialProperties, weighed: dict[str, float]) -> list[str]:
-    """What *a* gives that *b* does not, on the properties *weighed*."""
-    out = [phrase for attr, phrase in _BETTER_AT
-           if attr in weighed and round(getattr(a, attr) - getattr(b, attr), 6) >= _PROPERTY_STEP]
-    if "cost_per_kg_usd" in weighed and b.cost_per_kg_usd - a.cost_per_kg_usd >= _COST_STEP_USD:
-        out.append(f"costs less (~${a.cost_per_kg_usd:g}/kg against ~${b.cost_per_kg_usd:g}/kg)")
-    return out
-
-
-def _listed(items: list[str]) -> str:
-    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
-
-
-def describe_material_pick(
-    pick: MaterialProperties,
-    runner_up: MaterialProperties | None,
-    mapping: IntentMapping,
-    *,
-    of_what_you_have: bool = False,
-) -> str:
-    """Why *pick* wins and what *runner_up* would have given instead, in
-    words.  The one wording for the pick; the scores stay in the
-    recommendation for comparing materials."""
-    purpose = _PURPOSE.get(mapping.intent, f"'{mapping.intent}'")
-    lead = (f"Of what you have, {pick.display_name} is the best fit for {purpose}"
-            if of_what_you_have else f"{pick.display_name} is the best fit for {purpose}")
-    if runner_up is None:
-        return f"{lead}."
-    wins = _better_at(pick, runner_up, mapping.weights)
-    said = (f"{lead}: against {runner_up.display_name}, it {_listed(wins)}."
-            if wins else f"{lead}, narrowly ahead of {runner_up.display_name}.")
-    gives = _better_at(runner_up, pick, mapping.weights)
-    if gives:
-        said += f" {runner_up.display_name}, the next best, {_listed(gives)}."
-    return said
-
-
-def describe_better_option(
-    option: MaterialProperties, pick: MaterialProperties, mapping: IntentMapping,
-) -> str:
-    """A material the person does not have that suits the job materially
-    better than the best of what they do, and what it would give them."""
-    purpose = _PURPOSE.get(mapping.intent, f"'{mapping.intent}'")
-    gives = _better_at(option, pick, mapping.weights)
-    said = f"{option.display_name} suits {purpose} materially better, but you don't have it"
-    return f"{said}: against {pick.display_name}, it {_listed(gives)}." if gives else f"{said}."
-
-
-def _default_settings(mat: MaterialProperties) -> dict[str, Any]:
-    """Generate default print settings for a material."""
-    return {
-        "hotend_temp": mat.typical_hotend_temp,
-        "bed_temp": mat.typical_bed_temp,
-        "layer_height": 0.2,
-        "speed": 50 if mat.ease_of_print >= 0.7 else 35,
-        "fan_speed": 100 if mat.name in ("pla", "pla_plus") else 50,
-        "retraction": 1.0 if mat.name == "tpu" else 0.5,
-    }
 
 
 def _format_nozzle_context_line(
@@ -484,47 +128,6 @@ def _format_nozzle_context_line(
         )
     # Defensive cap so a future bridge change can't blow the line up.
     return line if len(line) <= 200 else line[:197] + "..."
-
-
-# Aliases from inventory material strings to catalog names.  Keys are
-# lowercase inventory tokens; values are catalog keys in ``_MATERIALS``.
-# Score gap (0-100 scale) at which a not-owned material is worth naming
-# as a materially better fit than the best on-hand option.  Tuned so
-# adjacent materials stay quiet and a real mismatch (PLA offered for a
-# "flexible" part when TPU exists) speaks up.
-_POOR_FIT_SCORE_GAP: float = 10.0
-
-_CATALOG_ALIASES: dict[str, str] = {
-    "pla+": "pla_plus",
-    "pla plus": "pla_plus",
-    "pa": "nylon",
-    "polyamide": "nylon",
-    "polycarbonate": "pc",
-}
-
-
-def _catalog_match(material_type: str) -> str | None:
-    """Map an inventory material string to a catalog material name.
-
-    Inventory strings come from AMS sync and user spools ("PETG-CF",
-    "PLA+", "PA-CF"); the catalog keys are base families ("petg",
-    "pla_plus", "nylon").  Filled variants (CF/GF/…) match their base
-    family for candidacy; the caller keeps the exact inventory string
-    for attribution, so a response can still say "PETG-CF".  Returns
-    ``None`` when nothing in the catalog corresponds.
-    """
-    token = (material_type or "").strip().lower()
-    if not token:
-        return None
-    for candidate in (token, token.replace("-", "_").replace(" ", "_")):
-        if candidate in _MATERIALS:
-            return candidate
-        if candidate in _CATALOG_ALIASES:
-            return _CATALOG_ALIASES[candidate]
-    base = re.split(r"[-_ ]", token, maxsplit=1)[0]
-    if base in _MATERIALS:
-        return base
-    return _CATALOG_ALIASES.get(base)
 
 
 def _availability_for(
@@ -584,6 +187,30 @@ def _format_on_hand_line(availability: dict[str, Any]) -> str:
     )
 
 
+#: The skin-contact caution, around the honesty note for the material.
+_SKIN_LEAD = "SKIN CONTACT: no printed part is proven safe on skin."
+_SKIN_TAIL = (
+    "Keep it out of the mouth, away from the eyes, and off broken skin, "
+    "piercings and implants. If your skin reacts, ask a doctor."
+)
+
+
+def _capabilities_for_the_wire(caps: dict[str, Any] | None) -> dict[str, bool] | None:
+    """The printer's enclosure and heated bed as the recommendation reads
+    them: both said, or ``None`` when nothing was said about the printer."""
+    if not caps:
+        return None
+    return {
+        "has_enclosure": bool(caps.get("has_enclosure", False)),
+        "has_heated_bed": bool(caps.get("has_heated_bed", True)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
 def recommend_material(
     intent: str,
     *,
@@ -592,12 +219,14 @@ def recommend_material(
     model_fingerprint: dict[str, Any] | None = None,
     printer_id: str = "",
     on_hand: list[dict[str, Any]] | None = None,
-) -> MaterialRecommendation:
+) -> MaterialRecommendation | BasicMaterials:
     """Recommend a material based on user intent and constraints.
 
-    Maps the intent string to attribute weights via fuzzy matching,
-    scores each material, filters by printer capabilities and budget,
-    and returns the top recommendation with alternatives.
+    Kiln's material recommendation picks from the intent, the printer's
+    capabilities and the budget, and returns the top recommendation with
+    alternatives.  When it gives no answer the result is
+    :class:`BasicMaterials`: no pick, the plastics the printer can melt, and
+    the sentence saying why.
 
     :param intent: User intent text (e.g. ``"make it strong"``).
     :param printer_capabilities: Optional dict with ``has_enclosure`` and
@@ -605,17 +234,15 @@ def recommend_material(
     :param budget_usd: Optional max budget per kg in USD.
     :param model_fingerprint: Optional fingerprint dict to check Print DNA
         for historical success rates.
-    :param printer_id: Optional active-printer identifier.  When supplied
-        AND kiln-pro is installed, the function consults the printer's
-        nozzle state via ``_pro_nozzle_bridge``.  Two enrichments fire,
-        independently and silently when kiln-pro is absent:
+    :param printer_id: Optional active-printer identifier.  When supplied,
+        the recommendation consults the printer's nozzle state via
+        ``_pro_nozzle_bridge``.  Two enrichments fire, independently and
+        silently when there is no nozzle answer:
 
         1. **Abrasive escalation.** If the top recommendation is an
            abrasive material (CF / GF / wood / metal fill) AND the
            active nozzle is brass, the reasoning gains a prepended
-           advisory line warning of the short brass lifetime (e.g.
-           "PETG-CF on brass burns through ~360 g before catastrophic
-           tip wear").
+           advisory line warning of the short brass lifetime.
 
         2. **Nozzle context.** Regardless of abrasive-ness, a single
            sentence is appended to the reasoning naming the active
@@ -624,8 +251,8 @@ def recommend_material(
            recommendation was computed against.  An untrusted-state
            hedge is appended when ``trusted_for_verdicts`` is False.
 
-        Free-tier installs without kiln-pro silently skip both
-        enrichments — reasoning is unchanged.
+        A basic answer compares the plastics with this printer's own rated
+        hotend ceiling, when Kiln holds one for it.
     :param on_hand: Optional on-hand inventory (each entry the
         ``OnHandMaterial.to_dict()`` shape from
         :func:`kiln.material_inventory.get_on_hand_materials`).  When
@@ -633,153 +260,78 @@ def recommend_material(
         has, and the recommendation carries an ``availability`` block
         attributing the answer to the machine(s) holding it (or to the
         shelf, when a spool swap is needed first).  When nothing on hand
-        matches the catalog, the best CATALOG pick is returned, clearly
-        labeled needs-purchase — never a silent widening.  When the
-        on-hand pick is a materially worse fit than a material the user
-        does NOT own, that is named too (``better_catalog_option``), so
-        "best of what you have" is never mistaken for "right for the
-        job".
+        matches, the best catalog pick is returned, clearly labeled
+        needs-purchase — never a silent widening.  When the on-hand pick
+        is a materially worse fit than a material the user does NOT own,
+        that is named too (``better_catalog_option``), so "best of what
+        you have" is never mistaken for "right for the job".  Only the
+        material names leave this computer.
     """
-    mapping = parse_intent(intent)
-    candidates = list(_MATERIALS.values())
+    from kiln import _pro_routing_bridge
 
-    # Filter by printer capabilities
-    if printer_capabilities:
-        has_enclosure = printer_capabilities.get("has_enclosure", False)
-        has_heated_bed = printer_capabilities.get("has_heated_bed", True)
-
-        filtered = []
-        for mat in candidates:
-            if mat.requires_enclosure and not has_enclosure:
-                continue
-            if mat.requires_heated_bed and not has_heated_bed:
-                continue
-            filtered.append(mat)
-
-        if filtered:
-            candidates = filtered
-
-    # Filter by budget
-    if budget_usd is not None:
-        budget_filtered = [m for m in candidates if m.cost_per_kg_usd <= budget_usd]
-        if budget_filtered:
-            candidates = budget_filtered
-
-    # Food-safety floor: when the intent implies food, drink, mouth or pet
-    # contact, drop candidates rated food_safe="no" (or unrated).  Conditional
-    # materials (PLA) stay in; the rating and the rule are public Kiln's own,
-    # so every install filters the same way.
-    from kiln.material_safety import (
-        filter_food_safe_materials,
-        use_case_implies_food_contact,
+    # Entries with neither a loaded row nor a shelf spool carry no physical
+    # material and confer no candidacy.
+    physical = [e for e in (on_hand or []) if e.get("loaded_on") or e.get("shelf_spools")]
+    on_hand_names = (
+        None if on_hand is None
+        else sorted({str(e.get("material_type", "")) for e in physical} - {""})
     )
+    answer, miss = _pro_routing_bridge.pick(
+        intent,
+        printer_capabilities=_capabilities_for_the_wire(printer_capabilities),
+        budget_usd=budget_usd,
+        on_hand_materials=on_hand_names,
+        inventory_recorded=bool(on_hand),
+    )
+    if answer is None:
+        return basic_materials(intent, miss or Miss("unanswered"), printer_id=printer_id)
 
-    if use_case_implies_food_contact(intent):
-        safe_set = set(
-            filter_food_safe_materials(
-                [getattr(m, "name", str(m)) for m in candidates],
-                require="yes_or_conditional",
-            )
-        )
-        food_filtered = [
-            m for m in candidates
-            if getattr(m, "name", str(m)) in safe_set
-        ]
-        if food_filtered:
-            candidates = food_filtered
-
-    # On-hand narrowing runs LAST, so the candidate set it narrows has
-    # already passed the printer / budget / food-safety filters.  That
-    # keeps the on-hand-vs-catalog comparison below apples-to-apples:
-    # the material we say the user is missing is one their printer can
-    # actually run.  Entries with neither a loaded row nor a shelf spool
-    # carry no physical material and confer no candidacy.
-    on_hand_index: dict[str, list[dict[str, Any]]] = {}
-    on_hand_status: str | None = None
-    catalog_best: tuple[float, MaterialProperties] | None = None
-    if on_hand is not None:
-        for entry in on_hand:
-            if not (entry.get("loaded_on") or entry.get("shelf_spools")):
-                continue
-            cat = _catalog_match(str(entry.get("material_type", "")))
-            if cat is not None:
-                on_hand_index.setdefault(cat, []).append(entry)
-        catalog_scored = sorted(
-            ((_score_material(m, mapping.weights), m) for m in candidates),
-            key=lambda x: x[0],
-            reverse=True,
-        )
-        catalog_best = catalog_scored[0] if catalog_scored else None
-        matched = [m for m in candidates if m.name in on_hand_index]
-        if matched:
-            candidates = matched
-            on_hand_status = "on_hand"
-        elif not on_hand:
-            on_hand_status = "no_inventory_recorded"
-        else:
-            on_hand_status = "needs_purchase"
-
-    # Score all candidates
-    scored: list[tuple[float, MaterialProperties]] = []
-    for mat in candidates:
-        score = _score_material(mat, mapping.weights)
-        scored.append((score, mat))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    if not scored:
-        # Fallback to PLA if everything got filtered out
-        pla = _MATERIALS["pla"]
+    top = dict(answer["pick"])
+    if answer.get("fallback"):
         return MaterialRecommendation(
-            material=pla,
-            score=50.0,
-            reasoning="Defaulting to PLA — all other materials were filtered out by constraints.",
-            settings=_default_settings(pla),
+            material=top,
+            score=answer["score"],
+            reasoning=answer["sentence"],
+            settings=dict(answer["settings"]),
             estimated_cost_usd=None,
             success_rate=None,
             alternatives=[],
         )
 
-    top_score, top_mat = scored[0]
-
-    # Why the pick wins and what the runner-up would have given, in words;
-    # the scores stay in the recommendation for comparing materials.
-    reasoning = describe_material_pick(
-        top_mat,
-        scored[1][1] if len(scored) > 1 else None,
-        mapping,
-        of_what_you_have=on_hand_status == "on_hand",
-    )
+    on_hand_catalog = answer.get("on_hand_catalog") or {}
+    on_hand_index: dict[str, list[dict[str, Any]]] = {}
+    for entry in physical:
+        cat = on_hand_catalog.get(str(entry.get("material_type", "")))
+        if cat is not None:
+            on_hand_index.setdefault(cat, []).append(entry)
+    on_hand_status = answer.get("on_hand_status")
+    reasoning = answer["sentence"]
 
     # On-hand attribution — say WHERE the answer physically is, or say
     # out loud that it isn't on hand.  Never silently widen: the
     # needs-purchase fallback keeps the catalog answer but labels it.
     availability: dict[str, Any] | None = None
     if on_hand_status == "on_hand":
-        availability = _availability_for(top_mat.name, on_hand_index)
+        availability = _availability_for(top["name"], on_hand_index)
         reasoning = f"{reasoning} {_format_on_hand_line(availability)}"
         # Being on hand is not the same as being right for the job.  When
         # a material the user does NOT own suits the intent materially
         # better, say so — recommending the best of a poor shelf without
         # mentioning it is the quiet half of silently widening.
-        if catalog_best is not None:
-            cat_score, cat_mat = catalog_best
-            if (
-                cat_mat.name != top_mat.name
-                and cat_score - top_score >= _POOR_FIT_SCORE_GAP
-            ):
-                availability["better_catalog_option"] = {
-                    "name": cat_mat.name,
-                    "display_name": cat_mat.display_name,
-                    "score": cat_score,
-                    "score_gap": round(cat_score - top_score, 2),
-                }
-                reasoning = (
-                    f"POOR FIT ON HAND: "
-                    f"{describe_better_option(cat_mat, top_mat, mapping)} "
-                    f"{top_mat.display_name} is the best of what you do "
-                    f"have.\n\n{reasoning}"
-                )
+        better = answer.get("better_catalog_option")
+        if better:
+            availability["better_catalog_option"] = {
+                "name": better["name"],
+                "display_name": better["display_name"],
+                "score": better["score"],
+                "score_gap": better["score_gap"],
+            }
+            reasoning = (
+                f"POOR FIT ON HAND: "
+                f"{better['sentence']} "
+                f"{top['display_name']} is the best of what you do "
+                f"have.\n\n{reasoning}"
+            )
     elif on_hand_status is not None:
         recorded = sorted({
             str(e.get("material_type", "")) for e in (on_hand or [])
@@ -804,7 +356,7 @@ def recommend_material(
             have = ", ".join(recorded) or "your recorded materials"
             reasoning = (
                 f"NOT ON HAND: nothing you have recorded ({have}) matches "
-                f"this request — {top_mat.display_name} is a catalog pick "
+                f"this request — {top['display_name']} is a catalog pick "
                 f"and needs to be purchased.\n\n{reasoning}"
             )
 
@@ -823,7 +375,7 @@ def recommend_material(
             if file_hash or signature or signature_v2:
                 rate_data = get_success_rate(
                     file_hash,
-                    material=top_mat.name,
+                    material=top["name"],
                     geometric_signature=signature,
                     geometric_signature_v2=signature_v2,
                 )
@@ -832,17 +384,12 @@ def recommend_material(
         except Exception:
             logger.debug("Could not check Print DNA for success rate", exc_info=True)
 
-    # Build alternatives (up to 3, excluding the top pick)
+    # Alternatives (up to 3, excluding the top pick), with where each is.
     alternatives: list[dict[str, Any]] = []
-    for alt_score, alt_mat in scored[1:4]:
-        alt: dict[str, Any] = {
-            "material": alt_mat.display_name,
-            "name": alt_mat.name,
-            "score": alt_score,
-            "settings": _default_settings(alt_mat),
-        }
+    for served_alt in answer["alternatives"]:
+        alt: dict[str, Any] = dict(served_alt)
         if on_hand_status == "on_hand":
-            alt_avail = _availability_for(alt_mat.name, on_hand_index)
+            alt_avail = _availability_for(alt["name"], on_hand_index)
             alt["availability"] = {
                 "status": alt_avail["status"],
                 "loaded_on": [
@@ -855,7 +402,7 @@ def recommend_material(
     # The material the user will ACTUALLY print: in on-hand mode that's
     # the recorded inventory string ("PETG-CF"), whose abrasive-ness the
     # catalog base name ("petg") would understate.
-    _filament = top_mat.name
+    _filament = top["name"]
     if availability and availability.get("as_recorded"):
         _filament = availability["as_recorded"][0]
 
@@ -878,8 +425,7 @@ def recommend_material(
                 printer_id=printer_id,
             )
             # The verdict's own contract: red, raised by the nozzle (an
-            # abrasive on brass).  It never carried an ``escalation_reason``,
-            # so a check on one never fired, with kiln-pro or without.
+            # abrasive on brass).
             if (
                 _nozzle_advisory is not None
                 and _nozzle_advisory.get("severity") == "red"
@@ -909,14 +455,12 @@ def recommend_material(
 
     # Abrasive-filament floor.  The NOZZLE ADVISORY above is the precise
     # answer — it knows which nozzle is fitted and how much life is left —
-    # but it needs kiln-pro AND a recorded nozzle state, so it says nothing
-    # on a free install and nothing on a paid one whose printer has never
-    # had its nozzle recorded.  Both cases used to route a filled filament
-    # to the user with no mention of the nozzle at all, and a missing
-    # warning reads as "no concern".  This floor states the material fact
-    # and is explicit about the nozzle being the part we cannot see.
-    # Public floor; reaches every install.  Suppressed when the precise
-    # advisory already fired, so nobody gets told twice.
+    # but it needs a recorded nozzle state.  Without one, a filled filament
+    # would reach the user with no mention of the nozzle at all, and a
+    # missing warning reads as "no concern".  This floor states the
+    # material fact and is explicit about the nozzle being the part we
+    # cannot see.  Public floor; reaches every install.  Suppressed when the
+    # precise advisory already fired, so nobody gets told twice.
     if not _nozzle_advisory_shown:
         try:
             from kiln.material_safety import abrasive_nozzle_floor
@@ -928,11 +472,11 @@ def recommend_material(
             logger.debug("Abrasive-filament floor skipped", exc_info=True)
 
     # Skin-contact advisory (worn / handled against skin).  This is NOT a
-    # filter — no printed material is skin-safe, so we never drop or downrank
-    # a candidate (unlike the food-safe filter above).  When the intent implies
-    # a worn item we prepend the honest caution for the chosen material so a
-    # material picked for a ring or band carries it.  Public floor; reaches
-    # every install.  Advisory only, best-effort, never breaks routing.
+    # filter — no printed material is skin-safe, so no candidate is dropped
+    # or downranked for it.  When the intent implies a worn item the honest
+    # caution for the chosen material is prepended, so a material picked for
+    # a ring or band carries it.  Public floor; reaches every install.
+    # Advisory only, best-effort, never breaks the recommendation.
     try:
         from kiln.design_intelligence import (
             get_skin_contact_floor,
@@ -940,38 +484,127 @@ def recommend_material(
         )
 
         if use_case_implies_skin_contact(intent):
-            _floor = get_skin_contact_floor(top_mat.name)
+            _floor = get_skin_contact_floor(top["name"])
             _note = _floor.honesty_note if _floor is not None else ""
-            reasoning = (
-                "SKIN CONTACT: no printed part is proven safe on skin. "
-                f"{_note} Keep it out of the mouth, away from the eyes, and off "
-                "broken skin, piercings and implants. If your skin reacts, ask "
-                "a doctor.\n\n"
-                f"{reasoning}"
-            )
-    except Exception:  # noqa: BLE001 — advisory is best-effort; never break routing
+            reasoning = f"{_SKIN_LEAD} {_note} {_SKIN_TAIL}\n\n{reasoning}"
+    except Exception:  # noqa: BLE001 — advisory is best-effort; never break the recommendation
         logger.debug("Skin-contact advisory skipped", exc_info=True)
 
     return MaterialRecommendation(
-        material=top_mat,
-        score=top_score,
+        material=top,
+        score=answer["score"],
         reasoning=reasoning,
-        settings=_default_settings(top_mat),
-        estimated_cost_usd=top_mat.cost_per_kg_usd,
+        settings=dict(answer["settings"]),
+        estimated_cost_usd=answer.get("estimated_cost_usd"),
         success_rate=success_rate,
         alternatives=alternatives,
         availability=availability,
     )
 
 
-def list_materials() -> list[MaterialProperties]:
-    """Return all available materials sorted by name."""
-    return sorted(_MATERIALS.values(), key=lambda m: m.name)
+def _hotend_limit_c(printer_id: str) -> float | None:
+    """The named printer's own rated hotend ceiling, or ``None`` when Kiln
+    holds none for it (no printer named, its model unknown, or only the
+    generic limits on record)."""
+    if not printer_id:
+        return None
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model_for
+        from kiln.safety_profiles import get_profile
+
+        model = resolve_printer_model_for(printer_id)
+        if not model:
+            return None
+        profile = get_profile(model)
+    except Exception:  # noqa: BLE001 -- unknown limits: the whole table is listed
+        logger.debug("printer limits unreadable for %s", printer_id, exc_info=True)
+        return None
+    if profile.id == "default":
+        return None
+    return float(profile.max_hotend_temp)
 
 
-def get_material(name: str) -> MaterialProperties | None:
-    """Look up a material by name.
+def basic_materials(intent: str, miss: Miss, *, printer_id: str = "") -> BasicMaterials:
+    """The answer when Kiln's material recommendation gives none: no pick,
+    the plastics the printer can melt (unranked), the food-contact floor and
+    the skin-contact caution, and one sentence saying why and what fixes it."""
+    from kiln import served_answer
+    from kiln._pro_routing_bridge import FEATURE
+    from kiln.material_basics import plastics_printer_can_melt
+    from kiln.material_safety import (
+        filter_food_safe_materials,
+        use_case_implies_food_contact,
+    )
 
-    :param name: Material name (case-insensitive).
-    """
-    return _MATERIALS.get(name.lower())
+    limit = _hotend_limit_c(printer_id)
+    plastics = plastics_printer_can_melt(limit)
+    if use_case_implies_food_contact(intent):
+        plastics = filter_food_safe_materials(plastics, require="yes_or_conditional")
+    cautions: list[str] = []
+    try:
+        from kiln.design_intelligence import use_case_implies_skin_contact
+
+        if use_case_implies_skin_contact(intent):
+            cautions.append(f"{_SKIN_LEAD} {_SKIN_TAIL}")
+    except Exception:  # noqa: BLE001 — advisory is best-effort
+        logger.debug("Skin-contact advisory skipped", exc_info=True)
+    note = served_answer.sentence(
+        miss,
+        feature=FEATURE,
+        on_the_line="Kiln did not pick a plastic for this part",
+        cannot="pick one",
+        wont=(
+            "lists the plastics this printer can melt instead" if limit is not None
+            else "lists common plastics instead"
+        ),
+        then="ask again for Kiln's pick for this part",
+    )
+    return BasicMaterials(plastics=plastics, note=note, miss=miss, hotend_limit_c=limit, cautions=cautions)
+
+
+def material_list() -> dict[str, Any]:
+    """The ``list_available_materials`` reply: every material Kiln's
+    recommendation picks from, with its properties, sorted by name.  When
+    Kiln's servers give no answer it is basic: each material's name and
+    category, and one sentence saying why and what fixes it."""
+    from kiln import _pro_routing_bridge
+
+    materials, miss = _pro_routing_bridge.catalogue()
+    if materials is not None:
+        return {"success": True, "materials": materials, "count": len(materials)}
+    return basic_material_list(miss or Miss("unanswered"))
+
+
+def basic_material_list(miss: Miss) -> dict[str, Any]:
+    """Names and categories only, from the material catalogue Kiln ships with."""
+    from kiln import served_answer
+    from kiln._pro_routing_bridge import FEATURE
+
+    named: list[dict[str, Any]] = []
+    try:
+        from kiln.design_intelligence import list_public_material_profiles
+
+        named = [
+            {"name": p.material_id, "display_name": p.display_name, "category": p.category}
+            for p in list_public_material_profiles()
+        ]
+    except Exception:  # noqa: BLE001 -- an unreadable catalogue lists nothing, and says why
+        logger.debug("material names unreadable", exc_info=True)
+    note = served_answer.sentence(
+        miss,
+        feature=FEATURE,
+        on_the_line="Kiln did not list each material's properties",
+        cannot="list them",
+        wont="lists names and categories only",
+        then="ask again for the full list",
+    )
+    out: dict[str, Any] = {
+        "success": True,
+        "basic": True,
+        "message": note,
+        "materials": named,
+        "count": len(named),
+        "retryable": miss.no_answer,
+    }
+    out.update(served_answer.fields(miss))
+    return out

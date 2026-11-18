@@ -749,6 +749,9 @@ class _IntelligenceToolsPlugin:
 
             try:
                 from kiln.material_routing import (
+                    BasicMaterials,
+                )
+                from kiln.material_routing import (
                     recommend_material as _recommend,
                 )
 
@@ -795,6 +798,12 @@ class _IntelligenceToolsPlugin:
                     printer_id=printer_id,
                     on_hand=on_hand,
                 )
+                if isinstance(rec, BasicMaterials):
+                    # No pick: the plastics this printer can melt, and why.
+                    basic = rec.to_dict()
+                    if printer_id:
+                        basic["answered_for_printer"] = printer_id
+                    return basic
 
                 response = {"success": True, "recommendation": rec.to_dict()}
                 # Say which machine the answer was computed for — an
@@ -821,14 +830,11 @@ class _IntelligenceToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_routing import list_materials
+                # With no answer from Kiln's servers the list is basic: each
+                # material's name and category, and a message saying why.
+                from kiln.material_routing import material_list
 
-                materials = list_materials()
-                return {
-                    "success": True,
-                    "materials": [m.to_dict() for m in materials],
-                    "count": len(materials),
-                }
+                return material_list()
             except Exception as exc:
                 _logger.exception("Unexpected error in list_available_materials")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
