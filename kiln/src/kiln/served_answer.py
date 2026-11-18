@@ -474,6 +474,12 @@ def envelope_for_transport(
     }
 
 
+#: How Kiln's servers start the 404 for a tool they do not have.
+_UNKNOWN_TOOL = "Unknown tool:"
+#: What a miss carries for such a tool, in place of the servers' words.
+_NOT_SERVED_HERE_DETAIL = "these servers do not have that answer yet"
+
+
 def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | None = None) -> dict[str, Any]:
     """The envelope for an HTTP error answer.
 
@@ -481,7 +487,9 @@ def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | Non
     server's own) comes back untouched: the server built it for this call
     and this side has no better words.  FastAPI's bare ``{"detail": ...}``
     -- which used to come back as-is, with no field that marked it an
-    error -- and a body that is not JSON at all are worded here.
+    error -- and a body that is not JSON at all are worded here.  A 404 for
+    a tool the servers do not have is no answer, never a ruling, and its
+    words (the tool's name) are not repeated.
     """
     if isinstance(body, dict) and any(k in body for k in ("status", "success", "error", "code")):
         return body
@@ -491,6 +499,10 @@ def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | Non
         detail = raw if isinstance(raw, str) else (json.dumps(raw) if raw is not None else "")
     if status == 401:
         miss = Miss("signed_out", "KILN_AUTH_REJECTED", detail)
+    elif status == 404 and detail.startswith(_UNKNOWN_TOOL):
+        # The servers do not have this tool (yet): nobody ruled on the ask,
+        # and the tool's name is not words for a person.
+        miss = Miss("unanswered", "NOT_SERVED_HERE", _NOT_SERVED_HERE_DETAIL)
     elif status >= 500:
         miss = Miss("unanswered", "KILN_API_HTTP_ERROR", detail)
     elif status == 429:

@@ -84,7 +84,7 @@ def _servers(monkeypatch, replies: dict[str, Any]) -> list[tuple[str, dict]]:
 
     asked: list[tuple[str, dict]] = []
 
-    def served(tool_name, /, _timeout=None, _asked_by_user=True, **kwargs):
+    def served(tool_name, /, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
         asked.append((tool_name, dict(kwargs)))
         reply = replies[tool_name]
         return reply(**kwargs) if callable(reply) else reply

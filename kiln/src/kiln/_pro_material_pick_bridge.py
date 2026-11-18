@@ -49,6 +49,9 @@ LOCAL_MODULE = "kiln_pro.material_floor_pick"
 FEATURE = "material pick"
 #: The same for Kiln Pro's own pick, when it is the one that missed.
 PRO_FEATURE = "Pro pick"
+#: What the sign-in sentence calls each pick.
+SIGN_IN_NAME = f"Kiln's {FEATURE}"
+PRO_SIGN_IN_NAME = "Kiln Pro's material pick"
 #: A pick is asked on the way to a make; the miss is said if this passes.
 _CONSULT_TIMEOUT_S: float = 4.0
 #: After the servers fail to answer, how long the pick is not asked for; a
@@ -231,6 +234,7 @@ def _ask(tool: str, requirements_text: str, printer: dict[str, Any]) -> tuple[An
             # The person asked what material to use; the pick is what they
             # reached for.
             _asked_by_user=True,
+            _feature=PRO_SIGN_IN_NAME if tool == WIRE_TOOL else SIGN_IN_NAME,
             requirements_text=str(requirements_text or ""),
             printer_has_enclosure=bool(printer.get("printer_has_enclosure", False)),
             printer_has_direct_drive=bool(printer.get("printer_has_direct_drive", True)),

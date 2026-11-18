@@ -43,6 +43,9 @@ LOCAL_MODULE = "kiln_pro.material_pairing.engine"
 MIX_TOOL = "material_mix_check"
 #: Where the same check is read from when kiln-pro IS installed here.
 MIX_LOCAL_MODULE = "kiln_pro.material_pairing.compat"
+#: What the sign-in sentence calls each answer asked for.
+SIGN_IN_NAME = "Kiln's pairing check"
+MIX_SIGN_IN_NAME = "Kiln's multi-material check"
 #: Which record answered, as the answer names it.
 FOUND = ("pair", "support", "none")
 #: The keys a multi-material answer carries.
@@ -107,6 +110,7 @@ def _served_co_print(material_a: str, material_b: str) -> tuple[dict[str, Any] |
             # The person asked whether these two materials print together;
             # the verdict is the feature they reached for.
             _asked_by_user=True,
+            _feature=SIGN_IN_NAME,
             material_a=material_a,
             material_b=material_b,
         )
@@ -156,6 +160,7 @@ def _served_mix_check(names: list[str]) -> tuple[dict[str, Any] | None, Miss | N
             # Asked on the way to a compose or a print; the person asked for
             # the plate, not for this check.
             _asked_by_user=False,
+            _feature=MIX_SIGN_IN_NAME,
             materials=list(names),
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback

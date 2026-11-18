@@ -21001,6 +21001,7 @@ def _pro_api_call(
     _timeout: float | None = None,
     _asked_by_user: bool = True,
     _http: dict | None = None,
+    _feature: str | None = None,
     **kwargs,
 ) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
@@ -21022,6 +21023,11 @@ def _pro_api_call(
     ``_http``, when given, is filled with ``status``: the HTTP status the
     answer came with, so a caller can tell a tool's own answer (200) from
     the servers turning the call away.  Left empty when no HTTP answer came.
+
+    ``_feature``, when given, is what the sign-in sentence calls the thing
+    asked for, in a person's words ("Kiln's material recommendation"), for a
+    served tool whose name is not one a person ever meets.  Left out, the
+    sentence names the tool.
 
     Bearer-token resolution order:
       1. OAuth access token from ``$KILN_AUTH_HOME/.kiln/auth_tokens.json``,
@@ -21087,7 +21093,7 @@ def _pro_api_call(
         # definition of them now, so this refusal cannot drift away from the
         # thirteen others that say the same thing.
         wall = account_required_message(
-            tool_name, tier=required_tier, allowance=allowance,
+            _feature or tool_name, tier=required_tier, allowance=allowance,
             every_plan=_PRO_TOOL_FLOORS.get(tool_name, ""),
         )
         # Value before the wall.  A person who reached for a paid tool is at

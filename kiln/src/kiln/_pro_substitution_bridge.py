@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 #: The served tool that answers one material's substitutes.
 WIRE_TOOL = "material_substitutes"
+#: What the sign-in sentence calls the answer asked for.
+SIGN_IN_NAME = "Kiln's ranked substitutes"
 #: Where the same answer is worked out when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.material_substitution"
 #: The reasons a substitute can be asked to address: the doors' input words.
@@ -129,7 +131,7 @@ def _served(material: str, reason: str | None, min_score: float, best: bool) -> 
     try:
         # The person asked for substitutes, and this is the answer they
         # asked for: a signed-out refusal is them meeting the sign-in wall.
-        answer = _srv._pro_api_call(WIRE_TOOL, _asked_by_user=True, **sent)
+        answer = _srv._pro_api_call(WIRE_TOOL, _asked_by_user=True, _feature=SIGN_IN_NAME, **sent)
     except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
         logger.debug("%s request failed", WIRE_TOOL, exc_info=True)
         return Asked(miss=classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None)))

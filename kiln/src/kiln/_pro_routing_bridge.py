@@ -40,6 +40,8 @@ LOCAL_MODULE = "kiln_pro.intent_materials.engine"
 
 #: What a person reads about a miss, filled in by :mod:`kiln.served_answer`.
 FEATURE = "material recommendation"
+#: What the sign-in sentence calls the answer asked for.
+SIGN_IN_NAME = f"Kiln's {FEATURE}"
 
 #: The longest description of what a part is for that is asked about.
 MAX_INTENT_CHARS = 10_000
@@ -162,6 +164,7 @@ def _served(want: str, request: dict[str, Any]) -> tuple[Any, Miss | None]:
             # The person asked which material to use, or for the list; the
             # answer is what they reached for.
             _asked_by_user=True,
+            _feature=SIGN_IN_NAME,
             want=want,
             **request,
         )

@@ -79,7 +79,7 @@ def plain_install_served(answer: Any = None, *, answer_for=None, others=None):
 
     sent: list[tuple[str, dict[str, Any]]] = []
 
-    def fake(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+    def fake(tool_name, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
         sent.append((tool_name, dict(kwargs)))
         if tool_name == WIRE:
             if isinstance(answer, BaseException):

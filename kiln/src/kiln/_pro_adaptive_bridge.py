@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 #: The hosted door, asked when kiln-pro is not installed here.
 WIRE_TOOL = "adaptive_slicing_answer"
+#: What the sign-in sentence calls the answer asked for.
+SIGN_IN_NAME = "Kiln's tuned slicing settings"
 #: Where the same answer is read when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.adaptive_slicing.engine"
 #: A person is waiting on the answer; past this, generic settings answer.
@@ -124,6 +126,7 @@ def _served(question: str, fields: dict[str, Any]) -> tuple[dict[str, Any] | Non
             WIRE_TOOL,
             _timeout=CONSULT_TIMEOUT_S,
             _asked_by_user=True,
+            _feature=SIGN_IN_NAME,
             ask=question,
             **fields,
         )

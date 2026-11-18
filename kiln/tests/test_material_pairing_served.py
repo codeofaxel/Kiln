@@ -66,7 +66,7 @@ def _served(monkeypatch, reply: Any) -> list[dict[str, Any]]:
 
     asks: list[dict[str, Any]] = []
 
-    def call(tool_name, _timeout=None, _asked_by_user=None, **kwargs):
+    def call(tool_name, _timeout=None, _asked_by_user=None, _feature=None, **kwargs):
         asks.append({"tool": tool_name, "asked_by_user": _asked_by_user, **kwargs})
         if isinstance(reply, BaseException):
             raise reply

@@ -60,7 +60,7 @@ def served(monkeypatch):
     calls: list[tuple[str, dict]] = []
     answers: list[Any] = []
 
-    def fake(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+    def fake(tool_name, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
         calls.append((tool_name, kwargs))
         answer = answers.pop(0) if answers else {}
         if isinstance(answer, BaseException):
