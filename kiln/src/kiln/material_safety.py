@@ -393,7 +393,7 @@ def _normalise(material: str) -> str:
 #
 # Which pairs of materials may share a print, what to purge between them and
 # the hardware each needs is Kiln's check (kiln-pro, https://kiln3d.com),
-# asked through :mod:`kiln._pro_pairing_bridge`.  Every install keeps two
+# asked through :mod:`kiln._pro_material_pairing_bridge`.  Every install keeps two
 # things so the composer still works with no answer from Kiln's servers: the
 # pairs that must never share a print, refused as always, and what the nozzle
 # temperature table alone shows about any other pair.
@@ -508,7 +508,7 @@ def basic_pair_finding(material_a: str, material_b: str) -> tuple[str, bool, str
 def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
     """Check compatibility between all material pairs in a print job.
 
-    Kiln's check answers through :mod:`kiln._pro_pairing_bridge`.
+    Kiln's check answers through :mod:`kiln._pro_material_pairing_bridge`.
 
     Args:
         materials: List of material names (one per extruder slot, 1-indexed
@@ -539,7 +539,7 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
         return {"safe": True, "level": "ok", "pairs": [], "hardware_warnings": [],
                 "purge_matrix": [], "message": "No materials specified."}
 
-    from kiln import _pro_pairing_bridge as pairing
+    from kiln import _pro_material_pairing_bridge as pairing
 
     entries, miss = pairing.mix_check(list(dict.fromkeys(clean)))
     if entries is not None:
@@ -555,7 +555,7 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
 def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, Any] | None:
     """The multi-material check for *clean* (one name per loaded part, in
     order), built from Kiln's answer for every pair of its distinct names
-    (:func:`kiln._pro_pairing_bridge.mix_check`).  ``None`` when the answer
+    (:func:`kiln._pro_material_pairing_bridge.mix_check`).  ``None`` when the answer
     leaves out a pair the parts need."""
     names = entries["names"]
     by_pair: dict[frozenset, dict[str, Any]] = {

@@ -65,11 +65,11 @@ def co_print(material_a: str, material_b: str) -> tuple[dict[str, Any] | None, M
 
 def _local_co_print(material_a: str, material_b: str) -> Any:
     try:
-        from kiln_pro.material_pairing.engine import co_print as _engine_co_print
+        from kiln_pro.material_pairing.engine import co_print_with_notes as _engine_co_print
     except ImportError:
         return _NOT_HERE
     try:
-        answer = _engine_co_print(material_a, material_b, with_notes=True)
+        answer = _engine_co_print(material_a, material_b)
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         return None, local_fault(exc, where="the pairing check on this computer")
     if _is_answer(answer):

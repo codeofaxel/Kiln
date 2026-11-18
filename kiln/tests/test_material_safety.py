@@ -2,7 +2,7 @@
 abrasive-filament floor.
 
 The check is Kiln's (kiln-pro, https://kiln3d.com), asked through
-``kiln._pro_pairing_bridge``.  These pin, on an install without kiln-pro:
+``kiln._pro_material_pairing_bridge``.  These pin, on an install without kiln-pro:
 the served check is relayed as it is; with no answer the check is basic --
 the pairs that must never share a print are still refused, word for word,
 every other pair is a caution with the conservative purge, and one sentence

@@ -1,7 +1,7 @@
 """Whether two materials share one dual-extrusion print, asked of Kiln's servers.
 
 ``check_multi_material_pairing`` answers from Kiln's pairing verdict, asked
-through :mod:`kiln._pro_pairing_bridge` (kiln-pro, https://kiln3d.com).  These
+through :mod:`kiln._pro_material_pairing_bridge` (kiln-pro, https://kiln3d.com).  These
 pin, on an install without kiln-pro:
 
 * the door rebuilds its reply from the served answer, for the pair the

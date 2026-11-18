@@ -1467,7 +1467,7 @@ class TestPostProcessing:
 
 class TestMultiMaterialCompatibility:
     """The pairing verdict is kiln-pro's, asked of Kiln's servers (see
-    test_pairing_served.py); these pin the report around it."""
+    test_material_pairing_served.py); these pin the report around it."""
 
     @staticmethod
     def _serve(monkeypatch, **answer):

@@ -3885,7 +3885,7 @@ def check_multi_material_compatibility(
     Kiln's pairing verdict (kiln-pro, https://kiln3d.com) gives the
     compatibility, the interface adhesion and the soluble-support record when
     one of the two dissolves away from the other; it is asked for through
-    :mod:`kiln._pro_pairing_bridge`.  When it does not come (offline, signed
+    :mod:`kiln._pro_material_pairing_bridge`.  When it does not come (offline, signed
     out, no answer, refused) the report is a basic answer made here from the
     nozzle temperature ranges alone (:func:`_basic_pairing_report`), and says
     so.
@@ -3893,7 +3893,7 @@ def check_multi_material_compatibility(
     :param material_a: First material (e.g. ``"pla"``).
     :param material_b: Second material (e.g. ``"tpu"``).
     """
-    from kiln import _pro_pairing_bridge as pairing
+    from kiln import _pro_material_pairing_bridge as pairing
 
     answer, miss = pairing.co_print(material_a, material_b)
     if answer is None:
