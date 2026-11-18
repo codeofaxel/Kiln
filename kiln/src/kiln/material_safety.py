@@ -494,18 +494,26 @@ def nozzle_range(material: str) -> tuple[str, float, float] | None:
 def basic_pair_finding(material_a: str, material_b: str) -> tuple[str, bool, str, str]:
     """What the nozzle temperature table alone shows about two materials.
 
-    ``(sentence, temperatures_judged, label_a, label_b)``.  Ranges that do not
-    overlap mean the two can't share one nozzle temperature; ranges that
-    overlap say nothing about how well they stick together or how much to
-    purge between them; a material the table lacks is said, and nothing is
-    judged.  Never says a pair is compatible.
+    ``(sentence, temperatures_judged, label_a, label_b)``.  Two spellings of
+    one material share its own temperature and bond to themselves.  Ranges
+    that do not overlap mean the two can't share one nozzle temperature;
+    ranges that overlap say nothing about how well they stick together or how
+    much to purge between them; a material the table lacks is said, and
+    nothing is judged.  Never says a pair is compatible.
     """
-    from kiln.catalog_keys import material_label
+    from kiln.catalog_keys import material_label, same_material_spelling
 
     range_a = nozzle_range(material_a)
     range_b = nozzle_range(material_b)
     label_a = range_a[0] if range_a else (material_label(material_a) or "an unnamed material")
     label_b = range_b[0] if range_b else (material_label(material_b) or "an unnamed material")
+    if same_material_spelling(material_a, material_b):
+        return (
+            f"Both are {label_a}: one material shares its own nozzle temperature and bonds to itself.",
+            True,
+            label_a,
+            label_a,
+        )
     if range_a and range_b:
         span_a = f"{label_a} ({range_a[1]:g}-{range_a[2]:g} °C)"
         span_b = f"{label_b} ({range_b[1]:g}-{range_b[2]:g} °C)"
@@ -525,7 +533,7 @@ def basic_pair_finding(material_a: str, material_b: str) -> tuple[str, bool, str
         label for label, known in ((label_a, range_a), (label_b, range_b)) if not known
     ))
     sentence = (
-        f"Kiln has no nozzle temperature range for {unknown} on this computer, so "
+        f"Kiln's nozzle temperature table has no range for {unknown}, so "
         "neither their temperatures nor how well they stick together was judged."
     )
     return sentence, False, label_a, label_b
@@ -554,9 +562,10 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
 
         When Kiln's check cannot be had, the answer is basic (``basic:
         True``, :func:`_basic_mix_check`): the pairs that must never share a
-        print are still refused, every other pair reads ``"caution"`` with
-        the conservative purge and a warning saying what the nozzle
-        temperature ranges alone show, and ``caution`` says why the check is
+        print are still refused, every other pair of different materials
+        reads ``"caution"`` with the conservative purge and a warning saying
+        what the nozzle temperature ranges alone show, the same material in
+        two slots reads ``"ok"`` with the conservative purge, and ``caution`` says why the check is
         missing and how to get it, with ``why`` / ``why_code`` /
         ``why_detail`` beside it.
     """
@@ -694,13 +703,17 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
     pairs from :data:`_REFUSED_PAIRS`, the conservative purge, the abrasive
     floor, the enclosure line for a material the catalog says needs
     ventilation (:func:`needs_ventilation`), and a warning per other pair
-    from :func:`basic_pair_finding`.  With one material loaded there is no
-    pair, and ``caution`` speaks of its hardware alone."""
+    from :func:`basic_pair_finding`.  The same material in two slots is
+    ``"ok"`` with the conservative purge.  With one material loaded there is
+    no pair of different materials, and ``caution`` speaks of its hardware
+    alone."""
+    from kiln.catalog_keys import same_material_spelling
     from kiln.served_answer import Miss, fields, sentence
 
     if not isinstance(miss, Miss):
         miss = Miss("unanswered", detail="no multi-material check")
     n = len(clean)
+    one_material = all(same_material_spelling(clean[0], m) for m in clean[1:])
     pairs: list[dict[str, Any]] = []
     seen: set[frozenset] = set()
     for i in range(n):
@@ -718,6 +731,16 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
                     "warning": refused["warning"],
                     "mitigations": list(refused["mitigations"]),
                     "purge_volume_mm3": refused["purge_volume_mm3"],
+                }
+            elif same_material_spelling(clean[i], clean[j]):
+                # One material in two slots: it shares its own temperature and
+                # bonds to itself; only the purge between colours is unjudged.
+                entry = {
+                    "level": "ok",
+                    "warning": basic_pair_finding(clean[i], clean[j])[0]
+                    + " The purge between its colours was not judged.",
+                    "mitigations": [],
+                    "purge_volume_mm3": _CONSERVATIVE_PURGE_MM3,
                 }
             else:
                 entry = {
@@ -760,13 +783,16 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
             + "; ".join(f"{p['material_a']} + {p['material_b']}" for p in incompatible_pairs)
             + ". Do not print — see warnings for details."
         )
-    elif pairs:
+    elif any(p["level"] != "ok" for p in pairs):
         level = "caution"
         message = "⚠️  Printable with precautions. Review warnings before starting."
+    elif pairs:
+        level = "ok"
+        message = "One material in every slot, so there are no pairs of different materials to check."
     else:
         level = "ok"
         message = "One material, so there are no pairs to check."
-    if len(set(clean)) == 1:
+    if one_material:
         # One material: no pair to judge, only the hardware it needs.
         caution = sentence(
             miss,

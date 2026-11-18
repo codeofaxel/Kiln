@@ -28,14 +28,15 @@ from kiln import design_intelligence as di
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "kiln"
 
-#: The three shapes a basic answer's notes take, and nothing else.
+#: The four shapes a basic answer's notes take, and nothing else.
 _BASIC_NOTES = (
     re.compile(r"^These two can't share one nozzle temperature: the nozzle ranges of .+ do not overlap\. "
                r"How well they stick together was not judged\.$"),
     re.compile(r"^The nozzle ranges of .+ overlap\. How well they stick together and how much to purge "
                r"between them was not judged\.$"),
-    re.compile(r"^Kiln has no nozzle temperature range for .+ on this computer, so neither their "
+    re.compile(r"^Kiln's nozzle temperature table has no range for .+, so neither their "
                r"temperatures nor how well they stick together was judged\.$"),
+    re.compile(r"^Both are .+: one material shares its own nozzle temperature and bonds to itself\.$"),
 )
 
 
@@ -151,8 +152,27 @@ class TestABasicAnswer:
     def test_a_material_the_nozzle_table_lacks_is_said(self, monkeypatch):
         _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
         out = _door()("pla_plus", "pva")
-        assert out["notes"].startswith("Kiln has no nozzle temperature range for PLA+ or PVA")
+        assert out["notes"].startswith("Kiln's nozzle temperature table has no range for PLA+ or PVA,")
+        assert "on this computer" not in out["notes"]
         assert "has judged nothing about this pair" in out["caution"]
+
+    def test_the_line_promises_only_what_the_verdict_carries(self, monkeypatch):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        caution = _door()("pla", "petg")["caution"]
+        assert caution.startswith(
+            "Kiln's pairing verdict says whether two materials can share one print and how well they bond."
+        )
+        assert "purge" not in caution
+
+    @pytest.mark.parametrize("pair", [("pla", "pla"), ("PETG-CF", "petg_cf"), ("tpu", "TPU")])
+    def test_one_material_twice_is_not_a_precaution(self, monkeypatch, pair):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        out = _door()(*pair)
+        assert re.match(r"^Both are .+: one material shares its own nozzle temperature and bonds to itself\.$",
+                        out["notes"]), out["notes"]
+        assert "answered only that one material pairs with itself" in out["caution"]
+        assert "test piece" not in out["caution"]
+        assert out["compatible"] is None, "a basic answer is still never a yes"
 
     @pytest.mark.parametrize("pair", [("pla", "tpu"), ("pla", "abs"), ("petg", "pva"), ("nylon", "pa"),
                                       ("cf_pla", "pla"), ("tpu", "tpu"), ("asa", "abs"), ("x", "y")])

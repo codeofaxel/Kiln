@@ -140,7 +140,31 @@ class TestABasicCheck:
         pairs = {(p["material_a"], p["material_b"]): p["warning"]
                  for p in check_material_compatibility(["TPU", "PC", "PLA GREY"])["pairs"]}
         assert pairs[("TPU", "PC")].startswith("These two can't share one nozzle temperature")
-        assert pairs[("TPU", "PLA GREY")].startswith("Kiln has no nozzle temperature range for PLA GREY")
+        assert pairs[("TPU", "PLA GREY")].startswith("Kiln's nozzle temperature table has no range for PLA GREY,")
+
+    def test_one_material_in_every_slot_is_not_a_precaution(self, monkeypatch):
+        """Four slots of PLA: one material shares its own temperature and
+        bonds to itself, so the check is ok; the purge between colours stays
+        the conservative one."""
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(["PLA", "PLA", "PLA", "PLA"])
+        assert result["safe"] is True and result["level"] == "ok" and result["basic"] is True
+        assert "precaution" not in result["message"].lower() and "⚠" not in result["message"]
+        (pair,) = result["pairs"]
+        assert pair["level"] == "ok" and pair["purge_volume_mm3"] == 800
+        assert pair["warning"] == (
+            "Both are PLA: one material shares its own nozzle temperature and bonds to itself. "
+            "The purge between its colours was not judged."
+        )
+        assert {v for row in result["purge_matrix"] for v in row} == {0.0, 800.0}
+
+    def test_a_same_material_pair_beside_a_different_one_keeps_the_caution(self, monkeypatch):
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(["PLA", "PLA", "PETG"])
+        levels = {(p["material_a"], p["material_b"]): p["level"] for p in result["pairs"]}
+        assert levels == {("PLA", "PLA"): "ok", ("PLA", "PETG"): "caution"}
+        assert result["level"] == "caution"
+        assert "Kiln can't check how these materials pair right now because" in result["caution"]
 
     def test_the_filled_filament_floor_still_warns(self, monkeypatch):
         _served(monkeypatch, _SIGNED_OUT)

@@ -3554,10 +3554,12 @@ def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiM
     Built only from the nozzle table: two ranges that do not overlap mean the
     two materials can't share one nozzle temperature; ranges that do overlap
     say nothing about how well the two stick together or how much to purge
-    between them.  It never says the pair is compatible, carries no adhesion
+    between them; two spellings of one material share its temperature and
+    bond to themselves.  It never says the pair is compatible, carries no adhesion
     grade, support record or general rule, and its ``caution`` is the one
     sentence saying why Kiln's verdict is missing and how to get it.
     """
+    from kiln.catalog_keys import same_material_spelling
     from kiln.material_safety import basic_pair_finding
     from kiln.served_answer import Miss, fields, sentence
 
@@ -3566,17 +3568,23 @@ def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiM
     a = str(material_a or "").lower()
     b = str(material_b or "").lower()
     notes, judged, label_a, label_b = basic_pair_finding(a, b)
-    wont = "answered from the nozzle temperatures alone" if judged else "has judged nothing about this pair"
+    same = same_material_spelling(a, b)
+    if same:
+        wont = "answered only that one material pairs with itself"
+    elif judged:
+        wont = "answered from the nozzle temperatures alone"
+    else:
+        wont = "has judged nothing about this pair"
     caution = sentence(
         miss,
         feature="pairing check",
         on_the_line=(
-            "Kiln's pairing verdict says whether two materials bond in one print "
-            "and how much to purge between them"
+            "Kiln's pairing verdict says whether two materials can share one print "
+            "and how well they bond"
         ),
         cannot=f"give its pairing verdict for {label_a} and {label_b}",
         wont=wont,
-        safe_remedy="run a small test piece before a long print",
+        safe_remedy="" if same else "run a small test piece before a long print",
         then="ask again",
     )
     return MultiMaterialReport(
