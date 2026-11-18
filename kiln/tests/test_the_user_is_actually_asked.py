@@ -1528,15 +1528,31 @@ def test_the_consent_record_is_read_in_exactly_one_place():
 
 #: The calls that write a print's clearance or a person's consent.
 _YES_WRITES = frozenset({"grant", "grant_from_record", "set_consent"})
+#: The calls that turn a person's answer into their yes, with the yes each
+#: writes: the caller hands them the answer, so the caller is the writer.
+_ANSWER_WRITES = {"consent_from_dialog_answer": "SOURCE_ELICITED", "_consent_from_code_answer": "SOURCE_CODE"}
+#: The modules those calls live in.
+_WRITER_MODULES = ("print_signoff", "print_consent", "server")
+#: Calls each module makes to its own writers by their bare names.
+_OWN_WRITERS = {
+    "print_signoff.py": _YES_WRITES | {"Clearance"},
+    "print_consent.py": _YES_WRITES,
+    "server.py": frozenset(_ANSWER_WRITES),
+}
 #: How a source read at run time is named below: a yes some gate already
 #: read, passed on.
 _CARRIED = "<carried>"
+#: A clearance built, or the slot it lives in reached, outside its own
+#: module: never a person's yes, and nothing may stand in for one that way.
+_RAW_CLEARANCE = "<sets the clearance itself>"
 
 #: Where a person's own yes is written, and the person behind each.  A new
 #: place fails until it is named here; a place that no longer writes one
 #: fails as stale.
 _WHERE_A_PERSON_SAYS_GO = {
     "server.py::consent_from_dialog_answer": "the answer the host's dialog brought back",
+    "server.py::_obtain_print_consent": "the person's answer it was just handed: the dialog's, or the code they typed",
+    "server.py::_ask_for_a_run": "the person's answer to the run, from the host's dialog",
     "server.py::_consent_from_account_always": "always allow the account turned on, confirmed for this start",
     "server.py::_consent_from_code_answer": "the code a person typed after this machine's screen showed it",
     "server.py::_covered_by_approval": "the plate this call built, under the yes its input got on this call",
@@ -1574,9 +1590,27 @@ _STANDS_IN_FOR_A_PERSON = {
 }
 
 
-def _sources_named(expr: ast.AST | None) -> set[str]:
+def _assigned(name: str, scope: ast.AST | None) -> list[ast.AST]:
+    """Every value *scope* binds to *name* (``=``, ``: T =``, ``:=``)."""
+    if scope is None:
+        return []
+    values: list[ast.AST] = []
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            targets = [node.target]
+        else:
+            continue
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+            values.append(node.value)
+    return values
+
+
+def _sources_named(expr: ast.AST | None, scope: ast.AST | None = None, _seen: frozenset[str] = frozenset()) -> set[str]:
     """Each source *expr* can write: a ``SOURCE_*`` constant by name, a
-    literal as written, and :data:`_CARRIED` for anything read at run time."""
+    literal as written, a name bound in *scope* read for what it is bound
+    to, and :data:`_CARRIED` for anything read at run time."""
     if expr is None:
         return {"SOURCE_ELICITED"}  # PrintConsent's default
     if isinstance(expr, ast.Constant):
@@ -1584,12 +1618,14 @@ def _sources_named(expr: ast.AST | None) -> set[str]:
     name = expr.id if isinstance(expr, ast.Name) else expr.attr if isinstance(expr, ast.Attribute) else ""
     if name.startswith("SOURCE_"):
         return {name}
+    if isinstance(expr, ast.Name) and name not in _seen and (bound := _assigned(name, scope)):
+        return set().union(*(_sources_named(v, scope, _seen | {name}) for v in bound))
     if isinstance(expr, ast.BoolOp):
-        return set().union(*(_sources_named(v) for v in expr.values))
+        return set().union(*(_sources_named(v, scope, _seen) for v in expr.values))
     if isinstance(expr, ast.IfExp):
-        return _sources_named(expr.body) | _sources_named(expr.orelse)
+        return _sources_named(expr.body, scope, _seen) | _sources_named(expr.orelse, scope, _seen)
     if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "str" and expr.args:
-        return _sources_named(expr.args[0])
+        return _sources_named(expr.args[0], scope, _seen)
     return {_CARRIED}
 
 
@@ -1597,41 +1633,101 @@ def _keyword(call: ast.Call, name: str) -> ast.AST | None:
     return next((kw.value for kw in call.keywords if kw.arg == name), None)
 
 
-def _yes_writes() -> dict[str, set[str]]:
+def _writer_names(tree: ast.AST) -> tuple[set[str], dict[str, str]]:
+    """``(dotted names that reach a writer module, {bare name: what it is})``,
+    from every way a module can import them."""
+    modules: set[str] = set()
+    names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if alias.name in _WRITER_MODULES and (mod == "kiln" or (node.level and not mod)):
+                    modules.add(local)
+                elif mod.rsplit(".", 1)[-1] in _WRITER_MODULES and (mod.startswith("kiln") or node.level):
+                    names[local] = alias.name
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "kiln":
+                    modules.update(f"{alias.asname or 'kiln'}.{m}" for m in _WRITER_MODULES)
+                elif alias.name.startswith("kiln.") and alias.name.rsplit(".", 1)[-1] in _WRITER_MODULES:
+                    modules.add(alias.asname or alias.name)
+    return modules, names
+
+
+def _builds_a_consent(expr: ast.AST) -> bool:
+    """Whether *expr* is ``PrintConsent(...)``, however the class is reached."""
+    if not isinstance(expr, ast.Call):
+        return False
+    func = expr.func
+    return (func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else "") == "PrintConsent"
+
+
+def _innermost_function(tree: ast.AST, node: ast.AST) -> ast.AST | None:
+    holders = [
+        f for f in ast.walk(tree)
+        if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and f.lineno <= node.lineno <= (f.end_lineno or 0)
+    ]
+    return min(holders, key=lambda f: (f.end_lineno or 0) - f.lineno) if holders else None
+
+
+def _yes_writes(src: pathlib.Path | None = None) -> dict[str, set[str]]:
     """``{"<module>::<function>": {each source it writes}}`` for every place
     in public Kiln that writes a print's clearance or a consent, read from
-    the source by what the call is, however it is imported."""
+    the source by what the call is, however it is imported or spelled: a
+    grant, a re-grant, a consent set, a person's answer handed to the code
+    that records it, and a clearance built or its slot reached outside its
+    own module."""
+    root = src or _SRC
     writes: dict[str, set[str]] = {}
-    for path in sorted(_SRC.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text())
-        own = path.name in ("print_signoff.py", "print_consent.py")
-        imported = {
-            alias.asname or alias.name: alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and (node.module or "").rsplit(".", 1)[-1] in ("print_signoff", "print_consent")
-            for alias in node.names
-        }
+        modules, names = _writer_names(tree)
+        own = _OWN_WRITERS.get(path.name, frozenset()) if path.parent == root else frozenset()
+        slot_is_own = path.parent == root and path.name in ("print_signoff.py", "print_consent.py")
         for node in ast.walk(tree):
+            if isinstance(node, (ast.Attribute, ast.Name)) and not slot_is_own:
+                reaches = (
+                    isinstance(node, ast.Attribute) and node.attr == "_current" and ast.unparse(node.value) in modules
+                ) or (isinstance(node, ast.Name) and names.get(node.id) == "_current")
+                if reaches:
+                    fn = _innermost_function(tree, node)
+                    owner = fn.name if fn is not None else "<module>"
+                    writes.setdefault(f"{path.relative_to(root).as_posix()}::{owner}", set()).add(_RAW_CLEARANCE)
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in (
-                "print_signoff", "print_consent",
-            ):
+            if isinstance(func, ast.Attribute) and ast.unparse(func.value) in modules:
                 call = func.attr
             elif isinstance(func, ast.Name):
-                call = imported.get(func.id, func.id if own else "")
+                call = names.get(func.id, func.id if func.id in own else "")
             else:
                 continue
-            if call not in _YES_WRITES or (owner := _innermost_owner(tree, node)) is None:
+            if call not in _YES_WRITES and call not in _ANSWER_WRITES and not (call == "Clearance" and not slot_is_own):
                 continue
+            fn = _innermost_function(tree, node)
             if call == "grant":
-                sources = _sources_named(_keyword(node, "source"))
-            elif call == "set_consent" and node.args and isinstance(node.args[0], ast.Call):
-                sources = _sources_named(_keyword(node.args[0], "source"))
-            else:
+                sources = _sources_named(_keyword(node, "source"), fn)
+            elif call == "set_consent" and node.args:
+                consent = node.args[0]
+                made = [consent] if isinstance(consent, ast.Call) else (
+                    _assigned(consent.id, fn) if isinstance(consent, ast.Name) else []
+                )
+                sources = set().union(*(
+                    _sources_named(_keyword(m, "source"), fn) if _builds_a_consent(m) else {_CARRIED} for m in made
+                )) if made else {_CARRIED}
+            elif call == "grant_from_record":
                 sources = {_CARRIED}
-            writes.setdefault(f"{path.relative_to(_SRC).as_posix()}::{owner}", set()).update(sources)
+            elif call in _ANSWER_WRITES:
+                sources = {_ANSWER_WRITES[call]}
+            elif call == "Clearance" and not slot_is_own:
+                sources = {_RAW_CLEARANCE}
+            else:
+                continue
+            owner = fn.name if fn is not None else "<module>"
+            writes.setdefault(f"{path.relative_to(root).as_posix()}::{owner}", set()).update(sources)
     # A sweep that silently found nothing would pass every check below.
     assert "server.py::_preview_gate_error" in writes and "print_signoff.py::exemption_verdict" in writes, writes
     return writes
@@ -1703,6 +1799,63 @@ def test_a_prior_approval_never_stands_in_for_a_yes():
 )
 def test_a_write_is_read_for_every_source_it_can_name(source, expected):
     assert _sources_named(ast.parse(source, mode="eval").body) == expected
+
+
+_ARGS = "'door', 'part.stl', None"
+
+
+@pytest.mark.parametrize(
+    "body, expected",
+    [
+        (f"from kiln import print_signoff\ndef f():\n    print_signoff.grant({_ARGS}, source=print_signoff.SOURCE_PRIOR_APPROVAL)\n",
+         {"SOURCE_PRIOR_APPROVAL"}),
+        (f"from kiln.print_signoff import grant as g\ndef f():\n    g({_ARGS}, source='prior_approval')\n",
+         {"'prior_approval'"}),
+        (f"from kiln import print_signoff as _ps\ndef f():\n    _ps.grant({_ARGS}, source=_ps.SOURCE_PRIOR_APPROVAL)\n",
+         {"SOURCE_PRIOR_APPROVAL"}),
+        (f"import kiln.print_signoff as ps\ndef f():\n    ps.grant({_ARGS}, source=ps.SOURCE_PRIOR_APPROVAL)\n",
+         {"SOURCE_PRIOR_APPROVAL"}),
+        (f"import kiln.print_signoff\ndef f():\n    kiln.print_signoff.grant({_ARGS}, source='prior_approval')\n",
+         {"'prior_approval'"}),
+        (f"import kiln\ndef f():\n    kiln.print_signoff.grant({_ARGS}, source='prior_approval')\n",
+         {"'prior_approval'"}),
+        ("from kiln import print_signoff\ndef f():\n    print_signoff._current.set(print_signoff.Clearance("
+         "tool='door', file_name='part.stl', printer_name=None, source='prior_approval'))\n",
+         {_RAW_CLEARANCE}),
+        ("from kiln.print_signoff import Clearance, _current\ndef f():\n    _current.set(Clearance("
+         "tool='door', file_name='part.stl', printer_name=None, source='prior_approval'))\n",
+         {_RAW_CLEARANCE}),
+        ("from kiln import server as _srv\nfrom kiln.print_consent import DialogAnswer\ndef f():\n"
+         f"    _srv.consent_from_dialog_answer({_ARGS}, DialogAnswer('accept', ''), aimed='workshop')\n",
+         {"SOURCE_ELICITED"}),
+        (f"from kiln import print_signoff\ndef f():\n    src = print_signoff.SOURCE_PRIOR_APPROVAL\n"
+         f"    print_signoff.grant({_ARGS}, source=src)\n",
+         {"SOURCE_PRIOR_APPROVAL"}),
+        ("from kiln.print_consent import SOURCE_ELICITED, PrintConsent, set_consent\ndef f():\n"
+         "    yes = PrintConsent(tool='door', file_name='part.stl', printer_name=None, source=SOURCE_ELICITED)\n"
+         "    set_consent(yes)\n",
+         {"SOURCE_ELICITED"}),
+    ],
+    ids=[
+        "module", "name alias", "module alias", "dotted alias", "dotted import", "package import",
+        "clearance set", "clearance set by name", "dialog answer forged", "source in a variable", "consent in a variable",
+    ],
+)
+def test_a_write_is_found_however_it_is_spelled(tmp_path, monkeypatch, body, expected):
+    """The reader finds every shape a self-grant could take: whatever the
+    import, a clearance built by hand, a person's answer forged, a source
+    held in a variable."""
+    (tmp_path / "server.py").write_text(
+        "from kiln import print_signoff\n"
+        "def _preview_gate_error(granted):\n    print_signoff.grant('t', 'x', None, source=granted.source)\n"
+    )
+    (tmp_path / "print_signoff.py").write_text(
+        "def grant(*a, **k):\n    pass\n"
+        "def exemption_verdict():\n    grant('t', 'x', None, source=SOURCE_CI_BYPASS)\n"
+    )
+    (tmp_path / "door.py").write_text(body)
+    monkeypatch.setattr(sys.modules[__name__], "_SRC", tmp_path)
+    assert _yes_writes().get("door.py::f") == expected
 
 
 def test_the_module_does_not_reach_for_the_sdk():
