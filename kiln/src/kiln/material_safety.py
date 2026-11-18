@@ -475,6 +475,10 @@ _REFUSED_PAIRS: dict[frozenset, dict[str, Any]] = {
 #: Purge (mm³) between two loaded slots when Kiln's check gave no figure for
 #: them: the conservative default, never a judged one.
 _CONSERVATIVE_PURGE_MM3 = 800
+#: Purge (mm³) between two colours of one material when Kiln's check gave no
+#: figure for them: the default a slicer's own project carries for a change
+#: of filament, never a judged one.
+_COLOUR_CHANGE_PURGE_MM3 = 280
 
 
 def nozzle_range(material: str) -> tuple[str, float, float] | None:
@@ -565,7 +569,8 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
         print are still refused, every other pair of different materials
         reads ``"caution"`` with the conservative purge and a warning saying
         what the nozzle temperature ranges alone show, the same material in
-        two slots reads ``"ok"`` with the conservative purge, and ``caution`` says why the check is
+        two slots reads ``"ok"`` with a slicer's default purge between its
+        colours, and ``caution`` says why the check is
         missing and how to get it, with ``why`` / ``why_code`` /
         ``why_detail`` beside it.
     """
@@ -706,7 +711,8 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
     floor, the enclosure line for a material the catalog says needs
     ventilation (:func:`needs_ventilation`), and a warning per other pair
     from :func:`basic_pair_finding`.  The same material in two slots is
-    ``"ok"`` with the conservative purge.  With one material loaded there is
+    ``"ok"`` with a slicer's default purge between its colours
+    (:data:`_COLOUR_CHANGE_PURGE_MM3`).  With one material loaded there is
     no pair of different materials, and ``caution`` speaks of its hardware
     alone."""
     from kiln.catalog_keys import same_material_spelling
@@ -743,7 +749,7 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
                     "warning": basic_pair_finding(clean[i], clean[j])[0]
                     + " The purge between its colours was not judged.",
                     "mitigations": [],
-                    "purge_volume_mm3": _CONSERVATIVE_PURGE_MM3,
+                    "purge_volume_mm3": _COLOUR_CHANGE_PURGE_MM3,
                 }
             else:
                 entry = {
@@ -774,6 +780,8 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
                 row.append(0.0)
             elif refused is not None:
                 row.append(float(refused["purge_volume_mm3"]))
+            elif same_material_spelling(clean[i], clean[j]):
+                row.append(float(_COLOUR_CHANGE_PURGE_MM3))
             else:
                 row.append(float(_CONSERVATIVE_PURGE_MM3))
         purge_matrix.append(row)
@@ -804,11 +812,18 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
             cannot="check what hardware this material needs",
             wont=(
                 "warned only from the material's name and the catalog on this computer"
-                + (", and set the conservative purge between its colours" if n > 1 else "")
+                + (", and set a slicer's default purge between its colours" if n > 1 else "")
             ),
             then=then,
         )
     else:
+        did = ["refused only the pairs that must never share a print"]
+        if any(p["level"] == "caution" for p in pairs):
+            did.append(
+                f"set the conservative purge of {_CONSERVATIVE_PURGE_MM3} mm³ a change between different materials"
+            )
+        if any(p["level"] == "ok" for p in pairs):
+            did.append("set a slicer's default purge between colours of one material")
         caution = sentence(
             miss,
             feature="multi-material check",
@@ -817,10 +832,7 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
                 "and how much to purge between them"
             ),
             cannot="check how these materials pair",
-            wont=(
-                "refused only the pairs that must never share a print and set the "
-                "conservative purge between the others"
-            ),
+            wont=", ".join(did[:-1]) + " and " + did[-1] if len(did) > 1 else did[0],
             safe_remedy="run a small test piece before a long print",
             then=then,
         )
