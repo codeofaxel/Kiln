@@ -50,10 +50,6 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks a material inventory door about several "
         "machines on Kiln Business; the cross-machine answer is what they reached for"
     ),
-    "_pro_pairing_bridge": (
-        "runs only when the person asks check_multi_material_pairing whether two "
-        "materials print together; the pairing verdict is the feature they reached for"
-    ),
     "_pro_material_pick_bridge": (
         "runs only when the person asks what material a part should be, on a "
         "plan that includes Kiln Pro; the pick is the feature they reached for"
@@ -114,6 +110,12 @@ _CALLER_DECIDES = {
 #: keyed by the name each call passes as its tool (its first argument): who
 #: asked, and why.
 _PER_CALL = {
+    "_pro_pairing_bridge": {
+        # The pairing verdict is what the person asked check_multi_material_pairing for.
+        "WIRE_TOOL": True,
+        # The multi-material check is fetched on the way to a compose or a print.
+        "MIX_TOOL": False,
+    },
     "_pro_assembly_bridge": {
         # The joint sweep IS the check the person asked for when they
         # validate or compose an assembly, and the parts' files are theirs.

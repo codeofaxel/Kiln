@@ -1136,7 +1136,7 @@ def compose_multicolor_3mf(
     try:
         _write_archive(output_path, members)
         if specified_materials:
-            flush_matrix_str = _flush_matrix_for(output_path, parsed)
+            flush_matrix_str = _flush_matrix_for(output_path, parsed, safety_result)
             if flush_matrix_str:
                 members.append((
                     "Metadata/project_settings.config",
@@ -1190,6 +1190,12 @@ def compose_multicolor_3mf(
         if safety_result.get("pairs"):
             result["material_pairs"] = safety_result["pairs"]
         result["flush_matrix_embedded"] = bool(flush_matrix_str)
+        if safety_result.get("basic"):
+            # Kiln's check did not answer: the pairs that must never share a
+            # print were still refused, and every other purge is the
+            # conservative default.  Say why, once.
+            result["safety_basic"] = True
+            result["safety_caution"] = safety_result.get("caution", "")
 
     result["fits_bed"] = plate_verdict["fits"]
     result["bed_fit"] = plate_verdict
@@ -1199,6 +1205,8 @@ def compose_multicolor_3mf(
     if safety_result and safety_result["level"] in ("caution", "conditional"):
         warning = str(safety_result["message"])
         safety_note = f" {warning}" if warning.startswith("⚠") else f" ⚠️  {warning}"
+    if safety_result and safety_result.get("basic") and safety_result.get("caution"):
+        safety_note += f" {safety_result['caution']}"
 
     if plate_verdict["fits"] is False:
         next_step = f" {plate_verdict['message']} It is not ready to print as laid out."
@@ -1268,8 +1276,10 @@ def _write_archive(output_path: str, members: list[tuple[str, str | bytes]]) -> 
             zf.writestr(name, data)
 
 
-def _flush_matrix_for(output_path: str, parsed: list[_ParsedPart]) -> str | None:
-    """The purge matrix for *output_path*, one row per filament slot a slice of it loads, or ``None`` when that slice loads a single filament."""
+def _flush_matrix_for(
+    output_path: str, parsed: list[_ParsedPart], check: dict[str, Any] | None = None,
+) -> str | None:
+    """The purge matrix for *output_path*, one row per filament slot a slice of it loads, or ``None`` when that slice loads a single filament.  *check* is the material check already made for these parts, read for each pair's purge."""
     evidence = detect_3mf_multicolor(output_path)
     slots = int((evidence or {}).get("filament_slots_needed", 0))
     if slots < 2:
@@ -1284,7 +1294,7 @@ def _flush_matrix_for(output_path: str, parsed: list[_ParsedPart]) -> str | None
         if material:
             per_slot.setdefault(part.extruder, material)
     materials = [per_slot.get(slot, "") for slot in range(1, slots + 1)]
-    return build_bambu_flush_matrix(materials, n_slots=slots)
+    return build_bambu_flush_matrix(materials, n_slots=slots, check=check)
 
 
 # ---------------------------------------------------------------------------

@@ -3942,20 +3942,6 @@ def check_multi_material_compatibility(
     )
 
 
-def _nozzle_range(material: str) -> tuple[str, float, float] | None:
-    """``(name, nozzle_min, nozzle_max)`` from the nozzle table every install
-    carries (:data:`kiln.gcode._MATERIAL_TEMPS`), for a spelling of one of
-    its materials (:func:`kiln.catalog_keys.same_material_spelling`); never a
-    family, so a filled or blended material has no range here."""
-    from kiln.catalog_keys import same_material_spelling
-    from kiln.gcode import _MATERIAL_TEMPS
-
-    for name, (low, high, _bed_low, _bed_high) in _MATERIAL_TEMPS.items():
-        if same_material_spelling(material, name):
-            return name, low, high
-    return None
-
-
 def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiMaterialReport:
     """The pairing answer this computer can give alone.
 
@@ -3966,41 +3952,15 @@ def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiM
     grade, support record or general rule, and its ``caution`` is the one
     sentence saying why Kiln's verdict is missing and how to get it.
     """
-    from kiln.catalog_keys import material_label
+    from kiln.material_safety import basic_pair_finding
     from kiln.served_answer import Miss, fields, sentence
 
     if not isinstance(miss, Miss):
         miss = Miss("unanswered", detail="no pairing verdict")
     a = str(material_a or "").lower()
     b = str(material_b or "").lower()
-    range_a = _nozzle_range(a)
-    range_b = _nozzle_range(b)
-    label_a = range_a[0] if range_a else (material_label(a) or "an unnamed material")
-    label_b = range_b[0] if range_b else (material_label(b) or "an unnamed material")
-    if range_a and range_b:
-        span_a = f"{label_a} ({range_a[1]:g}-{range_a[2]:g} °C)"
-        span_b = f"{label_b} ({range_b[1]:g}-{range_b[2]:g} °C)"
-        if max(range_a[1], range_b[1]) > min(range_a[2], range_b[2]):
-            notes = (
-                f"These two can't share one nozzle temperature: the nozzle ranges of "
-                f"{span_a} and {span_b} do not overlap. How well they stick together "
-                "was not judged."
-            )
-        else:
-            notes = (
-                f"The nozzle ranges of {span_a} and {span_b} overlap. How well they "
-                "stick together and how much to purge between them was not judged."
-            )
-        wont = "answered from the nozzle temperatures alone"
-    else:
-        unknown = " or ".join(dict.fromkeys(
-            label for label, known in ((label_a, range_a), (label_b, range_b)) if not known
-        ))
-        notes = (
-            f"Kiln has no nozzle temperature range for {unknown} on this computer, so "
-            "neither their temperatures nor how well they stick together was judged."
-        )
-        wont = "has judged nothing about this pair"
+    notes, judged, label_a, label_b = basic_pair_finding(a, b)
+    wont = "answered from the nozzle temperatures alone" if judged else "has judged nothing about this pair"
     caution = sentence(
         miss,
         feature="pairing check",

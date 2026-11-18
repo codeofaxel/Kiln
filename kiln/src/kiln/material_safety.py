@@ -1,11 +1,13 @@
-"""Material compatibility, process settings, and purge volume recommendations.
+"""Material safety floors: food contact, filled filament, and multi-material prints.
 
-Used by the multi-color/multi-material 3MF composer to:
+Used by the material doors and the multi-color/multi-material 3MF composer to:
 
-1. **Warn** when incompatible materials are paired (e.g., PLA + ASA).
-2. **Recommend** purge volumes between each material pair.
-3. **Suggest** per-extruder process settings (temp, speed) for known materials.
-4. **Embed** a BambuStudio-compatible flush volume matrix in the 3MF.
+1. **Refuse** a print that pairs materials that must never share one
+   (e.g., PLA + ASA), with or without an answer from Kiln's servers.
+2. **Check** every pair of loaded materials (level, warning, mitigations,
+   purge) and the hardware each needs, through Kiln's servers.
+3. **Embed** a BambuStudio-compatible flush volume matrix in the 3MF.
+4. **Warn** about food contact and about filled, abrasive filament.
 
 Safety philosophy
 -----------------
@@ -13,7 +15,6 @@ Safety philosophy
 * Hard blocks are only issued for pairings that are genuinely dangerous
   (extreme temp deltas, reactive chemistries, hardware damage risk).
 * Conditional pairings return warnings + recommended mitigations, not blocks.
-* Smart auto-selection of optimal settings for exotic combos → kiln-pro.
 
 Compatibility levels
 --------------------
@@ -377,189 +378,29 @@ def assess_food_safety(material: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Process settings database — per material
+# Material names
 # ---------------------------------------------------------------------------
 
-#: Recommended process settings per material type (case-insensitive key).
-#: ``temp_range``: (min, max) nozzle °C for reliable extrusion.
-#: ``bed_temp``: recommended bed °C.
-#: ``speed_factor``: relative speed multiplier vs PLA (1.0 = same as PLA).
-#: ``requires_hardened_nozzle``: brass nozzle will wear out fast.
-#: ``requires_enclosure``: warping / fume risk without enclosure.
-MATERIAL_PROCESS: dict[str, dict[str, Any]] = {
-    "PLA": {
-        "temp_range": (190, 230),
-        "bed_temp": 55,
-        "speed_factor": 1.0,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": False,
-        "notes": "Most forgiving FDM material. Excellent for multi-color.",
-    },
-    "PLA-CF": {
-        "temp_range": (210, 240),
-        "bed_temp": 55,
-        "speed_factor": 0.8,
-        "requires_hardened_nozzle": True,
-        "requires_enclosure": False,
-        "notes": "Carbon-fiber PLA. Requires hardened/wear-resistant nozzle.",
-    },
-    "PLA-HF": {
-        "temp_range": (200, 230),
-        "bed_temp": 55,
-        "speed_factor": 1.2,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": False,
-        "notes": "High-flow PLA variant. Generally PLA-compatible.",
-    },
-    "PETG": {
-        "temp_range": (230, 250),
-        "bed_temp": 70,
-        "speed_factor": 0.8,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": False,
-        "notes": "Higher temp than PLA. Sticks to PLA poorly — use interface layer.",
-    },
-    "TPU": {
-        "temp_range": (220, 240),
-        "bed_temp": 35,
-        "speed_factor": 0.4,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": False,
-        "notes": "Flexible. Print slowly. Purge thoroughly; retains previous color.",
-    },
-    "TPE": {
-        "temp_range": (220, 240),
-        "bed_temp": 35,
-        "speed_factor": 0.35,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": False,
-        "notes": "Ultra-flexible. Similar to TPU; even slower speeds recommended.",
-    },
-    "ABS": {
-        "temp_range": (230, 250),
-        "bed_temp": 100,
-        "speed_factor": 0.9,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": True,
-        "notes": "Warps without enclosure. Emits styrene fumes — ventilate.",
-    },
-    "ASA": {
-        "temp_range": (240, 260),
-        "bed_temp": 100,
-        "speed_factor": 0.85,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": True,
-        "notes": "UV-resistant ABS variant. High temp — enclosure required.",
-    },
-    "NYLON": {
-        "temp_range": (250, 270),
-        "bed_temp": 70,
-        "speed_factor": 0.8,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": True,
-        "notes": "Hygroscopic — dry filament before use. High warp risk.",
-    },
-    "PC": {
-        "temp_range": (260, 300),
-        "bed_temp": 110,
-        "speed_factor": 0.7,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": True,
-        "notes": "Polycarbonate. Extreme temps. Most consumer printers cannot reach required bed temp.",
-    },
-    "PVA": {
-        "temp_range": (190, 210),
-        "bed_temp": 45,
-        "speed_factor": 0.6,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": False,
-        "notes": "Water-soluble support material. Pairs with PLA. Hygroscopic — store dry.",
-    },
-    "HIPS": {
-        "temp_range": (230, 245),
-        "bed_temp": 100,
-        "speed_factor": 0.9,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": True,
-        "notes": "Limonene-soluble support material for ABS. Enclosure required.",
-    },
-    "PA": {    # Polyamide / Nylon alias
-        "temp_range": (250, 270),
-        "bed_temp": 70,
-        "speed_factor": 0.8,
-        "requires_hardened_nozzle": False,
-        "requires_enclosure": True,
-        "notes": "See NYLON.",
-    },
-}
+
+def _normalise(material: str) -> str:
+    """Normalise material name for lookup (uppercase, strip whitespace)."""
+    return material.strip().upper()
+
 
 # ---------------------------------------------------------------------------
-# Compatibility matrix
+# Multi-material prints: which materials may share one
 # ---------------------------------------------------------------------------
+#
+# Which pairs of materials may share a print, what to purge between them and
+# the hardware each needs is Kiln's check (kiln-pro, https://kiln3d.com),
+# asked through :mod:`kiln._pro_pairing_bridge`.  Every install keeps two
+# things so the composer still works with no answer from Kiln's servers: the
+# pairs that must never share a print, refused as always, and what the nozzle
+# temperature table alone shows about any other pair.
 
-#: Two-material compatibility entries.
-#: Keys are frozensets of two material names (order-independent).
-#: Values: level ("ok" | "caution" | "conditional" | "incompatible"),
-#:         warning message, purge_volume_mm3 (extra purge beyond base),
-#:         mitigations (list of actionable tips).
-_COMPAT: dict[frozenset, dict[str, Any]] = {
-    # -----------------------------------------------------------------------
-    # PLA pairings
-    # -----------------------------------------------------------------------
-    frozenset({"PLA"}): {
-        "level": "ok",
-        "purge_volume_mm3": 30,
-        "warning": None,
-        "mitigations": [],
-    },
-    frozenset({"PLA", "PLA-CF"}): {
-        "level": "caution",
-        "purge_volume_mm3": 40,
-        "warning": "PLA-CF requires a hardened/wear-resistant nozzle. "
-                   "Standard brass nozzle will wear quickly when extruding CF filament.",
-        "mitigations": [
-            "Install a hardened steel or ruby nozzle before printing.",
-            "Assign PLA-CF to a dedicated slot — never mix with standard brass nozzle.",
-        ],
-    },
-    frozenset({"PLA", "PLA-HF"}): {
-        "level": "ok",
-        "purge_volume_mm3": 30,
-        "warning": None,
-        "mitigations": [],
-    },
-    frozenset({"PLA", "PETG"}): {
-        "level": "conditional",
-        "purge_volume_mm3": 70,
-        "warning": "PLA and PETG do not adhere well to each other. "
-                   "Parts will delaminate at the PLA/PETG interface under any load.",
-        "mitigations": [
-            "Use as support interface only (PETG support under PLA model — releases cleanly).",
-            "Do not rely on PLA/PETG adhesion for structural parts.",
-            "Increase purge volume to avoid color contamination.",
-        ],
-    },
-    frozenset({"PLA", "TPU"}): {
-        "level": "caution",
-        "purge_volume_mm3": 90,
-        "warning": "TPU is significantly slower to print than PLA. "
-                   "Purge volume must be high to clear flexible residue from the nozzle.",
-        "mitigations": [
-            "Reduce overall print speed to ≤ 40 mm/s when TPU is active.",
-            "Increase flush/purge volume to ≥ 100 mm³ for TPU transitions.",
-            "Prime the nozzle before TPU sections to avoid under-extrusion.",
-        ],
-    },
-    frozenset({"PLA", "PVA"}): {
-        "level": "ok",
-        "purge_volume_mm3": 50,
-        "warning": "PVA is water-soluble — store dry between sessions. "
-                   "Once dissolved, supports release cleanly from PLA.",
-        "mitigations": [
-            "Store PVA in a sealed container with desiccant.",
-            "Use PVA only for support material, not structural geometry.",
-        ],
-    },
+#: Pairs that must never share one print, refused with or without an answer
+#: from Kiln's servers.  Each value is the check's own entry for that pair.
+_REFUSED_PAIRS: dict[frozenset, dict[str, Any]] = {
     frozenset({"PLA", "ABS"}): {
         "level": "incompatible",
         "purge_volume_mm3": 0,
@@ -596,72 +437,6 @@ _COMPAT: dict[frozenset, dict[str, Any]] = {
                    "Cannot share a temperature setting.",
         "mitigations": ["Do not pair PLA and PC."],
     },
-    # -----------------------------------------------------------------------
-    # PETG pairings
-    # -----------------------------------------------------------------------
-    frozenset({"PETG"}): {
-        "level": "ok",
-        "purge_volume_mm3": 40,
-        "warning": None,
-        "mitigations": [],
-    },
-    frozenset({"PETG", "TPU"}): {
-        "level": "caution",
-        "purge_volume_mm3": 80,
-        "warning": "Similar temps but thorough purging required. "
-                   "TPU residue in PETG causes stringing.",
-        "mitigations": [
-            "Increase flush volume to ≥ 100 mm³ on TPU→PETG transitions.",
-            "Reduce speed during TPU segments.",
-        ],
-    },
-    frozenset({"PETG", "ABS"}): {
-        "level": "conditional",
-        "purge_volume_mm3": 60,
-        "warning": "PETG and ABS have overlapping temperature ranges but "
-                   "adhesion between the two is unreliable.",
-        "mitigations": [
-            "Use as support interface only.",
-            "Enclosure required for ABS segments.",
-        ],
-    },
-    frozenset({"PETG", "HIPS"}): {
-        "level": "caution",
-        "purge_volume_mm3": 60,
-        "warning": "HIPS is soluble in Limonene; PETG is not. "
-                   "Useful as a dissolvable support for PETG.",
-        "mitigations": [
-            "Enclosure required for HIPS segments.",
-            "Soak completed print in Limonene to dissolve HIPS supports.",
-        ],
-    },
-    # -----------------------------------------------------------------------
-    # ABS / ASA pairings
-    # -----------------------------------------------------------------------
-    frozenset({"ABS"}): {
-        "level": "ok",
-        "purge_volume_mm3": 40,
-        "warning": "Enclosure required for all ABS printing.",
-        "mitigations": ["Use enclosed printer. Ventilate fumes."],
-    },
-    frozenset({"ABS", "ASA"}): {
-        "level": "ok",
-        "purge_volume_mm3": 50,
-        "warning": "Enclosure required. ASA runs slightly hotter than ABS.",
-        "mitigations": [
-            "Set temperature to the higher of the two profiles.",
-            "Ventilate or use HEPA filtration.",
-        ],
-    },
-    frozenset({"ABS", "HIPS"}): {
-        "level": "ok",
-        "purge_volume_mm3": 50,
-        "warning": "Classic combo: ABS model + HIPS support. Enclosure required.",
-        "mitigations": [
-            "Enclosure required.",
-            "Dissolve HIPS supports in Limonene after printing.",
-        ],
-    },
     frozenset({"ABS", "TPU"}): {
         "level": "incompatible",
         "purge_volume_mm3": 0,
@@ -669,63 +444,71 @@ _COMPAT: dict[frozenset, dict[str, Any]] = {
                    "ABS requires enclosure / high bed temp that will deform TPU sections.",
         "mitigations": ["Do not pair ABS and TPU."],
     },
-    frozenset({"ASA"}): {
-        "level": "ok",
-        "purge_volume_mm3": 40,
-        "warning": "Enclosure required for all ASA printing.",
-        "mitigations": ["Use enclosed printer."],
-    },
-    # -----------------------------------------------------------------------
-    # TPU / flexible
-    # -----------------------------------------------------------------------
-    frozenset({"TPU"}): {
-        "level": "ok",
-        "purge_volume_mm3": 60,
-        "warning": None,
-        "mitigations": [],
-    },
-    frozenset({"TPU", "TPE"}): {
-        "level": "ok",
-        "purge_volume_mm3": 70,
-        "warning": None,
-        "mitigations": [],
-    },
 }
 
-
-def _normalise(material: str) -> str:
-    """Normalise material name for lookup (uppercase, strip whitespace)."""
-    return material.strip().upper()
-
-
-def _lookup_compat(mat_a: str, mat_b: str) -> dict[str, Any]:
-    """Look up compatibility between two materials.  Returns a default
-    "unknown" entry if the pairing isn't in the database."""
-    key = frozenset({_normalise(mat_a), _normalise(mat_b)})
-    if key in _COMPAT:
-        return _COMPAT[key]
-    # Unknown pairing — caution by default
-    return {
-        "level": "caution",
-        "purge_volume_mm3": 80,
-        "warning": (
-            f"Compatibility between {mat_a} and {mat_b} is unknown. "
-            "Verify temperature ranges are compatible before printing."
-        ),
-        "mitigations": [
-            f"Check nozzle temp range for both {mat_a} and {mat_b}.",
-            "Test with a small print before committing to a full job.",
-        ],
-    }
+#: Purge (mm³) between two loaded slots when Kiln's check gave no figure for
+#: them: the conservative default, never a judged one.
+_CONSERVATIVE_PURGE_MM3 = 800
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+def nozzle_range(material: str) -> tuple[str, float, float] | None:
+    """``(name, nozzle_min, nozzle_max)`` from the nozzle table every install
+    carries (:data:`kiln.gcode._MATERIAL_TEMPS`), for a spelling of one of its
+    materials (:func:`kiln.catalog_keys.same_material_spelling`); never a
+    family, so a filled, blended or brand-named material has no range here."""
+    from kiln.catalog_keys import same_material_spelling
+    from kiln.gcode import _MATERIAL_TEMPS
+
+    for name, (low, high, _bed_low, _bed_high) in _MATERIAL_TEMPS.items():
+        if same_material_spelling(material, name):
+            return name, low, high
+    return None
+
+
+def basic_pair_finding(material_a: str, material_b: str) -> tuple[str, bool, str, str]:
+    """What the nozzle temperature table alone shows about two materials.
+
+    ``(sentence, temperatures_judged, label_a, label_b)``.  Ranges that do not
+    overlap mean the two can't share one nozzle temperature; ranges that
+    overlap say nothing about how well they stick together or how much to
+    purge between them; a material the table lacks is said, and nothing is
+    judged.  Never says a pair is compatible.
+    """
+    from kiln.catalog_keys import material_label
+
+    range_a = nozzle_range(material_a)
+    range_b = nozzle_range(material_b)
+    label_a = range_a[0] if range_a else (material_label(material_a) or "an unnamed material")
+    label_b = range_b[0] if range_b else (material_label(material_b) or "an unnamed material")
+    if range_a and range_b:
+        span_a = f"{label_a} ({range_a[1]:g}-{range_a[2]:g} °C)"
+        span_b = f"{label_b} ({range_b[1]:g}-{range_b[2]:g} °C)"
+        if max(range_a[1], range_b[1]) > min(range_a[2], range_b[2]):
+            sentence = (
+                f"These two can't share one nozzle temperature: the nozzle ranges of "
+                f"{span_a} and {span_b} do not overlap. How well they stick together "
+                "was not judged."
+            )
+        else:
+            sentence = (
+                f"The nozzle ranges of {span_a} and {span_b} overlap. How well they "
+                "stick together and how much to purge between them was not judged."
+            )
+        return sentence, True, label_a, label_b
+    unknown = " or ".join(dict.fromkeys(
+        label for label, known in ((label_a, range_a), (label_b, range_b)) if not known
+    ))
+    sentence = (
+        f"Kiln has no nozzle temperature range for {unknown} on this computer, so "
+        "neither their temperatures nor how well they stick together was judged."
+    )
+    return sentence, False, label_a, label_b
 
 
 def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
     """Check compatibility between all material pairs in a print job.
+
+    Kiln's check answers through :mod:`kiln._pro_pairing_bridge`.
 
     Args:
         materials: List of material names (one per extruder slot, 1-indexed
@@ -742,19 +525,38 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
         * ``purge_matrix`` (list[list[float]]) — recommended flush volumes
           (mm³) as an N×N matrix; use to configure slicer purge settings.
         * ``message`` (str) — human-readable summary.
+
+        When Kiln's check cannot be had, the answer is basic (``basic:
+        True``, :func:`_basic_mix_check`): the pairs that must never share a
+        print are still refused, every other pair reads ``"caution"`` with
+        the conservative purge and a warning saying what the nozzle
+        temperature ranges alone show, and ``caution`` says why the check is
+        missing and how to get it, with ``why`` / ``why_code`` /
+        ``why_detail`` beside it.
     """
     clean = [_normalise(m) for m in materials if m and m.strip()]
     if not clean:
         return {"safe": True, "level": "ok", "pairs": [], "hardware_warnings": [],
                 "purge_matrix": [], "message": "No materials specified."}
 
+    from kiln import _pro_pairing_bridge as pairing
+
+    check, miss = pairing.mix_check(clean)
+    if check is not None:
+        return check
+    return _basic_mix_check(clean, miss)
+
+
+def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
+    """The multi-material check this computer can make alone: the refused
+    pairs from :data:`_REFUSED_PAIRS`, the conservative purge, the abrasive
+    floor, and a warning per other pair from :func:`basic_pair_finding`."""
+    from kiln.served_answer import Miss, fields, sentence
+
+    if not isinstance(miss, Miss):
+        miss = Miss("unanswered", detail="no multi-material check")
     n = len(clean)
     pairs: list[dict[str, Any]] = []
-    worst_level = "ok"
-    level_rank = {"ok": 0, "caution": 1, "conditional": 2, "incompatible": 3}
-    hardware_warnings: list[str] = []
-
-    # Check all unique pairs
     seen: set[frozenset] = set()
     for i in range(n):
         for j in range(n):
@@ -764,78 +566,83 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
             if key in seen:
                 continue
             seen.add(key)
-            compat = _lookup_compat(clean[i], clean[j])
-            pairs.append({
-                "material_a": clean[i],
-                "material_b": clean[j],
-                "level": compat["level"],
-                "warning": compat.get("warning"),
-                "mitigations": compat.get("mitigations", []),
-                "purge_volume_mm3": compat.get("purge_volume_mm3", 80),
-            })
-            if level_rank.get(compat["level"], 0) > level_rank.get(worst_level, 0):
-                worst_level = compat["level"]
+            refused = _REFUSED_PAIRS.get(key)
+            if refused is not None:
+                entry = {
+                    "level": refused["level"],
+                    "warning": refused["warning"],
+                    "mitigations": list(refused["mitigations"]),
+                    "purge_volume_mm3": refused["purge_volume_mm3"],
+                }
+            else:
+                entry = {
+                    "level": "caution",
+                    "warning": basic_pair_finding(clean[i], clean[j])[0],
+                    "mitigations": [],
+                    "purge_volume_mm3": _CONSERVATIVE_PURGE_MM3,
+                }
+            pairs.append({"material_a": clean[i], "material_b": clean[j], **entry})
 
-    # Hardware checks per individual material
+    hardware_warnings: list[str] = []
     for mat in clean:
-        info = MATERIAL_PROCESS.get(mat, {})
-        if info.get("requires_hardened_nozzle"):
+        if is_abrasive_filament(mat):
             msg = f"{mat} requires a hardened/wear-resistant nozzle (not standard brass)."
             if msg not in hardware_warnings:
                 hardware_warnings.append(msg)
-        if info.get("requires_enclosure"):
-            msg = f"{mat} requires an enclosure to prevent warping and fume issues."
-            if msg not in hardware_warnings:
-                hardware_warnings.append(msg)
 
-    # Build purge matrix (N×N, row = from extruder, col = to extruder)
     purge_matrix: list[list[float]] = []
     for i in range(n):
         row: list[float] = []
         for j in range(n):
+            refused = _REFUSED_PAIRS.get(frozenset({clean[i], clean[j]}))
             if i == j:
                 row.append(0.0)
+            elif refused is not None:
+                row.append(float(refused["purge_volume_mm3"]))
             else:
-                compat = _lookup_compat(clean[i], clean[j])
-                row.append(float(compat.get("purge_volume_mm3", 80)))
+                row.append(float(_CONSERVATIVE_PURGE_MM3))
         purge_matrix.append(row)
 
-    is_safe = worst_level != "incompatible"
     incompatible_pairs = [p for p in pairs if p["level"] == "incompatible"]
-
     if incompatible_pairs:
+        level = "incompatible"
         message = (
             "⛔ INCOMPATIBLE MATERIALS: "
-            + "; ".join(
-                f"{p['material_a']} + {p['material_b']}" for p in incompatible_pairs
-            )
+            + "; ".join(f"{p['material_a']} + {p['material_b']}" for p in incompatible_pairs)
             + ". Do not print — see warnings for details."
         )
-    elif worst_level == "conditional":
-        message = (
-            "⚠️  Conditional compatibility. Review mitigations before printing: "
-            + "; ".join(p["warning"] for p in pairs if p.get("warning"))
-        )
-    elif worst_level == "caution":
-        message = (
-            "⚠️  Printable with precautions. Review warnings before starting."
-        )
+    elif pairs:
+        level = "caution"
+        message = "⚠️  Printable with precautions. Review warnings before starting."
     else:
-        message = "✅ All material pairings are compatible."
-
+        level = "ok"
+        message = "One material, so there are no pairs to check."
+    caution = sentence(
+        miss,
+        feature="multi-material check",
+        on_the_line=(
+            "Kiln's multi-material check says which loaded materials work together "
+            "and how much to purge between them"
+        ),
+        cannot="check how these materials pair",
+        wont=(
+            "refused only the pairs that must never share a print and set the "
+            "conservative purge between the others"
+        ),
+        safe_remedy="run a small test piece before a long print",
+        then="compose again",
+    )
     return {
-        "safe": is_safe,
-        "level": worst_level,
+        "safe": not incompatible_pairs,
+        "level": level,
         "pairs": pairs,
         "hardware_warnings": hardware_warnings,
         "purge_matrix": purge_matrix,
         "message": message,
+        "basic": True,
+        "caution": caution,
+        **fields(miss),
     }
-
-
-def get_process_settings(material: str) -> dict[str, Any] | None:
-    """Return recommended process settings for a material, or None if unknown."""
-    return MATERIAL_PROCESS.get(_normalise(material))
 
 
 # ---------------------------------------------------------------------------
@@ -872,22 +679,11 @@ _ABRASIVE_NOZZLE_FLOOR = (
 def is_abrasive_filament(material: str) -> bool:
     """True when *material* names a filled — and so abrasive — filament.
 
-    Two public sources, no curated table required:
-
-    1. an explicit ``requires_hardened_nozzle`` entry in
-       :data:`MATERIAL_PROCESS`, when the material is one we list;
-    2. otherwise the fill wording in the name itself.
-
-    The name rule matters because the filled-filament market moves faster
-    than any fixed table — ``MATERIAL_PROCESS`` carries PLA-CF but not
-    PETG-CF, PA-CF or PLA-GF, and a lookup miss must not read as "not
-    abrasive".  Errs toward warning: a needless caution costs a moment,
-    a missed one costs a nozzle.
+    Read from the fill wording in the name itself, with no table: the
+    filled-filament market moves faster than any fixed list, and a lookup
+    miss must not read as "not abrasive".  Errs toward warning: a needless
+    caution costs a moment, a missed one costs a nozzle.
     """
-    settings = get_process_settings(material)
-    if settings is not None and settings.get("requires_hardened_nozzle"):
-        return True
-
     name = _normalise(material)
     if not name:
         return False
@@ -919,7 +715,12 @@ def abrasive_nozzle_floor(material: str) -> str:
     return _ABRASIVE_NOZZLE_FLOOR.format(name=material.strip())
 
 
-def build_bambu_flush_matrix(materials: list[str], n_slots: int = 4) -> str:
+def build_bambu_flush_matrix(
+    materials: list[str],
+    n_slots: int = 4,
+    *,
+    check: dict[str, Any] | None = None,
+) -> str:
     """Build a BambuStudio-compatible flush volume matrix string.
 
     BambuStudio's ``project_settings.config`` expects a flattened N×N matrix
@@ -928,21 +729,33 @@ def build_bambu_flush_matrix(materials: list[str], n_slots: int = 4) -> str:
     Args:
         materials: Material name per slot (index 0 = slot 1).
         n_slots: Total number of slots in the matrix (default 4 for AMS Lite).
+        check: :func:`check_material_compatibility`'s answer for the print's
+            materials when the caller already holds it; asked for otherwise.
+            Each pair's purge is read from it.  A pair it gives no figure for,
+            and a slot with no material, gets the conservative purge.
 
     Returns:
         Space-separated string of N*N floats, e.g. ``"0 800 800 800 800 0 ..."``.
     """
     # Pad / truncate to n_slots
     padded = (materials + [""] * n_slots)[:n_slots]
+    if check is None:
+        named = [m for m in padded if m and m.strip()]
+        check = check_material_compatibility(named) if named else {"pairs": []}
+    purge: dict[frozenset, Any] = {}
+    for pair in check.get("pairs") or []:
+        if isinstance(pair, dict):
+            key = frozenset({_normalise(str(pair.get("material_a") or "")), _normalise(str(pair.get("material_b") or ""))})
+            purge[key] = pair.get("purge_volume_mm3")
     values: list[str] = []
     for i in range(n_slots):
         for j in range(n_slots):
             if i == j:
                 values.append("0")
             elif padded[i] and padded[j]:
-                compat = _lookup_compat(padded[i], padded[j])
-                vol = compat.get("purge_volume_mm3", 800)
-                values.append(str(int(vol)))
+                vol = purge.get(frozenset({_normalise(padded[i]), _normalise(padded[j])}))
+                ok = isinstance(vol, (int, float)) and not isinstance(vol, bool)
+                values.append(str(int(vol)) if ok else str(_CONSERVATIVE_PURGE_MM3))
             else:
-                values.append("800")  # conservative default for unknown slots
+                values.append(str(_CONSERVATIVE_PURGE_MM3))  # conservative default for unknown slots
     return " ".join(values)
