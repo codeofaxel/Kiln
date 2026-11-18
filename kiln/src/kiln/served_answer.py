@@ -94,6 +94,46 @@ _UPGRADE_FIX = "update Kiln"
 SESSION_EXPIRED_CODE = "KILN_SESSION_EXPIRED"
 _SESSION_EXPIRED = ("your Kiln session has expired", "sign back in")
 
+#: Plan walls from Kiln's servers: the plan is in the answer's
+#: ``required_tier``, or in the code itself.
+_PLAN_WALL_CODES = {
+    "TIER_REQUIRED": "", "PRO_REQUIRED": "pro", "BUSINESS_REQUIRED": "business",
+    "ENTERPRISE_REQUIRED": "enterprise",
+}
+_PAID_PLANS = ("pro", "business", "enterprise")
+#: The code a plan wall reads as for a caller this computer counts as
+#: holding that plan: the servers and this computer's record disagree, so
+#: the wall's own words (a pitch for a plan the person holds) are not said.
+PLAN_NOT_COUNTED_CODE = "PLAN_NOT_COUNTED"
+
+
+def plan_record_fix(plan: str) -> str:
+    """What fixes a *plan* wall the servers raised while this computer's
+    record of the sign-in holds that plan."""
+    return (
+        f"Kiln's servers do not count this computer's sign-in as Kiln {plan.strip().title()}; "
+        "signing in again brings this computer's record of the plan up to date"
+    )
+
+
+def _plan_held_here(answer: dict[str, Any], code: str) -> str:
+    """The plan a wall in *answer* stands in front of, when this computer
+    counts the caller as holding it; ``""`` otherwise (and for any answer
+    that is not a plan wall, or names no plan)."""
+    if code not in _PLAN_WALL_CODES:
+        return ""
+    plan = str(answer.get("required_tier") or _PLAN_WALL_CODES[code]).strip().lower()
+    if plan not in _PAID_PLANS:
+        return ""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        held, _why = check_tier(LicenseTier(plan))
+    except Exception:  # noqa: BLE001 -- an unreadable plan is not held
+        return ""
+    return plan if held else ""
+
+
 #: Wire codes that mean "no sign-in the servers accept" -- this install's
 #: own wall, an expired session, and the servers' own answer to a bearer
 #: they could not turn into an account.
@@ -270,7 +310,10 @@ def classify_answer(answer: Any) -> Miss | None:
     ``{"status": "error", "code", "error"}``, ``{"success": False, "error":
     {"code", "message"}}``, FastAPI's bare ``{"detail": ...}``, and a
     ``why`` already decided upstream.  An error with no code is not a
-    ruling; neither is one the server marked ``retryable``.
+    ruling; neither is one the server marked ``retryable``.  A plan wall
+    for a plan this computer counts the caller as holding is refused as
+    :data:`PLAN_NOT_COUNTED_CODE` with :func:`plan_record_fix`, never the
+    wall's own words, whichever door asked.
     """
     if not isinstance(answer, dict):
         return Miss("unanswered", detail="not an answer")
@@ -297,6 +340,11 @@ def classify_answer(answer: Any) -> Miss | None:
         raw = answer.get("why_detail")
         text = str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else ""
     text = _in_words(text, answer)
+    held = _plan_held_here(answer, code)
+    if held:
+        # A wall for a plan this computer counts the caller as holding, in
+        # whatever words: never the wall's own, which offer that plan.
+        return Miss("refused", PLAN_NOT_COUNTED_CODE, plan_record_fix(held))
     if why in CAUSES:
         return Miss(why, code, text)
     if code in SIGNED_OUT_CODES:
@@ -306,6 +354,17 @@ def classify_answer(answer: Any) -> Miss | None:
     if not code or code in UNANSWERED_CODES or answer.get("retryable") is True:
         return Miss("unanswered", code, text)
     return Miss("refused", code, text)
+
+
+def held_plan_wall(answer: Any) -> Miss | None:
+    """The miss a plan wall in *answer* reads as when this computer counts
+    the caller as holding that plan (:func:`classify_answer`'s own reading),
+    else ``None``.  For a door that hands the servers' refusal on as they
+    wrote it: a wall is never handed to someone who holds its plan."""
+    if not isinstance(answer, dict):
+        return None
+    miss = classify_answer(answer)
+    return miss if miss is not None and miss.code == PLAN_NOT_COUNTED_CODE else None
 
 
 def _in_words(text: str, answer: dict[str, Any]) -> str:
@@ -478,7 +537,8 @@ def clause(miss: Miss, *, feature: str, cannot: str, then: str = "try again") ->
     cause, fix = _cause_and_fix(miss, feature)
     if miss.cause == "refused":
         cause = f"{cause}: {miss.detail.rstrip('. ')}" if miss.detail else f"{cause} and gave no reason"
-        fix = "" if miss.detail else "wait a minute"
+        if miss.code != UPGRADE_REQUIRED_CODE:
+            fix = "" if miss.detail else "wait a minute"
     out = f"Kiln can't {cannot.strip()} right now ({cause})"
     if fix:
         out += f"; {fix} and {then.strip().rstrip('.')}"

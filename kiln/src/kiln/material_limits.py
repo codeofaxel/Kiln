@@ -23,9 +23,10 @@ A check that reads a plastic only because the person named none reads it
 inside :func:`assuming`: the assumed plastic's own figures, without spending
 the person's daily allowance of plastics on Kiln's servers and with nothing
 said about them.  The same holds wherever :data:`ASSUMED_PLASTIC` is read
-inside a tool call whose own arguments name no plastic
-(:func:`call_names_no_plastic`): a door's own default is not the person's
-choice, whatever the door hands on.
+inside a tool call whose own arguments do not name it
+(:func:`call_leaves_assumed_plastic_unnamed`): a door's own default is not
+the person's choice, whatever the door hands on, and a plastic named for
+another role does not make it one.
 
 A served answer is kept for the life of the process, per plastic and
 scenario, so a session asks once.  When kiln-pro is on this computer nothing
@@ -196,7 +197,8 @@ class MaterialLimits:
         lines: list[str] = []
         if self.miss is None and not self.known and self.material:
             lines.append(UNRECOGNISED)
-        lines.extend(general_figures_leave_out(self.material_id, static_safe_wall_read=self.value(ESD_WALL) is not None))
+        plastic = self.material_id or _plastic_written_first(self.material)
+        lines.extend(general_figures_leave_out(plastic, static_safe_wall_read=self.value(ESD_WALL) is not None))
         return lines
 
     def to_dict(self) -> dict[str, Any]:
@@ -316,6 +318,19 @@ def _public_id(material: str | None) -> str | None:
     return resolve_material_key(str(material), _catalogue().keys())
 
 
+def _plastic_written_first(material: str | None) -> str | None:
+    """The catalog plastic *material* is written as a grade of, or ``None``.
+
+    A printer reports a spool of a grade as its plastic and then the grade
+    ("TPU-AMS", "TPU 95A HF"), so the word's first part names the plastic
+    when the catalog holds it.  Read only for what the general figures leave
+    out for that plastic, never for a figure."""
+    from kiln.catalog_keys import _slug
+
+    first = _slug(str(material or "")).split("_", 1)[0]
+    return first if first in _catalogue() else None
+
+
 def _category(material_id: str | None) -> str | None:
     record = _catalogue().get(material_id or "")
     return record.get("category") if record else None
@@ -358,27 +373,44 @@ def _names_a_plastic(key: Any, value: Any) -> bool:
     return False
 
 
-def call_names_no_plastic() -> bool:
-    """True while a tool call runs whose own arguments name no plastic.
+def _is_assumed_plastic(value: Any) -> bool:
+    """True when *value* (a word, or a list or table of them) spells
+    :data:`ASSUMED_PLASTIC`."""
+    if isinstance(value, str):
+        return value.strip().lower() == ASSUMED_PLASTIC
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_is_assumed_plastic(item) for item in value)
+    return False
 
-    A check such a call makes of :data:`ASSUMED_PLASTIC` reads it as the
-    plastic assumed because the person named none, as :func:`assuming`
-    does, whatever spelling the door hands on: a door whose own default is
-    PLA has not been told PLA.  ``False`` outside a tool call, where nothing
-    says what the person named."""
+
+def call_leaves_assumed_plastic_unnamed() -> bool:
+    """True while a tool call runs none of whose own plastic arguments name
+    :data:`ASSUMED_PLASTIC`.
+
+    The assumed plastic read in such a call is the door's own default, not
+    the person's choice, even when the call names another plastic for
+    another role (a support material beside a part's own); only an
+    argument that names it is the person's choice.  ``False`` outside a
+    tool call, where nothing says what the person named."""
     try:
         from kiln.tool_context import current_tool_arguments, current_tool_name
     except ImportError:  # pragma: no cover - the module ships beside this one
         return False
     if current_tool_name() is None:
         return False
-    return not any(_names_a_plastic(key, value) for key, value in current_tool_arguments().items())
+    return not any(
+        _names_a_plastic(key, value) and _is_assumed_plastic(value)
+        for key, value in current_tool_arguments().items()
+    )
 
 
 def _the_calls_default(material: str) -> bool:
     """True when *material* is :data:`ASSUMED_PLASTIC` read inside a tool
-    call that named no plastic (:func:`call_names_no_plastic`)."""
-    return material.strip().lower() == ASSUMED_PLASTIC and call_names_no_plastic()
+    call whose own arguments do not name it
+    (:func:`call_leaves_assumed_plastic_unnamed`)."""
+    return material.strip().lower() == ASSUMED_PLASTIC and call_leaves_assumed_plastic_unnamed()
 
 
 @contextlib.contextmanager

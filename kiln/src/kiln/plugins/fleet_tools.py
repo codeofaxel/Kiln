@@ -105,6 +105,9 @@ def _served_route(
     except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
         _logger.debug("%s request failed", _ROUTE_TOOL, exc_info=True)
         return _route_miss(served_answer.classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None)))
+    held = served_answer.held_plan_wall(answer)
+    if held is not None:
+        return _route_miss(held)
     if isinstance(answer, dict) and (
         (answer.get("success") is True and isinstance(answer.get("routing"), dict))
         # The server's own ruling, built for this call in this door's shape
@@ -177,7 +180,7 @@ def _served_plates(
     if "Unknown parameters" in said and "plates_only" in said:
         return None, _PLATES_NOT_SERVED_YET
     miss = served_answer.classify_answer(answer) or served_answer.Miss("unanswered", detail="no plates in the answer")
-    if miss.cause == "refused" and said:
+    if miss.cause == "refused" and said and miss.code != served_answer.PLAN_NOT_COUNTED_CODE:
         # The servers' own ruling (the plan that reads a fleet's plates, a
         # day's allowance spent): their sentence, as they wrote it.
         return None, said

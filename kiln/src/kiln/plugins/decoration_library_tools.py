@@ -57,11 +57,11 @@ def _memory_refusal(tool: str, answer: dict[str, Any]) -> dict[str, Any]:
     anything else (offline, signed out, silent) is worded here, and in every
     case nothing in the decoration's folder changed.
     """
-    from kiln.served_answer import classify_answer, clause, fields
+    from kiln.served_answer import PLAN_NOT_COUNTED_CODE, classify_answer, clause, fields
 
-    if str(answer.get("code") or "") == "TIER_REQUIRED":
-        return {**answer, "status": "error", "success": False, "tool": tool}
     miss = classify_answer(answer)
+    if miss is not None and miss.code == "TIER_REQUIRED":
+        return {**answer, "status": "error", "success": False, "tool": tool}
     reason = clause(
         miss, feature="servers", cannot="reach decoration memory",
     ) if miss is not None else "Kiln's servers gave no answer"
@@ -69,16 +69,18 @@ def _memory_refusal(tool: str, answer: dict[str, Any]) -> dict[str, Any]:
         "status": "error",
         "success": False,
         "tool": tool,
-        "code": str(answer.get("code") or "DECORATION_MEMORY_UNAVAILABLE"),
+        "code": (miss.code if miss is not None and miss.code == PLAN_NOT_COUNTED_CODE
+                 else str(answer.get("code") or "DECORATION_MEMORY_UNAVAILABLE")),
         "error": (
             f"{tool} is Kiln Pro decoration memory, worked out on Kiln's "
             f"servers. {reason}. Nothing in the decoration's folder changed."
         ),
         **fields(miss),
     }
-    for key in ("upgrade_url", "required_tier"):
-        if answer.get(key):
-            envelope[key] = answer[key]
+    if miss is None or miss.code != PLAN_NOT_COUNTED_CODE:
+        for key in ("upgrade_url", "required_tier"):
+            if answer.get(key):
+                envelope[key] = answer[key]
     return envelope
 
 

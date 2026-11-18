@@ -36,7 +36,7 @@ import re
 import time
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error
+from kiln.served_answer import Miss, classify_answer, classify_transport_error, plan_record_fix
 
 logger = logging.getLogger(__name__)
 
@@ -233,27 +233,20 @@ def _without_plan_line(warnings: list[str]) -> list[str]:
     ]
 
 
-#: What fixes a plan the servers do not count as Kiln Pro while this
-#: computer's record of the sign-in does.
-_PLAN_RECORD_FIX = (
-    "Kiln's servers do not count this computer's sign-in as Kiln Pro; signing in "
-    "again brings this computer's record of the plan up to date"
-)
-
-
 #: Words that offer a plan: the pricing page, or "needs Kiln <plan>".
 _OFFERS_A_PLAN = re.compile(r"kiln3d\.com/pricing|\bneeds Kiln (?:Pro|Business|Enterprise)\b")
 
 
 def _why_not_kiln_pros(miss: Miss | None) -> Miss | None:
     """Why Kiln Pro's pick did not come, for a caller this computer counts as
-    holding Kiln Pro: the servers' own words, except a plan wall or words
-    that offer the plan, which are never said to someone who holds it.  ``None`` when Kiln
-    Pro's pick answered and had nothing for the part."""
+    holding Kiln Pro: the servers' own words, except words that offer the
+    plan, which are never said to someone who holds it (a plan wall in any
+    words is read that way for every door, in :mod:`kiln.served_answer`).
+    ``None`` when Kiln Pro's pick answered and had nothing for the part."""
     if miss is None:
         return None
-    if miss.code == "TIER_REQUIRED" or _OFFERS_A_PLAN.search(miss.detail or ""):
-        return Miss(miss.cause, miss.code, _PLAN_RECORD_FIX)
+    if _OFFERS_A_PLAN.search(miss.detail or ""):
+        return Miss(miss.cause, miss.code, plan_record_fix("pro"))
     return miss
 
 
