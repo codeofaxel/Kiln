@@ -194,7 +194,7 @@ def _accelerations(gcode: str) -> set[float]:
 class TestOnlyTheEstimateMoves:
     def test_faster_estimate_same_gcode(self, tmp_path: Path, served_roster_records) -> None:
         """A/B against the slicer's own defaults -- what a Bambu profile that
-        states no acceleration is timed with."""
+        states no machine limit is timed with."""
         model = _plate(tmp_path / "plate.stl")
         own = resolve_slicer_profile("bambu_a1")
         defaults = resolve_slicer_profile(
