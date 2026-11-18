@@ -852,9 +852,9 @@ _FILLERS = (
 #: "GLASS" alone reads a sea-glass colourway as glass fibre; "carbon black"
 #: is a pigment, not a filler.  Metal fill is matched with its "fill":
 #: "Copper" on a spool is far more often a colour than a filler, but
-#: "Copperfill" never is.  "Fill" on its own is a product word ("Refill",
-#: "Extrafill", a maker's name), so it counts only after a filler or as
-#: "filled".
+#: "Copperfill" never is.  "Fill" on its own is a product word ("Refill", or
+#: the name of a product line or a maker), so it counts only after a filler
+#: or as "filled".
 _ABRASIVE_FILL_PATTERNS = (
     r"\bCARBON\b(?!\s*-?\s*BLACK)",
     r"\bWOOD\b",

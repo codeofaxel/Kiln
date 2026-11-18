@@ -360,8 +360,8 @@ class TestAbrasiveFilament:
             "Hemp Beige PETG",
             "PLA Basic Refill",          # a refill spool, not a filler
             "PETG Refill",
-            "Fillamentum PLA Extrafill",  # a maker's name and a product line
-            "Extrafill PLA",
+            "Examplefill PLA",           # a maker named for "fill", not a filler
+            "PLA Examplefill Plus",      # a product line named for "fill"
             "Carbon Black PLA",          # a pigment
             "carbon-black PETG",
             "pla_basic", "petg_hf", "tpu_95a",
