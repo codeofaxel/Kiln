@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-16T22:09:07.883893+00:00",
+  "generated": "2026-11-18T00:16:22.796263+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -16134,7 +16134,7 @@
             ],
             "default": null,
             "title": "Service Temperature C",
-            "description": "The temperature the part lives at, in degrees C, for comparing with your own reports; leave out for room temperature. It does not change the pocket or the strength figure."
+            "description": "The temperature the part lives at, in degrees C; leave out for room temperature. The pocket and the strength figures are for room temperature: where the part lives hotter than Kiln's load data for the plastic reaches, a \"holds\" becomes \"not_vouched\" and ``heat`` says why. Also used for comparing with your own reports."
           }
         },
         "required": [
@@ -24667,10 +24667,17 @@
             "description": "Your disc magnets' height (default 3)."
           },
           "pin_clearance_mm": {
-            "default": 0.2,
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Pin Clearance Mm",
-            "type": "number",
-            "description": "Radial pin/socket clearance (default 0.2 \u2014 the assembles-as-is bound)."
+            "description": "Radial pin/socket clearance.  Leave it out and it is sized for the material (and the printer, when Kiln has measured it), never tighter than 0.2; a number you give is used as given."
           },
           "arrange_plates": {
             "default": true,
