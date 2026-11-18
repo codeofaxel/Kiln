@@ -454,7 +454,7 @@ def test_a_large_mesh_placed_thousands_of_times_is_measured_or_refused_fast(tmp_
     """The bed-fit measure folds each mesh once per distinct turn it is placed
     at, so copies that differ only by an offset cost one fold; past the fold
     limit a build is refused in words, and the bed-fit door falls back to the
-    bounded mesh read.  Both answers come within the bounds below."""
+    bounded mesh read.  Both answers come within the CPU bound below."""
     import asyncio
     import logging
     import time
@@ -466,29 +466,32 @@ def test_a_large_mesh_placed_thousands_of_times_is_measured_or_refused_fast(tmp_
     shared, turned = _instanced(tmp_path, turned=False), _instanced(tmp_path, turned=True)
     assert os.path.getsize(shared) < 100_000 and os.path.getsize(turned) < 100_000
 
-    started = time.monotonic()
+    started, cpu = time.monotonic(), time.process_time()
     box = compute_3mf_geometry_bbox(shared)
-    one_fold = time.monotonic() - started
+    one_fold = time.process_time() - cpu
     assert box == {"x_min": 1.0, "x_max": 125.0, "y_min": 1.0, "y_max": 5.0, "z_min": 0.0, "z_max": 6.0}
-    assert one_fold < _READ_BOUND_S
+    assert time.monotonic() - started < _READ_BOUND_S
 
-    # The turned copies are refused before any of them is folded, so each
-    # answer below reads the mesh about once, as the one fold above did, on
-    # whatever machine runs it.  Folding every turned copy takes many times
-    # that.
+    # Work is measured in CPU seconds of this whole process (the tool call
+    # runs on a worker thread), so time the machine gives the tests running
+    # beside this one is not counted and the bound holds however loaded the
+    # machine is; a wait that uses no CPU is not counted either.  The turned
+    # copies are refused before any is folded, and each answer below costs
+    # under three of the one fold above.  Folding every turned copy before
+    # the refusal costs tens.
     allowed = 6 * one_fold
 
-    started = time.monotonic()
+    cpu = time.process_time()
     with caplog.at_level(logging.WARNING):
         assert compute_3mf_geometry_bbox(turned) is None
     assert "more than 300,000,000 vertices once every differently turned copy is counted" in caplog.text
     fit = validate_mesh_for_printer(turned, "bambu_a1")
     assert "ok" in fit
-    assert time.monotonic() - started < allowed
+    assert time.process_time() - cpu < allowed
 
-    started = time.monotonic()
+    cpu = time.process_time()
     out = asyncio.run(server.mcp.call_tool("analyze_mesh_geometry", {"file_path": turned}))
     answer = json.loads(next(b.text for b in tool_result_blocks(out) if hasattr(b, "text")))
     assert answer["success"] is False
     assert "places more than 6,000,000 vertices and triangles" in answer["error"]["message"]
-    assert time.monotonic() - started < allowed
+    assert time.process_time() - cpu < allowed
