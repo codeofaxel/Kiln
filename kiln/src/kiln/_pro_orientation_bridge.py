@@ -20,10 +20,12 @@ No score crosses either way: a score per pose, beside the facts it was worked
 out from, would hand a caller the formula.  So nothing public Kiln shows about
 a pose is Kiln Pro's arithmetic; only which pose comes first is Kiln Pro's.
 
-A miss (offline, signed out, no answer, refused) is the floor ranking.  The
-ranking is asked on the way to a print, so the served ask waits briefly and,
-after the servers fail to answer, is left alone for a while.  Nothing here
-raises.
+A miss (offline, signed out, no answer, refused) is the floor ranking, and
+the miss is handed back with it (:func:`rank_or_miss`) so the door showing
+the ranking says once, in the four causes' words, that the order the plan
+includes did not arrive (:func:`miss_note`).  The ranking is asked on the way
+to a print, so the served ask waits briefly and, after the servers fail to
+answer, is left alone for a while.  Nothing here raises.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error
+from kiln.served_answer import Miss, classify_answer, classify_transport_error, sentence
 
 logger = logging.getLogger(__name__)
 
@@ -69,17 +71,37 @@ class Ranking:
 def rank(poses: list[dict[str, float]]) -> Ranking | None:
     """Kiln Pro's order of *poses* (each with the measured :data:`FACTS`,
     other keys ignored), or ``None`` for the floor.  Never raises."""
+    return rank_or_miss(poses)[0]
+
+
+def rank_or_miss(poses: list[dict[str, float]]) -> tuple[Ranking | None, Miss | None]:
+    """:func:`rank`, and why the order did not arrive when the signed-in plan
+    includes it: ``(ranking, None)`` when it came, ``(None, miss)`` when it
+    was asked for and missed, ``(None, None)`` for the floor any other way (a
+    plan that does not include it, nothing to rank).  Never raises."""
     if not poses:
-        return None
+        return None, None
     rows = _rows(poses)
     if rows is None:
-        return None
+        return None, None
     local = _local(rows)
     if local is not _NOT_HERE:
-        return local
+        return local, None
     if not _plan_includes_the_ranking():
-        return None
+        return None, None
     return _served(rows)
+
+
+def miss_note(miss: Miss) -> str:
+    """What a door says, once, when the order the plan includes missed: what
+    was on the line, why it did not arrive, what Kiln did instead and the fix."""
+    return sentence(
+        miss,
+        feature="servers",
+        on_the_line="Kiln Pro orders this part's poses on Kiln's servers",
+        cannot="get that order",
+        wont="ranked them by bed contact on this computer",
+    )
 
 
 def _rows(poses: list[dict[str, float]]) -> list[dict[str, float]] | None:
@@ -146,13 +168,14 @@ def _plan_includes_the_ranking() -> bool:
         return False
 
 
-def _served(rows: list[dict[str, float]]) -> Ranking | None:
+def _served(rows: list[dict[str, float]]) -> tuple[Ranking | None, Miss | None]:
     if time.monotonic() < _service_down_until:
-        return None
+        # The servers failed to answer moments ago; not asked again yet.
+        return None, Miss("unanswered", code="SERVER_UNREACHABLE")
     try:
         from kiln.server import _pro_api_call
     except Exception:  # noqa: BLE001
-        return None
+        return None, None
     try:
         answer = _pro_api_call(
             WIRE_TOOL,
@@ -163,12 +186,14 @@ def _served(rows: list[dict[str, float]]) -> Ranking | None:
             candidates=rows,
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
-        _note_miss(classify_transport_error(exc))
-        return None
+        miss = classify_transport_error(exc)
+        _note_miss(miss)
+        return None, miss
     if not (isinstance(answer, dict) and answer.get("success") is True and answer.get("status") == "ok"):
-        _note_miss(classify_answer(answer) if isinstance(answer, dict) else None)
-        return None
-    return _ranking_in(answer, len(rows))
+        miss = classify_answer(answer)
+        _note_miss(miss if isinstance(answer, dict) else None)
+        return None, miss
+    return _ranking_in(answer, len(rows)), None
 
 
 def _ranking_in(answer: Any, size: int) -> Ranking | None:
@@ -199,4 +224,6 @@ def _note_miss(miss: Miss | None) -> None:
     logger.debug("orientation ranking not served (%s); ranking by bed contact", miss and miss.cause)
 
 
-__all__ = ["FACTS", "LOCAL_MODULE", "WIRE_TOOL", "Ranking", "rank", "withheld_note"]
+__all__ = [
+    "FACTS", "LOCAL_MODULE", "WIRE_TOOL", "Ranking", "miss_note", "rank", "rank_or_miss", "withheld_note",
+]

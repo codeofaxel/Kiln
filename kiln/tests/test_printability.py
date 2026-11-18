@@ -2119,10 +2119,61 @@ class TestPrintabilityJudgmentTierSeam:
             "kiln.design_intelligence.load_pro_overlay_or_empty",
             lambda kind: {},
         )
+        # A free caller (the suite grants every plan by default).
+        monkeypatch.setattr(
+            "kiln.licensing.check_tier",
+            lambda *_a, **_k: (False, "This feature needs Kiln Pro. See what Pro includes at kiln3d.com/pricing"),
+        )
         path = _write_stl(str(tmp_path), _cube_triangles(20.0))
         report = analyze_printability(path, material="pla")
         rec_text = " ".join(report.recommendations)
         assert "Kiln Pro" in rec_text
+
+    @pytest.mark.parametrize(
+        ("signed_in", "said"),
+        [
+            pytest.param({"tier": "free"}, True, id="never-paid"),
+            pytest.param({"tier": "free", "lapsed_tier": "pro"}, False, id="plan-ended"),
+            pytest.param({"tier": "pro"}, False, id="paying-plain-install"),
+        ],
+    )
+    def test_the_upsell_line_is_said_only_to_someone_who_would_buy(
+        self, monkeypatch, tmp_path, signed_in, said,
+    ):
+        """The line selling curated recommendations is said to a never-paid
+        account only: never to one whose Pro plan ended, nor to a paying one
+        whose install has no curated overlay of its own."""
+        import base64
+        import json
+        import sys
+        import time
+        from unittest import mock
+
+        from kiln import account_plan
+
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        monkeypatch.setitem(sys.modules, "kiln.licensing", account_plan)
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+        monkeypatch.setattr(account_plan, "_last_ask_at", 0.0)
+        monkeypatch.setattr(account_plan, "_last_ask_answered", True)
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+
+        def b64(obj) -> str:
+            return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+        (tmp_path / ".kiln").mkdir(exist_ok=True)
+        (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps({
+            "access_token": f"{b64({'alg': 'none'})}.{b64({'exp': int(time.time()) + 86400})}.sig",
+            "refresh_token": "refresh", "email": "maker@example.com",
+            "signed_in_at": int(time.time()), **signed_in,
+        }))
+        path = _write_stl(str(tmp_path), _cube_triangles(20.0))
+        with mock.patch("requests.get", side_effect=OSError("offline")):
+            report = analyze_printability(path, material="pla")
+        assert ("available with Kiln Pro" in " ".join(report.recommendations)) is said
 
     def test_pro_tier_skips_upsell_line(self, monkeypatch, tmp_path):
         """When the overlay is populated, the upsell line is suppressed."""
