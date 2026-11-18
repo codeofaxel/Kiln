@@ -867,9 +867,10 @@ class MultiMaterialReport:
     pairing verdict did not come: ``compatible`` is then ``None`` (never a
     yes), ``notes`` says what the nozzle temperatures alone show, and
     ``caution`` says why the verdict is missing and how to get it, with
-    ``why`` / ``why_code`` / ``why_detail`` beside it
-    (:func:`kiln.served_answer.fields`).  Those four keys appear on a basic
-    answer only.
+    ``why`` / ``why_code`` / ``why_detail`` beside it, and ``retry_after_s``
+    when the miss is said again from an earlier ask
+    (:func:`kiln.served_answer.fields`).  Those keys appear on a basic answer
+    only.
 
     ``hardware_warnings`` names a filled filament's need for a hardened
     nozzle (:func:`kiln.material_safety.is_abrasive_filament`), on every
@@ -888,6 +889,7 @@ class MultiMaterialReport:
     why: str = ""
     why_code: str = ""
     why_detail: str = ""
+    retry_after_s: int = 0
     hardware_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -895,13 +897,15 @@ class MultiMaterialReport:
         if not self.basic:
             for key in _BASIC_ANSWER_KEYS:
                 out.pop(key, None)
+        if not out.get("retry_after_s"):
+            out.pop("retry_after_s", None)
         if not self.hardware_warnings:
             out.pop("hardware_warnings", None)
         return out
 
 
 #: The keys only a basic pairing answer carries.
-_BASIC_ANSWER_KEYS = ("basic", "why", "why_code", "why_detail")
+_BASIC_ANSWER_KEYS = ("basic", "why", "why_code", "why_detail", "retry_after_s")
 
 
 @dataclass

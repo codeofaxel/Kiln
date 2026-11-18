@@ -32,8 +32,6 @@ WIRE_TOOL = "adaptive_slicing_answer"
 SIGN_IN_NAME = "Kiln's tuned slicing"
 #: Where the same answer is read when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.adaptive_slicing.engine"
-#: A person is waiting on the answer; past this, generic settings answer.
-CONSULT_TIMEOUT_S: float = 15.0
 
 #: ``_local``'s answer when kiln-pro is not on this computer.
 _NOT_HERE = object()
@@ -67,7 +65,7 @@ _WORDS: dict[str, tuple[str, str, str, str]] = {
     ),
 }
 
-__all__ = ["CONSULT_TIMEOUT_S", "LOCAL_MODULE", "NOTE_KEY", "WIRE_TOOL", "ask", "basic"]
+__all__ = ["LOCAL_MODULE", "NOTE_KEY", "WIRE_TOOL", "ask", "basic"]
 
 
 def ask(question: str, **fields: Any) -> tuple[dict[str, Any] | None, Miss | None]:
@@ -120,21 +118,21 @@ def _served(question: str, fields: dict[str, Any]) -> tuple[dict[str, Any] | Non
         import kiln.server as _srv
     except Exception as exc:  # noqa: BLE001 -- no served door on this install is a miss, never a traceback
         return None, served_answer.local_fault(exc, where="the served door on this computer")
-    try:
+    answer, miss = served_answer.ask_briefly(
         # The person's own ask: these doors run only when someone asks for an
         # adaptive plan or a material's settings, which is what this fetches.
-        answer = _srv._pro_api_call(
+        lambda wait: _srv._pro_api_call(
             WIRE_TOOL,
-            _timeout=CONSULT_TIMEOUT_S,
+            _timeout=wait,
             _asked_by_user=True,
             _feature=SIGN_IN_NAME,
             ask=question,
             **fields,
-        )
-    except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
-        logger.debug("%s request failed", WIRE_TOOL, exc_info=True)
-        host = getattr(_srv, "_HOSTED_KILN_API_URL", None)
-        return None, served_answer.classify_transport_error(exc, host=host)
+        ),
+        host=getattr(_srv, "_HOSTED_KILN_API_URL", None),
+    )
+    if miss is not None:
+        return None, miss
     if _is_answer(answer, question):
         return answer, None
     miss = served_answer.classify_answer(answer) if isinstance(answer, dict) else None
