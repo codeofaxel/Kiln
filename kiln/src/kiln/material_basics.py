@@ -13,7 +13,7 @@ from typing import Any
 
 from kiln.gcode import _MATERIAL_TEMPS
 
-__all__ = ["basic_pick_line", "basic_plastics", "plastics_printer_can_melt"]
+__all__ = ["basic_pick_line", "basic_plastics", "plastics_printer_can_melt", "pro_pick_missed_line"]
 
 
 def plastics_printer_can_melt(max_hotend_temp_c: float | None = None) -> list[str]:
@@ -63,4 +63,23 @@ def basic_pick_line(miss: Any, *, feature: str, hotend_known: bool = True) -> st
             if miss.cause == "signed_out"
             else "ask again for Kiln's pick for this part"
         ),
+    )
+
+
+def pro_pick_missed_line(miss: Any, *, feature: str) -> str:
+    """The one line said beside the pick every plan gets when the caller's
+    plan includes Kiln Pro and Kiln Pro's own pick did not come: why
+    (:mod:`kiln.served_answer`) and what fixes it, never an offer of the plan
+    the caller holds."""
+    from kiln.served_answer import Miss, sentence
+
+    if miss is None:
+        miss = Miss("unanswered", detail="no Kiln Pro pick")
+    return sentence(
+        miss,
+        feature=feature,
+        on_the_line="This is the pick every plan gets, not Kiln Pro's pick",
+        cannot="give Kiln Pro's pick",
+        wont="gives the pick every plan gets instead",
+        then="ask again for Kiln Pro's pick",
     )

@@ -36,7 +36,7 @@ _FLOOR_PICK = {
     "material_id": "petg",
     "score": 62.0,
     "reasons": ["Recommended for: sustained load. PETG chosen — picked on Kiln's servers."],
-    "warnings": ["Load not checked: Kiln Pro sizes the part for the weight and how long it's held."],
+    "warnings": ["Load not checked for this material."],
     "alternatives": [
         {"material_id": "asa", "display_name": "ASA", "score": 50.0, "reasons": [], "warnings": ["w"]},
     ],
@@ -172,6 +172,35 @@ class TestTheServedPick:
         rec = di.recommend_material_for_design("shelf bracket")
         assert [tool for tool, _ in asked] == [bridge.WIRE_TOOL, bridge.FLOOR_WIRE_TOOL]
         assert rec.material.material_id == "petg"
+
+    @pytest.mark.parametrize(
+        ("pro_reply", "said"),
+        [
+            ({"success": True, "status": "ok", "known": False, "pick": None},
+             "because Kiln's material pick didn't answer"),
+            ({"success": False, "status": "error", "code": "TIER_REQUIRED", "required_tier": "pro",
+              "error": "Kiln Pro's material pick needs Kiln Pro. Upgrade at https://kiln3d.com/pricing."},
+             "signing in again brings this computer's record of the plan up to date"),
+            ({"status": "error", "success": False, "code": "INVALID_ARGUMENT",
+              "error": "requirements_text must describe the part."},
+             "requirements_text must describe the part."),
+        ],
+    )
+    def test_a_kiln_pro_plan_given_the_every_plan_pick_is_told_once_and_never_sold(self, monkeypatch, pro_reply, said):
+        """A caller whose plan includes Kiln Pro, handed the pick every plan
+        gets, reads one line saying so (why and what fixes it), and nothing
+        that offers the plan they hold."""
+        _plan(monkeypatch, "pro")
+        _servers(monkeypatch, {bridge.WIRE_TOOL: pro_reply, bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        rec = di.recommend_material_for_design("shelf bracket")
+        line = rec.warnings[0]
+        assert line.startswith("This is the pick every plan gets, not Kiln Pro's pick.") and said in line
+        assert sum("not Kiln Pro's pick" in w for w in rec.warnings) == 1
+        assert "kiln3d.com/pricing" not in line and "Upgrade" not in line and "needs Kiln" not in line
+        assert rec.warnings[1:] == _FLOOR_PICK["warnings"]
+        # A free plan handed the same pick is told nothing of the kind.
+        _plan(monkeypatch, "free")
+        assert di.recommend_material_for_design("shelf bracket").warnings == _FLOOR_PICK["warnings"]
 
     @pytest.mark.usefixtures("free_caller")
     def test_the_door_returns_the_pick_with_its_cautions(self, monkeypatch):
@@ -317,6 +346,13 @@ class TestTheCautionsOnEveryPath:
         assert out["basic"] is True and len(load) == 1
         assert load[0].startswith("This appears to be a load-bearing application; none of the plastics listed")
         assert "kiln3d.com" in load[0]
+
+    def test_the_load_nudge_names_the_plan_once_after_what_it_does_for_the_part(self):
+        """Value first, the plan as a fact, the link once."""
+        out = _door()("shelf bracket that holds 10 lbs")
+        text = " ".join(out["warnings"])
+        assert text.count("Kiln Pro") == 1 and text.count("kiln3d.com/pricing") == 1
+        assert "Kiln Pro sizes the part for the weight and how long it's held" in text
 
     def test_a_part_with_nothing_to_warn_about_carries_no_caution(self):
         out = _door()("cable clip")
