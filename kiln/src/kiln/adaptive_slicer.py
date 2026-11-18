@@ -280,11 +280,54 @@ _FALLBACK_BUILD_HEIGHT_MM = 2000.0
 _MAX_PLAN_LAYERS = 100_000
 #: The most regions one plan reads.
 _MAX_PLAN_REGIONS = 200
+#: The most region names one plan's layers list between them: what bounds
+#: the plan's size when many regions span many layers.
+_MAX_PLAN_REGION_ENTRIES = 250_000
+#: The longest material name or mode a plan reads, and the most of anything
+#: a caller sent that a refusal repeats.
+MAX_TEXT_CHARS = 64
 
 
 def _is_number(value: Any) -> bool:
-    """A finite int or float (a bool is not a size)."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    """A finite int or float (a bool is not a size; nor is a whole number too
+    large to be one)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _shown(value: Any) -> str:
+    """*value* as a refusal may repeat it: at most :data:`MAX_TEXT_CHARS`
+    characters of it."""
+    try:
+        text = repr(value)
+    except ValueError:  # a whole number too long to write out
+        return "a number too large to write out"
+    return text if len(text) <= MAX_TEXT_CHARS else f"{text[: MAX_TEXT_CHARS - 3]}..."
+
+
+def text_refusal(material: Any, mode: Any = None) -> str | None:
+    """Why a plan or a material's settings are refused for *material* or
+    *mode* before anything is asked, or ``None``.
+
+    A material that is not text or longer than :data:`MAX_TEXT_CHARS`; a mode
+    (when given) that is not text or longer than that.  A mode of the right
+    shape that the planner does not know is refused where a plan reads it.
+    """
+    if not isinstance(material, str):
+        return "Invalid material: name the material as text, e.g. 'PLA'."
+    if len(material) > MAX_TEXT_CHARS:
+        return f"Invalid material: a material name is at most {MAX_TEXT_CHARS} characters."
+    if mode is not None:
+        valid = ", ".join(m.value for m in AdaptiveMode)
+        if not isinstance(mode, str):
+            return f"Invalid mode: name the mode as text. Valid: {valid}."
+        if len(mode) > MAX_TEXT_CHARS:
+            return f"Invalid mode: a mode is at most {MAX_TEXT_CHARS} characters. Valid: {valid}."
+    return None
 
 
 @functools.lru_cache(maxsize=1)
@@ -318,12 +361,12 @@ def check_nozzle(nozzle_diameter_mm: Any) -> float:
     """
     if not _is_number(nozzle_diameter_mm):
         raise AdaptiveSlicerError(
-            f"Nozzle diameter must be a finite number of millimetres, got {nozzle_diameter_mm!r}."
+            f"Nozzle diameter must be a finite number of millimetres, got {_shown(nozzle_diameter_mm)}."
         )
     low, high = _PLAN_NOZZLE_MM
     if not low <= nozzle_diameter_mm <= high:
         raise AdaptiveSlicerError(
-            f"Nozzle diameter must be between {low:g} and {high:g} mm, got {nozzle_diameter_mm:g}."
+            f"Nozzle diameter must be between {low:g} and {high:g} mm, got {_shown(nozzle_diameter_mm)}."
         )
     return float(nozzle_diameter_mm)
 
@@ -338,14 +381,14 @@ def check_plan_inputs(model_height_mm: Any, nozzle_diameter_mm: Any) -> None:
     """
     if not _is_number(model_height_mm):
         raise AdaptiveSlicerError(
-            f"Model height must be a finite number of millimetres, got {model_height_mm!r}."
+            f"Model height must be a finite number of millimetres, got {_shown(model_height_mm)}."
         )
     if model_height_mm <= 0:
-        raise AdaptiveSlicerError(f"Model height must be positive, got {model_height_mm}.")
+        raise AdaptiveSlicerError(f"Model height must be positive, got {_shown(model_height_mm)}.")
     tallest = max_build_height_mm()
     if model_height_mm > tallest:
         raise AdaptiveSlicerError(
-            f"Model height {model_height_mm:g} mm is taller than any printer Kiln knows of ({tallest:g} mm)."
+            f"Model height {_shown(model_height_mm)} mm is taller than any printer Kiln knows of ({tallest:g} mm)."
         )
     check_nozzle(nozzle_diameter_mm)
 
@@ -511,7 +554,9 @@ class AdaptiveSlicer:
         :raises AdaptiveSlicerError: For a height or nozzle
             :func:`check_plan_inputs` refuses, more than
             :data:`_MAX_PLAN_REGIONS` regions, a layer that would not be
-            thicker than zero, or a plan past :data:`_MAX_PLAN_LAYERS` layers.
+            thicker than zero, a plan past :data:`_MAX_PLAN_LAYERS` layers, or
+            one whose layers would name more than
+            :data:`_MAX_PLAN_REGION_ENTRIES` regions between them.
         """
         check_plan_inputs(model_height_mm, nozzle_diameter_mm)
         if len(regions) > _MAX_PLAN_REGIONS:
@@ -527,6 +572,7 @@ class AdaptiveSlicer:
 
             z = 0.0
             layer_idx = 0
+            region_entries = 0
 
             while z < model_height_mm:
                 height = self._compute_layer_height(z, regions, material_profile, mode)
@@ -563,6 +609,12 @@ class AdaptiveSlicer:
                 cooling = self._compute_layer_cooling(z, regions, material_profile)
 
                 active_regions = _regions_at_z(z, regions)
+                region_entries += len(active_regions)
+                if region_entries > _MAX_PLAN_REGION_ENTRIES:
+                    raise AdaptiveSlicerError(
+                        f"This plan's layers would name more than {_MAX_PLAN_REGION_ENTRIES:,} regions "
+                        "between them; send fewer regions, or regions that cover less of the part's height."
+                    )
 
                 layer_heights.append(round(height, 4))
                 layer_regions_list.append(active_regions)
@@ -1372,8 +1424,27 @@ def _estimate_time_uniform(height_mm: float, layer_height: float) -> float:
     return round((layers * per_layer) / 60.0, 1)
 
 
+def _region_number(value: Any) -> float:
+    """One number of a region, or a refusal that repeats at most
+    :data:`MAX_TEXT_CHARS` characters of what was sent."""
+    try:
+        return float(value)
+    except ValueError as exc:
+        if isinstance(value, str):
+            raise AdaptiveSlicerError(f"could not convert string to float: {_shown(value)}") from exc
+        raise AdaptiveSlicerError(_shown(str(exc))) from exc
+    except (TypeError, OverflowError) as exc:
+        raise AdaptiveSlicerError(str(exc)) from exc
+
+
 def _parse_region_dicts(raw: list[dict[str, Any]], model_height: float) -> list[GeometryRegion]:
-    """Parse a list of region dicts into GeometryRegion objects."""
+    """Parse a list of region dicts into GeometryRegion objects.
+
+    :raises AdaptiveSlicerError: for more than :data:`_MAX_PLAN_REGIONS`
+        regions (before any is read) or a region number that is not one.
+    """
+    if isinstance(raw, (list, tuple)) and len(raw) > _MAX_PLAN_REGIONS:
+        raise AdaptiveSlicerError(f"A plan reads at most {_MAX_PLAN_REGIONS} regions, got {len(raw)}.")
     regions: list[GeometryRegion] = []
     for item in raw:
         try:
@@ -1383,13 +1454,17 @@ def _parse_region_dicts(raw: list[dict[str, Any]], model_height: float) -> list[
         regions.append(
             GeometryRegion(
                 region_type=rtype,
-                z_start_mm=float(item.get("z_start_mm", 0.0)),
-                z_end_mm=float(item.get("z_end_mm", model_height)),
-                area_pct=float(item.get("area_pct", 10.0)),
-                min_feature_size_mm=(float(item["min_feature_size_mm"]) if "min_feature_size_mm" in item else None),
-                overhang_angle=(float(item["overhang_angle"]) if "overhang_angle" in item else None),
-                bridge_length_mm=(float(item["bridge_length_mm"]) if "bridge_length_mm" in item else None),
-                wall_thickness_mm=(float(item["wall_thickness_mm"]) if "wall_thickness_mm" in item else None),
+                z_start_mm=_region_number(item.get("z_start_mm", 0.0)),
+                z_end_mm=_region_number(item.get("z_end_mm", model_height)),
+                area_pct=_region_number(item.get("area_pct", 10.0)),
+                min_feature_size_mm=(
+                    _region_number(item["min_feature_size_mm"]) if "min_feature_size_mm" in item else None
+                ),
+                overhang_angle=(_region_number(item["overhang_angle"]) if "overhang_angle" in item else None),
+                bridge_length_mm=(_region_number(item["bridge_length_mm"]) if "bridge_length_mm" in item else None),
+                wall_thickness_mm=(
+                    _region_number(item["wall_thickness_mm"]) if "wall_thickness_mm" in item else None
+                ),
             )
         )
     return regions
