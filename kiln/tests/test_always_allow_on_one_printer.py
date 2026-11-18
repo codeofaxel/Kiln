@@ -2169,7 +2169,8 @@ class TestItIsPro:
         result = _kiln("consent", "window", "--always", "--printer", "garage", typed="y\ngarage")
         said = _said(result)
         assert result.exit_code != 0
-        assert "CONSENT_PRO_REQUIRED" in said and "Kiln Pro" in said and "--for 2h" in said
+        # A person reads the sentence; the refusal's code is for a script.
+        assert "Kiln Pro" in said and "--for 2h" in said
         assert "Does garage have a camera" not in said and "Type the printer's name" not in said
         assert [w for w in consent_windows.live_windows() if w.always] == []
 

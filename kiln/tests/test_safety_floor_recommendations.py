@@ -40,6 +40,7 @@ from kiln.design_intelligence import (
 )
 
 from .conftest import _ENGINEERING_OVERLAY_PRESENT
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 # These tests are the inverse of ``requires_engineering_overlay`` —
 # they verify free-tier behavior, so we skip when the overlay IS
@@ -175,6 +176,7 @@ class TestLoadBearingNudgeAlwaysAttached:
             "ceiling hook for a hanging plant",
         ],
     )
+    @pytest.mark.usefixtures("free_caller")
     def test_load_bearing_prompts_attach_upgrade_nudge(self, prompt):
         rec = recommend_material_for_design(prompt)
         warning_text = " ".join(rec.warnings).lower()
