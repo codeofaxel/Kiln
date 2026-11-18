@@ -619,8 +619,14 @@ def audit_original_design(
             name="design_requirements",
             passed=design_validation.overall_pass,
             severity="critical" if not design_validation.overall_pass else "info",
-            message=design_validation.summary,
-            details=design_validation.to_dict(),
+            # The report itself is in the audit whole, with what it says
+            # about the figures its checks read; the gate repeats only what
+            # the checks found, so those lines are said once.
+            message=design_validation.checks_summary or design_validation.summary,
+            details={
+                **design_validation.to_dict(),
+                "summary": design_validation.checks_summary or design_validation.summary,
+            },
         ),
         AuditGate(
             name="printability",
@@ -880,7 +886,7 @@ def audit_original_design(
     if design_validation.critical_count or design_validation.warning_count:
         score -= design_validation.critical_count * 12
         score -= design_validation.warning_count * 4
-        reasons.append(design_validation.summary)
+        reasons.append(design_validation.checks_summary or design_validation.summary)
     if diagnostics is not None:
         severity_penalty = {
             "clean": 0,

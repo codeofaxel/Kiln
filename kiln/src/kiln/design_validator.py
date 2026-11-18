@@ -72,6 +72,11 @@ class DesignValidationReport:
     #: When no material was picked for the part: the analysis's basic
     #: material block (``kiln.design_intelligence.material_basic_of``).
     material_basic: dict[str, Any] | None = None
+    #: :attr:`summary` without what it says about the figures the checks
+    #: read (why they are general, the day's allowance, what they leave
+    #: out): for a reply that repeats the summary beside this report, so
+    #: those lines are said once.  Not part of :meth:`to_dict`.
+    checks_summary: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -506,9 +511,8 @@ def validate_design(
     warning_count = sum(1 for c in failed_checks if c.severity == "warning")
     overall_pass = critical_count == 0
 
-    summary = _build_summary(checks, failed_checks, material_name)
-    if limits_notes:
-        summary = " ".join([summary, *limits_notes])
+    checks_summary = _build_summary(checks, failed_checks, material_name)
+    summary = " ".join([checks_summary, *limits_notes]) if limits_notes else checks_summary
 
     return DesignValidationReport(
         file_path=file_path,
@@ -520,6 +524,7 @@ def validate_design(
         warning_count=warning_count,
         summary=summary,
         material_basic=material_basic_of(brief),
+        checks_summary=checks_summary,
     )
 
 
