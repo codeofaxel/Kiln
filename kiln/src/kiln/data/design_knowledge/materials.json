@@ -173,7 +173,7 @@
     "category": "thermoplastic_elastomer",
     "thermal": {
       "glass_transition_c": -40,
-      "max_service_temp_c": 80,
+      "max_service_temp_c": 44,
       "print_temp_range_c": [
         215,
         235
@@ -1041,7 +1041,7 @@
     "category": "thermoplastic_elastomer",
     "thermal": {
       "glass_transition_c": -40,
-      "max_service_temp_c": 80,
+      "max_service_temp_c": 50,
       "print_temp_range_c": [
         220,
         240
@@ -1091,7 +1091,7 @@
     "category": "thermoplastic_elastomer",
     "thermal": {
       "glass_transition_c": -45,
-      "max_service_temp_c": 70,
+      "max_service_temp_c": 44,
       "print_temp_range_c": [
         210,
         235

@@ -46,3 +46,11 @@ def test_a_temperature_inside_both_limits_is_still_fine():
     report = check_environment_compatibility("petg", "a part that sits at 40 C")
     assert report is not None
     assert not any("outside service range" in w for w in report.warnings)
+
+
+@pytest.mark.parametrize("material, celsius", [("tpu", 60), ("tpu_95a", 60), ("tpu_85a", 55)])
+def test_a_flexible_part_is_not_called_fine_where_it_softens(material, celsius):
+    report = check_environment_compatibility(material, f"a part that sits at {celsius} C")
+    assert report is not None
+    assert report.overall_verdict != "recommended"
+    assert any("outside service range" in w for w in report.warnings)

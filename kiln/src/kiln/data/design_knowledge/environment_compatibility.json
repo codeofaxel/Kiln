@@ -95,7 +95,7 @@
     },
     "temperature_range": {
       "min_service_c": -30,
-      "max_service_c": 80
+      "max_service_c": 44
     },
     "moisture": {
       "rating": "moderate",
@@ -739,7 +739,7 @@
     },
     "temperature_range": {
       "min_service_c": -30,
-      "max_service_c": 80
+      "max_service_c": 44
     },
     "moisture": {
       "rating": "moderate",
@@ -767,7 +767,7 @@
     },
     "temperature_range": {
       "min_service_c": -30,
-      "max_service_c": 80
+      "max_service_c": 50
     },
     "moisture": {
       "rating": "moderate",
