@@ -167,10 +167,4 @@ def _is_answer(answer: Any) -> bool:
     return isinstance(figures, dict) and all(q in figures and _is_figure(figures[q]) for q in QUANTITIES)
 
 
-def forget() -> None:
-    """Forget a service backoff (tests, and a deliberate reload)."""
-    global _service_down_until, _service_down_miss
-    _service_down_until, _service_down_miss = 0.0, None
-
-
-__all__ = ["BASES", "LOCAL_MODULE", "QUANTITIES", "WIRE_TOOL", "available", "ask", "forget"]
+__all__ = ["BASES", "LOCAL_MODULE", "QUANTITIES", "WIRE_TOOL", "available", "ask"]

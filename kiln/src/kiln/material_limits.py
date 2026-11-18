@@ -258,21 +258,11 @@ def general_design_limits() -> dict[str, Any]:
     }
 
 
-def forget() -> None:
-    """Drop every kept answer and every said miss (tests, a deliberate reload)."""
-    from kiln import _pro_material_limits_bridge as bridge
-
-    _answers.clear()
-    _said.clear()
-    bridge.forget()
-
-
 __all__ = [
     "GENERAL_ONLY",
     "PER_PLASTIC",
     "GENERAL_BLOCK_NOTE",
     "MaterialLimits",
-    "forget",
     "general_design_limits",
     "limits_for",
     "miss_sentence",

@@ -23,6 +23,16 @@ import pytest
 
 from kiln import material_limits
 
+def _forget() -> None:
+    """Drop every kept answer, said miss and service backoff."""
+    from kiln import _pro_material_limits_bridge as bridge
+    from kiln import material_limits as helper
+
+    helper._answers.clear()
+    helper._said.clear()
+    bridge._service_down_until, bridge._service_down_miss = 0.0, None
+
+
 #: A served answer with figures no general figure equals, so a door that
 #: states one of them read the served answer.
 _SERVED = {
@@ -52,9 +62,9 @@ def _answer(**overrides: Any) -> dict[str, Any]:
 def _plain_install(monkeypatch):
     """No kiln-pro on this machine, whatever the test runner has on its path."""
     monkeypatch.setitem(sys.modules, "kiln_pro", None)
-    material_limits.forget()
+    _forget()
     yield
-    material_limits.forget()
+    _forget()
 
 
 @pytest.fixture
@@ -187,7 +197,7 @@ def test_a_reply_judged_at_the_plastics_own_overhang_does_not_say_the_angle(serv
     # With no plastic figure (signed out), the general angle is the reply's own.
     _calls, answers = served
     answers.append({"success": False, "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "Sign in.", "why": "signed_out"})
-    material_limits.forget()
+    _forget()
     general = analyze_printability(str(path), material="pla").to_dict()
     assert general["overhang_threshold_deg"] == 45.0
 

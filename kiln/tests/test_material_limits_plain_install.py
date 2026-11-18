@@ -25,15 +25,25 @@ import pytest
 
 from kiln import generic_limits, material_limits
 
+def _forget() -> None:
+    """Drop every kept answer, said miss and service backoff."""
+    from kiln import _pro_material_limits_bridge as bridge
+    from kiln import material_limits as helper
+
+    helper._answers.clear()
+    helper._said.clear()
+    bridge._service_down_until, bridge._service_down_miss = 0.0, None
+
+
 _PACKAGE = Path(__file__).resolve().parents[1] / "src" / "kiln"
 
 
 @pytest.fixture(autouse=True)
 def _plain_install(monkeypatch):
     monkeypatch.setitem(sys.modules, "kiln_pro", None)
-    material_limits.forget()
+    _forget()
     yield
-    material_limits.forget()
+    _forget()
 
 
 def _serve(monkeypatch, answer: Any) -> list[str]:

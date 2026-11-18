@@ -20,6 +20,16 @@ from typing import Any
 
 import pytest
 
+def _forget() -> None:
+    """Drop every kept answer, said miss and service backoff."""
+    from kiln import _pro_material_limits_bridge as bridge
+    from kiln import material_limits as helper
+
+    helper._answers.clear()
+    helper._said.clear()
+    bridge._service_down_until, bridge._service_down_miss = 0.0, None
+
+
 #: What a fault on the server could carry: a path, a query, a tenant.
 SECRET = "/srv/kiln/tenant-7f3a/private.sqlite: SELECT api_key FROM kilntest_tenants"
 MARKERS = ("tenant-7f3a", "kilntest_tenants", "api_key", "private.sqlite")
@@ -205,7 +215,7 @@ def test_the_design_limits(monkeypatch, caplog):
     from kiln import material_limits
 
     _stub(monkeypatch, bridge.LOCAL_MODULE, for_the_wire=_raise)
-    material_limits.forget()
+    _forget()
     try:
         limits = material_limits.limits_for("pla")
         assert limits.basic and limits.miss is not None
@@ -213,7 +223,7 @@ def test_the_design_limits(monkeypatch, caplog):
         assert out["notes"]
         _assert_kept_local(out, caplog)
     finally:
-        material_limits.forget()
+        _forget()
 
 
 def test_the_multi_material_check(monkeypatch, caplog):
