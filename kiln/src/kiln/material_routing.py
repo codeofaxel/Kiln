@@ -545,8 +545,10 @@ def basic_materials(
     on_hand: list[dict[str, Any]] | None = None,
 ) -> BasicMaterials:
     """The answer when Kiln's material recommendation gives none: no pick,
-    the plastics the printer can melt (unranked), the food-contact floor and
-    the skin-contact caution, and one sentence saying why and what fixes it.
+    the plastics the printer can melt (unranked), the food-contact floor,
+    the plastics Kiln's public rules for the part leave out (said in one
+    line), the skin-contact caution, and one sentence saying why and what
+    fixes it.
 
     When *on_hand* was asked, the plastics are the person's own, as recorded
     and unranked, with where each one is, past the food-contact floor and
@@ -555,7 +557,7 @@ def basic_materials(
     hand.
     """
     from kiln._pro_routing_bridge import FEATURE
-    from kiln.material_basics import basic_pick_line, basic_plastics
+    from kiln.material_basics import basic_list, basic_pick_line
 
     cautions: list[str] = []
     try:
@@ -568,7 +570,9 @@ def basic_materials(
 
     shelf = _shelf_basics(intent, on_hand) if on_hand is not None else None
     if shelf:
-        names, rows = shelf
+        names, rows, rules_line = shelf
+        if rules_line:
+            cautions.insert(0, rules_line)
         for name in names:
             caution = _abrasive_caution(name)
             if caution:
@@ -577,12 +581,14 @@ def basic_materials(
         return BasicMaterials(plastics=names, note=note, miss=miss, cautions=cautions, on_hand=rows)
 
     limit = _hotend_limit_c(printer_id)
-    plastics = basic_plastics(intent, limit)
+    listed = basic_list(intent, limit)
+    if listed.rules_line:
+        cautions.insert(0, listed.rules_line)
     if on_hand is not None:
         cautions.append(_not_on_hand_line(on_hand))
     note = basic_pick_line(miss, feature=FEATURE, hotend_known=limit is not None)
     return BasicMaterials(
-        plastics=plastics, note=note, miss=miss, hotend_limit_c=limit, cautions=cautions,
+        plastics=listed.plastics, note=note, miss=miss, hotend_limit_c=limit, cautions=cautions,
         on_hand=[] if on_hand is not None else None,
     )
 
@@ -598,9 +604,13 @@ _NOTHING_RECORDED = (
 
 def _shelf_basics(
     intent: str, on_hand: list[dict[str, Any]],
-) -> tuple[list[str], list[dict[str, Any]]] | None:
+) -> tuple[list[str], list[dict[str, Any]], str] | None:
     """The materials on hand as recorded, unranked, past the food-contact
-    floor, and where each one is; ``None`` when none is left."""
+    floor and the plastics Kiln's public rules for the part leave out, where
+    each one is, and the line saying what those rules did
+    (:func:`kiln.material_basics.requirement_floor`); ``None`` when none is
+    left."""
+    from kiln.material_basics import requirement_floor
     from kiln.material_safety import filter_food_safe_materials, use_case_implies_food_contact
 
     index: dict[str, list[dict[str, Any]]] = {}
@@ -611,6 +621,7 @@ def _shelf_basics(
     names = list(index)
     if use_case_implies_food_contact(intent):
         names = filter_food_safe_materials(names, require="yes_or_conditional")
+    names, rules_line = requirement_floor(intent, names)
     if not names:
         return None
     rows = []
@@ -622,7 +633,7 @@ def _shelf_basics(
             "loaded_on": [r.get("printer_name") for r in where["loaded_on"]],
             "shelf_spools": len(where["shelf_spools"]),
         })
-    return names, rows
+    return names, rows, rules_line
 
 
 def _not_on_hand_line(on_hand: list[dict[str, Any]]) -> str:

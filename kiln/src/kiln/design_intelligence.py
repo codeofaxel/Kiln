@@ -1724,12 +1724,14 @@ def material_basic_of(brief: Any) -> dict[str, Any] | None:
 def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: Any) -> dict[str, Any]:
     """The answer when no pick came (``basic: true``): the plastics this
     printer can melt, in no order and with nothing said about any one of
-    them; the cautions every answer to this request carries (a load-bearing
-    part, food contact, a part worn against skin); and one line saying that
-    Kiln did not pick a plastic for this part, why, and what fixes it.
+    them beyond what Kiln's public rules for this part leave out or allow
+    only with conditions; the cautions every answer to this request carries
+    (those rules, a load-bearing part, food contact, a part worn against
+    skin); and one line saying that Kiln did not pick a plastic for this
+    part, why, and what fixes it.
 
     Reads nothing about a material but the nozzle temperature table Kiln
-    ships with (:mod:`kiln.material_basics`).
+    ships with and the public requirement rules (:mod:`kiln.material_basics`).
 
     :param requirements_text: What the part is for, as asked.
     :param max_hotend_temp_c: The printer's hotend ceiling; a plastic whose
@@ -1739,11 +1741,12 @@ def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: 
     from kiln import served_answer
     from kiln._pro_material_pick_bridge import FEATURE
     from kiln.load_bearing_detector import detect_load_bearing
-    from kiln.material_basics import basic_pick_line, basic_plastics
+    from kiln.material_basics import basic_list, basic_pick_line
     from kiln.material_safety import food_contact_nozzle_advisory, use_case_implies_food_contact
 
     text = requirements_text if isinstance(requirements_text, str) else ""
-    warnings: list[str] = []
+    listed = basic_list(text, max_hotend_temp_c)
+    warnings: list[str] = [listed.rules_line] if listed.rules_line else []
     verdict = detect_load_bearing(text)
     if verdict.is_load_bearing:
         warnings.append(_format_upgrade_nudge(verdict, _BASIC_LOAD_CAUTION))
@@ -1755,7 +1758,7 @@ def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: 
         "success": True,
         "basic": True,
         "message": basic_pick_line(miss, feature=FEATURE, hotend_known=max_hotend_temp_c is not None),
-        "plastics": basic_plastics(text, max_hotend_temp_c),
+        "plastics": listed.plastics,
         "warnings": warnings,
     }
     if use_case_implies_food_contact(text):
