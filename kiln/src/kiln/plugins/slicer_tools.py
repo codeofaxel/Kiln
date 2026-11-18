@@ -3095,9 +3095,9 @@ class _SlicerToolsPlugin:
                     slice uses are the ones the owner recorded as fitted
                     (``set_nozzle_state``), when they did.  Before slicing,
                     nozzles of different sizes are refused with
-                    ``MULTI_NOZZLE_MIXED_SIZES``, and an abrasive filament
-                    on a nozzle that is not wear-resistant, or left to the
-                    slicer's own map while one is fitted, with
+                    ``MULTI_NOZZLE_MIXED_SIZES``; on any slice, an
+                    abrasive filament that could print through a nozzle on
+                    record that is not wear-resistant is refused with
                     ``ABRASIVE_ON_SOFT_NOZZLE``.  The response's
                     ``filament_map`` block says which nozzle printed each
                     filament.

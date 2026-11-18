@@ -1029,8 +1029,9 @@ def _fit_nozzle(
     named.  Returns what was done, for the reply; ``None`` for a profile
     that states no nozzle.
 
-    For a printer with a nozzle record (*nozzles*), the owner's stated
-    nozzle positions are read for the same machine and returned as
+    What the owner stated on the same machine's nozzle record goes with
+    it: the nozzle's material as ``nozzle_material``, and for a printer
+    with a nozzle record (*nozzles*) each stated nozzle position as
     ``positions``; when every nozzle a slice uses was stated at one size
     (:func:`fitted_size_mm`), that is the size on record.
     """
@@ -1039,23 +1040,17 @@ def _fit_nozzle(
         return None
     own = sizes[0]
     uniform = max(sizes) - min(sizes) <= _NOZZLE_SAME_MM
-    from kiln.assumed_nozzle import AssumedNozzle, nozzle_for_profile
+    from kiln.assumed_nozzle import AssumedNozzle, nozzle_for_profile, recorded_statement
 
     changed: dict[str, str] = {}
-    positions: list[dict[str, Any]] | None = None
     if "nozzle_diameter" in stated:
         answer = AssumedNozzle(own, "stated", printer_name or None)
-        if isinstance(nozzles, Mapping):
-            from kiln.assumed_nozzle import recorded_positions
-
-            positions = recorded_positions(answer.printer_id)
+        said_on_record = recorded_statement(answer.printer_id)
     else:
         answer = nozzle_for_profile(profile_id, printer_name)
+        said_on_record = recorded_statement(answer.printer_id)
         if isinstance(nozzles, Mapping):
-            from kiln.assumed_nozzle import recorded_positions
-
-            positions = recorded_positions(answer.printer_id)
-            size = fitted_size_mm(_with_fitted(nozzles, positions))
+            size = fitted_size_mm(_with_fitted(nozzles, said_on_record["positions"]))
             if size is not None:
                 answer = AssumedNozzle(
                     size, "record", answer.printer_id, answer.record_unreachable, answer.inferred_printer,
@@ -1132,8 +1127,10 @@ def _fit_nozzle(
         "changed": changed,
         "note": " ".join([said, *notes]),
     }
-    if positions is not None:
-        fit["positions"] = positions
+    if isinstance(nozzles, Mapping) and said_on_record["positions"] is not None:
+        fit["positions"] = said_on_record["positions"]
+    if said_on_record["material"] is not None:
+        fit["nozzle_material"] = said_on_record["material"]
     return fit
 
 

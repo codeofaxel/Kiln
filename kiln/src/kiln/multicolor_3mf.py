@@ -746,18 +746,17 @@ def _build_model_settings(parsed: list[_ParsedPart], groups: list[list[int]]) ->
 # ---------------------------------------------------------------------------
 
 
-def _build_project_settings(flush_matrix_str: str) -> str:
-    """Build ``Metadata/project_settings.config`` — the purge volumes."""
+def _build_project_settings(flush_matrix_str: str, filaments: list[str] | None = None) -> str:
+    """Build ``Metadata/project_settings.config``: the purge volumes, and each slot's filament when every slot names one."""
     import json
 
     values = [str(int(float(v))) for v in flush_matrix_str.split()]
-    return json.dumps(
-        {
-            "flush_volumes_matrix": values,
-            "flush_multiplier": ["1"],
-        },
-        indent=2,
-    )
+    settings: dict[str, Any] = {"flush_volumes_matrix": values, "flush_multiplier": ["1"]}
+    if filaments and all(filaments):
+        from kiln.slicer_filament import safe_filament_type
+
+        settings["filament_type"] = [safe_filament_type(name) for name in filaments]
+    return json.dumps(settings, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -1140,11 +1139,12 @@ def compose_multicolor_3mf(
     try:
         _write_archive(output_path, members)
         if specified_materials:
-            flush_matrix_str = _flush_matrix_for(output_path, parsed)
+            filaments = _slot_filaments(output_path, parsed)
+            flush_matrix_str = _flush_matrix_for(filaments)
             if flush_matrix_str:
                 members.append((
                     "Metadata/project_settings.config",
-                    _build_project_settings(flush_matrix_str),
+                    _build_project_settings(flush_matrix_str, filaments),
                 ))
                 _write_archive(output_path, members)
     except Exception as exc:
@@ -1272,23 +1272,29 @@ def _write_archive(output_path: str, members: list[tuple[str, str | bytes]]) -> 
             zf.writestr(name, data)
 
 
-def _flush_matrix_for(output_path: str, parsed: list[_ParsedPart]) -> str | None:
-    """The purge matrix for *output_path*, one row per filament slot a slice of it loads, or ``None`` when that slice loads a single filament."""
+def _slot_filaments(output_path: str, parsed: list[_ParsedPart]) -> list[str]:
+    """Each filament slot a slice of *output_path* loads, as the material its parts name ("" for none), or ``[]`` for a single filament."""
     evidence = detect_3mf_multicolor(output_path)
     slots = int((evidence or {}).get("filament_slots_needed", 0))
     if slots < 2:
-        return None
-    try:
-        from kiln.material_safety import build_bambu_flush_matrix
-    except ImportError:
-        return None
+        return []
     per_slot: dict[int, str] = {}
     for part, _, _ in parsed:
         material = (part.material or "").strip()
         if material:
             per_slot.setdefault(part.extruder, material)
-    materials = [per_slot.get(slot, "") for slot in range(1, slots + 1)]
-    return build_bambu_flush_matrix(materials, n_slots=slots)
+    return [per_slot.get(slot, "") for slot in range(1, slots + 1)]
+
+
+def _flush_matrix_for(filaments: list[str]) -> str | None:
+    """The purge matrix for one filament slot per entry of *filaments*, or ``None`` for fewer than two."""
+    if len(filaments) < 2:
+        return None
+    try:
+        from kiln.material_safety import build_bambu_flush_matrix
+    except ImportError:
+        return None
+    return build_bambu_flush_matrix(filaments, n_slots=len(filaments))
 
 
 # ---------------------------------------------------------------------------

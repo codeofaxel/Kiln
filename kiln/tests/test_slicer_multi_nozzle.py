@@ -1170,6 +1170,7 @@ class TestTheRecordSaysWhatIsFitted:
         monkeypatch.setitem(sys.modules, "kiln_pro.nozzle_intelligence.store_resolver", store)
         assert bridge.consult_recorded_nozzle("shop_two") == {
             "diameter_mm": 0.4,
+            "material": None,
             "answered": True,
             "positions": [{"id": 1, "fitted": True, "diameter_mm": 0.4, "material": "hardened_steel"}],
         }
@@ -1247,15 +1248,15 @@ def owner_says(monkeypatch, no_kiln_pro):
     statement set here and no one size of its own; returns a setter."""
     from kiln import _pro_nozzle_bridge as bridge
 
-    said: dict = {"positions": None}
+    said: dict = {"positions": None, "material": None}
 
     def answer(printer_id):
-        return {"diameter_mm": None, "answered": True, "positions": said["positions"]}
+        return {"diameter_mm": None, "material": said["material"], "answered": True, "positions": said["positions"]}
 
     monkeypatch.setattr(bridge, "consult_recorded_nozzle", answer)
 
-    def set_positions(positions):
-        said["positions"] = positions
+    def set_positions(positions, material=None):
+        said["positions"], said["material"] = positions, material
 
     return set_positions
 
@@ -1484,3 +1485,106 @@ class TestTheWearResistantNozzles:
         from kiln.material_safety import is_wear_resistant_nozzle
 
         assert not is_wear_resistant_nozzle(material)
+
+
+class TestEverySliceIsCheckedForAnAbrasiveFilament:
+    """A slice for one nozzle is checked too, and fails closed when Kiln
+    cannot tell which fitted nozzle will print."""
+
+    def _slice(self, tmp_path, run, *, filaments=1, **kwargs):
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", run),
+        ):
+            return slice_file(
+                _plate(tmp_path, filaments), output_dir=str(tmp_path / "out"),
+                profile=resolve_slicer_profile("invented_two"), **kwargs,
+            )
+
+    def test_one_filament_on_a_printer_with_a_soft_nozzle_fitted_is_refused(
+        self, tmp_path, invented_printer, owner_says,
+    ):
+        invented_printer(_WIDE)
+        owner_says(_HARD_AND_BRASS)
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, material="PLA-CF")
+        assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
+        said = str(refused.value)
+        assert "may print through any nozzle fitted" in said and "nozzle 2 (brass)" in said
+        assert "give a filament-to-nozzle map with it on nozzle 1" in said
+
+    def test_with_every_fitted_nozzle_wear_resistant_it_slices(self, tmp_path, invented_printer, owner_says):
+        invented_printer(_WIDE)
+        owner_says(_TWO_HARD)
+        assert self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA-CF").success
+
+    def test_the_one_nozzle_fitted_on_a_two_nozzle_printer_is_judged(self, tmp_path, invented_printer, owner_says):
+        invented_printer(_WIDE)
+        owner_says(_fitted((1, 0.4, "brass")))
+        with pytest.raises(NozzleMapError, match=r"the one nozzle fitted, nozzle 1 \(brass\), is not wear-resistant"):
+            self._slice(tmp_path, _never_runs, material="PLA-CF")
+
+    def test_a_printer_with_one_nozzle_on_record_is_judged_the_same_way(self, tmp_path, invented_printer, owner_says):
+        invented_printer(None)
+        owner_says(None, "brass")
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, material="PLA-CF")
+        assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
+        assert "the nozzle on record for this printer is brass" in str(refused.value)
+        owner_says(None, "hardened_steel")
+        assert self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA-CF").success
+
+    def test_a_plain_filament_is_never_refused(self, tmp_path, invented_printer, owner_says):
+        invented_printer(None)
+        owner_says(None, "brass")
+        assert self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA").success
+
+    def test_a_printer_kiln_cannot_map_names_the_nozzle_that_can_take_it(self):
+        from kiln.slicer import abrasive_nozzle_refusal
+
+        said = abrasive_nozzle_refusal([["PLA-CF"]], fitted=_HARD_AND_BRASS, mappable=False)
+        assert said.endswith("only nozzle 1 can take it, so fit wear-resistant nozzles in place of the others for it.")
+        assert abrasive_nozzle_refusal([["PLA-CF"]], fitted=_TWO_HARD) == ""
+        assert abrasive_nozzle_refusal([["PLA"]], on_record="brass") == ""
+        assert abrasive_nozzle_refusal([["PLA-CF"]]) == ""
+
+
+class TestAMultiMaterialPlateCarriesItsFilaments:
+    """Each object's material, as multi_material_print hands it to the
+    composer, reaches the same check."""
+
+    def _plate(self, tmp_path, materials):
+        from kiln.design_intelligence import get_material_profile
+
+        parts = [
+            ColorPart(
+                _cube(tmp_path / f"m{i}.stl", 40.0 + 60.0 * i), extruder=i + 1, name=f"m{i}",
+                material=get_material_profile(material).display_name,
+            )
+            for i, material in enumerate(materials)
+        ]
+        composed = compose_multicolor_3mf(parts, output_path=str(tmp_path / "mm.3mf"))
+        assert composed["success"], composed
+        return composed["output_path"]
+
+    def test_the_composed_plate_states_each_slots_filament(self, tmp_path):
+        from kiln.file_metadata import slicer_settings
+
+        plate = self._plate(tmp_path, ["pla", "cf_pla"])
+        stated = slicer_settings(plate)["filament_type"].split(",")
+        assert len(stated) == 2 and stated[0].startswith("PLA") and stated[1] == "Carbon Fiber PLA"
+
+    def test_an_abrasive_object_on_a_soft_nozzle_is_refused(self, tmp_path):
+        plate = self._plate(tmp_path, ["pla", "cf_pla"])
+        record = slicer_profiles.fitted_record(_WIDE, _HARD_AND_BRASS)
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _never_runs),
+            pytest.raises(NozzleMapError) as refused,
+        ):
+            slice_file(plate, output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, record), filament_map=[1, 2])
+        assert str(refused.value).startswith("Filament 2 is Carbon Fiber PLA, an abrasive filament")

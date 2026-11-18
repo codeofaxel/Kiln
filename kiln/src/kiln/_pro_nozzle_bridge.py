@@ -244,11 +244,12 @@ def nozzle_unchecked(printer_id: str, *, at: str = "preflight") -> dict[str, Any
 def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     """The nozzle on record for *printer_id*, when somebody recorded one.
 
-    ``{"diameter_mm": float | None, "answered": bool, "positions": list | None}``.
-    ``diameter_mm`` is set only for a record a person or the machine stated;
-    a catalogue default is nobody's record and comes back ``None``.
-    ``positions`` is the owner's statement of each nozzle position, when the
-    record holds one (:func:`recorded_positions_of`), else ``None``.
+    ``{"diameter_mm": float | None, "material": str | None, "answered": bool,
+    "positions": list | None}``.  ``diameter_mm`` and ``material`` are set
+    only for a record a person or the machine stated; a catalogue default is
+    nobody's record and comes back ``None``, and so does a material nobody
+    knows.  ``positions`` is the owner's statement of each nozzle position,
+    when the record holds one (:func:`recorded_positions_of`), else ``None``.
     ``answered`` is ``False`` when the record could not be asked at all
     (offline, signed out, no answer), so a caller can tell "no record" from
     "could not ask".  From kiln-pro locally when it is installed, asked
@@ -257,7 +258,7 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     """
     pid = (printer_id or "").strip() if isinstance(printer_id, str) else ""
     if not pid:
-        return {"diameter_mm": None, "answered": True, "positions": None}
+        return {"diameter_mm": None, "material": None, "answered": True, "positions": None}
     if available():
         # Asked of the store each time, never remembered: the read is local,
         # the record can change between two checks, and a process that
@@ -267,16 +268,17 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
         try:
             from kiln_pro.nozzle_intelligence.store_resolver import recorded_nozzle
         except ImportError:  # a kiln-pro from before this door existed
-            return {"diameter_mm": None, "answered": True, "positions": None}
+            return {"diameter_mm": None, "material": None, "answered": True, "positions": None}
         try:
             state = recorded_nozzle(pid, tool_name=RECORD_TOOL)
         except Exception:  # noqa: BLE001 -- one rung of a check, never the check
             logger.debug("recorded nozzle lookup failed", exc_info=True)
-            return {"diameter_mm": None, "answered": True, "positions": None}
+            return {"diameter_mm": None, "material": None, "answered": True, "positions": None}
         if state is None:
-            return {"diameter_mm": None, "answered": True, "positions": None}
+            return {"diameter_mm": None, "material": None, "answered": True, "positions": None}
         return {
             "diameter_mm": state.diameter_mm,
+            "material": _material_word(getattr(state, "material", None)),
             "answered": True,
             "positions": recorded_positions_of(getattr(state, "positions", None)),
         }
@@ -287,6 +289,13 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     answer = _served_recorded_nozzle(pid)
     _record_memo[pid] = (now, answer)
     return answer
+
+
+def _material_word(material: Any) -> str | None:
+    """A nozzle material as the record's word, lower case; ``None`` for none
+    or ``unknown``."""
+    word = str(getattr(material, "value", material) or "").strip().lower()
+    return word if word and word != "unknown" else None
 
 
 def _field(entry: Any, name: str) -> Any:
@@ -315,13 +324,11 @@ def recorded_positions_of(raw: Any) -> list[dict[str, Any]] | None:
             size = float(size) if size is not None and not isinstance(size, bool) else None
         except (TypeError, ValueError):
             size = None
-        material = getattr(_field(entry, "material"), "value", _field(entry, "material"))
-        word = str(material).strip().lower() if material is not None else ""
         read[pid] = {
             "id": pid,
             "fitted": _field(entry, "fitted") is True,
             "diameter_mm": size if size is not None and 0 < size <= 5 else None,
-            "material": word or None,
+            "material": _material_word(_field(entry, "material")),
         }
     return [read[pid] for pid in sorted(read)] or None
 
@@ -362,10 +369,11 @@ def _served_state(printer_id: str) -> dict[str, Any] | None:
 def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     answer = _served_state(printer_id)
     if answer is None:
-        return {"diameter_mm": None, "answered": False, "positions": None}
+        return {"diameter_mm": None, "material": None, "answered": False, "positions": None}
     stated = answer.get("found") and answer.get("trusted_for_verdicts")
     return {
         "diameter_mm": answer.get("diameter_mm") if stated else None,
+        "material": _material_word(answer.get("material")) if stated else None,
         "answered": True,
         "positions": recorded_positions_of(answer.get("positions")) if stated else None,
     }
