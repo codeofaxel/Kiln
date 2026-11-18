@@ -1832,12 +1832,22 @@ def build_parametric_generation_prompt(
 
                 # The curated keys a profile carries, then the plastic's
                 # limits from the one helper every check reads.
+                from kiln.material_limits import WALL_RECOMMENDED
+
                 plastic_limits = limits_for(material)
                 dl = {**(mat_profile.design_limits or {}), **plastic_limits.design_limits()}
                 lines = [f"// Material: {mat_profile.display_name} \u2014 Design limits:"]
-                if plastic_limits.basic:
-                    lines.append("// (general figures: this plastic's own limits were not available)")
-                rec_wall = dl.get("recommended_wall_thickness_mm")
+                if plastic_limits.miss is not None or plastic_limits.allowance:
+                    lines.append("// (general figures: this plastic's own limits were not read for this prompt)")
+                    # Why, said once in the call's reply.
+                    from kiln.reading_notes import LIMITS_KEY, note_said
+
+                    for note in plastic_limits.notes():
+                        note_said(LIMITS_KEY, note)
+                elif plastic_limits.basic:
+                    lines.append("// (general figures: Kiln has no limits of this plastic's own)")
+                # One wall with the checks: the plastic's own, else the general one.
+                rec_wall = dl.get("recommended_wall_thickness_mm") or plastic_limits.value(WALL_RECOMMENDED)
                 if rec_wall:
                     lines.append(f"// - Recommended wall thickness: {rec_wall}mm")
                 overhang = dl.get("max_unsupported_overhang_deg")
