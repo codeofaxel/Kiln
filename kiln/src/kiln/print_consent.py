@@ -852,7 +852,7 @@ def consent_for(
         window = None
     if window is None:
         return None
-    from kiln.plate_state import LOOK_ASKS_THE_PERSON
+    from kiln.plate_state import unvouched
 
     target = aimed_at or printer_name
     # Nobody is being asked, so under always allow the plate is looked at.
@@ -862,7 +862,7 @@ def consent_for(
     # with none the person is asked the ordinary way.  (A frame not yet
     # judged does not withdraw the yes -- the gate holds the start until
     # eyes have judged it.)
-    if window.always and unasked_look(target).verdict in LOOK_ASKS_THE_PERSON:
+    if window.always and unvouched(unasked_look(target)):
         try:
             window = consent_windows.covering(target, for_a_start=True, timed_only=True)
         except Exception:  # noqa: BLE001 — an unreadable store is no window
@@ -874,7 +874,7 @@ def consent_for(
     if (
         not window.always
         and consent_windows.plate_holds_a_part(target)
-        and unasked_look(target).verdict in LOOK_ASKS_THE_PERSON
+        and unvouched(unasked_look(target))
     ):
         return None
     if window.always:

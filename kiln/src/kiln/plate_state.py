@@ -1401,6 +1401,15 @@ LOOK_NEEDED = "needed"         # a frame is ready; eyes have not judged it yet
 LOOK_BLIND = "blind"           # there is a camera, and it gave nothing usable
 #: The verdicts on which nobody's eyes vouch for the plate: the person is asked.
 LOOK_ASKS_THE_PERSON = (LOOK_BLIND, LOOK_MORE)
+LOOK_VERDICTS = (LOOK_NO_CAMERA, LOOK_CLEAR, LOOK_AS_RECORDED, LOOK_OCCUPIED, LOOK_MORE, LOOK_NEEDED, LOOK_BLIND)
+
+
+def unvouched(look: Any) -> bool:
+    """Whether no eyes vouch for the plate on *look* (a verdict, or a look
+    carrying one): :data:`LOOK_ASKS_THE_PERSON`, or a verdict this module
+    does not know.  Every start nobody is asked about reads it."""
+    verdict = getattr(look, "verdict", look)
+    return verdict in LOOK_ASKS_THE_PERSON or verdict not in LOOK_VERDICTS
 
 
 @dataclass(frozen=True)

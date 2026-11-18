@@ -136,15 +136,15 @@ def could_not_see_line(printer: str, why: str) -> str:
 
 def unvouched_bed(look: Any) -> str:
     """The clause for a look no eyes vouched for
-    (:data:`kiln.plate_state.LOOK_ASKS_THE_PERSON`): the camera showed
-    nothing usable, or the bed was seen holding more than the record names."""
+    (:func:`kiln.plate_state.unvouched`): the camera showed nothing
+    usable, or the bed was seen holding more than the record names."""
     from kiln.plate_state import LOOK_BLIND
 
     if look.verdict == LOOK_BLIND:
         reason = f" ({look.why})" if look.why else ""
         seen = f"Kiln could not see the bed through the camera{reason}"
         return f"{look.beside} is still on the plate and {seen}" if look.beside else seen
-    return look.why or "the bed was seen with something more on it than Kiln has on record"
+    return look.why or "no one has vouched for what is on the bed"
 
 
 def asking_anyway_line(printer: str, look: Any, *, always: bool) -> str:

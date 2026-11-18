@@ -3848,7 +3848,7 @@ async def _consent_from_account_always(
 
     Returns the reset token, or ``None`` for no yes."""
     from kiln import bridge_client, consent_windows
-    from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+    from kiln.plate_state import LOOK_NEEDED, unvouched
 
     grantor = answer.grantor
     identity = grantor if grantor.startswith("account:") or not grantor else f"account:{grantor}"
@@ -3873,7 +3873,7 @@ async def _consent_from_account_always(
     except Exception:  # noqa: BLE001 — a copy that could not be made or judged is no yes
         logger.debug("consent: the account's always allow could not be used", exc_info=True)
         return None
-    if look.verdict == LOOK_BLIND:
+    if unvouched(look):
         return None
     if look.verdict != LOOK_NEEDED:
         try:
@@ -4489,10 +4489,10 @@ def _preview_gate_error(
 
     bed_look = None
     if granted.source == SOURCE_ALWAYS or (granted.source == SOURCE_WINDOW and plate_holds_a_part(aimed)):
-        from kiln.plate_state import LOOK_ASKS_THE_PERSON, LOOK_NEEDED
+        from kiln.plate_state import LOOK_NEEDED, unvouched
 
         bed_look = unasked_look(aimed)
-        if bed_look.verdict in LOOK_ASKS_THE_PERSON:
+        if unvouched(bed_look):
             print_signoff.clear()
             note_unasked_look(aimed, bed_look)
             _audit(
@@ -4656,10 +4656,10 @@ def _always_allow_dialog_row(aimed: str) -> str | None:
             return "off. A different printer is now set up under this name, so Kiln is asking again"
         if consent_windows.always_waiting_on_pro(aimed) is not None:
             return f"on, but {_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking"
-        from kiln.plate_state import LOOK_ASKS_THE_PERSON, LOOK_BLIND
+        from kiln.plate_state import LOOK_BLIND, unvouched
 
         look = unasked_look_noted(aimed)
-        if look is not None and look.verdict in LOOK_ASKS_THE_PERSON and consent_windows.always_for(aimed) is not None:
+        if look is not None and unvouched(look) and consent_windows.always_for(aimed) is not None:
             if look.verdict == LOOK_BLIND:
                 return f"on, but Kiln could not see the bed through the camera ({look.why}), so it is asking you"
             return f"on, but {look.why}, so it is asking you"
@@ -4672,12 +4672,12 @@ def _standing_window_dialog_row(aimed: str) -> str | None:
     vouched for the bed beside a part still on it; ``None`` otherwise."""
     with contextlib.suppress(Exception):
         from kiln import consent_window_note, consent_windows
-        from kiln.plate_state import LOOK_ASKS_THE_PERSON
+        from kiln.plate_state import unvouched
 
         # A look is taken for this call only when a standing yes covers the
         # printer, so with no always allow it was a window's.
         look = unasked_look_noted(aimed)
-        if look is None or look.verdict not in LOOK_ASKS_THE_PERSON or consent_windows.always_for(aimed) is not None:
+        if look is None or not unvouched(look) or consent_windows.always_for(aimed) is not None:
             return None
         return "open, but " + consent_window_note.unvouched_bed(look) + ", so Kiln is asking you"
     return None
@@ -4719,10 +4719,10 @@ def _always_allow_could_not_see(aimed: str) -> str:
     part, would have started had eyes vouched for the bed; ``""`` when that
     is not this call."""
     from kiln import consent_window_note, consent_windows
-    from kiln.plate_state import LOOK_ASKS_THE_PERSON
+    from kiln.plate_state import unvouched
 
     look = unasked_look_noted(aimed)
-    if look is None or look.verdict not in LOOK_ASKS_THE_PERSON:
+    if look is None or not unvouched(look):
         return ""
     # A look is taken for this call only when a standing yes covers the
     # printer, so with no always allow it was a window's.

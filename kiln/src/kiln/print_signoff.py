@@ -549,16 +549,16 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
             # part), or the job does not go.  A machine with no camera has
             # nothing to look through.
             from kiln.consent_windows import look_at_bed, settle_copy_bed_check
-            from kiln.plate_state import LOOK_ASKS_THE_PERSON, LOOK_NEEDED
+            from kiln.plate_state import LOOK_NEEDED, unvouched
 
             if window.account_grant and not window.bed_check:
                 # A copy of the account's always allow that has not started
                 # a print yet: what it says about the bed is decided now.
                 settle_copy_bed_check(window.id, printer_name)
             look = look_at_bed(printer_name)
-            if look.verdict == LOOK_NEEDED or look.verdict in LOOK_ASKS_THE_PERSON:
+            if look.verdict == LOOK_NEEDED or unvouched(look):
                 seen = f"holding only {look.beside}" if look.beside else "clear"
-                why = f" ({look.why})" if look.verdict in LOOK_ASKS_THE_PERSON and look.why else ""
+                why = f" ({look.why})" if unvouched(look) and look.why else ""
                 return (
                     f"not started on {printer_name}: always allow starts a print only after the bed has "
                     f"been seen {seen} through the camera, and nobody has looked in the last few minutes"
