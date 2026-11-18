@@ -106,7 +106,6 @@ def moving_group(
     joint with two supports.
     """
     adjacency: dict[str, set[str]] = {pid: set() for pid in part_ids}
-    pair = {interface.part_a_id, interface.part_b_id}
     for other in interfaces or ():
         if other is interface:
             continue

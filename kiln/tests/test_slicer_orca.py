@@ -504,6 +504,28 @@ class TestMultiPlateAndSalvage:
              pytest.raises(SlicerError, match="crashed while slicing"):
             slice_file(stl, output_dir=str(tmp_path / "out"))
 
+    def test_a_crash_on_a_bambu_profile_does_not_blame_bambu_printers(self, tmp_path):
+        """Kiln's own settings slice every Bambu Lab model through this path,
+        so a crash on one of them is inside the slicer, and the message says
+        so: it never tells a Bambu owner their printer's profiles crash."""
+        stl = _write_cube(str(tmp_path / "cube.stl"))
+
+        with patch("kiln.slicer.find_slicer", return_value=self._fake_orca(tmp_path)), \
+             patch("kiln.slicer.run_program.run", return_value=_completed(-11)), \
+             pytest.raises(SlicerError) as raised:
+            slice_file(
+                stl,
+                output_dir=str(tmp_path / "out"),
+                profile=resolve_slicer_profile("bambu_p1s"),
+            )
+
+        said = str(raised.value)
+        assert "printer profiles specifically" not in said
+        assert "is inside" in said
+        assert "not in your model or your settings" in said
+        assert "PrusaSlicer instead" in said
+        assert "report_issue" in said
+
 
 @pytest.mark.skipif(not _installed(_PRUSA), reason="needs a real PrusaSlicer")
 class TestPrusaSlicerIsUnaffected:
