@@ -3970,7 +3970,7 @@ class _SlicerToolsPlugin:
                     try:
                         report = _analyze_printability(
                             input_path,
-                            material=material or "pla",
+                            material=material or None,
                             printer_id=effective_printer_id or None,
                         )
                     except Exception as exc:  # noqa: BLE001 -- the print stands without it, and says so

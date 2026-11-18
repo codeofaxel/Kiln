@@ -385,7 +385,7 @@ def validate_design(
     report = analyze_printability(
         file_path,
         build_volume=build_volume,
-        material=(picked.material.material_id if picked and picked.material else None) or "pla",
+        material=picked.material.material_id if picked and picked.material else None,
     )
     report_dict = report.to_dict()
 

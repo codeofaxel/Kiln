@@ -191,7 +191,7 @@ class _SmartPrintToolsPlugin:
                         try:
                             report = analyze_printability(
                                 model_path,
-                                material=material or "pla",
+                                material=material or None,
                                 printer_id=printer_id or None,
                             )
                         except Exception as exc:

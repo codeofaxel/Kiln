@@ -592,30 +592,34 @@ class _MeshToolsPlugin:
                     return refusal
                 try:
                     from kiln.generation.validation import cad_intake_report
+                    from kiln.material_limits import assuming
 
-                    return {
-                        "success": True,
-                        **cad_intake_report(
-                            file_path, mesh_path, conversion,
-                            material=material or "pla",
-                            printer_id=printer_id or None,
-                        ),
-                    }
+                    with assuming(material) as plastic:
+                        return {
+                            "success": True,
+                            **cad_intake_report(
+                                file_path, mesh_path, conversion,
+                                material=plastic,
+                                printer_id=printer_id or None,
+                            ),
+                        }
                 except Exception as exc:
                     return _error_dict(f"CAD intake failed: {exc}")
 
             try:
                 from kiln.generation.validation import design_scorecard
+                from kiln.material_limits import assuming
 
-                return {
-                    "success": True,
-                    "subject": "mesh",
-                    **design_scorecard(
-                        file_path,
-                        material=material or "pla",
-                        printer_id=printer_id or None,
-                    ),
-                }
+                with assuming(material) as plastic:
+                    return {
+                        "success": True,
+                        "subject": "mesh",
+                        **design_scorecard(
+                            file_path,
+                            material=plastic,
+                            printer_id=printer_id or None,
+                        ),
+                    }
             except Exception as exc:
                 return _error_dict(f"Scorecard generation failed: {exc}")
 

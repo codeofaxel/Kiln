@@ -19,6 +19,11 @@ check knows what a slice will leave out.  It is the same for every plastic.
 With no answer, both are the general minimum wall: a heads-up that may warn
 about more than Kiln's own check would, never less.
 
+A check that reads a plastic only because the person named none reads it
+inside :func:`assuming`: the assumed plastic's own figures, without spending
+the person's daily allowance of plastics on Kiln's servers and with nothing
+said about them.
+
 A served answer is kept for the life of the process, per plastic and
 scenario, so a session asks once.  When kiln-pro is on this computer nothing
 is kept: one caller's answer never reaches the next.
@@ -26,7 +31,10 @@ is kept: one caller's answer never reaches the next.
 
 from __future__ import annotations
 
+import contextlib
 import json
+from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -56,6 +64,11 @@ GENERAL_ONLY: tuple[str, ...] = (WALL_MIN, BRIDGE_CLEAN, HOLE_FORMS, HOLE_USABLE
 
 #: A figure the plastic itself, or its family, has.
 OWN_BASES = ("plastic", "family")
+
+#: The plastic a check reads when the person named none.
+ASSUMED_PLASTIC = "pla"
+#: The plastics read here because the person named none (:func:`assuming`).
+_assumed: ContextVar[frozenset[str]] = ContextVar("kiln_material_limits_assumed", default=frozenset())
 
 _DATA = Path(__file__).resolve().parent / "data" / "design_knowledge" / "materials.json"
 
@@ -247,6 +260,26 @@ def _general(nozzle: float, layer: float | None) -> tuple[dict[str, float | None
     return figures, basis
 
 
+@contextlib.contextmanager
+def assuming(material: str | None) -> Iterator[str]:
+    """The plastic a check reads: *material* when the person named one, else
+    :data:`ASSUMED_PLASTIC`.  Inside the block the assumed plastic's limits
+    are its own figures, read without spending the person's daily allowance
+    of plastics on Kiln's servers, and nothing is said about them; a plastic
+    the person named is read as always."""
+    if isinstance(material, str) and material.strip():
+        yield material
+        return
+    from kiln import _pro_material_limits_bridge as bridge
+
+    token = _assumed.set(_assumed.get() | {ASSUMED_PLASTIC})
+    try:
+        with bridge.assuming_here(ASSUMED_PLASTIC):
+            yield ASSUMED_PLASTIC
+    finally:
+        _assumed.reset(token)
+
+
 def limits_for(
     material: str | None,
     *,
@@ -274,9 +307,11 @@ def limits_for(
     key = (name.lower(), round(nozzle, 3), layer, enclosed, pin_height_mm)
     answer = None if local else _answers.get(key)
     miss: Miss | None = None
+    assumed = name.lower() in _assumed.get()
     if answer is None:
         answer, miss = bridge.ask(
             name, nozzle_mm=nozzle, layer_height_mm=layer, enclosed=enclosed, pin_height_mm=pin_height_mm,
+            assumed=assumed,
         )
         # An answer the allowance cut to the general figures holds only for
         # today, so it is not kept.
@@ -390,11 +425,13 @@ def sliced_floors(*, nozzle_mm: float | None) -> SlicedFloors:
 
 
 __all__ = [
+    "ASSUMED_PLASTIC",
     "GENERAL_ONLY",
     "PER_PLASTIC",
     "GENERAL_BLOCK_NOTE",
     "MaterialLimits",
     "SlicedFloors",
+    "assuming",
     "general_design_limits",
     "limits_for",
     "miss_sentence",

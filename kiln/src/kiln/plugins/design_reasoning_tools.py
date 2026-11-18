@@ -1204,13 +1204,15 @@ class _DesignReasoningToolsPlugin:
                 return err
             try:
                 from kiln.generation.validation import optimize_orientation
+                from kiln.material_limits import assuming
 
-                result = optimize_orientation(
-                    file_path,
-                    output_path=output_path or None,
-                    material=material or "pla",
-                    printer_id=printer_id or None,
-                )
+                with assuming(material) as plastic:
+                    result = optimize_orientation(
+                        file_path,
+                        output_path=output_path or None,
+                        material=plastic,
+                        printer_id=printer_id or None,
+                    )
                 response = {"success": True, **result}
                 try:
                     from kiln_pro.plugins.git_render_tools import (
@@ -1300,17 +1302,20 @@ class _DesignReasoningToolsPlugin:
                     bed_x_mm, bed_y_mm, bed_z_mm = build_volume
                     printer_bed_mm = build_volume
 
-                response = {
-                    "success": True,
-                    **can_print_now(
-                        file_path,
-                        auto_fix=auto_fix,
-                        output_path=output_path or None,
-                        printer_bed_mm=printer_bed_mm,
-                        printer_id=resolved_model_id,
-                        material=material or "pla",
-                    ),
-                }
+                from kiln.material_limits import assuming
+
+                with assuming(material) as plastic:
+                    response = {
+                        "success": True,
+                        **can_print_now(
+                            file_path,
+                            auto_fix=auto_fix,
+                            output_path=output_path or None,
+                            printer_bed_mm=printer_bed_mm,
+                            printer_id=resolved_model_id,
+                            material=plastic,
+                        ),
+                    }
                 if resolved_model_id and isinstance(response.get("bed_check"), dict):
                     response["bed_check"]["source"] = "printer"
                 if resolved_model_id:

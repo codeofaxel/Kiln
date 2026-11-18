@@ -521,10 +521,21 @@ def decide_supports(
 
     Nothing is kept between calls: one process serves every customer on
     the hosted server, and a reading takes 0.1 s on an ordinary part.
+    With no *material*, the plastic a check assumes
+    (:func:`kiln.material_limits.assuming`).
     """
+    from kiln.material_limits import assuming
+
+    with assuming(material) as plastic:
+        return _decide_supports(input_path, plastic.lower(), nozzle_diameter=nozzle_diameter, on_anyway=on_anyway)
+
+
+def _decide_supports(
+    input_path: str, plastic: str, *, nozzle_diameter: float | None, on_anyway: bool,
+) -> SliceSupports:
+    """:func:`decide_supports` for one plastic, already read."""
     from kiln.printability import judge_supports, material_overhangs, support_verdict
 
-    plastic = (material or "pla").lower()
     try:
         judged = judge_supports(
             input_path, material=plastic, nozzle_diameter=nozzle_diameter,

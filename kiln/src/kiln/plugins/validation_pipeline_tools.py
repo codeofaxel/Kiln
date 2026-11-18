@@ -292,9 +292,12 @@ def run_full_validation_pipeline(
     )
 
     # Step 5: Printability
-    _step_printability(
-        report, working_path, material=material or "pla", printer_id=printer_id or None,
-    )
+    from kiln.material_limits import assuming
+
+    with assuming(material) as plastic:
+        _step_printability(
+            report, working_path, material=plastic, printer_id=printer_id or None,
+        )
 
     # Step 5b: Support assessment
     _step_support_assessment(

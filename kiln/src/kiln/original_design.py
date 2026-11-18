@@ -518,6 +518,7 @@ def audit_original_design(
         layer_height=layer_height,
         max_overhang_angle=max_overhang_angle,
         build_volume=build_volume_tuple,
+        material=material,
     )
     # The engine was handed a size, not the printer: say where the size
     # really came from.

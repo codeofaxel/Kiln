@@ -22,6 +22,7 @@ Nothing is kept here, and nothing here raises.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import time
@@ -79,22 +80,42 @@ def ask(
     layer_height_mm: float | None = None,
     enclosed: bool | None = None,
     pin_height_mm: float | None = None,
+    assumed: bool = False,
 ) -> tuple[dict[str, Any] | None, Miss | None]:
     """``(answer, None)`` for one plastic in this scenario, or ``(None, miss)``.
 
     The answer carries ``known``, ``material_id`` and ``limits``
     (``{quantity: {value, unit, basis}}`` for every quantity in
-    :data:`QUANTITIES`).  Never raises."""
-    scenario = {
+    :data:`QUANTITIES`).  *assumed* says the check reads this plastic only
+    because the person named none (:func:`kiln.material_limits.assuming`).
+    Never raises."""
+    scenario: dict[str, Any] = {
         "nozzle_mm": float(nozzle_mm),
         "layer_height_mm": layer_height_mm,
         "enclosed": enclosed,
         "pin_height_mm": pin_height_mm,
     }
+    if assumed:
+        scenario["assumed"] = True
     local = _local(material, scenario)
     if local is not _NOT_HERE:
         return local  # type: ignore[return-value]
     return _served(material, scenario)
+
+
+def assuming_here(material: str) -> contextlib.AbstractContextManager[Any]:
+    """With kiln-pro on this computer, its own reads of *material* inside the
+    block read it as the plastic a check assumes because the person named
+    none; elsewhere nothing to do (the served ask carries ``assumed``)."""
+    try:
+        from kiln_pro.material_limits.engine import assuming as _engine_assuming
+    except ImportError:
+        return contextlib.nullcontext()
+    try:
+        return _engine_assuming(material)
+    except Exception:  # noqa: BLE001 -- the check reads on either way
+        logger.debug("assumed-plastic scope unavailable", exc_info=True)
+        return contextlib.nullcontext()
 
 
 def ask_sliced(*, nozzle_mm: float) -> tuple[dict[str, Any] | None, Miss | None]:
@@ -226,4 +247,6 @@ def _is_answer(answer: Any, wanted: tuple[str, ...] = QUANTITIES) -> bool:
     return all(figures[q].get("value") is not None for q in wanted if q in SLICED)
 
 
-__all__ = ["BASES", "LOCAL_MODULE", "QUANTITIES", "SLICED", "WIRE_TOOL", "available", "ask", "ask_sliced"]
+__all__ = [
+    "BASES", "LOCAL_MODULE", "QUANTITIES", "SLICED", "WIRE_TOOL", "available", "ask", "ask_sliced", "assuming_here",
+]
