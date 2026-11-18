@@ -111,6 +111,27 @@ class TestTheServedVerdict:
         assert out["compatible"] is False and out["interface_adhesion"] == "unknown"
         assert out["notes"] == "No compatibility data for pla + hips."
         assert out["caution"].startswith("Nothing here covers this pair")
+        assert "not available either" in out["caution"]
+
+    def test_a_pair_nothing_covers_points_at_the_general_rules_it_came_with(self, monkeypatch):
+        """Kiln's servers send the general rules with a pair the table lacks;
+        the caution points at them instead of saying they are missing."""
+        rules = ["Materials with similar print temperatures usually bond better.", "Purge more after dark colours."]
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes="No compatibility data for pla + hips.", material_b="hips",
+                                     general_rules=rules))
+        out = _door()("pla", "hips")
+        assert out["general_rules"] == rules
+        assert out["caution"].startswith("Nothing here covers this pair; reason it out from the general rules below")
+        assert "not available" not in out["caution"]
+
+    def test_one_material_in_both_places_is_said_to_bond_to_itself(self, monkeypatch):
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes="No compatibility data for abs + abs.", material_a="abs",
+                                     material_b="abs", general_rules=["A stand-in rule."]))
+        out = _door()("ABS", "abs")
+        assert "bonds to itself" in out["caution"]
+        assert "Nothing here covers" not in out["caution"] and "not available" not in out["caution"]
 
 
 class TestABasicAnswer:

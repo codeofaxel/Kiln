@@ -545,6 +545,90 @@ class TestPerObjectPrintsRefuse:
 
 
 # ===========================================================================
+# The doors that compose AND print say what the composer says about the
+# plate's materials: the hardware each needs, and a check made without Kiln's
+# answer, before and after the print.
+# ===========================================================================
+
+
+class TestPrintingDoorsSayTheComposersSafety:
+    @pytest.fixture(autouse=True)
+    def _signed_out_plain_install(self, monkeypatch):
+        import kiln.server as srv
+        from kiln import _pro_material_pairing_bridge as pairing
+
+        monkeypatch.setattr(srv, "_served_bearer", lambda: ("", None))
+        monkeypatch.setattr(pairing, "_local_mix_check", lambda *a, **k: pairing._NOT_HERE)
+
+    @staticmethod
+    def _driven():
+        class _Ams(_MmuPrinter):
+            name = "bambu"
+
+        return _Ams(mm.from_bambu_ams(
+            {"ams_exist_bits": "1", "tray_exist_bits": "3", "units": [{"unit_id": 0, "trays": [
+                {"slot": 0, "tray_type": "PETG-CF", "tray_color": "FF0000FF"},
+                {"slot": 1, "tray_type": "PETG", "tray_color": "00FF00FF"}]}]},
+            printer_model="bambu_a1",
+        ))
+
+    def _assert_said(self, reply):
+        assert any("PETG-CF" in w and "hardened" in w for w in reply.get("hardware_warnings") or []), reply
+        assert reply.get("safety_basic") is True, reply
+        assert "signed out" in reply.get("safety_caution", ""), reply
+
+    def test_multi_material_print_says_it_after_the_print(self, tmp_path, monkeypatch):
+        from kiln import server
+
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print", return_value={"success": True}):
+            result = server.multi_material_print(objects_json=json.dumps([
+                {"file_path": stl, "material_id": "PETG-CF", "color": "#ff0000"},
+                {"file_path": stl, "material_id": "PETG", "color": "#00ff00"},
+            ]))
+        assert result["success"] is True
+        self._assert_said(result)
+
+    def test_multi_material_print_says_it_beside_the_plate_it_shows_first(self, tmp_path, monkeypatch):
+        from kiln import server
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print") as reslice:
+            result = server.multi_material_print(objects_json=json.dumps([
+                {"file_path": stl, "material_id": "PETG-CF", "color": "#ff0000"},
+                {"file_path": stl, "material_id": "PETG", "color": "#00ff00"},
+            ]))
+        assert result["error"]["code"] == "PREVIEW_NOT_CONFIRMED", result
+        reslice.assert_not_called()
+        self._assert_said(result)
+
+    def test_multi_color_copies_says_it_after_the_print(self, tmp_path, monkeypatch):
+        from kiln import server
+
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print", return_value={"success": True}):
+            result = server.multi_color_copies(
+                model_path=stl, copies=2, ams_slots=[0, 1], material="PETG-CF",
+                colors=["#ff0000", "#00ff00"], printer_id="bambu_a1",
+            )
+        assert result["success"] is True, result
+        assert any("PETG-CF" in w and "hardened" in w for w in result.get("hardware_warnings") or []), result
+        assert result.get("safety_basic") is True and result.get("safety_caution"), result
+
+
+# ===========================================================================
 # preflight_check says what the printer carries
 # ===========================================================================
 

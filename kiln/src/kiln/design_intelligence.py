@@ -3554,15 +3554,31 @@ def check_multi_material_compatibility(
         )
 
     if answer["found"] == "none":
-        # No data covers the pair, and the answer's note says so.
-        caution = unestablished_caution(
-            "multi_material_pairing",
-            "Nothing here covers this pair, and the general polymer rules "
-            "that would let you reason it out are not available either. "
-            "Treat it as untested rather than fine — a test piece is the "
-            "only thing that will tell you.",
-            curated_entry_exists=False,
-        )
+        # No data covers the pair, and the answer's note says so.  One
+        # material in both places bonds to itself; otherwise the caution
+        # says whether the general rules came with the answer.
+        from kiln.catalog_keys import same_material_spelling
+        from kiln.material_safety import basic_pair_finding
+
+        if same_material_spelling(a, b):
+            caution = basic_pair_finding(a, b)[0]
+        elif rules:
+            caution = unestablished_caution(
+                "multi_material_pairing",
+                "Nothing here covers this pair; reason it out from the general "
+                "rules below, and treat it as untested rather than fine — a "
+                "test piece is the only thing that will tell you.",
+                curated_entry_exists=False,
+            )
+        else:
+            caution = unestablished_caution(
+                "multi_material_pairing",
+                "Nothing here covers this pair, and the general polymer rules "
+                "that would let you reason it out are not available either. "
+                "Treat it as untested rather than fine — a test piece is the "
+                "only thing that will tell you.",
+                curated_entry_exists=False,
+            )
     else:
         caution = "" if notes else _verdict_caution()
     return _with_nozzle_lines(MultiMaterialReport(
