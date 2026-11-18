@@ -64,6 +64,7 @@ __all__ = [
     "SOURCE_QUEUED",
     "SOURCE_PRIOR_APPROVAL",
     "SOURCE_RESUME",
+    "COPY_CONVERTED",
     "COPY_MOVED",
     "COPY_REPAIRED",
     "COPY_RESCALED",
@@ -81,6 +82,7 @@ __all__ = [
     "take",
     "require_signoff",
     "signoff_required",
+    "token_rejected_message",
     "token_verdict",
     "adapter_verdict",
 ]
@@ -311,8 +313,13 @@ COPY_MOVED = "moved"
 COPY_REPAIRED = "repaired"
 #: The mesh was rescaled: a different part from the one shown.
 COPY_RESCALED = "rescaled"
+#: The part was turned into another file format and nothing else: a yes for
+#: the part covers the copy.
+COPY_CONVERTED = "converted"
 
-_COPY_KINDS = frozenset({COPY_MOVED, COPY_REPAIRED, COPY_RESCALED})
+_COPY_KINDS = frozenset({COPY_MOVED, COPY_REPAIRED, COPY_RESCALED, COPY_CONVERTED})
+#: The copies that are still the part the person was shown.
+_SAME_PART = frozenset({COPY_MOVED, COPY_CONVERTED})
 
 #: How far a chain of copies is followed back (a copy of a copy of ...).
 _MAX_COPY_HOPS = 4
@@ -368,14 +375,14 @@ def _copy_record(path: str) -> tuple[str, str] | None:
 
 def approved_part(path: str) -> str:
     """The file a person's yes and preview name for *path*: the part a copy
-    that only moved it was made from, followed back to the first, else
-    *path* itself.  A copy that changed the part stops the walk.  Never
-    raises."""
+    that only moved or converted it was made from, followed back to the
+    first, else *path* itself.  A copy that changed the part stops the
+    walk.  Never raises."""
     current = str(path or "")
     try:
         for _ in range(_MAX_COPY_HOPS):
             record = _copy_record(current) if current else None
-            if record is None or record[1] != COPY_MOVED:
+            if record is None or record[1] not in _SAME_PART:
                 break
             current = record[0]
     except Exception:  # noqa: BLE001 -- unreadable lineage is no lineage
@@ -391,7 +398,7 @@ def changed_from(path: str) -> tuple[str, str] | None:
         record = _copy_record(approved_part(path))
     except Exception:  # noqa: BLE001
         return None
-    if record is None or record[1] == COPY_MOVED:
+    if record is None or record[1] in _SAME_PART:
         return None
     return record
 
@@ -545,23 +552,24 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
         if live and always:
             # Nobody is asked when a queued job is sent, so the plate is
             # looked at here as it is at every other door: seen clear in a
-            # fresh frame, or the job does not go.  (A machine with no
-            # camera has nothing to look through; a plate on record as
-            # occupied is refused by the start itself.)
+            # fresh frame (beside a part on record, holding only that
+            # part), or the job does not go.  A machine with no camera has
+            # nothing to look through.
             from kiln.consent_windows import look_at_bed, settle_copy_bed_check
-            from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+            from kiln.plate_state import LOOK_NEEDED, unvouched
 
             if window.account_grant and not window.bed_check:
                 # A copy of the account's always allow that has not started
                 # a print yet: what it says about the bed is decided now.
                 settle_copy_bed_check(window.id, printer_name)
             look = look_at_bed(printer_name)
-            if look.verdict in (LOOK_NEEDED, LOOK_BLIND):
+            if look.verdict == LOOK_NEEDED or unvouched(look):
+                seen = f"holding only {look.beside}" if look.beside else "clear"
+                why = f" ({look.why})" if unvouched(look) and look.why else ""
                 return (
                     f"not started on {printer_name}: always allow starts a print only after the bed has "
-                    "been seen clear through the camera, and nobody has looked in the last few minutes"
-                    + (f" ({look.why})" if look.verdict == LOOK_BLIND and look.why else "")
-                    + ". Look at the bed (look_at_plate), then queue it again."
+                    f"been seen {seen} through the camera, and nobody has looked in the last few minutes"
+                    f"{why}. Look at the bed (look_at_plate), then queue it again."
                 )
         if not live and always:
             return (
@@ -687,6 +695,11 @@ def exemption_verdict(
     return None
 
 
+def token_rejected_message(reason: str | None) -> str:
+    """What a start is told when its preview token does not fit the print."""
+    return f"Preview token rejected: {reason}. Re-render the preview and issue a fresh token."
+
+
 def token_verdict(
     tool: str,
     file_name: str,
@@ -715,11 +728,7 @@ def token_verdict(
             preview_token, file_name, printer_id=printer_id or None,
         )
         if not ok:
-            return Verdict(
-                ok=False,
-                code=CODE_TOKEN_INVALID,
-                message=f"Preview token rejected: {reason}. Re-render the preview and issue a fresh token.",
-            )
+            return Verdict(ok=False, code=CODE_TOKEN_INVALID, message=token_rejected_message(reason))
         door = getattr(token, "door", "") or ""
     except Exception as exc:  # noqa: BLE001 — a broken gate must not brick printing
         logger.warning("Preview gate validation failed: %s", exc)

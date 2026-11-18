@@ -78,6 +78,20 @@ def test_a_flexible_spool_keeps_its_caution_with_no_answer(word):
     assert material_limits.FLEXIBLE_CAUTION in material_limits.limits_for(word).cautions()
 
 
+#: A flexible plastic written brand-first, with its hardness run on, or as TPE.
+FLEXIBLE_ANY_WAY = ("Generic TPU", "Hyper TPU", "CR-TPU", "AMS-TPU", "TPE", "Generic TPE", "TPU95A")
+
+
+@pytest.mark.parametrize("word", FLEXIBLE_ANY_WAY)
+def test_a_flexible_plastic_written_any_way_keeps_its_caution(word):
+    assert material_limits.FLEXIBLE_CAUTION in material_limits.limits_for(word).cautions()
+
+
+@pytest.mark.parametrize("word", ("Generic PLA", "CR-PETG", "PETG-ESD", "Matte PLA"))
+def test_a_rigid_plastic_written_brand_first_is_not_called_flexible(word):
+    assert material_limits.FLEXIBLE_CAUTION not in material_limits.limits_for(word).cautions()
+
+
 @pytest.mark.parametrize("word", sorted(set(SPOOL_TYPES) - set(FLEXIBLE)))
 def test_no_other_spool_type_is_called_flexible(word):
     assert material_limits.FLEXIBLE_CAUTION not in material_limits.limits_for(word).cautions()
@@ -123,7 +137,8 @@ def _slice(part: str, material: str) -> dict[str, Any]:
     return json.loads(blocks[0].text)
 
 
-def test_a_slice_for_a_flexible_spool_says_what_the_general_figures_leave_out(t_part, stand_in_slicer):
-    reply = _slice(t_part, "TPU-AMS")
+@pytest.mark.parametrize("spool", ["TPU-AMS", "Generic TPU", "TPE"])
+def test_a_slice_for_a_flexible_spool_says_what_the_general_figures_leave_out(t_part, stand_in_slicer, spool):
+    reply = _slice(t_part, spool)
     assert reply.get("success") is True, reply
     assert json.dumps(reply).count(json.dumps(material_limits.FLEXIBLE_CAUTION)[1:-1]) == 1, reply

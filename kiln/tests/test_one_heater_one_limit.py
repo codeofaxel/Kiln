@@ -340,12 +340,15 @@ def test_slice_and_print_with_no_yes_sends_nothing_to_the_printer(tmp_path, gara
 
 
 def test_slice_and_print_with_a_yes_goes_on_to_send_the_file(tmp_path, garage, sliced):
-    """The question before the upload lets an approved print through; the
-    full gate still judges the start (here it wants the preview too)."""
+    """The question before the upload lets an approved, previewed print
+    through; the full gate still judges the start."""
+    from kiln.preview_gate import get_preview_gate
+
     model = _cube(tmp_path / "cube.stl")
+    preview = get_preview_gate().issue(model, door="stage").token
     token = set_consent(PrintConsent(tool="slice_and_print", file_name=model, printer_name="garage", source=SOURCE_ELICITED))
     try:
-        _tool("slice_and_print")(model, printer_name="garage", skip_validation=True)
+        _tool("slice_and_print")(model, printer_name="garage", skip_validation=True, preview_token=preview)
     finally:
         reset_consent(token)
     assert garage.uploads == ["cube.gcode"]

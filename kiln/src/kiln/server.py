@@ -97,6 +97,7 @@ from kiln.print_consent import (
     SOURCE_ELICITED,
     SOURCE_HOSTED_APPROVAL,
     SOURCE_HOSTED_DELEGATION,
+    SOURCE_WINDOW,
     PrintConsent,
     alerted_devices,
     consent_for,
@@ -2917,15 +2918,16 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         aimed = printer_name or _resolve_effective_printer_name(None)
     except Exception:  # noqa: BLE001
         aimed = printer_name or "default"
-    # A start that would rest on always allow has nobody looking at the
-    # printer, so the plate is looked at: once, here, off the event loop
-    # (a frame is a camera fetch).  The reading below, the gate and the
-    # line on the result all use this one look.
+    # A start that would rest on always allow, or on a window beside a part
+    # still on the plate, has nobody looking at the printer, so the plate
+    # is looked at: once, here, off the event loop (a frame is a camera
+    # fetch).  The reading below, the gate and the line on the result all
+    # use this one look.
     note_unasked_look(None, None)
     with contextlib.suppress(Exception):
         from kiln import consent_windows
 
-        if consent_windows.always_for(aimed) is not None:
+        if await asyncio.to_thread(consent_windows.looks_before_an_unasked_start, aimed):
             note_unasked_look(aimed, await asyncio.to_thread(consent_windows.look_at_bed, aimed))
     try:
         standing = consent_for(file_name=file_value, printer_name=printer_name, aimed_at=aimed)
@@ -2991,6 +2993,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             # Why they are being asked at all, when always allow was on
             # for this printer and turned itself off.
             "always allow": _always_allow_dialog_row(aimed),
+            "standing window": _standing_window_dialog_row(aimed),
             # A recovery onto the part still on the plate: what to check.
             "part on the plate": on_plate,
         },
@@ -3845,7 +3848,7 @@ async def _consent_from_account_always(
 
     Returns the reset token, or ``None`` for no yes."""
     from kiln import bridge_client, consent_windows
-    from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+    from kiln.plate_state import LOOK_NEEDED, unvouched
 
     grantor = answer.grantor
     identity = grantor if grantor.startswith("account:") or not grantor else f"account:{grantor}"
@@ -3870,7 +3873,7 @@ async def _consent_from_account_always(
     except Exception:  # noqa: BLE001 — a copy that could not be made or judged is no yes
         logger.debug("consent: the account's always allow could not be used", exc_info=True)
         return None
-    if look.verdict == LOOK_BLIND:
+    if unvouched(look):
         return None
     if look.verdict != LOOK_NEEDED:
         try:
@@ -4408,9 +4411,55 @@ def _no_yes_before_sending(
 
     file_name = print_signoff.approved_part(file_name)
     exempt, aimed, granted = _said_go(tool_name, file_name, printer_name)
-    if exempt is not None or granted is not None:
+    if exempt is not None:
         return None
-    return _no_yes_error(tool_name, file_name, preview_token, aimed)
+    if granted is None:
+        return _no_yes_error(tool_name, file_name, preview_token, aimed)
+    return _no_preview_before_sending(tool_name, file_name, preview_token, granted, printer_name)
+
+
+def _no_preview_before_sending(
+    tool_name: str, file_name: str, preview_token: str | None, granted: Any, printer_name: str | None,
+) -> dict | None:
+    """The preview half of the gate, asked before a door sends its file and
+    without spending the token: ``None`` when this call's token is good for
+    *file_name*, or the door that took the yes judged the preview."""
+    if not preview_token:
+        if granted.door:
+            return None
+        return _changed_part_error(tool_name, file_name) or _unseen_error(tool_name, file_name)
+    try:
+        from kiln.preview_gate import get_preview_gate
+
+        ok, reason, _token = get_preview_gate().validate_detail(
+            preview_token, file_name, printer_id=_token_printer_id(printer_name), consume=False,
+        )
+    except Exception:  # noqa: BLE001 — a gate that cannot read the token is the full gate's to judge
+        return None
+    if ok:
+        return None
+    from kiln import print_signoff
+
+    return _changed_part_error(tool_name, file_name) or _error_dict(
+        print_signoff.token_rejected_message(reason), code="PREVIEW_TOKEN_INVALID",
+    )
+
+
+def _token_printer_id(printer_name: str | None) -> str | None:
+    """The printer model a preview token is matched against for a start on *printer_name*."""
+    return _resolve_printer_model_live(printer_name) if printer_name else _PRINTER_MODEL
+
+
+def _unseen_error(tool_name: str, file_name: str) -> dict:
+    """The refusal for a print a person said go to with no preview of it on record."""
+    name = os.path.basename(str(file_name or "")) or "this file"
+    return _error_dict(
+        f"{tool_name} refuses to proceed: a yes was given for {name}, but no preview of it "
+        "is on record — the dialog describes a job, it cannot show one. Show the print "
+        "first (the inline 3D stage, else a viewer link, else the PNG renders), then call "
+        "issue_preview_token(file_path, door=<stage|url|png>) and pass preview_token=<token>.",
+        code="PREVIEW_NOT_CONFIRMED",
+    )
 
 
 def _preview_gate_error(
@@ -4473,27 +4522,37 @@ def _preview_gate_error(
         return _no_yes_error(tool_name, file_name, preview_token, aimed)
 
     # LOOKED.  Always allow means nobody was asked, so where the machine
-    # has a camera the plate has to have been seen clear in a fresh frame.
-    # A frame nobody has judged yet holds the start and is handed over;
-    # asked before the token is touched, so the token is still good for
-    # the call that follows the look.  The yes was read on the look taken
-    # when the call arrived; a door that works for a while first (slicing)
-    # gets a fresh one here, and if that one shows nothing the print does
-    # not start on a bed nobody could see: the person is asked instead.
+    # has a camera the plate has to have been seen clear in a fresh frame
+    # -- or, beside a part still on it, holding only that part.  A window
+    # with an end looks too when the plate holds a part.  A frame nobody
+    # has judged yet holds the start and is handed over; asked before the
+    # token is touched, so the token is still good for the call that
+    # follows the look.  The yes was read on the look taken when the call
+    # arrived; a door that works for a while first (slicing) gets a fresh
+    # one here, and if no eyes vouch for that one the print does not
+    # start: the person is asked instead.
+    from kiln.consent_windows import plate_holds_a_part
+
     bed_look = None
-    if granted.source == SOURCE_ALWAYS:
-        from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+    if granted.source == SOURCE_ALWAYS or (granted.source == SOURCE_WINDOW and plate_holds_a_part(aimed)):
+        from kiln.plate_state import LOOK_NEEDED, unvouched
 
         bed_look = unasked_look(aimed)
-        if bed_look.verdict == LOOK_BLIND:
+        if unvouched(bed_look):
             print_signoff.clear()
             note_unasked_look(aimed, bed_look)
-            _audit(tool_name, "always_allow_could_not_see", details={"file": file_name, "printer": aimed, "why": bed_look.why})
+            _audit(
+                tool_name, "always_allow_could_not_see" if granted.source == SOURCE_ALWAYS else "window_could_not_see",
+                details={"file": file_name, "printer": aimed, "why": bed_look.why},
+            )
             return _error_dict(_no_yes_message(tool_name, file_name, aimed), code="PREVIEW_NOT_CONFIRMED")
         if bed_look.verdict == LOOK_NEEDED:
             print_signoff.clear()
-            _audit(tool_name, "always_allow_look_first", details={"file": file_name, "printer": aimed, "frame": bed_look.frame})
-            return _look_first_error(tool_name, aimed, bed_look)
+            _audit(
+                tool_name, "always_allow_look_first" if granted.source == SOURCE_ALWAYS else "window_look_first",
+                details={"file": file_name, "printer": aimed, "frame": bed_look.frame},
+            )
+            return _look_first_error(tool_name, aimed, bed_look, window=granted.source == SOURCE_WINDOW)
 
     # SAW.  The token half lives in kiln.print_signoff so every door asks
     # the same question of the same code.  We can't hash a file on the
@@ -4505,11 +4564,7 @@ def _preview_gate_error(
             file_name,
             preview_token,
             printer_name=printer_name,
-            printer_id=(
-                _resolve_printer_model_live(printer_name)
-                if printer_name
-                else _PRINTER_MODEL
-            ),
+            printer_id=_token_printer_id(printer_name),
         )
         if not verdict.ok:
             print_signoff.clear()
@@ -4527,16 +4582,7 @@ def _preview_gate_error(
 
     if not saw:
         print_signoff.clear()
-        if block := _changed_part_error(tool_name, file_name):
-            return block
-        name = os.path.basename(str(file_name or "")) or "this file"
-        return _error_dict(
-            f"{tool_name} refuses to proceed: a yes was given for {name}, but no preview of it "
-            "is on record — the dialog describes a job, it cannot show one. Show the print "
-            "first (the inline 3D stage, else a viewer link, else the PNG renders), then call "
-            "issue_preview_token(file_path, door=<stage|url|png>) and pass preview_token=<token>.",
-            code="PREVIEW_NOT_CONFIRMED",
-        )
+        return _changed_part_error(tool_name, file_name) or _unseen_error(tool_name, file_name)
     if is_hosted_multitenant() and grade_of(granted.source) == GRADE_B:
         print_signoff.clear()
         _audit(
@@ -4569,23 +4615,39 @@ def _preview_gate_error(
         details["window_until"] = granted.expires_at
     if granted.source == SOURCE_ALWAYS:
         details["always_allow"] = _always_allow_for_audit(granted.window_id)
-        # What the plate was known to be when nobody was asked: the frame
-        # it was seen clear in and who judged it, or why it was not checked.
-        if bed_look is not None:
-            details["bed_look"] = bed_look.evidence()
+    # What the plate was known to be when nobody was asked: the frame it
+    # was seen in and who judged it, or why it was not checked.
+    if bed_look is not None:
+        details["bed_look"] = bed_look.evidence()
     _audit(tool_name, "preview_gate_satisfied", details=details)
     return None
 
 
-def _look_first_error(tool_name: str, aimed: str, look: Any) -> dict:
-    """The refusal that hands over the plate: always allow is on, nobody
-    is being asked, and the frame has not been judged yet."""
+def _look_first_error(tool_name: str, aimed: str, look: Any, *, window: bool = False) -> dict:
+    """The refusal that hands over the plate: always allow is on (or a
+    window is open and a part is on the plate), nobody is being asked, and
+    the frame has not been judged yet."""
+    why = (
+        f"a standing window is open for {aimed}, so nobody is being asked"
+        if window else f"always allow is on for {aimed}, so nobody is being asked"
+    )
+    if look.beside:
+        judge = (
+            f"{look.beside} is still on the plate, so before a print starts beside it that way the bed is looked "
+            f"at through the camera. Here is the bed now: {look.frame} (or call look_at_plate to see it). Look at "
+            f'the picture, then call look_at_plate with seen="as_recorded" if {look.beside} is all that is on the '
+            'bed, seen="clear" if the bed is empty, or seen="occupied" if anything else is on it or you cannot '
+            "tell, and start again."
+        )
+    else:
+        judge = (
+            "before a print starts that way the bed is looked at through the camera. Here is the bed now: "
+            f"{look.frame} (or call look_at_plate to see it). Look at the picture, then call look_at_plate "
+            'with seen="clear" if the bed is empty, or seen="occupied" if anything is on it or you cannot '
+            "tell, and start again."
+        )
     return _error_dict(
-        f"{tool_name} has not started: always allow is on for {aimed}, so nobody is being asked, and "
-        "before a print starts that way the bed is looked at through the camera. Here is the bed now: "
-        f"{look.frame} (or call look_at_plate to see it). Look at the picture, then call look_at_plate "
-        'with seen="clear" if the bed is empty, or seen="occupied" if anything is on it or you cannot '
-        "tell, and start again. The picture is kept with this print's record.",
+        f"{tool_name} has not started: {why}, and {judge} The picture is kept with this print's record.",
         code="ALWAYS_ALLOW_LOOK_FIRST",
         extra={
             "snapshot_path": look.frame,
@@ -4627,11 +4689,30 @@ def _always_allow_dialog_row(aimed: str) -> str | None:
             return "off. A different printer is now set up under this name, so Kiln is asking again"
         if consent_windows.always_waiting_on_pro(aimed) is not None:
             return f"on, but {_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking"
-        from kiln.plate_state import LOOK_BLIND
+        from kiln.plate_state import LOOK_BLIND, unvouched
 
         look = unasked_look_noted(aimed)
-        if look is not None and look.verdict == LOOK_BLIND:
-            return f"on, but Kiln could not see the bed through the camera ({look.why}), so it is asking you"
+        if look is not None and unvouched(look) and consent_windows.always_for(aimed) is not None:
+            if look.verdict == LOOK_BLIND:
+                return f"on, but Kiln could not see the bed through the camera ({look.why}), so it is asking you"
+            return f"on, but {look.why}, so it is asking you"
+    return None
+
+
+def _standing_window_dialog_row(aimed: str) -> str | None:
+    """The row the approval dialog carries when a standing window covers
+    this printer and the person is asked anyway, because nobody's eyes
+    vouched for the bed beside a part still on it; ``None`` otherwise."""
+    with contextlib.suppress(Exception):
+        from kiln import consent_window_note, consent_windows
+        from kiln.plate_state import unvouched
+
+        # A look is taken for this call only when a standing yes covers the
+        # printer, so with no always allow it was a window's.
+        look = unasked_look_noted(aimed)
+        if look is None or not unvouched(look) or consent_windows.always_for(aimed) is not None:
+            return None
+        return "open, but " + consent_window_note.unvouched_bed(look) + ", so Kiln is asking you"
     return None
 
 
@@ -4667,15 +4748,19 @@ _ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO = (
 
 
 def _always_allow_could_not_see(aimed: str) -> str:
-    """The sentence for a print that always allow would have started, had
-    the camera shown the bed; ``""`` when that is not this call."""
-    from kiln import consent_window_note
-    from kiln.plate_state import LOOK_BLIND
+    """The sentence for a print that always allow, or a window beside a
+    part, would have started had eyes vouched for the bed; ``""`` when that
+    is not this call."""
+    from kiln import consent_window_note, consent_windows
+    from kiln.plate_state import unvouched
 
     look = unasked_look_noted(aimed)
-    if look is None or look.verdict != LOOK_BLIND:
+    if look is None or not unvouched(look):
         return ""
-    return consent_window_note.could_not_see_line(aimed, look.why)
+    # A look is taken for this call only when a standing yes covers the
+    # printer, so with no always allow it was a window's.
+    always = consent_windows.always_for(aimed) is not None
+    return consent_window_note.asking_anyway_line(aimed, look, always=always)
 
 
 def _note_print_started(adapter: PrinterAdapter, result: Any = None) -> None:

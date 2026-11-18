@@ -714,7 +714,7 @@ class TestARetryBesideTheFailedPart:
         kwargs.setdefault("skip_validation", True)
         return retry(model_path=model, printer_name="workshop", skip_diagnosis=True, **kwargs)
 
-    def _asked_then(self, monkeypatch, model: str, call):
+    def _asked_then(self, monkeypatch, model: str, call, *, tool: str = "retry_print_with_fix", arg: str = "model_path"):
         """The wrapper asks the person about *model* on a host that draws a
         dialog, they say yes, and *call* runs in that same call's context."""
         async def _person(ctx, message, **_kw):
@@ -729,9 +729,7 @@ class TestARetryBesideTheFailedPart:
         monkeypatch.setattr(server, "_consent_from_account", _no_account)
 
         async def _the_call():
-            await server._obtain_print_consent(
-                "retry_print_with_fix", {"model_path": model, "printer_name": "workshop"}, object(),
-            )
+            await server._obtain_print_consent(tool, {arg: model, "printer_name": "workshop"}, object())
             return call()
 
         return asyncio.run(_the_call())
@@ -818,6 +816,131 @@ class TestARetryBesideTheFailedPart:
         if expected is not None:
             assert [(c.source, c.window_id) for c in self.cleared if c] == [expected], self.cleared
 
+    def _standing_yes(self, monkeypatch, yes: str):
+        from kiln import consent_windows
+        from kiln.print_consent import SOURCE_ALWAYS, SOURCE_TERMINAL, SOURCE_WINDOW
+
+        if yes == "window":
+            return SOURCE_WINDOW, consent_windows._open_window(seconds=600, scope=("workshop",), source=SOURCE_TERMINAL)
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
+        monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: True)
+        told_no_camera = self.printer.frame is None
+        window = consent_windows.open_always(printer_name="workshop", typed_name="workshop", told_no_camera=told_no_camera)
+        return SOURCE_ALWAYS, window
+
+    def _print_beside(self, door: str, model: str, token: str):
+        """One call of *door*, placing *model* beside the failed part, in a
+        context of its own as every MCP call is; returns ``(result, context)``."""
+        import contextvars
+
+        from kiln.plugins import slicer_tools
+        from tests.test_watchdog_attached_to_every_print import _plugin_tools
+
+        ctx = contextvars.copy_context()
+        if door == "retry":
+            return ctx.run(lambda: self._retry(model, placement=[200, 20], preview_token=token)), ctx
+        sap = _plugin_tools(slicer_tools)["slice_and_print"]
+        out = ctx.run(lambda: sap(
+            input_path=model, printer_name="workshop", placement=[200, 20], skip_validation=True, preview_token=token,
+        ))
+        return out, ctx
+
+    @staticmethod
+    def _bed_line(ctx) -> str:
+        from kiln import consent_window_note
+
+        block = ctx.run(lambda: consent_window_note.for_outcome(
+            consent_window_note.note_for("workshop"), consent_window_note.STARTED, "workshop",
+        ))
+        return str((block.get("bed_check") or {}).get("note") or "")
+
+    @pytest.mark.parametrize("door", ["retry", "slice_and_print"])
+    @pytest.mark.parametrize("yes", ["window", "always_allow"])
+    def test_the_bed_is_looked_at_before_a_print_beside_the_failed_part(self, monkeypatch, tmp_path, yes, door):
+        """Nobody is asked, the printer has a camera and the failed part is on
+        the plate: the print is held with a fresh frame of the bed, and starts
+        beside the part, still unasked, once eyes say that part is all there is."""
+        import contextvars
+
+        from kiln.plugins import homing_tools
+        from tests.test_always_allow_on_one_printer import _FRAME
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self.printer.frame = _FRAME
+        source, window = self._standing_yes(monkeypatch, yes)
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        token = self._token(model)
+
+        held, _ = self._print_beside(door, model, token)
+        assert self.printer.started == [], held
+        assert held["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST", held
+        assert self.printer.frames_fetched >= 1
+        assert pathlib.Path(held["snapshot_path"]).read_bytes() == _FRAME
+        assert "jar v2 is still on the plate" in held["error"]["message"]
+        assert 'seen="as_recorded"' in held["error"]["message"]
+
+        judged = contextvars.copy_context().run(
+            lambda: homing_tools.look_at_plate(printer_name="workshop", seen="as_recorded"),
+        )
+        assert judged.get("success") is True, judged
+
+        out, ctx = self._print_beside(door, model, token)
+        assert out.get("success") is True, out
+        assert self.printer.started == ["bracket_placed.gcode.3mf"]
+        assert [(c.source, c.window_id) for c in self.cleared if c][-1:] == [(source, window.id)]
+        assert "only jar v2 was on it" in self._bed_line(ctx)
+
+    @pytest.mark.parametrize("yes", ["window", "always_allow"])
+    def test_a_bed_seen_with_more_on_it_asks_the_person_once(self, monkeypatch, tmp_path, yes):
+        """Eyes saw more than the failed part, or could not tell: nothing
+        starts unasked, the person is told why they are asked, and their yes
+        prints it beside the part with one question."""
+        import contextvars
+
+        from kiln.plugins import homing_tools
+        from tests.test_always_allow_on_one_printer import _FRAME
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self.printer.frame = _FRAME
+        self._standing_yes(monkeypatch, yes)
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        token = self._token(model)
+        held, _ = self._print_beside("retry", model, token)
+        assert held["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST", held
+        contextvars.copy_context().run(lambda: homing_tools.look_at_plate(printer_name="workshop", seen="occupied"))
+
+        refused, _ = self._print_beside("retry", model, token)
+        assert self.printer.started == [], refused
+        assert refused["error"]["code"] == "PREVIEW_NOT_CONFIRMED", refused
+        assert "besides jar v2" in refused["error"]["message"]
+
+        out = contextvars.copy_context().run(lambda: self._asked_then(
+            monkeypatch, model, lambda: self._retry(model, placement=[200, 20], preview_token=token),
+        ))
+        assert out.get("success") is True, out
+        assert len(self.asked) == 1 and "besides jar v2" in self.asked[0]
+        assert self.printer.started == ["bracket_placed.gcode.3mf"]
+
+    @pytest.mark.parametrize("yes", ["window", "always_allow"])
+    def test_a_printer_with_no_camera_prints_beside_the_failed_part_and_says_so(self, monkeypatch, tmp_path, yes):
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._standing_yes(monkeypatch, yes)
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        out, ctx = self._print_beside("retry", model, self._token(model))
+        assert out.get("success") is True, out
+        assert self.printer.started == ["bracket_placed.gcode.3mf"]
+        assert self._bed_line(ctx) == "This printer has no camera Kiln can use, so the bed was not checked first."
+
     def test_a_rescaled_mesh_is_another_part_asked_about_once_on_the_file_named(self, monkeypatch, tmp_path):
         """The pre-print check rescales a part drawn in metres: what would
         print is not what the person was shown.  Refused in plain words with
@@ -852,6 +975,81 @@ class TestARetryBesideTheFailedPart:
         assert len(self.asked) == 1 and print_consent.display_name(rescaled) in self.asked[0]
         assert len(self.printer.started) == 1
         assert [os.path.basename(c.file_name) for c in self.cleared if c] == [os.path.basename(rescaled)]
+
+    @pytest.mark.parametrize("token", ["none", "for another part"])
+    @pytest.mark.parametrize("door, arg", [("retry", "model_path"), ("slice_and_print", "input_path")])
+    def test_a_yes_with_no_preview_of_this_part_sends_nothing(self, monkeypatch, tmp_path, door, arg, token):
+        """The person said go, and no preview of this part is on this call:
+        refused before anything is sent, so the printer keeps no file."""
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        other = self._token(_cube(tmp_path / "other.stl", size=10.0)) if token != "none" else None
+        tool = "retry_print_with_fix" if door == "retry" else "slice_and_print"
+
+        def _print():
+            if door == "retry":
+                return self._retry(model, preview_token=other)
+            from kiln.plugins import slicer_tools
+            from tests.test_watchdog_attached_to_every_print import _plugin_tools
+
+            sap = _plugin_tools(slicer_tools)["slice_and_print"]
+            return sap(input_path=model, printer_name="workshop", skip_validation=True, preview_token=other)
+
+        out = self._asked_then(monkeypatch, model, _print, tool=tool, arg=arg)
+        assert self.printer.uploaded == [] and self.printer.started == [], out
+        expected = "PREVIEW_NOT_CONFIRMED" if token == "none" else "PREVIEW_TOKEN_INVALID"
+        assert out["error"]["code"] == expected, out
+
+    @staticmethod
+    def _step(path, size: float = 20.0) -> str:
+        pytest.importorskip("OCP", reason="a real STEP file needs the CAD kernel to write and convert")
+        from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+        from OCP.IFSelect import IFSelect_RetDone
+        from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+        writer = STEPControl_Writer()
+        writer.Transfer(BRepPrimAPI_MakeBox(size, size, size).Shape(), STEPControl_StepModelType.STEPControl_AsIs)
+        assert writer.Write(str(path)) == IFSelect_RetDone
+        return str(path)
+
+    def _print_step(self, door: str, model: str, token: str):
+        from kiln.plugins import slicer_tools
+        from tests.test_watchdog_attached_to_every_print import _plugin_tools
+
+        if door == "retry":
+            return self._retry(model, skip_validation=False, preview_token=token)
+        sap = _plugin_tools(slicer_tools)["slice_and_print"]
+        return sap(input_path=model, printer_name="workshop", preview_token=token)
+
+    @pytest.mark.parametrize("door, arg", [("retry", "model_path"), ("slice_and_print", "input_path")])
+    def test_a_step_file_only_converted_prints_on_the_yes_for_it(self, monkeypatch, tmp_path, door, arg):
+        """The check turns a STEP file into a mesh and changes nothing else:
+        the same part, so the person's one yes for the STEP prints it, and
+        nothing says Kiln repaired it."""
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._slicer(monkeypatch, tmp_path)
+        model = self._step(tmp_path / "bracket.step")
+        tool = "retry_print_with_fix" if door == "retry" else "slice_and_print"
+        out = self._asked_then(
+            monkeypatch, model, lambda: self._print_step(door, model, self._token(model)), tool=tool, arg=arg,
+        )
+        assert out.get("success") is True, out
+        assert len(self.asked) == 1 and "bracket" in self.asked[0], "one question, about the STEP"
+        assert len(self.printer.started) == 1
+        assert [(c.source, os.path.basename(c.file_name)) for c in self.cleared if c] == [(SOURCE_ELICITED, "bracket.step")]
+        assert "repaired" not in str(out.get("error") or "")
+
+    def test_a_step_file_converted_and_rescaled_is_another_part(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._slicer(monkeypatch, tmp_path)
+        model = self._step(tmp_path / "bracket.step", size=0.02)
+        out = self._asked_then(monkeypatch, model, lambda: self._print_step("retry", model, self._token(model)))
+        assert self.printer.started == [] and self.printer.uploaded == [], out
+        assert out["changed_part"]["how"] == "rescaled", out
+        assert "Kiln rescaled bracket.step before printing it" in out["error"]["message"]
 
     def test_a_window_does_not_let_the_old_preview_stand_for_a_changed_part(self, monkeypatch, tmp_path):
         """Inside a window nobody is asked, and the preview is still the
@@ -891,10 +1089,20 @@ class _BesideBench(_Bench):
         self.homed = {"x", "y", "z"}
         self.uploaded: list[str] = []
         self.impl_calls: list[tuple[str, dict]] = []
+        self.frame: bytes | None = None
+        self.frames_fetched = 0
 
     @property
     def name(self) -> str:
         return "bambu"
+
+    @property
+    def snapshot_source(self):
+        return "printer" if self.frame is not None else None
+
+    def get_snapshot(self) -> bytes:
+        self.frames_fetched += 1
+        return self.frame or b""
 
     def homed_axes_now(self):
         return set(self.homed)
@@ -1320,15 +1528,31 @@ def test_the_consent_record_is_read_in_exactly_one_place():
 
 #: The calls that write a print's clearance or a person's consent.
 _YES_WRITES = frozenset({"grant", "grant_from_record", "set_consent"})
+#: The calls that turn a person's answer into their yes, with the yes each
+#: writes: the caller hands them the answer, so the caller is the writer.
+_ANSWER_WRITES = {"consent_from_dialog_answer": "SOURCE_ELICITED", "_consent_from_code_answer": "SOURCE_CODE"}
+#: The modules those calls live in.
+_WRITER_MODULES = ("print_signoff", "print_consent", "server")
+#: Calls each module makes to its own writers by their bare names.
+_OWN_WRITERS = {
+    "print_signoff.py": _YES_WRITES | {"Clearance"},
+    "print_consent.py": _YES_WRITES,
+    "server.py": frozenset(_ANSWER_WRITES),
+}
 #: How a source read at run time is named below: a yes some gate already
 #: read, passed on.
 _CARRIED = "<carried>"
+#: A clearance built, or the slot it lives in reached, outside its own
+#: module: never a person's yes, and nothing may stand in for one that way.
+_RAW_CLEARANCE = "<sets the clearance itself>"
 
 #: Where a person's own yes is written, and the person behind each.  A new
 #: place fails until it is named here; a place that no longer writes one
 #: fails as stale.
 _WHERE_A_PERSON_SAYS_GO = {
     "server.py::consent_from_dialog_answer": "the answer the host's dialog brought back",
+    "server.py::_obtain_print_consent": "the person's answer it was just handed: the dialog's, or the code they typed",
+    "server.py::_ask_for_a_run": "the person's answer to the run, from the host's dialog",
     "server.py::_consent_from_account_always": "always allow the account turned on, confirmed for this start",
     "server.py::_consent_from_code_answer": "the code a person typed after this machine's screen showed it",
     "server.py::_covered_by_approval": "the plate this call built, under the yes its input got on this call",
@@ -1366,9 +1590,27 @@ _STANDS_IN_FOR_A_PERSON = {
 }
 
 
-def _sources_named(expr: ast.AST | None) -> set[str]:
+def _assigned(name: str, scope: ast.AST | None) -> list[ast.AST]:
+    """Every value *scope* binds to *name* (``=``, ``: T =``, ``:=``)."""
+    if scope is None:
+        return []
+    values: list[ast.AST] = []
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            targets = [node.target]
+        else:
+            continue
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+            values.append(node.value)
+    return values
+
+
+def _sources_named(expr: ast.AST | None, scope: ast.AST | None = None, _seen: frozenset[str] = frozenset()) -> set[str]:
     """Each source *expr* can write: a ``SOURCE_*`` constant by name, a
-    literal as written, and :data:`_CARRIED` for anything read at run time."""
+    literal as written, a name bound in *scope* read for what it is bound
+    to, and :data:`_CARRIED` for anything read at run time."""
     if expr is None:
         return {"SOURCE_ELICITED"}  # PrintConsent's default
     if isinstance(expr, ast.Constant):
@@ -1376,12 +1618,14 @@ def _sources_named(expr: ast.AST | None) -> set[str]:
     name = expr.id if isinstance(expr, ast.Name) else expr.attr if isinstance(expr, ast.Attribute) else ""
     if name.startswith("SOURCE_"):
         return {name}
+    if isinstance(expr, ast.Name) and name not in _seen and (bound := _assigned(name, scope)):
+        return set().union(*(_sources_named(v, scope, _seen | {name}) for v in bound))
     if isinstance(expr, ast.BoolOp):
-        return set().union(*(_sources_named(v) for v in expr.values))
+        return set().union(*(_sources_named(v, scope, _seen) for v in expr.values))
     if isinstance(expr, ast.IfExp):
-        return _sources_named(expr.body) | _sources_named(expr.orelse)
+        return _sources_named(expr.body, scope, _seen) | _sources_named(expr.orelse, scope, _seen)
     if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "str" and expr.args:
-        return _sources_named(expr.args[0])
+        return _sources_named(expr.args[0], scope, _seen)
     return {_CARRIED}
 
 
@@ -1389,41 +1633,101 @@ def _keyword(call: ast.Call, name: str) -> ast.AST | None:
     return next((kw.value for kw in call.keywords if kw.arg == name), None)
 
 
-def _yes_writes() -> dict[str, set[str]]:
+def _writer_names(tree: ast.AST) -> tuple[set[str], dict[str, str]]:
+    """``(dotted names that reach a writer module, {bare name: what it is})``,
+    from every way a module can import them."""
+    modules: set[str] = set()
+    names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if alias.name in _WRITER_MODULES and (mod == "kiln" or (node.level and not mod)):
+                    modules.add(local)
+                elif mod.rsplit(".", 1)[-1] in _WRITER_MODULES and (mod.startswith("kiln") or node.level):
+                    names[local] = alias.name
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "kiln":
+                    modules.update(f"{alias.asname or 'kiln'}.{m}" for m in _WRITER_MODULES)
+                elif alias.name.startswith("kiln.") and alias.name.rsplit(".", 1)[-1] in _WRITER_MODULES:
+                    modules.add(alias.asname or alias.name)
+    return modules, names
+
+
+def _builds_a_consent(expr: ast.AST) -> bool:
+    """Whether *expr* is ``PrintConsent(...)``, however the class is reached."""
+    if not isinstance(expr, ast.Call):
+        return False
+    func = expr.func
+    return (func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else "") == "PrintConsent"
+
+
+def _innermost_function(tree: ast.AST, node: ast.AST) -> ast.AST | None:
+    holders = [
+        f for f in ast.walk(tree)
+        if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and f.lineno <= node.lineno <= (f.end_lineno or 0)
+    ]
+    return min(holders, key=lambda f: (f.end_lineno or 0) - f.lineno) if holders else None
+
+
+def _yes_writes(src: pathlib.Path | None = None) -> dict[str, set[str]]:
     """``{"<module>::<function>": {each source it writes}}`` for every place
     in public Kiln that writes a print's clearance or a consent, read from
-    the source by what the call is, however it is imported."""
+    the source by what the call is, however it is imported or spelled: a
+    grant, a re-grant, a consent set, a person's answer handed to the code
+    that records it, and a clearance built or its slot reached outside its
+    own module."""
+    root = src or _SRC
     writes: dict[str, set[str]] = {}
-    for path in sorted(_SRC.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text())
-        own = path.name in ("print_signoff.py", "print_consent.py")
-        imported = {
-            alias.asname or alias.name: alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and (node.module or "").rsplit(".", 1)[-1] in ("print_signoff", "print_consent")
-            for alias in node.names
-        }
+        modules, names = _writer_names(tree)
+        own = _OWN_WRITERS.get(path.name, frozenset()) if path.parent == root else frozenset()
+        slot_is_own = path.parent == root and path.name in ("print_signoff.py", "print_consent.py")
         for node in ast.walk(tree):
+            if isinstance(node, (ast.Attribute, ast.Name)) and not slot_is_own:
+                reaches = (
+                    isinstance(node, ast.Attribute) and node.attr == "_current" and ast.unparse(node.value) in modules
+                ) or (isinstance(node, ast.Name) and names.get(node.id) == "_current")
+                if reaches:
+                    fn = _innermost_function(tree, node)
+                    owner = fn.name if fn is not None else "<module>"
+                    writes.setdefault(f"{path.relative_to(root).as_posix()}::{owner}", set()).add(_RAW_CLEARANCE)
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in (
-                "print_signoff", "print_consent",
-            ):
+            if isinstance(func, ast.Attribute) and ast.unparse(func.value) in modules:
                 call = func.attr
             elif isinstance(func, ast.Name):
-                call = imported.get(func.id, func.id if own else "")
+                call = names.get(func.id, func.id if func.id in own else "")
             else:
                 continue
-            if call not in _YES_WRITES or (owner := _innermost_owner(tree, node)) is None:
+            if call not in _YES_WRITES and call not in _ANSWER_WRITES and not (call == "Clearance" and not slot_is_own):
                 continue
+            fn = _innermost_function(tree, node)
             if call == "grant":
-                sources = _sources_named(_keyword(node, "source"))
-            elif call == "set_consent" and node.args and isinstance(node.args[0], ast.Call):
-                sources = _sources_named(_keyword(node.args[0], "source"))
-            else:
+                sources = _sources_named(_keyword(node, "source"), fn)
+            elif call == "set_consent" and node.args:
+                consent = node.args[0]
+                made = [consent] if isinstance(consent, ast.Call) else (
+                    _assigned(consent.id, fn) if isinstance(consent, ast.Name) else []
+                )
+                sources = set().union(*(
+                    _sources_named(_keyword(m, "source"), fn) if _builds_a_consent(m) else {_CARRIED} for m in made
+                )) if made else {_CARRIED}
+            elif call == "grant_from_record":
                 sources = {_CARRIED}
-            writes.setdefault(f"{path.relative_to(_SRC).as_posix()}::{owner}", set()).update(sources)
+            elif call in _ANSWER_WRITES:
+                sources = {_ANSWER_WRITES[call]}
+            elif call == "Clearance" and not slot_is_own:
+                sources = {_RAW_CLEARANCE}
+            else:
+                continue
+            owner = fn.name if fn is not None else "<module>"
+            writes.setdefault(f"{path.relative_to(root).as_posix()}::{owner}", set()).update(sources)
     # A sweep that silently found nothing would pass every check below.
     assert "server.py::_preview_gate_error" in writes and "print_signoff.py::exemption_verdict" in writes, writes
     return writes
@@ -1495,6 +1799,63 @@ def test_a_prior_approval_never_stands_in_for_a_yes():
 )
 def test_a_write_is_read_for_every_source_it_can_name(source, expected):
     assert _sources_named(ast.parse(source, mode="eval").body) == expected
+
+
+_ARGS = "'door', 'part.stl', None"
+
+
+@pytest.mark.parametrize(
+    "body, expected",
+    [
+        (f"from kiln import print_signoff\ndef f():\n    print_signoff.grant({_ARGS}, source=print_signoff.SOURCE_PRIOR_APPROVAL)\n",
+         {"SOURCE_PRIOR_APPROVAL"}),
+        (f"from kiln.print_signoff import grant as g\ndef f():\n    g({_ARGS}, source='prior_approval')\n",
+         {"'prior_approval'"}),
+        (f"from kiln import print_signoff as _ps\ndef f():\n    _ps.grant({_ARGS}, source=_ps.SOURCE_PRIOR_APPROVAL)\n",
+         {"SOURCE_PRIOR_APPROVAL"}),
+        (f"import kiln.print_signoff as ps\ndef f():\n    ps.grant({_ARGS}, source=ps.SOURCE_PRIOR_APPROVAL)\n",
+         {"SOURCE_PRIOR_APPROVAL"}),
+        (f"import kiln.print_signoff\ndef f():\n    kiln.print_signoff.grant({_ARGS}, source='prior_approval')\n",
+         {"'prior_approval'"}),
+        (f"import kiln\ndef f():\n    kiln.print_signoff.grant({_ARGS}, source='prior_approval')\n",
+         {"'prior_approval'"}),
+        ("from kiln import print_signoff\ndef f():\n    print_signoff._current.set(print_signoff.Clearance("
+         "tool='door', file_name='part.stl', printer_name=None, source='prior_approval'))\n",
+         {_RAW_CLEARANCE}),
+        ("from kiln.print_signoff import Clearance, _current\ndef f():\n    _current.set(Clearance("
+         "tool='door', file_name='part.stl', printer_name=None, source='prior_approval'))\n",
+         {_RAW_CLEARANCE}),
+        ("from kiln import server as _srv\nfrom kiln.print_consent import DialogAnswer\ndef f():\n"
+         f"    _srv.consent_from_dialog_answer({_ARGS}, DialogAnswer('accept', ''), aimed='workshop')\n",
+         {"SOURCE_ELICITED"}),
+        (f"from kiln import print_signoff\ndef f():\n    src = print_signoff.SOURCE_PRIOR_APPROVAL\n"
+         f"    print_signoff.grant({_ARGS}, source=src)\n",
+         {"SOURCE_PRIOR_APPROVAL"}),
+        ("from kiln.print_consent import SOURCE_ELICITED, PrintConsent, set_consent\ndef f():\n"
+         "    yes = PrintConsent(tool='door', file_name='part.stl', printer_name=None, source=SOURCE_ELICITED)\n"
+         "    set_consent(yes)\n",
+         {"SOURCE_ELICITED"}),
+    ],
+    ids=[
+        "module", "name alias", "module alias", "dotted alias", "dotted import", "package import",
+        "clearance set", "clearance set by name", "dialog answer forged", "source in a variable", "consent in a variable",
+    ],
+)
+def test_a_write_is_found_however_it_is_spelled(tmp_path, monkeypatch, body, expected):
+    """The reader finds every shape a self-grant could take: whatever the
+    import, a clearance built by hand, a person's answer forged, a source
+    held in a variable."""
+    (tmp_path / "server.py").write_text(
+        "from kiln import print_signoff\n"
+        "def _preview_gate_error(granted):\n    print_signoff.grant('t', 'x', None, source=granted.source)\n"
+    )
+    (tmp_path / "print_signoff.py").write_text(
+        "def grant(*a, **k):\n    pass\n"
+        "def exemption_verdict():\n    grant('t', 'x', None, source=SOURCE_CI_BYPASS)\n"
+    )
+    (tmp_path / "door.py").write_text(body)
+    monkeypatch.setattr(sys.modules[__name__], "_SRC", tmp_path)
+    assert _yes_writes().get("door.py::f") == expected
 
 
 def test_the_module_does_not_reach_for_the_sdk():
