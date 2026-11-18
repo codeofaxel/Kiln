@@ -46,6 +46,11 @@ _PERSONS_OWN_ASK = {
         "runs only when the person names the rules on check_material_environment; "
         "the per-requirement verdict is the feature they reached for"
     ),
+    "_pro_adaptive_bridge": (
+        "runs only when the person asks an adaptive slicing tool for a plan, a "
+        "material's settings or the materials Kiln tunes; the tuned answer is what "
+        "they reached for"
+    ),
     "_pro_fleet_materials_bridge": (
         "runs only when the person asks a material inventory door about several "
         "machines on Kiln Business; the cross-machine answer is what they reached for"

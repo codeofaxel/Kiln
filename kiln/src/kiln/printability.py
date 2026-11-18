@@ -7413,8 +7413,7 @@ _PLACEMENT_PENALTY = 50
 #: part that prints perfectly.
 #:
 #: The floor that matters is the thinnest layer any supported machine can
-#: lay down, which this repo's own slicer catalogue puts at 0.08mm
-#: (``adaptive_slicer`` min_layer_height_mm).  Half of that is material the
+#: lay down, about 0.08mm.  Half of that is material the
 #: process cannot resolve in the first place, so clipping it costs nothing
 #: real.  Deliberately loose in the safe direction: a part 0.03mm low loses
 #: a slab far under one layer, while a false fatal teaches users that the

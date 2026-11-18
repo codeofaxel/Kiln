@@ -180,6 +180,16 @@ def test_the_material_recommendation(monkeypatch, caplog):
     _assert_kept_local(out, caplog)
 
 
+def test_the_adaptive_slicing_settings(monkeypatch, caplog):
+    from kiln import _pro_adaptive_bridge as bridge
+    from kiln.plugins.adaptive_slicing_tools import quick_adaptive_plan
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, answer=_raise)
+    out = quick_adaptive_plan("petg", 12.0, nozzle_diameter_mm=0.4)
+    assert out["success"] is True and out["basic"] is True
+    _assert_kept_local(out, caplog)
+
+
 def test_the_placement_check(monkeypatch, caplog):
     from kiln import _pro_placement_bridge as bridge
     from kiln import served_answer
