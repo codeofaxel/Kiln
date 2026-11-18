@@ -92,9 +92,10 @@ DERIVED: frozenset[str] = frozenset(
 )
 
 _NO_ACCELERATION = (
-    "0 means no acceleration command: the printer keeps what its firmware or "
-    "start sequence set.  A door that states one reaches both slicers "
-    "(kiln.slicer_orca finding 7)."
+    "The default is stated for a printer whose own start sequence sets one "
+    "(slicer_profiles._ensure_acceleration_coverage), and a role by the "
+    "printer's record; otherwise none, and the printer keeps its own.  "
+    "Either way the same values reach every slicer."
 )
 _ESTIMATE_ONLY = (
     "Used for the time estimate only (machine_limits_usage defaults to "
@@ -349,6 +350,51 @@ class TestEveryDoorDerivesThem:
         assert not DERIVED & set(s)
 
 
+class TestTheAccelerationsAreStated:
+    """A printer whose start sequence sets its acceleration states it; one
+    with none states none."""
+
+    _SPEEDS = {
+        "perimeter_speed": "200",
+        "external_perimeter_speed": "150",
+        "infill_speed": "250",
+        "first_layer_speed": "50",
+        "nozzle_diameter": "0.4",
+    }
+
+    def _effective(self, printer_id: str, **stated: str) -> dict[str, str]:
+        settings = {**self._SPEEDS, **stated}
+        sp_mod._apply_printer_invariants(settings, printer_id)
+        return settings
+
+    def test_the_working_acceleration_is_the_start_sequences(self) -> None:
+        from kiln.printers.bambu_3mf import start_sequence_motion
+
+        for printer_id in ("bambu_p1s", "bambu_a1"):
+            working = start_sequence_motion(printer_id)["accel"]
+            settings = self._effective(printer_id)
+            assert float(settings["default_acceleration"]) == working, printer_id
+
+    def test_no_role_is_added_to_the_default(self) -> None:
+        settings = self._effective("bambu_p1s")
+        assert [key for key in sp_mod._ROLE_ACCELERATIONS if key in settings] == ["default_acceleration"]
+
+    def test_a_stated_acceleration_is_never_replaced(self) -> None:
+        own = self._effective("bambu_p1s", default_acceleration="4000")
+        assert own["default_acceleration"] == "4000"
+        role = self._effective("bambu_p1s", first_layer_acceleration="700")
+        assert role["first_layer_acceleration"] == "700"
+        assert float(role["default_acceleration"]) > 700
+
+    def test_a_printer_with_no_start_sequence_states_none(self) -> None:
+        settings = self._effective("ender3")
+        assert not [key for key in sp_mod._ROLE_ACCELERATIONS if key in settings]
+
+    def test_the_estimate_is_made_at_the_same_acceleration(self) -> None:
+        settings = self._effective("bambu_p1s")
+        assert settings["machine_max_acceleration_extruding"].split(",")[0] == settings["default_acceleration"]
+
+
 class TestTheHotendCeilingIsStated:
     """The flow bound the derived speeds rest on (``_ensure_flow_ceiling``)."""
 
@@ -443,9 +489,23 @@ class TestOrcaCarriesThePace:
         assert process["top_surface_speed"] == "100"
 
     def test_no_stated_acceleration_means_none_is_written(self) -> None:
-        presets = settings_to_orca_presets(_ini(resolve_slicer_profile("bambu_a1")))
+        """Every role is handed over as "0", never left out: a role a slicer
+        is not handed is one it fills from its own defaults."""
+        presets = settings_to_orca_presets(_ini(resolve_slicer_profile("default")))
         assert presets.machine["emit_machine_limits_to_gcode"] == "0"
-        assert presets.process["default_acceleration"] == "0"
+        accelerations = {k: v for k, v in presets.process.items() if k.endswith("_acceleration")}
+        assert set(_EVERY_FAMILY_ACCELERATION) <= set(accelerations)
+        assert set(accelerations.values()) == {"0"}
+
+    def test_every_role_is_handed_over_once_one_is_stated(self) -> None:
+        process = settings_to_orca_presets(
+            {**_ini(resolve_slicer_profile("default")), "default_acceleration": "3000", "travel_acceleration": "4000"}
+        ).process
+        assert set(_EVERY_FAMILY_ACCELERATION) <= set(process)
+        assert process["travel_short_distance_acceleration"] == "4000"
+        assert process["initial_layer_travel_acceleration"] == "4000"
+        assert process["prime_tower_acceleration"] == "3000"
+        assert process["outer_wall_acceleration"] == "3000"
 
     def test_stated_accelerations_reach_orca_unclamped(self) -> None:
         settings = {
@@ -481,6 +541,54 @@ class TestOrcaCarriesThePace:
 # ---------------------------------------------------------------------------
 
 
+class TestALimitTheSlicerAddedOnItsOwnIsTakenOut:
+    """Machine limits the settings did not ask for are taken out of the
+    opening run of the executable block, and nothing else is."""
+
+    _FILE = (
+        "; HEADER_BLOCK_END\n"
+        "M204 S999 ; a comment line before the block, not the slicer's\n"
+        "; EXECUTABLE_BLOCK_START\n"
+        "M73 P0 R10\n"
+        "M201 X1000 Y1000 Z500 E5000\n"
+        "M203 X500 Y500 Z12 E120\n"
+        "M204 P1500 R1500 T1500\n"
+        "M205 X10.00 Y10.00 Z0.20 E2.50\n"
+        "M106 S0\n"
+        "M204 P20000 R5000 T20000 ; the start sequence's own\n"
+        "M204 S3000\n"
+        "G1 X1 Y1 E1\n"
+    )
+
+    def test_only_the_opening_run_goes(self, tmp_path: Path) -> None:
+        from kiln.slicer import _drop_unasked_machine_limits
+
+        path = tmp_path / "plate.gcode"
+        path.write_text(self._FILE, encoding="utf-8")
+        assert _drop_unasked_machine_limits(str(path)) == 4
+        kept = path.read_text(encoding="utf-8").splitlines()
+        assert kept == [
+            "; HEADER_BLOCK_END",
+            "M204 S999 ; a comment line before the block, not the slicer's",
+            "; EXECUTABLE_BLOCK_START",
+            "M73 P0 R10",
+            "M106 S0",
+            "M204 P20000 R5000 T20000 ; the start sequence's own",
+            "M204 S3000",
+            "G1 X1 Y1 E1",
+        ]
+
+    def test_a_file_with_no_such_opening_is_left_byte_for_byte(self, tmp_path: Path) -> None:
+        from kiln.slicer import _drop_unasked_machine_limits
+
+        path = tmp_path / "plate.gcode"
+        body = "; EXECUTABLE_BLOCK_START\r\nG28\r\nM204 S500\r\nM201 X9 Y9\r\n"
+        path.write_bytes(body.encode())
+        assert _drop_unasked_machine_limits(str(path)) == 0
+        assert path.read_bytes() == body.encode()
+        assert not list(tmp_path.glob("*.limits"))
+
+
 def _find_prusaslicer() -> str | None:
     for name in ("prusa-slicer", "PrusaSlicer", "prusaslicer"):
         found = shutil.which(name)
@@ -499,8 +607,35 @@ def _find_orca() -> str | None:
     return mac if os.path.isfile(mac) and os.access(mac, os.X_OK) else None
 
 
+def _find_bambu_studio() -> str | None:
+    for name in ("bambu-studio", "BambuStudio", "bambustudio"):
+        found = shutil.which(name)
+        if found:
+            return found
+    mac = "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio"
+    return mac if os.path.isfile(mac) and os.access(mac, os.X_OK) else None
+
+
 _PRUSA = _find_prusaslicer()
 _ORCA = _find_orca()
+_BAMBU_STUDIO = _find_bambu_studio()
+
+#: Every acceleration a slicer of the Orca family reads from its process
+#: preset.  Each is handed over on every slice.
+_EVERY_FAMILY_ACCELERATION = (
+    "default_acceleration",
+    "inner_wall_acceleration",
+    "outer_wall_acceleration",
+    "sparse_infill_acceleration",
+    "internal_solid_infill_acceleration",
+    "top_surface_acceleration",
+    "initial_layer_acceleration",
+    "bridge_acceleration",
+    "travel_acceleration",
+    "travel_short_distance_acceleration",
+    "initial_layer_travel_acceleration",
+    "prime_tower_acceleration",
+)
 
 
 def _box(x0: float, y0: float, x1: float, y1: float, h: float) -> list[tuple]:
@@ -658,7 +793,52 @@ def _prusa_slice(ini: str, model: str, out_dir: str) -> str:
     return Path(out).read_text(encoding="utf-8", errors="replace")
 
 
-_MOTION_LIMIT = re.compile(r"^(M201|M203|M204|M205|SET_VELOCITY_LIMIT)\b", re.MULTILINE)
+_MOTION_LIMIT = re.compile(r"^(M201|M203|M204|M205|SET_VELOCITY_LIMIT)\b[^;\n]*", re.MULTILINE)
+_PRINT_ACCELERATION = re.compile(r"^M204\s+S(\d+(?:\.\d+)?)\s*$")
+
+
+def _stated_accelerations(settings: dict[str, str]) -> set[float]:
+    """The accelerations *settings* ask for, in mm/s²."""
+    stated: set[float] = set()
+    for key in sp_mod._ROLE_ACCELERATIONS:
+        try:
+            value = float(str(settings.get(key, "")).strip() or 0)
+        except ValueError:
+            continue
+        if value > 0:
+            stated.add(value)
+    return stated
+
+
+def _written_accelerations(gcode: str) -> set[float]:
+    """Every acceleration the G-code sets for the print itself."""
+    return {
+        float(m.group(1))
+        for found in _MOTION_LIMIT.finditer(gcode)
+        if (m := _PRINT_ACCELERATION.match(found.group(0).strip()))
+    }
+
+
+def _unasked_motion(settings: dict[str, str], gcode: str) -> list[str]:
+    """The motion-limit lines in *gcode* that *settings* did not ask for.
+
+    A print's acceleration (``M204 S``) is asked for when the settings state
+    that value for some role.  Every other limit -- an axis limit, a jerk, a
+    machine acceleration limit -- is asked for only by settings that say
+    their limits go into the G-code.
+    """
+    stated = _stated_accelerations(settings)
+    emits = str(settings.get("machine_limits_usage", "")).strip() == "emit_to_gcode"
+    unasked: set[str] = set()
+    for found in _MOTION_LIMIT.finditer(gcode):
+        line = found.group(0).strip()
+        m = _PRINT_ACCELERATION.match(line)
+        if m:
+            if float(m.group(1)) not in stated:
+                unasked.add(line)
+        elif not emits:
+            unasked.add(line)
+    return sorted(unasked)
 
 
 @pytest.fixture(scope="module")
@@ -722,11 +902,22 @@ class TestTheGcodeKeepsThePace:
         assert not over, "\n".join(over)
 
     def test_no_motion_limit_kiln_did_not_ask_for(self, prusa_slices) -> None:
-        """No bundled profile states an acceleration or a limit, so none may
-        reach a printer: the machine keeps its own."""
-        for pid, (_settings, gcode) in prusa_slices.items():
-            found = _MOTION_LIMIT.findall(gcode)
-            assert not found, f"{pid}: {sorted(set(found))}"
+        """Every acceleration in the G-code is one the profile states, and
+        no other limit reaches a printer: the machine keeps its own."""
+        unasked = {pid: _unasked_motion(settings, gcode) for pid, (settings, gcode) in prusa_slices.items()}
+        assert not any(unasked.values()), {pid: lines for pid, lines in unasked.items() if lines}
+
+    def test_a_stated_acceleration_is_written(self, prusa_slices) -> None:
+        """The other half: what a profile states is in the file."""
+        # The working acceleration, which every print uses; a role the
+        # fixture never prints (a bridge, a raft) writes nothing.
+        missing = [
+            pid
+            for pid, (settings, gcode) in prusa_slices.items()
+            if settings.get("default_acceleration", "0") not in ("", "0")
+            and float(settings["default_acceleration"]) not in _written_accelerations(gcode)
+        ]
+        assert not missing, missing
 
     def test_the_solid_layers_print_at_the_derived_speed(self, prusa_slices) -> None:
         """The printing half, read off the feedrates: the A1's solid infill
@@ -887,9 +1078,89 @@ class TestOrcaPrintsTheSameProfile:
                 assert m and m.group(1).strip() == settings[src], f"{pid}: {dst}"
 
     def test_orca_writes_no_motion_limit_kiln_did_not_ask_for(self, orca_slices) -> None:
-        for pid, (_settings, gcode) in orca_slices.items():
-            found = _MOTION_LIMIT.findall(gcode)
-            assert not found, f"{pid}: {sorted(set(found))}"
+        for pid, (settings, gcode) in orca_slices.items():
+            assert not _unasked_motion(settings, gcode), f"{pid}: {_unasked_motion(settings, gcode)}"
+
+
+# ---------------------------------------------------------------------------
+# Every slicer Kiln can drive, through the door a slice really goes through
+# ---------------------------------------------------------------------------
+
+_SLICERS = {"PrusaSlicer": _PRUSA, "OrcaSlicer": _ORCA, "Bambu Studio": _BAMBU_STUDIO}
+
+#: One printer per start-sequence family and G-code flavour, and the generic
+#: profile.  A printer whose record is not in hand slices as the generic one.
+_MOTION_SAMPLE = ("bambu_p1s", "bambu_a1", "k1c", "ender3", "default")
+
+#: A case that states accelerations whatever records are in hand, so the
+#: stated path is judged on every machine that has a slicer.
+_STATED_CASE = "default, accelerations stated"
+_STATED_OVERRIDES = {
+    "default_acceleration": "3000",
+    "first_layer_acceleration": "1000",
+    "external_perimeter_acceleration": "2000",
+}
+
+
+@pytest.fixture(scope="module")
+def door_slices(tmp_path_factory: pytest.TempPathFactory) -> dict[tuple[str, str], tuple[dict, str]]:
+    """(slicer, case) -> the effective settings and the G-code
+    :func:`kiln.slicer.slice_file` hands back, for every slicer installed."""
+    from kiln.slicer import slice_file
+
+    work = tmp_path_factory.mktemp("door_motion")
+    model = _write_fixture(work / "plate.stl")
+    sp_mod._cache.clear()
+    sp_mod._loaded = False
+    inis = {pid: resolve_slicer_profile(pid) for pid in _MOTION_SAMPLE}
+    inis[_STATED_CASE] = resolve_slicer_profile("default", overrides=dict(_STATED_OVERRIDES))
+    jobs = [(name, path, case) for name, path in _SLICERS.items() if path for case in inis]
+
+    def run(job: tuple[str, str, str]):
+        name, path, case = job
+        out_dir = tempfile.mkdtemp(dir=work)
+        result = slice_file(model, output_dir=out_dir, profile=inis[case], slicer_path=path, timeout=600)
+        return (name, case), (_ini(inis[case]), Path(result.output_path).read_text(encoding="utf-8", errors="replace"))
+
+    with ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2)) as pool:
+        return dict(pool.map(run, jobs))
+
+
+class TestEverySlicerWritesTheAccelerationsKilnStates:
+    """The G-code of every installed slicer carries the accelerations the
+    settings state and no motion limit besides, judged on the file each one
+    writes."""
+
+    @pytest.mark.parametrize("slicer", list(_SLICERS))
+    def test_no_motion_limit_kiln_did_not_ask_for(self, slicer: str, door_slices) -> None:
+        if not _SLICERS[slicer]:
+            pytest.skip(f"{slicer} not installed")
+        unasked = {
+            case: _unasked_motion(settings, gcode)
+            for (name, case), (settings, gcode) in door_slices.items()
+            if name == slicer
+        }
+        assert unasked, f"{slicer} sliced nothing"
+        assert not any(unasked.values()), {case: lines for case, lines in unasked.items() if lines}
+
+    @pytest.mark.parametrize("slicer", list(_SLICERS))
+    def test_the_stated_accelerations_are_written(self, slicer: str, door_slices) -> None:
+        if not _SLICERS[slicer]:
+            pytest.skip(f"{slicer} not installed")
+        settings, gcode = door_slices[(slicer, _STATED_CASE)]
+        assert _written_accelerations(gcode) == {3000.0, 1000.0, 2000.0}, settings
+
+    def test_every_slicer_writes_the_same_accelerations(self, door_slices) -> None:
+        installed = [name for name, path in _SLICERS.items() if path]
+        if len(installed) < 2:
+            pytest.skip("fewer than two slicers installed: nothing to compare")
+        cases = {case for _name, case in door_slices}
+        differing = {}
+        for case in cases:
+            written = {name: sorted(_written_accelerations(door_slices[(name, case)][1])) for name in installed}
+            if len({tuple(v) for v in written.values()}) > 1:
+                differing[case] = written
+        assert not differing, differing
 
 
 # ---------------------------------------------------------------------------

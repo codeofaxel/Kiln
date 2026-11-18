@@ -240,6 +240,25 @@ class TestInstallOnARealFastMCP:
             "open a 3D panel"
         )
 
+    def test_the_stage_states_its_self_contained_policy(self):
+        """A host that reviews panels reads a missing policy as unreviewed,
+        so the stage states the policy it needs: no origin to connect to and
+        none to load from."""
+        import asyncio
+
+        _cache_the_stage()
+        mcp = _fastmcp()
+        assert local_stage.install(mcp)["resource"]
+        listed = asyncio.run(mcp.list_resources())
+        stage = next(
+            r for r in listed if str(r.uri).rstrip("/") == local_stage.MESH_VIEWER_RESOURCE_URI
+        )
+        policy = (stage.meta or {})["ui"]["csp"]
+        assert policy == {"connectDomains": [], "resourceDomains": []}
+        # The registration holds its own copy, so editing it edits nothing else.
+        policy["resourceDomains"].append("https://edited.example.com")
+        assert local_stage.PANEL_CSP == {"connectDomains": [], "resourceDomains": []}
+
     def test_install_is_idempotent(self):
         _cache_the_stage()
         mcp = _fastmcp()

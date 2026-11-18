@@ -190,8 +190,12 @@ class TestThePanelMayLoadTheRelay:
 
         assert local_monitor._register_resource(_Mcp())
         csp = captured["meta"]["ui"]["csp"]
-        assert csp == {"resourceDomains": ["http://127.0.0.1:8081", "http://localhost:8081"]}
-        assert "connectDomains" not in csp
+        assert csp == {
+            "connectDomains": [],
+            "resourceDomains": ["http://127.0.0.1:8081", "http://localhost:8081"],
+        }
+        # Pictures from the relay only: the connect list is stated, and empty.
+        assert csp["connectDomains"] == []
 
     def test_the_relay_port_matches_the_declared_origin(self):
         assert f":{local_monitor.VIDEO_RELAY_PORT}" in local_monitor.PANEL_CSP["resourceDomains"][0]

@@ -1362,6 +1362,8 @@ def _slice_with_orca(
                 f"or scale it down so it fits one plate."
             )
 
+        if str(settings.get("machine_limits_usage", "")).strip() != "emit_to_gcode":
+            _drop_unasked_machine_limits(str(produced[0]))
         shutil.move(str(produced[0]), out_file)
 
     _record_slice(profile, input_abs, out_file, drawn_as=drawn_as)
@@ -1389,6 +1391,48 @@ def _slice_with_orca(
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
     )
+
+
+#: A machine-limit line a slicer opens a file with: the axis limits, and the
+#: acceleration limits in their ``P``/``R``/``T`` form (a print's own
+#: acceleration is ``M204 S`` and is never one of these).
+_MACHINE_LIMIT_LINE = re.compile(r"^(?:M201|M203|M205|M204(?=[^;\n]*\b[PRT]))\b")
+_MACHINE_LIMIT_PROGRESS = re.compile(r"^M73\b")
+_EXECUTABLE_BLOCK_START = "; EXECUTABLE_BLOCK_START"
+
+
+def _drop_unasked_machine_limits(gcode_path: str) -> int:
+    """Take the run of machine-limit lines that opens the executable block
+    out of *gcode_path*.
+
+    For settings that did not ask for limits in the G-code, so the printer
+    keeps its own.  A limit anywhere else (a start sequence's, a person's
+    custom G-code) stays.  Returns the number of lines taken.
+    """
+    taken = 0
+    tmp_path = f"{gcode_path}.limits"
+    with open(gcode_path, encoding="utf-8", errors="surrogateescape", newline="") as src, open(
+        tmp_path, "w", encoding="utf-8", errors="surrogateescape", newline=""
+    ) as dst:
+        in_opening = False
+        for line in src:
+            if in_opening:
+                if _MACHINE_LIMIT_LINE.match(line):
+                    taken += 1
+                    continue
+                if line.strip() and not _MACHINE_LIMIT_PROGRESS.match(line):
+                    in_opening = False
+                    dst.write(line)
+                    dst.writelines(src)
+                    break
+            elif line.strip() == _EXECUTABLE_BLOCK_START:
+                in_opening = True
+            dst.write(line)
+    if taken:
+        os.replace(tmp_path, gcode_path)
+    else:
+        os.unlink(tmp_path)
+    return taken
 
 
 def slice_file(input_path: str, **kwargs: Any) -> SliceResult:

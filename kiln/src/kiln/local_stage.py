@@ -104,6 +104,12 @@ MESH_VIEWER_RESOURCE_URI = "ui://kiln/mesh-viewer"
 #: Resource name shown in host resource listings.
 MESH_VIEWER_RESOURCE_NAME = "kiln_mesh_viewer"
 
+#: What the stage document may reach beyond itself: nothing.  Its scripts,
+#: styles and model ride inside the document or the tool's reply, so the
+#: policy names no origin, and states that rather than leaving it out: a
+#: host that reviews panels reads a missing policy as an unreviewed one.
+PANEL_CSP: dict[str, list[str]] = {"connectDomains": [], "resourceDomains": []}
+
 #: Appended to every stage tool's description at stamp time, so the stage is
 #: discoverable where agents actually look — the tool listing that keyword
 #: search runs over.  The stage machinery itself is invisible in schemas: it
@@ -1038,7 +1044,12 @@ def _register_resource(mcp: Any) -> bool:
                 "zoom, and turntable on Kiln's dark stage."
             ),
             mime_type=MCP_APP_MIME_TYPE,
-            meta={"ui": {"prefersBorder": False}},
+            meta={
+                "ui": {
+                    "prefersBorder": False,
+                    "csp": {key: list(origins) for key, origins in PANEL_CSP.items()},
+                }
+            },
             fn=_document,
         )
     )

@@ -278,6 +278,15 @@ def test_fewer_than_three_prints_are_said_as_the_slicers_time(kiln_env):
     assert "slicer's estimate" in said["said"] and "(2 so far)" in said["said"]
 
 
+def test_an_uncorrected_time_says_what_it_covers(kiln_env):
+    said = lpt.learned_time(3600, "voron")["said"]
+    assert said == (
+        "About 1h 0m by the slicer's estimate. Print time, from the first layer. Warm-up before it "
+        "(heating, homing, levelling if on) is extra. Kiln corrects it from your own prints on voron "
+        "once it has timed 3 (none yet)."
+    )
+
+
 def test_three_prints_correct_the_slicer_and_say_from_how_many(kiln_env):
     _seed("voron", [(3600, 3960, "success")] * 3)
 
