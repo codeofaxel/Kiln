@@ -51,8 +51,9 @@ _PERSONS_OWN_ASK = {
         "machines on Kiln Business; the cross-machine answer is what they reached for"
     ),
     "_pro_material_pick_bridge": (
-        "runs only when the person asks what material a part should be, on a "
-        "plan that includes Kiln Pro; the pick is the feature they reached for"
+        "runs only when the person asks what material a part should be "
+        "(recommend_design_material, or an analysis of what a part needs); the "
+        "pick is the feature they reached for"
     ),
     "_pro_orientation_bridge": (
         "runs only when the person asks how to lay a part on the bed, on a plan "

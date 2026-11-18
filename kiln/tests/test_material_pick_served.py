@@ -1,0 +1,360 @@
+"""Kiln's material pick for one part, asked of Kiln's servers.
+
+``recommend_design_material`` and the design analysis
+(``get_design_constraints``) ask for the pick through
+``kiln._pro_material_pick_bridge``: on a plain install (no kiln-pro) a
+signed-in plan below Kiln Pro asks ``material_floor_pick``; a Kiln Pro plan
+asks ``material_pick`` and, when that has no pick for the part, asks as
+every other plan does.  These pin, with Kiln's servers stood in:
+
+* the reply is rebuilt from what the servers sent and this computer's own
+  catalogue record of the material, and nothing else;
+* which wire each plan asks, and what is sent;
+* a miss (signed out, offline, no answer, refused) picks nothing: the reply
+  is basic -- the plastics this printer can melt, the cautions for the part,
+  and one sentence saying why there is no pick and what fixes it -- and the
+  basic reply reads nothing about a material but the nozzle table;
+* the cautions are said on every path: a part worn against skin, food
+  contact, a load-bearing part;
+* the pick's engine is not in this package.
+"""
+
+from __future__ import annotations
+
+import socket
+from typing import Any
+
+import pytest
+
+from kiln import _pro_material_pick_bridge as bridge
+from kiln import design_intelligence as di
+from kiln.material_basics import plastics_printer_can_melt
+from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
+
+#: A pick as ``material_floor_pick`` sends it.
+_FLOOR_PICK = {
+    "material_id": "petg",
+    "score": 62.0,
+    "reasons": ["Recommended for: sustained load. PETG chosen — picked on Kiln's servers."],
+    "warnings": ["Load not checked: Kiln Pro sizes the part for the weight and how long it's held."],
+    "alternatives": [
+        {"material_id": "asa", "display_name": "ASA", "score": 50.0, "reasons": [], "warnings": ["w"]},
+    ],
+    "recommended_brands": [],
+    "fallback": False,
+}
+#: A pick as ``material_pick`` sends it (Kiln Pro).
+_KILN_PRO_PICK = {
+    "material_id": "asa",
+    "score": 81.0,
+    "reasons": ["picked by Kiln Pro"],
+    "warnings": [],
+    "alternatives": [],
+    "recommended_brands": [{"profile_id": "x_asa", "brand": "X"}],
+}
+
+
+def _ok(pick: dict[str, Any]) -> dict[str, Any]:
+    return {"success": True, "status": "ok", "known": True, "pick": dict(pick)}
+
+
+@pytest.fixture(autouse=True)
+def _fresh(monkeypatch):
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    monkeypatch.setattr(bridge, "_last_miss", None, raising=False)
+    di._reset_knowledge_base()
+    yield
+    di._reset_knowledge_base()
+
+
+def _plan(monkeypatch, plan: str) -> None:
+    import kiln.licensing as licensing
+
+    paid = plan != "free"
+    monkeypatch.setattr(
+        licensing, "check_tier",
+        lambda *_a, **_k: (True, None) if paid else (False, "needs Kiln Pro, see kiln3d.com/pricing"),
+    )
+
+
+def _servers(monkeypatch, replies: dict[str, Any]) -> list[tuple[str, dict]]:
+    """Kiln's servers stood in: *replies* maps a wire to its answer (or a
+    callable raising what the network would).  Returns what was asked."""
+    import kiln.server as srv
+
+    asked: list[tuple[str, dict]] = []
+
+    def served(tool_name, /, _timeout=None, _asked_by_user=True, **kwargs):
+        asked.append((tool_name, dict(kwargs)))
+        reply = replies[tool_name]
+        return reply(**kwargs) if callable(reply) else reply
+
+    monkeypatch.setattr(srv, "_pro_api_call", served)
+    return asked
+
+
+def _door():
+    from kiln.plugins.design_tools import plugin
+
+    tools: dict = {}
+
+    class _Mcp:
+        def tool(self, **_kw):
+            def keep(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return keep
+
+    plugin.register(_Mcp())
+    return tools["recommend_design_material"]
+
+
+# ---------------------------------------------------------------------------
+# The served pick
+# ---------------------------------------------------------------------------
+
+
+class TestTheServedPick:
+    def test_a_free_plan_asks_the_floor_wire_and_gets_its_pick(self, monkeypatch):
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        rec = di.recommend_material_for_design(
+            "shelf bracket", printer_has_enclosure=True, printer_has_direct_drive=False,
+            max_hotend_temp_c=260, supported_materials=["petg", "asa"],
+        )
+        assert asked == [(bridge.FLOOR_WIRE_TOOL, {
+            "requirements_text": "shelf bracket", "printer_has_enclosure": True,
+            "printer_has_direct_drive": False, "max_hotend_temp_c": 260,
+            "supported_materials": ["petg", "asa"],
+        })]
+        assert rec.material.material_id == "petg" and rec.score == 62.0
+        assert rec.reasons == _FLOOR_PICK["reasons"] and rec.warnings == _FLOOR_PICK["warnings"]
+        assert rec.alternatives == _FLOOR_PICK["alternatives"] and rec.recommended_brands == []
+
+    def test_the_material_is_this_computers_own_record(self, monkeypatch):
+        """The served pick names the material; its name, family, heat and
+        chemistry are this computer's catalogue record, and a scored pick
+        carries no design-limits summary."""
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        rec = di.recommend_material_for_design("shelf bracket")
+        record = di.get_public_material_profile("petg")
+        assert rec.material.display_name == record.display_name
+        assert rec.material.thermal == record.thermal and rec.material.chemical == record.chemical
+        assert rec.material.design_limits == {} and rec.design_limits_summary == {}
+
+    def test_the_everyday_default_summarises_its_own_design_limits(self, monkeypatch):
+        _plan(monkeypatch, "free")
+        fallback = {**_FLOOR_PICK, "material_id": "pla", "reasons": [], "alternatives": [], "fallback": True}
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(fallback)})
+        rec = di.recommend_material_for_design("anything")
+        assert rec.design_limits_summary == di.get_public_material_profile("pla").design_limits != {}
+
+    def test_a_kiln_pro_plan_gets_kiln_pros_pick_and_no_miss(self, monkeypatch):
+        _plan(monkeypatch, "pro")
+        asked = _servers(monkeypatch, {bridge.WIRE_TOOL: _ok(_KILN_PRO_PICK)})
+        rec, miss = di.material_pick_for_design("strong bracket")
+        assert miss is None and [tool for tool, _ in asked] == [bridge.WIRE_TOOL]
+        assert rec.material.material_id == "asa" and rec.recommended_brands[0]["brand"] == "X"
+
+    @pytest.mark.parametrize(
+        "pro_reply",
+        [
+            {"success": True, "status": "ok", "known": False, "pick": None},
+            {"success": False, "status": "error", "code": "TIER_REQUIRED", "error": "needs Kiln Pro", "required_tier": "pro"},
+            {"status": "error", "success": False, "code": "INVALID_ARGUMENT", "error": "requirements_text must describe the part."},
+        ],
+    )
+    def test_a_kiln_pro_plan_with_no_pro_pick_asks_as_every_plan_does(self, monkeypatch, pro_reply):
+        _plan(monkeypatch, "pro")
+        asked = _servers(monkeypatch, {bridge.WIRE_TOOL: pro_reply, bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        rec = di.recommend_material_for_design("shelf bracket")
+        assert [tool for tool, _ in asked] == [bridge.WIRE_TOOL, bridge.FLOOR_WIRE_TOOL]
+        assert rec.material.material_id == "petg"
+
+    @pytest.mark.usefixtures("free_caller")
+    def test_the_door_returns_the_pick_with_its_cautions(self, monkeypatch):
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        out = _door()("a ring worn daily", max_hotend_temp_c=260)
+        assert out["success"] is True and "basic" not in out
+        assert out["material"]["material_id"] == "petg" and out["score"] == 62.0
+        assert any(w.startswith("SKIN CONTACT: no 3D-printed part is skin-safe") for w in out["warnings"])
+        assert out["skin_contact"]["never_skin_safe"] is True
+
+
+# ---------------------------------------------------------------------------
+# A miss picks nothing
+# ---------------------------------------------------------------------------
+
+
+def _offline(**_kw):
+    raise socket.gaierror(8, "nodename nor servname provided")
+
+
+def _silent(**_kw):
+    raise ConnectionResetError("reset by peer")
+
+
+class TestAMissPicksNothing:
+    @pytest.mark.usefixtures("free_caller")
+    def test_signed_out_says_sign_in_and_kiln_picks(self):
+        """No sign-in on this install: the real served door refuses before any
+        network call, and the reply is the basic list."""
+        out = _door()("kids toy", max_hotend_temp_c=230)
+        assert out["basic"] is True and out["success"] is True and out["why"] == "signed_out"
+        assert out["message"] == (
+            "Kiln did not pick a plastic for this part. Kiln can't pick one right now because "
+            "Kiln is signed out, so it lists the plastics this printer can melt instead. Sign in "
+            "and Kiln picks the plastic for this part."
+        )
+        assert out["plastics"] == plastics_printer_can_melt(230)
+        for key in ("material", "score", "reasons", "alternatives", "recommended_brands"):
+            assert key not in out
+
+    @pytest.mark.parametrize(
+        ("reply", "cause", "words"),
+        [
+            (_offline, "offline", "this computer is offline"),
+            (_silent, "unanswered", "Kiln's material pick didn't answer"),
+            ({"status": "error", "success": False, "code": "SEAT_DAILY_CAP", "error": "Too many asks today."},
+             "refused", "Kiln's material pick said no"),
+        ],
+    )
+    def test_each_miss_says_its_cause_and_lists_the_plastics(self, monkeypatch, reply, cause, words):
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: reply})
+        out = _door()("cable clip", max_hotend_temp_c=250)
+        assert out["basic"] is True and out["why"] == cause
+        assert out["message"].startswith("Kiln did not pick a plastic for this part.")
+        assert words in out["message"]
+        assert out["plastics"] == plastics_printer_can_melt(250)
+        assert "score" not in out and "material" not in out
+
+    def test_the_plastics_are_the_ones_the_hotend_melts(self, monkeypatch):
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})
+        low = _door()("cable clip", max_hotend_temp_c=200)["plastics"]
+        assert low == plastics_printer_can_melt(200) and "PC" not in low and "PLA" in low
+
+    def test_servers_that_do_not_answer_are_left_alone_for_a_while(self, monkeypatch):
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})
+        for _ in range(3):
+            out = _door()("cable clip")
+            assert out["basic"] is True and out["why"] == "offline"
+        assert len(asked) == 1
+
+    def test_a_kiln_pro_plan_offline_is_not_asked_twice(self, monkeypatch):
+        _plan(monkeypatch, "pro")
+        asked = _servers(monkeypatch, {bridge.WIRE_TOOL: _offline, bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        out = _door()("cable clip")
+        assert out["basic"] is True and [tool for tool, _ in asked] == [bridge.WIRE_TOOL]
+
+    def test_a_pick_this_computer_cannot_read_is_a_miss(self, monkeypatch):
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok({**_FLOOR_PICK, "material_id": "unobtanium"})})
+        out = _door()("cable clip")
+        assert out["basic"] is True and "material" not in out
+
+    def test_the_basic_reply_reads_nothing_about_a_material(self, monkeypatch):
+        """With every reader of the material catalogue made to fail, the basic
+        reply still comes back whole: it reads the nozzle table only."""
+        from kiln import material_safety
+
+        def _no(*_a, **_k):
+            raise AssertionError("the basic reply read the material catalogue")
+
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})
+        monkeypatch.setattr(di._DesignKnowledgeBase, "materials", property(_no))
+        for name in ("get_material_profile", "get_public_material_profile", "list_public_material_profiles",
+                     "list_material_profiles"):
+            monkeypatch.setattr(di, name, _no)
+        monkeypatch.setattr(material_safety, "_food_ratings", _no)
+        out = _door()("shelf bracket that holds 10 lbs, food safe, worn on the wrist", max_hotend_temp_c=240)
+        assert out["basic"] is True and out["plastics"] == plastics_printer_can_melt(240)
+
+
+# ---------------------------------------------------------------------------
+# The cautions are said on every path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("free_caller")
+class TestTheCautionsOnEveryPath:
+    def test_skin_contact(self):
+        out = _door()("a ring worn daily")
+        assert out["basic"] is True
+        assert (
+            "SKIN CONTACT: no 3D-printed part is skin-safe, hypoallergenic, or biocompatible. "
+            "For any mouth, eye, broken-skin, piercing, or implant use, see a medical professional."
+        ) in out["warnings"]
+
+    def test_food_contact(self):
+        from kiln.material_safety import food_contact_nozzle_advisory
+
+        out = _door()("coffee mug")
+        assert out["basic"] is True and out["food_contact_use_case_detected"] is True
+        assert food_contact_nozzle_advisory() in out["warnings"]
+
+    def test_a_load_bearing_part(self):
+        out = _door()("shelf bracket that holds 10 lbs")
+        load = [w for w in out["warnings"] if "load-bearing" in w]
+        assert out["basic"] is True and len(load) == 1
+        assert load[0].startswith("This appears to be a load-bearing application; none of the plastics listed")
+        assert "kiln3d.com" in load[0]
+
+    def test_a_part_with_nothing_to_warn_about_carries_no_caution(self):
+        out = _door()("cable clip")
+        assert out["basic"] is True and out["warnings"] == []
+        assert "food_contact_use_case_detected" not in out
+
+
+# ---------------------------------------------------------------------------
+# The design analysis
+# ---------------------------------------------------------------------------
+
+
+class TestTheDesignAnalysis:
+    def test_a_served_pick_is_its_recommended_material(self, monkeypatch):
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        brief = di.get_design_constraints("shelf bracket").to_dict()
+        assert brief["recommended_material"]["material"]["material_id"] == "petg"
+        assert "material_basic" not in brief
+
+    @pytest.mark.usefixtures("free_caller")
+    def test_a_miss_names_the_plastics_and_why(self):
+        brief = di.get_design_constraints("a cereal bowl to eat from").to_dict()
+        assert brief["recommended_material"] is None
+        basic = brief["material_basic"]
+        assert basic["basic"] is True and basic["why"] == "signed_out"
+        assert basic["plastics"] == plastics_printer_can_melt(None)
+        assert basic["food_contact_use_case_detected"] is True
+
+
+# ---------------------------------------------------------------------------
+# The engine is not here
+# ---------------------------------------------------------------------------
+
+
+def test_the_pick_engine_is_not_in_this_package():
+    from pathlib import Path
+
+    for name in ("_recommend_from_safety_floor", "_recommend_material_for_design", "_kiln_pro_recommendation",
+                 "_HEAT_KEYWORDS", "_OUTDOOR_KEYWORDS", "_INDOOR_KEYWORDS", "_FLEXIBLE_KEYWORDS",
+                 "_SUSTAINED_LOAD_KEYWORDS", "_COSMETIC_KEYWORDS", "_DEFAULT_HOT_TARGET_C",
+                 "_TPU_FAMILY_PREFIXES", "_is_tpu_family", "_hotend_ceiling_warning", "_load_judgement_is_paid"):
+        assert not hasattr(di, name), name
+    package = Path(di.__file__).resolve().parent
+    said = (
+        "survives target temperature",
+        "the only FDM material with genuine flexibility",
+        "best surface finish for cosmetic prints",
+        "dimensional stability suitable for sustained-load applications",
+    )
+    for path in package.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for words in said:
+            assert words not in text, f"{path.name} still words the pick: {words!r}"
