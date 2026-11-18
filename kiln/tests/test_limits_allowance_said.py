@@ -20,8 +20,8 @@ import pytest
 from kiln import material_limits
 
 LINE = (
-    "Checked against the general figures: your plan checks 6 plastics a day against their own design "
-    "limits, today's are used, and they renew at midnight UTC. Kiln Business has no daily limit: "
+    "Checked against the general figures: today's checks of each plastic's own design limits on your "
+    "plan are used, and they renew at midnight UTC. Kiln Business has no daily limit: "
     "https://kiln3d.com/pricing"
 )
 
