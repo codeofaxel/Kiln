@@ -751,6 +751,7 @@ class _IntelligenceToolsPlugin:
                 from kiln._pro_routing_bridge import refusal_for
                 from kiln.material_routing import (
                     BasicMaterials,
+                    RequestRefused,
                 )
                 from kiln.material_routing import (
                     recommend_material as _recommend,
@@ -798,13 +799,18 @@ class _IntelligenceToolsPlugin:
                                 )
                             return refused
 
-                rec = _recommend(
-                    intent,
-                    printer_capabilities=caps,
-                    budget_usd=budget_usd,
-                    printer_id=printer_id,
-                    on_hand=on_hand,
-                )
+                try:
+                    rec = _recommend(
+                        intent,
+                        printer_capabilities=caps,
+                        budget_usd=budget_usd,
+                        printer_id=printer_id,
+                        on_hand=on_hand,
+                    )
+                except RequestRefused as refusal:
+                    # Kiln's material recommendation could not read the
+                    # request: its ruling on the input, said as one.
+                    return _srv._error_dict(str(refusal), code="VALIDATION_ERROR")
                 if isinstance(rec, BasicMaterials):
                     # No pick: the plastics this printer can melt (or the
                     # materials on hand, when asked), and why.

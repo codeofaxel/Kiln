@@ -54,15 +54,31 @@ _NOT_HERE = object()
 
 __all__ = [
     "FEATURE",
+    "INPUT_REFUSED",
     "LOCAL_MODULE",
     "MAX_INTENT_CHARS",
     "MAX_NAMES",
     "MAX_NAME_CHARS",
+    "SIGN_IN_NAME",
     "WIRE_TOOL",
     "catalogue",
+    "input_refusal",
     "pick",
     "refusal_for",
 ]
+
+
+#: The code Kiln's material recommendation gives a request it cannot read.
+INPUT_REFUSED = "INVALID_ARGUMENT"
+
+
+def input_refusal(miss: Miss | None) -> str | None:
+    """The recommendation's own sentence when *miss* is its refusal of a
+    request it could not read (a ruling on the input, which the door relays
+    as such), else ``None``."""
+    if isinstance(miss, Miss) and miss.cause == "refused" and miss.code == INPUT_REFUSED and miss.detail:
+        return miss.detail
+    return None
 
 
 def refusal_for(intent: Any) -> str | None:
