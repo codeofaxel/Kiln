@@ -99,7 +99,7 @@ def get_material_slicing_profile(
     and other material-tuned values used by the adaptive slicer.  When
     Kiln's tuned settings cannot be reached (offline, signed out), the
     reply carries generic settings worked out from the nozzle size,
-    ``basic: true`` and ``basic_note`` saying why.
+    ``basic: true`` and ``message`` saying why.
 
     Args:
         material: Material name — PLA, PETG, ABS, TPU, ASA, Nylon, PC,
@@ -109,10 +109,13 @@ def get_material_slicing_profile(
             else 0.4; the reply's ``nozzle`` says which.
     """
     from kiln import _pro_adaptive_bridge as bridge
-    from kiln.adaptive_slicer import generic_profile
+    from kiln.adaptive_slicer import generic_profile, text_refusal
     from kiln.assumed_nozzle import assumed_nozzle
 
     try:
+        refused = text_refusal(material)
+        if refused is not None:
+            return {"success": False, "error": refused}
         nozzle = assumed_nozzle(None, stated=nozzle_diameter_mm, or_only_printer=True)
         answer, miss = bridge.ask("profile", material=material, nozzle_diameter_mm=nozzle.diameter_mm)
         if answer is not None:
@@ -167,8 +170,8 @@ def generate_adaptive_slicing_plan(
 
     When Kiln's settings tuned to the material cannot be reached (offline,
     signed out), the plan is built from generic settings worked out from
-    the nozzle size and the reply says ``basic: true``, with ``basic_note``
-    saying why and what gets the tuned plan.
+    the nozzle size and the reply says ``basic: true``, with ``message``
+    saying why.
     """
     from kiln import _pro_adaptive_bridge as bridge
     from kiln.adaptive_slicer import (
@@ -177,10 +180,14 @@ def generate_adaptive_slicing_plan(
         _parse_region_dicts,
         generic_profile,
         get_adaptive_slicer,
+        text_refusal,
     )
     from kiln.assumed_nozzle import assumed_nozzle
 
     try:
+        refused = text_refusal(material, mode)
+        if refused is not None:
+            return {"success": False, "error": refused}
         nozzle = assumed_nozzle(printer, stated=nozzle_diameter_mm, or_only_printer=True)
         answer, miss = bridge.ask(
             "plan",
@@ -382,14 +389,23 @@ def quick_adaptive_plan(
 
     When Kiln's settings tuned to the material cannot be reached (offline,
     signed out), the plan is built from generic settings worked out from
-    the nozzle size and the reply says ``basic: true``, with ``basic_note``
-    saying why and what gets the tuned plan.
+    the nozzle size and the reply says ``basic: true``, with ``message``
+    saying why.
     """
     from kiln import _pro_adaptive_bridge as bridge
-    from kiln.adaptive_slicer import AdaptiveMode, AdaptiveSlicerError, generic_profile, get_adaptive_slicer
+    from kiln.adaptive_slicer import (
+        AdaptiveMode,
+        AdaptiveSlicerError,
+        generic_profile,
+        get_adaptive_slicer,
+        text_refusal,
+    )
     from kiln.assumed_nozzle import assumed_nozzle
 
     try:
+        refused_text = text_refusal(material, mode)
+        if refused_text is not None:
+            return {"success": False, "error": refused_text}
         refused = _invalid_mode(mode)
         if refused is not None:
             return refused
@@ -435,11 +451,14 @@ def list_supported_materials() -> dict:
     Returns material names with their key slicing constraints
     (layer height limits, bridge parameters, overhang angles).  When the
     list cannot be reached (offline, signed out), it is empty, the reply
-    says ``basic: true`` with ``basic_note`` saying why, and
-    ``generic_settings`` shows what a plan uses for every material instead.
+    says ``basic: true`` with ``message`` saying why, and
+    ``generic_settings`` shows what a plan uses for every material instead,
+    stated at Kiln's default nozzle (``nozzle_diameter_mm``), the size the
+    served list states every window at.
     """
     from kiln import _pro_adaptive_bridge as bridge
     from kiln.adaptive_slicer import generic_profile
+    from kiln.assumed_nozzle import DEFAULT_MM
 
     try:
         answer, miss = bridge.ask("materials")
@@ -451,12 +470,13 @@ def list_supported_materials() -> dict:
                 "materials": answer["materials"],
                 "count": answer.get("count", len(answer["materials"])),
             }
-        generic = generic_profile()
+        generic = generic_profile(nozzle_diameter_mm=DEFAULT_MM)
         return {
             "success": True,
             "materials": [],
             "count": 0,
             "generic_settings": {
+                "nozzle_diameter_mm": DEFAULT_MM,
                 "layer_range_mm": f"{generic.min_layer_height_mm}-{generic.max_layer_height_mm}",
                 "optimal_mm": generic.optimal_layer_height_mm,
                 "bridge_mm": generic.bridge_layer_height_mm,

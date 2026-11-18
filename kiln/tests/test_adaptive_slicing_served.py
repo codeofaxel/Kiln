@@ -197,11 +197,12 @@ class TestAMissAnswersWithGenericSettings:
         out = _ask_door(door)
         assert out["success"] is True and out["basic"] is True
         assert out["why"] == CAUSE[miss]
-        line = out["basic_note"]
+        line = out["message"]
+        assert "basic_note" not in out and "note" not in out
         assert "generic settings worked out from the nozzle size, not settings tuned to PLA" in line
         assert "Kiln can't" in line and "right now because" in line and ", so it" in line
         if CAUSE[miss] in FIX_WORDS:
-            assert f"{FIX_WORDS[CAUSE[miss]]} and ask again for settings tuned to PLA." in line
+            assert line.endswith(f"{FIX_WORDS[CAUSE[miss]]} and ask again.")
         if door == "profile":
             assert out["profile"]["top_surface_layers"] is None
             assert out["profile"]["overhang_max_angle"] == _floor_angle()
@@ -217,13 +218,19 @@ class TestAMissAnswersWithGenericSettings:
         assert out["success"] is True and out["basic"] is True
         assert out["materials"] == [] and out["count"] == 0
         assert out["generic_settings"]["layer_range_mm"] == "0.1-0.3"
-        assert "every material plans with generic settings" in out["basic_note"]
+        assert out["generic_settings"]["nozzle_diameter_mm"] == 0.4, "the list says the nozzle it is stated at"
+        assert "every material plans with generic settings" in out["message"]
 
-    def test_signed_out_says_sign_in_for_settings_tuned_to_the_material(self, served):
+    @pytest.mark.parametrize("material", ["petg", "PLA+", "unobtainium"])
+    def test_signed_out_promises_nothing_for_a_material_kiln_may_not_tune(self, served, material):
+        """Signed in, a material Kiln does not tune is refused by name; so the
+        miss never promises that signing in brings settings tuned to it."""
         _, answers = served
         answers.append(MISSES["signed_out"])
-        out = doors.quick_adaptive_plan("petg", 10.0, nozzle_diameter_mm=0.4)
-        assert out["basic_note"].endswith("Sign in and ask again for settings tuned to PETG.")
+        out = doors.quick_adaptive_plan(material, 10.0, nozzle_diameter_mm=0.4)
+        assert out["message"].endswith("Sign in and ask again.")
+        assert "ask again for settings" not in out["message"]
+        assert f"check whether it has settings tuned to {material.upper()}" in out["message"]
 
     @pytest.mark.parametrize("door", ["generate", "quick", "profile"])
     def test_a_basic_answer_does_not_depend_on_the_material(self, served, door):
@@ -234,7 +241,7 @@ class TestAMissAnswersWithGenericSettings:
         for material in ("PLA", "PETG", "ABS", "TPU", "unobtainium"):
             answers.append(MISSES["signed_out"])
             out = _ask_door(door, material)
-            out.pop("basic_note")
+            out.pop("message")
             body = out.get("plan") or out.get("profile")
             assert body.pop("material") == material.upper()
             body.pop("plan_id", None)
@@ -331,6 +338,70 @@ class TestAMissRefusesWhatNoPlanIsMadeFor:
         with _deadline(5.0):
             out = doors.generate_adaptive_slicing_plan(many, "PLA", 10.0, nozzle_diameter_mm=0.4)
         assert out["success"] is False and "at most 200 regions" in out["error"]
+
+    def test_a_plan_whose_layers_would_name_too_many_regions(self, served):
+        """Each count on its own can be in range and the plan still enormous:
+        many regions spanning every layer of a tall part."""
+        _, answers = served
+        answers.append(MISSES["signed_out"])
+        tall = [{"region_type": "standard", "z_start_mm": 0.0, "z_end_mm": 1000.0, "area_pct": 1.0}] * 200
+        with _deadline(5.0):
+            out = doors.generate_adaptive_slicing_plan(tall, "PLA", 1000.0, nozzle_diameter_mm=0.1)
+        assert out["success"] is False and "more than 250,000 regions" in out["error"], out
+
+    @pytest.mark.parametrize("height", [10**400, -(10**400)], ids=["huge", "huge_negative"])
+    def test_a_whole_number_too_large_to_be_a_height(self, served, height):
+        _, answers = served
+        answers.append(MISSES["offline"])
+        out = doors.quick_adaptive_plan("PLA", height, nozzle_diameter_mm=0.4)
+        assert out["success"] is False and "finite number" in out["error"]
+        assert len(out["error"]) < 200, "the refusal repeats at most 64 characters of what was sent"
+
+
+class TestCallerTextIsBounded:
+    """A long name never reaches Kiln's servers and is never repeated whole."""
+
+    LONG = "x" * 50_000
+
+    @pytest.mark.parametrize("door", ["generate", "quick", "profile"])
+    def test_a_long_material_is_refused_before_anything_is_asked(self, served, door):
+        calls, _ = served
+        out = _ask_door(door, self.LONG)
+        assert calls == []
+        assert out == {"success": False, "error": "Invalid material: a material name is at most 64 characters."}
+
+    @pytest.mark.parametrize("door", ["generate", "quick", "profile"])
+    @pytest.mark.parametrize("material", [None, 7, ["PLA"]])
+    def test_a_material_that_is_not_text_is_refused(self, served, door, material):
+        calls, _ = served
+        out = _ask_door(door, material)
+        assert calls == [] and out["success"] is False
+        assert out["error"] == "Invalid material: name the material as text, e.g. 'PLA'."
+
+    @pytest.mark.parametrize("door", ["generate", "quick"])
+    def test_a_long_mode_is_refused_before_anything_is_asked(self, served, door):
+        calls, _ = served
+        if door == "generate":
+            out = doors.generate_adaptive_slicing_plan([], "PLA", 10.0, nozzle_diameter_mm=0.4, mode=self.LONG)
+        else:
+            out = doors.quick_adaptive_plan("PLA", 10.0, nozzle_diameter_mm=0.4, mode=self.LONG)
+        assert calls == [] and out["success"] is False
+        assert out["error"].startswith("Invalid mode: a mode is at most 64 characters.")
+
+    def test_a_long_region_value_is_repeated_at_most_64_characters(self, served):
+        _, answers = served
+        answers.append(MISSES["signed_out"])
+        regions = [{"region_type": "bulk", "z_start_mm": self.LONG}]
+        out = doors.generate_adaptive_slicing_plan(regions, "PLA", 10.0, nozzle_diameter_mm=0.4)
+        assert out["success"] is False and out["error"].startswith("could not convert string to float: 'xxx")
+        assert len(out["error"]) <= len("could not convert string to float: ") + 64
+
+    def test_a_short_region_value_still_reads_as_before(self, served):
+        _, answers = served
+        answers.append(MISSES["signed_out"])
+        regions = [{"region_type": "bulk", "z_start_mm": "abc"}]
+        out = doors.generate_adaptive_slicing_plan(regions, "PLA", 10.0, nozzle_diameter_mm=0.4)
+        assert out == {"success": False, "error": "could not convert string to float: 'abc'"}
 
 
 # ---------------------------------------------------------------------------
