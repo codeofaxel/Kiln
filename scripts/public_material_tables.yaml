@@ -5,7 +5,7 @@
 # baseline:  present when the gate was added; listed, not judged.  The list
 #            only shrinks: a table leaves it when it is served instead, or
 #            when it earns a keep row.  A new table may not join it.
-baseline_count: 30
+baseline_count: 29
 keep:
   'gcode.py::_MATERIAL_TEMPS':
     door: the live-printer filament load, unload, purge and wipe commands
@@ -14,7 +14,6 @@ keep:
     door: every material lookup
     why: a spelling map from short names to catalogue ids; it carries no figure or judgement
 baseline:
-  - 'adaptive_slicer.py::_MATERIAL_PROFILES'
   - 'ambient_safety.py::_ALIASES'
   - 'ambient_safety.py::_MATERIAL_THERMAL_PROFILES'
   - 'cli/main.py::_MATERIAL_ALIASES'
