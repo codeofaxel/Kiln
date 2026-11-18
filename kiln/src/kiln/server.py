@@ -22791,24 +22791,22 @@ def find_material_substitute(
             (unavailable, cost, strength, finish_quality, heat_resistance, lead_time).
         min_score: Minimum compatibility score threshold (0.0–1.0).
     """
+    # The ranked substitutes and their trade-offs are Kiln's servers' answer
+    # (kiln._pro_substitution_bridge), free on every plan for a signed-in
+    # account.  With no answer (signed out, offline, unanswered, refused) the
+    # reply is the basic list: the same family from the bundled catalogue,
+    # unranked, ``basic: true`` and a ``note`` saying why.
     try:
-        from kiln.material_substitution import (
-            SubstitutionReason,
-            find_substitutes,
-        )
+        from kiln import _pro_substitution_bridge as substitution
 
-        reason_enum = None
-        if reason:
-            try:
-                reason_enum = SubstitutionReason(reason.lower())
-            except ValueError:
-                return _error_dict(
-                    f"Invalid reason: {reason!r}. Valid: {[r.value for r in SubstitutionReason]}",
-                    code="VALIDATION_ERROR",
-                )
-
-        subs = find_substitutes(material, "fdm", reason=reason_enum, min_score=min_score)
-        sub_dicts = [s.to_dict() for s in subs]
+        refused = substitution.refusal_for(material, reason=reason, min_score=min_score)
+        if refused is not None:
+            return _error_dict(refused, code="VALIDATION_ERROR")
+        asked = substitution.ask(material, reason=reason, min_score=min_score)
+        if asked.refusal is not None:
+            return _error_dict(asked.refusal["error"], code=asked.refusal["code"])
+        basic = asked.miss is not None
+        sub_dicts = substitution.basic_substitutes(material) if basic else list(asked.substitutes or [])
         # Food-safety preservation: if the source material is rated food
         # safe, mark any substitute that is NOT as a safety regression so
         # callers don't silently swap a pet bowl's PETG for ABS.  Public
@@ -22846,6 +22844,11 @@ def find_material_substitute(
             "substitutes": sub_dicts,
             "count": len(sub_dicts),
         }
+        if basic:
+            # No ranking came back: the list is the basic one, said so.
+            result["basic"] = True
+            result["note"] = substitution.basic_line(asked.miss, material, found=bool(sub_dicts), reason=reason)
+            result.update(substitution.miss_fields(asked.miss))
         if food_safety_check is not None:
             result["food_safety"] = food_safety_check
         return result
@@ -22864,13 +22867,32 @@ def get_best_material_substitute(material: str) -> dict:
     Args:
         material: The original filament material (e.g. "PLA", "PETG").
     """
+    # The best substitute is Kiln's servers' answer (the same bridge).  With
+    # no answer no best is named: the reply is the basic list, as above.
     try:
-        from kiln.material_substitution import get_best_substitute
+        from kiln import _pro_substitution_bridge as substitution
 
-        sub = get_best_substitute(material, "fdm")
-        if sub is None:
+        refused = substitution.refusal_for(material, best=True)
+        if refused is not None:
+            return _error_dict(refused, code="VALIDATION_ERROR")
+        asked = substitution.ask(material, best=True)
+        if asked.refusal is not None:
+            return _error_dict(asked.refusal["error"], code=asked.refusal["code"])
+        if asked.miss is not None:
+            # Without Kiln's ranking no best is named: the basic list instead.
+            basic = substitution.basic_substitutes(material)
+            return {
+                "success": True,
+                "material": material,
+                "basic": True,
+                "substitutes": basic,
+                "note": substitution.basic_line(asked.miss, material, found=bool(basic)),
+                **substitution.miss_fields(asked.miss),
+            }
+        subs = asked.substitutes or []
+        if not subs:
             return {"success": True, "material": material, "substitute": None, "message": "No substitutes found"}
-        return {"success": True, "material": material, "substitute": sub.to_dict()}
+        return {"success": True, "material": material, "substitute": subs[0]}
     except Exception as exc:
         logger.exception("Error in get_best_material_substitute")
         return _error_dict(f"Failed to get best material substitute: {exc}", code="SUBSTITUTION_ERROR")

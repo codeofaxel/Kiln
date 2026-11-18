@@ -112,9 +112,22 @@ class TestRecommendDesignMaterial:
 
 
 class TestFindMaterialSubstitute:
-    def test_swapping_food_safe_petg_flags_every_substitute_that_is_not(self):
+    """The substitutes are Kiln's servers' answer (stood in here with made-up
+    figures); the food-safety check over them is this package's own."""
+
+    def test_swapping_food_safe_petg_flags_every_substitute_that_is_not(self, monkeypatch):
+        import kiln.server as srv
         from kiln.server import find_material_substitute
 
+        def served(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+            return {"success": True, "status": "ok", "substitutes": [
+                {"original_material": "petg", "substitute_material": name, "device_type": "fdm",
+                 "compatibility_score": 0.1, "reasons": ["unavailable"], "trade_offs": "stand-in",
+                 "cost_delta_pct": 0.0}
+                for name in ("pla", "abs", "nylon")
+            ]}
+
+        monkeypatch.setattr(srv, "_pro_api_call", served)
         result = find_material_substitute("PETG")
         assert result["success"] is True, result
         check = result.get("food_safety")
@@ -125,6 +138,7 @@ class TestFindMaterialSubstitute:
             name = str(sub.get("substitute_material") or sub.get("substitute") or sub.get("material") or "")
             if sub.get("food_safe") != "yes":
                 assert name.lower() in flagged, (name, check)
+        assert flagged == {"pla", "abs", "nylon"}
 
 
 class TestTheDetector:

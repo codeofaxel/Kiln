@@ -159,6 +159,17 @@ def test_the_material_rule_check(monkeypatch, caplog):
     _assert_kept_local(out, caplog)
 
 
+def test_the_substitution_ranking(monkeypatch, caplog):
+    import kiln.server as srv
+    from kiln import _pro_substitution_bridge as bridge
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, substitutes_for_the_wire=_raise)
+    out = {"list": srv.find_material_substitute("pla"), "best": srv.get_best_material_substitute("pla")}
+    assert out["list"]["basic"] is True and out["best"]["basic"] is True
+    assert out["list"]["why"] == "unanswered"
+    _assert_kept_local(out, caplog)
+
+
 def test_the_placement_check(monkeypatch, caplog):
     from kiln import _pro_placement_bridge as bridge
     from kiln import served_answer

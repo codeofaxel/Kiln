@@ -199,6 +199,18 @@ class TestTheVoice:
             seen.add(text)
         assert len(seen) == len(_misses())
 
+    @pytest.mark.parametrize("found", [True, False])
+    def test_the_substitution_line(self, found):
+        from kiln import _pro_substitution_bridge as substitution
+
+        seen = set()
+        for miss in _misses():
+            text = substitution.basic_line(miss, "pla", found=found)
+            _lint(text, where=f"substitution/{found}/{miss.cause}")
+            assert "PLA" in text
+            seen.add(text)
+        assert len(seen) == len(_misses())
+
     def test_the_blade_line(self, monkeypatch):
         from kiln import _pro_cutter_bridge as cutter
 

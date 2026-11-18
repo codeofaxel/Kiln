@@ -518,6 +518,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_cost_bridge": ("served_answer", "cost intelligence for a print file's estimate; the estimate itself is the floor"),
     "kiln._pro_melt_bridge": ("served_answer", "a printer's own melt rates for a slice; the material's cautious figure is the floor"),
     "kiln._pro_material_rules_bridge": ("served_answer", "whether a material meets the rules a part must meet; a miss judges no requirement met"),
+    "kiln._pro_substitution_bridge": ("served_answer", "which filaments can stand in for one material, ranked with their trade-offs, free on every plan for a signed-in account and kept nowhere; a miss lists the same family from the bundled catalogue, unranked and with no score, trade-off or price, names no best, and says why in one line"),
     "kiln._pro_fault_bridge": ("served_answer", "what one printer fault code means and how to clear it; a miss keeps the code's family line and says why once"),
     "kiln._pro_ams_bridge": ("served_answer", "the check an AMS dryer START passes before it is sent; a miss sends nothing, and a stop never needs it"),
     "kiln.start_narrative": ("served_answer", "what one Bambu model's print start looks like; a miss keeps the generic line and says why instead of pointing at a sign-in the install already has"),
