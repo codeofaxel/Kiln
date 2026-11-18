@@ -545,23 +545,24 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
         if live and always:
             # Nobody is asked when a queued job is sent, so the plate is
             # looked at here as it is at every other door: seen clear in a
-            # fresh frame, or the job does not go.  (A machine with no
-            # camera has nothing to look through; a plate on record as
-            # occupied is refused by the start itself.)
+            # fresh frame (beside a part on record, holding only that
+            # part), or the job does not go.  A machine with no camera has
+            # nothing to look through.
             from kiln.consent_windows import look_at_bed, settle_copy_bed_check
-            from kiln.plate_state import LOOK_BLIND, LOOK_NEEDED
+            from kiln.plate_state import LOOK_ASKS_THE_PERSON, LOOK_NEEDED
 
             if window.account_grant and not window.bed_check:
                 # A copy of the account's always allow that has not started
                 # a print yet: what it says about the bed is decided now.
                 settle_copy_bed_check(window.id, printer_name)
             look = look_at_bed(printer_name)
-            if look.verdict in (LOOK_NEEDED, LOOK_BLIND):
+            if look.verdict == LOOK_NEEDED or look.verdict in LOOK_ASKS_THE_PERSON:
+                seen = f"holding only {look.beside}" if look.beside else "clear"
+                why = f" ({look.why})" if look.verdict in LOOK_ASKS_THE_PERSON and look.why else ""
                 return (
                     f"not started on {printer_name}: always allow starts a print only after the bed has "
-                    "been seen clear through the camera, and nobody has looked in the last few minutes"
-                    + (f" ({look.why})" if look.verdict == LOOK_BLIND and look.why else "")
-                    + ". Look at the bed (look_at_plate), then queue it again."
+                    f"been seen {seen} through the camera, and nobody has looked in the last few minutes"
+                    f"{why}. Look at the bed (look_at_plate), then queue it again."
                 )
         if not live and always:
             return (

@@ -404,11 +404,12 @@ def look_at_plate(
     describes a part someone took off -- look before you ask a person.
 
     A print held with ``ALWAYS_ALLOW_LOOK_FIRST`` carries a frame the same
-    way: always allow is on for that printer, nobody is being asked, so
-    the bed is looked at first.  Judge that frame here with ``seen`` and
-    start the print again; the picture is kept with the print's record.
-    If you cannot tell, say ``occupied`` -- the person is then the one who
-    says the bed is clear.
+    way: nobody is being asked about it (always allow, or a standing window
+    while the plate record names a part), so the bed is looked at first.  Judge that frame here with ``seen`` and start the print again;
+    the picture is kept with the print's record.  Beside a part on record,
+    ``seen="as_recorded"`` says that part is all that is on the bed.  If
+    you cannot tell, say ``occupied`` -- the person is then the one who
+    decides.
 
     When the PERSON tells you the bed is clear -- typed to you in a chat,
     after a refusal that says a part is on it -- pass their words exactly
@@ -434,7 +435,9 @@ def look_at_plate(
     Args:
         printer_name: Which printer.  Omit for the default one.
         seen: Omit to fetch the picture.  ``"clear"`` or ``"occupied"`` to
-            record what you saw in the picture you were just given.
+            record what you saw in the picture you were just given;
+            ``"as_recorded"`` when the plate record names parts and they
+            are all that is on it.
         person_says: The person's own words that the bed is clear, exactly
             as they typed them.  Not with ``seen``.
 
@@ -491,10 +494,18 @@ def look_at_plate(
             # A host that cannot open files still sees an image.
             return [answer, _picture(found)]
 
-        if seen not in ("clear", "occupied"):
+        if seen not in plate_state.SEEN_VERDICTS:
             return _srv._error_dict(
-                'seen must be "clear" (nothing on the plate) or "occupied" (something is on it).',
+                'seen must be "clear" (nothing on the plate), "occupied" (something is on it), or '
+                '"as_recorded" (only the parts the plate record names).',
                 code="INVALID_INPUT",
+            )
+        before = plate_state.read(adapter)
+        if seen == plate_state.SEEN_AS_RECORDED and not (before.occupied and before.jobs):
+            return _srv._error_dict(
+                'The plate record names no part on this plate, so there is nothing to be "as recorded": '
+                'say seen="clear" if the bed is empty, or seen="occupied" if anything is on it.',
+                code="INVALID_INPUT", extra={"plate": before.to_dict()},
             )
         # An agent is calling this tool, so an agent is what did the looking.
         # A person's own statement has its own doors (`kiln plate clear`,
@@ -502,7 +513,8 @@ def look_at_plate(
         # person_says) and is recorded as theirs.
         status = plate_state.mark_from_camera(adapter, seen=seen, judged_by="agent")
         state = plate_state.read(adapter)
-        if status is None or state.status != seen:
+        written = "occupied" if seen == plate_state.SEEN_AS_RECORDED else seen
+        if status is None or state.status != written:
             return _srv._error_dict(
                 "What you saw could not be recorded against this printer: "
                 + (state.note or "the record did not take."),
@@ -511,10 +523,21 @@ def look_at_plate(
         answer: dict[str, Any] = {"success": True, "printer_name": target_name, "plate": state.to_dict()}
         if seen == "clear" and (up := _next_up(target_name)) is not None:
             answer["next_up"] = up
-        if seen == "occupied":
+        if seen == "occupied" and before.occupied and before.jobs:
+            answer["next"] = (
+                f"No print starts beside {before.parts_named()} without the person: the next start asks them. "
+                "If the person tells you the bed is clear, pass their exact words as person_says; do not "
+                "write them yourself."
+            )
+        elif seen == "occupied":
             answer["next"] = (
                 "A print will not start onto this bed. If the person tells you the bed is clear, pass "
                 "their exact words as person_says; do not write them yourself."
+            )
+        if seen == plate_state.SEEN_AS_RECORDED:
+            answer["next"] = (
+                f"A print planned beside {state.parts_named()} can start now; any other print waits until the "
+                "plate is cleared."
             )
         return answer
     except Exception as exc:

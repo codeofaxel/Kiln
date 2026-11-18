@@ -818,6 +818,131 @@ class TestARetryBesideTheFailedPart:
         if expected is not None:
             assert [(c.source, c.window_id) for c in self.cleared if c] == [expected], self.cleared
 
+    def _standing_yes(self, monkeypatch, yes: str):
+        from kiln import consent_windows
+        from kiln.print_consent import SOURCE_ALWAYS, SOURCE_TERMINAL, SOURCE_WINDOW
+
+        if yes == "window":
+            return SOURCE_WINDOW, consent_windows._open_window(seconds=600, scope=("workshop",), source=SOURCE_TERMINAL)
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
+        monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: True)
+        told_no_camera = self.printer.frame is None
+        window = consent_windows.open_always(printer_name="workshop", typed_name="workshop", told_no_camera=told_no_camera)
+        return SOURCE_ALWAYS, window
+
+    def _print_beside(self, door: str, model: str, token: str):
+        """One call of *door*, placing *model* beside the failed part, in a
+        context of its own as every MCP call is; returns ``(result, context)``."""
+        import contextvars
+
+        from kiln.plugins import slicer_tools
+        from tests.test_watchdog_attached_to_every_print import _plugin_tools
+
+        ctx = contextvars.copy_context()
+        if door == "retry":
+            return ctx.run(lambda: self._retry(model, placement=[200, 20], preview_token=token)), ctx
+        sap = _plugin_tools(slicer_tools)["slice_and_print"]
+        out = ctx.run(lambda: sap(
+            input_path=model, printer_name="workshop", placement=[200, 20], skip_validation=True, preview_token=token,
+        ))
+        return out, ctx
+
+    @staticmethod
+    def _bed_line(ctx) -> str:
+        from kiln import consent_window_note
+
+        block = ctx.run(lambda: consent_window_note.for_outcome(
+            consent_window_note.note_for("workshop"), consent_window_note.STARTED, "workshop",
+        ))
+        return str((block.get("bed_check") or {}).get("note") or "")
+
+    @pytest.mark.parametrize("door", ["retry", "slice_and_print"])
+    @pytest.mark.parametrize("yes", ["window", "always_allow"])
+    def test_the_bed_is_looked_at_before_a_print_beside_the_failed_part(self, monkeypatch, tmp_path, yes, door):
+        """Nobody is asked, the printer has a camera and the failed part is on
+        the plate: the print is held with a fresh frame of the bed, and starts
+        beside the part, still unasked, once eyes say that part is all there is."""
+        import contextvars
+
+        from kiln.plugins import homing_tools
+        from tests.test_always_allow_on_one_printer import _FRAME
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self.printer.frame = _FRAME
+        source, window = self._standing_yes(monkeypatch, yes)
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        token = self._token(model)
+
+        held, _ = self._print_beside(door, model, token)
+        assert self.printer.started == [], held
+        assert held["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST", held
+        assert self.printer.frames_fetched >= 1
+        assert pathlib.Path(held["snapshot_path"]).read_bytes() == _FRAME
+        assert "jar v2 is still on the plate" in held["error"]["message"]
+        assert 'seen="as_recorded"' in held["error"]["message"]
+
+        judged = contextvars.copy_context().run(
+            lambda: homing_tools.look_at_plate(printer_name="workshop", seen="as_recorded"),
+        )
+        assert judged.get("success") is True, judged
+
+        out, ctx = self._print_beside(door, model, token)
+        assert out.get("success") is True, out
+        assert self.printer.started == ["bracket_placed.gcode.3mf"]
+        assert [(c.source, c.window_id) for c in self.cleared if c][-1:] == [(source, window.id)]
+        assert "only jar v2 was on it" in self._bed_line(ctx)
+
+    @pytest.mark.parametrize("yes", ["window", "always_allow"])
+    def test_a_bed_seen_with_more_on_it_asks_the_person_once(self, monkeypatch, tmp_path, yes):
+        """Eyes saw more than the failed part, or could not tell: nothing
+        starts unasked, the person is told why they are asked, and their yes
+        prints it beside the part with one question."""
+        import contextvars
+
+        from kiln.plugins import homing_tools
+        from tests.test_always_allow_on_one_printer import _FRAME
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self.printer.frame = _FRAME
+        self._standing_yes(monkeypatch, yes)
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        token = self._token(model)
+        held, _ = self._print_beside("retry", model, token)
+        assert held["error"]["code"] == "ALWAYS_ALLOW_LOOK_FIRST", held
+        contextvars.copy_context().run(lambda: homing_tools.look_at_plate(printer_name="workshop", seen="occupied"))
+
+        refused, _ = self._print_beside("retry", model, token)
+        assert self.printer.started == [], refused
+        assert refused["error"]["code"] == "PREVIEW_NOT_CONFIRMED", refused
+        assert "besides jar v2" in refused["error"]["message"]
+
+        out = contextvars.copy_context().run(lambda: self._asked_then(
+            monkeypatch, model, lambda: self._retry(model, placement=[200, 20], preview_token=token),
+        ))
+        assert out.get("success") is True, out
+        assert len(self.asked) == 1 and "besides jar v2" in self.asked[0]
+        assert self.printer.started == ["bracket_placed.gcode.3mf"]
+
+    @pytest.mark.parametrize("yes", ["window", "always_allow"])
+    def test_a_printer_with_no_camera_prints_beside_the_failed_part_and_says_so(self, monkeypatch, tmp_path, yes):
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._standing_yes(monkeypatch, yes)
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        out, ctx = self._print_beside("retry", model, self._token(model))
+        assert out.get("success") is True, out
+        assert self.printer.started == ["bracket_placed.gcode.3mf"]
+        assert self._bed_line(ctx) == "This printer has no camera Kiln can use, so the bed was not checked first."
+
     def test_a_rescaled_mesh_is_another_part_asked_about_once_on_the_file_named(self, monkeypatch, tmp_path):
         """The pre-print check rescales a part drawn in metres: what would
         print is not what the person was shown.  Refused in plain words with
@@ -891,10 +1016,20 @@ class _BesideBench(_Bench):
         self.homed = {"x", "y", "z"}
         self.uploaded: list[str] = []
         self.impl_calls: list[tuple[str, dict]] = []
+        self.frame: bytes | None = None
+        self.frames_fetched = 0
 
     @property
     def name(self) -> str:
         return "bambu"
+
+    @property
+    def snapshot_source(self):
+        return "printer" if self.frame is not None else None
+
+    def get_snapshot(self) -> bytes:
+        self.frames_fetched += 1
+        return self.frame or b""
 
     def homed_axes_now(self):
         return set(self.homed)

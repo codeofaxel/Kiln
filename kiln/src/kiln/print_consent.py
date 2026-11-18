@@ -852,23 +852,31 @@ def consent_for(
         window = None
     if window is None:
         return None
-    if window.always:
-        # Nobody is being asked, so the plate is looked at.  A camera that
-        # gives nothing usable cannot vouch for the plate: always allow is
-        # not used for this print.  A window with an end that covers the
-        # printer is still the person's yes for that while -- it never
-        # rested on a look -- and with none, they are asked the ordinary
-        # way.  (A frame not yet judged does not withdraw the yes -- the
-        # gate holds the start until eyes have judged it.)
-        from kiln.plate_state import LOOK_BLIND
+    from kiln.plate_state import LOOK_ASKS_THE_PERSON
 
-        if unasked_look(aimed_at or printer_name).verdict == LOOK_BLIND:
-            try:
-                window = consent_windows.covering(aimed_at or printer_name, for_a_start=True, timed_only=True)
-            except Exception:  # noqa: BLE001 — an unreadable store is no window
-                window = None
-            if window is None:
-                return None
+    target = aimed_at or printer_name
+    # Nobody is being asked, so under always allow the plate is looked at.
+    # A look no eyes vouch for (a camera that gives nothing usable, a bed
+    # seen holding more than the record names) is no yes from always allow
+    # for this print; a window with an end may still cover it, below, and
+    # with none the person is asked the ordinary way.  (A frame not yet
+    # judged does not withdraw the yes -- the gate holds the start until
+    # eyes have judged it.)
+    if window.always and unasked_look(target).verdict in LOOK_ASKS_THE_PERSON:
+        try:
+            window = consent_windows.covering(target, for_a_start=True, timed_only=True)
+        except Exception:  # noqa: BLE001 — an unreadable store is no window
+            window = None
+        if window is None:
+            return None
+    # A window with an end never rested on a look, except for a start
+    # beside a part still on the plate: that bed is looked at first.
+    if (
+        not window.always
+        and consent_windows.plate_holds_a_part(target)
+        and unasked_look(target).verdict in LOOK_ASKS_THE_PERSON
+    ):
+        return None
     if window.always:
         # Always allow is for a machine, and ``covering`` has just matched
         # the machine this print is aimed at.  The consent is therefore

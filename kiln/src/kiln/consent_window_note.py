@@ -86,14 +86,20 @@ def for_outcome(block: dict[str, Any], outcome: str, printer_name: str | None) -
     """An always-allow block, worded for what the call did: the line says
     the print was started (or queued) without asking, and the block
     carries what the bed was known to be — the look taken for this call,
-    with its picture.  Any other block, and a call that started nothing,
-    comes back as it was."""
-    if not (outcome and block.get("always") and block.get("opened")):
+    with its picture.  A window's block carries the same when a look was
+    taken (a start beside a part on the plate).  Any other block, and a
+    call that started nothing, comes back as it was."""
+    if not (outcome and block.get("opened")):
         return block
     from kiln.print_consent import unasked_look_noted
 
-    worded = {**block, "note": always_line(block["printer"], outcome)}
     look = unasked_look_noted(printer_name)
+    if not block.get("always"):
+        # A window looks only for a start beside a part still on the plate.
+        if look is None:
+            return block
+        return {**block, "bed_check": {**look.evidence(), "note": bed_check_line(look.evidence())}}
+    worded = {**block, "note": always_line(block["printer"], outcome)}
     if look is not None:
         worded["bed_check"] = {**look.evidence(), "note": bed_check_line(look.evidence())}
     return worded
@@ -128,6 +134,31 @@ def could_not_see_line(printer: str, why: str) -> str:
     )
 
 
+def unvouched_bed(look: Any) -> str:
+    """The clause for a look no eyes vouched for
+    (:data:`kiln.plate_state.LOOK_ASKS_THE_PERSON`): the camera showed
+    nothing usable, or the bed was seen holding more than the record names."""
+    from kiln.plate_state import LOOK_BLIND
+
+    if look.verdict == LOOK_BLIND:
+        reason = f" ({look.why})" if look.why else ""
+        seen = f"Kiln could not see the bed through the camera{reason}"
+        return f"{look.beside} is still on the plate and {seen}" if look.beside else seen
+    return look.why or "the bed was seen with something more on it than Kiln has on record"
+
+
+def asking_anyway_line(printer: str, look: Any, *, always: bool) -> str:
+    """What a person is told when always allow (or a standing window, for a
+    start beside a part) covers the printer and they are asked anyway,
+    because no eyes vouched for the bed."""
+    from kiln.plate_state import LOOK_BLIND
+
+    if always and look.verdict == LOOK_BLIND and not look.beside:
+        return could_not_see_line(printer, look.why)
+    lead = f"Always allow is on for {printer}" if always else f"A standing window is open for {printer}"
+    return f"{lead}, but {unvouched_bed(look)}, so it is asking you this time."
+
+
 def bed_check_line(evidence: dict[str, Any] | None) -> str:
     """One sentence on what the bed was known to be for a print nobody
     was asked about; ``""`` when nothing is known."""
@@ -139,7 +170,8 @@ def bed_check_line(evidence: dict[str, Any] | None) -> str:
         return "Before it started, you said the bed was clear."
     if evidence.get("checked"):
         who = "you" if evidence.get("judged_by") == "human" else "your assistant"
-        return f"Before it started, {who} checked the bed through the camera. The picture: {evidence.get('frame')}"
+        beside = f": only {evidence['beside']} was on it" if evidence.get("beside") else ""
+        return f"Before it started, {who} checked the bed through the camera{beside}. The picture: {evidence.get('frame')}"
     if evidence.get("camera") is None:
         return "This printer has no camera Kiln can use, so the bed was not checked first."
     return ""

@@ -693,6 +693,33 @@ def machine_under(printer_name: str | None) -> str:
         return ""
 
 
+def plate_holds_a_part(printer_name: str | None) -> bool:
+    """Whether the plate record of the machine under *printer_name* names a
+    part on it: a start there is a start beside it, and a standing window
+    then looks at the bed first too.  Never raises."""
+    from kiln import plate_state
+
+    try:
+        import kiln.server as _srv
+
+        state = plate_state.read(_srv._resolve_adapter(str(printer_name or "").strip()))
+        return state.occupied and bool(state.jobs)
+    except Exception:  # noqa: BLE001 -- no machine, no record
+        return False
+
+
+def looks_before_an_unasked_start(printer_name: str | None) -> bool:
+    """Whether a print on *printer_name* that nobody is asked about is
+    looked at first: always allow covers it, or a standing window does and
+    the plate holds a part.  Never raises."""
+    try:
+        if always_for(printer_name) is not None:
+            return True
+        return covering(printer_name, for_a_start=True) is not None and plate_holds_a_part(printer_name)
+    except Exception:  # noqa: BLE001 -- an unreadable store is no window
+        return False
+
+
 def look_at_bed(printer_name: str | None) -> Any:
     """The plate of the machine under *printer_name*, for a start nobody
     is being asked about (:func:`kiln.plate_state.look_for_unasked_start`)
