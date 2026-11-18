@@ -93,15 +93,22 @@ def _check_wall_thickness(
     required_mm: float,
     *,
     material_name: str = "",
+    floor_mm: float | None = None,
 ) -> DesignValidationCheck:
-    """Check wall thickness against the design brief minimum."""
+    """Check wall thickness against the required wall.
+
+    *floor_mm* is the thinnest wall the plastic closes at all: below it the
+    check is critical.  Between it and *required_mm* (the recommended wall,
+    or the brief's own minimum) it is a warning.  With no floor given, a wall
+    under half the required one is critical."""
     passed = min_wall_mm >= required_mm
     material_clause = f" for {material_name}" if material_name else ""
+    critical_below = floor_mm if floor_mm is not None else required_mm * 0.5
 
     if passed:
         severity = "info"
         fix = ""
-    elif min_wall_mm < required_mm * 0.5:
+    elif min_wall_mm < critical_below:
         severity = "critical"
         fix = (
             f"Increase wall thickness to at least {required_mm:.1f} mm"
@@ -374,6 +381,13 @@ def validate_design(
         # One plastic's limits, from the one helper every check reads.
         plastic_limits = limits_for(resolved_material_id)
         material_limits = plastic_limits.design_limits()
+        # The wall check warns below the recommended wall: the plastic's own
+        # where it was read, the general three-line wall otherwise.
+        from kiln.material_limits import WALL_RECOMMENDED
+
+        recommended = plastic_limits.value(WALL_RECOMMENDED)
+        if recommended:
+            material_limits.setdefault("recommended_wall_thickness_mm", float(recommended))
         limits_notes = plastic_limits.notes()
 
     # 4. Run checks.
@@ -383,11 +397,19 @@ def validate_design(
     # The printability engine returns nozzle_diameter as min_wall when
     # no thin walls exist, which would be a false positive.
     min_wall_required = _resolve_wall_thickness(rules, material_limits)
+    wall_floor = _wall_floor(rules, material_limits)
+    brief_wall = rules.get("min_wall_thickness_mm")
+    if isinstance(brief_wall, (int, float)):
+        # A wall under half the brief's own minimum stays critical, as the
+        # material floor is.
+        wall_floor = max(wall_floor or 0.0, 0.5 * float(brief_wall))
     thin_wall_count = thin_walls.get("thin_wall_count", 0)
     if min_wall_required is not None and thin_wall_count > 0:
         actual_min_wall = thin_walls.get("min_wall_thickness_mm", float("inf"))
         checks.append(
-            _check_wall_thickness(actual_min_wall, min_wall_required, material_name=material_name)
+            _check_wall_thickness(
+                actual_min_wall, min_wall_required, material_name=material_name, floor_mm=wall_floor,
+            )
         )
     elif min_wall_required is not None:
         # No thin walls detected — pass the check with a reasonable value.
@@ -560,22 +582,37 @@ def _resolve_wall_thickness(
     rules: dict[str, Any],
     material_limits: dict[str, Any],
 ) -> float | None:
-    """Resolve the effective minimum wall thickness.
+    """Resolve the wall the design should have.
 
-    Takes the stricter (larger) of the brief's combined rule and the
-    material's own design limit.
+    The stricter (larger) of the brief's combined rule, the material's
+    recommended wall and the thinnest wall the material closes at all.
     """
-    brief_wall = rules.get("min_wall_thickness_mm")
-    material_wall = material_limits.get("min_wall_thickness_mm")
-    material_wall_from_rules = rules.get("material_min_wall_thickness_mm")
-
     candidates = [
-        v for v in (brief_wall, material_wall, material_wall_from_rules) if v is not None
+        v
+        for v in (
+            rules.get("min_wall_thickness_mm"),
+            material_limits.get("recommended_wall_thickness_mm"),
+            rules.get("material_recommended_wall_thickness_mm"),
+            _wall_floor(rules, material_limits),
+        )
+        if v is not None
     ]
     if not candidates:
         return None
 
     return max(candidates)
+
+
+def _wall_floor(rules: dict[str, Any], material_limits: dict[str, Any]) -> float | None:
+    """The thinnest wall the material closes at all (a static-safe grade's
+    own electrical minimum where it has one): below it the check is
+    critical.  ``None`` when the material carries none."""
+    candidates = [
+        v
+        for v in (material_limits.get("min_wall_thickness_mm"), rules.get("material_min_wall_thickness_mm"))
+        if v is not None
+    ]
+    return max(candidates) if candidates else None
 
 
 def _build_summary(
