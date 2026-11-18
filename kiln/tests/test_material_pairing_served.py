@@ -168,6 +168,50 @@ class TestABasicAnswer:
             assert grade not in json.dumps(out), grade
 
 
+class TestANameTooLong:
+    """A material name longer than the check reads is refused before anything
+    is asked, and no reply repeats any of it."""
+
+    _LONG = "q" * 60 + "zzmrk"
+
+    @pytest.mark.parametrize("names", [(_LONG, "pla"), ("pla", _LONG)])
+    def test_the_door_refuses_in_plain_words_and_asks_nothing(self, monkeypatch, names):
+        from kiln import _pro_material_pairing_bridge as bridge
+
+        asks = _served(monkeypatch, _answer())
+        monkeypatch.setattr(bridge, "_local_co_print", lambda a, b: pytest.fail("asked kiln-pro"))
+        out = _door()(*names)
+        assert asks == []
+        assert out == {"success": False, "code": "INVALID_INPUT",
+                       "error": f"A material name is at most {bridge.MAX_MATERIAL_CHARS} characters."}
+
+    def test_the_bridge_refuses_before_asking(self, monkeypatch):
+        from kiln import _pro_material_pairing_bridge as bridge
+
+        asks = _served(monkeypatch, _answer())
+        monkeypatch.setattr(bridge, "_local_co_print", lambda a, b: pytest.fail("asked kiln-pro"))
+        answer, miss = bridge.co_print("pla", self._LONG)
+        assert answer is None and asks == []
+        assert (miss.cause, miss.code) == ("refused", "INVALID_INPUT")
+        assert "zzmrk" not in miss.detail and "qqq" not in miss.detail
+
+    def test_the_pairing_function_refuses_without_repeating_the_name(self, monkeypatch):
+        asks = _served(monkeypatch, _answer())
+        with pytest.raises(ValueError) as caught:
+            di.check_multi_material_compatibility(self._LONG, "pla")
+        assert asks == [] and "zzmrk" not in str(caught.value)
+
+    def test_a_name_at_the_limit_is_still_asked(self, monkeypatch):
+        from kiln import _pro_material_pairing_bridge as bridge
+
+        name = "p" * bridge.MAX_MATERIAL_CHARS
+        asks = _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                            material_a=name, notes="No compatibility data."))
+        out = _door()(name, "pla")
+        assert [ask["material_a"] for ask in asks] == [name]
+        assert out["success"] is True
+
+
 def test_the_pairing_table_is_not_in_this_package():
     assert not (_SRC / "data" / "design_knowledge" / "multi_material_pairing.json").exists()
     assert not hasattr(di._DesignKnowledgeBase, "multi_material")

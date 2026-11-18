@@ -47,16 +47,35 @@ MIX_LOCAL_MODULE = "kiln_pro.material_pairing.compat"
 FOUND = ("pair", "support", "none")
 #: The keys a multi-material answer carries.
 _ENTRY_KEYS = ("names", "pairs", "hardware")
+#: The longest material name the pairing check reads.
+MAX_MATERIAL_CHARS = 64
 
 #: ``_local_co_print``'s answer when kiln-pro is not on this computer.
 _NOT_HERE = object()
+
+
+def name_problem(material_a: Any, material_b: Any) -> str | None:
+    """Why the pairing check cannot read these two names, or ``None``.
+
+    Each must be text of at most :data:`MAX_MATERIAL_CHARS` characters.  The
+    sentence says what a name must be and repeats nothing that was sent.
+    """
+    if not isinstance(material_a, str) or not isinstance(material_b, str):
+        return "Both materials must be given as names."
+    if len(material_a) > MAX_MATERIAL_CHARS or len(material_b) > MAX_MATERIAL_CHARS:
+        return f"A material name is at most {MAX_MATERIAL_CHARS} characters."
+    return None
 
 
 def co_print(material_a: str, material_b: str) -> tuple[dict[str, Any] | None, Miss | None]:
     """``(answer, None)`` for the pair, or ``(None, miss)`` when no answer
     came.  The answer carries ``found``, ``compatible``,
     ``interface_adhesion``, ``notes``, ``support_pair`` and
-    ``general_rules``.  Never raises."""
+    ``general_rules``.  Names the check cannot read (:func:`name_problem`)
+    are refused here, before anything is asked.  Never raises."""
+    problem = name_problem(material_a, material_b)
+    if problem is not None:
+        return None, Miss("refused", code="INVALID_INPUT", detail=problem)
     local = _local_co_print(material_a, material_b)
     if local is not _NOT_HERE:
         return local  # type: ignore[return-value]
@@ -185,4 +204,14 @@ def _is_answer(answer: Any) -> bool:
     )
 
 
-__all__ = ["FOUND", "LOCAL_MODULE", "MIX_LOCAL_MODULE", "MIX_TOOL", "WIRE_TOOL", "co_print", "mix_check"]
+__all__ = [
+    "FOUND",
+    "LOCAL_MODULE",
+    "MAX_MATERIAL_CHARS",
+    "MIX_LOCAL_MODULE",
+    "MIX_TOOL",
+    "WIRE_TOOL",
+    "co_print",
+    "mix_check",
+    "name_problem",
+]

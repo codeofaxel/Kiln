@@ -3492,9 +3492,15 @@ def check_multi_material_compatibility(
 
     :param material_a: First material (e.g. ``"pla"``).
     :param material_b: Second material (e.g. ``"tpu"``).
+    :raises ValueError: when a name is not text or is longer than
+        :data:`kiln._pro_material_pairing_bridge.MAX_MATERIAL_CHARS`; the
+        message repeats nothing that was sent.
     """
     from kiln import _pro_material_pairing_bridge as pairing
 
+    problem = pairing.name_problem(material_a, material_b)
+    if problem is not None:
+        raise ValueError(problem)
     answer, miss = pairing.co_print(material_a, material_b)
     if answer is None:
         return _basic_pairing_report(material_a, material_b, miss)
