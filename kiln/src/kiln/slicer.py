@@ -185,6 +185,13 @@ REFUSED_PATHS_COLLIDE = "paths_collide"
 REFUSED_NOZZLE_REACH = "nozzle_cannot_reach"
 
 
+class SliceTimeLimitError(SlicerError):
+    """The slicer ran past the time limit and was stopped; nothing was
+    sliced.  ``code`` is the door's error code."""
+
+    code = "SLICE_TOOK_TOO_LONG"
+
+
 class NozzleMapError(SlicerError):
     """A slice for more than one nozzle that cannot be run as asked: the
     filament-to-nozzle map does not fit the print or the printer, or the
@@ -1314,9 +1321,9 @@ def _run_slicer_with_startup_retry(
             )
         except subprocess.TimeoutExpired:
             remove_partial_output()
-            raise SlicerError(
-                f"Slicing timed out after {timeout}s. The model may be too complex "
-                f"or the slicer is hanging."
+            raise SliceTimeLimitError(
+                f"The slicer took too long: it was stopped after {timeout} seconds and nothing was "
+                f"sliced. Slice again with a longer time limit, or a simpler plate."
             ) from None
         except OSError as exc:
             raise SlicerError(f"Failed to run slicer: {exc}") from exc
@@ -1628,7 +1635,10 @@ def slice_file(input_path: str, **kwargs: Any) -> SliceResult:
     """
     try:
         return _slice_file(input_path, **kwargs)
-    except (SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal, ProjectPlateError, NozzleMapError):
+    except (
+        SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal, ProjectPlateError, NozzleMapError,
+        SliceTimeLimitError,
+    ):
         # A refusal is about where the print lands, never its unit, and a
         # door answers it by its kind: rewrapped, it would lose both.
         raise

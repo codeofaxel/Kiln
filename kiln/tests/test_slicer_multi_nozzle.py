@@ -920,3 +920,66 @@ class TestTheEstimateTimesEachKindOfChange:
     def test_a_map_that_does_not_fit_is_refused(self, row):
         with pytest.raises(ValueError, match="one nozzle number for each filament"):
             self._estimate(filament_map=[1, 2, 2])
+
+
+# ---------------------------------------------------------------------------
+# A slicer that runs past its time limit
+# ---------------------------------------------------------------------------
+
+
+class TestASlicerThatRunsTooLong:
+    @pytest.fixture
+    def slow_slicer(self, tmp_path):
+        """A stand-in slicer that records its process id and then waits far
+        longer than any test allows."""
+        script = tmp_path / "bin" / "BambuStudio"
+        script.parent.mkdir()
+        pid_file = tmp_path / "slicer.pid"
+        script.write_text(f'#!/bin/sh\necho $$ > "{pid_file}"\nexec sleep 60\n')
+        script.chmod(0o755)
+        return SlicerInfo(path=str(script), name="bambustudio"), pid_file
+
+    def _gone(self, pid_file: Path) -> bool:
+        import os
+
+        try:
+            os.kill(int(pid_file.read_text()), 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+    def test_slice_model_stops_it_at_the_limit_and_says_so(self, tmp_path, slow_slicer):
+        import time
+
+        info, pid_file = slow_slicer
+        started = time.monotonic()
+        with (
+            patch("kiln.server._check_auth", return_value=None),
+            patch("kiln.slicer.find_slicer", return_value=info),
+        ):
+            reply = _slice_model_tool()(
+                input_path=_plate(tmp_path, filaments=1), output_dir=str(tmp_path / "out"), printer_id=None,
+                profile=_profile(tmp_path, None), time_limit_seconds=1,
+            )
+        assert time.monotonic() - started < 30
+        assert reply["success"] is False
+        assert reply["error"]["code"] == "SLICE_TOOK_TOO_LONG"
+        assert reply["error"]["retryable"] is False
+        assert "took too long" in reply["error"]["message"]
+        assert self._gone(pid_file)
+        assert list((tmp_path / "out").glob("*.gcode")) == []
+
+    @pytest.mark.parametrize("limit", [0, -5, True, 2.5])
+    def test_a_limit_that_is_not_whole_seconds_is_refused(self, tmp_path, limit):
+        with patch("kiln.server._check_auth", return_value=None), patch("kiln.slicer.find_slicer", side_effect=AssertionError):
+            reply = _slice_model_tool()(input_path=_plate(tmp_path, filaments=1), printer_id=None, time_limit_seconds=limit)
+        assert reply["success"] is False and reply["error"]["code"] == "INVALID_INPUT"
+
+    def test_slice_file_raises_its_own_refusal(self, tmp_path, slow_slicer):
+        from kiln.slicer import SliceTimeLimitError
+
+        info, _pid_file = slow_slicer
+        with patch("kiln.slicer.find_slicer", return_value=info), pytest.raises(SliceTimeLimitError) as refused:
+            slice_file(_plate(tmp_path, filaments=1), output_dir=str(tmp_path / "out"),
+                       profile=_profile(tmp_path, None), timeout=1)
+        assert refused.value.code == "SLICE_TOOK_TOO_LONG"

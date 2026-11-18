@@ -3070,10 +3070,15 @@ class _SlicerToolsPlugin:
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
             filament_map: list[int] | None = None,
+            time_limit_seconds: int | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
             Args:
+                time_limit_seconds: How long the slicer may run, in whole
+                    seconds.  Leave unset for Kiln's own limit.  A slicer
+                    still running at the limit is stopped and the slice is
+                    refused (``SLICE_TOOK_TOO_LONG``); nothing is sliced.
                 filament_map: Only for a printer with more than one nozzle:
                     the nozzle (1 for the first) each filament prints from,
                     one number per filament in filament order (``[2, 1]``
@@ -3156,6 +3161,14 @@ class _SlicerToolsPlugin:
                 return err
             if err := _srv._refuse_unknown_printer(printer_name, "slice for"):
                 return err
+            if time_limit_seconds is not None and (
+                isinstance(time_limit_seconds, bool) or not isinstance(time_limit_seconds, int) or time_limit_seconds < 1
+            ):
+                return _srv._error_dict(
+                    "time_limit_seconds is how long the slicer may run, in whole seconds of 1 or more. "
+                    "Give one, or leave it out for Kiln's own limit.",
+                    code="INVALID_INPUT",
+                )
 
             try:
                 from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError
@@ -3183,6 +3196,7 @@ class _SlicerToolsPlugin:
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
                     **({"filament_map": filament_map} if filament_map else {}),
+                    **({"timeout": time_limit_seconds} if time_limit_seconds is not None else {}),
                 )
                 if slice_err is not None:
                     return slice_err
