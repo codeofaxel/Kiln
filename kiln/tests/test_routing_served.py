@@ -487,6 +487,24 @@ class TestOverLongInput:
             reply = doors["recommend_material"](intent="a shelf bracket")
         assert reply["basic"] is True and reply["why"] == "refused"
 
+    def test_an_over_long_printer_name_is_refused_and_never_said_back(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id="p" * 100_000)
+        assert sent == [], "a request with an over-long printer name was sent to Kiln's servers"
+        assert reply["success"] is False and reply["error"]["code"] == "VALIDATION_ERROR"
+        assert reply["error"]["message"] == "Invalid printer_id: name a registered printer in at most 200 characters."
+        assert len(json.dumps(reply)) < 1_000
+
+    def test_a_printer_name_that_is_not_text_is_refused(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id=["x1c"])
+        assert sent == [] and reply["error"]["code"] == "VALIDATION_ERROR"
+
+    def test_a_printer_name_at_the_limit_is_answered_for(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id="p" * 200)
+        assert len(_picks(sent)) == 1 and reply["answered_for_printer"] == "p" * 200
+
     def test_an_intent_at_the_limit_is_asked(self, doors):
         with plain_install_served(served_pick()) as sent:
             reply = doors["recommend_material"](intent="x" * 10_000)
@@ -587,14 +605,39 @@ def test_a_basic_reply_carries_no_catalogue_figure(doors, intent):
 # ---------------------------------------------------------------------------
 
 
+#: The recommender's table and scoring names, by digest (tests/_moved_away.py).
+_RECOMMENDER_NAMES = frozenset({
+    "921a09ea08de9920f8bb1c513648333dff25ba0cea988a43fd7b4e44f17b5741",
+    "05b73ca5b7e998a8e31e7fa2c2f10f66a89c805aeeda76a159bf44289863bc1a",
+    "852ec86ecfa45ec13026b90cda723740826b665cafad0393a2264abfac8e3f2e",
+    "6148056da6a94a523efde903ecd64cc4131bebbc654ead166a0af9735d11f880",
+    "1f040a2fe112e9b544ed253caa2a64aa329fe0370ebef9a5734e640181fbe6fd",
+    "cc01db682fc86f8ae3994ccb023b3b84417fe1b59f525db30006eddfec217485",
+    "06a7651c5e78da178ae6c2978276b7dc2c5dd32135bffcecda997ee1e04813e6",
+    "74e26aedfdc69ffc0f94fd2828f53ddba8d171095d6864618475ec0a89549f2c",
+    "8a01335438f258d2d5358620eef11ddbcb654001c052a2be2108b54e4a2ca389",
+    "b742816c74c8ad1eb5249491df8f0dde127e15db070c0449284fcca0fb3716aa",
+    "e4d33e17261ad0520d4424c01fde02ae0a1a51d129fed48a7525dc7131073ceb",
+    "4ea02db8a1c1d41af7920ba068ed9e182ef1b2235347e4a6f02a96d2b7bd18d5",
+    "cd9ccfa02b09cf5d5780497d124eb451f08dcf21caa21aeb0fadc097d1b55632",
+    "983ff2a5bd16e93640ec3000571ce232c92b29bb1281e4396ea3a65055ddf3c7",
+})
+#: The table and its scoring gap, named anywhere in the package's source.
+_RECOMMENDER_WORDS = frozenset({
+    "05b73ca5b7e998a8e31e7fa2c2f10f66a89c805aeeda76a159bf44289863bc1a",
+    "b742816c74c8ad1eb5249491df8f0dde127e15db070c0449284fcca0fb3716aa",
+})
+#: A material's per-material score field, as a name in code (a field or a
+#: keyword); the same word as a dict key elsewhere is not the table.
+_RECOMMENDER_FIELDS = frozenset({
+    "563de2f8b494f9c75b8c81bb722588ba7f3b6602fc5d01a4ceae1ec7f1650189",
+})
+
+
 def test_the_table_and_its_scoring_are_not_in_the_public_package():
     import kiln.material_routing as routing
+    from tests._moved_away import attributes_back, names_back, tokens_back
 
-    gone = ("_MATERIALS", "_INTENT_MAP", "_DEFAULT_WEIGHTS", "_score_material", "parse_intent",
-            "describe_material_pick", "describe_better_option", "_CATALOG_ALIASES", "_catalog_match",
-            "_POOR_FIT_SCORE_GAP", "MaterialProperties", "IntentMapping", "list_materials", "get_material")
-    assert not [name for name in gone if hasattr(routing, name)]
-    for path in _SRC.rglob("*.py"):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        assert "_INTENT_MAP" not in text and "_POOR_FIT_SCORE_GAP" not in text, path
-        assert not re.search(r"ease_of_print\s*=", text), path
+    assert attributes_back(routing, _RECOMMENDER_NAMES) == []
+    assert tokens_back(_RECOMMENDER_WORDS, _SRC) == []
+    assert names_back(_RECOMMENDER_FIELDS, _SRC) == []

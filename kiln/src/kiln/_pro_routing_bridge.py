@@ -48,6 +48,9 @@ MAX_INTENT_CHARS = 10_000
 #: The most on-hand material names one ask carries, and how much of each.
 MAX_NAMES = 500
 MAX_NAME_CHARS = 120
+#: The longest printer name a recommendation is asked for; the answer
+#: names the printer it was for.
+MAX_PRINTER_ID_CHARS = 200
 
 #: ``_local``'s answer when kiln-pro is not on this computer.
 _NOT_HERE = object()
@@ -59,6 +62,7 @@ __all__ = [
     "MAX_INTENT_CHARS",
     "MAX_NAMES",
     "MAX_NAME_CHARS",
+    "MAX_PRINTER_ID_CHARS",
     "SIGN_IN_NAME",
     "WIRE_TOOL",
     "catalogue",
@@ -81,14 +85,20 @@ def input_refusal(miss: Miss | None) -> str | None:
     return None
 
 
-def refusal_for(intent: Any) -> str | None:
+def refusal_for(intent: Any, printer_id: Any = "") -> str | None:
     """Why the door refuses this request before asking, or ``None``: a
     description of the part that is not text, or longer than
-    :data:`MAX_INTENT_CHARS` characters."""
+    :data:`MAX_INTENT_CHARS` characters; a printer named by something other
+    than text, or by more than :data:`MAX_PRINTER_ID_CHARS` characters (the
+    answer names the printer it was for)."""
     if not isinstance(intent, str):
         return "Invalid intent: say what the part is for, as text."
     if len(intent) > MAX_INTENT_CHARS:
         return f"Invalid intent: say what the part is for in at most {MAX_INTENT_CHARS:,} characters."
+    if printer_id is not None and not isinstance(printer_id, str):
+        return "Invalid printer_id: name a registered printer, as text."
+    if printer_id and len(printer_id) > MAX_PRINTER_ID_CHARS:
+        return f"Invalid printer_id: name a registered printer in at most {MAX_PRINTER_ID_CHARS:,} characters."
     return None
 
 

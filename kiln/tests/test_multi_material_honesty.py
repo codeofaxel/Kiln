@@ -610,6 +610,71 @@ class TestPrintingDoorsSayTheComposersSafety:
         reslice.assert_not_called()
         self._assert_said(result)
 
+    def test_multi_material_print_prints_the_plate_it_showed_and_says_it_again(self, tmp_path, monkeypatch):
+        """The two documented calls through the real preview gate: the first
+        builds the plate and hands it back, a real token is issued on that
+        plate, and the second call prints it and says what the first said."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        objects = json.dumps([
+            {"file_path": stl, "material_id": "PETG-CF", "color": "#ff0000"},
+            {"file_path": stl, "material_id": "PETG", "color": "#00ff00"},
+        ])
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print", return_value={"success": True}) as reslice:
+            shown = server.multi_material_print(objects_json=objects)
+            assert shown["error"]["code"] == "PREVIEW_NOT_CONFIRMED", shown
+            reslice.assert_not_called()
+            token = get_preview_gate().issue(shown["plate_path"]).token
+            printed = server.multi_material_print(objects_json=objects, preview_token=token)
+
+        assert printed["success"] is True, printed
+        reslice.assert_called_once()
+        assert reslice.call_args.kwargs["model_path"] == shown["plate_path"]
+        self._assert_said(printed)
+        assert printed["hardware_warnings"] == shown["hardware_warnings"]
+        assert printed["safety_caution"] == shown["safety_caution"]
+        spots = {(o["x_mm"], o["y_mm"]) for o in printed["objects"]}
+        assert len(spots) == 2, printed["objects"]
+
+    def test_multi_color_copies_prints_with_a_real_token_and_says_it(self, tmp_path, monkeypatch):
+        """multi_color_copies takes its token on the model it copies: the call
+        carrying it and the person's yes prints the plate and says the
+        hardware the plastic needs."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+        from kiln.print_consent import PrintConsent, reset_consent, set_consent
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        kwargs = dict(
+            model_path=stl, copies=2, ams_slots=[0, 1], material="PETG-CF",
+            colors=["#ff0000", "#00ff00"], printer_id="bambu_a1",
+        )
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print", return_value={"success": True}) as reslice:
+            refused = server.multi_color_copies(**kwargs)
+            assert refused["error"]["code"] == "PREVIEW_NOT_CONFIRMED", refused
+            reslice.assert_not_called()
+            token = get_preview_gate().issue(stl).token
+            said_go = set_consent(PrintConsent(tool="multi_color_copies", file_name=stl, printer_name=None))
+            try:
+                printed = server.multi_color_copies(**kwargs, preview_token=token)
+            finally:
+                reset_consent(said_go)
+
+        assert printed["success"] is True, printed
+        reslice.assert_called_once()
+        assert any("PETG-CF" in w and "hardened" in w for w in printed.get("hardware_warnings") or []), printed
+        assert printed.get("safety_basic") is True and printed.get("safety_caution"), printed
+
     def test_multi_color_copies_says_it_after_the_print(self, tmp_path, monkeypatch):
         from kiln import server
 

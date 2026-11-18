@@ -844,7 +844,7 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
 #: The fillers a filled filament is named for, as they appear before "fill".
 _FILLERS = (
     r"COPPER|BRONZE|BRASS|STEEL|IRON|ALUMINI?UM|TITANIUM|TUNGSTEN|METAL|MAGNET(?:IC)?"
-    r"|WOOD|BAMBOO|CORK|STONE|MARBLE|MINERAL|CERAMIC|GLASS|CARBON|GLOW"
+    r"|WOOD|TIMBER|BAMBOO|HEMP|CORK|STONE|MARBLE|MINERAL|CERAMIC|GLASS|CARBON|GLOW"
 )
 
 #: Fill wording in a filled filament's own name.  Whole words, because
@@ -852,9 +852,9 @@ _FILLERS = (
 #: "GLASS" alone reads a sea-glass colourway as glass fibre; "carbon black"
 #: is a pigment, not a filler.  Metal fill is matched with its "fill":
 #: "Copper" on a spool is far more often a colour than a filler, but
-#: "Copperfill" never is.  "Fill" on its own is a product word ("Refill",
-#: "Extrafill", a maker's name), so it counts only after a filler or as
-#: "filled".
+#: "Copperfill" never is.  "Fill" on its own is a product word ("Refill", or
+#: the name of a product line or a maker), so it counts only after a filler
+#: or as "filled".
 _ABRASIVE_FILL_PATTERNS = (
     r"\bCARBON\b(?!\s*-?\s*BLACK)",
     r"\bWOOD\b",
@@ -886,9 +886,11 @@ def is_abrasive_filament(material: str) -> bool:
     Read from the fill wording in the name itself, with no table: the
     filled-filament market moves faster than any fixed list, and a lookup
     miss must not read as "not abrasive".  Errs toward warning: a needless
-    caution costs a moment, a missed one costs a nozzle.
+    caution costs a moment, a missed one costs a nozzle.  An underscore is
+    a word break, so a catalogue id (``wood_pla``) reads as the name it
+    stands for.
     """
-    name = _normalise(material)
+    name = _normalise(material).replace("_", " ")
     if not name:
         return False
     if any(re.search(p, name) for p in _ABRASIVE_FILL_PATTERNS):

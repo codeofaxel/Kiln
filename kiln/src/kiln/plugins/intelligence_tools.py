@@ -757,9 +757,10 @@ class _IntelligenceToolsPlugin:
                     recommend_material as _recommend,
                 )
 
-                # A request Kiln's servers could not read is refused here,
-                # before anything is asked or scanned.
-                refused = refusal_for(intent)
+                # A request Kiln's servers could not read, or a printer name
+                # too long to say back, is refused here, before anything is
+                # asked or scanned.
+                refused = refusal_for(intent, printer_id)
                 if refused is not None:
                     return _srv._error_dict(refused, code="VALIDATION_ERROR")
 

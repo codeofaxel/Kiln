@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 #: The served tool that answers one material's substitutes.
 WIRE_TOOL = "material_substitutes"
 #: What the sign-in sentence calls the answer asked for.
-SIGN_IN_NAME = "Kiln's ranked substitutes"
+SIGN_IN_NAME = "Kiln's substitute ranking"
 #: Where the same answer is worked out when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.material_substitution"
 #: The reasons a substitute can be asked to address: the doors' input words.
@@ -233,9 +233,11 @@ def _base_polymer(key: str, catalogue: Any) -> str | None:
 
 def basic_line(miss: Miss | None, material: str, *, found: bool, reason: str | None = None) -> str:
     """The one line a basic answer carries: what the list is, why Kiln's
-    ranking is missing, and how to get it.  The material is named by the
-    bundled catalogue's own name, or as "this material" when the catalogue
-    does not know it; what the caller typed is never repeated."""
+    ranking is missing, and how to get it.  The material is named once, by
+    the bundled catalogue's own name, or as "this material" when the
+    catalogue does not know it; what the caller typed is never repeated.
+    The door is asked about a material, never a part, so the list is said
+    to be checked against none."""
     if miss is None:
         miss = Miss("unanswered", detail="no substitutes")
     label = catalogue_name(material) or "this material"
@@ -245,18 +247,18 @@ def basic_line(miss: Miss | None, material: str, *, found: bool, reason: str | N
             miss,
             feature="servers",
             on_the_line=f"Kiln's catalogue lists no other filament of the same family as {label}",
-            cannot=f"rank substitutes for {label}",
+            cannot="rank substitutes for it",
             wont="names none",
             then=then,
         )
-    unchecked = "not ranked or checked against this part"
+    unchecked = "not ranked and not checked against any part"
     if reason:
-        unchecked = f"not ranked, not chosen for {reason.lower().replace('_', ' ')} and not checked against this part"
+        unchecked = f"not ranked, not chosen for {reason.lower().replace('_', ' ')} and not checked against any part"
     return sentence(
         miss,
         feature="servers",
         on_the_line=f"These are filaments of the same family as {label} in Kiln's catalogue, {unchecked}",
-        cannot=f"rank substitutes for {label}",
+        cannot="rank them",
         wont="lists only the same family",
         safe_remedy="check each one against what the part has to do",
         then=then,

@@ -201,6 +201,24 @@ class TestABasicCheck:
             "PETG-CF requires a hardened/wear-resistant nozzle (not standard brass)."
         ]
 
+    def test_a_catalogue_id_gets_the_hardened_nozzle_line_like_its_name(self, monkeypatch):
+        """The composer is handed catalogue ids as well as names: ``wood_pla``
+        is warned about exactly as ``WOOD-PLA`` is, signed in or not."""
+        served = {"success": True, "names": ["WOOD_PLA", "PLA"],
+                  "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 30}],
+                            [0, 1, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 30}],
+                            [1, 1, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 30}]],
+                  "hardware": [{"hardened_nozzle": False, "enclosure": False},
+                               {"hardened_nozzle": False, "enclosure": False}]}
+        line = "WOOD_PLA requires a hardened/wear-resistant nozzle (not standard brass)."
+        _served(monkeypatch, served)
+        assert check_material_compatibility(["wood_pla", "pla"])["hardware_warnings"] == [line]
+        _served(monkeypatch, _SIGNED_OUT)
+        assert check_material_compatibility(["wood_pla", "pla"])["hardware_warnings"] == [line]
+
     @pytest.mark.parametrize(
         "materials,warned",
         [
@@ -310,11 +328,19 @@ class TestAbrasiveFilament:
             "Carbon Black PLA-CF",  # a black carbon-fibre grade is still carbon fibre
             "Glass-filled PETG",
             "Bronze-fill PLA",
+            "timber-fill PLA",
+            "PLA Timber Fill",
+            "hempfill PETG",
             "steelFill",
             "Glow PLA",
             "Glow-in-the-dark PETG",
             "Magnetic PLA",
             "PLA filled with bamboo",
+            "wood_pla",            # catalogue ids: an underscore is a word break
+            "carbon_fiber_petg",
+            "glow_pla",
+            "pla_metal",
+            "pla_cf",
         ],
     )
     def test_filled_filament_is_abrasive(self, material):
@@ -330,12 +356,15 @@ class TestAbrasiveFilament:
             "Bronze PETG",
             "Sea Glass PLA",
             "Redwood PLA",
+            "Timber Brown PLA",          # a colourway named for wood, not a filler
+            "Hemp Beige PETG",
             "PLA Basic Refill",          # a refill spool, not a filler
             "PETG Refill",
-            "Fillamentum PLA Extrafill",  # a maker's name and a product line
-            "Extrafill PLA",
+            "Examplefill PLA",           # a maker named for "fill", not a filler
+            "PLA Examplefill Plus",      # a product line named for "fill"
             "Carbon Black PLA",          # a pigment
             "carbon-black PETG",
+            "pla_basic", "petg_hf", "tpu_95a",
             "", "   ",
         ],
     )

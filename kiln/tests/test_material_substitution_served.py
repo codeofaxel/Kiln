@@ -173,7 +173,7 @@ class TestTheServedAnswer:
         answers.append(_ok(SERVED[:1]))
         assert _best("PETG") == {"success": True, "material": "PETG", "substitute": SERVED[0]}
 
-    def test_no_substitute_is_said_as_it_always_was(self, served):
+    def test_no_substitute_says_none_was_found(self, served):
         calls, answers = served
         answers.append(_ok([]))
         assert _best("PLA") == {
@@ -220,6 +220,9 @@ class TestAMissIsTheBasicList:
             assert f'"{key}"' not in json.dumps(out), key
         _assert_basic_line(out["note"], "PLA")
         assert "same family" in out["note"] and "not ranked" in out["note"]
+        # Asked about a material, never a part; the material is named once.
+        assert "this part" not in out["note"] and "not checked against any part" in out["note"]
+        assert out["note"].count("PLA (Polylactic Acid)") == 1, out["note"]
 
     @pytest.mark.parametrize("cause", sorted(_misses()))
     def test_the_best_door_names_no_best(self, served, cause):
@@ -260,6 +263,7 @@ class TestAMissIsTheBasicList:
         assert out["basic"] is True and out["substitutes"] == [] and out["count"] == 0
         assert out["note"].startswith(f"Kiln's catalogue lists no other filament of the same family as {named}.")
         assert "basic substitute" not in out["note"]
+        assert out["note"].count(named) == 1, out["note"]
 
     @pytest.mark.parametrize("door", ["find", "best"])
     def test_a_name_the_catalogue_does_not_know_is_never_repeated(self, served, door):
@@ -302,16 +306,21 @@ class TestAMissIsTheBasicList:
         assert all("food_safe" in s for s in out["substitutes"])
 
 
+#: The names the substitution rules were built with, by digest
+#: (tests/_moved_away.py).
+_RULE_BUILDER_NAMES = frozenset({
+    "6731b9696a96338bd653e2043ccab853d2c37e3fb498db82f8024971b39d2a76",
+    "19544c80bcc71d7b7e27912ca41d59d065ad4282ab9dcc2f3fc4f188fb29289f",
+    "d7f3690eb7f99844f61bc84c21e8c0efc3dd252a9f93b55352bb811dd2c86493",
+})
+
+
 class TestTheRulesAreNotInThisPackage:
     def test_the_rules_module_is_gone(self):
         assert importlib.util.find_spec("kiln.material_substitution") is None
 
     def test_no_public_source_builds_substitution_rules(self):
+        from tests._moved_away import tokens_back
+
         src = Path(__file__).resolve().parents[1] / "src" / "kiln"
-        offenders = [
-            str(path.relative_to(src))
-            for path in src.rglob("*.py")
-            if any(word in path.read_text(encoding="utf-8", errors="replace")
-                   for word in ("_add_bidirectional", "SubstitutionMatrix", "_build_builtin_rules"))
-        ]
-        assert offenders == []
+        assert tokens_back(_RULE_BUILDER_NAMES, src) == []

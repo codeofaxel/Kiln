@@ -199,8 +199,7 @@ def ask(
             name, _timeout=srv._SERVED_MAKE_WAIT_S, _http=http, **kwargs,
         )
         if http.get("status") != 200:
-            miss = classify_answer(answer) or Miss("unanswered", "KILN_API_HTTP_ERROR")
-            return None, _in_their_words(miss, answer)
+            return None, classify_answer(answer) or Miss("unanswered", "KILN_API_HTTP_ERROR")
         if isinstance(answer, dict) and answer.get("code") == _FILE_GONE_CODE:
             return None, Miss("unanswered", _FILE_GONE_CODE, str(answer.get("error") or ""))
         answer, whole = _bring_home(answer, trip)
@@ -248,25 +247,6 @@ def _read_first(
 def _a_size(value: Any) -> bool:
     """Whether *value* states a size: a positive number."""
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
-
-
-def _in_their_words(miss: Any, answer: Any) -> Any:
-    """*miss* with the servers' own sentence as its detail when their answer
-    has one: a refusal's ``error`` can be a bare code word ("upgrade_required"),
-    with the sentence for a person elsewhere in the answer."""
-    from kiln.served_answer import Miss
-
-    if miss.cause != "refused" or " " in miss.detail or not isinstance(answer, dict):
-        return miss
-    upgrade = answer.get("upgrade")
-    for said in (
-        upgrade.get("headline") if isinstance(upgrade, dict) else None,
-        answer.get("message"),
-        answer.get("detail"),
-    ):
-        if isinstance(said, str) and " " in said.strip():
-            return Miss(miss.cause, miss.code, said.strip()[:400])
-    return Miss(miss.cause, miss.code, "")
 
 
 #: What a free account does for a make, said once when a make ran on this

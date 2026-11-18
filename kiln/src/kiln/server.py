@@ -4026,10 +4026,6 @@ def _open_window_from_answer(tool_name: str, answer: Any, aimed: str, *, source:
     )
 
 
-class _PlateAlreadyBuilt(Exception):
-    """Control flow only: the previewed plate is reused, not rebuilt."""
-
-
 @contextlib.contextmanager
 def _covered_by_approval(
     tool_name: str, approved_file: str, derived_file: str, printer_name: str | None,
@@ -24011,7 +24007,7 @@ def multi_material_print(
         # objects land side by side instead of stacked at the origin.
         # Objects that must stay coincident (a body and an inlay sharing one
         # coordinate space) declare the same "group" index.
-        from kiln.multicolor_3mf import auto_arrange_parts, compose_multicolor_3mf
+        from kiln.multicolor_3mf import auto_arrange_parts, compose_multicolor_3mf, plate_material_safety
 
         part_specs: list[dict[str, Any]] = []
         for i, (obj, built) in enumerate(zip(objects, build_objects, strict=True)):
@@ -24057,26 +24053,28 @@ def multi_material_print(
                 details={"file": output_3mf, "consent": plate_verdict.source, "door": plate_verdict.door},
             )
             plate_cleared = True
-        compose_result: dict[str, Any] = {"success": True, "reused_previewed_plate": True}
         try:
-            if plate_cleared:
-                raise _PlateAlreadyBuilt
             try:
                 positioned = auto_arrange_parts(part_specs, printer_id=printer_id)
             except ValueError:
                 # printer_id not in the supported-model catalog — arrange on
                 # the default plate size instead of refusing the print.
                 positioned = auto_arrange_parts(part_specs)
-            # Compose onto the plate the arrangement was packed for: the
-            # composer re-centres a group it judges off ITS plate, so a
-            # layout packed for a wider bed and composed at the 256
-            # default would be shifted — undoing the arrangement.  An
-            # unknown id falls back to the same default on both sides.
-            compose_result = compose_multicolor_3mf(
-                positioned, output_path=output_3mf, printer_id=printer_id or None,
-            )
-        except _PlateAlreadyBuilt:
-            pass
+            if plate_cleared:
+                # The plate the person saw prints as it sits on disk, never
+                # rebuilt.  The arrangement is the one it was built from, and
+                # its materials are judged again so this reply says what the
+                # preview said.
+                compose_result = {**plate_material_safety(positioned), "reused_previewed_plate": True}
+            else:
+                # Compose onto the plate the arrangement was packed for: the
+                # composer re-centres a group it judges off ITS plate, so a
+                # layout packed for a wider bed and composed at the 256
+                # default would be shifted — undoing the arrangement.  An
+                # unknown id falls back to the same default on both sides.
+                compose_result = compose_multicolor_3mf(
+                    positioned, output_path=output_3mf, printer_id=printer_id or None,
+                )
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-material 3MF: {exc}",

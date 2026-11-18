@@ -944,6 +944,78 @@ def auto_arrange_parts(
 
 
 # ---------------------------------------------------------------------------
+# The plate's materials
+# ---------------------------------------------------------------------------
+
+
+def _specified_materials(parts: list[ColorPart]) -> list[str]:
+    """The materials *parts* name, in order, blanks left out."""
+    return [p.material for p in parts if p.material and p.material.strip()]
+
+
+def _material_check(materials: list[str]) -> dict[str, Any] | None:
+    """Kiln's multi-material check for *materials*, or ``None`` with none named."""
+    if not materials:
+        return None
+    try:
+        from kiln.material_safety import (  # lazy import keeps startup lean
+            check_material_compatibility,
+        )
+
+        return check_material_compatibility(materials)
+    except ImportError:
+        logger.debug("kiln.material_safety not available — skipping safety check")
+        return None
+
+
+def _unsafe_materials(safety_result: dict[str, Any]) -> dict[str, Any]:
+    """The refusal for materials that must never share a print."""
+    return {
+        "success": False,
+        "error": "⛔ Incompatible materials — do not print. " + safety_result["message"],
+        "hardware_warnings": safety_result.get("hardware_warnings", []),
+        "safety": safety_result,
+    }
+
+
+def _safety_fields(safety_result: dict[str, Any]) -> dict[str, Any]:
+    """The material check's fields as a plate result carries them."""
+    fields: dict[str, Any] = {
+        "safety_level": safety_result["level"],
+        "safety_message": safety_result["message"],
+    }
+    if safety_result.get("hardware_warnings"):
+        fields["hardware_warnings"] = safety_result["hardware_warnings"]
+    if safety_result.get("pairs"):
+        fields["material_pairs"] = safety_result["pairs"]
+    if safety_result.get("basic"):
+        # Kiln's check did not answer: the pairs that must never share a
+        # print were still refused, and every other purge is the
+        # conservative default.  Say why, once.
+        fields["safety_basic"] = True
+        fields["safety_caution"] = safety_result.get("caution", "")
+    return fields
+
+
+def plate_material_safety(parts: list[ColorPart]) -> dict[str, Any]:
+    """What :func:`compose_multicolor_3mf` says about *parts*' materials, without composing.
+
+    ``{"success": True, ...}`` with the same safety fields a composed plate
+    carries (``hardware_warnings``, ``safety_basic``, ``safety_caution`` and
+    the rest), or the composer's own refusal for materials that must never
+    share a print.  A door that prints a plate it composed on an earlier call
+    reads this, so the call that starts the print says what the plate's
+    preview said.
+    """
+    safety_result = _material_check(_specified_materials(parts))
+    if safety_result is None:
+        return {"success": True}
+    if not safety_result["safe"]:
+        return _unsafe_materials(safety_result)
+    return {"success": True, **_safety_fields(safety_result)}
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -999,28 +1071,11 @@ def compose_multicolor_3mf(
 
     # -----------------------------------------------------------------------
     # -----------------------------------------------------------------------
-    safety_result: dict[str, Any] | None = None
     flush_matrix_str: str | None = None
-    specified_materials = [p.material for p in parts if p.material and p.material.strip()]
-    if specified_materials:
-        try:
-            from kiln.material_safety import (  # lazy import keeps startup lean
-                check_material_compatibility,
-            )
-
-            safety_result = check_material_compatibility(specified_materials)
-            if not safety_result["safe"]:
-                return {
-                    "success": False,
-                    "error": (
-                        "⛔ Incompatible materials — do not print. "
-                        + safety_result["message"]
-                    ),
-                    "hardware_warnings": safety_result.get("hardware_warnings", []),
-                    "safety": safety_result,
-                }
-        except ImportError:
-            logger.debug("kiln.material_safety not available — skipping safety check")
+    specified_materials = _specified_materials(parts)
+    safety_result = _material_check(specified_materials)
+    if safety_result is not None and not safety_result["safe"]:
+        return _unsafe_materials(safety_result)
 
     # -----------------------------------------------------------------------
     # Parse all STL files
@@ -1183,19 +1238,8 @@ def compose_multicolor_3mf(
 
     # Attach full safety report (all free)
     if safety_result is not None:
-        result["safety_level"] = safety_result["level"]
-        result["safety_message"] = safety_result["message"]
-        if safety_result.get("hardware_warnings"):
-            result["hardware_warnings"] = safety_result["hardware_warnings"]
-        if safety_result.get("pairs"):
-            result["material_pairs"] = safety_result["pairs"]
+        result.update(_safety_fields(safety_result))
         result["flush_matrix_embedded"] = bool(flush_matrix_str)
-        if safety_result.get("basic"):
-            # Kiln's check did not answer: the pairs that must never share a
-            # print were still refused, and every other purge is the
-            # conservative default.  Say why, once.
-            result["safety_basic"] = True
-            result["safety_caution"] = safety_result.get("caution", "")
 
     result["fits_bed"] = plate_verdict["fits"]
     result["bed_fit"] = plate_verdict
