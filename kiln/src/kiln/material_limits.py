@@ -62,8 +62,28 @@ _DATA = Path(__file__).resolve().parent / "data" / "design_knowledge" / "materia
 #: (material, nozzle, layer, enclosed, pin height) -> the served answer; what
 #: the slice keeps at a nozzle is kept under ("", nozzle, None, None, "sliced").
 _answers: dict[tuple[Any, ...], dict[str, Any]] = {}
-#: The causes a miss has already been said for in this process.
+#: The causes a miss has already been said for, outside a tool call
+#: (:func:`_said_here`); a call keeps its own.
 _said: set[str] = set()
+#: Where a tool call keeps the causes it has said (:func:`kiln.tool_context.call_memo`).
+_SAID_KEY = "kiln.material_limits.said"
+
+
+def _said_here() -> set[str]:
+    """The causes already said where a reply is being built: the running
+    call's own (one call is one caller, so a cause is said to every caller
+    who meets it), or this process's outside a call."""
+    try:
+        from kiln.tool_context import call_memo
+    except ImportError:  # pragma: no cover - the module ships beside this one
+        return _said
+    memo = call_memo()
+    if memo is None:
+        return _said
+    said = memo.get(_SAID_KEY)
+    if not isinstance(said, set):
+        said = memo[_SAID_KEY] = set()
+    return said
 
 
 @dataclass(frozen=True)
@@ -119,12 +139,14 @@ class MaterialLimits:
 
     def notes(self) -> list[str]:
         """What a reply should say about where its figures came from: why the
-        plastic's own were not read (once per cause in a process), and for a
-        flexible or static-safe plastic answered generally, what the general
-        figures leave out.  Empty when the plastic's own figures were read."""
+        plastic's own were not read (once per cause in a tool call, or in a
+        process outside one), and for a flexible or static-safe plastic
+        answered generally, what the general figures leave out.  Empty when
+        the plastic's own figures were read."""
         lines: list[str] = []
-        if self.miss is not None and self.miss.cause not in _said:
-            _said.add(self.miss.cause)
+        said = _said_here()
+        if self.miss is not None and self.miss.cause not in said:
+            said.add(self.miss.cause)
             lines.append(miss_sentence(self.miss))
         if self.miss is not None or not self.known:
             category = _category(self.material_id)
