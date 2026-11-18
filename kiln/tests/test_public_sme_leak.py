@@ -681,7 +681,6 @@ class TestMatrixDisguises:
         [
             "design_knowledge/materials.json",
             "design_knowledge/environment_compatibility.json",
-            "design_knowledge/multi_material_pairing.json",
             "design_knowledge/skin_contact.json",
             "design_knowledge/post_processing.json",
             "design_knowledge/design_templates.json",

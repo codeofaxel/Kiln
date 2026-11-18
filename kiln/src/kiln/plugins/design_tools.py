@@ -1266,6 +1266,12 @@ class _DesignToolsPlugin:
             notes on temperature management, and soluble support dissolution
             instructions when applicable.
 
+            When Kiln's pairing verdict cannot be had (offline, signed out,
+            no answer), the answer is ``basic: true``: ``compatible`` is
+            ``null``, never a yes; ``notes`` says what the two materials'
+            nozzle temperature ranges alone show; ``caution`` says why the
+            verdict is missing and how to get it.  Relay it as unjudged.
+
             Use this when a user asks "can I print PLA with TPU?" or
             "what support material works with ABS?" or planning any
             multi-material / dual-extrusion print.

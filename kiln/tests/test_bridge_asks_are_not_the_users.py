@@ -123,6 +123,12 @@ _CALLER_DECIDES = {
 #: keyed by the name each call passes as its tool (its first argument): who
 #: asked, and why.
 _PER_CALL = {
+    "_pro_material_pairing_bridge": {
+        # The pairing verdict is what the person asked check_multi_material_pairing for.
+        "WIRE_TOOL": True,
+        # The multi-material check is fetched on the way to a compose or a print.
+        "MIX_TOOL": False,
+    },
     "_pro_assembly_bridge": {
         # The joint sweep IS the check the person asked for when they
         # validate or compose an assembly, and the parts' files are theirs.
