@@ -664,30 +664,6 @@ requires_post_processing_overlay = pytest.mark.skipif(
 )
 
 
-def _multi_material_overlay_loaded() -> bool:
-    """True when the multi_material_pairing overlay is merged in."""
-    try:
-        from kiln.design_intelligence import (
-            _reset_knowledge_base,
-            check_multi_material_compatibility,
-        )
-        _reset_knowledge_base()
-        report = check_multi_material_compatibility("pla", "petg")
-        if report is None or not report.general_rules:
-            return False
-    except Exception:
-        return False
-    return True
-
-
-_MULTI_MATERIAL_OVERLAY_PRESENT = _multi_material_overlay_loaded()
-
-requires_multi_material_overlay = pytest.mark.skipif(
-    not _MULTI_MATERIAL_OVERLAY_PRESENT,
-    reason="requires the kiln-pro overlay",
-)
-
-
 def _printer_intelligence_overlay_loaded() -> bool:
     """True when the printer_intelligence overlay is merged in."""
     try:

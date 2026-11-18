@@ -49,11 +49,6 @@ KNOWN_GAPS: dict[str, set[str]] = {
     "skin_contact": set(),
     "environment_compatibility": set(),
     "material_troubleshooting": set(),
-    # PPS stays open: no published data exists for a single PPS cross-pair,
-    # and no support strategy for it either — it is the one high-temperature
-    # polymer with no documented partner.  An invented rating there would be
-    # noise dressed as coverage.
-    "co_print_compatibility": {"pps"},
     "post_processing": set(),
     # Closed entirely: the 35 rigid materials by the bending model, the 3
     # elastomers by the deflection model. Every material is answerable.
@@ -73,7 +68,6 @@ TABLES: dict[str, tuple[str, str | None]] = {
     "skin_contact": ("skin_contact.json", None),
     "environment_compatibility": ("environment_compatibility.json", None),
     "material_troubleshooting": ("material_troubleshooting.json", None),
-    "co_print_compatibility": ("multi_material_pairing.json", "co_print_compatibility"),
     "post_processing": ("post_processing.json", None),
     "load_tables": ("load_tables.json", None),
 }

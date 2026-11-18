@@ -50,6 +50,10 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks a material inventory door about several "
         "machines on Kiln Business; the cross-machine answer is what they reached for"
     ),
+    "_pro_pairing_bridge": (
+        "runs only when the person asks check_multi_material_pairing whether two "
+        "materials print together; the pairing verdict is the feature they reached for"
+    ),
     "_pro_material_pick_bridge": (
         "runs only when the person asks what material a part should be, on a "
         "plan that includes Kiln Pro; the pick is the feature they reached for"

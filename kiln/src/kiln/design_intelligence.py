@@ -850,21 +850,41 @@ class MultiMaterialReport:
     """Co-print compatibility report between two materials.
 
     ``caution`` is set when the reasoning behind the verdict could not be
-    read — the public pairing matrix carries the verdict but no ``notes`` and
-    no ``general_rules``.  See :func:`unestablished_caution`.
+    read — the verdict came without ``notes`` or ``general_rules``.  See
+    :func:`unestablished_caution`.
+
+    ``basic`` marks an answer made on this computer alone because Kiln's
+    pairing verdict did not come: ``compatible`` is then ``None`` (never a
+    yes), ``notes`` says what the nozzle temperatures alone show, and
+    ``caution`` says why the verdict is missing and how to get it, with
+    ``why`` / ``why_code`` / ``why_detail`` beside it
+    (:func:`kiln.served_answer.fields`).  Those four keys appear on a basic
+    answer only.
     """
 
     material_a: str
     material_b: str
-    compatible: bool
+    compatible: bool | None
     interface_adhesion: str
     notes: str
     support_pair: dict[str, Any] | None
     general_rules: list[str]
     caution: str = ""
+    basic: bool = False
+    why: str = ""
+    why_code: str = ""
+    why_detail: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        if not self.basic:
+            for key in _BASIC_ANSWER_KEYS:
+                out.pop(key, None)
+        return out
+
+
+#: The keys only a basic pairing answer carries.
+_BASIC_ANSWER_KEYS = ("basic", "why", "why_code", "why_detail")
 
 
 @dataclass
@@ -962,7 +982,6 @@ class _DesignKnowledgeBase:
         self._troubleshooting: dict[str, dict[str, Any]] = {}
         self._printer_compatibility: dict[str, dict[str, Any]] = {}
         self._post_processing: dict[str, dict[str, Any]] = {}
-        self._multi_material: dict[str, Any] = {}
         self._skin_contact: dict[str, dict[str, Any]] = {}
         # Each table's ``_meta`` block, keyed by table attribute.  The tables
         # themselves drop every underscore key (that rule keeps metadata and
@@ -1003,7 +1022,6 @@ class _DesignKnowledgeBase:
             ("material_troubleshooting.json", "_troubleshooting"),
             ("printer_material_compatibility.json", "_printer_compatibility"),
             ("post_processing.json", "_post_processing"),
-            ("multi_material_pairing.json", "_multi_material"),
             ("skin_contact.json", "_skin_contact"),
         ]
 
@@ -1159,10 +1177,6 @@ class _DesignKnowledgeBase:
     @property
     def post_processing(self) -> dict[str, dict[str, Any]]:
         return self._table("_post_processing", "post_processing")
-
-    @property
-    def multi_material(self) -> dict[str, Any]:
-        return self._table("_multi_material", "multi_material_pairing")
 
     @property
     def skin_contact(self) -> dict[str, dict[str, Any]]:
@@ -3868,37 +3882,27 @@ def check_multi_material_compatibility(
 ) -> MultiMaterialReport:
     """Check if two materials can be co-printed in a dual-extrusion setup.
 
-    Looks up the co-print compatibility matrix and support pair data.
-    Returns compatibility status, interface adhesion rating, and
-    dissolution info if applicable.
+    Kiln's pairing verdict (kiln-pro, https://kiln3d.com) gives the
+    compatibility, the interface adhesion and the soluble-support record when
+    one of the two dissolves away from the other; it is asked for through
+    :mod:`kiln._pro_pairing_bridge`.  When it does not come (offline, signed
+    out, no answer, refused) the report is a basic answer made here from the
+    nozzle temperature ranges alone (:func:`_basic_pairing_report`), and says
+    so.
 
     :param material_a: First material (e.g. ``"pla"``).
     :param material_b: Second material (e.g. ``"tpu"``).
     """
-    kb = _get_kb()
-    a = material_a.lower()
-    b = material_b.lower()
-    mm = kb.multi_material
+    from kiln import _pro_pairing_bridge as pairing
 
-    co_compat = mm.get("co_print_compatibility", {})
-    support_pairs = mm.get("support_pairs", [])
-    rules = mm.get("general_rules", [])
+    answer, miss = pairing.co_print(material_a, material_b)
+    if answer is None:
+        return _basic_pairing_report(material_a, material_b, miss)
 
-    # Check co-print compatibility (try both directions)
-    pair_data: dict[str, Any] | None = None
-    if a in co_compat and b in co_compat[a]:
-        pair_data = co_compat[a][b]
-    elif b in co_compat and a in co_compat[b]:
-        pair_data = co_compat[b][a]
-
-    # Check support pair data
-    support_match: dict[str, Any] | None = None
-    for sp in support_pairs:
-        model = sp.get("model_material", "").lower()
-        support = sp.get("support_material", "").lower()
-        if (a == model and b == support) or (b == model and a == support):
-            support_match = sp
-            break
+    a = answer["material_a"]
+    b = answer["material_b"]
+    notes = answer["notes"]
+    rules = list(answer["general_rules"])
 
     def _verdict_caution() -> str:
         """A verdict with no notes: yes/no, and nothing about what actually
@@ -3914,73 +3918,113 @@ def check_multi_material_compatibility(
             curated_entry_exists=False,
         )
 
-    if pair_data:
-        notes = pair_data.get("notes", "")
-        return MultiMaterialReport(
-            material_a=a,
-            material_b=b,
-            compatible=pair_data.get("compatible", False),
-            interface_adhesion=pair_data.get("interface_adhesion", "unknown"),
-            notes=notes,
-            support_pair=support_match,
-            general_rules=rules,
-            caution="" if notes else _verdict_caution(),
-        )
-
-    # No explicit data — use support pair if available
-    if support_match:
-        adhesion = support_match.get("interface_adhesion", "unknown")
-        notes = support_match.get("notes", "")
-        return MultiMaterialReport(
-            material_a=a,
-            material_b=b,
-            compatible=adhesion not in ("none", "poor"),
-            interface_adhesion=adhesion,
-            notes=notes,
-            support_pair=support_match,
-            general_rules=rules,
-            caution="" if notes else _verdict_caution(),
-        )
-
-    # No data at all.  Only send the caller to the general rules when there
-    # ARE any: that list is empty on the public floor, so the old wording
-    # pointed at something that could never have anything in it.
-    no_data_note = f"No compatibility data for {a} + {b}."
-    if rules:
-        no_data_note += " Check general rules."
-    return MultiMaterialReport(
-        material_a=a,
-        material_b=b,
-        compatible=False,
-        interface_adhesion="unknown",
-        notes=no_data_note,
-        support_pair=None,
-        general_rules=rules,
-        caution=unestablished_caution(
+    if answer["found"] == "none":
+        # No data covers the pair, and the answer's note says so.
+        caution = unestablished_caution(
             "multi_material_pairing",
             "Nothing here covers this pair, and the general polymer rules "
             "that would let you reason it out are not available either. "
             "Treat it as untested rather than fine — a test piece is the "
             "only thing that will tell you.",
             curated_entry_exists=False,
-        ),
+        )
+    else:
+        caution = "" if notes else _verdict_caution()
+    return MultiMaterialReport(
+        material_a=a,
+        material_b=b,
+        compatible=answer["compatible"],
+        interface_adhesion=answer["interface_adhesion"],
+        notes=notes,
+        support_pair=answer["support_pair"],
+        general_rules=rules,
+        caution=caution,
     )
 
 
-def get_support_material_options(model_material: str) -> list[dict[str, Any]]:
-    """Get all viable soluble support material options for a model material.
+def _nozzle_range(material: str) -> tuple[str, float, float] | None:
+    """``(name, nozzle_min, nozzle_max)`` from the nozzle table every install
+    carries (:data:`kiln.gcode._MATERIAL_TEMPS`), for a spelling of one of
+    its materials (:func:`kiln.catalog_keys.same_material_spelling`); never a
+    family, so a filled or blended material has no range here."""
+    from kiln.catalog_keys import same_material_spelling
+    from kiln.gcode import _MATERIAL_TEMPS
 
-    :param model_material: The model material (e.g. ``"pla"``, ``"abs"``).
+    for name, (low, high, _bed_low, _bed_high) in _MATERIAL_TEMPS.items():
+        if same_material_spelling(material, name):
+            return name, low, high
+    return None
+
+
+def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiMaterialReport:
+    """The pairing answer this computer can give alone.
+
+    Built only from the nozzle table: two ranges that do not overlap mean the
+    two materials can't share one nozzle temperature; ranges that do overlap
+    say nothing about how well the two stick together or how much to purge
+    between them.  It never says the pair is compatible, carries no adhesion
+    grade, support record or general rule, and its ``caution`` is the one
+    sentence saying why Kiln's verdict is missing and how to get it.
     """
-    kb = _get_kb()
-    model_key = model_material.lower()
-    support_pairs = kb.multi_material.get("support_pairs", [])
+    from kiln.catalog_keys import material_label
+    from kiln.served_answer import Miss, fields, sentence
 
-    results = []
-    for sp in support_pairs:
-        if sp.get("model_material", "").lower() == model_key:
-            results.append(sp)
-    return results
+    if not isinstance(miss, Miss):
+        miss = Miss("unanswered", detail="no pairing verdict")
+    a = str(material_a or "").lower()
+    b = str(material_b or "").lower()
+    range_a = _nozzle_range(a)
+    range_b = _nozzle_range(b)
+    label_a = range_a[0] if range_a else (material_label(a) or "an unnamed material")
+    label_b = range_b[0] if range_b else (material_label(b) or "an unnamed material")
+    if range_a and range_b:
+        span_a = f"{label_a} ({range_a[1]:g}-{range_a[2]:g} °C)"
+        span_b = f"{label_b} ({range_b[1]:g}-{range_b[2]:g} °C)"
+        if max(range_a[1], range_b[1]) > min(range_a[2], range_b[2]):
+            notes = (
+                f"These two can't share one nozzle temperature: the nozzle ranges of "
+                f"{span_a} and {span_b} do not overlap. How well they stick together "
+                "was not judged."
+            )
+        else:
+            notes = (
+                f"The nozzle ranges of {span_a} and {span_b} overlap. How well they "
+                "stick together and how much to purge between them was not judged."
+            )
+        wont = "answered from the nozzle temperatures alone"
+    else:
+        unknown = " or ".join(dict.fromkeys(
+            label for label, known in ((label_a, range_a), (label_b, range_b)) if not known
+        ))
+        notes = (
+            f"Kiln has no nozzle temperature range for {unknown} on this computer, so "
+            "neither their temperatures nor how well they stick together was judged."
+        )
+        wont = "has judged nothing about this pair"
+    caution = sentence(
+        miss,
+        feature="pairing check",
+        on_the_line=(
+            "Kiln's pairing verdict says whether two materials bond in one print "
+            "and how much to purge between them"
+        ),
+        cannot=f"give its pairing verdict for {label_a} and {label_b}",
+        wont=wont,
+        safe_remedy="run a small test piece before a long print",
+        then="ask again",
+    )
+    return MultiMaterialReport(
+        material_a=a,
+        material_b=b,
+        compatible=None,
+        interface_adhesion="unknown",
+        notes=notes,
+        support_pair=None,
+        general_rules=[],
+        caution=caution,
+        basic=True,
+        **fields(miss),
+    )
 
 
 # ---------------------------------------------------------------------------

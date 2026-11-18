@@ -159,6 +159,16 @@ def test_the_material_rule_check(monkeypatch, caplog):
     _assert_kept_local(out, caplog)
 
 
+def test_the_pairing_check(monkeypatch, caplog):
+    from kiln import _pro_pairing_bridge as bridge
+    from kiln.design_intelligence import check_multi_material_compatibility
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, co_print=_raise)
+    out = check_multi_material_compatibility("pla", "petg").to_dict()
+    assert out["basic"] is True and out["compatible"] is None
+    _assert_kept_local(out, caplog)
+
+
 def test_the_placement_check(monkeypatch, caplog):
     from kiln import _pro_placement_bridge as bridge
     from kiln import served_answer
