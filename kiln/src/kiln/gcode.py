@@ -450,8 +450,9 @@ def _parse_command_word(line: str) -> str | None:
 
 #: Commands whose whole line, after the command word, is text a person
 #: wrote: a display message, or a file name on the card.  Nothing in it is
-#: run.  A command that takes its text in quotes is not here: only what is
-#: inside the quotes is text, and a command may follow them.
+#: run.  When that text is quoted, only what is inside the quotes is text,
+#: and a command may follow them; a command that always takes its text in
+#: quotes is not here.
 _TEXT_COMMANDS: frozenset[str] = frozenset({"M28", "M30", "M36", "M38", "M117"})
 
 #: A quoted run, opened and closed: text, never commands.  A quote left
@@ -465,12 +466,13 @@ def _later_commands(cmd: str, cleaned: str) -> list[str]:
     """Each command word on *cleaned* after its first, with what follows it
     up to the next: what a firmware that runs several commands a line would
     run after *cmd*.  None for a line that is text after its command word,
-    and nothing inside quotes is a command."""
-    if cmd in _TEXT_COMMANDS:
-        return []
+    and nothing inside quotes is a command.  A text command whose text is
+    quoted is text only inside the quotes."""
     text = _QUOTED_RE.sub(lambda quoted: " " * len(quoted.group()), cleaned)
     first = _CMD_RE.match(text)
     if first is None:
+        return []
+    if cmd in _TEXT_COMMANDS and not cleaned[first.end():].lstrip().startswith('"'):
         return []
     starts = [m.start() for m in _COMMAND_WORD_START_RE.finditer(text, first.end())]
     return [cleaned[a:b].strip() for a, b in itertools.pairwise([*starts, len(cleaned)])]
@@ -609,12 +611,39 @@ def _extract_param(line: str, letter: str) -> float | None:
     return None
 
 
-def _strip_comment(line: str) -> str:
-    """Remove inline comments (everything from ``;`` onward) and strip whitespace."""
-    idx = line.find(";")
-    if idx != -1:
-        line = line[:idx]
-    return line.strip()
+def _strip_comment(line: str) -> str | None:
+    """Remove an inline comment and strip whitespace.  A comment starts at
+    the first ``;`` outside a quoted string: inside ``"..."`` (``""`` being
+    one quote) a ``;`` is text, as RepRapFirmware reads it.  ``None`` when a
+    quote is still open where a ``;`` stands: the line cannot be read one
+    way only, and every check refuses it (:data:`UNREADABLE_QUOTE`)."""
+    semi = line.find(";")
+    if semi == -1:
+        return line.strip()
+    quote = line.find('"')
+    while quote != -1 and quote < semi:
+        close = _closing_quote(line, quote)
+        if close is None:
+            return None
+        semi = line.find(";", close + 1)
+        if semi == -1:
+            return line.strip()
+        quote = line.find('"', close + 1)
+    return line[:semi].strip()
+
+
+#: The refusal for a line :func:`_strip_comment` cannot read one way only.
+UNREADABLE_QUOTE = (
+    "Line refused: a quote is still open where a ';' stands, so where the comment starts cannot be "
+    "told: {line!r}. Close the quote, or leave the ';' out."
+)
+
+
+def _refuse_unreadable(raw_line: str, errors: list[str], blocked: list[str]) -> None:
+    """Record the refusal of a line whose comment cannot be told apart."""
+    line = raw_line.strip()
+    errors.append(UNREADABLE_QUOTE.format(line=line[:200]))
+    blocked.append(line)
 
 
 def _heat_targets(cmd: str, cleaned: str) -> list[tuple[str, float]] | None:
@@ -948,6 +977,9 @@ def _validate_single(
     if ceilings is None:
         ceilings = _GENERIC_CEILINGS
     cleaned = _strip_comment(raw_line)
+    if cleaned is None:
+        _refuse_unreadable(raw_line, errors, blocked)
+        return None
     if not cleaned:
         return None  # blank / comment-only line -- skip silently
     cleaned = _strip_line_number(cleaned)
@@ -1361,6 +1393,9 @@ def _validate_single_with_profile(
     from kiln.safety_profiles import limit_provenance_suffix  # noqa: E402
 
     cleaned = _strip_comment(raw_line)
+    if cleaned is None:
+        _refuse_unreadable(raw_line, errors, blocked)
+        return None
     if not cleaned:
         return None
     cleaned = _strip_line_number(cleaned)

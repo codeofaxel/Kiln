@@ -176,6 +176,55 @@ def test_a_print_file_run_as_a_second_command_on_the_line_is_refused():
     assert "M98" in result.errors[0]
 
 
+#: A ';' inside a closed quote is text to a firmware that reads quotes, so it
+#: hides nothing written after the quote.
+BEHIND_A_QUOTED_SEMICOLON = [
+    'M117 "a;" M32 "0:/gcodes/part.gcode"',
+    'M117 "a;" M98 P"0:/gcodes/part.gcode"',
+    'M117 "a;" M24',
+    'M118 S"a;" M32 "0:/gcodes/part.gcode"',
+    'M291 P"a;" S1 M32 "0:/gcodes/part.gcode"',
+]
+
+
+@pytest.mark.parametrize("line", BEHIND_A_QUOTED_SEMICOLON)
+def test_a_start_behind_a_quoted_semicolon_is_refused(line):
+    for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
+        assert result.valid is False and result.commands == [], (line, result.errors)
+
+
+@pytest.mark.parametrize("line", ['M117 "a;b', 'M118 S"done; M32 0:/gcodes/part.gcode'])
+def test_a_quote_left_open_at_a_semicolon_is_refused(line):
+    for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
+        assert result.valid is False and result.blocked_commands == [line], (line, result.errors)
+        assert "quote is still open" in result.errors[0]
+
+
+@pytest.mark.parametrize(
+    "line, read_as",
+    [('M117 "a;b"', 'M117 "a;b"'), ('M117 "say ""hi;"""', 'M117 "say ""hi;"""'), ('G1 X10 ; to the "edge', "G1 X10")],
+)
+def test_a_semicolon_inside_a_closed_quote_is_text(line, read_as):
+    result = gcode.validate_gcode([line])
+    assert result.valid is True and result.commands == [read_as], result.errors
+
+
+@pytest.mark.parametrize("line", BEHIND_A_QUOTED_SEMICOLON[:2])
+def test_a_print_file_hiding_a_start_behind_a_quoted_semicolon_is_refused(tmp_path, line):
+    path = tmp_path / "part.gcode"
+    path.write_text(f"G28\nG1 X10 Y10 Z0.3 F3000\n{line}\n")
+    assert gcode.scan_gcode_file(str(path)).valid is False
+
+
+def test_the_interceptor_blocks_a_quote_left_open_at_a_semicolon():
+    from kiln.gcode_interceptor import GcodeInterceptor, InterceptionAction
+
+    interceptor = GcodeInterceptor()
+    session = interceptor.create_session("workshop")
+    assert interceptor.intercept(session.session_id, 'M117 "a;b').action == InterceptionAction.BLOCK
+    assert interceptor.intercept(session.session_id, 'M117 "a;b"').action == InterceptionAction.ALLOW
+
+
 @pytest.mark.parametrize("line", THE_PRINTERS_OWN_MACROS)
 def test_the_printers_own_macros_still_run(line):
     for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
@@ -227,6 +276,16 @@ def test_the_send_gcode_tool_never_runs_a_print_file_as_a_macro(monkeypatch):
     monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
     result = _tool()('M98 P"0:/gcodes/part.gcode"')
     assert result["success"] is False
+    adapter.send_gcode.assert_not_called()
+
+
+@pytest.mark.parametrize("line", [BEHIND_A_QUOTED_SEMICOLON[0], BEHIND_A_QUOTED_SEMICOLON[1], 'M117 "a;b'])
+def test_the_send_gcode_tool_never_sends_a_start_behind_a_quoted_semicolon(monkeypatch, line):
+    adapter = _adapter()
+    monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
+    monkeypatch.setattr(server, "_check_confirmation", lambda *_a, **_k: None)
+    result = _tool()(line)
+    assert result["success"] is False, result
     adapter.send_gcode.assert_not_called()
 
 

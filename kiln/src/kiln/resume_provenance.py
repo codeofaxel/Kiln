@@ -647,7 +647,10 @@ def writes_a_file(line: Any) -> bool:
     command word on it judged, not only the first."""
     from kiln.gcode import _later_commands, _parse_command_word, _strip_comment, _strip_line_number
 
-    cleaned = _strip_line_number(_strip_comment(str(line)))
+    stripped = _strip_comment(str(line))
+    if stripped is None:
+        return True  # a line that cannot be read one way only is treated as a write
+    cleaned = _strip_line_number(stripped)
     command = _parse_command_word(cleaned) if cleaned else None
     if command is None:
         return False
