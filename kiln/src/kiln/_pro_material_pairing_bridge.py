@@ -14,11 +14,13 @@ Each is asked in one of two places, in order:
 1. **kiln-pro on this computer** (Kiln's servers, and an install with
    kiln-pro), imported by name in :func:`_local_co_print` and
    :func:`_local_mix_check`, never by a string, so a static reader of the call
-   graph sees the crossing.  There the curated notes and general rules come
-   back with a pairing too.
+   graph sees the crossing.
 2. **served**: Kiln's servers answer through :data:`WIRE_TOOL` and
    :data:`MIX_TOOL`, asked through the door every served tool uses
    (:func:`kiln.server._pro_api_call`).
+
+Either way a pairing comes back with the curated notes and general rules
+this caller may read, and says whether they were read (``notes_read``).
 
 A miss (offline, signed out, no answer, refused) comes back as a
 :class:`kiln.served_answer.Miss` and never as a verdict: the caller answers
@@ -74,7 +76,8 @@ def co_print(material_a: str, material_b: str) -> tuple[dict[str, Any] | None, M
     """``(answer, None)`` for the pair, or ``(None, miss)`` when no answer
     came.  The answer carries ``found``, ``compatible``,
     ``interface_adhesion``, ``notes``, ``support_pair`` and
-    ``general_rules``.  Names the check cannot read (:func:`name_problem`)
+    ``general_rules``, and ``notes_read`` when it says whether the curated
+    notes were read.  Names the check cannot read (:func:`name_problem`)
     are refused here, before anything is asked.  Never raises."""
     problem = name_problem(material_a, material_b)
     if problem is not None:

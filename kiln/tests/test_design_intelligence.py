@@ -2178,9 +2178,12 @@ class TestFreePathCautions:
             what_is_unknown: str,
             *,
             curated_entry_exists: bool | None = None,
+            table_read: bool | None = None,
         ) -> str:
             # The entity-level answer is OPTIONAL by design: the pairing site
             # is keyed by two materials, which one entity id cannot address.
+            # Whether the table was read is optional too: an answer from
+            # Kiln's servers says so, and without one this computer is asked.
             seen.append(overlay_kind)
             return "spy"
 
