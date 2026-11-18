@@ -201,33 +201,56 @@ class TestProductSettingsReachTheSlice:
 # ---------------------------------------------------------------------------
 
 
+_BRAND = {
+    "profile_id": "x_asa", "brand": "X", "product_name": "X ASA", "nozzle_temp_optimal_c": 250,
+}
+
+
+def _served_pick(monkeypatch, *, pro: bool, pick: dict) -> None:
+    """A plain install whose plan is (or is not) Kiln Pro, with Kiln's
+    servers answering every material pick with *pick*."""
+    import kiln.licensing as licensing
+    import kiln.server as srv
+    from kiln import _pro_material_pick_bridge as bridge
+
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    monkeypatch.setattr(licensing, "check_tier", lambda *_a, **_k: (pro, None if pro else "needs Kiln Pro"))
+    monkeypatch.setattr(
+        srv, "_pro_api_call",
+        lambda tool_name, /, **_kw: {"success": True, "status": "ok", "known": True, "pick": dict(pick)},
+    )
+
+
 class TestRecommendationBrands:
     """Tests for recommended_brands in MaterialRecommendation."""
 
-    def test_recommendation_includes_brands(self):
+    def test_recommendation_includes_brands(self, monkeypatch):
+        _served_pick(monkeypatch, pro=True, pick={
+            "material_id": "asa", "score": 80.0, "reasons": [], "warnings": [], "alternatives": [],
+            "recommended_brands": [_BRAND],
+        })
         rec = recommend_material_for_design("outdoor garden planter, UV resistant")
-        # Should recommend ASA or similar — and include brand profiles if they exist
-        assert hasattr(rec, "recommended_brands")
-        assert isinstance(rec.recommended_brands, list)
+        assert isinstance(rec.recommended_brands, list) and rec.recommended_brands == [_BRAND]
 
-    def test_recommendation_brand_has_required_fields(self):
-        rec = recommend_material_for_design("basic prototype, easy to print")
-        # PLA will likely be recommended — it has brand profiles
-        if rec.recommended_brands:
-            brand = rec.recommended_brands[0]
-            assert "profile_id" in brand
-            assert "brand" in brand
-            assert "product_name" in brand
-            assert "nozzle_temp_optimal_c" in brand
+    def test_recommendation_brand_has_required_fields(self, monkeypatch):
+        _served_pick(monkeypatch, pro=True, pick={
+            "material_id": "asa", "score": 80.0, "reasons": [], "warnings": [], "alternatives": [],
+            "recommended_brands": [_BRAND],
+        })
+        brand = recommend_material_for_design("basic prototype, easy to print").recommended_brands[0]
+        for field in ("profile_id", "brand", "product_name", "nozzle_temp_optimal_c"):
+            assert field in brand
 
-    def test_recommendation_serializable(self):
+    def test_recommendation_serializable(self, monkeypatch):
         import json
 
-        rec = recommend_material_for_design("basic prototype")
-        d = rec.to_dict()
-        assert "recommended_brands" in d
-        json_str = json.dumps(d)
-        assert json_str
+        _served_pick(monkeypatch, pro=False, pick={
+            "material_id": "pla", "score": 52.0, "reasons": ["PLA recommended"], "warnings": [],
+            "alternatives": [], "recommended_brands": [], "fallback": False,
+        })
+        d = recommend_material_for_design("basic prototype").to_dict()
+        assert d["recommended_brands"] == []
+        assert json.dumps(d)
 
 
 # ---------------------------------------------------------------------------

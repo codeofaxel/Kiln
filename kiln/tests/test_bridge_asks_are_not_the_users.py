@@ -60,8 +60,9 @@ _PERSONS_OWN_ASK = {
         "get_best_material_substitute; the ranked substitutes are the feature they reached for"
     ),
     "_pro_material_pick_bridge": (
-        "runs only when the person asks what material a part should be, on a "
-        "plan that includes Kiln Pro; the pick is the feature they reached for"
+        "runs only when the person asks what material a part should be "
+        "(recommend_design_material, or an analysis of what a part needs); the "
+        "pick is the feature they reached for"
     ),
     "_pro_routing_bridge": (
         "runs only when the person asks recommend_material for a material or "
