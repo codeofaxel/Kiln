@@ -1348,7 +1348,8 @@ _STANDS_IN_FOR_A_PERSON = {
     ("pipelines.py::_start_print", _CARRIED): "the yes a pipeline stored when its door started it",
     ("print_signoff.py::grant_from_record", _CARRIED): "a stored clearance, re-granted for the start it was stored for",
     ("print_signoff.py::grant_from_record", "SOURCE_QUEUED"): (
-        "a stored job record that names no source: every door that queues takes the gate first"
+        "a queued job whose stored yes names no source: every door that queues asks the person "
+        "before it queues, so someone said yes to it before it was queued"
     ),
     ("print_signoff.py::exemption_verdict", "SOURCE_CI_BYPASS"): "the audited KILN_SKIP_PREVIEW_GATE switch",
     ("print_signoff.py::exemption_verdict", "SOURCE_RESUME"): "a resume Kiln made, of the job the printer reports paused",

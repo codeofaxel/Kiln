@@ -625,6 +625,71 @@ class TestQueueDoors:
         assert [d["job_id"] for d in summary["dispatched"]] == [job_id], summary
         assert printer.started == ["part.gcode"]
 
+    def test_a_job_queued_through_its_door_starts_on_the_persons_own_yes(self, queue_env, tmp_path, monkeypatch):
+        """End to end through one queue door: the wrapper asks the person on a
+        host that draws a dialog, ``submit_job`` takes the gate and stores
+        that yes on the job, and the scheduler later starts the job on it --
+        the person's own yes, who saw it where, never a stand-in."""
+        import asyncio
+
+        from kiln.events import EventBus
+        from kiln.plugins.queue_tools import submit_job
+        from kiln.print_consent import CHOICE_THIS_PRINT, DialogAnswer
+        from kiln.registry import PrinterRegistry
+        from kiln.scheduler import JobScheduler
+
+        path = _stl(tmp_path / "part.gcode")
+        token = _token_for(path, monkeypatch)
+        asked: list[str] = []
+
+        async def _person(ctx, message, **_kw):
+            asked.append(message)
+            return DialogAnswer("accept", "", choice=CHOICE_THIS_PRINT)
+
+        async def _no_account(*_a, **_k):
+            return None
+
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda *_a: True)
+        monkeypatch.setattr(server, "ask_user_to_confirm", _person)
+        monkeypatch.setattr(server, "_consent_from_account", _no_account)
+
+        async def _the_call():
+            await server._obtain_print_consent("submit_job", {"file_name": "part.gcode"}, object())
+            return submit_job("part.gcode", preview_token=token)
+
+        out = asyncio.run(_the_call())
+        assert out["success"] is True, out
+        assert len(asked) == 1, "asked once, before it was queued"
+        stored = queue_env.get_job(out["job_id"]).metadata["preview_signoff"]
+        assert (stored["source"], stored["door"]) == (print_consent.SOURCE_ELICITED, "stage")
+
+        printer = _Printer()
+        registry = PrinterRegistry()
+        registry.register("garage", printer)
+        taken: list[object] = []
+        take = print_signoff.take
+        monkeypatch.setattr(print_signoff, "take", lambda *a, **k: taken.append(c := take(*a, **k)) or c)
+        summary = JobScheduler(queue_env, registry, EventBus(), poll_interval=0.01).tick()
+        assert [d["job_id"] for d in summary["dispatched"]] == [out["job_id"]], summary
+        assert printer.started == ["part.gcode"]
+        assert [(c.source, c.door) for c in taken if c] == [(print_consent.SOURCE_ELICITED, "stage")], taken
+
+    def test_a_queued_job_whose_record_names_no_source_still_starts(self, queue_env):
+        """A stored yes that names no source is re-granted as a queued job:
+        every door that queues asked the person before it queued, so someone
+        said yes to it before it was queued (the pin's recorded reason)."""
+        from kiln.events import EventBus
+        from kiln.registry import PrinterRegistry
+        from kiln.scheduler import JobScheduler
+
+        printer = _Printer()
+        registry = PrinterRegistry()
+        registry.register("garage", printer)
+        job_id = queue_env.submit("part.gcode", "garage", "test", metadata={"preview_signoff": {"door": "stage"}})
+        summary = JobScheduler(queue_env, registry, EventBus(), poll_interval=0.01).tick()
+        assert [d["job_id"] for d in summary["dispatched"]] == [job_id], summary
+        assert printer.started == ["part.gcode"]
+
 
 class TestCliDoors:
     @pytest.fixture
