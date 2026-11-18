@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import generic_limits as _generic
-from kiln.served_answer import Miss, sentence
+from kiln.served_answer import Miss, free_account_note, sentence
 
 OVERHANG = "overhang_unsupported_deg"
 BRIDGE = "bridge_max_mm"
@@ -215,7 +215,7 @@ def miss_sentence(miss: Miss) -> str:
         cannot="get this plastic's own limits",
         wont="checks the part against the general figures and won't call them this plastic's own",
         safe_remedy="leave extra margin",
-        then="check again",
+        then="check again" + free_account_note(miss),
     )
 
 
@@ -393,7 +393,7 @@ def sliced_miss_sentence(miss: Miss, general_wall_mm: float) -> str:
             f"warns about thin walls and pins from the general minimum wall ({general_wall_mm:g} mm) "
             "instead and stops nothing"
         ),
-        then="check again for Kiln's exact check",
+        then="check again for Kiln's exact check" + free_account_note(miss),
     )
 
 

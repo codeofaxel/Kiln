@@ -35,6 +35,7 @@ def _lines(miss: Miss) -> dict[str, str]:
     from kiln import _pro_adaptive_bridge, _pro_substitution_bridge, material_routing
     from kiln.design_intelligence import _basic_pairing_report
     from kiln.material_basics import basic_pick_line
+    from kiln.material_limits import miss_sentence, sliced_miss_sentence
     from kiln.material_safety import _basic_mix_check
 
     return {
@@ -45,6 +46,8 @@ def _lines(miss: Miss) -> dict[str, str]:
         "pairing": _basic_pairing_report("pla", "petg", miss).caution,
         "mix": _basic_mix_check(["PLA", "PETG"], miss)["caution"],
         "slicing": _pro_adaptive_bridge.basic(miss, "PLA")["message"],
+        "design limits": miss_sentence(miss),
+        "slicer check": sliced_miss_sentence(miss, 0.8),
     }
 
 
