@@ -25,6 +25,12 @@ Two halves:
 previewed, the printer sees the slice made from it, and the slice ledger
 in :mod:`kiln.monitor_twin` is what joins the two.  A clearance for
 ``jar.stl`` starts ``jar.gcode`` sliced from it and nothing else.
+
+A copy Kiln makes of a part during a call is part of that lineage too
+(:func:`note_copy`).  A copy that only MOVES the part on the plate is the
+same part, so a yes for the part covers it (:func:`approved_part`); a copy
+that CHANGES it (repaired, rescaled) is a different part, which a yes for
+the original never covers, and the refusal says so (:func:`changed_from`).
 """
 
 from __future__ import annotations
@@ -58,8 +64,14 @@ __all__ = [
     "SOURCE_QUEUED",
     "SOURCE_PRIOR_APPROVAL",
     "SOURCE_RESUME",
+    "COPY_MOVED",
+    "COPY_REPAIRED",
+    "COPY_RESCALED",
     "Clearance",
     "Verdict",
+    "approved_part",
+    "changed_from",
+    "note_copy",
     "grant",
     "grant_from_record",
     "record_for",
@@ -243,7 +255,10 @@ class Clearance:
         if mine == theirs:
             return True
         drawn, source = _sliced_from(file_name)
-        return _norm(drawn) == mine or (source is not None and _norm(source) == mine)
+        if _norm(drawn) == mine or (source is not None and _norm(source) == mine):
+            return True
+        # A slice of a copy that only moved the part is a slice of the part.
+        return drawn is not None and _norm(approved_part(drawn)) == mine
 
 
 def _scope_covers(scope: Any, aimed: str | None, printer_name: str | None) -> bool:
@@ -284,6 +299,101 @@ def _sliced_from(file_name: str) -> tuple[str | None, str | None]:
         )
     except Exception:  # noqa: BLE001
         return None, None
+
+
+# ---------------------------------------------------------------------------
+# Copies Kiln makes of a part during a call
+# ---------------------------------------------------------------------------
+
+#: The part only moved on the plate: a yes for the part covers the copy.
+COPY_MOVED = "moved"
+#: The mesh was repaired: a different part from the one shown.
+COPY_REPAIRED = "repaired"
+#: The mesh was rescaled: a different part from the one shown.
+COPY_RESCALED = "rescaled"
+
+_COPY_KINDS = frozenset({COPY_MOVED, COPY_REPAIRED, COPY_RESCALED})
+
+#: How far a chain of copies is followed back (a copy of a copy of ...).
+_MAX_COPY_HOPS = 4
+
+#: ``(copy, part, part_hash, copy_hash, how)`` for each copy this call made,
+#: by real path.  A ContextVar, like the clearance: it lives as long as the
+#: call that made the copies, and a tuple, so no call shares another's.
+_copies: ContextVar[tuple[tuple[str, str, str, str, str], ...]] = ContextVar("kiln_part_copies", default=())
+
+
+def _real(path: str | None) -> str:
+    return os.path.realpath(str(path)) if path else ""
+
+
+def _file_hash(path: str) -> str:
+    from kiln.preview_gate import hash_file
+
+    return hash_file(path)
+
+
+def note_copy(part_path: str, copy_path: str, *, how: str) -> None:
+    """Record that Kiln just made *copy_path* from *part_path*, and how.
+
+    Called by the code that writes the copy, right after it is written.
+    The content of both files is recorded, so the copy is read as the part
+    only while neither has changed since.  Never raises.
+    """
+    try:
+        if how not in _COPY_KINDS or not part_path or not copy_path:
+            return
+        part, copy = _real(part_path), _real(copy_path)
+        if part == copy:
+            return
+        entry = (copy, part, _file_hash(part), _file_hash(copy), how)
+        kept = tuple(e for e in _copies.get() if e[0] != copy)
+        _copies.set((*kept, entry)[-64:])
+    except Exception:  # noqa: BLE001 -- bookkeeping never blocks a copy
+        logger.debug("copy not recorded", exc_info=True)
+
+
+def _copy_record(path: str) -> tuple[str, str] | None:
+    """``(part, how)`` when *path* is a copy this call made and neither file
+    has changed since, else ``None``."""
+    real = _real(path)
+    for copy, part, part_hash, copy_hash, how in reversed(_copies.get()):
+        if copy != real:
+            continue
+        if _file_hash(copy) != copy_hash or _file_hash(part) != part_hash:
+            return None
+        return part, how
+    return None
+
+
+def approved_part(path: str) -> str:
+    """The file a person's yes and preview name for *path*: the part a copy
+    that only moved it was made from, followed back to the first, else
+    *path* itself.  A copy that changed the part stops the walk.  Never
+    raises."""
+    current = str(path or "")
+    try:
+        for _ in range(_MAX_COPY_HOPS):
+            record = _copy_record(current) if current else None
+            if record is None or record[1] != COPY_MOVED:
+                break
+            current = record[0]
+    except Exception:  # noqa: BLE001 -- unreadable lineage is no lineage
+        logger.debug("copy lineage unreadable", exc_info=True)
+    return current
+
+
+def changed_from(path: str) -> tuple[str, str] | None:
+    """``(part, how)`` when *path* (or the part a moved copy of it is) is a
+    copy this call made that CHANGED *part*: repaired or rescaled.  A yes
+    for *part* does not cover it.  ``None`` otherwise.  Never raises."""
+    try:
+        record = _copy_record(approved_part(path))
+    except Exception:  # noqa: BLE001
+        return None
+    if record is None or record[1] == COPY_MOVED:
+        return None
+    return record
 
 
 _current: ContextVar[Clearance | None] = ContextVar("kiln_print_clearance", default=None)
@@ -660,3 +770,4 @@ def adapter_verdict(adapter: Any, file_name: str, kwargs: dict[str, Any] | None 
 
 def _reset_for_tests() -> None:
     _current.set(None)
+    _copies.set(())

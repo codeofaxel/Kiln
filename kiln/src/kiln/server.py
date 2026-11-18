@@ -4354,10 +4354,41 @@ def _said_go(
     return None, aimed, consent_for(file_name=file_name, printer_name=printer_name, aimed_at=aimed)
 
 
+def _changed_part_error(tool_name: str, file_name: str) -> dict | None:
+    """The refusal for a part Kiln changed during this call (repaired,
+    rescaled) when the yes or the preview on record is for the part as it
+    was, or ``None`` when *file_name* is no such copy.
+
+    One plain sentence and one way on: the changed part is a different
+    part, so the person is shown it and asked about it once, by calling the
+    tool again on that file.  Its path rides the error as ``changed_part``.
+    """
+    from kiln import print_signoff
+
+    changed = print_signoff.changed_from(file_name)
+    if changed is None:
+        return None
+    part, how = changed
+    path = print_signoff.approved_part(file_name)
+    was = os.path.basename(part) or "the part"
+    arg = _CONSENT_FILE_ARG.get(tool_name)
+    again = f'call {tool_name} again with {arg}="{path}"' if arg else f'start "{path}" again'
+    return _error_dict(
+        f"{tool_name} has not started: Kiln {how} {was} before printing it, so what would print is not the "
+        f"part the person was shown and said yes to. Nothing was sent to the printer. Show them the {how} "
+        f"part ({path}), then {again} with a preview token issued for that file; they are asked about it "
+        "once, the usual way.",
+        code="PREVIEW_NOT_CONFIRMED",
+        extra={"changed_part": {"was": part, "now": path, "how": how}},
+    )
+
+
 def _no_yes_error(tool_name: str, file_name: str, preview_token: str | None, aimed: str) -> dict:
     """The refusal for a print nobody said go to."""
     from kiln import print_signoff
 
+    if block := _changed_part_error(tool_name, file_name):
+        return block
     if preview_token:
         # The token is left unspent: it is still good for the call that
         # carries the yes.
@@ -4373,6 +4404,9 @@ def _no_yes_before_sending(
     ``None`` when a yes is on record or the call is exempt: the full
     gate (:func:`_preview_gate_error`) still judges the print right before
     it starts, the preview half and any look at the bed included."""
+    from kiln import print_signoff
+
+    file_name = print_signoff.approved_part(file_name)
     exempt, aimed, granted = _said_go(tool_name, file_name, printer_name)
     if exempt is not None or granted is not None:
         return None
@@ -4410,11 +4444,18 @@ def _preview_gate_error(
     resume-mode print is still exempt: the print is already running and
     already had its approval.  On the hosted multi-tenant server a
     terminal yes or a terminal window is nobody's, and is not accepted.
+
+    A copy Kiln made during the call that only moves the part on the plate
+    is judged as the part (:func:`kiln.print_signoff.approved_part`): the
+    yes and the preview for the part cover it, and every check on the bed
+    still runs.  A copy that changed the part is judged as itself, and its
+    refusal says so (:func:`_changed_part_error`).
     """
     from kiln import print_signoff
     from kiln.print_consent import GRADE_B, grade_of
     from kiln.runtime_env import is_hosted_multitenant
 
+    file_name = print_signoff.approved_part(file_name)
     # Neither fact is needed for the audited CI bypass or for a resume
     # continuation; decided first, before anything touches the token.
     exempt, aimed, granted = _said_go(tool_name, file_name, printer_name, is_resume=is_resume)
@@ -4472,6 +4513,8 @@ def _preview_gate_error(
         )
         if not verdict.ok:
             print_signoff.clear()
+            if block := _changed_part_error(tool_name, file_name):
+                return block
             code = "PREVIEW_TOKEN_INVALID" if verdict.code == print_signoff.CODE_TOKEN_INVALID else "PREVIEW_NOT_CONFIRMED"
             return _error_dict(verdict.message, code=code)
         saw = verdict.door or "token"
@@ -4484,6 +4527,8 @@ def _preview_gate_error(
 
     if not saw:
         print_signoff.clear()
+        if block := _changed_part_error(tool_name, file_name):
+            return block
         name = os.path.basename(str(file_name or "")) or "this file"
         return _error_dict(
             f"{tool_name} refuses to proceed: a yes was given for {name}, but no preview of it "

@@ -546,7 +546,14 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
             report=report,
             bypassable=not no_part,
         )
-    return PrintGate(path=report.get("validated_path") or input_path, report=report)
+    path = report.get("validated_path") or input_path
+    if path != input_path:
+        # A repaired or rescaled mesh is another part than the one shown.
+        from kiln.print_signoff import COPY_REPAIRED, COPY_RESCALED, note_copy
+
+        rescaled = any(c.get("name") == "auto_scale" and c.get("passed") for c in report.get("checks") or [])
+        note_copy(input_path, path, how=COPY_RESCALED if rescaled else COPY_REPAIRED)
+    return PrintGate(path=path, report=report)
 
 
 class _ValidationPipelinePlugin:
