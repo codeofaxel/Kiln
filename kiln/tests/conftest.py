@@ -1537,13 +1537,17 @@ def _forget_served_misses() -> None:
         ("kiln.start_narrative", "_served_blocks"),
         ("kiln.start_narrative", "_served_lines"),
         ("kiln.start_narrative", "_last_miss"),
+        # A plastic's limits and what the slice keeps at a nozzle, and the
+        # causes already said.
+        ("kiln.material_limits", "_answers"),
+        ("kiln.material_limits", "_said"),
     ):
         record = getattr(sys.modules.get(module), attr, None)
-        if isinstance(record, dict):
+        if isinstance(record, (dict, set)):
             record.clear()
     for name in (
         "kiln._pro_melt_bridge", "kiln._pro_catalogue_bridge", "kiln._pro_material_bridge",
-        "kiln._pro_nozzle_bridge", "kiln.start_narrative",
+        "kiln._pro_nozzle_bridge", "kiln.start_narrative", "kiln._pro_material_limits_bridge",
     ):
         bridge = sys.modules.get(name)
         if bridge is not None:
@@ -1568,6 +1572,47 @@ def _no_served_miss_crosses_a_test():
     free for any test that never asks: an unimported bridge has no dict to
     clear.
     """
+    _forget_served_misses()
+    yield
+    _forget_served_misses()
+
+
+#: Stand-in figures for what Kiln's own slice keeps, per nozzle width: this
+#: suite's own, never Kiln's.  A test of how the thin-wall check stops a
+#: feature the slice leaves out serves them with :func:`kilns_slice_lines`.
+STAND_IN_WALL_NOZZLES = 0.425
+STAND_IN_PIN_NOZZLES = 1.75
+
+
+@pytest.fixture
+def kilns_slice_lines(monkeypatch):
+    """Kiln's servers stood in for what the slice keeps at a nozzle (public
+    tests cannot import kiln-pro).  Every other served tool is answered as a
+    signed-out install, as without this fixture."""
+    import kiln.server as srv
+
+    signed_out = srv._pro_api_call
+
+    def serve(tool_name, /, _timeout=None, _asked_by_user=True, **kwargs):
+        if tool_name == "material_limits" and kwargs.get("quantities") == [
+            "sliced_wall_min_mm", "sliced_pin_min_mm",
+        ]:
+            nozzle = float(kwargs["nozzle_mm"])
+            return {
+                "success": True,
+                "status": "ok",
+                "known": False,
+                "material_id": None,
+                "scenario": {"nozzle_mm": nozzle},
+                "limits": {
+                    "sliced_wall_min_mm": {"value": STAND_IN_WALL_NOZZLES * nozzle, "unit": "mm", "basis": "general"},
+                    "sliced_pin_min_mm": {"value": STAND_IN_PIN_NOZZLES * nozzle, "unit": "mm", "basis": "general"},
+                },
+                "note": "",
+            }
+        return signed_out(tool_name, _timeout=_timeout, _asked_by_user=_asked_by_user, **kwargs)
+
+    monkeypatch.setattr(srv, "_pro_api_call", serve)
     _forget_served_misses()
     yield
     _forget_served_misses()

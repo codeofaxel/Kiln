@@ -191,8 +191,7 @@ class ThinWallAnalysis:
     layer_height_mm: float = 0.0
     #: The thin features Kiln's slicer drops, each naming ``why`` (``"wall"``,
     #: ``"pin"`` or ``"island"``): what a hard stop says (:func:`_hard_stops`).
-    #: A pin is read up to two nozzle widths across, so its thickness can be
-    #: past the nozzle.
+    #: A pin's thickness can be past the nozzle.
     dropped_regions: list[dict[str, Any]] = field(default_factory=list)
     #: The slicer settings the two above were judged for.  Empty on a block
     #: built by hand, which a hard stop then judges by the nozzle alone.
@@ -201,6 +200,20 @@ class ThinWallAnalysis:
     #: closes them (:func:`_seal_cracks`): how many places, and the widest.
     sealed_crack_count: int = 0
     sealed_crack_widest_mm: float = 0.0
+    #: Which figures judged what the slice leaves out: ``"exact"`` (Kiln's own,
+    #: from Kiln's servers or kiln-pro on this computer) or ``"general"`` (the
+    #: general minimum wall, when Kiln's own could not be read).  Empty on a
+    #: block built by hand.
+    slicer_check: str = ""
+    #: Under the general figures: the walls and pins the same reading, taken
+    #: against the general minimum wall (``general_wall_mm``), finds may be left
+    #: out when sliced, each naming ``why`` like ``dropped_regions``.  A warning,
+    #: never a stop; with Kiln's own figures these are empty and
+    #: ``dropped_regions`` says what is left out.
+    may_be_left_out_count: int = 0
+    may_be_left_out_min_mm: float = 0.0
+    may_be_left_out_regions: list[dict[str, Any]] = field(default_factory=list)
+    general_wall_mm: float = 0.0
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
@@ -3083,13 +3096,11 @@ _DETAIL_WINDOW_MM: float = 50.0
 
 # What Kiln's slicer does with a thin reading that is not tip detail
 # (:func:`_slice_fate`), for the slicer settings :data:`_JUDGED_FOR` names.
+# The thinnest wall Kiln's slice lays a line in and the thinnest round pin it
+# prints are Kiln's own figures (:func:`kiln.material_limits.sliced_floors`);
+# without them both are the general minimum wall, and what that judges thin
+# is a warning that it may be left out, never a stop (:func:`_measure_thin_walls`).
 # Pinned by test_printability_judges_what_the_slicer_drops.py.
-#: A wall narrower across its layer than slope x nozzle + offset gets no line.
-_WALL_DROP_SLOPE: float = 0.35
-_WALL_DROP_OFFSET_MM: float = 0.05
-#: A round pin needs at least this many nozzle widths across to print in every
-#: layer; readings up to it are read for pins on every tier.
-_PIN_MIN_FRACTION: float = 2.0
 #: Wider one way across its layer than the other by more than this, a thin
 #: piece is a fin and is judged as a wall, not as a pin.
 _PIN_ROUND_RATIO: float = 1.25
@@ -3294,6 +3305,8 @@ def _slice_fate(
     *,
     nozzle: float,
     layer_height: float,
+    wall_line: float,
+    pin_line: float,
     pins_only: bool = False,
 ) -> np.ndarray:
     """What Kiln's slicer does with each thin reading that is not tip detail
@@ -3301,17 +3314,18 @@ def _slice_fate(
 
     A slicer works a layer at a time, so a reading is judged by what a layer
     holds at it.  A wall narrower across its layer (the chord leaned onto
-    the layer) than :data:`_WALL_DROP_SLOPE` x nozzle +
-    :data:`_WALL_DROP_OFFSET_MM` gets no line.  A flat sheet prints when a
+    the layer) than *wall_line* gets no line.  A flat sheet prints when a
     layer falls inside it, so one thinner than *layer_height* may be left
     out: a warning, never a drop.  Otherwise the feature is read across its
     layer (:func:`_level_spans`): about as wide one way as the other
-    (:data:`_PIN_ROUND_RATIO`), it is a pin, and narrower than
-    :data:`_PIN_MIN_FRACTION` nozzle widths it is dropped; a fin shorter than
-    :data:`_ISLAND_MIN_LENGTH_FRACTION` nozzle widths is a speck, dropped too.
-    With *pins_only* (readings at or past the nozzle) only the pin rule
-    applies.  A reading thinner than the nozzle the probe could not afford
-    stays a drop, the cautious answer; a thicker one is left as it was.
+    (:data:`_PIN_ROUND_RATIO`), it is a pin, and narrower than *pin_line* it
+    is dropped; a fin shorter than :data:`_ISLAND_MIN_LENGTH_FRACTION` nozzle
+    widths is a speck, dropped too.  *wall_line* and *pin_line* come from
+    :class:`kiln.material_limits.SlicedFloors`: Kiln's own, or the general
+    minimum wall when Kiln's own could not be read.  With *pins_only*
+    (readings at or past the nozzle) only the pin rule applies.  A reading
+    thinner than the nozzle the probe could not afford stays a drop, the
+    cautious answer; a thicker one is left as it was.
     Pinned by test_printability_judges_what_the_slicer_drops.py.
     """
     n = int(chords.shape[0])
@@ -3324,7 +3338,7 @@ def _slice_fate(
         # Judged at the precision every thickness is reported at (µm).
         across = np.round(chords / np.maximum(np.sqrt(np.maximum(1.0 - dz * dz, 0.0)), 1e-9), 3)
         tall = np.round(chords / np.maximum(dz, 1e-9), 3)
-        fate[~flat & (across < _WALL_DROP_SLOPE * nozzle + _WALL_DROP_OFFSET_MM)] = _FATE_WALL
+        fate[~flat & (across < wall_line)] = _FATE_WALL
         fate[flat & (tall < layer_height)] = _FATE_SHEET
     idx = np.nonzero((fate == _FATE_PRINTS) & ~flat)[0]
     if idx.size == 0:
@@ -3334,7 +3348,7 @@ def _slice_fate(
     # a reading never taken.
     unread = ~np.isfinite(spans[:, 0])
     wide, narrow = spans.max(axis=1), spans.min(axis=1)
-    pin = (wide <= _PIN_ROUND_RATIO * narrow) & (wide < _PIN_MIN_FRACTION * nozzle)
+    pin = (wide <= _PIN_ROUND_RATIO * narrow) & (wide < pin_line)
     speck = (wide > _PIN_ROUND_RATIO * narrow) & (wide < _ISLAND_MIN_LENGTH_FRACTION * nozzle)
     if pins_only:
         fate[idx] = np.where(~unread & pin, _FATE_PIN, _FATE_PRINTS)
@@ -3613,11 +3627,13 @@ def _analyze_thin_walls(
     nozzle_diameter: float = 0.4,
     thin_below_mm: float | None = None,
     layer_height: float = 0.2,
+    sliced: Any = None,
 ) -> ThinWallAnalysis:
     """Measure thin walls; see :func:`_measure_thin_walls`."""
     return _measure_thin_walls(
         triangles, vertices,
         nozzle_diameter=nozzle_diameter, thin_below_mm=thin_below_mm, layer_height=layer_height,
+        sliced=sliced,
     )[0]
 
 
@@ -3631,6 +3647,7 @@ def _measure_thin_walls(
     tris: np.ndarray | None = None,
     comp_ids: np.ndarray | None = None,
     layer_height: float = 0.2,
+    sliced: Any = None,
 ) -> tuple[ThinWallAnalysis, float]:
     """Measure thin walls via per-component vectorized inward ray-casting.
 
@@ -3678,16 +3695,28 @@ def _measure_thin_walls(
     *tris* is the same triangles as a ``(T, 3, 3)`` float array and *comp_ids*
     their component labels, when the caller already holds them; each is
     built here otherwise.  Either way the measurement reads the same numbers.
+
+    *sliced* is what Kiln's own slice keeps at this nozzle
+    (:class:`kiln.material_limits.SlicedFloors`), asked here when not given.
+    With Kiln's own figures a feature the slice leaves out is a drop (a hard
+    stop); without them nothing is a drop, and what the same reading finds
+    against the general minimum wall is a warning that it may be left out.
     """
     threshold = max(nozzle_diameter, thin_below_mm or 0.0)
     basis = "material" if threshold > nozzle_diameter else "nozzle"
+    if sliced is None:
+        from kiln.material_limits import sliced_floors
+
+        sliced = sliced_floors(nozzle_mm=nozzle_diameter)
     # Readings up to the pin line are judged by what the slicer does with them
     # (_slice_fate) on every tier, read the same way on each: through the
     # cracks a slicer closes, on reads of their own (fate_budget).
-    pin_line = _PIN_MIN_FRACTION * nozzle_diameter
+    pin_line = float(sliced.pin_mm)
+    wall_line = float(sliced.wall_mm)
+    check = "exact" if sliced.exact else "general"
 
     def unmeasured() -> tuple[ThinWallAnalysis, float]:
-        return ThinWallAnalysis(0.0, 0, 0.0, [], threshold, basis), 0.0
+        return ThinWallAnalysis(0.0, 0, 0.0, [], threshold, basis, slicer_check=check), 0.0
 
     total = len(triangles)
     if total < 4:
@@ -3853,13 +3882,15 @@ def _measure_thin_walls(
     # slicer drops it (_slice_fate); only a drop stops the print.  From the
     # nozzle up to the pin line a round pin is a drop too, unless it is a tip
     # standing on solid.  The same on every tier: the nozzle and the layer
-    # decide, never a material's floor.
+    # decide, never a material's floor.  Without Kiln's own figures the same
+    # reading is taken against the general minimum wall, and what it finds is
+    # a warning, never a stop.
     fate = np.full(n_sample, _FATE_PRINTS, dtype=np.int64)
     below = np.nonzero(thin_mask & (reported < nozzle_diameter))[0]
     if below.size:
         fate[below] = _slice_fate(
             origins[below], directions[below], exit_dist[below], origin_comps[below], fate_runs,
-            nozzle=nozzle_diameter, layer_height=layer_height,
+            nozzle=nozzle_diameter, layer_height=layer_height, wall_line=wall_line, pin_line=pin_line,
         )
         if fate_budget.left > 0:
             # Nothing was refused (a refusal spends the whole budget), so a
@@ -3875,18 +3906,22 @@ def _measure_thin_walls(
     if band.size:
         shaped = _slice_fate(
             origins[band], directions[band], exit_dist[band], origin_comps[band], fate_runs,
-            nozzle=nozzle_diameter, layer_height=layer_height, pins_only=True,
+            nozzle=nozzle_diameter, layer_height=layer_height, wall_line=wall_line, pin_line=pin_line,
+            pins_only=True,
         )
         pins = band[shaped == _FATE_PIN]
         if pins.size:
             # Only a pin thin for longer than a tip stops (an antenna, a long
             # peg); a shorter one standing on the part is detail.  Past the
-            # nozzle nothing stopped before, so a walk cut short stops nothing.
+            # nozzle nothing stopped before, so a walk cut short stops nothing;
+            # a warning, which stops nothing either way, takes it as a pin.
             mids = origins[pins] + directions[pins] * (exit_dist[pins] * 0.5)[:, None]
-            length, _ = _pin_length(
+            length, refused = _pin_length(
                 mids, origin_comps[pins], targets, component_cache, fate_budget, pin_line=pin_line,
             )
             tip = length <= _DETAIL_HEIGHT_MAX_MM
+            if not sliced.exact:
+                tip &= ~refused
             fate[pins[~tip]] = _FATE_PIN
             detail_mask[pins[tip]] = True
             thin_mask &= ~detail_mask
@@ -3900,7 +3935,11 @@ def _measure_thin_walls(
     sub_nozzle_pct = int((counted & (reported < nozzle_diameter)).sum()) / n_sample * 100.0
 
     sub_nozzle = thin_mask & (reported < nozzle_diameter)
-    dropped = np.isin(fate, _FATE_DROPS)  # set only on the readings judged above
+    flagged = np.isin(fate, _FATE_DROPS)  # set only on the readings judged above
+    # Judged by Kiln's own figures, a flagged reading is left out of the slice;
+    # judged by the general minimum wall, it only may be.
+    dropped = flagged if sliced.exact else np.zeros_like(flagged)
+    left_out = flagged & ~dropped
     thin_line = sub_nozzle & (fate == _FATE_PRINTS)
     thin_sheet = sub_nozzle & (fate == _FATE_SHEET)
     line_count, sheet_count = int(thin_line.sum()), int(thin_sheet.sum())
@@ -3925,14 +3964,19 @@ def _measure_thin_walls(
         problematic = _thin_wall_features(
             origins[thin_mask], exit_dist[thin_mask], link_mm=link_mm,
         )
-    dropped_regions: list[dict[str, Any]] = []
-    for code in np.unique(fate[dropped]):
-        kind = dropped & (fate == code)
-        dropped_regions += [
-            {**r, "why": _FATE_WORD[int(code)]}
-            for r in _thin_wall_features(origins[kind], exit_dist[kind], link_mm=link_mm)
-        ]
-    dropped_regions.sort(key=lambda f: (f["thickness_mm"], f["x"], f["y"], f["z"]))
+    def regions(mask: np.ndarray) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        for code in np.unique(fate[mask]):
+            kind = mask & (fate == code)
+            found += [
+                {**r, "why": _FATE_WORD[int(code)]}
+                for r in _thin_wall_features(origins[kind], exit_dist[kind], link_mm=link_mm)
+            ]
+        found.sort(key=lambda f: (f["thickness_mm"], f["x"], f["y"], f["z"]))
+        return found
+
+    dropped_regions = regions(dropped)
+    left_out_regions = regions(left_out)
     # Cracks are counted where a chord thinner than the nozzle met them, a
     # set every tier shares, so the note reads the same on each.
     sealed = counted & (crack_width > 0) & (np.round(raw_chord, 3) < nozzle_diameter)
@@ -3963,6 +4007,11 @@ def _measure_thin_walls(
         judged_for=_JUDGED_FOR,
         sealed_crack_count=crack_places,
         sealed_crack_widest_mm=round(float(crack_width[sealed].max()), 3) if sealed.any() else 0.0,
+        slicer_check=check,
+        may_be_left_out_count=int(left_out.sum()),
+        may_be_left_out_min_mm=round(float(exit_dist[left_out].min()), 3) if left_out.any() else 0.0,
+        may_be_left_out_regions=left_out_regions[:_THIN_FEATURE_CAP],
+        general_wall_mm=0.0 if sliced.exact else round(wall_line, 3),
     ), sub_nozzle_pct
 
 
@@ -7685,6 +7734,7 @@ def _build_recommendations(
     adhesion_force: AdhesionForceEstimate | None = None,
     adhesion: AdhesionRecommendation | None = None,
     thin_walls_below_nozzle: bool | None = None,
+    slicer_note: str = "",
 ) -> list[str]:
     """Generate actionable recommendations based on analysis results.
 
@@ -7693,6 +7743,9 @@ def _build_recommendations(
     and declines one.  The nozzle advice fires only for walls thinner
     than the nozzle (``thin_walls_below_nozzle``); a wall above the
     nozzle but under a material's floor is the material rule's to name.
+    *slicer_note* is why what the slice leaves out was judged by the
+    general figures (:meth:`kiln.material_limits.SlicedFloors.note`), said
+    once, after the warning it explains.
     """
     recs: list[str] = []
 
@@ -7731,6 +7784,15 @@ def _build_recommendations(
                 f"{layer:g} mm layer, so it may be left out when sliced; make it at least {layer:g} mm "
                 f"thick."
             )
+        if getattr(thin_walls, "may_be_left_out_count", 0):
+            general = thin_walls.general_wall_mm
+            recs.append(
+                f"A wall or pin as thin as {thin_walls.may_be_left_out_min_mm:.2f} mm is thinner than "
+                f"{general:g} mm, the general minimum wall, so it may be left out when sliced; make it "
+                f"at least {general:g} mm thick."
+            )
+            if slicer_note:
+                recs.append(slicer_note)
     elif below_nozzle:
         recs.append(
             f"Thin walls detected ({thin_walls.min_wall_thickness_mm:.2f} mm min).  "
@@ -9073,12 +9135,16 @@ def _analyze_printability_here(
         component_size_uniformity=round(component_size_uniformity, 3),
         genus=mesh_genus,
     )
+    # What Kiln's own slice keeps at this nozzle, asked once for the report.
+    from kiln.material_limits import sliced_floors
+
+    sliced = sliced_floors(nozzle_mm=nozzle_diameter)
     # The walls and the gaps share one budget for the corners they read.
     corner_budget = _CornerBudget()
     thin_walls, sub_nozzle_wall_pct = _measure_thin_walls(
         triangles, vertices,
         nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor, corner_budget=corner_budget,
-        tris=shared_tris, comp_ids=shared_comp_ids, layer_height=layer_height,
+        tris=shared_tris, comp_ids=shared_comp_ids, layer_height=layer_height, sliced=sliced,
     )
     cavities = _analyze_cavity_widths(
         triangles, vertices, nozzle_diameter=nozzle_diameter, corner_budget=corner_budget,
@@ -9143,6 +9209,7 @@ def _analyze_printability_here(
         warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
         adhesion=adhesion,
         thin_walls_below_nozzle=sub_nozzle_wall_pct > 0,
+        slicer_note=sliced.note(),
     )
 
     # Surface the bridge-substitution downgrade.  When the
@@ -9555,18 +9622,18 @@ def _dropped_sentence(region: dict[str, Any], nozzle_diameter: float) -> str:
     (``region["why"]``, a wall when unsaid)."""
     thick = float(region["thickness_mm"])
     why = region.get("why", "wall")
+    # The fix is the general minimum wall: past it, nothing here is left out.
+    enough = generic_limits.wall_min_mm(nozzle_diameter)
     if why == "pin":
-        need = _PIN_MIN_FRACTION * nozzle_diameter
         return (
-            f"A pin {thick:.2f} mm across is too thin for Kiln's slicer to print reliably: it "
-            f"needs at least {need:g} mm. Thicken it to {need:g} mm, or use a smaller nozzle."
+            f"A pin {thick:.2f} mm across is too thin for Kiln's slicer to print reliably. "
+            f"Thicken it to at least {enough:g} mm, or use a smaller nozzle."
         )
-    fix = f"Thicken it to at least {2 * nozzle_diameter:g} mm."
+    fix = f"Thicken it to at least {enough:g} mm."
     if why == "island":
         return (
             f"A piece only {thick:.2f} mm thick is too short for Kiln's slicer to lay a line "
-            f"along, so it will be missing. Make it longer, or at least {2 * nozzle_diameter:g} mm "
-            f"thick."
+            f"along, so it will be missing. Make it longer, or at least {enough:g} mm thick."
         )
     return (
         f"A wall measures {thick:.2f} mm, thinner than the {nozzle_diameter:g} mm nozzle can "

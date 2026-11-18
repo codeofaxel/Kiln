@@ -2454,6 +2454,7 @@ class TestPlacementIsStructuredNotOnlyProse:
         assert report.placement.score_if_placed == seated_report.score
         assert report.placement.score_if_placed > report.score
 
+    @pytest.mark.usefixtures("kilns_slice_lines")
     def test_a_part_that_is_ALSO_badly_shaped_does_not_claim_otherwise(self):
         """The mirror case, and the one that keeps this honest: a part
         whose shape would fail on its own must not report that placement
@@ -2640,6 +2641,7 @@ class TestSubToleranceGeometryIsNotMeasured:
         assert report.cavities.cavity_sample_count == 0, report.cavities
         assert report.cavities.min_cavity_width_mm == 0.0, report.cavities
 
+    @pytest.mark.usefixtures("kilns_slice_lines")
     def test_a_30um_fin_is_measured_because_every_slicer_drops_it(self):
         # A 30 µm fin, 20 mm long and 5 mm tall, counts.  Every slicer
         # deletes it, so a floor that kept it out of the verdict would let

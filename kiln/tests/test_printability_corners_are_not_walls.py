@@ -156,6 +156,7 @@ class TestACornerIsNotAWall:
         assert walls.min_wall_thickness_mm >= 1.2, walls
 
 
+@pytest.mark.usefixtures("kilns_slice_lines")
 class TestAWallIsStillAWall:
     def test_a_fin_thinner_than_the_nozzle(self, tmp_path):
         """A 0.3 mm fin is a wall, printed as one thin line; a 0.1 mm one is

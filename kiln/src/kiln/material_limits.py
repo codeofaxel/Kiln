@@ -13,6 +13,12 @@ installed, otherwise from Kiln's servers.  When no answer comes, every figure
 is the general one, ``basis`` says ``general``, and :attr:`MaterialLimits.miss`
 says why; the general figures are never called the plastic's own.
 
+:func:`sliced_floors` answers, for one nozzle, the thinnest wall and the
+thinnest round pin Kiln's own slice keeps, which is how the printability
+check knows what a slice will leave out.  It is the same for every plastic.
+With no answer, both are the general minimum wall: a heads-up that may warn
+about more than Kiln's own check would, never less.
+
 A served answer is kept for the life of the process, per plastic and
 scenario, so a session asks once.  When kiln-pro is on this computer nothing
 is kept: one caller's answer never reaches the next.
@@ -40,6 +46,8 @@ HOLE_FORMS = "hole_forms_mm"
 HOLE_USABLE = "hole_usable_mm"
 THREAD_PITCH = "thread_min_pitch_mm"
 THREAD_DIAMETER = "thread_min_diameter_mm"
+SLICED_WALL = "sliced_wall_min_mm"
+SLICED_PIN = "sliced_pin_min_mm"
 
 #: The quantities that differ by plastic: asked of kiln-pro.
 PER_PLASTIC: tuple[str, ...] = (OVERHANG, BRIDGE, WALL_RECOMMENDED, PIN, ESD_WALL)
@@ -51,7 +59,8 @@ OWN_BASES = ("plastic", "family")
 
 _DATA = Path(__file__).resolve().parent / "data" / "design_knowledge" / "materials.json"
 
-#: (material, nozzle, layer, enclosed, pin height) -> the served answer.
+#: (material, nozzle, layer, enclosed, pin height) -> the served answer; what
+#: the slice keeps at a nozzle is kept under ("", nozzle, None, None, "sliced").
 _answers: dict[tuple[Any, ...], dict[str, Any]] = {}
 #: The causes a miss has already been said for in this process.
 _said: set[str] = set()
@@ -258,12 +267,85 @@ def general_design_limits() -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class SlicedFloors:
+    """What Kiln's own slice keeps at one nozzle: the thinnest wall, across
+    its layer, it lays a line in (``wall_mm``) and the thinnest round pin it
+    prints in every layer (``pin_mm``).
+
+    ``exact`` is true when Kiln's own figures were read (kiln-pro on this
+    computer, or Kiln's servers): a feature the check finds thinner than them
+    is left out of the slice.  Otherwise both are the general minimum wall at
+    the nozzle (:func:`kiln.generic_limits.wall_min_mm`), a heads-up: what the
+    check finds thinner than it may be left out, and ``miss`` says why Kiln's
+    own figures were not read."""
+
+    nozzle_mm: float
+    wall_mm: float
+    pin_mm: float
+    exact: bool
+    miss: Miss | None = None
+
+    def note(self) -> str:
+        """The one sentence for a heads-up: why the check is not Kiln's own
+        and how to get it.  Empty when the figures are Kiln's own."""
+        if self.exact or self.miss is None:
+            return ""
+        return sliced_miss_sentence(self.miss, self.wall_mm)
+
+
+def sliced_miss_sentence(miss: Miss, general_wall_mm: float) -> str:
+    """The one sentence for a miss of what Kiln's slice keeps, in the
+    served-answer voice."""
+    return sentence(
+        miss,
+        feature="slicer check",
+        on_the_line="Whether a thin wall or pin is left out when sliced depends on the slicer and the nozzle",
+        cannot="check exactly what its slicer leaves out",
+        wont=(
+            f"warns about thin walls and pins from the general minimum wall ({general_wall_mm:g} mm) "
+            "instead and stops nothing"
+        ),
+        then="check again for Kiln's exact check",
+    )
+
+
+def sliced_floors(*, nozzle_mm: float | None) -> SlicedFloors:
+    """What Kiln's own slice keeps at *nozzle_mm* (the reference nozzle when it
+    is not stated).  Never raises.
+
+    Asked of kiln-pro on this computer, else of Kiln's servers; a served
+    answer is kept for the life of the process, per nozzle.  With no answer
+    both figures are the general minimum wall and ``miss`` says why."""
+    nozzle = _generic.stated_nozzle_mm(nozzle_mm)
+    from kiln import _pro_material_limits_bridge as bridge
+
+    local = bridge.available()
+    key = ("", nozzle, None, None, "sliced")
+    answer = None if local else _answers.get(key)
+    miss: Miss | None = None
+    if answer is None:
+        answer, miss = bridge.ask_sliced(nozzle_mm=nozzle)
+        if answer is not None and not local:
+            _answers[key] = answer
+    if answer is None:
+        general = _generic.wall_min_mm(nozzle)
+        return SlicedFloors(nozzle, general, general, False, miss)
+    figures = answer["limits"]
+    return SlicedFloors(
+        nozzle, float(figures[SLICED_WALL]["value"]), float(figures[SLICED_PIN]["value"]), True,
+    )
+
+
 __all__ = [
     "GENERAL_ONLY",
     "PER_PLASTIC",
     "GENERAL_BLOCK_NOTE",
     "MaterialLimits",
+    "SlicedFloors",
     "general_design_limits",
     "limits_for",
     "miss_sentence",
+    "sliced_floors",
+    "sliced_miss_sentence",
 ]

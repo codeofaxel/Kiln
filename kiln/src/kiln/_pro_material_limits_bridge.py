@@ -11,10 +11,13 @@ two places, in order:
 2. **served**: Kiln's servers answer through :data:`WIRE_TOOL`, asked through
    the door every served tool uses (:func:`kiln.server._pro_api_call`).
 
-One plastic and one scenario per ask.  A miss (offline, signed out, no
-answer, refused) comes back as a :class:`kiln.served_answer.Miss` and never as
-a figure: :mod:`kiln.material_limits` answers with the general figures and
-says why.  Nothing is kept here, and nothing here raises.
+One plastic and one scenario per ask.  :func:`ask_sliced` asks the same two
+places what Kiln's own slice keeps at a nozzle (the thinnest wall and the
+thinnest round pin), which is the same for every plastic and names none.  A
+miss (offline, signed out, no answer, refused) comes back as a
+:class:`kiln.served_answer.Miss` and never as a figure:
+:mod:`kiln.material_limits` answers with the general figures and says why.
+Nothing is kept here, and nothing here raises.
 """
 
 from __future__ import annotations
@@ -40,6 +43,10 @@ QUANTITIES: tuple[str, ...] = (
     "pin_min_mm",
     "esd_wall_min_mm",
 )
+#: What Kiln's own slice keeps at a nozzle, each ``{value, unit, basis}``:
+#: the thinnest wall, across its layer, it lays a line in, and the thinnest
+#: round pin it prints in every layer.
+SLICED: tuple[str, ...] = ("sliced_wall_min_mm", "sliced_pin_min_mm")
 #: Where a figure came from, as the answer says it.
 BASES: tuple[str, ...] = ("plastic", "family", "general", "not_applicable")
 #: A check waits this long, at most; the general figures are always there.
@@ -88,22 +95,44 @@ def ask(
     return _served(material, scenario)
 
 
-def _local(material: str, scenario: dict[str, Any]) -> Any:
+def ask_sliced(*, nozzle_mm: float) -> tuple[dict[str, Any] | None, Miss | None]:
+    """``(answer, None)`` with what Kiln's own slice keeps at *nozzle_mm*, or
+    ``(None, miss)``.
+
+    The answer carries ``limits`` with every quantity in :data:`SLICED`.  No
+    plastic is named: the figures are the same for every plastic.  Never
+    raises."""
+    scenario = {"nozzle_mm": float(nozzle_mm), "quantities": list(SLICED)}
+    local = _local(None, scenario)
+    if local is not _NOT_HERE:
+        return local  # type: ignore[return-value]
+    return _served(None, scenario)
+
+
+def _wanted(scenario: dict[str, Any]) -> tuple[str, ...]:
+    """The quantities an answer to *scenario* must carry: the ones it asked
+    for, else every per-plastic quantity."""
+    return tuple(scenario.get("quantities") or QUANTITIES)
+
+
+def _local(material: str | None, scenario: dict[str, Any]) -> Any:
     try:
         from kiln_pro.material_limits.engine import for_the_wire as _engine_limits
     except ImportError:
         return _NOT_HERE
+    asked = scenario.get("quantities")
+    rest = {key: value for key, value in scenario.items() if key != "quantities"}
     try:
-        answer = _engine_limits(material, None, **scenario)
+        answer = _engine_limits(material, list(asked) if asked else None, **rest)
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         return None, local_fault(exc, where="the design limits on this computer")
-    if _is_answer(answer):
-        return _kept(answer), None
+    if _is_answer(answer, _wanted(scenario)):
+        return _kept(answer, _wanted(scenario)), None
     miss = classify_answer(answer) if isinstance(answer, dict) else None
     return None, miss or Miss("unanswered", detail="no design limits in the answer")
 
 
-def _served(material: str, scenario: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss | None]:
+def _served(material: str | None, scenario: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss | None]:
     global _service_down_until, _service_down_miss
     if time.monotonic() < _service_down_until:
         return None, _service_down_miss or Miss("unanswered", "SERVER_UNREACHABLE")
@@ -111,6 +140,7 @@ def _served(material: str, scenario: dict[str, Any]) -> tuple[dict[str, Any] | N
         import kiln.server as _srv
     except Exception as exc:  # noqa: BLE001 -- no served door here is a miss, never a traceback
         return None, local_fault(exc, where="the served door on this computer")
+    named = {"material": material} if material is not None else {}
     try:
         answer = _srv._pro_api_call(
             WIRE_TOOL,
@@ -118,7 +148,7 @@ def _served(material: str, scenario: dict[str, Any]) -> tuple[dict[str, Any] | N
             # Asked on the way to a design check, a print check or a slice;
             # the person asked for the check, not for this.
             _asked_by_user=False,
-            material=material,
+            **named,
             **{key: value for key, value in scenario.items() if value is not None},
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
@@ -127,8 +157,8 @@ def _served(material: str, scenario: dict[str, Any]) -> tuple[dict[str, Any] | N
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
         _service_down_miss = miss
         return None, miss
-    if _is_answer(answer):
-        return _kept(answer), None
+    if _is_answer(answer, _wanted(scenario)):
+        return _kept(answer, _wanted(scenario)), None
     miss = classify_answer(answer) if isinstance(answer, dict) else None
     if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
@@ -136,13 +166,13 @@ def _served(material: str, scenario: dict[str, Any]) -> tuple[dict[str, Any] | N
     return None, miss or Miss("unanswered", detail="no design limits in the answer")
 
 
-def _kept(answer: dict[str, Any]) -> dict[str, Any]:
+def _kept(answer: dict[str, Any], wanted: tuple[str, ...] = QUANTITIES) -> dict[str, Any]:
     """Only what a check reads, so nothing else an answer carries travels on."""
     material_id = answer.get("material_id")
     return {
         "known": answer["known"],
         "material_id": material_id if isinstance(material_id, str) else None,
-        "limits": {q: dict(answer["limits"][q]) for q in QUANTITIES if q in answer["limits"]},
+        "limits": {q: dict(answer["limits"][q]) for q in wanted if q in answer["limits"]},
     }
 
 
@@ -160,11 +190,14 @@ def _is_figure(figure: Any) -> bool:
     )
 
 
-def _is_answer(answer: Any) -> bool:
+def _is_answer(answer: Any, wanted: tuple[str, ...] = QUANTITIES) -> bool:
     if not (isinstance(answer, dict) and answer.get("success") is True and isinstance(answer.get("known"), bool)):
         return False
     figures = answer.get("limits")
-    return isinstance(figures, dict) and all(q in figures and _is_figure(figures[q]) for q in QUANTITIES)
+    if not isinstance(figures, dict) or not all(q in figures and _is_figure(figures[q]) for q in wanted):
+        return False
+    # What the slice keeps is always a figure, never "does not apply".
+    return all(figures[q].get("value") is not None for q in wanted if q in SLICED)
 
 
-__all__ = ["BASES", "LOCAL_MODULE", "QUANTITIES", "WIRE_TOOL", "available", "ask"]
+__all__ = ["BASES", "LOCAL_MODULE", "QUANTITIES", "SLICED", "WIRE_TOOL", "available", "ask", "ask_sliced"]
