@@ -258,9 +258,19 @@ class TestTheFlushMatrix:
         assert build_bambu_flush_matrix(["PLA", "PETG", "PLA"], n_slots=3) == "0 800 800 800 0 800 800 800 0"
 
 
+#: The pair and process tables' names, by digest (tests/_moved_away.py).
+_PAIR_TABLE_NAMES = frozenset({
+    "c7b40d3423e4838b08c272c9f25eaa921c992bace6329090da8024a8c43ee0a6",
+    "2c07a58cc1a3c05c565f0ef3aa46a33de7ab716af65c36fd934d6e537f501b9e",
+    "149e54a49728231c57960a88db4f9d7023956efec70ca3700a95fc960fef5459",
+    "969b9098705aebc40527330bab15e50ed1de979106657ab4bf4f96133f18b430",
+})
+
+
 def test_the_pair_and_process_tables_are_not_in_this_package():
-    for name in ("MATERIAL_PROCESS", "_COMPAT", "_lookup_compat", "get_process_settings"):
-        assert not hasattr(ms, name), name
+    from tests._moved_away import attributes_back
+
+    assert attributes_back(ms, _PAIR_TABLE_NAMES) == []
     assert set(ms._REFUSED_PAIRS) == {frozenset(pair) for pair in _REFUSED}
 
 

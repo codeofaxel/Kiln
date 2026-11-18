@@ -663,22 +663,34 @@ class TestOneAskPerPart:
 # ---------------------------------------------------------------------------
 
 
-def test_the_pick_engine_is_not_in_this_package():
-    from pathlib import Path
+#: The pick engine's names, by digest (tests/_moved_away.py).
+_PICK_ENGINE_NAMES = frozenset({
+    "a7a4ae31bee4f5fc18190c16774a501baf05cd30ac77bbf26cc8bdf6fe8a775c",
+    "0479388b0262a8b0b2d639bee734f86bff7629fce0015b2d339d1a5f33b898cc",
+    "8e011dfca10f46a4dfa379b3ba3df224e5540d3118479f199133d0b04911e479",
+    "72b2968e1cdbba10353f0896fa2514b94c7f36f300cf1002ddf65ee413682a5f",
+    "613bbb787bcd63b3bc5abdedc0ad944836c923f6b8dde0ac6f97351e1ae7cf37",
+    "429bce7047064ba1af478e623b4831402fdac2fd8932724f931779833a47a3ed",
+    "ea9d5f16f4b0655e6a143ccd85ad891f89bc875224a3b277ee1f9105213a2b9d",
+    "28fcc92cdb5b273fce45a95c6304a889fb89aba6e9f0c782e1c8373ee404549f",
+    "95b349296000a48c2982fa431e6fc7eff40535dff6fea31dec44b310225c819e",
+    "e6748a39ca6a305a377f2f1690752ffff89908bee34195c579292033b1e5cc10",
+    "685d1eb42dd5855db7b169207165b08e37a8aebb5ac45adbba7544afb86d2cf2",
+    "bb737d4d7700a67b17c654bac4e1e9ac1945de7ef2cc2595bd331557a9ec86b8",
+    "ad3b12644c3204c95e460b2b881dc260810fc1c1f69bbfb9002a266b66e31d22",
+    "99a65d5b45f27e8d97116017ae038f1566215d8fdd06d17b66151801cf556592",
+})
+#: Sentences the pick engine says, by digest and number of words.
+_PICK_ENGINE_SAID = {
+    "7c24f4e8fcf2358cf045b1a48a054ab7ea7da32a5d0ac4b976a503f361302eb8": 3,
+    "c0338e796b7c0763a0952fc65aecfedddaffab09e89751f7ba69fcff71bc94ad": 7,
+    "ad518f74e63b05481faa16aec4ca3f1e8d82724e2e082c4b2d0103369276b890": 6,
+    "c8f722673989a77b4a73926dad6cac4e4892a47b36cb8054b973f5c5726c0801": 7,
+}
 
-    for name in ("_recommend_from_safety_floor", "_recommend_material_for_design", "_kiln_pro_recommendation",
-                 "_HEAT_KEYWORDS", "_OUTDOOR_KEYWORDS", "_INDOOR_KEYWORDS", "_FLEXIBLE_KEYWORDS",
-                 "_SUSTAINED_LOAD_KEYWORDS", "_COSMETIC_KEYWORDS", "_DEFAULT_HOT_TARGET_C",
-                 "_TPU_FAMILY_PREFIXES", "_is_tpu_family", "_hotend_ceiling_warning", "_load_judgement_is_paid"):
-        assert not hasattr(di, name), name
-    package = Path(di.__file__).resolve().parent
-    said = (
-        "survives target temperature",
-        "the only FDM material with genuine flexibility",
-        "best surface finish for cosmetic prints",
-        "dimensional stability suitable for sustained-load applications",
-    )
-    for path in package.rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        for words in said:
-            assert words not in text, f"{path.name} still words the pick: {words!r}"
+
+def test_the_pick_engine_is_not_in_this_package():
+    from tests._moved_away import attributes_back, strings_back
+
+    assert attributes_back(di, _PICK_ENGINE_NAMES) == []
+    assert strings_back(_PICK_ENGINE_SAID) == [], "a module still words the pick"

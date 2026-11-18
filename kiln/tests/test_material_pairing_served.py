@@ -282,9 +282,16 @@ class TestANameTooLong:
         assert out["success"] is True
 
 
+#: The pairing table's file, its reader's name and its structure key, by
+#: digest (tests/_moved_away.py).
+_PAIRING_TABLE_FILE = frozenset({"23a77f89c8184d8c7a63a63b9d7780941d7d05a7bb7a168cae1b34d67de0ca95"})
+_PAIRING_TABLE_READER = frozenset({"9e9c2bdd74f7b92cf3909ba6082a5202c9ac757089661ba55e16c8b45f3d4127"})
+_PAIRING_TABLE_KEY = frozenset({"65a1a25b86a4f9499ce7909386e5eff1b43fae210093a1b553419b7051146c5e"})
+
+
 def test_the_pairing_table_is_not_in_this_package():
-    assert not (_SRC / "data" / "design_knowledge" / "multi_material_pairing.json").exists()
-    assert not hasattr(di._DesignKnowledgeBase, "multi_material")
-    hits = [p for p in _SRC.rglob("*") if p.is_file() and p.suffix in (".py", ".json")
-            and "co_print_compatibility" in p.read_text(encoding="utf-8", errors="replace")]
-    assert not hits, [str(p.relative_to(_SRC)) for p in hits]
+    from tests._moved_away import attributes_back, files_back, quoted_back
+
+    assert files_back(_PAIRING_TABLE_FILE, _SRC) == []
+    assert attributes_back(di._DesignKnowledgeBase, _PAIRING_TABLE_READER) == []
+    assert quoted_back(_PAIRING_TABLE_KEY, (".py", ".json"), _SRC) == []
