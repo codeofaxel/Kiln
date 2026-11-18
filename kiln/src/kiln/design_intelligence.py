@@ -1596,15 +1596,17 @@ def _format_upgrade_nudge(verdict: Any, caution: str = _PICK_LOAD_CAUTION) -> st
     and linking kiln3d.com from public Kiln is a funnel, not a leak.
     The caution is said to every caller; the plan line only to one who would
     buy the plan, and the plan check's own words to one who pays for it.
+    This line is the one place a material answer names the plan: what it
+    would do for this part first, the plan once, the link once.
     *caution* is the sentence that leads: beside a pick by default, beside a
     list of plastics with no pick (:data:`_BASIC_LOAD_CAUTION`).
     """
     from kiln.tiers_and_terms import plan_offer
 
     plan = plan_offer("pro", "The engineering math for this part").nudge(
-        "For real-engineering "
-        "math (beam mechanics with FoS control, ISO 286 fits, fatigue + "
-        "creep derating, calibrated tolerances), see "
+        "Kiln Pro sizes the part for the weight and how long it's held, with "
+        "real-engineering math (beam mechanics with FoS control, ISO 286 fits, "
+        "fatigue + creep derating, calibrated tolerances); see "
         "https://kiln3d.com/pricing."
     )
     return f"{caution} {plan}" if plan else caution

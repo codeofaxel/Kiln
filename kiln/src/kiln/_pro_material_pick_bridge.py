@@ -20,7 +20,9 @@ Asked in one of two places, in order:
 
 Each call answers ``(pick, None)`` or ``(None, miss)``: a miss (offline,
 signed out, no answer, refused) is a :class:`kiln.served_answer.Miss` the
-door words with :func:`miss_sentence`, never a pick.  The pick is asked for
+door words with :func:`kiln.material_basics.basic_pick_line`, never a pick.
+A plan that includes Kiln Pro, handed the pick every plan gets, reads one
+line saying so (:func:`kiln.material_basics.pro_pick_missed_line`).  The pick is asked for
 on the way to a make, so the served ask waits briefly and, after the servers
 fail to answer, is left alone for a while.  Nothing here raises.
 """
@@ -28,6 +30,7 @@ fail to answer, is left alone for a while.  Nothing here raises.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -61,14 +64,6 @@ def pick(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss | N
     if local is not _NOT_HERE:
         return local
     return _served(requirements_text, printer)
-
-
-def miss_sentence(miss: Miss | None) -> str:
-    """The one line a door says when no pick came: Kiln did not pick a
-    plastic for this part, why, and what fixes it."""
-    from kiln.material_basics import basic_pick_line
-
-    return basic_pick_line(miss, feature=FEATURE)
 
 
 #: ``_local``'s answer when kiln-pro is not on this computer.
@@ -126,17 +121,46 @@ def _served(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss 
         return None, held
     if time.monotonic() < _service_down_until:
         return None, _last_miss or Miss("unanswered", code="SERVER_UNREACHABLE", detail="not asked again yet")
+    pro_missed: Miss | None = None
     if _plan_includes_the_pick():
         rec, miss = _ask(WIRE_TOOL, requirements_text, printer)
         # Kiln Pro's pick, or a miss asking again would only repeat; a part
         # it has nothing for, or a plan the servers do not count as Kiln Pro,
-        # is asked as every other plan is.
+        # is asked as every other plan is, and the answer says so once.
         if rec is not None or (miss is not None and miss.cause != "refused"):
             return rec, miss
+        pro_missed = _why_not_kiln_pros(miss)
     rec, miss = _ask(FLOOR_WIRE_TOOL, requirements_text, printer)
     if rec is None and miss is None:
         miss = Miss("unanswered", detail="no pick in the answer")
+    if rec is not None and pro_missed is not None:
+        from kiln.material_basics import pro_pick_missed_line
+
+        rec.warnings.insert(0, pro_pick_missed_line(pro_missed, feature=FEATURE))
     return rec, miss
+
+
+#: What fixes a plan the servers do not count as Kiln Pro while this
+#: computer's record of the sign-in does.
+_PLAN_RECORD_FIX = (
+    "Kiln's servers do not count this computer's sign-in as Kiln Pro; signing in "
+    "again brings this computer's record of the plan up to date"
+)
+
+
+#: Words that offer a plan: the pricing page, or "needs Kiln <plan>".
+_OFFERS_A_PLAN = re.compile(r"kiln3d\.com/pricing|\bneeds Kiln (?:Pro|Business|Enterprise)\b")
+
+
+def _why_not_kiln_pros(miss: Miss | None) -> Miss:
+    """Why Kiln Pro's pick did not come, for a caller this computer counts as
+    holding Kiln Pro: the servers' own words, except words that offer the
+    plan, which are never said to someone who holds it."""
+    if miss is None:
+        return Miss("unanswered", detail="no Kiln Pro pick in the answer")
+    if _OFFERS_A_PLAN.search(miss.detail or ""):
+        return Miss(miss.cause, miss.code, _PLAN_RECORD_FIX)
+    return miss
 
 
 def _ask(tool: str, requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss | None]:
@@ -257,4 +281,4 @@ def _rebuild_floor(pick: Any) -> Any:
     )
 
 
-__all__ = ["FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "WIRE_TOOL", "miss_sentence", "pick"]
+__all__ = ["FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "WIRE_TOOL", "pick"]
