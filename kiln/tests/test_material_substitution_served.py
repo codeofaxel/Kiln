@@ -103,7 +103,7 @@ class TestWhatIsSent:
         assert calls == [(WIRE, {"material": "PETG", "best": True}, True)]
 
     def test_a_reason_the_doors_do_not_take_sends_nothing(self, served):
-        calls, _ = served
+        calls, answers = served
         out = _find("pla", reason="cheap")
         assert calls == []
         assert out["success"] is False and out["error"]["code"] == "VALIDATION_ERROR"
@@ -111,6 +111,10 @@ class TestWhatIsSent:
             "Invalid reason: 'cheap'. Valid: ['unavailable', 'cost', 'lead_time', 'strength', "
             "'finish_quality', 'heat_resistance']"
         )
+        # A reason the doors take is asked, in any case.
+        answers.append(_ok([]))
+        _find("pla", reason="COST")
+        assert calls == [(WIRE, {"material": "pla", "reason": "COST", "min_score": 0.5}, True)]
 
 
 class TestTheServedAnswer:
@@ -130,11 +134,12 @@ class TestTheServedAnswer:
         assert _best("PETG") == {"success": True, "material": "PETG", "substitute": SERVED[0]}
 
     def test_no_substitute_is_said_as_it_always_was(self, served):
-        _, answers = served
+        calls, answers = served
         answers.append(_ok([]))
-        assert _best("unobtainium") == {
-            "success": True, "material": "unobtainium", "substitute": None, "message": "No substitutes found",
+        assert _best("PLA") == {
+            "success": True, "material": "PLA", "substitute": None, "message": "No substitutes found",
         }
+        assert len(calls) == 1, "the best door answered without asking"
 
     def test_the_servers_ruling_on_a_request_is_relayed(self, served):
         _, answers = served
