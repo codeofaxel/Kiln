@@ -26,7 +26,6 @@ Nothing here raises.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,9 +68,10 @@ def refusal_for(material: Any, *, reason: Any = None, min_score: Any = 0.5, best
 
     A material that is not text or is longer than :data:`MAX_MATERIAL_CHARS`;
     a reason that is not one of :data:`REASONS`; a *min_score* that is not a
-    finite number from 0.0 to 1.0 (a bool is not one).  With *best*, only
-    the material is read.  A refusal repeats at most
-    :data:`MAX_MATERIAL_CHARS` characters of what was sent.
+    number.  Any number is a threshold (one below every match lists them
+    all, one above every match lists none).  With *best*, only the material
+    is read.  A refusal repeats at most :data:`MAX_MATERIAL_CHARS`
+    characters of what was sent.
     """
     if not isinstance(material, str):
         return "Invalid material: name the filament as text, e.g. 'PLA'."
@@ -84,13 +84,8 @@ def refusal_for(material: Any, *, reason: Any = None, min_score: Any = 0.5, best
             return f"Invalid reason: name it as text. Valid: {list(REASONS)}"
         if reason.lower() not in REASONS:
             return f"Invalid reason: {reason[:MAX_MATERIAL_CHARS]!r}. Valid: {list(REASONS)}"
-    if (
-        isinstance(min_score, bool)
-        or not isinstance(min_score, (int, float))
-        or not math.isfinite(min_score)
-        or not 0.0 <= min_score <= 1.0
-    ):
-        return "Invalid min_score: give a number from 0.0 to 1.0."
+    if not isinstance(min_score, (int, float)):
+        return "Invalid min_score: give a number; matches run from 0.0 to 1.0."
     return None
 
 
@@ -160,16 +155,9 @@ def _read(answer: Any) -> Asked:
 # ---------------------------------------------------------------------------
 
 
-def basic_substitutes(material: str) -> list[dict[str, str]]:
-    """The other filaments of *material*'s family in the bundled catalogue.
-
-    A family is the filaments the catalogue files under the same category
-    whose catalogue ids are named after the same base polymer (``silk_pla``
-    and ``pla_plus`` after ``pla``; a blend such as ``pc_abs`` is named after
-    two and belongs to neither).  Alphabetical by id, each with its catalogue
-    name and category only.  Empty when the catalogue does not know the
-    material or names no other filament of its family.
-    """
+def _catalogue_entry(material: Any) -> tuple[str, dict[str, Any]] | None:
+    """The bundled catalogue's id for *material* and the catalogue, or
+    ``None`` when the catalogue does not know the name."""
     from kiln.catalog_keys import resolve_material_key
     from kiln.design_intelligence import list_public_material_profiles
 
@@ -177,19 +165,55 @@ def basic_substitutes(material: str) -> list[dict[str, str]]:
         profiles = {p.material_id: p for p in list_public_material_profiles()}
     except Exception:  # noqa: BLE001 -- no catalogue, no family
         logger.debug("the bundled material catalogue could not be read", exc_info=True)
-        return []
+        return None
     key = resolve_material_key(material if isinstance(material, str) else "", profiles)
-    if key is None:
+    return (key, profiles) if key is not None else None
+
+
+def catalogue_name(material: Any) -> str | None:
+    """The bundled catalogue's name for *material*, or ``None`` when the
+    catalogue does not know it."""
+    entry = _catalogue_entry(material)
+    return entry[1][entry[0]].display_name if entry is not None else None
+
+
+def basic_substitutes(material: str) -> list[dict[str, str]]:
+    """The other filaments of *material*'s family in the bundled catalogue.
+
+    A family is the filaments the catalogue files under the same category
+    whose catalogue ids are named after the same base polymer (``silk_pla``
+    and ``pla_plus`` after ``pla``; a blend such as ``pc_abs`` is named after
+    two and belongs to neither).  Another spelling of the same material is
+    not a substitute for it and is left out.  Alphabetical by id, each with
+    its catalogue name and category, and a filled filament also with the
+    nozzle-wear caution every filled filament carries (``abrasive_caution``).
+    Empty when the catalogue does not know the material or names no other
+    filament of its family.
+    """
+    from kiln.catalog_keys import same_material_spelling
+    from kiln.material_safety import abrasive_nozzle_floor
+
+    entry = _catalogue_entry(material)
+    if entry is None:
         return []
+    key, profiles = entry
     base = _base_polymer(key, profiles)
     if base is None:
         return []
     category = profiles[key].category
-    return [
-        {"substitute_material": other, "display_name": profiles[other].display_name, "category": category}
-        for other in sorted(profiles)
-        if other != key and profiles[other].category == category and _base_polymer(other, profiles) == base
-    ]
+    family: list[dict[str, str]] = []
+    for other in sorted(profiles):
+        if other == key or same_material_spelling(other, key):
+            continue
+        if profiles[other].category != category or _base_polymer(other, profiles) != base:
+            continue
+        name = profiles[other].display_name
+        member = {"substitute_material": other, "display_name": name, "category": category}
+        caution = abrasive_nozzle_floor(name) or abrasive_nozzle_floor(other)
+        if caution:
+            member["abrasive_caution"] = caution
+        family.append(member)
+    return family
 
 
 def _base_polymer(key: str, catalogue: Any) -> str | None:
@@ -204,12 +228,12 @@ def _base_polymer(key: str, catalogue: Any) -> str | None:
 
 def basic_line(miss: Miss | None, material: str, *, found: bool, reason: str | None = None) -> str:
     """The one line a basic answer carries: what the list is, why Kiln's
-    ranking is missing, and how to get it."""
-    from kiln.catalog_keys import material_label
-
+    ranking is missing, and how to get it.  The material is named by the
+    bundled catalogue's own name, or as "this material" when the catalogue
+    does not know it; what the caller typed is never repeated."""
     if miss is None:
         miss = Miss("unanswered", detail="no substitutes")
-    label = material_label(material if isinstance(material, str) else "") or "this material"
+    label = catalogue_name(material) or "this material"
     # Someone who never signed in is told the fix is free.  An owner whose
     # session ran out is told to sign back in (served_answer words that).
     stranger = miss.cause == "signed_out" and miss.code != SESSION_EXPIRED_CODE
@@ -220,7 +244,7 @@ def basic_line(miss: Miss | None, material: str, *, found: bool, reason: str | N
         return sentence(
             miss,
             feature="servers",
-            on_the_line=f"There is no basic substitute for {label}",
+            on_the_line=f"Kiln's catalogue lists no other filament of the same family as {label}",
             cannot=f"rank substitutes for {label}",
             wont="names none",
             then=then,
@@ -253,6 +277,7 @@ __all__ = [
     "ask",
     "basic_line",
     "basic_substitutes",
+    "catalogue_name",
     "miss_fields",
     "refusal_for",
 ]
