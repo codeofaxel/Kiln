@@ -208,6 +208,27 @@ class TestTheServedPick:
         _plan(monkeypatch, "free")
         assert di.recommend_material_for_design("shelf bracket").warnings == _FLOOR_PICK["warnings"]
 
+    @pytest.mark.parametrize(
+        "wall_words",
+        [
+            # A plan wall worded from the tool's own summary, offering nothing by name.
+            "Serve Kiln Pro's material pick for one part to the install that asked. "
+            "That's what Kiln Pro would do for this request.",
+            "Kiln Pro would run material pick for this request and return the full result.",
+        ],
+    )
+    def test_a_plan_wall_in_any_words_is_never_repeated_to_someone_who_holds_the_plan(self, monkeypatch, wall_words):
+        """The servers' tier wall is the plan wall whatever its words: a caller
+        this computer counts as holding Kiln Pro is told how to bring the
+        record up to date, never the wall's own sentence."""
+        _plan(monkeypatch, "pro")
+        refusal = {"success": False, "status": "error", "code": "TIER_REQUIRED", "required_tier": "pro",
+                   "error": wall_words}
+        _servers(monkeypatch, {bridge.WIRE_TOOL: refusal, bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        line = di.recommend_material_for_design("shelf bracket").warnings[0]
+        assert "signing in again" in line
+        assert wall_words.split(".")[0] not in line
+
     def test_a_stale_kiln_pro_record_meeting_a_free_server_is_told_to_sign_in_and_never_pitched(self, monkeypatch):
         """The servers answer the pick every plan gets, as for a free caller,
         with the load caution and its plan sentence; this computer counts the

@@ -247,12 +247,12 @@ _OFFERS_A_PLAN = re.compile(r"kiln3d\.com/pricing|\bneeds Kiln (?:Pro|Business|E
 
 def _why_not_kiln_pros(miss: Miss | None) -> Miss | None:
     """Why Kiln Pro's pick did not come, for a caller this computer counts as
-    holding Kiln Pro: the servers' own words, except words that offer the
-    plan, which are never said to someone who holds it.  ``None`` when Kiln
+    holding Kiln Pro: the servers' own words, except a plan wall or words
+    that offer the plan, which are never said to someone who holds it.  ``None`` when Kiln
     Pro's pick answered and had nothing for the part."""
     if miss is None:
         return None
-    if _OFFERS_A_PLAN.search(miss.detail or ""):
+    if miss.code == "TIER_REQUIRED" or _OFFERS_A_PLAN.search(miss.detail or ""):
         return Miss(miss.cause, miss.code, _PLAN_RECORD_FIX)
     return miss
 
