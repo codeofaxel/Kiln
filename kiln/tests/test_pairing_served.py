@@ -103,9 +103,10 @@ class TestTheServedVerdict:
         assert out["support_pair"] == record and out["compatible"] is True
 
     def test_a_pair_nothing_covers_says_so(self, monkeypatch):
-        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
-                                     notes="No compatibility data for pla + hips.", material_b="hips"))
+        asks = _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                            notes="No compatibility data for pla + hips.", material_b="hips"))
         out = _door()("pla", "hips")
+        assert [ask["tool"] for ask in asks] == ["material_pairing"]
         assert out["compatible"] is False and out["interface_adhesion"] == "unknown"
         assert out["notes"] == "No compatibility data for pla + hips."
         assert out["caution"].startswith("Nothing here covers this pair")

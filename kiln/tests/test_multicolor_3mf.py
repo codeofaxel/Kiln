@@ -468,16 +468,24 @@ def test_compose_no_material_no_safety_keys(stl_a: Path, tmp_path: Path):
     assert "safety_level" not in result
 
 
-def _serve_entries(monkeypatch, entries: dict) -> None:
-    """Kiln's servers answer the multi-material check with *entries*."""
+def _serve_entries(monkeypatch, entries: dict) -> list[str]:
+    """Kiln's servers answer the multi-material check with *entries*; the
+    list records each tool asked."""
     import kiln.server as srv
 
-    monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **_kw: {"success": True, **entries})
+    asked: list[str] = []
+
+    def call(tool, **_kw):
+        asked.append(tool)
+        return {"success": True, **entries}
+
+    monkeypatch.setattr(srv, "_pro_api_call", call)
+    return asked
 
 
 def test_compose_compatible_materials_ok(stl_a: Path, stl_b: Path, tmp_path: Path, monkeypatch):
     """A served check that finds the pair fine → safety_level='ok', succeeds."""
-    _serve_entries(monkeypatch, {
+    asked = _serve_entries(monkeypatch, {
         "names": ["PLA"],
         "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 30}]],
         "hardware": [{"hardened_nozzle": False, "enclosure": False}],
@@ -495,6 +503,7 @@ def test_compose_compatible_materials_ok(stl_a: Path, stl_b: Path, tmp_path: Pat
     assert "✅" in result["safety_message"]
     assert result.get("hardware_warnings", []) == []
     assert "safety_basic" not in result
+    assert asked == ["material_mix_check"]
     with zipfile.ZipFile(out) as zf:
         import json
 
@@ -559,7 +568,7 @@ def test_compose_incompatible_block_surfaces_hardware_warnings(
     stl_a: Path, stl_b: Path, tmp_path: Path, monkeypatch
 ):
     """Even on a hard block, hardware_warnings should be in the error response."""
-    _serve_entries(monkeypatch, {
+    asked = _serve_entries(monkeypatch, {
         "names": ["PLA", "ABS"],
         "pairs": [
             [0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 30}],
@@ -579,6 +588,7 @@ def test_compose_incompatible_block_surfaces_hardware_warnings(
     assert result["success"] is False
     assert "hardware_warnings" in result
     assert any("enclosure" in w.lower() for w in result["hardware_warnings"])
+    assert asked == ["material_mix_check"]
 
 
 def test_compose_caution_materials_succeed_with_warning(stl_a: Path, stl_b: Path, tmp_path: Path):

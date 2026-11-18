@@ -75,6 +75,8 @@ class TestTheServedCheck:
         asks = _served(monkeypatch, _ENTRIES)
         check = check_material_compatibility([" pla ", "PETG", "", None, "PETG"])  # type: ignore[list-item]
         assert asks == [{"tool": "material_mix_check", "asked_by_user": False, "materials": ["PLA", "PETG"]}]
+        assert check_material_compatibility(["", None])["message"] == "No materials specified."  # type: ignore[list-item]
+        assert len(asks) == 1, "a check with no materials asks nothing"
         assert check == {
             "safe": True,
             "level": "conditional",
@@ -99,13 +101,6 @@ class TestTheServedCheck:
         _served(monkeypatch, {**_ENTRIES, "pairs": _ENTRIES["pairs"][:1]})
         check = check_material_compatibility(["PLA", "PETG"])
         assert check["basic"] is True and check["why"] == "unanswered"
-
-    def test_no_materials_asks_nothing(self, monkeypatch):
-        asks = _served(monkeypatch, AssertionError("no ask for an empty list"))
-        result = check_material_compatibility([])
-        assert result["safe"] is True and result["level"] == "ok" and result["pairs"] == []
-        assert result["message"] == "No materials specified."
-        assert asks == []
 
 
 class TestABasicCheck:

@@ -1506,8 +1506,9 @@ class TestMultiMaterialCompatibility:
         assert report.interface_adhesion == "unknown"
 
     def test_to_dict(self, monkeypatch):
-        self._serve(monkeypatch)
+        self._serve(monkeypatch, interface_adhesion="excellent")
         d = check_multi_material_compatibility("pla", "tpu").to_dict()
+        assert d["interface_adhesion"] == "excellent", "the served verdict is the report"
         assert {"material_a", "material_b", "compatible", "general_rules", "caution"} <= set(d)
         assert "basic" not in d
 
