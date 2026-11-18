@@ -173,7 +173,7 @@ def test_the_multi_material_check(monkeypatch, caplog):
     from kiln import _pro_pairing_bridge as bridge
     from kiln.material_safety import check_material_compatibility
 
-    _stub(monkeypatch, bridge.MIX_LOCAL_MODULE, check_material_compatibility=_raise)
+    _stub(monkeypatch, bridge.MIX_LOCAL_MODULE, pair_entries=_raise)
     out = check_material_compatibility(["PLA", "ABS"])
     assert out["basic"] is True and out["safe"] is False
     _assert_kept_local(out, caplog)

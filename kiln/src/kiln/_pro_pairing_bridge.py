@@ -45,8 +45,8 @@ MIX_TOOL = "material_mix_check"
 MIX_LOCAL_MODULE = "kiln_pro.material_pairing.compat"
 #: Which record answered, as the answer names it.
 FOUND = ("pair", "support", "none")
-#: The keys every multi-material check carries.
-_CHECK_KEYS = ("safe", "level", "pairs", "hardware_warnings", "purge_matrix", "message")
+#: The keys a multi-material answer carries.
+_ENTRY_KEYS = ("names", "pairs", "hardware")
 
 #: ``_local_co_print``'s answer when kiln-pro is not on this computer.
 _NOT_HERE = object()
@@ -100,32 +100,33 @@ def _served_co_print(material_a: str, material_b: str) -> tuple[dict[str, Any] |
     return None, miss or Miss("unanswered", detail="no pairing verdict in the answer")
 
 
-def mix_check(materials: list[str]) -> tuple[dict[str, Any] | None, Miss | None]:
-    """``(check, None)`` for the materials one print loads, or ``(None,
-    miss)`` when no check came.  The check carries ``safe``, ``level``,
-    ``pairs``, ``hardware_warnings``, ``purge_matrix`` and ``message``.
-    Never raises."""
-    local = _local_mix_check(materials)
+def mix_check(names: list[str]) -> tuple[dict[str, Any] | None, Miss | None]:
+    """``(entries, None)`` for the distinct material names one print loads,
+    or ``(None, miss)`` when none came.  The entries carry ``names`` (as
+    judged), ``pairs`` (``[i, j, entry]`` for every pair ``i <= j``: a known
+    pair's level, warning, mitigations and purge, or ``known: False`` with the
+    default level and purge) and ``hardware`` (per name).  Never raises."""
+    local = _local_mix_check(names)
     if local is not _NOT_HERE:
         return local  # type: ignore[return-value]
-    return _served_mix_check(materials)
+    return _served_mix_check(names)
 
 
-def _local_mix_check(materials: list[str]) -> Any:
+def _local_mix_check(names: list[str]) -> Any:
     try:
-        from kiln_pro.material_pairing.compat import check_material_compatibility as _engine_check
+        from kiln_pro.material_pairing.compat import pair_entries as _engine_entries
     except ImportError:
         return _NOT_HERE
     try:
-        check = _engine_check(list(materials))
+        entries = _engine_entries(list(names))
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         return None, local_fault(exc, where="the multi-material check on this computer")
-    if _is_check(check):
-        return check, None
+    if _is_entries(entries):
+        return entries, None
     return None, Miss("unanswered", detail="no multi-material check in the answer")
 
 
-def _served_mix_check(materials: list[str]) -> tuple[dict[str, Any] | None, Miss | None]:
+def _served_mix_check(names: list[str]) -> tuple[dict[str, Any] | None, Miss | None]:
     try:
         import kiln.server as _srv
     except Exception as exc:  # noqa: BLE001 -- no served door here is a miss, never a traceback
@@ -136,29 +137,37 @@ def _served_mix_check(materials: list[str]) -> tuple[dict[str, Any] | None, Miss
             # Asked on the way to a compose or a print; the person asked for
             # the plate, not for this check.
             _asked_by_user=False,
-            materials=list(materials),
+            materials=list(names),
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
         logger.debug("%s request failed", MIX_TOOL, exc_info=True)
         return None, classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None))
-    if isinstance(answer, dict) and answer.get("success") is True and _is_check(answer.get("check")):
-        return answer["check"], None
+    if isinstance(answer, dict) and answer.get("success") is True and _is_entries(answer):
+        return {key: answer[key] for key in _ENTRY_KEYS}, None
     miss = classify_answer(answer) if isinstance(answer, dict) else None
     return None, miss or Miss("unanswered", detail="no multi-material check in the answer")
 
 
-def _is_check(check: Any) -> bool:
-    return (
-        isinstance(check, dict)
-        and all(key in check for key in _CHECK_KEYS)
-        and isinstance(check["safe"], bool)
-        and isinstance(check["level"], str)
-        and isinstance(check["pairs"], list)
-        and all(isinstance(pair, dict) for pair in check["pairs"])
-        and isinstance(check["hardware_warnings"], list)
-        and isinstance(check["purge_matrix"], list)
-        and isinstance(check["message"], str)
-    )
+def _is_entries(entries: Any) -> bool:
+    if not isinstance(entries, dict):
+        return False
+    names, pairs, hardware = entries.get("names"), entries.get("pairs"), entries.get("hardware")
+    if not (isinstance(names, list) and all(isinstance(n, str) for n in names)):
+        return False
+    if not (isinstance(hardware, list) and len(hardware) == len(names)
+            and all(isinstance(h, dict) for h in hardware)):
+        return False
+    if not isinstance(pairs, list):
+        return False
+    for pair in pairs:
+        if not (isinstance(pair, list) and len(pair) == 3 and isinstance(pair[2], dict)):
+            return False
+        i, j, entry = pair
+        if not (isinstance(i, int) and isinstance(j, int) and 0 <= i < len(names) and 0 <= j < len(names)):
+            return False
+        if not (isinstance(entry.get("level"), str) and isinstance(entry.get("known"), bool)):
+            return False
+    return True
 
 
 def _is_answer(answer: Any) -> bool:

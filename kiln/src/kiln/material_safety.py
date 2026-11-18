@@ -541,10 +541,128 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
 
     from kiln import _pro_pairing_bridge as pairing
 
-    check, miss = pairing.mix_check(clean)
-    if check is not None:
-        return check
+    entries, miss = pairing.mix_check(list(dict.fromkeys(clean)))
+    if entries is not None:
+        check = _check_from_entries(clean, entries)
+        if check is not None:
+            return check
+        from kiln.served_answer import Miss
+
+        miss = Miss("unanswered", detail="the multi-material check left a pair out")
     return _basic_mix_check(clean, miss)
+
+
+#: Each level's rank: the check's level is its worst pair's.
+_LEVEL_RANK = {"ok": 0, "caution": 1, "conditional": 2, "incompatible": 3}
+
+
+def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, Any] | None:
+    """The multi-material check for *clean* (one name per loaded part, in
+    order), built from Kiln's answer for every pair of its distinct names
+    (:func:`kiln._pro_pairing_bridge.mix_check`).  ``None`` when the answer
+    leaves out a pair the parts need."""
+    names = entries["names"]
+    by_pair: dict[frozenset, dict[str, Any]] = {
+        frozenset({names[i], names[j]}): entry for i, j, entry in entries["pairs"]
+    }
+    flags = dict(zip(names, entries["hardware"]))
+
+    def entry_for(mat_a: str, mat_b: str) -> dict[str, Any] | None:
+        entry = by_pair.get(frozenset({mat_a, mat_b}))
+        if entry is None:
+            return None
+        if entry.get("known"):
+            return entry
+        # A pair Kiln has no entry for: its own level and purge, worded here.
+        return {
+            "level": entry["level"],
+            "purge_volume_mm3": entry.get("purge_volume_mm3", _CONSERVATIVE_PURGE_MM3),
+            "warning": (
+                f"Compatibility between {mat_a} and {mat_b} is unknown. "
+                "Verify temperature ranges are compatible before printing."
+            ),
+            "mitigations": [
+                f"Check nozzle temp range for both {mat_a} and {mat_b}.",
+                "Test with a small print before committing to a full job.",
+            ],
+        }
+
+    n = len(clean)
+    pairs: list[dict[str, Any]] = []
+    worst_level = "ok"
+    seen: set[frozenset] = set()
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            key = frozenset({clean[i], clean[j]})
+            if key in seen:
+                continue
+            seen.add(key)
+            compat = entry_for(clean[i], clean[j])
+            if compat is None:
+                return None
+            pairs.append({
+                "material_a": clean[i],
+                "material_b": clean[j],
+                "level": compat["level"],
+                "warning": compat.get("warning"),
+                "mitigations": list(compat.get("mitigations", [])),
+                "purge_volume_mm3": compat.get("purge_volume_mm3", 80),
+            })
+            if _LEVEL_RANK.get(compat["level"], 0) > _LEVEL_RANK.get(worst_level, 0):
+                worst_level = compat["level"]
+
+    hardware_warnings: list[str] = []
+    for mat in clean:
+        flag = flags.get(mat) or {}
+        if flag.get("hardened_nozzle"):
+            msg = f"{mat} requires a hardened/wear-resistant nozzle (not standard brass)."
+            if msg not in hardware_warnings:
+                hardware_warnings.append(msg)
+        if flag.get("enclosure"):
+            msg = f"{mat} requires an enclosure to prevent warping and fume issues."
+            if msg not in hardware_warnings:
+                hardware_warnings.append(msg)
+
+    purge_matrix: list[list[float]] = []
+    for i in range(n):
+        row: list[float] = []
+        for j in range(n):
+            if i == j:
+                row.append(0.0)
+            else:
+                compat = entry_for(clean[i], clean[j])
+                if compat is None:
+                    return None
+                row.append(float(compat.get("purge_volume_mm3", 80)))
+        purge_matrix.append(row)
+
+    incompatible_pairs = [p for p in pairs if p["level"] == "incompatible"]
+    if incompatible_pairs:
+        message = (
+            "⛔ INCOMPATIBLE MATERIALS: "
+            + "; ".join(f"{p['material_a']} + {p['material_b']}" for p in incompatible_pairs)
+            + ". Do not print — see warnings for details."
+        )
+    elif worst_level == "conditional":
+        message = (
+            "⚠️  Conditional compatibility. Review mitigations before printing: "
+            + "; ".join(p["warning"] for p in pairs if p.get("warning"))
+        )
+    elif worst_level == "caution":
+        message = "⚠️  Printable with precautions. Review warnings before starting."
+    else:
+        message = "✅ All material pairings are compatible."
+
+    return {
+        "safe": worst_level != "incompatible",
+        "level": worst_level,
+        "pairs": pairs,
+        "hardware_warnings": hardware_warnings,
+        "purge_matrix": purge_matrix,
+        "message": message,
+    }
 
 
 def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:

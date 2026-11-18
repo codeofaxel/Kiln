@@ -468,20 +468,19 @@ def test_compose_no_material_no_safety_keys(stl_a: Path, tmp_path: Path):
     assert "safety_level" not in result
 
 
-def _serve_check(monkeypatch, check: dict) -> None:
-    """Kiln's servers answer the multi-material check with *check*."""
+def _serve_entries(monkeypatch, entries: dict) -> None:
+    """Kiln's servers answer the multi-material check with *entries*."""
     import kiln.server as srv
 
-    monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **_kw: {"success": True, "check": check})
+    monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **_kw: {"success": True, **entries})
 
 
 def test_compose_compatible_materials_ok(stl_a: Path, stl_b: Path, tmp_path: Path, monkeypatch):
     """A served check that finds the pair fine → safety_level='ok', succeeds."""
-    _serve_check(monkeypatch, {
-        "safe": True, "level": "ok", "message": "✅ All material pairings are compatible.",
-        "pairs": [{"material_a": "PLA", "material_b": "PLA", "level": "ok", "warning": None,
-                   "mitigations": [], "purge_volume_mm3": 30}],
-        "hardware_warnings": [], "purge_matrix": [[0.0, 30.0], [30.0, 0.0]],
+    _serve_entries(monkeypatch, {
+        "names": ["PLA"],
+        "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 30}]],
+        "hardware": [{"hardened_nozzle": False, "enclosure": False}],
     })
     out = str(tmp_path / "compat.3mf")
     result = compose_multicolor_3mf(
@@ -560,12 +559,14 @@ def test_compose_incompatible_block_surfaces_hardware_warnings(
     stl_a: Path, stl_b: Path, tmp_path: Path, monkeypatch
 ):
     """Even on a hard block, hardware_warnings should be in the error response."""
-    _serve_check(monkeypatch, {
-        "safe": False, "level": "incompatible", "message": "⛔ INCOMPATIBLE MATERIALS: PLA + ABS.",
-        "pairs": [{"material_a": "PLA", "material_b": "ABS", "level": "incompatible", "warning": "w",
-                   "mitigations": [], "purge_volume_mm3": 0}],
-        "hardware_warnings": ["ABS requires an enclosure to prevent warping and fume issues."],
-        "purge_matrix": [[0.0, 0.0], [0.0, 0.0]],
+    _serve_entries(monkeypatch, {
+        "names": ["PLA", "ABS"],
+        "pairs": [
+            [0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 30}],
+            [0, 1, {"known": True, "level": "incompatible", "warning": "w", "mitigations": [], "purge_volume_mm3": 0}],
+            [1, 1, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 40}],
+        ],
+        "hardware": [{"hardened_nozzle": False, "enclosure": False}, {"hardened_nozzle": False, "enclosure": True}],
     })
     out = str(tmp_path / "block_hw.3mf")
     result = compose_multicolor_3mf(

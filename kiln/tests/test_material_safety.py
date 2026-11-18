@@ -51,23 +51,54 @@ def _served(monkeypatch, reply: Any) -> list[dict[str, Any]]:
     return asks
 
 
-def _check(**overrides: Any) -> dict[str, Any]:
-    out = {
-        "safe": True, "level": "conditional", "message": "Conditional compatibility.",
-        "pairs": [{"material_a": "PLA", "material_b": "PETG", "level": "conditional", "warning": "w",
-                   "mitigations": ["m"], "purge_volume_mm3": 70}],
-        "hardware_warnings": [], "purge_matrix": [[0.0, 70.0], [70.0, 0.0]],
-    }
-    out.update(overrides)
-    return out
+#: Kiln's answer for PLA and PETG: each pair's entry by index, PETG on its own
+#: not in the table, and PETG needing an enclosure.
+_ENTRIES = {
+    "success": True,
+    "names": ["PLA", "PETG"],
+    "pairs": [
+        [0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 30}],
+        [0, 1, {"known": True, "level": "conditional", "warning": "w", "mitigations": ["m"], "purge_volume_mm3": 70}],
+        [1, 1, {"known": False, "level": "caution", "purge_volume_mm3": 80}],
+    ],
+    "hardware": [{"hardened_nozzle": False, "enclosure": False}, {"hardened_nozzle": False, "enclosure": True}],
+}
+
+
+def _check() -> dict[str, Any]:
+    """The check the composer builds from :data:`_ENTRIES`."""
+    return {"pairs": [{"material_a": "PLA", "material_b": "PETG", "purge_volume_mm3": 70}]}
 
 
 class TestTheServedCheck:
-    def test_the_served_check_is_the_answer(self, monkeypatch):
-        check = _check()
-        asks = _served(monkeypatch, {"success": True, "check": check})
-        assert check_material_compatibility([" pla ", "PETG", "", None]) == check  # type: ignore[list-item]
+    def test_the_check_is_built_from_kilns_answer_for_each_pair(self, monkeypatch):
+        asks = _served(monkeypatch, _ENTRIES)
+        check = check_material_compatibility([" pla ", "PETG", "", None, "PETG"])  # type: ignore[list-item]
         assert asks == [{"tool": "material_mix_check", "asked_by_user": False, "materials": ["PLA", "PETG"]}]
+        assert check == {
+            "safe": True,
+            "level": "conditional",
+            "pairs": [
+                {"material_a": "PLA", "material_b": "PETG", "level": "conditional", "warning": "w",
+                 "mitigations": ["m"], "purge_volume_mm3": 70},
+                {"material_a": "PETG", "material_b": "PETG", "level": "caution",
+                 "warning": "Compatibility between PETG and PETG is unknown. Verify temperature ranges are "
+                            "compatible before printing.",
+                 "mitigations": ["Check nozzle temp range for both PETG and PETG.",
+                                 "Test with a small print before committing to a full job."],
+                 "purge_volume_mm3": 80},
+            ],
+            "hardware_warnings": ["PETG requires an enclosure to prevent warping and fume issues."],
+            "purge_matrix": [[0.0, 70.0, 70.0], [70.0, 0.0, 80.0], [70.0, 80.0, 0.0]],
+            "message": "\u26a0\ufe0f  Conditional compatibility. Review mitigations before printing: w; "
+                       "Compatibility between PETG and PETG is unknown. Verify temperature ranges are "
+                       "compatible before printing.",
+        }
+
+    def test_an_answer_missing_a_pair_is_a_basic_check(self, monkeypatch):
+        _served(monkeypatch, {**_ENTRIES, "pairs": _ENTRIES["pairs"][:1]})
+        check = check_material_compatibility(["PLA", "PETG"])
+        assert check["basic"] is True and check["why"] == "unanswered"
 
     def test_no_materials_asks_nothing(self, monkeypatch):
         asks = _served(monkeypatch, AssertionError("no ask for an empty list"))
