@@ -18,6 +18,7 @@ import json
 import pytest
 
 from kiln.pre_estimate import (
+    _DEFAULT_TOOL_CHANGE_SECONDS,
     FilamentUsage,
     _extract_dim,
     _format_time,
@@ -213,9 +214,13 @@ class TestGetPrinterToolChange:
         for pid, profile in held.items():
             tc = profile.get("tool_change")
             assert tc is not None, f"Printer '{pid}' missing tool_change data"
-            assert "tool_change_seconds" in tc, f"Printer '{pid}' missing tool_change_seconds"
             assert "tool_changer" in tc, f"Printer '{pid}' missing tool_changer"
-            assert "tool_change_notes" in tc, f"Printer '{pid}' missing tool_change_notes"
+            assert tc.get("tool_change_notes"), f"Printer '{pid}' missing tool_change_notes"
+            if "tool_change_seconds" not in tc:
+                # A record may leave the swap time out when its maker publishes
+                # none: the notes say so, and the estimate uses the default.
+                estimate = _get_printer_tool_change(pid)
+                assert estimate["tool_change_seconds"] == _DEFAULT_TOOL_CHANGE_SECONDS, pid
 
 
 # ---------------------------------------------------------------------------

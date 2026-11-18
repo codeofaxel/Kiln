@@ -25,7 +25,7 @@
       "max_service_temp_c": 50,
       "print_temp_range_c": [
         190,
-        220
+        230
       ],
       "bed_temp_range_c": [
         50,

@@ -392,7 +392,7 @@ class TestPerCallerEntitlement:
         # Thermal ceilings, food-contact status and process limits specifically.
         pla = get_material_profile("pla")
         assert pla is not None
-        assert pla.thermal["print_temp_range_c"] == [190, 220]
+        assert pla.thermal["print_temp_range_c"] == public["pla"]["thermal"]["print_temp_range_c"]
         assert pla.thermal["max_service_temp_c"] == 50
         assert pla.chemical["food_safe"] == "conditional"
         assert pla.design_limits["min_wall_thickness_mm"] == 0.8
@@ -435,7 +435,10 @@ class TestPerCallerEntitlement:
         assert _material_depth() == (0, 0, 0)
         profile = get_material_profile("pla")
         assert profile is not None
-        assert profile.thermal["print_temp_range_c"] == [190, 220]
+        import json
+
+        public_pla = json.loads((di._DATA_DIR / "materials.json").read_text(encoding="utf-8"))["pla"]
+        assert profile.thermal["print_temp_range_c"] == public_pla["thermal"]["print_temp_range_c"]
         assert "pla" in {p.material_id for p in list_material_profiles()}
         assert unestablished_caution("materials", "Nobody checked.").startswith(
             "Nobody checked."
