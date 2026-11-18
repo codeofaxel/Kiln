@@ -1022,6 +1022,7 @@ class _DesignReasoningToolsPlugin:
                 return _srv._error_dict(f"Provider error: {exc}", code="PROVIDER_ERROR")
 
             current_prompt = prompt
+            material_basic: dict[str, Any] | None = None
 
             # Pre-enrich with design intelligence (skip for OpenSCAD raw code)
             if provider != "openscad":
@@ -1034,6 +1035,7 @@ class _DesignReasoningToolsPlugin:
                         max_length=limit,
                     )
                     current_prompt = enriched.improved_prompt
+                    material_basic = enriched.material_basic
                 except Exception:
                     pass
 
@@ -1143,6 +1145,9 @@ class _DesignReasoningToolsPlugin:
                 "brief_id": goal_id or None,
                 **best_result,
             }
+            if material_basic is not None:
+                # No material was picked for the part the prompt describes.
+                response["material_basic"] = material_basic
             # The best round is still a make: a piece left in the air is
             # said on it like on every other make door.
             from kiln.fusion_check import attach_fusion_report

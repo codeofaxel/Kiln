@@ -405,6 +405,128 @@ class TestTheDesignAnalysis:
 
 
 # ---------------------------------------------------------------------------
+# Replies built from the analysis
+# ---------------------------------------------------------------------------
+
+
+def _cube(path) -> str:
+    import struct
+
+    lo, hi = 0.0, 20.0
+    v = {(a, b, c): (hi if a else lo, hi if b else lo, hi if c else lo) for a in (0, 1) for b in (0, 1) for c in (0, 1)}
+    quads = [
+        ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)), ((0, 0, 1), (0, 1, 1), (1, 1, 1), (1, 0, 1)),
+        ((0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)), ((1, 0, 0), (1, 0, 1), (1, 1, 1), (1, 1, 0)),
+        ((0, 0, 0), (0, 0, 1), (1, 0, 1), (1, 0, 0)), ((0, 1, 0), (1, 1, 0), (1, 1, 1), (0, 1, 1)),
+    ]
+    tris = [t for a, b, c, d in quads for t in ((a, b, c), (a, c, d))]
+    with open(path, "wb") as fh:
+        fh.write(b"cube".ljust(80, b"\x00") + struct.pack("<I", len(tris)))
+        for tri in tris:
+            fh.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            for corner in tri:
+                fh.write(struct.pack("<3f", *v[corner]))
+            fh.write(struct.pack("<H", 0))
+    return str(path)
+
+
+def _tools(module: str) -> dict[str, Any]:
+    import importlib
+
+    plugin = importlib.import_module(module).plugin
+    tools: dict = {}
+
+    class _Mcp:
+        def tool(self, **_kw):
+            def keep(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return keep
+
+    plugin.register(_Mcp())
+    return tools
+
+
+def _says_basic(block: Any) -> None:
+    """A reply's basic material block: Kiln did not pick, why, and the fix."""
+    assert isinstance(block, dict) and block["basic"] is True and block["why"] == "signed_out"
+    assert block["message"].startswith("Kiln did not pick a plastic for this part.")
+    assert "Sign in and Kiln picks the plastic for this part." in block["message"]
+    assert block["plastics"]
+
+
+@pytest.mark.usefixtures("free_caller")
+class TestRepliesBuiltFromTheAnalysisSayBasic:
+    """With no pick, a reply built from the design analysis says so: the
+    validator's report and every prompt builder carry the analysis's basic
+    block, never a material that silently went missing."""
+
+    def test_the_validators_report(self, tmp_path):
+        out = _tools("kiln.plugins.design_tools")["validate_design_for_requirements"](
+            _cube(tmp_path / "cube.stl"), "shelf bracket that holds 10 lbs",
+        )
+        assert out["success"] is True and out["material"] is None
+        _says_basic(out["material_basic"])
+
+    def test_the_generation_prompt(self):
+        out = _tools("kiln.plugins.design_tools")["build_generation_prompt"]("shelf bracket that holds 10 lbs")
+        prompt = out["prompt"]
+        assert not any(c.startswith("designed for ") for c in prompt["constraints_added"])
+        _says_basic(prompt["material_basic"])
+
+    def test_the_parametric_prompt(self):
+        from kiln.generation_feedback import build_parametric_generation_prompt
+
+        _says_basic(build_parametric_generation_prompt("shelf bracket that holds 10 lbs").to_dict()["material_basic"])
+
+    def test_generate_model(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import kiln.server as srv
+        from kiln.generation import GenerationJob, GenerationStatus
+
+        gen = MagicMock()
+        gen.display_name = "Stand-in"
+        gen.generate.return_value = GenerationJob(
+            id="j1", provider="meshy", prompt="p", status=GenerationStatus.PENDING, progress=0,
+            created_at=0.0, format="stl",
+        )
+        monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(srv, "_get_generation_provider", lambda *_a, **_k: gen)
+        out = srv.generate_model("shelf bracket that holds 10 lbs", provider="meshy")
+        _says_basic(out["design_intelligence"]["material_basic"])
+
+    def test_iterate_design(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import kiln.server as srv
+        from kiln.generation import GenerationJob, GenerationStatus
+
+        gen = MagicMock()
+        gen.generate.return_value = GenerationJob(
+            id="j1", provider="meshy", prompt="p", status=GenerationStatus.PENDING, progress=0,
+            created_at=0.0, format="stl",
+        )
+        monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(srv, "_get_generation_provider", lambda *_a, **_k: gen)
+        out = _tools("kiln.plugins.design_reasoning_tools")["iterate_design"](
+            "shelf bracket that holds 10 lbs", provider="meshy", max_iterations=1,
+        )
+        _says_basic(out["material_basic"])
+
+    def test_a_reply_with_a_pick_carries_no_basic_block(self, monkeypatch, tmp_path):
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        tools = _tools("kiln.plugins.design_tools")
+        report = tools["validate_design_for_requirements"](_cube(tmp_path / "cube.stl"), "shelf bracket")
+        prompt = tools["build_generation_prompt"]("shelf bracket")["prompt"]
+        assert report["material"] == "petg" and "material_basic" not in report
+        assert "material_basic" not in prompt
+        assert any(c.startswith("designed for ") for c in prompt["constraints_added"])
+
+
+# ---------------------------------------------------------------------------
 # The engine is not here
 # ---------------------------------------------------------------------------
 

@@ -1699,6 +1699,21 @@ def recommend_material_for_design(
     return rec
 
 
+def material_basic_of(brief: Any) -> dict[str, Any] | None:
+    """The basic material block (:func:`basic_material_answer`) a reply built
+    from the design analysis *brief* carries when no material was picked for
+    it, or ``None`` when one was picked or named.
+
+    Every reply built from an analysis (the validator's report, a generation
+    prompt) reads it here, so none drops the material without saying that
+    Kiln did not pick one, why, and what fixes it.
+    """
+    if getattr(brief, "recommended_material", None) is not None:
+        return None
+    block = getattr(brief, "material_basic", None)
+    return dict(block) if isinstance(block, dict) else None
+
+
 def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: Any) -> dict[str, Any]:
     """The answer when no pick came (``basic: true``): the plastics this
     printer can melt, in no order and with nothing said about any one of

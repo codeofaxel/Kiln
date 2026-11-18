@@ -69,9 +69,12 @@ class DesignValidationReport:
     critical_count: int = 0
     warning_count: int = 0
     summary: str = ""
+    #: When no material was picked for the part: the analysis's basic
+    #: material block (``kiln.design_intelligence.material_basic_of``).
+    material_basic: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "file_path": self.file_path,
             "requirements_text": self.requirements_text,
             "material": self.material,
@@ -81,6 +84,9 @@ class DesignValidationReport:
             "warning_count": self.warning_count,
             "summary": self.summary,
         }
+        if self.material_basic is not None:
+            out["material_basic"] = dict(self.material_basic)
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +332,7 @@ def validate_design(
     :returns: A :class:`DesignValidationReport`.
     :raises ValueError: If the file cannot be parsed.
     """
-    from kiln.design_intelligence import get_design_constraints
+    from kiln.design_intelligence import get_design_constraints, material_basic_of
     from kiln.printability import _parse_mesh, analyze_printability
 
     path = Path(file_path)
@@ -440,6 +446,7 @@ def validate_design(
         critical_count=critical_count,
         warning_count=warning_count,
         summary=summary,
+        material_basic=material_basic_of(brief),
     )
 
 
