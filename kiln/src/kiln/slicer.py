@@ -45,7 +45,7 @@ from typing import Any
 from kiln import run_program
 from kiln.openscad_runner import present_signals
 from kiln.output_paths import kiln_output_dir
-from kiln.slicer_filament import LOADED_OBSERVED, SliceFilament, ensure_profile_filament
+from kiln.slicer_filament import LOADED_OBSERVED, SOURCE_PROFILE, SliceFilament, ensure_profile_filament
 from kiln.slicer_layer import SliceLayer, ensure_profile_layer, for_the_slicer
 from kiln.slicer_layer import witnessed as layer_witnessed
 from kiln.slicer_material import MaterialRefused
@@ -1515,6 +1515,26 @@ def _units_question_for(path: str) -> str:
         return ""
 
 
+def _supports_plastic(
+    material: str | None, loaded_material: str | None, filament: SliceFilament | None = None,
+) -> str | None:
+    """The plastic a slice's support decision reads: the one named for the
+    slice, else the spool the printer reports loaded, else one the profile
+    itself states; ``None`` when nothing names one, so the decision reads
+    the plastic a check assumes (:func:`kiln.material_limits.assuming`).
+
+    The word as given, never the material table's row for it: the support
+    decision reads it through the same design limits every other check
+    reads, so a name they cannot place is said to be one here too, and two
+    spellings of one plastic are one plastic."""
+    for word in (material, loaded_material):
+        if isinstance(word, str) and word.strip():
+            return word
+    if filament is not None and filament.source == SOURCE_PROFILE:
+        return filament.filament_type or filament.material
+    return None
+
+
 def _slice_file(
     input_path: str,
     *,
@@ -1686,7 +1706,8 @@ def _slice_file(
 
     saved = saved_supports(input_abs)
     slicer_profile, supports = ensure_profile_supports(
-        slicer_profile, input_abs, material=filament.material, **({"project": saved} if saved else {}),
+        slicer_profile, input_abs, material=_supports_plastic(material, loaded_material, filament),
+        **({"project": saved} if saved else {}),
     )
     # Which nozzle the profile was written for, read from the profile itself
     # so every door's reply says it whichever door resolved the profile.
@@ -2314,7 +2335,7 @@ def slice_multicolor_copies(
     # the copies are the same part moved, and each copy's slice would
     # otherwise read it again.
     profile, supports = ensure_profile_supports(
-        profile, input_path, material=material or loaded_material, stated=True,
+        profile, input_path, material=_supports_plastic(material, loaded_material), stated=True,
     )
 
     # Create positioned STL copies and slice each
