@@ -855,3 +855,68 @@ class TestAPlateIsComposedOnTheBedItPrintsOn:
             ColorPart(_cube(tmp_path / "b.stl", 235.0), extruder=1, name="b"),
         ]
         assert self._placed_x(tmp_path, parts) <= 200.0
+
+
+# ---------------------------------------------------------------------------
+# The estimate before a part exists
+# ---------------------------------------------------------------------------
+
+#: An invented two-nozzle printer row with an automatic changer (invented times).
+_TIMED_ROW = {
+    "tool_change": {"tool_changer": "ams", "tool_change_seconds": 90},
+    "nozzles": {"kind": "fixed_pair", "sliced_as": 2, "switch_seconds": 4.0, "filament_change_seconds": 40},
+}
+
+
+class TestTheEstimateTimesEachKindOfChange:
+    @pytest.fixture
+    def row(self, monkeypatch):
+        from kiln import pre_estimate
+
+        held = {"row": dict(_TIMED_ROW)}
+        monkeypatch.setattr(pre_estimate, "_profile_row", lambda printer_id: held["row"] if printer_id else {})
+        return held
+
+    def _estimate(self, **kwargs):
+        from kiln.pre_estimate import estimate_from_dimensions
+
+        return estimate_from_dimensions(
+            40, 40, 20, materials=["PLA", "PLA"], material_fractions=[0.5, 0.5], printer_id="invented_two",
+            layer_height_mm=0.2, **kwargs,
+        )
+
+    def test_one_filament_per_nozzle_is_all_switches(self, row):
+        est = self._estimate(filament_map=[1, 2])
+        assert (est.nozzle_switches, est.filament_swaps) == (est.tool_changes, 0) and est.tool_changes > 0
+        assert est.tool_change_time_seconds == round(est.tool_changes * 4.0)
+
+    def test_both_on_one_nozzle_is_all_swaps(self, row):
+        est = self._estimate(filament_map=[1, 1])
+        assert (est.nozzle_switches, est.filament_swaps) == (0, est.tool_changes)
+        assert est.tool_change_time_seconds == est.tool_changes * 40
+
+    def test_three_filaments_on_two_nozzles_count_both(self):
+        from kiln.pre_estimate import _changes_by_kind
+
+        # Layer one: 1 -> 2 (switch), 2 -> 3 (switch and swap); back again.
+        assert _changes_by_kind([1, 2, 1], 1) == (2, 1)
+        assert _changes_by_kind([1, 2, 1], 2) == (4, 2)
+
+    def test_with_no_map_every_change_keeps_the_full_time_and_says_why(self, row):
+        est = self._estimate()
+        assert est.tool_change_time_seconds == est.tool_changes * 90
+        assert est.nozzle_switches is None and "nozzle_switches" not in est.to_dict()
+        assert any("decided when the part is sliced" in note for note in est.confidence_notes)
+
+    def test_a_one_nozzle_printer_is_estimated_exactly_as_before(self, row):
+        row["row"] = {"tool_change": dict(_TIMED_ROW["tool_change"])}
+        est = self._estimate()
+        assert est.tool_change_time_seconds == est.tool_changes * 90
+        assert not any("nozzle" in note for note in est.confidence_notes)
+        assert set(est.to_dict()) == {f for f in est.__dataclass_fields__} - {"nozzle_switches", "filament_swaps"}
+        with pytest.raises(ValueError, match="sliced with one nozzle"):
+            self._estimate(filament_map=[1, 2])
+
+    def test_a_map_that_does_not_fit_is_refused(self, row):
+        with pytest.raises(ValueError, match="one nozzle number for each filament"):
+            self._estimate(filament_map=[1, 2, 2])

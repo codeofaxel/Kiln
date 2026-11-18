@@ -805,6 +805,7 @@ class _EstimateToolsPlugin:
             tool_changer_addon: str = "",
             electricity_rate: float = 0.12,
             printer_wattage: float = 200.0,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Estimate print time, cost, and filament usage BEFORE generating a model.
 
@@ -862,6 +863,10 @@ class _EstimateToolsPlugin:
                 Use ``list_multi_material_addons`` to see all options.
             :param electricity_rate: Cost per kWh in USD (default 0.12).
             :param printer_wattage: Printer power in watts (default 200).
+            :param filament_map: Only for a printer with more than one nozzle:
+                the nozzle (1 for the first) each material prints from, in
+                material order.  The estimate then times moves between
+                nozzles and filament swaps apart.
             """
             import json as _json
 
@@ -916,6 +921,7 @@ class _EstimateToolsPlugin:
                         tool_changer_addon=eff_addon,
                         electricity_rate=electricity_rate,
                         printer_wattage=printer_wattage,
+                        filament_map=filament_map,
                     )
                 else:
                     if width_mm <= 0 or depth_mm <= 0 or height_mm <= 0:
@@ -939,6 +945,7 @@ class _EstimateToolsPlugin:
                         tool_changer_addon=eff_addon,
                         electricity_rate=electricity_rate,
                         printer_wattage=printer_wattage,
+                        filament_map=filament_map,
                     )
 
                 # Build human-readable summary
