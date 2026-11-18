@@ -299,6 +299,55 @@ class TestARefusalSaysWhatIsTrue:
         assert "upgrade_url" not in out
         assert "your Business plan" in out["error"]
 
+    def test_a_plan_that_ended_is_said_as_theirs_never_sold_again(self, plain_install):
+        """The account says it is on Free and that its Business plan ended:
+        the refusal names the plan as theirs and the page where it is
+        renewed, and never sends them to the plans page."""
+        _sign_in(plain_install, tier="free")
+        resp = mock.MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "success": True, "tier": "free", "has_entitlement": True, "lapsed_tier": "business",
+        }
+        with mock.patch("requests.get", return_value=resp):
+            out = self._gated()()
+        assert _saved(plain_install)["lapsed_tier"] == "business"
+        assert out["code"] == "TIER_REQUIRED" and out["required_tier"] == "business"
+        assert out["error"] == (
+            "fleet_status is part of the Kiln Business plan this account had, "
+            "which has ended. Renewing it brings it back."
+        )
+        assert out["upgrade_url"] == "https://kiln3d.com/app/settings/billing"
+        assert "pricing" not in json.dumps(out)
+
+    def test_a_plan_that_ended_covers_only_what_it_included(self, plain_install):
+        """A Pro plan that ended says nothing about Business: that plan was
+        never theirs, and is described as for anyone else."""
+        _sign_in(plain_install, tier="free", lapsed_tier="pro")
+        with _account_unreachable():
+            out = self._gated()()
+        assert "needs Kiln Business" in out["error"]
+        assert out["upgrade_url"].startswith("https://kiln3d.com/pricing")
+
+    def test_renewing_forgets_the_plan_that_ended(self, plain_install):
+        _sign_in(plain_install, tier="free", lapsed_tier="business", checked_ago_s=30 * 24 * 3600)
+        with _account_says("business"):
+            assert account_plan.refresh_plan() is LicenseTier.BUSINESS
+        assert "lapsed_tier" not in _saved(plain_install)
+
+    def test_a_door_built_on_plan_offer_sells_nothing_to_an_ended_owner(
+        self, plain_install, monkeypatch
+    ):
+        from kiln.tiers_and_terms import plan_offer
+
+        # A plain install: the plan check is this module.
+        monkeypatch.setitem(sys.modules, "kiln.licensing", account_plan)
+        _sign_in(plain_install, tier="free", lapsed_tier="business")
+        with _account_unreachable():
+            offer = plan_offer("business", "Running printers side by side")
+        assert offer.sells is False and offer.covered is False
+        assert offer.words.startswith("Running printers side by side is part of the Kiln Business plan")
+
     def test_the_recheck_before_a_refusal_is_rate_limited(self, plain_install):
         _sign_in(plain_install, tier="free")
         gated = self._gated()

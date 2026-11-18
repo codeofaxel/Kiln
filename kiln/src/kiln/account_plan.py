@@ -264,6 +264,14 @@ def refresh_plan(*, min_interval_s: float = 0.0) -> LicenseTier:
                 stamp = int(time.time())
                 stored["tier"] = _as_tier(answer.get("tier")).value
                 stored["has_entitlement"] = bool(answer.get("has_entitlement"))
+                # The paid plan this account had and no longer does, as the
+                # account says it: a refusal tells its owner the thing was
+                # part of that plan, never sells it to them again.
+                ended = _ended_plan(answer)
+                if ended:
+                    stored["lapsed_tier"] = ended
+                else:
+                    stored.pop("lapsed_tier", None)
                 stored["plan_checked_at"] = stamp
                 # The stamp other readers of this file treat as "the plan
                 # was current as of".
@@ -312,23 +320,37 @@ def _covers(required: object) -> bool:
     return refresh_plan(min_interval_s=RECHECK_BEFORE_REFUSAL_MIN_INTERVAL_S) >= needed
 
 
+def _ended_plan(answer: dict) -> str:
+    """The paid plan the account's answer says it had and no longer does, or
+    ``""``: only for an account on Free now, and only a plan Kiln sells."""
+    ended = str(answer.get("lapsed_tier") or "").strip().lower()
+    if ended not in ("pro", "business", "enterprise"):
+        return ""
+    return ended if _as_tier(answer.get("tier")) is LicenseTier.FREE else ""
+
+
 def _refusal(subject: str, required: object) -> dict[str, Any]:
     """Why *subject* is refused, said for the state this machine is in.
 
-    Four states, four different things to tell a person:
+    Five states, five different things to tell a person:
 
     * signed out: a subscriber connects this machine; anyone else sees the
       plans (the sign-in fields are for the agent);
     * a sign-in the server refused: sign back in.  Never an upsell, since
       the account may well hold the plan;
     * a paid plan Kiln has not confirmed for too long: get online;
+    * signed in, on a plan that ended which included it: it was part of the
+      plan this account had, and renewing it brings it back.  Never an
+      upsell: they have seen the plans, and the plan was theirs;
     * signed in on a plan that does not include it: which account and plan
       Kiln sees, and where the plan that includes it is described.
     """
     from kiln.auth_session import _read_tokens, _rejected_verdict
     from kiln.tiers_and_terms import (
+        BILLING_PAGE_URL,
         paywall_fields,
         plan_does_not_include_message,
+        plan_ended_message,
         plan_unconfirmed_message,
         signin_hint_fields,
         tier_required_message,
@@ -363,6 +385,15 @@ def _refusal(subject: str, required: object) -> dict[str, Any]:
             "error": plan_unconfirmed_message(subject, saved.value),
             "code": "PLAN_UNCONFIRMED",
             "retryable": True,
+        }
+    ended = _as_tier(stored.get("lapsed_tier"))
+    if ended is not LicenseTier.FREE and ended >= _as_tier(required):
+        return {
+            "error": plan_ended_message(subject, ended.value),
+            "code": "TIER_REQUIRED",
+            "current_tier": saved.value,
+            "upgrade_url": BILLING_PAGE_URL,
+            **paywall_fields(needed),
         }
     return {
         "error": plan_does_not_include_message(

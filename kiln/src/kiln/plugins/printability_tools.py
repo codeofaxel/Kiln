@@ -298,6 +298,17 @@ class _PrintabilityToolsPlugin:
                 note = _kiln_pro_ranking_note()
                 if note:
                     resp["upgrade_hint"] = note
+                # Kiln Pro's order, which the plan includes, did not arrive:
+                # the cause on every miss, in words once a session.
+                if result.ranking_miss is not None:
+                    from kiln import _pro_orientation_bridge, served_public
+                    from kiln.served_answer import fields
+
+                    resp.update(fields(result.ranking_miss))
+                    if served_public.first_this_session("auto_orient_model:kiln_pro_order"):
+                        resp.setdefault("warnings", []).append(
+                            _pro_orientation_bridge.miss_note(result.ranking_miss)
+                        )
 
                 if apply:
                     oriented_path = apply_orientation(
