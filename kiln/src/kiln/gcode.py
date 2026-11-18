@@ -2121,6 +2121,47 @@ def slicer_nozzle_diameters(text: str) -> tuple[tuple[float, ...], ...]:
 
 
 # ---------------------------------------------------------------------------
+# The filament-to-nozzle map a file states
+# ---------------------------------------------------------------------------
+
+_FILAMENT_MAP_LINE = re.compile(r"^;\s*filament_map\s*=\s*(.+?)\s*$")
+_FILAMENT_MAP_MODE_LINE = re.compile(r"^;\s*filament_map_mode\s*=\s*(.+?)\s*$")
+
+
+def stated_filament_map(lines: Iterable[str]) -> tuple[list[int] | None, str | None]:
+    """``(map, mode)`` as the sliced file whose *lines* are given states it.
+
+    ``map`` lists, per filament in order, the nozzle (1 for the first) that
+    prints it, or is ``None`` when the file states none in whole numbers;
+    ``mode`` is who chose it, in the slicer's own word, or ``None``.  The
+    first statement of each counts.  Never raises.
+    """
+    stated: list[int] | None = None
+    mode: str | None = None
+    for line in lines:
+        if not line.startswith(";"):
+            continue
+        found = _FILAMENT_MAP_LINE.match(line)
+        if found:
+            if stated is None:
+                parts = [part.strip() for part in found.group(1).split(",")]
+                if parts and all(part.isdigit() for part in parts):
+                    stated = [int(part) for part in parts]
+            continue
+        found = _FILAMENT_MAP_MODE_LINE.match(line)
+        if found and mode is None:
+            mode = found.group(1)
+    return stated, mode
+
+
+def states_several_nozzles(text: str) -> bool:
+    """Whether the sliced file *text* puts a filament on a nozzle beyond
+    the first, by its own stated filament-to-nozzle map."""
+    stated, _mode = stated_filament_map(text.splitlines())
+    return bool(stated) and max(stated) > 1
+
+
+# ---------------------------------------------------------------------------
 # The slicer's own print time and layer count
 # ---------------------------------------------------------------------------
 

@@ -2392,6 +2392,7 @@ def _auto_wrap_bambu_3mf(
     *,
     quiet_start: dict[str, Any] | None = None,
     lift_floor_mm: float | None = None,
+    several_nozzles: bool = False,
 ) -> tuple[str | None, str | None]:
     """If the effective printer is a Bambu Lab, repackage the sliced
     G-code into a 3MF so it can actually start (Bambu firmware ignores
@@ -2407,8 +2408,13 @@ def _auto_wrap_bambu_3mf(
     Returns ``(threemf_path, warning)``.  When no wrap happens, both
     are ``None``.  Failure is non-fatal — the original gcode_path is
     still usable for non-Bambu printers or manual wrapping.
+
+    A slice made for more than one nozzle (*several_nozzles*, or a file
+    that says so) is never wrapped here: the print package the slicer made
+    with it is returned, or ``(None, why it cannot go to the printer)``.
     """
-    if not effective_printer_id or not effective_printer_id.startswith("bambu"):
+    is_bambu = bool(effective_printer_id) and effective_printer_id.startswith("bambu")
+    if not (is_bambu or several_nozzles):
         return (None, None)
     try:
         # CRITICAL: use build_bambu_3mf (adds BambuStudio start-gcode —
@@ -2426,6 +2432,25 @@ def _auto_wrap_bambu_3mf(
             build_bambu_3mf,
             thumbnail_inputs_for_model,
         )
+
+        from kiln.printers.bambu_3mf import MultiNozzlePackageError, multi_nozzle_print_package
+
+        # A file sliced for more than one nozzle travels in the package the
+        # slicer made with it, or not at all.
+        try:
+            package = multi_nozzle_print_package(gcode_path, quiet_start=quiet_start, lift_floor_mm=lift_floor_mm)
+        except MultiNozzlePackageError as exc:
+            return (None, str(exc))
+        if package is not None:
+            try:
+                from kiln.monitor_twin import note_wrapped
+
+                note_wrapped(gcode_path, package)
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
+                _logger.debug("monitor-twin wrap note failed", exc_info=True)
+            return (package, None)
+        if not is_bambu:
+            return (None, None)
 
         stem = gcode_path.rsplit(".", 1)[0]
         if quiet_start is not None and not stem.endswith("_quiet"):
@@ -2530,14 +2555,6 @@ def _auto_wrap_bambu_3mf(
     except Exception as exc:  # noqa: BLE001
         _logger.warning("Bambu auto-wrap failed: %s — leaving as raw gcode", exc)
         return (None, f"Bambu auto-wrap failed: {exc}")
-
-
-#: Said on a slice made for more than one nozzle, in place of a print package.
-_MULTI_NOZZLE_NOT_PACKAGED = (
-    "This file was sliced for more than one nozzle. Kiln has not packaged it for the printer, "
-    "so it is not ready to upload or start: the response's filament_map says which nozzle "
-    "prints each filament."
-)
 
 
 def _steer_to_wrapped_upload(
@@ -3177,15 +3194,11 @@ class _SlicerToolsPlugin:
                 # so the LCD preview matches the sliced geometry.
                 _gcode_path = result.to_dict().get("output_path")
                 multi_nozzle = isinstance(result.filament_map, dict)
-                if _gcode_path and multi_nozzle:
-                    # A file sliced for more than one nozzle is handed back
-                    # as G-code only: the print package states one nozzle.
-                    threemf_path, warning = None, None
-                    response.setdefault("warnings", []).append(_MULTI_NOZZLE_NOT_PACKAGED)
-                elif _gcode_path:
+                if _gcode_path:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
                         _gcode_path, effective_printer_id, effective_input,
                         quiet_start=sinfo.get("quiet_start"), lift_floor_mm=sinfo.get("lift_floor_mm"),
+                        several_nozzles=multi_nozzle,
                     )
                     if threemf_path:
                         response["output_3mf_path"] = threemf_path
@@ -3565,6 +3578,7 @@ class _SlicerToolsPlugin:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
                         _gcode_path, effective_printer_id, effective_input,
                         quiet_start=sinfo.get("quiet_start"), lift_floor_mm=sinfo.get("lift_floor_mm"),
+                        several_nozzles=isinstance(result.filament_map, dict),
                     )
                     _wrap_path = threemf_path
                     if threemf_path:
@@ -3592,7 +3606,7 @@ class _SlicerToolsPlugin:
                             _logger.warning(
                                 "Post-wrap safety verification skipped: %s", _exc,
                             )
-                    else:
+                    elif not isinstance(result.filament_map, dict):
                         # Not a Bambu: the G-code itself is the file that
                         # goes to the printer, so it leaves this door
                         # carrying its preview and its weight, the same as

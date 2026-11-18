@@ -999,9 +999,10 @@ class _GenerationAIToolsPlugin:
                         quiet_start=quiet_plan, lift_floor_mm=sinfo["lift_floor_mm"],
                     )
                 except ValueError as exc:
-                    # No printer file for an occupied plate without the plan;
-                    # the slice and its verdict ride the refusal.
-                    block = _srv._error_dict(str(exc), code="PLACEMENT_START_NOT_YET")
+                    # No printer file for an occupied plate without the plan,
+                    # or for a slice made for more than one nozzle without
+                    # its package; the slice and its verdict ride the refusal.
+                    block = _srv._error_dict(str(exc), code=getattr(exc, "code", None) or "PLACEMENT_START_NOT_YET")
                     block["slice"] = slice_result.to_dict()
                     _attach_placement(block, place_info)
                     return block

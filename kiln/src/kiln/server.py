@@ -12551,6 +12551,10 @@ def wrap_gcode_as_3mf(
     except FileNotFoundError as exc:
         return _error_dict(f"G-code file not found: {exc}")
     except ValueError as exc:
+        # A file sliced for more than one nozzle says why in its own words.
+        code = getattr(exc, "code", None)
+        if code:
+            return _error_dict(str(exc), code=code)
         return _error_dict(f"Invalid G-code: {exc}")
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to wrap G-code as 3MF: {exc}")

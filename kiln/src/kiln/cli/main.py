@@ -5260,6 +5260,10 @@ def slice(
                 if not json_mode:
                     click.echo(f"Bambu 3MF: {upload_path}")
             except Exception as exc:
+                if getattr(exc, "code", None) == "MULTI_NOZZLE_NOT_PACKAGED":
+                    # Sliced for more than one nozzle: no raw form of it starts.
+                    click.echo(format_error(str(exc), code=exc.code, json_mode=json_mode))
+                    sys.exit(1)
                 if wrap_kwargs.get("quiet_start") is not None or wrap_kwargs.get("lift_floor_mm") is not None:
                     # A raw file would carry no plan and no floor onto the
                     # occupied plate.  Why there was no plan is the verdict's

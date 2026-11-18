@@ -377,6 +377,10 @@ class _SmartPrintToolsPlugin:
                     )
                     _logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
                 except Exception as exc:
+                    if getattr(exc, "code", None) == "MULTI_NOZZLE_NOT_PACKAGED":
+                        # Sliced for more than one nozzle: no raw form of it
+                        # starts either, so nothing is handed on.
+                        return _srv._error_dict(str(exc), code=exc.code)
                     if quiet_plan is not None or lift_floor is not None:
                         # A raw file, or one without the plan, would carry
                         # the vendor's start onto the occupied plate.

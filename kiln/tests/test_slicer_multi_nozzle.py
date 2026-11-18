@@ -12,9 +12,11 @@ the slicer runs.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import struct
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -121,9 +123,14 @@ def _profile(tmp_path: Path, nozzles: dict | None = _NOZZLES) -> str:
     return str(ini)
 
 
-def _slicer_that_writes(header: str, seen: dict, returncode: int = 0, said: str = ""):
+#: A sliced body that homes first and changes filament inside the change routine.
+_STARTED_BODY = "G28\nG1 X10 Y10 E1\nM620 S1A\nT1\nM621 S1A\nG1 X20 Y20 E1\n"
+
+
+def _slicer_that_writes(header: str, seen: dict, returncode: int = 0, said: str = "", body: str = "T0\nT1\n"):
     """A stand-in for the slicer run: records the command line, the timeout
-    and the presets it was handed, and writes *header* as the sliced file."""
+    and the presets it was handed, and writes *header* then *body* as the
+    sliced file; asked for a print package, it writes one holding that file."""
 
     def run(cmd, *, timeout, retryable_returncodes, remove_partial_output, output_is_complete, cwd=None):
         seen["cmd"], seen["timeout"] = list(cmd), timeout
@@ -135,12 +142,23 @@ def _slicer_that_writes(header: str, seen: dict, returncode: int = 0, said: str 
         ]
         work_dir = cmd[cmd.index("--outputdir") + 1]
         if returncode == 0:
-            Path(work_dir, "plate_1.gcode").write_text(f"{header}T0\nT1\n; filament used [mm] = 1.0, 1.0\n")
+            gcode = f"{header}{body}; filament used [mm] = 1.0, 1.0\n"
+            Path(work_dir, "plate_1.gcode").write_text(gcode)
+            if "--export-3mf" in cmd:
+                _write_package(Path(work_dir, cmd[cmd.index("--export-3mf") + 1]), gcode.encode())
         else:
             Path(work_dir, "result.json").write_text(json.dumps({"error_string": said}))
         return SimpleNamespace(returncode=returncode, stdout="", stderr="")
 
     return run
+
+
+def _write_package(path: Path, gcode: bytes, *, md5: str | None = None) -> None:
+    """A print package holding *gcode* as its plate, with its checksum."""
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("3D/3dmodel.model", "<model/>")
+        zf.writestr("Metadata/plate_1.gcode", gcode)
+        zf.writestr("Metadata/plate_1.gcode.md5", md5 or hashlib.md5(gcode).hexdigest().upper())
 
 
 def _never_runs(*_args, **_kwargs):
@@ -542,3 +560,170 @@ class TestTheSliceModelDoor:
         assert reply["success"] is False
         assert reply["error"]["code"] == "NOZZLE_MAP_WRONG_LENGTH"
         assert "one nozzle number for each filament" in reply["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# The print package a slice for more than one nozzle travels in
+# ---------------------------------------------------------------------------
+
+
+def _bambu_3mf():
+    from kiln.printers import bambu_3mf
+
+    return bambu_3mf
+
+
+class TestTheSlicerWritesThePrintPackage:
+    def _slice(self, tmp_path, run, **kwargs):
+        return TestTheSlice()._slice(tmp_path, run, **kwargs)
+
+    def test_bambu_studio_is_asked_for_it_and_it_is_kept_holding_the_slice(self, tmp_path):
+        seen: dict = {}
+        result = self._slice(tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen), filament_map=[1, 2])
+        assert "--export-3mf" in seen["cmd"]
+        package = _bambu_3mf().print_package_path_for(result.output_path)
+        gcode = Path(result.output_path).read_bytes()
+        with zipfile.ZipFile(package) as zf:
+            # The file as Kiln handed it back, its lineage line included.
+            assert zf.read("Metadata/plate_1.gcode") == gcode
+            assert zf.read("Metadata/plate_1.gcode.md5").decode() == hashlib.md5(gcode).hexdigest().upper()
+            assert "3D/3dmodel.model" in zf.namelist()
+        assert not list((tmp_path / "out").glob("*.made.3mf"))
+
+    def test_a_slice_for_one_nozzle_asks_for_no_package(self, tmp_path):
+        seen: dict = {}
+        result = self._slice(tmp_path, _slicer_that_writes("", seen), filaments=1)
+        assert "--export-3mf" not in seen["cmd"]
+        assert not Path(_bambu_3mf().print_package_path_for(result.output_path)).exists()
+
+    def test_a_slicer_that_writes_none_still_slices(self, tmp_path):
+        def run(cmd, **kwargs):
+            reply = _slicer_that_writes("; filament_map = 1,2\n", {})(cmd, **kwargs)
+            Path(cmd[cmd.index("--outputdir") + 1], cmd[cmd.index("--export-3mf") + 1]).unlink()
+            return reply
+
+        result = self._slice(tmp_path, run, filament_map=[1, 2])
+        assert result.success
+        assert not Path(_bambu_3mf().print_package_path_for(result.output_path)).exists()
+
+
+def _sliced(tmp_path: Path, body: str = _STARTED_BODY, header: str = "; filament_map = 1,2\n") -> Path:
+    gcode = tmp_path / "plate.gcode"
+    gcode.write_text(f"{header}{body}")
+    return gcode
+
+
+class TestThePackageIsJudged:
+    def test_a_package_that_homes_and_changes_inside_the_routine_passes(self, tmp_path):
+        b = _bambu_3mf()
+        gcode = _sliced(tmp_path)
+        _write_package(Path(b.print_package_path_for(gcode)), gcode.read_bytes())
+        assert b.print_package_problems(b.print_package_path_for(gcode), str(gcode)) == []
+        assert b.multi_nozzle_print_package(str(gcode)) == b.print_package_path_for(gcode)
+
+    @pytest.mark.parametrize(
+        "body, problem",
+        [
+            ("G1 X10 Y10 E1\nG28\n", "without homing"),
+            ("G28\nG1 X10 Y10 E1\nT1\nG1 X20 Y20 E1\n", "outside the printer's filament-change routine"),
+            ("G28\nM620 S1A\nT1\nM621 S1A\nG1 X20 Y20 E1\nT0 H-1\n", "outside the printer's filament-change routine"),
+        ],
+    )
+    def test_a_package_that_cannot_start_is_refused_with_why(self, tmp_path, body, problem):
+        b = _bambu_3mf()
+        gcode = _sliced(tmp_path, body)
+        _write_package(Path(b.print_package_path_for(gcode)), gcode.read_bytes())
+        assert any(problem in p for p in b.print_package_problems(b.print_package_path_for(gcode), str(gcode)))
+        with pytest.raises(b.MultiNozzlePackageError) as refused:
+            b.multi_nozzle_print_package(str(gcode))
+        assert refused.value.code == "MULTI_NOZZLE_NOT_PACKAGED"
+        assert "not ready to upload or start" in str(refused.value) and problem in str(refused.value)
+
+    def test_a_package_of_another_slice_or_a_wrong_checksum_is_refused(self, tmp_path):
+        b = _bambu_3mf()
+        gcode = _sliced(tmp_path)
+        package = Path(b.print_package_path_for(gcode))
+        _write_package(package, gcode.read_bytes(), md5="0" * 32)
+        assert b.print_package_problems(str(package), str(gcode)) == ["the package's checksum does not match its plate"]
+        _write_package(package, gcode.read_bytes() + b"; another\n")
+        assert b.print_package_problems(str(package), str(gcode)) == [
+            "the slicer's package holds a different slice from this file"
+        ]
+        with pytest.raises(b.MultiNozzlePackageError, match="no print package was made with this slice"):
+            b.multi_nozzle_print_package(str(gcode))
+
+    def test_a_slice_for_one_nozzle_is_left_to_kilns_own_package(self, tmp_path):
+        b = _bambu_3mf()
+        gcode = _sliced(tmp_path, header="; filament_map = 1,1\n")
+        # Another wrap of a one-nozzle slice at the same name is not a record.
+        _write_package(Path(b.print_package_path_for(gcode)), b"G28\n")
+        assert b.multi_nozzle_print_package(str(gcode)) is None
+
+    @pytest.mark.parametrize("asked", [{"lift_floor_mm": 12.0}, {"resume_mode": True}])
+    def test_a_start_of_kilns_own_is_refused(self, tmp_path, asked):
+        b = _bambu_3mf()
+        gcode = _sliced(tmp_path)
+        _write_package(Path(b.print_package_path_for(gcode)), gcode.read_bytes())
+        with pytest.raises(b.MultiNozzlePackageError, match="start of Kiln's own"):
+            b.multi_nozzle_print_package(str(gcode), **asked)
+
+    def test_kilns_own_package_builder_refuses_such_a_file(self, tmp_path):
+        b = _bambu_3mf()
+        with pytest.raises(b.MultiNozzlePackageError, match="sliced for one nozzle only"):
+            b.build_bambu_3mf("; filament_map = 2,1\n;LAYER_CHANGE\nG1 X1 Y1 E1\n", str(tmp_path / "x.3mf"))
+
+
+class TestEveryDoorSendsThePackage:
+    def _ready(self, tmp_path, body=_STARTED_BODY):
+        b = _bambu_3mf()
+        gcode = _sliced(tmp_path, body)
+        _write_package(Path(b.print_package_path_for(gcode)), gcode.read_bytes())
+        return str(gcode), b.print_package_path_for(gcode)
+
+    def test_the_slice_doors_wrap_helper(self, tmp_path):
+        from kiln.plugins.slicer_tools import _auto_wrap_bambu_3mf
+
+        gcode, package = self._ready(tmp_path)
+        assert _auto_wrap_bambu_3mf(gcode, "bambu_invented", None) == (package, None)
+        assert _auto_wrap_bambu_3mf(gcode, None, None, several_nozzles=True) == (package, None)
+        assert _auto_wrap_bambu_3mf(gcode, None, None) == (None, None)
+
+    def test_the_slice_doors_wrap_helper_says_why_not(self, tmp_path):
+        from kiln.plugins.slicer_tools import _auto_wrap_bambu_3mf
+
+        gcode, _package = self._ready(tmp_path, body="G1 X1 Y1 E1\n")
+        path, warning = _auto_wrap_bambu_3mf(gcode, "bambu_invented", None)
+        assert path is None and warning.startswith("This file was sliced for more than one nozzle")
+        assert "Bambu auto-wrap failed" not in warning
+
+    def test_the_printers_own_wrap_and_the_upload_step(self, tmp_path):
+        from kiln.printers.bambu import BambuAdapter
+        from kiln.printers.upload_prep import prepare_upload_for_adapter
+
+        gcode, package = self._ready(tmp_path)
+        fake = SimpleNamespace(_printer_model="bambu_invented", active_filament_color=lambda: None)
+        fake.wrap_gcode_as_3mf = lambda path, **kw: BambuAdapter.wrap_gcode_as_3mf(fake, path, **kw)
+        assert prepare_upload_for_adapter(fake, gcode) == (package, True)
+
+    def test_the_upload_step_never_falls_back_to_the_raw_file(self, tmp_path):
+        from kiln.printers.bambu import BambuAdapter
+        from kiln.printers.upload_prep import prepare_upload_for_adapter
+
+        gcode, _package = self._ready(tmp_path, body="G1 X1 Y1 E1\n")
+        fake = SimpleNamespace(_printer_model="bambu_invented", active_filament_color=lambda: None)
+        fake.wrap_gcode_as_3mf = lambda path, **kw: BambuAdapter.wrap_gcode_as_3mf(fake, path, **kw)
+        with pytest.raises(_bambu_3mf().MultiNozzlePackageError):
+            prepare_upload_for_adapter(fake, gcode)
+
+
+class TestTheSliceModelDoorSendsThePackage(TestTheSliceModelDoor):
+    def test_a_package_that_can_start_is_the_file_to_upload(self, tmp_path):
+        with patch("kiln.printers.bed_fit.verify_3mf_is_safe_to_print", return_value={"ok": True}):
+            reply = self._call(
+                tmp_path, _slicer_that_writes("; filament_map = 2,1\n", {}, body=_STARTED_BODY),
+                filament_map=[2, 1],
+            )
+        assert reply["success"], reply
+        assert reply["output_3mf_path"].endswith(".gcode.3mf")
+        assert reply["recommended_upload_path"] == reply["output_3mf_path"]
+        assert not any("more than one nozzle" in w for w in reply.get("warnings", []))

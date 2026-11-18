@@ -3229,12 +3229,32 @@ class BambuAdapter(PrinterAdapter):
         lift_floor_mm: float | None = None,
         bed_type: str | None = None,
     ) -> str:
-        """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF."""
-        from kiln.printers.bambu_3mf import TEXTURED_PLATE, BambuPrintSettings, build_bambu_3mf
+        """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
+
+        A file sliced for more than one nozzle gets the slicer's own package
+        instead (:func:`~kiln.printers.bambu_3mf.multi_nozzle_print_package`).
+        """
+        from kiln.printers.bambu_3mf import (
+            TEXTURED_PLATE,
+            BambuPrintSettings,
+            build_bambu_3mf,
+            multi_nozzle_print_package,
+        )
 
         abs_path = os.path.abspath(gcode_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Gcode file not found: {abs_path}")
+        package = multi_nozzle_print_package(
+            abs_path, quiet_start=quiet_start, lift_floor_mm=lift_floor_mm, resume_mode=resume_mode,
+        )
+        if package is not None:
+            try:
+                from kiln.monitor_twin import note_wrapped
+
+                note_wrapped(abs_path, package)
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
+                logger.debug("monitor-twin wrap note failed", exc_info=True)
+            return package
 
         gcode_body = Path(abs_path).read_text(encoding="utf-8")
         stem = Path(abs_path).stem

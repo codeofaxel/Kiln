@@ -687,9 +687,26 @@ _INSTALL_BAMBU_STUDIO = (
     "bambulab.com/download/studio, or set KILN_SLICER_PATH to its binary, and slice again."
 )
 
-#: The lines of a sliced file that state its filament-to-nozzle map.
-_FILAMENT_MAP_LINE = re.compile(r"^;\s*filament_map\s*=\s*(.+?)\s*$")
-_FILAMENT_MAP_MODE_LINE = re.compile(r"^;\s*filament_map_mode\s*=\s*(.+?)\s*$")
+#: The name Bambu Studio is given for the print package it writes with a
+#: slice for more than one nozzle, inside the run's output folder.
+_SLICER_PACKAGE_NAME = "kiln_print_package.3mf"
+
+
+def _keep_print_package(made_path: str, out_file: str) -> None:
+    """Keep the print package the slicer wrote with the slice at *out_file*
+    beside it, holding that file as it now stands
+    (:func:`kiln.printers.bambu_3mf.keep_slicer_package`).  A package that
+    cannot be kept is logged and left out: the door that sends the file
+    then says no package was made.  Never raises."""
+    try:
+        from kiln.printers.bambu_3mf import keep_slicer_package
+
+        keep_slicer_package(made_path, out_file)
+    except Exception:  # noqa: BLE001 -- a package that cannot be kept costs the package, never the slice
+        logger.warning("The slicer's print package for %s was not kept", out_file, exc_info=True)
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(made_path)
 
 
 def _is_bambu_studio(info: SlicerInfo) -> bool:
@@ -769,22 +786,11 @@ def filament_map_of(gcode_path: str | None) -> dict[str, Any] | None:
     """
     if not gcode_path:
         return None
-    stated: list[int] | None = None
-    mode: str | None = None
+    from kiln.gcode import stated_filament_map
+
     try:
         with open(gcode_path, errors="replace", encoding="utf-8") as fh:
-            for line in fh:
-                if not line.startswith(";"):
-                    continue
-                found = _FILAMENT_MAP_LINE.match(line)
-                if found and stated is None:
-                    parts = [part.strip() for part in found.group(1).split(",")]
-                    if parts and all(part.isdigit() for part in parts):
-                        stated = [int(part) for part in parts]
-                    continue
-                found = _FILAMENT_MAP_MODE_LINE.match(line)
-                if found and mode is None:
-                    mode = found.group(1)
+            stated, mode = stated_filament_map(fh)
     except OSError:
         return None
     if stated is None:
@@ -1417,6 +1423,9 @@ def _slice_with_orca(
         cmd += ["--load-filaments", ";".join(presets.filament_paths)]
         if filament_map:
             cmd += ["--filament-map-mode", "Manual", "--filament-map", ",".join(str(n) for n in filament_map)]
+        if nozzles and _is_bambu_studio(slicer):
+            # The slicer writes the print package for this slice beside it.
+            cmd += ["--export-3mf", _SLICER_PACKAGE_NAME]
 
         if extra_args:
             cmd.extend(extra_args)
@@ -1540,8 +1549,15 @@ def _slice_with_orca(
             )
 
         shutil.move(str(produced[0]), out_file)
+        made_package: str | None = None
+        written = Path(work_dir, _SLICER_PACKAGE_NAME)
+        if nozzles and written.is_file():
+            made_package = out_file + ".made.3mf"
+            shutil.move(str(written), made_package)
 
     _record_slice(profile, input_abs, out_file, drawn_as=drawn_as)
+    if made_package is not None:
+        _keep_print_package(made_package, out_file)
     message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
     if crashed_after_finishing:
         message += (
