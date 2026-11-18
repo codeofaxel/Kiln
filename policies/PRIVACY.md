@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-11-16 · Version 2.50*
+*Last updated: 2026-11-17 · Version 2.51*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -248,8 +248,8 @@ joined to your browsing anywhere.
 
 When you create a Kiln account, we also note, once, how you reached
 Kiln, as one word from a fixed list: X, GitHub, PyPI, a search engine,
-another website, no referring website, the Kiln command line, or an AI
-app's Kiln connector. Your browser works that word out from the name of
+an AI assistant such as ChatGPT or Copilot, another website, no referring
+website, the Kiln command line, or an AI app's Kiln connector. Your browser works that word out from the name of
 the website that sent you (never the page's address) or the campaign
 tag on the link you followed. If you land on kiln3d.com first and sign
 in from there, the site works the word out on the first page you open.
