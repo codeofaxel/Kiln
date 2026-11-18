@@ -173,3 +173,21 @@ class TestParameterNames:
     def test_an_overhang_is_judged_by_the_overhang_figure(self, served):
         warnings = self._warnings("overhang_angle = 80; // deg\n")
         assert [w.limit_value for w in warnings] == [57.0]
+
+
+def test_a_reply_judged_at_the_plastics_own_overhang_does_not_say_the_angle(served, tmp_path):
+    """The verdict is the answer; the plastic's own figure stays Kiln's."""
+    trimesh = pytest.importorskip("trimesh")
+    from kiln.printability import analyze_printability
+
+    path = tmp_path / "block.stl"
+    trimesh.creation.box(extents=(20, 20, 10)).export(str(path))
+    reply = analyze_printability(str(path), material="pla").to_dict()
+    assert "overhang_threshold_deg" not in reply
+    # With no plastic figure (signed out), the general angle is the reply's own.
+    _calls, answers = served
+    answers.append({"success": False, "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "Sign in.", "why": "signed_out"})
+    material_limits.forget()
+    general = analyze_printability(str(path), material="pla").to_dict()
+    assert general["overhang_threshold_deg"] == 45.0
+

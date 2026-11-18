@@ -9000,9 +9000,13 @@ def _analyze_printability_here(
     # "TPU at 38° needs_supports=True, but supports.estimated_support_volume_mm3=0"
     # because 38° is below the supports estimator's 45° floor.  Pin
     # them together so the verdict and the volume estimate agree.
+    _overhangs_block = material_overhangs(material)
     _resolved_threshold = _resolve_overhang_threshold(
-        max_overhang_angle, material, material_overhangs(material),
+        max_overhang_angle, material, _overhangs_block,
     )
+    # Judged at the plastic's own figure (not one the caller stated): the
+    # figure is Kiln's to serve, so the reply says the verdict, not the angle.
+    _own_overhang = max_overhang_angle is None and bool(_overhangs_block["overhangs"]["material_limits_deg"])
     # Connected-component count: one closed body = 1; a multi-body mesh
     # = N components.  Exposed for the kiln-pro overlay.
     #
@@ -9474,6 +9478,8 @@ def _analyze_printability_here(
         or _material_physics_from_overlay(material)
     ):
         _mark_tuned(report)
+    elif _own_overhang:
+        report.tuned = True
     return report
 
 
