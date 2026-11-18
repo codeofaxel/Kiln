@@ -552,10 +552,6 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
     return _basic_mix_check(clean, miss)
 
 
-#: Each level's rank: the check's level is its worst pair's.
-_LEVEL_RANK = {"ok": 0, "caution": 1, "conditional": 2, "incompatible": 3}
-
-
 def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, Any] | None:
     """The multi-material check for *clean* (one name per loaded part, in
     order), built from Kiln's answer for every pair of its distinct names
@@ -590,6 +586,8 @@ def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, 
     n = len(clean)
     pairs: list[dict[str, Any]] = []
     worst_level = "ok"
+    # The check's level is its worst pair's.
+    level_rank = {"ok": 0, "caution": 1, "conditional": 2, "incompatible": 3}
     seen: set[frozenset] = set()
     for i in range(n):
         for j in range(n):
@@ -610,7 +608,7 @@ def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, 
                 "mitigations": list(compat.get("mitigations", [])),
                 "purge_volume_mm3": compat.get("purge_volume_mm3", 80),
             })
-            if _LEVEL_RANK.get(compat["level"], 0) > _LEVEL_RANK.get(worst_level, 0):
+            if level_rank.get(compat["level"], 0) > level_rank.get(worst_level, 0):
                 worst_level = compat["level"]
 
     hardware_warnings: list[str] = []
