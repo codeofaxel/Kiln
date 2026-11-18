@@ -9291,6 +9291,18 @@ def _undriven_multi_material_decision(
     return out
 
 
+#: What the composer says about a plate's materials that a door printing the
+#: plate says too: the hardware each material needs (a hardened nozzle, an
+#: enclosure) and, when Kiln's multi-material check did not answer, that the
+#: plate was judged without it and why.
+_COMPOSER_SAFETY_KEYS = ("hardware_warnings", "safety_basic", "safety_caution")
+
+
+def _composer_safety(compose_result: dict[str, Any]) -> dict[str, Any]:
+    """The composer's safety fields a printing door passes on, as given."""
+    return {key: compose_result[key] for key in _COMPOSER_SAFETY_KEYS if compose_result.get(key)}
+
+
 def _plate_too_big_refusal(compose_result: dict[str, Any], composed_path: str) -> dict[str, Any] | None:
     """An error envelope for a composed plate bigger than its bed, else ``None``.
 
@@ -21001,6 +21013,7 @@ def _pro_api_call(
     _timeout: float | None = None,
     _asked_by_user: bool = True,
     _http: dict | None = None,
+    _feature: str | None = None,
     **kwargs,
 ) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
@@ -21022,6 +21035,11 @@ def _pro_api_call(
     ``_http``, when given, is filled with ``status``: the HTTP status the
     answer came with, so a caller can tell a tool's own answer (200) from
     the servers turning the call away.  Left empty when no HTTP answer came.
+
+    ``_feature``, when given, is what the sign-in sentence calls the thing
+    asked for, in a person's words ("Kiln's material recommendation"), for a
+    served tool whose name is not one a person ever meets.  Left out, the
+    sentence names the tool.
 
     Bearer-token resolution order:
       1. OAuth access token from ``$KILN_AUTH_HOME/.kiln/auth_tokens.json``,
@@ -21087,7 +21105,7 @@ def _pro_api_call(
         # definition of them now, so this refusal cannot drift away from the
         # thirteen others that say the same thing.
         wall = account_required_message(
-            tool_name, tier=required_tier, allowance=allowance,
+            _feature or tool_name, tier=required_tier, allowance=allowance,
             every_plan=_PRO_TOOL_FLOORS.get(tool_name, ""),
         )
         # Value before the wall.  A person who reached for a paid tool is at
@@ -22894,6 +22912,7 @@ def get_best_material_substitute(material: str) -> dict:
                 "material": material,
                 "basic": True,
                 "substitutes": basic,
+                "count": len(basic),
                 "note": substitution.basic_line(asked.miss, material, found=bool(basic)),
                 **substitution.miss_fields(asked.miss),
             }
@@ -24185,7 +24204,7 @@ def multi_material_print(
                     "or renders), call issue_preview_token on that path, and call "
                     "multi_material_print again with preview_token.",
                     code="PREVIEW_NOT_CONFIRMED",
-                    extra={"plate_path": output_3mf, "printed": False},
+                    extra={"plate_path": output_3mf, "printed": False, **_composer_safety(compose_result)},
                 )
         with _covered_by_approval("multi_material_print", output_3mf, output_3mf, printer_name):
             result = run_reslice_and_print(
@@ -24217,6 +24236,7 @@ def multi_material_print(
             result["multi_material_3mf"] = output_3mf
             if compose_result.get("slicer_note"):
                 result["slicer_note"] = compose_result["slicer_note"]
+            result.update(_composer_safety(compose_result))
             # Warn when AMS mapping was not established
             if len(unique_filaments) > 1 and not ams_info:
                 result["ams_warning"] = (
@@ -24605,6 +24625,7 @@ def multi_color_copies(
             result["multi_color_3mf"] = output_3mf
             if compose_result.get("slicer_note"):
                 result["slicer_note"] = compose_result["slicer_note"]
+            result.update(_composer_safety(compose_result))
             if ams_warning:
                 result["ams_warning"] = ams_warning
 

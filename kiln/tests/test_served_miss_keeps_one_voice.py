@@ -34,3 +34,85 @@ def test_the_door_line_never_names_the_tool_the_envelope_named():
 def test_an_answer_without_a_worded_detail_keeps_its_own_text():
     miss = served_answer.classify_answer({"success": False, "why": "refused", "error": "Not on this plan."})
     assert miss is not None and miss.detail == "Not on this plan."
+
+
+def test_a_server_without_the_tool_did_not_answer_and_its_name_is_not_said():
+    envelope = _envelope(404, "Unknown tool: material_substitutes")
+    assert envelope["why"] == "unanswered"
+    assert envelope["why_code"] == "NOT_SERVED_HERE"
+    assert "said no" not in envelope["error"]
+    assert "material_substitutes" not in envelope["why_detail"]
+    miss = served_answer.classify_answer(envelope)
+    assert miss is not None and miss.cause == "unanswered" and miss.no_answer
+    line = basic_pick_line(miss, feature="material pick")
+    assert "didn't answer" in line and "said no" not in line
+    assert "material_substitutes" not in line
+
+
+def test_a_retired_tool_keeps_the_servers_words():
+    words = "That tool was replaced: ask for the material record instead."
+    miss = served_answer.classify_answer(_envelope(404, words))
+    assert miss is not None and miss.cause == "refused" and miss.detail == words
+
+
+# ---------------------------------------------------------------------------
+# Signed out: the sign-in sentence names what the person asked for, never the
+# served tool behind it.
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402
+
+from kiln import (  # noqa: E402
+    _pro_adaptive_bridge,
+    _pro_material_limits_bridge,
+    _pro_material_pairing_bridge,
+    _pro_material_pick_bridge,
+    _pro_routing_bridge,
+    _pro_substitution_bridge,
+)
+
+
+def _signed_out_misses():
+    pick_printer = {"printer_has_enclosure": False, "printer_has_direct_drive": True, "max_hotend_temp_c": 260}
+    return {
+        _pro_routing_bridge.WIRE_TOOL: lambda: _pro_routing_bridge.pick("a shelf bracket")[1],
+        "intent_materials/catalogue": lambda: _pro_routing_bridge.catalogue()[1],
+        _pro_substitution_bridge.WIRE_TOOL: lambda: _pro_substitution_bridge.ask("PLA").miss,
+        _pro_material_pairing_bridge.WIRE_TOOL: lambda: _pro_material_pairing_bridge.co_print("pla", "petg")[1],
+        _pro_material_pairing_bridge.MIX_TOOL: lambda: _pro_material_pairing_bridge.mix_check(["PLA", "PETG"])[1],
+        _pro_material_pick_bridge.FLOOR_WIRE_TOOL: lambda: _pro_material_pick_bridge.pick("a shelf bracket", pick_printer)[1],
+        _pro_adaptive_bridge.WIRE_TOOL: lambda: _pro_adaptive_bridge.ask("materials")[1],
+        _pro_material_limits_bridge.WIRE_TOOL: lambda: _pro_material_limits_bridge.ask("pla", nozzle_mm=0.4)[1],
+    }
+
+
+@pytest.fixture
+def _signed_out_plain_install(monkeypatch):
+    import kiln.server as srv
+
+    monkeypatch.setattr(srv, "_served_bearer", lambda: ("", None))
+    for bridge in (
+        _pro_routing_bridge, _pro_adaptive_bridge, _pro_substitution_bridge, _pro_material_pick_bridge,
+    ):
+        monkeypatch.setattr(bridge, "_local", lambda *a, _not_here=bridge._NOT_HERE, **k: _not_here)
+    monkeypatch.setattr(_pro_material_pick_bridge, "_service_down_until", 0.0)
+    monkeypatch.setattr(_pro_material_pick_bridge, "_plan_includes_the_pick", lambda: False)
+    monkeypatch.setattr(
+        _pro_material_pairing_bridge, "_local_co_print", lambda *a, **k: _pro_material_pairing_bridge._NOT_HERE
+    )
+    monkeypatch.setattr(
+        _pro_material_pairing_bridge, "_local_mix_check", lambda *a, **k: _pro_material_pairing_bridge._NOT_HERE
+    )
+    monkeypatch.setattr(
+        _pro_material_limits_bridge, "_local", lambda *a, **k: _pro_material_limits_bridge._NOT_HERE
+    )
+    monkeypatch.setattr(_pro_material_limits_bridge, "_service_down_until", 0.0)
+
+
+@pytest.mark.parametrize("wire", sorted(_signed_out_misses()))
+def test_a_signed_out_miss_never_names_the_served_tool(wire, _signed_out_plain_install):
+    miss = _signed_out_misses()[wire]()
+    assert miss is not None and miss.cause == "signed_out", miss
+    for name in (wire.split("/")[0], "intent_materials", "material_floor_pick"):
+        assert name not in miss.detail, miss.detail
+    assert miss.detail.startswith("Kiln"), miss.detail

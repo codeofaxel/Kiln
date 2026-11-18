@@ -428,6 +428,22 @@ def _minutes(seconds: float) -> str:
     return f"{whole} minute" if whole == 1 else f"{whole} minutes"
 
 
+#: Said after the fix to someone this install has never signed in for.
+FREE_ACCOUNT_NOTE = " (a free account is enough)"
+#: Signed-out codes from someone who already has an account: a session that
+#: ran out, and a sign-in Kiln's servers would not take.
+_HAS_AN_ACCOUNT = frozenset({SESSION_EXPIRED_CODE, "KILN_AUTH_REJECTED"})
+
+
+def free_account_note(miss: Miss | None) -> str:
+    """:data:`FREE_ACCOUNT_NOTE` when *miss* is someone who never signed in,
+    to end a free answer's *then* with; ``""`` for every other miss,
+    including an account whose session ran out or was not taken."""
+    if isinstance(miss, Miss) and miss.cause == "signed_out" and miss.code not in _HAS_AN_ACCOUNT:
+        return FREE_ACCOUNT_NOTE
+    return ""
+
+
 def clause(miss: Miss, *, feature: str, cannot: str, then: str = "try again") -> str:
     """The same content as a clause that follows "because": no capital, no
     full stop, the cause in brackets and the fix after a semicolon.  For a
@@ -474,6 +490,12 @@ def envelope_for_transport(
     }
 
 
+#: How Kiln's servers start the 404 for a tool they do not have.
+_UNKNOWN_TOOL = "Unknown tool:"
+#: What a miss carries for such a tool, in place of the servers' words.
+_NOT_SERVED_HERE_DETAIL = "these servers do not have that answer yet"
+
+
 def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | None = None) -> dict[str, Any]:
     """The envelope for an HTTP error answer.
 
@@ -481,7 +503,9 @@ def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | Non
     server's own) comes back untouched: the server built it for this call
     and this side has no better words.  FastAPI's bare ``{"detail": ...}``
     -- which used to come back as-is, with no field that marked it an
-    error -- and a body that is not JSON at all are worded here.
+    error -- and a body that is not JSON at all are worded here.  A 404 for
+    a tool the servers do not have is no answer, never a ruling, and its
+    words (the tool's name) are not repeated.
     """
     if isinstance(body, dict) and any(k in body for k in ("status", "success", "error", "code")):
         return body
@@ -491,6 +515,10 @@ def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | Non
         detail = raw if isinstance(raw, str) else (json.dumps(raw) if raw is not None else "")
     if status == 401:
         miss = Miss("signed_out", "KILN_AUTH_REJECTED", detail)
+    elif status == 404 and detail.startswith(_UNKNOWN_TOOL):
+        # The servers do not have this tool (yet): nobody ruled on the ask,
+        # and the tool's name is not words for a person.
+        miss = Miss("unanswered", "NOT_SERVED_HERE", _NOT_SERVED_HERE_DETAIL)
     elif status >= 500:
         miss = Miss("unanswered", "KILN_API_HTTP_ERROR", detail)
     elif status == 429:
@@ -619,6 +647,7 @@ def _sentence_of(text: str) -> str:
 
 __all__ = [
     "CAUSES",
+    "FREE_ACCOUNT_NOTE",
     "HOSTED_DOORS",
     "KINDS",
     "LOCAL_FAULT_CODE",
@@ -632,6 +661,7 @@ __all__ = [
     "envelope_for_http",
     "envelope_for_transport",
     "fields",
+    "free_account_note",
     "kind_of_tool",
     "local_fault",
     "sentence",

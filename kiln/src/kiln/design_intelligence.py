@@ -3554,15 +3554,31 @@ def check_multi_material_compatibility(
         )
 
     if answer["found"] == "none":
-        # No data covers the pair, and the answer's note says so.
-        caution = unestablished_caution(
-            "multi_material_pairing",
-            "Nothing here covers this pair, and the general polymer rules "
-            "that would let you reason it out are not available either. "
-            "Treat it as untested rather than fine — a test piece is the "
-            "only thing that will tell you.",
-            curated_entry_exists=False,
-        )
+        # No data covers the pair, and the answer's note says so.  One
+        # material in both places bonds to itself; otherwise the caution
+        # says whether the general rules came with the answer.
+        from kiln.catalog_keys import same_material_spelling
+        from kiln.material_safety import basic_pair_finding
+
+        if same_material_spelling(a, b):
+            caution = basic_pair_finding(a, b)[0]
+        elif rules:
+            caution = unestablished_caution(
+                "multi_material_pairing",
+                "Nothing here covers this pair; reason it out from the general "
+                "rules below, and treat it as untested rather than fine — a "
+                "test piece is the only thing that will tell you.",
+                curated_entry_exists=False,
+            )
+        else:
+            caution = unestablished_caution(
+                "multi_material_pairing",
+                "Nothing here covers this pair, and the general polymer rules "
+                "that would let you reason it out are not available either. "
+                "Treat it as untested rather than fine — a test piece is the "
+                "only thing that will tell you.",
+                curated_entry_exists=False,
+            )
     else:
         caution = "" if notes else _verdict_caution()
     return _with_nozzle_lines(MultiMaterialReport(
@@ -3602,7 +3618,7 @@ def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiM
     """
     from kiln.catalog_keys import same_material_spelling
     from kiln.material_safety import basic_pair_finding
-    from kiln.served_answer import Miss, fields, sentence
+    from kiln.served_answer import Miss, fields, free_account_note, sentence
 
     if not isinstance(miss, Miss):
         miss = Miss("unanswered", detail="no pairing verdict")
@@ -3626,7 +3642,7 @@ def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiM
         cannot=f"give its pairing verdict for {label_a} and {label_b}",
         wont=wont,
         safe_remedy="" if same else "run a small test piece before a long print",
-        then="ask again",
+        then="ask again" + free_account_note(miss),
     )
     return MultiMaterialReport(
         material_a=a,

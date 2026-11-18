@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import re
 import time
 from typing import Any
@@ -49,6 +50,9 @@ LOCAL_MODULE = "kiln_pro.material_floor_pick"
 FEATURE = "material pick"
 #: The same for Kiln Pro's own pick, when it is the one that missed.
 PRO_FEATURE = "Pro pick"
+#: What the sign-in sentence calls each pick.
+SIGN_IN_NAME = f"Kiln's {FEATURE}"
+PRO_SIGN_IN_NAME = "Kiln Pro's material pick"
 #: A pick is asked on the way to a make; the miss is said if this passes.
 _CONSULT_TIMEOUT_S: float = 4.0
 #: After the servers fail to answer, how long the pick is not asked for; a
@@ -58,6 +62,10 @@ SERVICE_BACKOFF_S: float = 300.0
 MAX_REQUIREMENTS_CHARS = 2000
 #: What a longer description is told, once, with nothing asked.
 TOO_LONG = f"Describe the part in {MAX_REQUIREMENTS_CHARS:,} characters or fewer."
+#: The hotend ceiling a printer is taken to have when none is given.
+_DEFAULT_CEILING_C = 300
+#: What a hotend ceiling that is not a number is told, with nothing asked.
+BAD_CEILING = "Give the printer's hotend ceiling as a number of degrees C."
 
 _service_down_until: float = 0.0
 _last_miss: Miss | None = None
@@ -70,12 +78,15 @@ def pick(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss | N
     raises.
 
     A description longer than :data:`MAX_REQUIREMENTS_CHARS` is refused here
-    with :data:`TOO_LONG`, nothing asked.  Within one tool call
+    with :data:`TOO_LONG`, and a hotend ceiling that is not a finite number
+    with :data:`BAD_CEILING`, nothing asked.  Within one tool call
     (:func:`kiln.tool_context.call_memo`) the same part on the same printer
     is asked for once: a door whose helpers each read the analysis gets one
     answer, each helper its own copy."""
     if isinstance(requirements_text, str) and len(requirements_text) > MAX_REQUIREMENTS_CHARS:
         return None, Miss("refused", code="INVALID_ARGUMENT", detail=TOO_LONG)
+    if _hotend_ceiling(printer) is None:
+        return None, Miss("refused", code="INVALID_ARGUMENT", detail=BAD_CEILING)
     memo, key = _call_memo(), _memo_key(requirements_text, printer)
     if memo is not None and key is not None and key in memo:
         return copy.deepcopy(memo[key])
@@ -85,6 +96,22 @@ def pick(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss | N
     if memo is not None and key is not None:
         memo[key] = copy.deepcopy(answer)
     return answer
+
+
+def _hotend_ceiling(printer: dict[str, Any]) -> int | None:
+    """The printer's hotend ceiling in whole degrees, or ``None`` when what
+    was given is not a finite number (``None``, NaN, infinity, a yes/no,
+    words).  Left out, it is :data:`_DEFAULT_CEILING_C`."""
+    raw = printer.get("max_hotend_temp_c", _DEFAULT_CEILING_C)
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return int(value)
 
 
 def _call_memo() -> dict[Any, Any] | None:
@@ -129,12 +156,12 @@ def _local(requirements_text: str, printer: dict[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         from kiln.served_answer import local_fault
 
-        return None, local_fault(exc, where="the material pick on this computer")
+        return None, local_fault(exc, where="Kiln's material pick")
     from kiln.design_intelligence import MaterialRecommendation
 
     if isinstance(rec, MaterialRecommendation):
         return rec, None
-    return None, Miss("unanswered", detail="the material pick on this computer gave no pick")
+    return None, Miss("unanswered", detail="Kiln's material pick gave no pick")
 
 
 def _plan_includes_the_pick() -> bool:
@@ -189,8 +216,21 @@ def _served(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss 
     if rec is None and miss is None:
         miss = Miss("unanswered", detail="no pick in the answer")
     if rec is not None and pro_note is not None:
-        rec.warnings.insert(0, pro_note)
+        # This computer counts the caller as holding Kiln Pro: the pick every
+        # plan gets keeps its load caution and says nothing about the plan.
+        rec.warnings = [pro_note, *_without_plan_line(rec.warnings)]
     return rec, miss
+
+
+def _without_plan_line(warnings: list[str]) -> list[str]:
+    """*warnings* with the plan sentence the load caution may carry removed,
+    the caution itself kept word for word."""
+    from kiln.design_intelligence import _PICK_LOAD_CAUTION
+
+    return [
+        _PICK_LOAD_CAUTION if w.startswith(_PICK_LOAD_CAUTION) else w
+        for w in warnings
+    ]
 
 
 #: What fixes a plan the servers do not count as Kiln Pro while this
@@ -231,10 +271,11 @@ def _ask(tool: str, requirements_text: str, printer: dict[str, Any]) -> tuple[An
             # The person asked what material to use; the pick is what they
             # reached for.
             _asked_by_user=True,
+            _feature=PRO_SIGN_IN_NAME if tool == WIRE_TOOL else SIGN_IN_NAME,
             requirements_text=str(requirements_text or ""),
             printer_has_enclosure=bool(printer.get("printer_has_enclosure", False)),
             printer_has_direct_drive=bool(printer.get("printer_has_direct_drive", True)),
-            max_hotend_temp_c=int(printer.get("max_hotend_temp_c", 300)),
+            max_hotend_temp_c=_hotend_ceiling(printer),
             supported_materials=printer.get("supported_materials"),
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
@@ -363,6 +404,7 @@ def _rebuild_floor(pick: Any) -> Any:
 
 
 __all__ = [
-    "FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "MAX_REQUIREMENTS_CHARS", "PRO_FEATURE", "TOO_LONG", "WIRE_TOOL",
+    "BAD_CEILING", "FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "MAX_REQUIREMENTS_CHARS", "PRO_FEATURE",
+    "PRO_SIGN_IN_NAME", "SIGN_IN_NAME", "TOO_LONG", "WIRE_TOOL",
     "pick",
 ]

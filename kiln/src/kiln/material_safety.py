@@ -710,10 +710,11 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
     no pair of different materials, and ``caution`` speaks of its hardware
     alone."""
     from kiln.catalog_keys import same_material_spelling
-    from kiln.served_answer import Miss, fields, sentence
+    from kiln.served_answer import Miss, fields, free_account_note, sentence
 
     if not isinstance(miss, Miss):
         miss = Miss("unanswered", detail="no multi-material check")
+    then = "compose again" + free_account_note(miss)
     n = len(clean)
     one_material = all(same_material_spelling(clean[0], m) for m in clean[1:])
     pairs: list[dict[str, Any]] = []
@@ -805,7 +806,7 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
                 "warned only from the material's name and the catalog on this computer"
                 + (", and set the conservative purge between its colours" if n > 1 else "")
             ),
-            then="compose again",
+            then=then,
         )
     else:
         caution = sentence(
@@ -821,7 +822,7 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
                 "conservative purge between the others"
             ),
             safe_remedy="run a small test piece before a long print",
-            then="compose again",
+            then=then,
         )
     return {
         "safe": not incompatible_pairs,
@@ -840,17 +841,29 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
 # Abrasive-filament floor
 # ---------------------------------------------------------------------------
 
+#: The fillers a filled filament is named for, as they appear before "fill".
+_FILLERS = (
+    r"COPPER|BRONZE|BRASS|STEEL|IRON|ALUMINI?UM|TITANIUM|TUNGSTEN|METAL|MAGNET(?:IC)?"
+    r"|WOOD|BAMBOO|CORK|STONE|MARBLE|MINERAL|CERAMIC|GLASS|CARBON|GLOW"
+)
+
 #: Fill wording in a filled filament's own name.  Whole words, because
 #: "CARBON" as a bare substring reads POLYCARBONATE as carbon-filled, and
-#: "GLASS" alone reads a sea-glass colourway as glass fibre.  Metal fill
-#: is left to the ``FILL`` rule below: "Copper" on a spool is far more
-#: often a colour than a filler, but "Copperfill" never is.
+#: "GLASS" alone reads a sea-glass colourway as glass fibre; "carbon black"
+#: is a pigment, not a filler.  Metal fill is matched with its "fill":
+#: "Copper" on a spool is far more often a colour than a filler, but
+#: "Copperfill" never is.  "Fill" on its own is a product word ("Refill",
+#: "Extrafill", a maker's name), so it counts only after a filler or as
+#: "filled".
 _ABRASIVE_FILL_PATTERNS = (
-    r"\bCARBON\b",
+    r"\bCARBON\b(?!\s*-?\s*BLACK)",
     r"\bWOOD\b",
     r"\bMETAL\b",
+    r"\bMAGNETIC\b",
+    r"\bGLOW\b",
     r"GLASS\s*-?\s*FIB",
-    r"FILL",
+    rf"(?:{_FILLERS})\s*-?\s*FILL",
+    r"\bFILLED\b",
 )
 
 #: Fill suffixes, matched as whole tokens so "PETG" never reads as "GF"

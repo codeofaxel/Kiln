@@ -80,7 +80,7 @@ def asked(monkeypatch):
 
     calls: list[tuple[str, dict]] = []
 
-    def serve(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+    def serve(tool_name, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
         calls.append((tool_name, {"_asked_by_user": _asked_by_user, **kwargs}))
         return _lines(kwargs.get("nozzle_mm", NOZZLE))
 

@@ -13,7 +13,7 @@ from typing import Any
 
 from kiln.gcode import _MATERIAL_TEMPS
 
-__all__ = ["basic_pick_line", "basic_plastics", "plastics_printer_can_melt", "pro_pick_missed_line"]
+__all__ = ["basic_pick_line", "basic_plastics", "pick_then", "plastics_printer_can_melt", "pro_pick_missed_line"]
 
 
 def plastics_printer_can_melt(max_hotend_temp_c: float | None = None) -> list[str]:
@@ -60,12 +60,19 @@ def basic_pick_line(miss: Any, *, feature: str, hotend_known: bool = True) -> st
         on_the_line="Kiln did not pick a plastic for this part",
         cannot="pick one",
         wont="lists the plastics this printer can melt instead" if hotend_known else "lists common plastics instead",
-        then=(
-            "Kiln picks the plastic for this part"
-            if miss.cause == "signed_out"
-            else "ask again for Kiln's pick for this part"
-        ),
+        then=pick_then(miss),
     )
+
+
+def pick_then(miss: Any) -> str:
+    """What the fix to a missed material pick leads to, for the line that
+    says why: Kiln's pick for this part, and for someone who never signed in,
+    that a free account is enough."""
+    from kiln.served_answer import free_account_note
+
+    if getattr(miss, "cause", "") == "signed_out":
+        return "Kiln picks the plastic for this part" + free_account_note(miss)
+    return "ask again for Kiln's pick for this part"
 
 
 #: What a line about Kiln Pro's pick says first, whatever came of it.

@@ -66,7 +66,7 @@ def _served(monkeypatch, reply: Any) -> list[dict[str, Any]]:
 
     asks: list[dict[str, Any]] = []
 
-    def call(tool_name, _timeout=None, _asked_by_user=None, **kwargs):
+    def call(tool_name, _timeout=None, _asked_by_user=None, _feature=None, **kwargs):
         asks.append({"tool": tool_name, "asked_by_user": _asked_by_user, **kwargs})
         if isinstance(reply, BaseException):
             raise reply
@@ -111,6 +111,27 @@ class TestTheServedVerdict:
         assert out["compatible"] is False and out["interface_adhesion"] == "unknown"
         assert out["notes"] == "No compatibility data for pla + hips."
         assert out["caution"].startswith("Nothing here covers this pair")
+        assert "not available either" in out["caution"]
+
+    def test_a_pair_nothing_covers_points_at_the_general_rules_it_came_with(self, monkeypatch):
+        """Kiln's servers send the general rules with a pair the table lacks;
+        the caution points at them instead of saying they are missing."""
+        rules = ["Materials with similar print temperatures usually bond better.", "Purge more after dark colours."]
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes="No compatibility data for pla + hips.", material_b="hips",
+                                     general_rules=rules))
+        out = _door()("pla", "hips")
+        assert out["general_rules"] == rules
+        assert out["caution"].startswith("Nothing here covers this pair; reason it out from the general rules below")
+        assert "not available" not in out["caution"]
+
+    def test_one_material_in_both_places_is_said_to_bond_to_itself(self, monkeypatch):
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes="No compatibility data for abs + abs.", material_a="abs",
+                                     material_b="abs", general_rules=["A stand-in rule."]))
+        out = _door()("ABS", "abs")
+        assert "bonds to itself" in out["caution"]
+        assert "Nothing here covers" not in out["caution"] and "not available" not in out["caution"]
 
 
 class TestABasicAnswer:
@@ -261,9 +282,16 @@ class TestANameTooLong:
         assert out["success"] is True
 
 
+#: The pairing table's file, its reader's name and its structure key, by
+#: digest (tests/_moved_away.py).
+_PAIRING_TABLE_FILE = frozenset({"23a77f89c8184d8c7a63a63b9d7780941d7d05a7bb7a168cae1b34d67de0ca95"})
+_PAIRING_TABLE_READER = frozenset({"9e9c2bdd74f7b92cf3909ba6082a5202c9ac757089661ba55e16c8b45f3d4127"})
+_PAIRING_TABLE_KEY = frozenset({"65a1a25b86a4f9499ce7909386e5eff1b43fae210093a1b553419b7051146c5e"})
+
+
 def test_the_pairing_table_is_not_in_this_package():
-    assert not (_SRC / "data" / "design_knowledge" / "multi_material_pairing.json").exists()
-    assert not hasattr(di._DesignKnowledgeBase, "multi_material")
-    hits = [p for p in _SRC.rglob("*") if p.is_file() and p.suffix in (".py", ".json")
-            and "co_print_compatibility" in p.read_text(encoding="utf-8", errors="replace")]
-    assert not hits, [str(p.relative_to(_SRC)) for p in hits]
+    from tests._moved_away import attributes_back, files_back, quoted_back
+
+    assert files_back(_PAIRING_TABLE_FILE, _SRC) == []
+    assert attributes_back(di._DesignKnowledgeBase, _PAIRING_TABLE_READER) == []
+    assert quoted_back(_PAIRING_TABLE_KEY, (".py", ".json"), _SRC) == []

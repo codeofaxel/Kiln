@@ -265,7 +265,7 @@ class TestAMissIsBasic:
     def test_signed_out_says_signing_in_gets_the_pick(self, doors):
         with plain_install_served(SIGNED_OUT):
             reply = doors["recommend_material"](intent="strong")
-        assert reply["message"].endswith("Sign in and Kiln picks the plastic for this part.")
+        assert reply["message"].endswith("Sign in and Kiln picks the plastic for this part (a free account is enough).")
 
     def test_both_material_picks_say_a_miss_the_same_way(self, doors):
         """The recommender and the design pick share one signed-out sentence
@@ -394,8 +394,27 @@ class TestAMissFromTheMaterialsOnHand:
         assert reply["on_hand_scope"] == "printer:x1c" and reply["answered_for_printer"] == "x1c"
         caution, note = reply["message"].split("\n\n")
         assert caution.startswith("ABRASIVE FILAMENT: PETG-CF ")
-        assert "lists the materials you have on hand instead" in note
+        assert note.startswith("These are the materials you have on hand, not checked against this part.")
+        assert "Check each one against what the part has to do" in note
         _assert_one_voice(note)
+
+    def test_a_shelf_of_one_plastic_is_never_said_as_a_pick(self, doors, tmp_path, monkeypatch):
+        """A one-item list reads like a pick to an agent; the line says it was
+        not checked against the part and what to do instead."""
+        from kiln.persistence import KilnDB
+
+        db = KilnDB(db_path=str(tmp_path / "pva.db"))
+        db.save_material("x1c", 0, "PVA", color="natural", remaining_grams=400.0)
+        monkeypatch.setattr("kiln.persistence.get_db", lambda *a, **k: db)
+        try:
+            with plain_install_served(SIGNED_OUT):
+                reply = doors["recommend_material"](intent="strong bracket", on_hand_only=True, printer_id="x1c")
+        finally:
+            db.close()
+        assert reply["basic"] is True and reply["plastics"] == ["PVA"]
+        assert "not checked against this part" in reply["message"]
+        assert "check each one against what the part has to do" in reply["message"].lower()
+        assert "Kiln did not pick a plastic" not in reply["message"]
 
     def test_every_machine_counts_when_no_printer_is_named(self, doors, filled_shelf):
         with plain_install_served(SIGNED_OUT):
@@ -446,6 +465,27 @@ class TestOverLongInput:
         assert sent == [], "an over-long intent was sent to Kiln's servers"
         assert reply["success"] is False and reply["error"]["code"] == "VALIDATION_ERROR"
         assert reply["error"]["message"] == "Invalid intent: say what the part is for in at most 10,000 characters."
+
+    @pytest.mark.parametrize("budget", ["25", True])
+    def test_a_request_the_recommendation_cannot_read_is_refused_never_basic(self, doors, budget):
+        """The recommendation's own refusal of a value it cannot read (a budget
+        sent as text or as yes/no through the REST door) is relayed as a
+        refusal, the way the substitution doors relay theirs."""
+        refusal = {
+            "status": "error", "success": False, "code": "INVALID_ARGUMENT",
+            "error": "Give the budget as a price per kilogram.",
+        }
+        with plain_install_served(refusal):
+            reply = doors["recommend_material"](intent="a shelf bracket", budget_usd=budget)
+        assert reply["success"] is False and "basic" not in reply, reply
+        assert reply["error"]["code"] == "VALIDATION_ERROR"
+        assert reply["error"]["message"] == "Give the budget as a price per kilogram."
+
+    def test_a_refusal_that_is_not_about_the_input_is_still_basic(self, doors):
+        refusal = {"status": "error", "success": False, "code": "ALLOWANCE_USED_UP", "error": "Not today."}
+        with plain_install_served(refusal):
+            reply = doors["recommend_material"](intent="a shelf bracket")
+        assert reply["basic"] is True and reply["why"] == "refused"
 
     def test_an_intent_at_the_limit_is_asked(self, doors):
         with plain_install_served(served_pick()) as sent:

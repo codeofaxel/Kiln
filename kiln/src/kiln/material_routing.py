@@ -29,6 +29,11 @@ from kiln.served_answer import Miss
 logger = logging.getLogger(__name__)
 
 
+class RequestRefused(ValueError):
+    """Kiln's material recommendation could not read the request: a ruling
+    on the input, which the door relays as a refusal, never a basic list."""
+
+
 # ---------------------------------------------------------------------------
 # The replies
 # ---------------------------------------------------------------------------
@@ -232,7 +237,8 @@ def recommend_material(
     capabilities and the budget, and returns the top recommendation with
     alternatives.  When it gives no answer the result is
     :class:`BasicMaterials`: no pick, the plastics the printer can melt, and
-    the sentence saying why.
+    the sentence saying why.  A request it could not read raises
+    :class:`RequestRefused` with its own sentence.
 
     :param intent: User intent text (e.g. ``"make it strong"``).
     :param printer_capabilities: Optional dict with ``has_enclosure`` and
@@ -290,6 +296,9 @@ def recommend_material(
         inventory_recorded=bool(on_hand),
     )
     if answer is None:
+        refused = _pro_routing_bridge.input_refusal(miss)
+        if refused is not None:
+            raise RequestRefused(refused)
         return basic_materials(intent, miss or Miss("unanswered"), printer_id=printer_id, on_hand=on_hand)
 
     top = dict(answer["pick"])
@@ -564,7 +573,7 @@ def basic_materials(
             caution = _abrasive_caution(name)
             if caution:
                 cautions.append(caution)
-        note = _basic_line(miss, wont="lists the materials you have on hand instead")
+        note = _shelf_line(miss)
         return BasicMaterials(plastics=names, note=note, miss=miss, cautions=cautions, on_hand=rows)
 
     limit = _hotend_limit_c(printer_id)
@@ -639,23 +648,21 @@ def _abrasive_caution(name: str) -> str:
         return ""
 
 
-def _basic_line(miss: Miss, *, wont: str) -> str:
-    """The one line a basic answer says, for a list other than the printer's
-    plastics."""
+def _shelf_line(miss: Miss) -> str:
+    """The one line a basic answer from the materials on hand says: they are
+    the person's own, as recorded, and nothing judged them against the part."""
     from kiln import served_answer
     from kiln._pro_routing_bridge import FEATURE
+    from kiln.material_basics import pick_then
 
     return served_answer.sentence(
         miss,
         feature=FEATURE,
-        on_the_line="Kiln did not pick a plastic for this part",
-        cannot="pick one",
-        wont=wont,
-        then=(
-            "Kiln picks the plastic for this part"
-            if miss.cause == "signed_out"
-            else "ask again for Kiln's pick for this part"
-        ),
+        on_the_line="These are the materials you have on hand, not checked against this part",
+        cannot="pick one for this part",
+        wont="lists them as recorded",
+        safe_remedy="check each one against what the part has to do",
+        then=pick_then(miss),
     )
 
 
@@ -702,7 +709,7 @@ def basic_material_list(miss: Miss) -> dict[str, Any]:
         on_the_line="Kiln did not list each material's properties",
         cannot="list them",
         wont="lists common plastics by name and category only",
-        then="ask again for the full list",
+        then="ask again for the full list" + served_answer.free_account_note(miss),
     )
     out: dict[str, Any] = {
         "success": True,

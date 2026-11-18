@@ -84,7 +84,7 @@ def _servers(monkeypatch, replies: dict[str, Any]) -> list[tuple[str, dict]]:
 
     asked: list[tuple[str, dict]] = []
 
-    def served(tool_name, /, _timeout=None, _asked_by_user=True, **kwargs):
+    def served(tool_name, /, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
         asked.append((tool_name, dict(kwargs)))
         reply = replies[tool_name]
         return reply(**kwargs) if callable(reply) else reply
@@ -208,6 +208,39 @@ class TestTheServedPick:
         _plan(monkeypatch, "free")
         assert di.recommend_material_for_design("shelf bracket").warnings == _FLOOR_PICK["warnings"]
 
+    def test_a_stale_kiln_pro_record_meeting_a_free_server_is_told_to_sign_in_and_never_pitched(self, monkeypatch):
+        """The servers answer the pick every plan gets, as for a free caller,
+        with the load caution and its plan sentence; this computer counts the
+        caller as holding Kiln Pro, so the reply says how to bring the record
+        up to date and keeps the caution, never the plan sentence."""
+        _plan(monkeypatch, "pro")
+        pitched = dict(_FLOOR_PICK, warnings=[
+            "Load not checked for this material.",
+            f"{di._PICK_LOAD_CAUTION} Kiln Pro sizes the part for the weight and how long it's held; see "
+            "https://kiln3d.com/pricing.",
+        ])
+        refusal = {"success": False, "status": "error", "code": "TIER_REQUIRED", "required_tier": "pro",
+                   "error": "Kiln Pro's material pick needs Kiln Pro. Upgrade at https://kiln3d.com/pricing."}
+        _servers(monkeypatch, {bridge.WIRE_TOOL: refusal, bridge.FLOOR_WIRE_TOOL: _ok(pitched)})
+        rec = di.recommend_material_for_design("shelf bracket that holds books")
+        assert "signing in again" in rec.warnings[0]
+        assert di._PICK_LOAD_CAUTION in rec.warnings
+        assert not any("kiln3d.com/pricing" in w or "sizes the part" in w for w in rec.warnings), rec.warnings
+
+    @pytest.mark.parametrize("ceiling", [None, float("nan"), float("inf"), "hot", True])
+    def test_a_hotend_ceiling_that_is_not_a_number_is_refused_here_and_never_waits(self, monkeypatch, ceiling):
+        """Refused before anything is asked, in plain words, and never read as
+        Kiln's servers not answering: the next good ask is asked at once."""
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        rec, miss = di.material_pick_for_design("shelf bracket", max_hotend_temp_c=ceiling)
+        assert rec is None and asked == []
+        assert (miss.cause, miss.code, miss.detail) == ("refused", "INVALID_ARGUMENT", bridge.BAD_CEILING)
+        assert miss.retry_after_s == 0
+        rec, miss = di.material_pick_for_design("shelf bracket", max_hotend_temp_c=260)
+        assert miss is None and rec.material.material_id == "petg"
+        assert [tool for tool, _ in asked] == [bridge.FLOOR_WIRE_TOOL]
+
     @pytest.mark.usefixtures("free_caller")
     def test_the_door_returns_the_pick_with_its_cautions(self, monkeypatch):
         _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
@@ -241,7 +274,7 @@ class TestAMissPicksNothing:
         assert out["message"] == (
             "Kiln did not pick a plastic for this part. Kiln can't pick one right now because "
             "Kiln is signed out, so it lists the plastics this printer can melt instead. Sign in "
-            "and Kiln picks the plastic for this part."
+            "and Kiln picks the plastic for this part (a free account is enough)."
         )
         assert out["plastics"] == plastics_printer_can_melt(230)
         for key in ("material", "score", "reasons", "alternatives", "recommended_brands"):
@@ -506,7 +539,7 @@ def _says_basic(block: Any) -> None:
     """A reply's basic material block: Kiln did not pick, why, and the fix."""
     assert isinstance(block, dict) and block["basic"] is True and block["why"] == "signed_out"
     assert block["message"].startswith("Kiln did not pick a plastic for this part.")
-    assert "Sign in and Kiln picks the plastic for this part." in block["message"]
+    assert "Sign in and Kiln picks the plastic for this part (a free account is enough)." in block["message"]
     assert block["plastics"]
 
 
@@ -630,22 +663,34 @@ class TestOneAskPerPart:
 # ---------------------------------------------------------------------------
 
 
-def test_the_pick_engine_is_not_in_this_package():
-    from pathlib import Path
+#: The pick engine's names, by digest (tests/_moved_away.py).
+_PICK_ENGINE_NAMES = frozenset({
+    "a7a4ae31bee4f5fc18190c16774a501baf05cd30ac77bbf26cc8bdf6fe8a775c",
+    "0479388b0262a8b0b2d639bee734f86bff7629fce0015b2d339d1a5f33b898cc",
+    "8e011dfca10f46a4dfa379b3ba3df224e5540d3118479f199133d0b04911e479",
+    "72b2968e1cdbba10353f0896fa2514b94c7f36f300cf1002ddf65ee413682a5f",
+    "613bbb787bcd63b3bc5abdedc0ad944836c923f6b8dde0ac6f97351e1ae7cf37",
+    "429bce7047064ba1af478e623b4831402fdac2fd8932724f931779833a47a3ed",
+    "ea9d5f16f4b0655e6a143ccd85ad891f89bc875224a3b277ee1f9105213a2b9d",
+    "28fcc92cdb5b273fce45a95c6304a889fb89aba6e9f0c782e1c8373ee404549f",
+    "95b349296000a48c2982fa431e6fc7eff40535dff6fea31dec44b310225c819e",
+    "e6748a39ca6a305a377f2f1690752ffff89908bee34195c579292033b1e5cc10",
+    "685d1eb42dd5855db7b169207165b08e37a8aebb5ac45adbba7544afb86d2cf2",
+    "bb737d4d7700a67b17c654bac4e1e9ac1945de7ef2cc2595bd331557a9ec86b8",
+    "ad3b12644c3204c95e460b2b881dc260810fc1c1f69bbfb9002a266b66e31d22",
+    "99a65d5b45f27e8d97116017ae038f1566215d8fdd06d17b66151801cf556592",
+})
+#: Sentences the pick engine says, by digest and number of words.
+_PICK_ENGINE_SAID = {
+    "7c24f4e8fcf2358cf045b1a48a054ab7ea7da32a5d0ac4b976a503f361302eb8": 3,
+    "c0338e796b7c0763a0952fc65aecfedddaffab09e89751f7ba69fcff71bc94ad": 7,
+    "ad518f74e63b05481faa16aec4ca3f1e8d82724e2e082c4b2d0103369276b890": 6,
+    "c8f722673989a77b4a73926dad6cac4e4892a47b36cb8054b973f5c5726c0801": 7,
+}
 
-    for name in ("_recommend_from_safety_floor", "_recommend_material_for_design", "_kiln_pro_recommendation",
-                 "_HEAT_KEYWORDS", "_OUTDOOR_KEYWORDS", "_INDOOR_KEYWORDS", "_FLEXIBLE_KEYWORDS",
-                 "_SUSTAINED_LOAD_KEYWORDS", "_COSMETIC_KEYWORDS", "_DEFAULT_HOT_TARGET_C",
-                 "_TPU_FAMILY_PREFIXES", "_is_tpu_family", "_hotend_ceiling_warning", "_load_judgement_is_paid"):
-        assert not hasattr(di, name), name
-    package = Path(di.__file__).resolve().parent
-    said = (
-        "survives target temperature",
-        "the only FDM material with genuine flexibility",
-        "best surface finish for cosmetic prints",
-        "dimensional stability suitable for sustained-load applications",
-    )
-    for path in package.rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        for words in said:
-            assert words not in text, f"{path.name} still words the pick: {words!r}"
+
+def test_the_pick_engine_is_not_in_this_package():
+    from tests._moved_away import attributes_back, strings_back
+
+    assert attributes_back(di, _PICK_ENGINE_NAMES) == []
+    assert strings_back(_PICK_ENGINE_SAID) == [], "a module still words the pick"

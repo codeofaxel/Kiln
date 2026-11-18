@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 #: The served tool that answers one plastic's limits.
 WIRE_TOOL = "material_limits"
+#: What the sign-in sentence calls the answer asked for.
+SIGN_IN_NAME = "Kiln's design limits for each plastic"
 #: Where the same answer is read from when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.material_limits.engine"
 #: The quantities an answer carries, each ``{value, unit, basis}``.
@@ -148,6 +150,7 @@ def _served(material: str | None, scenario: dict[str, Any]) -> tuple[dict[str, A
             # Asked on the way to a design check, a print check or a slice;
             # the person asked for the check, not for this.
             _asked_by_user=False,
+            _feature=SIGN_IN_NAME,
             **named,
             **{key: value for key, value in scenario.items() if value is not None},
         )

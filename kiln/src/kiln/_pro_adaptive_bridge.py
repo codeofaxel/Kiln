@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 #: The hosted door, asked when kiln-pro is not installed here.
 WIRE_TOOL = "adaptive_slicing_answer"
+#: What the sign-in sentence calls the answer asked for.
+SIGN_IN_NAME = "Kiln's tuned slicing settings"
 #: Where the same answer is read when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.adaptive_slicing.engine"
 #: A person is waiting on the answer; past this, generic settings answer.
@@ -87,7 +89,8 @@ def basic(miss: Miss, material: Any = "", door: str = "plan") -> dict[str, Any]:
     name = str(material or "").strip().upper() or "this material"
     on_the_line, cannot, wont, then = (part.format(m=name) for part in _WORDS[door])
     text = served_answer.sentence(
-        miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont, then=then,
+        miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont,
+        then=then + served_answer.free_account_note(miss),
     )
     out: dict[str, Any] = {"basic": True, NOTE_KEY: text, "retryable": miss.no_answer}
     out.update(served_answer.fields(miss))
@@ -104,7 +107,7 @@ def _local(question: str, fields: dict[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         from kiln.served_answer import local_fault
 
-        return local_fault(exc, where="the adaptive slicing settings on this computer")
+        return local_fault(exc, where="Kiln's adaptive slicing settings")
     if _is_answer(out, question):
         return out
     return Miss("unanswered", detail="no adaptive slicing answer")
@@ -124,6 +127,7 @@ def _served(question: str, fields: dict[str, Any]) -> tuple[dict[str, Any] | Non
             WIRE_TOOL,
             _timeout=CONSULT_TIMEOUT_S,
             _asked_by_user=True,
+            _feature=SIGN_IN_NAME,
             ask=question,
             **fields,
         )

@@ -51,7 +51,7 @@ def _serve(monkeypatch, answer: Any) -> list[str]:
 
     calls: list[str] = []
 
-    def fake(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+    def fake(tool_name, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
         calls.append(tool_name)
         if isinstance(answer, BaseException):
             raise answer
