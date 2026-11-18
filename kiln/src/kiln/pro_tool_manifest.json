@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-18T00:16:22.796263+00:00",
+  "generated": "2026-11-18T00:32:09.349005+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -10244,7 +10244,8 @@
               }
             ],
             "default": null,
-            "title": "Expected Head Version Id"
+            "title": "Expected Head Version Id",
+            "description": "The newest version of the proposed branch the reviewer looked at.  With a verdict, nothing is recorded if the branch has moved since (``SOURCE_HEAD_MOVED``)."
           }
         },
         "required": [
