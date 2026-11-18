@@ -1379,6 +1379,23 @@ def resolve_printer_generation_context(
     return ctx
 
 
+def _whose_wall(wall: float, rules: dict[str, Any], limits: Any) -> str:
+    """What a prompt says after the wall it states, so a figure is never
+    passed off as more than it is: nothing for the brief's own rule or the
+    plastic's own wall, the static-safe minimum named as such, and the
+    general figure said to be general."""
+    from kiln.material_limits import WALL_RECOMMENDED
+
+    brief = rules.get("min_wall_thickness_mm")
+    if isinstance(brief, (int, float)) and float(brief) == wall:
+        return ""
+    if limits.static_safe_floor() and wall == limits.wall_floor_mm():
+        return " (this plastic's static-safe minimum)"
+    if limits.is_own(WALL_RECOMMENDED):
+        return ""
+    return " (the general figure for any plastic)"
+
+
 def enhance_prompt_with_design_intelligence(
     prompt: str,
     *,
@@ -1459,38 +1476,40 @@ def enhance_prompt_with_design_intelligence(
     rules = brief.combined_rules
     mat = brief.recommended_material
     mat_limits: dict[str, Any] = {}
-    if mat and mat.material:
-        from kiln.material_limits import limits_for
+    from kiln.material_limits import limits_for
 
+    # The plastic the design checks read: the recommended one, else the one
+    # named, else none (the general figures, with nothing asked).
+    plastic_limits = limits_for(None)
+    if mat and mat.material:
         # The curated keys a profile carries, then the plastic's limits from
         # the one helper every check reads.
+        plastic_limits = limits_for(mat.material.material_id)
         mat_limits = {
             **(getattr(mat.material, "design_limits", None) or {}),
-            **limits_for(mat.material.material_id).design_limits(),
+            **plastic_limits.design_limits(),
         }
     elif material:
-        from kiln.material_limits import limits_for
-
         # A name the catalogue cannot place: the plastic's own limits where
         # Kiln's design limits place it (the brief read them already).
-        named = limits_for(material)
-        if named.known:
-            mat_limits = named.design_limits()
+        plastic_limits = limits_for(material)
+        if plastic_limits.known:
+            mat_limits = plastic_limits.design_limits()
 
     # -----------------------------------------------------------------
     # Core constraints (always included regardless of budget)
     # -----------------------------------------------------------------
     core_constraints: list[str] = []
 
-    # Wall thickness — the material's recommended wall, or the brief's own
-    # minimum when that is stricter.
-    wall_candidates = [
-        float(v) for v in (mat_limits.get("recommended_wall_thickness_mm"), rules.get("min_wall_thickness_mm"))
-        if isinstance(v, (int, float))
-    ]
-    rec_wall = max(wall_candidates) if wall_candidates else None
-    if rec_wall:
-        core_constraints.append(f"minimum wall thickness {rec_wall}mm")
+    # Wall thickness: the wall the design check will hold the part to, and
+    # whose figure it is when it is not the brief's or the plastic's own.
+    from kiln.design_validator import wall_held_to
+
+    held_wall = wall_held_to(rules, plastic_limits)
+    if held_wall:
+        core_constraints.append(
+            f"minimum wall thickness {float(held_wall)}mm{_whose_wall(float(held_wall), rules, plastic_limits)}"
+        )
 
     if rules.get("infill_min_pct"):
         core_constraints.append(f"solid infill, minimum {rules['infill_min_pct']}% density")
@@ -1858,6 +1877,11 @@ def build_parametric_generation_prompt(
                 rec_wall = dl.get("recommended_wall_thickness_mm") or plastic_limits.value(WALL_RECOMMENDED)
                 if rec_wall:
                     lines.append(f"// - Recommended wall thickness: {rec_wall}mm")
+                # A static-safe grade's own minimum wall, where it is above
+                # the recommended one: the checks hold the part to it.
+                floor = plastic_limits.wall_floor_mm()
+                if plastic_limits.static_safe_floor() and floor > float(rec_wall or 0.0):
+                    lines.append(f"// - Minimum wall thickness: {floor}mm (this plastic's static-safe minimum)")
                 overhang = dl.get("max_unsupported_overhang_deg")
                 if overhang:
                     lines.append(f"// - Max unsupported overhang: {overhang}\u00b0")

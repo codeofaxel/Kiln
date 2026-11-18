@@ -433,14 +433,10 @@ def validate_design(
         plastic_limits = limits_for(material or None)
     # The wall check warns below the recommended wall: the plastic's own
     # where it was read, the general three-line wall otherwise.
-    wall_limits = dict(material_limits) or {
-        "min_wall_thickness_mm": plastic_limits.wall_floor_mm(),
-    }
+    wall_limits = _wall_limits(plastic_limits)
     recommended = plastic_limits.value(WALL_RECOMMENDED)
-    if recommended:
-        wall_limits.setdefault("recommended_wall_thickness_mm", float(recommended))
-        if material_limits:
-            material_limits.setdefault("recommended_wall_thickness_mm", float(recommended))
+    if recommended and material_limits:
+        material_limits.setdefault("recommended_wall_thickness_mm", float(recommended))
 
     # 4. Run checks.
     checks: list[DesignValidationCheck] = []
@@ -630,9 +626,37 @@ def validation_to_feedback(
     return feedback_items
 
 
+def wall_held_to(rules: dict[str, Any], plastic_limits: Any) -> float | None:
+    """The wall :func:`validate_design_for_requirements` holds a part to: it
+    warns below this, and is critical below the plastic's thinnest wall.
+
+    The stricter of the brief's own rule (*rules*, a brief's
+    ``combined_rules``), the plastic's recommended wall (its own where it was
+    read, the general one otherwise) and the thinnest wall it closes at all
+    (a static-safe grade's own minimum where it has one), from
+    *plastic_limits* (:func:`kiln.material_limits.limits_for`).  A reader
+    that tells a design what wall it needs reads it here, so it never states
+    a wall the check does not hold.
+    """
+    return _resolve_wall_thickness(rules, _wall_limits(plastic_limits))
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _wall_limits(plastic_limits: Any) -> dict[str, Any]:
+    """The wall figures the wall check reads from one plastic's limits: its
+    design limits, with the recommended wall (the general one where the
+    plastic has none of its own)."""
+    from kiln.material_limits import WALL_RECOMMENDED
+
+    limits = plastic_limits.design_limits()
+    recommended = plastic_limits.value(WALL_RECOMMENDED)
+    if recommended:
+        limits.setdefault("recommended_wall_thickness_mm", float(recommended))
+    return limits
 
 
 def _resolve_wall_thickness(
