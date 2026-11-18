@@ -886,9 +886,11 @@ def is_abrasive_filament(material: str) -> bool:
     Read from the fill wording in the name itself, with no table: the
     filled-filament market moves faster than any fixed list, and a lookup
     miss must not read as "not abrasive".  Errs toward warning: a needless
-    caution costs a moment, a missed one costs a nozzle.
+    caution costs a moment, a missed one costs a nozzle.  An underscore is
+    a word break, so a catalogue id (``wood_pla``) reads as the name it
+    stands for.
     """
-    name = _normalise(material)
+    name = _normalise(material).replace("_", " ")
     if not name:
         return False
     if any(re.search(p, name) for p in _ABRASIVE_FILL_PATTERNS):
