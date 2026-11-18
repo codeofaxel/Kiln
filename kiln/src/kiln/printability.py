@@ -8009,7 +8009,7 @@ def _material_wall_floor(
     against the same floor kiln-pro's material wall rule judges by
     (https://kiln3d.com) — one measurement that both read, never a
     second pass re-measured to agree.  Without kiln-pro's rule here, the
-    plastic's own recommended wall from the one helper every check reads
+    plastic's own wall floor from the one helper every check reads
     (:func:`_plastic_recommended_wall`).  ``None`` — no floor of the
     plastic's own for this caller — leaves the nozzle as the threshold,
     the safety floor every tier gets.
@@ -8040,14 +8040,17 @@ def _material_wall_floor(
 
 
 def _plastic_recommended_wall(material: str, nozzle_diameter: float) -> float | None:
-    """The plastic's own recommended wall at *nozzle_diameter*
-    (:func:`kiln.material_limits.limits_for`), or ``None`` when the plastic
-    has none of its own for this caller."""
-    from kiln.material_limits import WALL_RECOMMENDED, limits_for
+    """The plastic's own wall floor at *nozzle_diameter*
+    (:func:`kiln.material_limits.limits_for`): the larger of its own
+    recommended wall and a static-safe grade's own minimum wall, which is a
+    floor of its own and never lowered.  ``None`` when the plastic has
+    neither for this caller."""
+    from kiln.material_limits import ESD_WALL, WALL_RECOMMENDED, limits_for
 
     limits = limits_for(material, nozzle_mm=nozzle_diameter)
     own = limits.value(WALL_RECOMMENDED) if limits.is_own(WALL_RECOMMENDED) else None
-    return float(own) if own and own > 0 else None
+    floor = max(float(own or 0.0), float(limits.value(ESD_WALL) or 0.0))
+    return floor if floor > 0 else None
 
 
 def _tell_whoever_runs_this_machine(file_path: str, stopped: Exception) -> None:
