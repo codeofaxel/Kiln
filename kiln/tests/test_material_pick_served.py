@@ -297,7 +297,8 @@ class TestAMissPicksNothing:
             "Kiln is signed out, so it lists the plastics this printer can melt instead. Sign in "
             "and Kiln picks the plastic for this part (a free account is enough)."
         )
-        assert out["plastics"] == plastics_printer_can_melt(230)
+        # A toy for kids: the public rule for impact-resistant parts leaves out PLA.
+        assert out["plastics"] == [p for p in plastics_printer_can_melt(230) if p != "PLA"]
         for key in ("material", "score", "reasons", "alternatives", "recommended_brands"):
             assert key not in out
 
@@ -442,7 +443,9 @@ class TestAMissPicksNothing:
                      "shelf bracket that holds 10 lbs, food safe, worn on the wrist"):
             out = _door()(text, max_hotend_temp_c=240)
             assert out["basic"] is True and out["plastics"] == basic_plastics(text, 240)
-        assert _door()("shelf bracket", max_hotend_temp_c=240)["plastics"] == plastics_printer_can_melt(240)
+        # A bracket: the public rule for load-bearing parts leaves out PLA and TPU.
+        bracket = _door()("shelf bracket", max_hotend_temp_c=240)["plastics"]
+        assert bracket == [p for p in plastics_printer_can_melt(240) if p not in ("PLA", "TPU")]
 
 
 # ---------------------------------------------------------------------------

@@ -31,8 +31,8 @@ from typing import Any
 
 from kiln.served_answer import (
     Miss,
+    ask_briefly,
     classify_answer,
-    classify_transport_error,
     fields,
     free_account_note,
     local_fault,
@@ -128,13 +128,14 @@ def _served(material: str, reason: str | None, min_score: float, best: bool) -> 
         sent["best"] = True
     else:
         sent.update(reason=reason, min_score=min_score)
-    try:
+    answer, miss = ask_briefly(
         # The person asked for substitutes, and this is the answer they
         # asked for: a signed-out refusal is them meeting the sign-in wall.
-        answer = _srv._pro_api_call(WIRE_TOOL, _asked_by_user=True, _feature=SIGN_IN_NAME, **sent)
-    except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
-        logger.debug("%s request failed", WIRE_TOOL, exc_info=True)
-        return Asked(miss=classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None)))
+        lambda wait: _srv._pro_api_call(WIRE_TOOL, _timeout=wait, _asked_by_user=True, _feature=SIGN_IN_NAME, **sent),
+        host=getattr(_srv, "_HOSTED_KILN_API_URL", None),
+    )
+    if miss is not None:
+        return Asked(miss=miss)
     return _read(answer)
 
 

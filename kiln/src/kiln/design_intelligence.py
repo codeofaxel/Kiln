@@ -867,9 +867,10 @@ class MultiMaterialReport:
     pairing verdict did not come: ``compatible`` is then ``None`` (never a
     yes), ``notes`` says what the nozzle temperatures alone show, and
     ``caution`` says why the verdict is missing and how to get it, with
-    ``why`` / ``why_code`` / ``why_detail`` beside it
-    (:func:`kiln.served_answer.fields`).  Those four keys appear on a basic
-    answer only.
+    ``why`` / ``why_code`` / ``why_detail`` beside it, and ``retry_after_s``
+    when the miss is said again from an earlier ask
+    (:func:`kiln.served_answer.fields`).  Those keys appear on a basic answer
+    only.
 
     ``hardware_warnings`` names a filled filament's need for a hardened
     nozzle (:func:`kiln.material_safety.is_abrasive_filament`), on every
@@ -888,6 +889,7 @@ class MultiMaterialReport:
     why: str = ""
     why_code: str = ""
     why_detail: str = ""
+    retry_after_s: int = 0
     hardware_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -895,13 +897,15 @@ class MultiMaterialReport:
         if not self.basic:
             for key in _BASIC_ANSWER_KEYS:
                 out.pop(key, None)
+        if not out.get("retry_after_s"):
+            out.pop("retry_after_s", None)
         if not self.hardware_warnings:
             out.pop("hardware_warnings", None)
         return out
 
 
 #: The keys only a basic pairing answer carries.
-_BASIC_ANSWER_KEYS = ("basic", "why", "why_code", "why_detail")
+_BASIC_ANSWER_KEYS = ("basic", "why", "why_code", "why_detail", "retry_after_s")
 
 
 @dataclass
@@ -1724,12 +1728,14 @@ def material_basic_of(brief: Any) -> dict[str, Any] | None:
 def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: Any) -> dict[str, Any]:
     """The answer when no pick came (``basic: true``): the plastics this
     printer can melt, in no order and with nothing said about any one of
-    them; the cautions every answer to this request carries (a load-bearing
-    part, food contact, a part worn against skin); and one line saying that
-    Kiln did not pick a plastic for this part, why, and what fixes it.
+    them beyond what Kiln's public rules for this part leave out or allow
+    only with conditions; the cautions every answer to this request carries
+    (those rules, a load-bearing part, food contact, a part worn against
+    skin); and one line saying that Kiln did not pick a plastic for this
+    part, why, and what fixes it.
 
     Reads nothing about a material but the nozzle temperature table Kiln
-    ships with (:mod:`kiln.material_basics`).
+    ships with and the public requirement rules (:mod:`kiln.material_basics`).
 
     :param requirements_text: What the part is for, as asked.
     :param max_hotend_temp_c: The printer's hotend ceiling; a plastic whose
@@ -1739,11 +1745,12 @@ def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: 
     from kiln import served_answer
     from kiln._pro_material_pick_bridge import FEATURE
     from kiln.load_bearing_detector import detect_load_bearing
-    from kiln.material_basics import basic_pick_line, basic_plastics
+    from kiln.material_basics import basic_list, basic_pick_line
     from kiln.material_safety import food_contact_nozzle_advisory, use_case_implies_food_contact
 
     text = requirements_text if isinstance(requirements_text, str) else ""
-    warnings: list[str] = []
+    listed = basic_list(text, max_hotend_temp_c)
+    warnings: list[str] = [listed.rules_line] if listed.rules_line else []
     verdict = detect_load_bearing(text)
     if verdict.is_load_bearing:
         warnings.append(_format_upgrade_nudge(verdict, _BASIC_LOAD_CAUTION))
@@ -1755,7 +1762,7 @@ def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: 
         "success": True,
         "basic": True,
         "message": basic_pick_line(miss, feature=FEATURE, hotend_known=max_hotend_temp_c is not None),
-        "plastics": basic_plastics(text, max_hotend_temp_c),
+        "plastics": listed.plastics,
         "warnings": warnings,
     }
     if use_case_implies_food_contact(text):

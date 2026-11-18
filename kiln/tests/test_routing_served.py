@@ -287,8 +287,10 @@ class TestAMissIsBasic:
         with plain_install_served(SIGNED_OUT):
             reply = doors["recommend_material"](intent=CEREAL)
         kept = filter_food_safe_materials(plastics_printer_can_melt(None), require="yes_or_conditional")
+        # The public rules for a food or liquid part also leave out nylon.
+        kept = [p for p in kept if p != "Nylon"]
         assert reply["plastics"] == kept and kept
-        assert not {"ABS", "ASA", "TPU"} & set(reply["plastics"])
+        assert not {"ABS", "ASA", "TPU", "Nylon"} & set(reply["plastics"])
 
     def test_a_brief_with_no_food_lists_every_plastic(self, doors):
         with plain_install_served(SIGNED_OUT):

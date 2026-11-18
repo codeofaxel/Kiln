@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error, local_fault
+from kiln.served_answer import Miss, ask_briefly, classify_answer, local_fault
 
 logger = logging.getLogger(__name__)
 
@@ -107,19 +107,21 @@ def _served_co_print(material_a: str, material_b: str) -> tuple[dict[str, Any] |
         import kiln.server as _srv
     except Exception as exc:  # noqa: BLE001 -- no served door here is a miss, never a traceback
         return None, local_fault(exc, where="the served door on this computer")
-    try:
-        answer = _srv._pro_api_call(
+    answer, miss = ask_briefly(
+        lambda wait: _srv._pro_api_call(
             WIRE_TOOL,
+            _timeout=wait,
             # The person asked whether these two materials print together;
             # the verdict is the feature they reached for.
             _asked_by_user=True,
             _feature=SIGN_IN_NAME,
             material_a=material_a,
             material_b=material_b,
-        )
-    except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
-        logger.debug("%s request failed", WIRE_TOOL, exc_info=True)
-        return None, classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None))
+        ),
+        host=getattr(_srv, "_HOSTED_KILN_API_URL", None),
+    )
+    if miss is not None:
+        return None, miss
     if _is_answer(answer):
         return answer, None
     miss = classify_answer(answer) if isinstance(answer, dict) else None
@@ -157,18 +159,20 @@ def _served_mix_check(names: list[str]) -> tuple[dict[str, Any] | None, Miss | N
         import kiln.server as _srv
     except Exception as exc:  # noqa: BLE001 -- no served door here is a miss, never a traceback
         return None, local_fault(exc, where="the served door on this computer")
-    try:
-        answer = _srv._pro_api_call(
+    answer, miss = ask_briefly(
+        lambda wait: _srv._pro_api_call(
             MIX_TOOL,
+            _timeout=wait,
             # Asked on the way to a compose or a print; the person asked for
             # the plate, not for this check.
             _asked_by_user=False,
             _feature=MIX_SIGN_IN_NAME,
             materials=list(names),
-        )
-    except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
-        logger.debug("%s request failed", MIX_TOOL, exc_info=True)
-        return None, classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None))
+        ),
+        host=getattr(_srv, "_HOSTED_KILN_API_URL", None),
+    )
+    if miss is not None:
+        return None, miss
     if isinstance(answer, dict) and answer.get("success") is True and _is_entries(answer):
         return {key: answer[key] for key in _ENTRY_KEYS}, None
     miss = classify_answer(answer) if isinstance(answer, dict) else None

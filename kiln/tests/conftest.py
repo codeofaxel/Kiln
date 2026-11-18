@@ -1572,6 +1572,8 @@ def _forget_served_misses() -> None:
     for name in (
         "kiln._pro_melt_bridge", "kiln._pro_catalogue_bridge", "kiln._pro_material_bridge",
         "kiln._pro_nozzle_bridge", "kiln.start_narrative", "kiln._pro_material_limits_bridge",
+        # The servers' silence every brief ask shares (served_answer.ask_briefly).
+        "kiln.served_answer",
     ):
         bridge = sys.modules.get(name)
         if bridge is not None:

@@ -172,19 +172,19 @@ class TestABasicCheck:
 
     def test_one_material_in_every_slot_is_not_a_precaution(self, monkeypatch):
         """Four slots of PLA: one material shares its own temperature and
-        bonds to itself, so the check is ok; the purge between colours stays
-        the conservative one."""
+        bonds to itself, so the check is ok; the purge between colours is a
+        slicer's default for a change of filament."""
         _served(monkeypatch, _SIGNED_OUT)
         result = check_material_compatibility(["PLA", "PLA", "PLA", "PLA"])
         assert result["safe"] is True and result["level"] == "ok" and result["basic"] is True
         assert "precaution" not in result["message"].lower() and "⚠" not in result["message"]
         (pair,) = result["pairs"]
-        assert pair["level"] == "ok" and pair["purge_volume_mm3"] == 800
+        assert pair["level"] == "ok" and pair["purge_volume_mm3"] == 280
         assert pair["warning"] == (
             "Both are PLA: one material shares its own nozzle temperature and bonds to itself. "
             "The purge between its colours was not judged."
         )
-        assert {v for row in result["purge_matrix"] for v in row} == {0.0, 800.0}
+        assert {v for row in result["purge_matrix"] for v in row} == {0.0, 280.0}
 
     def test_a_same_material_pair_beside_a_different_one_keeps_the_caution(self, monkeypatch):
         _served(monkeypatch, _SIGNED_OUT)
@@ -258,7 +258,7 @@ class TestABasicCheck:
         assert result["basic"] is True and result["why"] == "signed_out"
         assert "Kiln can't check what hardware this material needs right now because" in result["caution"]
         assert "pair" not in result["caution"]
-        assert ("conservative purge between its colours" in result["caution"]) is (len(materials) > 1)
+        assert ("a slicer's default purge between its colours" in result["caution"]) is (len(materials) > 1)
         assert result["caution"].endswith("Sign in and compose again (a free account is enough).")
 
 
@@ -271,9 +271,11 @@ class TestTheFlushMatrix:
             "0", "70", "800", "800", "70", "0", "800", "800", "800", "800", "0", "800", "800", "800", "800", "0",
         ]
 
-    def test_without_an_answer_every_pair_gets_the_conservative_purge(self, monkeypatch):
+    def test_without_an_answer_different_materials_get_the_conservative_purge(self, monkeypatch):
+        """Two materials get the conservative purge; two colours of one
+        material get a slicer's default for a change of filament."""
         _served(monkeypatch, _SIGNED_OUT)
-        assert build_bambu_flush_matrix(["PLA", "PETG", "PLA"], n_slots=3) == "0 800 800 800 0 800 800 800 0"
+        assert build_bambu_flush_matrix(["PLA", "PETG", "PLA"], n_slots=3) == "0 800 280 800 0 800 280 800 0"
 
 
 #: The pair and process tables' names, by digest (tests/_moved_away.py).

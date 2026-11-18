@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import os
 import struct
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -474,11 +473,13 @@ class TestEnhancedPromptEnrichment:
         mock_material = MagicMock()
         mock_material.material.display_name = "PETG"
         mock_material.material.design_limits = {"max_cantilever_length_mm": 40}
-        served = SimpleNamespace(design_limits=lambda: {
-            "max_unsupported_overhang_deg": 55,
-            "recommended_wall_thickness_mm": 1.5,
-            "max_bridge_length_mm": 12,
-        })
+        from kiln.material_limits import BRIDGE, OVERHANG, WALL_RECOMMENDED, MaterialLimits
+
+        served = MaterialLimits(
+            "petg", "petg", True, 0.4, None,
+            figures={OVERHANG: 55, WALL_RECOMMENDED: 1.5, BRIDGE: 12},
+            basis={OVERHANG: "plastic", WALL_RECOMMENDED: "plastic", BRIDGE: "plastic"},
+        )
 
         mock_brief = MagicMock()
         mock_brief.combined_rules = {"min_wall_thickness_mm": 1.2}
@@ -491,9 +492,9 @@ class TestEnhancedPromptEnrichment:
              patch("kiln.material_limits.limits_for", return_value=served):
             result = enhance_prompt_with_design_intelligence("test prompt", max_length=2000)
 
-        assert "55 degrees" in result.improved_prompt
+        assert "no overhangs greater than 55.0 degrees" in result.improved_prompt
         assert "50 degrees" not in result.improved_prompt
-        assert "1.5mm" in result.improved_prompt
+        assert "minimum wall thickness 1.5mm" in result.improved_prompt
 
     def test_large_budget_includes_guidance(self):
         """With a large prompt budget, combined_guidance should be included."""

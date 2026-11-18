@@ -44,6 +44,10 @@ generator resolves every served tool to a kind at ship time and refuses
 to generate one it cannot place; the bundled manifest carries the kind,
 and this side derives it the same way when a bundle predates the block.
 
+**A door with a basic answer of its own** asks through :func:`ask_briefly`:
+a short wait, and after Kiln's servers leave an ask unanswered, every such
+door answers basic at once for a while instead of waiting again.
+
 **Every door to Kiln's servers** in this package is on :data:`HOSTED_DOORS`
 with how it words a miss; a test pins the roster against the source, so a
 new door cannot ship without deciding what an offline person is told.
@@ -59,6 +63,8 @@ import math
 import re
 import socket
 import ssl
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -557,6 +563,62 @@ def fields(miss: Miss | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# asking briefly, for a door with a basic answer of its own
+# ---------------------------------------------------------------------------
+
+#: How long an ask waits, at most, when the door asking has a basic answer of
+#: its own to give instead.
+CONSULT_TIMEOUT_S: float = 4.0
+#: After Kiln's servers leave such an ask unanswered, how long every such ask
+#: leaves them alone and gives its basic answer at once.
+SERVICE_BACKOFF_S: float = 300.0
+
+_service_down_until: float = 0.0
+_service_down_miss: Miss | None = None
+
+
+def ask_briefly(ask: Callable[[float], Any], *, host: str | None = None) -> tuple[Any, Miss | None]:
+    """Ask Kiln's servers once, for a door that has a basic answer of its own.
+
+    *ask* makes the request, waiting at most the seconds it is handed
+    (:data:`CONSULT_TIMEOUT_S`), and returns what came back.  The result is
+    ``(what came back, None)`` when the servers gave any answer at all (an
+    answer, a refusal, a sign-in wall: the door reads it), or ``(None,
+    miss)`` when none came: this computer offline, or the servers silent.
+
+    Once the servers leave an ask unanswered, every ask made through here
+    gets that miss at once for :data:`SERVICE_BACKOFF_S`, said with the time
+    left before Kiln asks again (:attr:`Miss.retry_after_s`): a hung server
+    costs one short wait, not one per door.  An offline computer, a sign-in
+    and a refusal are asked again at once, since each answers at once and
+    the change that fixes it is the person's.  *host* is where the request
+    went, to tell offline from silent.  Never raises.
+    """
+    wait = _service_down_until - time.monotonic()
+    if wait > 0:
+        last = _service_down_miss or Miss("unanswered", code="SERVER_UNREACHABLE")
+        return None, Miss(last.cause, last.code, last.detail, retry_after_s=wait)
+    try:
+        answer = ask(CONSULT_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
+        logger.debug("served ask failed", exc_info=True)
+        return None, _no_answer(classify_transport_error(exc, host=host))
+    if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
+        return None, _no_answer(classify_answer(answer) or Miss("unanswered", code="SERVER_UNREACHABLE"))
+    return answer, None
+
+
+def _no_answer(miss: Miss) -> Miss:
+    """*miss*, after leaving Kiln's servers alone for a while when it is
+    their silence (:func:`ask_briefly`)."""
+    global _service_down_until, _service_down_miss
+    if miss.cause == "unanswered":
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = miss
+    return miss
+
+
+# ---------------------------------------------------------------------------
 # the served door's own envelopes
 # ---------------------------------------------------------------------------
 
@@ -734,6 +796,7 @@ def _sentence_of(text: str) -> str:
 
 __all__ = [
     "CAUSES",
+    "CONSULT_TIMEOUT_S",
     "FREE_ACCOUNT_NOTE",
     "HOSTED_DOORS",
     "KINDS",
@@ -741,7 +804,9 @@ __all__ = [
     "Miss",
     "SESSION_EXPIRED_CODE",
     "SIGNED_OUT_CODES",
+    "SERVICE_BACKOFF_S",
     "UNANSWERED_CODES",
+    "ask_briefly",
     "classify_answer",
     "classify_transport_error",
     "clause",
