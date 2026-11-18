@@ -834,8 +834,8 @@ _START_MODULES = [
 ]
 
 #: A start is cleared by the gate every MCP door calls, by the CLI's own
-#: verdict, or by an explicit grant (a standing opt-in, a queued job, a
-#: prior approval).  Anything else is a door that forgot.
+#: verdict, or by an explicit grant (a standing opt-in, a queued job).
+#: Anything else is a door that forgot.
 _CLEARING_CALLS = {
     "_preview_gate_error", "token_verdict", "grant", "grant_from_record", "cli_gate",
 }

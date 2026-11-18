@@ -52,6 +52,142 @@ def test_the_walker_and_the_validator_agree_on_the_words():
 
 
 # ---------------------------------------------------------------------------
+# A file run by its path is a start too, unless it is the printer's own macro
+# ---------------------------------------------------------------------------
+
+#: A print file run as a macro, in the spellings RepRapFirmware reads, and
+#: the ways a print file could be made into a macro first.
+RUNS_A_PRINT_FILE = [
+    'M98 P"0:/gcodes/part.gcode"',
+    'M98 P"/gcodes/part.gcode"',
+    "M98 P/gcodes/part.gcode",
+    'M98 P"../gcodes/part.gcode"',
+    'M98 P"/macros/../gcodes/part.gcode"',
+    'm98 p"0:/GCODES/part.gcode"',
+    'N10 M98 P"0:/gcodes/part.gcode"*12',
+    'M98 P"1:/macros/part.g"',
+    'M98 P"0:gcodes/part.gcode"',
+    'M98 P{"0:/gcodes/" ^ "part.gcode"}',
+    'M98 P"/macros/purge.g" P"/gcodes/part.gcode"',
+    'M98 P"0:/gcodes/part.gcode',
+    'M471 S"0:/gcodes/part.gcode" T"0:/macros/part.g"',
+    'M471 S"/gcodes/part.gcode" T"/sys/part.g" D1',
+    'M471 S"/gcodes" T"/sys" D1',
+    'M471 S"/gcodes/part.gcode" T"part.g"',
+    'M505 P"0:/gcodes"',
+    # Read the way the firmware reads parameters: a letter starts one with no
+    # space before it, in either case, and a line it cannot read one way only
+    # is refused.
+    'M98P"/gcodes/part.gcode"',
+    'M98 R1P"/gcodes/part.gcode"',
+    'M98 P"/macros/purge.g"P"/gcodes/part.gcode"',
+    'M98 P"/macros/purge.g" p"/gcodes/part.gcode"',
+    'M98 P"/macros/purge.g" S{1}',
+    "M98 Pconfig.g",
+    'M98 P""',
+    "M98",
+    "M98 R1",
+    'M471 S"/gcodes/part.gcode"',
+    "M471 S\"/gcodes/part.gcode\" T/gcodes/b.gcode",
+    'M471 S"/gcodes/part.gcode"T"/macros/part.g"',
+    # A word with a subcode is the word.
+    'M98.1 P"/gcodes/part.gcode"',
+    "M24.1",
+    'M32.5 "part.gcode"',
+]
+
+#: The files the firmware keeps to start an interrupted print again, and the
+#: words that run them.
+RESTARTS_AN_INTERRUPTED_PRINT = [
+    'M98 P"resurrect.g"',
+    'M98 P"0:/sys/resurrect.g"',
+    'M98 P"/SYS/Resurrect.g"',
+    'M98 P"/macros/../sys/./resurrect.g"',
+    'M98 P"resurrect-prologue.g"',
+    "M916",
+    "M1000",
+    "M1000 S",
+]
+
+#: The printer's own macros, which a person wrote and keeps, still run, and
+#: a print file renamed among the print files is not a macro.
+THE_PRINTERS_OWN_MACROS = [
+    'M98 P"homeall.g"',
+    'M98 P"0:/sys/homeall.g"',
+    'M98 P"/macros/Load Filament (PLA).g"',
+    'M98 P"0:/macros/purge.g"',
+    'M98 P"/MACROS/Purge.g"',
+    'M98P"/macros/purge.g"',
+    'M98 R1 P"/macros/purge.g"',
+    'M98 P"/macros/purge.g" R1',
+    'm98 p"0:/macros/purge.g"',
+    'M98 P"/macros/say ""hi"".g"',
+    'M471 S"0:/gcodes/a.gcode" T"0:/gcodes/b.gcode"',
+    'M471 S"/gcodes/a.gcode"T"/gcodes/b.gcode"',
+]
+
+
+@pytest.mark.parametrize("dialect", list(gcode.GCodeDialect))
+@pytest.mark.parametrize("line", RESTARTS_AN_INTERRUPTED_PRINT)
+def test_an_interrupted_print_is_not_restarted_by_a_raw_command(dialect, line):
+    result = gcode.validate_gcode([line], dialect=dialect)
+    assert result.valid is False and result.commands == [], (line, result.errors)
+    assert "resume_print" in result.errors[0], result.errors
+
+
+@pytest.mark.parametrize(
+    "lines, dialect",
+    [
+        (["G28", "SDCARD_PRINT_FILE FILENAME=other.gcode"], gcode.GCodeDialect.KLIPPER),
+        (["G28", 'M98 P"0:/gcodes/other.gcode"'], gcode.GCodeDialect.GENERIC),
+        (["G28", "M23 other.gcode", "M24"], gcode.GCodeDialect.MARLIN),
+    ],
+    ids=["klipper", "reprapfirmware", "marlin"],
+)
+def test_a_print_file_that_starts_another_file_is_refused(tmp_path, lines, dialect):
+    path = tmp_path / "part.gcode"
+    path.write_text("\n".join(lines) + "\n")
+    assert gcode.scan_gcode_file(str(path), dialect=dialect, macros=True).valid is False
+
+
+def test_a_print_file_calling_its_own_macros_still_passes(tmp_path):
+    path = tmp_path / "part.gcode"
+    path.write_text('PRINT_START EXTRUDER=200 BED=60\nM98 P"/macros/purge.g"\nG1 X10 Y10 F3000\n')
+    result = gcode.scan_gcode_file(str(path), dialect=gcode.GCodeDialect.KLIPPER, macros=True)
+    assert result.valid is True, result.errors
+
+
+@pytest.mark.parametrize("dialect", list(gcode.GCodeDialect))
+@pytest.mark.parametrize("line", RUNS_A_PRINT_FILE)
+def test_a_print_file_run_by_its_path_is_refused_in_every_dialect(dialect, line):
+    result = gcode.validate_gcode([line], dialect=dialect)
+    assert result.valid is False, (line, result.errors)
+    assert result.commands == [] and len(result.blocked_commands) == 1
+
+
+@pytest.mark.parametrize("line", RUNS_A_PRINT_FILE)
+def test_a_print_file_run_by_its_path_is_refused_against_a_printers_own_limits(line):
+    assert gcode.validate_commands([line], "ender3").valid is False, line
+
+
+def test_a_print_file_run_as_a_second_command_on_the_line_is_refused():
+    result = gcode.validate_gcode(['G4 P1 M98 P"0:/gcodes/part.gcode"'])
+    assert result.valid is False
+    assert "M98" in result.errors[0]
+
+
+@pytest.mark.parametrize("line", THE_PRINTERS_OWN_MACROS)
+def test_the_printers_own_macros_still_run(line):
+    for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
+        assert result.valid is True and result.commands == [line], (line, result.errors)
+
+
+def test_the_refusal_names_the_folders_that_still_run():
+    result = gcode.validate_gcode(['M98 P"0:/gcodes/part.gcode"'])
+    assert "/sys" in result.errors[0] and "/macros" in result.errors[0] and "start_print" in result.errors[0]
+
+
+# ---------------------------------------------------------------------------
 # The two raw doors a user can reach
 # ---------------------------------------------------------------------------
 
@@ -84,6 +220,23 @@ def test_the_send_gcode_tool_never_hands_a_start_to_the_printer(monkeypatch):
     result = _tool()("M23 part.gcode\nM24")
     assert result["success"] is False
     adapter.send_gcode.assert_not_called()
+
+
+def test_the_send_gcode_tool_never_runs_a_print_file_as_a_macro(monkeypatch):
+    adapter = _adapter()
+    monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
+    result = _tool()('M98 P"0:/gcodes/part.gcode"')
+    assert result["success"] is False
+    adapter.send_gcode.assert_not_called()
+
+
+def test_the_send_gcode_tool_still_runs_the_printers_own_macro(monkeypatch):
+    adapter = _adapter()
+    monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
+    monkeypatch.setattr(server, "_check_confirmation", lambda *_a, **_k: None)
+    result = _tool()('M98 P"/macros/purge.g"')
+    assert result["success"] is True, result
+    adapter.send_gcode.assert_called_once_with(['M98 P"/macros/purge.g"'])
 
 
 def test_the_cli_gcode_command_never_hands_a_start_to_the_printer(monkeypatch):
@@ -121,3 +274,6 @@ def test_a_fixed_send_is_vouched_for_only_when_its_words_are_visibly_not_a_start
     assert ok(_call("adapter.send_gcode(cmds)")) is False
     assert ok(_call('adapter.send_gcode([f"{word} S0"])')) is False
     assert ok(_call("adapter.send_gcode([])")) is False
+    assert ok(_call("""adapter.send_gcode(['M98 P"0:/gcodes/part.gcode"'])""")) is False
+    assert ok(_call("""adapter.send_gcode([f'M98 P"{path}"'])""")) is False
+    assert ok(_call("""adapter.send_gcode(['M98 P"homeall.g"'])""")) is True
