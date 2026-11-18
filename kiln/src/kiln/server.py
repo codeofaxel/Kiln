@@ -22900,6 +22900,7 @@ def get_best_material_substitute(material: str) -> dict:
                 "material": material,
                 "basic": True,
                 "substitutes": basic,
+                "count": len(basic),
                 "note": substitution.basic_line(asked.miss, material, found=bool(basic)),
                 **substitution.miss_fields(asked.miss),
             }

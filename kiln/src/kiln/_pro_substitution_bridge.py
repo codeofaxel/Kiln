@@ -30,11 +30,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from kiln.served_answer import (
-    SESSION_EXPIRED_CODE,
     Miss,
     classify_answer,
     classify_transport_error,
     fields,
+    free_account_note,
     local_fault,
     sentence,
 )
@@ -114,7 +114,7 @@ def _local(material: str, reason: str | None, min_score: float, best: bool) -> A
     try:
         answer = substitutes_for_the_wire(material, reason=reason, min_score=min_score, best=best)
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
-        return Asked(miss=local_fault(exc, where="the substitution ranking on this computer"))
+        return Asked(miss=local_fault(exc, where="Kiln's substitution ranking"))
     return _read(answer)
 
 
@@ -186,7 +186,8 @@ def basic_substitutes(material: str) -> list[dict[str, str]]:
     whose catalogue ids are named after the same base polymer (``silk_pla``
     and ``pla_plus`` after ``pla``; a blend such as ``pc_abs`` is named after
     two and belongs to neither).  Another spelling of the same material is
-    not a substitute for it and is left out.  Alphabetical by id, each with
+    not a substitute for it and is left out, and a member the catalogue
+    spells two ways is listed once.  Alphabetical by id, each with
     its catalogue name and category, and a filled filament also with the
     nozzle-wear caution every filled filament carries (``abrasive_caution``).
     Empty when the catalogue does not know the material or names no other
@@ -209,6 +210,8 @@ def basic_substitutes(material: str) -> list[dict[str, str]]:
             continue
         if profiles[other].category != category or _base_polymer(other, profiles) != base:
             continue
+        if any(same_material_spelling(other, kept["substitute_material"]) for kept in family):
+            continue  # one material under a second spelling is listed once
         name = profiles[other].display_name
         member = {"substitute_material": other, "display_name": name, "category": category}
         caution = abrasive_nozzle_floor(name) or abrasive_nozzle_floor(other)
@@ -236,12 +239,7 @@ def basic_line(miss: Miss | None, material: str, *, found: bool, reason: str | N
     if miss is None:
         miss = Miss("unanswered", detail="no substitutes")
     label = catalogue_name(material) or "this material"
-    # Someone who never signed in is told the fix is free.  An owner whose
-    # session ran out is told to sign back in (served_answer words that).
-    stranger = miss.cause == "signed_out" and miss.code != SESSION_EXPIRED_CODE
-    then = "ask again for Kiln's ranked substitutes and their trade-offs" + (
-        " (a free account is enough)" if stranger else ""
-    )
+    then = "ask again for Kiln's ranked substitutes and their trade-offs" + free_account_note(miss)
     if not found:
         return sentence(
             miss,
@@ -265,9 +263,12 @@ def basic_line(miss: Miss | None, material: str, *, found: bool, reason: str | N
     )
 
 
-def miss_fields(miss: Miss | None) -> dict[str, str]:
-    """The machine-readable twin of :func:`basic_line`."""
-    return fields(miss)
+def miss_fields(miss: Miss | None) -> dict[str, Any]:
+    """The machine-readable twin of :func:`basic_line`, with ``retryable``:
+    whether asking again later may get Kiln's ranking."""
+    if miss is None:
+        return {}
+    return {**fields(miss), "retryable": miss.no_answer}
 
 
 __all__ = [

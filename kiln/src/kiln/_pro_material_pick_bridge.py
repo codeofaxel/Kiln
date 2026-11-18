@@ -132,12 +132,12 @@ def _local(requirements_text: str, printer: dict[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         from kiln.served_answer import local_fault
 
-        return None, local_fault(exc, where="the material pick on this computer")
+        return None, local_fault(exc, where="Kiln's material pick")
     from kiln.design_intelligence import MaterialRecommendation
 
     if isinstance(rec, MaterialRecommendation):
         return rec, None
-    return None, Miss("unanswered", detail="the material pick on this computer gave no pick")
+    return None, Miss("unanswered", detail="Kiln's material pick gave no pick")
 
 
 def _plan_includes_the_pick() -> bool:

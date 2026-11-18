@@ -41,7 +41,7 @@ def _served(monkeypatch, reply: Any) -> list[dict[str, Any]]:
 
     asks: list[dict[str, Any]] = []
 
-    def call(tool_name, _timeout=None, _asked_by_user=None, **kwargs):
+    def call(tool_name, _timeout=None, _asked_by_user=None, _feature=None, **kwargs):
         asks.append({"tool": tool_name, "asked_by_user": _asked_by_user, **kwargs})
         if isinstance(reply, BaseException):
             raise reply
@@ -241,7 +241,7 @@ class TestABasicCheck:
         assert "Kiln can't check what hardware this material needs right now because" in result["caution"]
         assert "pair" not in result["caution"]
         assert ("conservative purge between its colours" in result["caution"]) is (len(materials) > 1)
-        assert result["caution"].endswith("Sign in and compose again.")
+        assert result["caution"].endswith("Sign in and compose again (a free account is enough).")
 
 
 class TestTheFlushMatrix:

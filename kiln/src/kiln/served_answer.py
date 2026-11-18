@@ -428,6 +428,22 @@ def _minutes(seconds: float) -> str:
     return f"{whole} minute" if whole == 1 else f"{whole} minutes"
 
 
+#: Said after the fix to someone this install has never signed in for.
+FREE_ACCOUNT_NOTE = " (a free account is enough)"
+#: Signed-out codes from someone who already has an account: a session that
+#: ran out, and a sign-in Kiln's servers would not take.
+_HAS_AN_ACCOUNT = frozenset({SESSION_EXPIRED_CODE, "KILN_AUTH_REJECTED"})
+
+
+def free_account_note(miss: Miss | None) -> str:
+    """:data:`FREE_ACCOUNT_NOTE` when *miss* is someone who never signed in,
+    to end a free answer's *then* with; ``""`` for every other miss,
+    including an account whose session ran out or was not taken."""
+    if isinstance(miss, Miss) and miss.cause == "signed_out" and miss.code not in _HAS_AN_ACCOUNT:
+        return FREE_ACCOUNT_NOTE
+    return ""
+
+
 def clause(miss: Miss, *, feature: str, cannot: str, then: str = "try again") -> str:
     """The same content as a clause that follows "because": no capital, no
     full stop, the cause in brackets and the fix after a semicolon.  For a
@@ -631,6 +647,7 @@ def _sentence_of(text: str) -> str:
 
 __all__ = [
     "CAUSES",
+    "FREE_ACCOUNT_NOTE",
     "HOSTED_DOORS",
     "KINDS",
     "LOCAL_FAULT_CODE",
@@ -644,6 +661,7 @@ __all__ = [
     "envelope_for_http",
     "envelope_for_transport",
     "fields",
+    "free_account_note",
     "kind_of_tool",
     "local_fault",
     "sentence",

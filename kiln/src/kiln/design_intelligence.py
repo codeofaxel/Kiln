@@ -3602,7 +3602,7 @@ def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiM
     """
     from kiln.catalog_keys import same_material_spelling
     from kiln.material_safety import basic_pair_finding
-    from kiln.served_answer import Miss, fields, sentence
+    from kiln.served_answer import Miss, fields, free_account_note, sentence
 
     if not isinstance(miss, Miss):
         miss = Miss("unanswered", detail="no pairing verdict")
@@ -3626,7 +3626,7 @@ def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiM
         cannot=f"give its pairing verdict for {label_a} and {label_b}",
         wont=wont,
         safe_remedy="" if same else "run a small test piece before a long print",
-        then="ask again",
+        then="ask again" + free_account_note(miss),
     )
     return MultiMaterialReport(
         material_a=a,

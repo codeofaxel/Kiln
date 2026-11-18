@@ -241,7 +241,7 @@ class TestAMissPicksNothing:
         assert out["message"] == (
             "Kiln did not pick a plastic for this part. Kiln can't pick one right now because "
             "Kiln is signed out, so it lists the plastics this printer can melt instead. Sign in "
-            "and Kiln picks the plastic for this part."
+            "and Kiln picks the plastic for this part (a free account is enough)."
         )
         assert out["plastics"] == plastics_printer_can_melt(230)
         for key in ("material", "score", "reasons", "alternatives", "recommended_brands"):
@@ -506,7 +506,7 @@ def _says_basic(block: Any) -> None:
     """A reply's basic material block: Kiln did not pick, why, and the fix."""
     assert isinstance(block, dict) and block["basic"] is True and block["why"] == "signed_out"
     assert block["message"].startswith("Kiln did not pick a plastic for this part.")
-    assert "Sign in and Kiln picks the plastic for this part." in block["message"]
+    assert "Sign in and Kiln picks the plastic for this part (a free account is enough)." in block["message"]
     assert block["plastics"]
 
 

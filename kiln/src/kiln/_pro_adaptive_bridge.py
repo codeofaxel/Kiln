@@ -89,7 +89,8 @@ def basic(miss: Miss, material: Any = "", door: str = "plan") -> dict[str, Any]:
     name = str(material or "").strip().upper() or "this material"
     on_the_line, cannot, wont, then = (part.format(m=name) for part in _WORDS[door])
     text = served_answer.sentence(
-        miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont, then=then,
+        miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont,
+        then=then + served_answer.free_account_note(miss),
     )
     out: dict[str, Any] = {"basic": True, NOTE_KEY: text, "retryable": miss.no_answer}
     out.update(served_answer.fields(miss))
@@ -106,7 +107,7 @@ def _local(question: str, fields: dict[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         from kiln.served_answer import local_fault
 
-        return local_fault(exc, where="the adaptive slicing settings on this computer")
+        return local_fault(exc, where="Kiln's adaptive slicing settings")
     if _is_answer(out, question):
         return out
     return Miss("unanswered", detail="no adaptive slicing answer")

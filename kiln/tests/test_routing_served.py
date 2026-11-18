@@ -265,7 +265,7 @@ class TestAMissIsBasic:
     def test_signed_out_says_signing_in_gets_the_pick(self, doors):
         with plain_install_served(SIGNED_OUT):
             reply = doors["recommend_material"](intent="strong")
-        assert reply["message"].endswith("Sign in and Kiln picks the plastic for this part.")
+        assert reply["message"].endswith("Sign in and Kiln picks the plastic for this part (a free account is enough).")
 
     def test_both_material_picks_say_a_miss_the_same_way(self, doors):
         """The recommender and the design pick share one signed-out sentence

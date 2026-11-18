@@ -202,7 +202,8 @@ class TestAMissAnswersWithGenericSettings:
         assert "generic settings worked out from the nozzle size, not settings tuned to PLA" in line
         assert "Kiln can't" in line and "right now because" in line and ", so it" in line
         if CAUSE[miss] in FIX_WORDS:
-            assert line.endswith(f"{FIX_WORDS[CAUSE[miss]]} and ask again.")
+            free = " (a free account is enough)" if CAUSE[miss] == "signed_out" else ""
+            assert line.endswith(f"{FIX_WORDS[CAUSE[miss]]} and ask again{free}.")
         if door == "profile":
             assert out["profile"]["top_surface_layers"] is None
             assert out["profile"]["overhang_max_angle"] == _floor_angle()
@@ -228,7 +229,7 @@ class TestAMissAnswersWithGenericSettings:
         _, answers = served
         answers.append(MISSES["signed_out"])
         out = doors.quick_adaptive_plan(material, 10.0, nozzle_diameter_mm=0.4)
-        assert out["message"].endswith("Sign in and ask again.")
+        assert out["message"].endswith("Sign in and ask again (a free account is enough).")
         assert "ask again for settings" not in out["message"]
         assert f"check whether it has settings tuned to {material.upper()}" in out["message"]
 

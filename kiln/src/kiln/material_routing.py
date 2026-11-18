@@ -653,6 +653,7 @@ def _shelf_line(miss: Miss) -> str:
     the person's own, as recorded, and nothing judged them against the part."""
     from kiln import served_answer
     from kiln._pro_routing_bridge import FEATURE
+    from kiln.material_basics import pick_then
 
     return served_answer.sentence(
         miss,
@@ -661,11 +662,7 @@ def _shelf_line(miss: Miss) -> str:
         cannot="pick one for this part",
         wont="lists them as recorded",
         safe_remedy="check each one against what the part has to do",
-        then=(
-            "Kiln picks the plastic for this part"
-            if miss.cause == "signed_out"
-            else "ask again for Kiln's pick for this part"
-        ),
+        then=pick_then(miss),
     )
 
 
@@ -712,7 +709,7 @@ def basic_material_list(miss: Miss) -> dict[str, Any]:
         on_the_line="Kiln did not list each material's properties",
         cannot="list them",
         wont="lists common plastics by name and category only",
-        then="ask again for the full list",
+        then="ask again for the full list" + served_answer.free_account_note(miss),
     )
     out: dict[str, Any] = {
         "success": True,
