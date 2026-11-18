@@ -239,9 +239,40 @@ WRITES_INTO_A_MACRO_FOLDER = [
     'M560 P"0:/macros/job.g"',
     'M560 P"/sys/config.g"',
     'G4 S0 M28 "0:/macros/job.g"',
+    # The card reads a name with a trailing dot or space, or a short alias,
+    # as the folder it stands for.
+    'M28 "0:/macros./job.g"',
+    'M28 "0:/sys /daemon.g"',
+    'M28 "0:/macros. ./job.g"',
+    'M28 "0:/gcodes/.. /macros/job.g"',
+    'M28 "0:/FILAME~1/PLA/load.g"',
+    # The filament words run the files in the filaments folder.
+    'M28 "0:/filaments/PLA/load.g"',
+    'M559 P"/filaments/PLA/unload.g"',
+    'M560 P"/Filaments/PLA/config.g"',
 ]
 #: Writing a print file among the print files, or a page among the pages.
-WRITES_ELSEWHERE = ['M28 "0:/gcodes/part.gcode"', "M28 part.gcode", 'M560 P"0:/www/index.html"', 'M560 P"reprap.htm"']
+WRITES_ELSEWHERE = [
+    'M28 "0:/gcodes/part.gcode"', "M28 part.gcode", 'M28 "0:/gcodes/part.v2.gcode"',
+    'M560 P"0:/www/index.html"', 'M560 P"reprap.htm"',
+]
+#: Moving a file into a folder whose files run as macros, however spelled.
+MOVES_INTO_A_MACRO_FOLDER = [
+    'M471 S"/gcodes/part.gcode" T"/filaments/PLA/load.g"',
+    'M471 S"/gcodes/part.gcode" T"/macros./part.g"',
+    'M471 S"/gcodes/part.gcode" T"/sys /part.g"',
+]
+
+
+@pytest.mark.parametrize("line", MOVES_INTO_A_MACRO_FOLDER)
+def test_moving_a_file_into_a_macro_folder_is_refused(line):
+    for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
+        assert result.valid is False and result.commands == [], (line, result.errors)
+
+
+def test_the_filament_folders_own_files_still_run():
+    line = 'M98 P"/filaments/PLA/load.g"'
+    assert gcode.validate_gcode([line]).valid is True
 
 
 @pytest.mark.parametrize("line", WRITES_INTO_A_MACRO_FOLDER)

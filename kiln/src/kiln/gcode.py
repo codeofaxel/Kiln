@@ -218,10 +218,15 @@ _PRINT_START_COMMANDS: dict[str, str] = {
 # Raw G-code that runs a file on the printer by its path.  A print file run
 # that way starts around the door that shows it, so only the printer's own
 # macros may be run: RepRapFirmware's system folder (where a name with no
-# folder is looked for) and its macros folder, read exactly or not at all.
-# Moving a file into either, or pointing the system folder somewhere else,
-# would make any file one.
-_MACRO_FOLDERS: tuple[str, ...] = ("/sys/", "/macros/")
+# folder is looked for), its macros folder and its filaments folder (whose
+# files the filament load and unload words run), read exactly or not at
+# all.  Writing or moving a file into any of them, or pointing the system
+# folder somewhere else, would make any file one.
+_MACRO_FOLDERS: tuple[str, ...] = ("/sys/", "/macros/", "/filaments/")
+#: The macro folders as a sentence names them.
+_MACRO_FOLDER_NAMES = (
+    ", ".join(f.rstrip("/") for f in _MACRO_FOLDERS[:-1]) + f" or {_MACRO_FOLDERS[-1].rstrip('/')}"
+)
 #: Files the firmware keeps in its system folder to start the print a power
 #: failure or a pause cut off again.  Run by path they restart that print.
 _RESUME_FILES: frozenset[str] = frozenset({"/sys/resurrect.g", "/sys/resurrect-prologue.g"})
@@ -233,11 +238,11 @@ _RESUMES_A_PRINT = (
 _RUNS_A_FILE: dict[str, str] = {
     "M98": (
         "Running a file by path (M98) is blocked unless it names, in quotes, one of the printer's own "
-        "macros in /sys or /macros -- a print file starts through start_print, which shows the print first"
+        f"macros in {_MACRO_FOLDER_NAMES} -- a print file starts through start_print, which shows the print first"
     ),
     "M471": (
-        "Moving a file (M471) is blocked unless it names, in quotes, a place outside the printer's /sys "
-        "and /macros folders -- a file there runs as a macro, which no one is shown first"
+        "Moving a file (M471) is blocked unless it names, in quotes, a place outside the printer's "
+        f"{_MACRO_FOLDER_NAMES} folders -- a file there runs as a macro, which no one is shown first"
     ),
     "M505": (
         "Changing the printer's system folder (M505) is blocked -- the files there run as macros, which "
@@ -252,8 +257,8 @@ _WRITES_A_FILE: dict[str, str] = {"M28": "/gcodes", "M559": "/sys", "M560": "/ww
 #: Where each of those writes when no file is named.
 _WRITES_BY_DEFAULT: dict[str, str] = {"M559": "/sys/config.g", "M560": "/www/index.html"}
 _WRITES_INTO_A_MACRO_FOLDER = (
-    "Writing a file into the printer's /sys or /macros folder ({word}) is blocked unless it names, readably, a "
-    "place outside them -- a file there runs as a macro, which no one is shown first"
+    "Writing a file into the printer's " + _MACRO_FOLDER_NAMES + " folder ({word}) is blocked unless it names, "
+    "readably, a place outside them -- a file there runs as a macro, which no one is shown first"
 )
 #: Macro words, in a print file, that start another file on the printer.
 _MACRO_STARTS: dict[str, str] = {
@@ -541,7 +546,9 @@ def _card_path(value: str | None, folder: str | None) -> str | None:
     """*value* as a lower-case absolute path on the printer's main card, a
     bare name read inside *folder*, or ``None`` when it cannot be read as
     one: an expression, another card, an unclosed quote, a step above the
-    card's top, or a bare name with no folder to read it in."""
+    card's top, a bare name with no folder to read it in, or a part the
+    card's file system reads as another name (one ending in a dot or a
+    space, or a short alias such as ``NAME~1``)."""
     if not value or any(char in value for char in "{}\\") or any(ord(char) < 32 for char in value):
         return None
     text = value.strip()
@@ -562,8 +569,14 @@ def _card_path(value: str | None, folder: str | None) -> str | None:
                 return None
             parts.pop()
             continue
+        if part.endswith((".", " ")) or _SHORT_ALIAS_RE.search(part):
+            return None
         parts.append(part)
     return "/" + "/".join(parts).lower()
+
+
+#: A card's short alias for a long name (``FILAME~1``): another spelling of it.
+_SHORT_ALIAS_RE = re.compile(r"~\d")
 
 
 def _in_a_macro_folder(path: str | None) -> bool:
