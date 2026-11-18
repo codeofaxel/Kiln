@@ -22799,7 +22799,7 @@ def find_material_substitute(
     try:
         from kiln import _pro_substitution_bridge as substitution
 
-        refused = substitution.invalid_reason(reason)
+        refused = substitution.refusal_for(material, reason=reason, min_score=min_score)
         if refused is not None:
             return _error_dict(refused, code="VALIDATION_ERROR")
         asked = substitution.ask(material, reason=reason, min_score=min_score)
@@ -22872,6 +22872,9 @@ def get_best_material_substitute(material: str) -> dict:
     try:
         from kiln import _pro_substitution_bridge as substitution
 
+        refused = substitution.refusal_for(material, best=True)
+        if refused is not None:
+            return _error_dict(refused, code="VALIDATION_ERROR")
         asked = substitution.ask(material, best=True)
         if asked.refusal is not None:
             return _error_dict(asked.refusal["error"], code=asked.refusal["code"])

@@ -117,6 +117,36 @@ class TestWhatIsSent:
         assert calls == [(WIRE, {"material": "pla", "reason": "COST", "min_score": 0.5}, True)]
 
 
+class TestWhatIsRefusedBeforeAsking:
+    """Kiln's servers refuse the same requests in the same words; the doors
+    refuse them first, so an offline install answers the same refusal."""
+
+    LIMIT = 64
+
+    @pytest.mark.parametrize("door", ["find", "best"])
+    def test_a_material_longer_than_the_limit(self, served, door):
+        calls, _ = served
+        long = "x" * (self.LIMIT + 1)
+        out = _find(long) if door == "find" else _best(long)
+        assert calls == []
+        assert out["success"] is False and out["error"]["code"] == "VALIDATION_ERROR"
+        assert long not in out["error"]["message"]
+
+    def test_a_refused_reason_repeats_at_most_the_limit(self, served):
+        calls, _ = served
+        out = _find("pla", reason="z" * 500)
+        assert calls == [] and out["error"]["code"] == "VALIDATION_ERROR"
+        message = out["error"]["message"]
+        assert "z" * (self.LIMIT + 1) not in message and "z" * self.LIMIT in message
+
+    @pytest.mark.parametrize("min_score", [float("nan"), float("inf"), -0.1, 1.5, True])
+    def test_min_score_must_be_a_finite_number_from_zero_to_one(self, served, min_score):
+        calls, _ = served
+        out = _find("pla", min_score=min_score)
+        assert calls == [] and out["error"]["code"] == "VALIDATION_ERROR"
+        assert out["error"]["message"] == "Invalid min_score: give a number from 0.0 to 1.0."
+
+
 class TestTheServedAnswer:
     def test_the_list_is_the_servers_with_the_food_safety_check(self, served):
         _, answers = served

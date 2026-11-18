@@ -26,6 +26,7 @@ Nothing here raises.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,6 +48,9 @@ WIRE_TOOL = "material_substitutes"
 LOCAL_MODULE = "kiln_pro.material_substitution"
 #: The reasons a substitute can be asked to address: the doors' input words.
 REASONS = ("unavailable", "cost", "lead_time", "strength", "finish_quality", "heat_resistance")
+#: The longest filament name the doors take, and the most of anything a
+#: caller sent that a refusal repeats; Kiln's servers refuse the same.
+MAX_MATERIAL_CHARS = 64
 
 
 @dataclass(frozen=True)
@@ -60,11 +64,34 @@ class Asked:
     miss: Miss | None = None
 
 
-def invalid_reason(reason: Any) -> str | None:
-    """The doors' refusal for a *reason* they do not take, or ``None``."""
-    if not reason or (isinstance(reason, str) and reason.lower() in REASONS):
+def refusal_for(material: Any, *, reason: Any = None, min_score: Any = 0.5, best: bool = False) -> str | None:
+    """Why the doors refuse this request before asking, or ``None``.
+
+    A material that is not text or is longer than :data:`MAX_MATERIAL_CHARS`;
+    a reason that is not one of :data:`REASONS`; a *min_score* that is not a
+    finite number from 0.0 to 1.0 (a bool is not one).  With *best*, only
+    the material is read.  A refusal repeats at most
+    :data:`MAX_MATERIAL_CHARS` characters of what was sent.
+    """
+    if not isinstance(material, str):
+        return "Invalid material: name the filament as text, e.g. 'PLA'."
+    if len(material) > MAX_MATERIAL_CHARS:
+        return f"Invalid material: a filament name is at most {MAX_MATERIAL_CHARS} characters."
+    if best:
         return None
-    return f"Invalid reason: {reason!r}. Valid: {list(REASONS)}"
+    if reason:
+        if not isinstance(reason, str):
+            return f"Invalid reason: name it as text. Valid: {list(REASONS)}"
+        if reason.lower() not in REASONS:
+            return f"Invalid reason: {reason[:MAX_MATERIAL_CHARS]!r}. Valid: {list(REASONS)}"
+    if (
+        isinstance(min_score, bool)
+        or not isinstance(min_score, (int, float))
+        or not math.isfinite(min_score)
+        or not 0.0 <= min_score <= 1.0
+    ):
+        return "Invalid min_score: give a number from 0.0 to 1.0."
+    return None
 
 
 def ask(material: str, *, reason: str | None = None, min_score: float = 0.5, best: bool = False) -> Asked:
@@ -219,12 +246,13 @@ def miss_fields(miss: Miss | None) -> dict[str, str]:
 
 __all__ = [
     "LOCAL_MODULE",
+    "MAX_MATERIAL_CHARS",
     "REASONS",
     "WIRE_TOOL",
     "Asked",
     "ask",
     "basic_line",
     "basic_substitutes",
-    "invalid_reason",
     "miss_fields",
+    "refusal_for",
 ]
