@@ -1,0 +1,297 @@
+"""Public Kiln -> Kiln's servers: how to finish a print in one plastic.
+
+``get_post_processing_guide`` answers how to sand, smooth, paint or
+strengthen a print in one plastic, and ``get_print_diagnostic`` adds that
+plastic's strengthening tips.  The finishing guide is Kiln's
+(https://kiln3d.com) and is answered by its servers, free on every plan for
+any signed-in account; nothing sent is kept.  Two ways in, in order:
+
+1. **kiln-pro on this computer** (Kiln's servers): asked in process of the
+   same function that answers the wire, imported by name in :func:`_local`,
+   never by a string, so a static reader of the call graph sees the crossing.
+2. **served**: Kiln's servers answer through :data:`WIRE_TOOL`, asked through
+   the door every served tool uses (:func:`kiln.server._pro_api_call`).
+
+A miss (offline, signed out, no answer, refused) is never a finishing answer.
+The guide answers with the basic step instead (:func:`basic_guide`): one
+textbook step that suits any plastic, with how not to get hurt doing it,
+marked ``basic`` and carrying one line (:func:`basic_line`, in
+:mod:`kiln.served_answer`'s voice) saying why the plastic's own steps are
+missing and how to get them.  The diagnostic gives no strengthening tip and
+says why in one line (:func:`tips_line`).  No line repeats a material or goal
+the caller sent, and nothing here raises.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+from kiln.served_answer import (
+    Miss,
+    classify_answer,
+    classify_transport_error,
+    fields,
+    local_fault,
+    sentence,
+)
+
+logger = logging.getLogger(__name__)
+
+#: The served tool that answers the finishing guide and the strengthening tips.
+WIRE_TOOL = "finishing_guide"
+#: Where the same answer is worked out when kiln-pro IS installed here.
+LOCAL_MODULE = "kiln_pro.finishing"
+#: What a person reads about a miss, filled in by :mod:`kiln.served_answer`.
+FEATURE = "finishing guide"
+#: The longest material name or goal the doors take; Kiln's servers refuse
+#: the same.
+MAX_TEXT_CHARS = 64
+#: The codes of the servers' own answers that are the door's answer rather
+#: than a miss: no finishing record for the material, a goal the record holds
+#: nothing for, a request they could not read.  Each carries its sentence.
+DOOR_CODES = ("NO_FINISHING_DATA", "UNKNOWN_GOAL", "VALIDATION_ERROR")
+#: The diagnostic asks for the tips on the way to its own answer, so the
+#: served ask waits this long before the miss is said instead.
+TIPS_TIMEOUT_S: float = 4.0
+
+#: The guide's reply keys, in order, with no goal and with one.
+OVERVIEW_KEYS = ("material", "available_goals", "techniques", "paintability", "strengthening")
+GOAL_KEYS = ("material", "goal", "answer")
+
+#: What any print can be finished with, whatever it is made of: one textbook
+#: step, and how not to get hurt doing it.  Nothing here is about one plastic.
+BASIC_STEPS: tuple[dict[str, str], ...] = (
+    {
+        "name": "Sanding",
+        "how": (
+            "Start with a coarse grit to take the layer lines down and work up "
+            "through finer grits to the finish you want."
+        ),
+        "safety_notes": "Wear a dust mask: plastic dust should not be breathed.",
+    },
+)
+
+
+@dataclass(frozen=True)
+class Asked:
+    """What came back for one guide ask: ``answer`` (the guide's answer) when
+    Kiln answered; ``error`` (the door's own sentence) when Kiln's servers
+    answered that there is nothing to show; ``miss`` when no answer came."""
+
+    answer: dict[str, Any] | None = None
+    error: str | None = None
+    miss: Miss | None = None
+
+
+def refusal_for(material: Any, goal: Any = None) -> str | None:
+    """Why the doors refuse this request before asking, or ``None``.
+
+    A material that is not text or is longer than :data:`MAX_TEXT_CHARS`; a
+    goal that is not text or is longer than that.  No refusal repeats what
+    was sent.
+    """
+    if not isinstance(material, str):
+        return "Invalid material: name the plastic as text, e.g. 'PLA'."
+    if len(material) > MAX_TEXT_CHARS:
+        return f"Invalid material: a material name is at most {MAX_TEXT_CHARS} characters."
+    if goal is not None:
+        if not isinstance(goal, str):
+            return "Invalid goal: name it as text: surface_finish, paint, strengthen, or a technique's name."
+        if len(goal) > MAX_TEXT_CHARS:
+            return f"Invalid goal: a goal is at most {MAX_TEXT_CHARS} characters."
+    return None
+
+
+def guide(material: str, goal: str | None = None) -> Asked:
+    """Kiln's finishing guide for *material*: the overview with no *goal*,
+    else the answer for that goal.  Never raises."""
+    local = _local(material, goal, False)
+    if local is _NOT_HERE:
+        local = _served(material, goal, False)
+    return _read_guide(local)
+
+
+def tips(material: str) -> tuple[list[str] | None, Miss | None]:
+    """``(tips, None)`` -- the strengthening tips for *material*, each with
+    the safety note of the technique it names, empty when none apply -- or
+    ``(None, miss)`` when no answer came.  Never raises."""
+    if refusal_for(material) is not None:
+        # No plastic is named like this, so there is no tip to ask for.
+        return [], None
+    answer = _local(material, None, True)
+    if answer is _NOT_HERE:
+        answer = _served(material, None, True)
+    if isinstance(answer, Miss):
+        return None, answer
+    if isinstance(answer, dict) and answer.get("success") is True:
+        listed = answer.get("tips")
+        if isinstance(listed, list) and all(isinstance(t, str) for t in listed):
+            return list(listed), None
+    return None, classify_answer(answer) or Miss("unanswered", detail="no strengthening tips in the answer")
+
+
+#: ``_local``'s answer when kiln-pro is not on this computer.
+_NOT_HERE = object()
+
+
+def _local(material: str, goal: str | None, want_tips: bool) -> Any:
+    """kiln-pro's answer, asked here exactly as the wire asks it."""
+    try:
+        from kiln_pro.finishing import finishing_for_the_wire
+    except ImportError:
+        return _NOT_HERE
+    try:
+        return finishing_for_the_wire(material, goal=goal, tips=want_tips)
+    except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
+        return local_fault(exc, where="Kiln's finishing guide")
+
+
+def _served(material: str, goal: str | None, want_tips: bool) -> Any:
+    try:
+        import kiln.server as _srv
+    except Exception as exc:  # noqa: BLE001 -- no served door here is a miss, never a traceback
+        return local_fault(exc, where="the served door on this computer")
+    sent: dict[str, Any] = {"material": material}
+    if want_tips:
+        sent["tips"] = True
+    elif goal is not None:
+        sent["goal"] = goal
+    # The guide is what the person asked for, so a signed-out refusal is them
+    # meeting the sign-in wall; the tips are asked on the way to a diagnostic,
+    # which the person asked about the print, not about these.
+    asked_by_user = not want_tips
+    try:
+        return _srv._pro_api_call(
+            WIRE_TOOL,
+            _timeout=TIPS_TIMEOUT_S if want_tips else None,
+            _asked_by_user=asked_by_user,
+            **sent,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
+        logger.debug("%s request failed", WIRE_TOOL, exc_info=True)
+        return classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None))
+
+
+def _read_guide(answer: Any) -> Asked:
+    if isinstance(answer, Miss):
+        return Asked(miss=answer)
+    if isinstance(answer, dict):
+        if answer.get("success") is True and _is_guide(answer):
+            return Asked(answer=answer)
+        # The servers' own answer that there is nothing to show.
+        if (
+            answer.get("success") is False
+            and answer.get("code") in DOOR_CODES
+            and isinstance(answer.get("error"), str)
+        ):
+            return Asked(error=answer["error"])
+    return Asked(miss=classify_answer(answer) or Miss("unanswered", detail="no finishing guide in the answer"))
+
+
+def _is_guide(answer: dict[str, Any]) -> bool:
+    if not isinstance(answer.get("material"), str):
+        return False
+    if "goal" in answer:
+        return isinstance(answer.get("goal"), str) and isinstance(answer.get("answer"), dict)
+    return (
+        isinstance(answer.get("available_goals"), list)
+        and isinstance(answer.get("techniques"), list)
+        and isinstance(answer.get("paintability"), dict)
+        and isinstance(answer.get("strengthening"), list)
+    )
+
+
+def reply_from(answer: dict[str, Any]) -> dict[str, Any]:
+    """The guide door's reply rebuilt from Kiln's answer, key for key, before
+    its upgrade line is added."""
+    keys = GOAL_KEYS if "goal" in answer else OVERVIEW_KEYS
+    return {"success": True, **{key: answer[key] for key in keys}}
+
+
+# ---------------------------------------------------------------------------
+# A miss
+# ---------------------------------------------------------------------------
+
+
+def _label(material: Any) -> str:
+    """The plastic as the bundled catalogue names it, or "this plastic":
+    what the caller typed is never repeated."""
+    from kiln._pro_substitution_bridge import catalogue_name
+
+    return catalogue_name(material) or "this plastic"
+
+
+def basic_line(miss: Miss | None, material: Any) -> str:
+    """The one line the basic guide carries: Kiln did not give this
+    plastic's finishing steps, why, and what fixes it."""
+    if miss is None:
+        miss = Miss("unanswered", detail="no finishing guide")
+    label = _label(material)
+    return sentence(
+        miss,
+        feature=FEATURE,
+        on_the_line=f"Kiln did not give the finishing steps for {label}",
+        cannot="give them",
+        wont="lists one general step that suits any plastic instead",
+        then=(
+            f"Kiln gives the finishing steps for {label}"
+            if miss.cause == "signed_out"
+            else f"ask again for the finishing steps for {label}"
+        ),
+    )
+
+
+def basic_guide(miss: Miss | None, material: Any) -> dict[str, Any]:
+    """The guide's answer when Kiln's could not be had: the basic step, the
+    line saying why, and its machine-readable twin.  Never a technique of
+    one plastic, a paint or a strength figure."""
+    return {
+        "success": True,
+        "basic": True,
+        "steps": [dict(step) for step in BASIC_STEPS],
+        "message": basic_line(miss, material),
+        **fields(miss or Miss("unanswered", detail="no finishing guide")),
+    }
+
+
+def tips_line(miss: Miss | None, material: Any) -> str:
+    """The one line the diagnostic carries in place of strengthening tips it
+    could not get: why, and what fixes it.  Never read as "no tip applies"."""
+    if miss is None:
+        miss = Miss("unanswered", detail="no strengthening tips")
+    label = _label(material)
+    return sentence(
+        miss,
+        feature=FEATURE,
+        on_the_line=f"Kiln did not give the strengthening tips for {label}",
+        cannot="give them",
+        wont="gives none",
+        then=(
+            f"Kiln gives the strengthening tips for {label}"
+            if miss.cause == "signed_out"
+            else f"ask again for the strengthening tips for {label}"
+        ),
+    )
+
+
+__all__ = [
+    "BASIC_STEPS",
+    "DOOR_CODES",
+    "FEATURE",
+    "GOAL_KEYS",
+    "LOCAL_MODULE",
+    "MAX_TEXT_CHARS",
+    "OVERVIEW_KEYS",
+    "TIPS_TIMEOUT_S",
+    "WIRE_TOOL",
+    "Asked",
+    "basic_guide",
+    "basic_line",
+    "guide",
+    "refusal_for",
+    "reply_from",
+    "tips",
+    "tips_line",
+]

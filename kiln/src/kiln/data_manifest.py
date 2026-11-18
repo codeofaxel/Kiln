@@ -79,7 +79,6 @@ REFERENCE_DATA_FILES: dict[str, str] = {
         "print-defect guidance, keyed by symptom and material"
     ),
     "design_knowledge/materials.json": "material design data, keyed by material",
-    "design_knowledge/post_processing.json": "finishing guidance, keyed by process",
     "design_knowledge/skin_contact.json": (
         "skin-contact and biocompatibility guidance, keyed by material"
     ),

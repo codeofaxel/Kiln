@@ -211,6 +211,20 @@ class TestTheVoice:
             seen.add(text)
         assert len(seen) == len(_misses())
 
+    @pytest.mark.parametrize("which", ["basic_line", "tips_line"])
+    def test_the_finishing_lines(self, which):
+        from kiln import _pro_finishing_bridge as finishing
+
+        seen = set()
+        for miss in _misses():
+            for material in ("pla", "a plastic nobody catalogues"):
+                text = getattr(finishing, which)(miss, material)
+                _lint(text, where=f"finishing/{which}/{miss.cause}")
+                assert "a plastic nobody catalogues" not in text, "the caller's words came back"
+                seen.add(text)
+            assert "PLA" in getattr(finishing, which)(miss, "pla")
+        assert len(seen) == 2 * len(_misses())
+
     def test_the_blade_line(self, monkeypatch):
         from kiln import _pro_cutter_bridge as cutter
 

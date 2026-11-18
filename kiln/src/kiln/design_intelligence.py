@@ -116,7 +116,7 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     """Probe whether one kiln-pro engineering overlay actually merged.
 
     Used by free-tier-honest consumer tools (``troubleshoot_print_issue``,
-    ``get_post_processing``, ``check_environment_compatibility``, the
+    ``check_environment_compatibility``, the
     ``troubleshoot_printer`` MCP wrapper) to attach an ``upgrade_hint``
     field when the response shape is shallow because the overlay didn't
     merge — so a free user (or an agent acting on their behalf) sees an
@@ -829,28 +829,6 @@ class PrinterCompatibilityReport:
 
 
 @dataclass
-class PostProcessingGuide:
-    """Post-processing techniques, paintability, and strengthening for a material.
-
-    ``upgrade_hint`` is set (with the canonical Kiln Pro upsell + pricing
-    URL) only when the kiln-pro engineering overlay didn't merge — i.e.
-    free tier, missing license, or overlay endpoint unreachable past
-    grace.  Pro+ tier with a valid license sees this field empty.  Lets
-    an MCP agent surface the upgrade path verbatim without having to
-    invent the copy.
-    """
-
-    material: str
-    techniques: list[dict[str, Any]]
-    paintability: dict[str, Any] | None
-    strengthening: list[dict[str, Any]]
-    upgrade_hint: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
 class MultiMaterialReport:
     """Co-print compatibility report between two materials.
 
@@ -986,7 +964,6 @@ class _DesignKnowledgeBase:
         self._printers: dict[str, dict[str, Any]] = {}
         self._troubleshooting: dict[str, dict[str, Any]] = {}
         self._printer_compatibility: dict[str, dict[str, Any]] = {}
-        self._post_processing: dict[str, dict[str, Any]] = {}
         self._skin_contact: dict[str, dict[str, Any]] = {}
         # Each table's ``_meta`` block, keyed by table attribute.  The tables
         # themselves drop every underscore key (that rule keeps metadata and
@@ -1026,7 +1003,6 @@ class _DesignKnowledgeBase:
             ("printer_profiles.json", "_printers"),
             ("material_troubleshooting.json", "_troubleshooting"),
             ("printer_material_compatibility.json", "_printer_compatibility"),
-            ("post_processing.json", "_post_processing"),
             ("skin_contact.json", "_skin_contact"),
         ]
 
@@ -1046,7 +1022,7 @@ class _DesignKnowledgeBase:
         logger.info(
             "Design knowledge loaded: %d materials, %d templates, %d requirements, "
             "%d load tables, %d environments, %d printers, %d troubleshooting, "
-            "%d printer-compat, %d post-processing",
+            "%d printer-compat",
             len(self._materials),
             len(self._templates),
             len(self._requirements),
@@ -1055,7 +1031,6 @@ class _DesignKnowledgeBase:
             len(self._printers),
             len(self._troubleshooting),
             len(self._printer_compatibility),
-            len(self._post_processing),
         )
 
     def _table(
@@ -1178,10 +1153,6 @@ class _DesignKnowledgeBase:
         records this process has fetched."""
         self._load()
         return self._printer_compatibility
-
-    @property
-    def post_processing(self) -> dict[str, dict[str, Any]]:
-        return self._table("_post_processing", "post_processing")
 
     @property
     def skin_contact(self) -> dict[str, dict[str, Any]]:
@@ -3333,143 +3304,6 @@ def compat_floor_reason(printer_id: str) -> dict[str, str] | None:
 
 
 # ---------------------------------------------------------------------------
-# Public API — Post-Processing
-# ---------------------------------------------------------------------------
-
-#: Technique names the post-processing table used before it described each
-#: finish by its chemistry and form instead of a retail product, mapped to the
-#: name the table uses now.  An agent, a saved note or an older client holding
-#: one of these still reaches the technique.  Keys are casefolded.
-#: An older technique name may carry a product in brackets ("Epoxy Coating
-#: (<product>)", "Dyeing with <product>") or lack a form word ("Flexible
-#: Paint" for "Flexible Rubber Paint").  An agent or saved note may still
-#: hold such a spelling, so a lookup matches on the technique's CORE -- the
-#: name with any bracketed tail, any "with ..." tail and the form word
-#: "rubber" removed -- rather than on a table of old names, which would keep
-#: the products in this file.
-_TECHNIQUE_TAIL = re.compile(r"\s*\(.*\)\s*$|\s+with\s+.*$", re.IGNORECASE)
-_TECHNIQUE_FORM_WORDS = re.compile(r"\brubber\b", re.IGNORECASE)
-
-
-def technique_core(name: str) -> str:
-    """The comparable core of technique *name*: brackets, a ``with ...``
-    tail and the form word dropped, whitespace folded, casefolded."""
-    core = _TECHNIQUE_TAIL.sub("", str(name or "").strip())
-    core = _TECHNIQUE_FORM_WORDS.sub(" ", core)
-    return " ".join(core.split()).casefold()
-
-
-def find_post_processing_technique(
-    techniques: list[Any], name: str
-) -> dict[str, Any] | None:
-    """The technique in *techniques* called *name* (any case; an old
-    spelling that carried a product or a form word too).  An exact name
-    wins; otherwise the one technique with the same core."""
-    wanted = str(name or "").strip().casefold()
-    if not wanted:
-        return None
-    rows = [t for t in techniques if isinstance(t, dict)]
-    for technique in rows:
-        if str(technique.get("name", "")).strip().casefold() == wanted:
-            return technique
-    core = technique_core(name)
-    matches = [t for t in rows if technique_core(t.get("name", "")) == core]
-    return matches[0] if len(matches) == 1 else None
-
-
-def get_post_processing(material_id: str) -> PostProcessingGuide | None:
-    """Get post-processing techniques for a material.
-
-    :param material_id: Material key (e.g. ``"pla"``, ``"abs"``).
-    """
-    kb = _get_kb()
-    material_key = material_id.lower()
-    data = kb.post_processing.get(material_key)
-    if data is None:
-        return None
-
-    return PostProcessingGuide(
-        material=material_key,
-        techniques=data.get("techniques", []),
-        paintability=data.get("paintability"),
-        strengthening=data.get("strengthening", []),
-        upgrade_hint=(
-            ""
-            if _engineering_overlay_loaded("post_processing")
-            else _upgrade_hint("post_processing")
-        ),
-    )
-
-
-def _technique_safety_note(guide: PostProcessingGuide, method: str) -> str:
-    """The safety note of the technique a strengthening *method* names, or ``""``.
-
-    "IPA Vapor Smoothing (Structural)" is the "IPA Vapor Smoothing" technique,
-    so a tip that recommends it carries that technique's fire warning.
-    """
-    wanted = technique_core(method)
-    if not wanted:
-        return ""
-    for technique in guide.techniques:
-        if not isinstance(technique, dict):
-            continue
-        if technique_core(technique.get("name", "")) == wanted:
-            return str(technique.get("safety_notes") or "").strip()
-    return ""
-
-
-def get_public_post_processing(material_id: str) -> PostProcessingGuide | None:
-    """Get the public post-processing floor without optional enrichment.
-
-    Each technique keeps its ``safety_notes``: the fire, fume and dust
-    warnings are the floor, so an offline or signed-out install still says
-    them.
-    """
-    raw = json.loads(
-        (_DATA_DIR / "post_processing.json").read_text(encoding="utf-8")
-    )
-    material_key = material_id.lower()
-    data = raw.get(material_key)
-    if not isinstance(data, dict):
-        return None
-
-    techniques = [
-        {
-            key: item[key]
-            for key in ("name", "difficulty", "tools_needed", "safety_notes")
-            if key in item
-        }
-        for item in (data.get("techniques") or [])
-        if isinstance(item, dict)
-    ]
-    paintability = data.get("paintability")
-    if isinstance(paintability, dict):
-        paintability = {
-            key: paintability[key]
-            for key in ("primer_needed", "paint_types")
-            if key in paintability
-        }
-    strengthening = [
-        {
-            key: item[key]
-            for key in ("method", "applicable", "strength_gain_pct")
-            if key in item
-        }
-        if isinstance(item, dict)
-        else {"method": str(item), "applicable": None}
-        for item in (data.get("strengthening") or [])
-    ]
-
-    return PostProcessingGuide(
-        material=material_key,
-        techniques=techniques,
-        paintability=paintability,
-        strengthening=strengthening,
-        upgrade_hint=_upgrade_hint("post_processing"),
-    )
-
-
-# ---------------------------------------------------------------------------
 # Public API — Multi-Material Compatibility
 # ---------------------------------------------------------------------------
 
@@ -3601,7 +3435,9 @@ def get_print_diagnostic(
     This is the primary tool for agents diagnosing print problems.  It
     pulls from troubleshooting data, printer compatibility, storage
     requirements, and post-processing tips to give a comprehensive
-    answer in one call.
+    answer in one call.  The strengthening tips are Kiln's finishing
+    guide's (:mod:`kiln._pro_finishing_bridge`); when it cannot be had,
+    ``post_processing_tips`` holds one line saying why instead.
 
     :param material_id: Material being printed (e.g. ``"petg"``).
     :param symptom: What's going wrong (e.g. ``"stringing"``, ``"warping"``).
@@ -3621,20 +3457,14 @@ def get_print_diagnostic(
             mat_key = material_id.lower()
             compat = compat_report.materials.get(mat_key)
 
-    # Post-processing quick tips
-    pp_tips: list[str] = []
-    pp_guide = get_post_processing(material_id)
-    if pp_guide and pp_guide.strengthening:
-        for s in pp_guide.strengthening:
-            if s.get("applicable"):
-                tip = (
-                    f"{s.get('method', 'Unknown')}: ~{s.get('strength_gain_pct', 0)}% "
-                    f"strength gain. {s.get('tradeoffs', '')}"
-                )
-                safety = _technique_safety_note(pp_guide, str(s.get("method", "")))
-                if safety:
-                    tip = f"{tip.rstrip()} Safety: {safety}"
-                pp_tips.append(tip)
+    # Strengthening tips, each with the safety note of the technique it
+    # names, from Kiln's finishing guide; when they cannot be had, one line
+    # says why instead (never an empty list that reads as "none apply").
+    from kiln import _pro_finishing_bridge as finishing
+
+    pp_tips, tips_miss = finishing.tips(material_id)
+    if pp_tips is None:
+        pp_tips = [finishing.tips_line(tips_miss, material_id)]
 
     # Build combined guidance
     combined: list[str] = []

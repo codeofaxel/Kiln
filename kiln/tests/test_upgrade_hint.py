@@ -8,9 +8,10 @@ with valid license), the hint is empty.
 
 Covered tools:
   - troubleshoot_print_issue              (TroubleshootingResult.upgrade_hint)
-  - get_post_processing                   (PostProcessingGuide.upgrade_hint)
   - check_environment_compatibility       (EnvironmentReport.upgrade_hint)
   - server.troubleshoot_printer wrapper   (dict["upgrade_hint"])
+  - get_post_processing_guide             (its reply's upgrade_hint, which
+                                           follows the caller's plan alone)
 
 Detection probe: ``_engineering_overlay_loaded()`` checks whether
 ``pla.agent_guidance`` is non-empty (overlay-only field).
@@ -34,7 +35,6 @@ from kiln.design_intelligence import (
     _engineering_overlay_loaded,
     _upgrade_hint,
     check_environment_compatibility,
-    get_post_processing,
     troubleshoot_print_issue,
     unestablished_caution,
 )
@@ -115,12 +115,6 @@ class TestFreeTierHintAttached:
         assert result.upgrade_hint == _UPGRADE_HINT_TROUBLESHOOTING
 
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_post_processing_attaches_hint(self, _mock):
-        result = get_post_processing("pla")
-        assert result is not None, "pla should resolve in the catalog"
-        assert result.upgrade_hint == _UPGRADE_HINT_POST_PROCESSING
-
-    @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
     def test_environment_attaches_hint(self, _mock):
         result = check_environment_compatibility("pla", "outdoor sunny")
         assert result is not None, "pla + outdoor query should resolve"
@@ -139,12 +133,6 @@ class TestProTierHintEmpty:
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=True)
     def test_troubleshoot_no_hint(self, _mock):
         result = troubleshoot_print_issue("pla")
-        assert result is not None
-        assert result.upgrade_hint == ""
-
-    @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=True)
-    def test_post_processing_no_hint(self, _mock):
-        result = get_post_processing("pla")
         assert result is not None
         assert result.upgrade_hint == ""
 
@@ -172,13 +160,6 @@ class TestToDictIncludesHint:
         d = result.to_dict()
         assert "upgrade_hint" in d
         assert d["upgrade_hint"] == _UPGRADE_HINT_TROUBLESHOOTING
-
-    @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_post_processing_dict_carries_hint(self, _mock):
-        result = get_post_processing("pla")
-        d = result.to_dict()
-        assert "upgrade_hint" in d
-        assert d["upgrade_hint"] == _UPGRADE_HINT_POST_PROCESSING
 
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
     def test_environment_dict_carries_hint(self, _mock):
@@ -293,16 +274,27 @@ class TestHintNamesTheTierThatActuallyUnlocksIt:
 
     def test_the_wired_tool_carries_the_named_tier_not_just_the_helper(self):
         """The helper being right is not the product being right — this is what
-        an agent actually reads off the response."""
-        with _kiln_pro_says("business"):
-            with patch(
-                "kiln.design_intelligence._engineering_overlay_loaded",
-                return_value=False,
-            ):
-                result = get_post_processing("pla")
-        assert result is not None
-        assert "Kiln Business" in result.upgrade_hint
-        assert "Kiln Pro" not in result.upgrade_hint
+        an agent actually reads off the finishing guide's reply."""
+        from kiln._pro_finishing_bridge import Asked
+        from kiln.plugins.design_tools import plugin
+
+        tools: dict = {}
+
+        class _MCP:
+            def tool(self, **_kwargs):
+                def decorator(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        plugin.register(_MCP())
+        answer = Asked(answer={"success": True, "material": "pla", "goal": "paint", "answer": {"paintability": None}})
+        with _kiln_pro_says("business"), patch("kiln._pro_finishing_bridge.guide", return_value=answer):
+            result = tools["get_post_processing_guide"]("pla", "paint")
+        assert result["success"] is True
+        assert "Kiln Business" in result["upgrade_hint"]
+        assert "Kiln Pro" not in result["upgrade_hint"]
 
     def test_the_caution_tail_names_the_tier_too(self):
         """``unestablished_caution`` shares the same shortfall and the same

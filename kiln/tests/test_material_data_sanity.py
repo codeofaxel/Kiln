@@ -17,7 +17,6 @@ import pytest
 
 from .conftest import (
     requires_engineering_overlay,
-    requires_post_processing_overlay,
     requires_printer_compatibility_overlay,
     requires_troubleshooting_overlay,
 )
@@ -30,7 +29,6 @@ MATERIALS_FILE = DATA_DIR / "materials.json"
 PATTERNS_FILE = DATA_DIR / "design_templates.json"
 COMPAT_FILE = DATA_DIR / "printer_material_compatibility.json"
 TROUBLESHOOT_FILE = DATA_DIR / "material_troubleshooting.json"
-POST_PROC_FILE = DATA_DIR / "post_processing.json"
 PRINTER_INTEL_FILE = PRINTER_INTEL_DIR / "printer_intelligence.json"
 
 # --- Fixtures ---
@@ -721,85 +719,6 @@ class TestTroubleshootingSchema:
             tips = entry.get("break_in_tips", [])
             assert len(tips) >= 3, (
                 f"{mat_id} has only {len(tips)} break_in_tips (need >= 3)"
-            )
-
-
-# --- Post-Processing Guide Tests ---
-
-
-@pytest.fixture(scope="module")
-def post_proc_data() -> dict:
-    """Raw public file — used only by tests that don't need the overlay."""
-    with open(POST_PROC_FILE) as f:
-        return json.load(f)
-
-
-@pytest.fixture(scope="module")
-def post_proc() -> dict:
-    """Post-processing MERGED with the kiln-pro overlay.
-
-    Public file holds technique skeleton + paintability bool + strengthening
-    skeleton; the overlay layers the curated prose back in.
-    """
-    from kiln.design_intelligence import _get_kb
-    return _get_kb().post_processing
-
-
-class TestPostProcessingGuide:
-    """Post-processing guide schema and cross-references."""
-
-    VALID_DIFFICULTY = {"easy", "moderate", "advanced"}
-
-    def test_every_material_has_post_processing(self, post_proc, materials):
-        missing = set(materials.keys()) - set(post_proc.keys())
-        assert not missing, (
-            f"Materials missing from post_processing: {missing}"
-        )
-
-    def test_no_extra_materials(self, post_proc, materials):
-        extra = set(post_proc.keys()) - set(materials.keys())
-        assert not extra, (
-            f"Post-processing has unknown materials: {extra}"
-        )
-
-    def test_minimum_techniques(self, post_proc):
-        for mat_id, entry in post_proc.items():
-            count = len(entry.get("techniques", []))
-            assert count >= 2, (
-                f"{mat_id} has only {count} techniques (need >= 2)"
-            )
-
-    @requires_post_processing_overlay
-    def test_technique_has_required_fields(self, post_proc):
-        required = {
-            "name", "difficulty", "tools_needed",
-            "procedure", "result", "safety_notes",
-        }
-        for mat_id, entry in post_proc.items():
-            for i, tech in enumerate(entry.get("techniques", [])):
-                missing = required - set(tech.keys())
-                assert not missing, (
-                    f"{mat_id}.techniques[{i}] missing: {missing}"
-                )
-
-    def test_difficulty_values_valid(self, post_proc):
-        for mat_id, entry in post_proc.items():
-            for i, tech in enumerate(entry.get("techniques", [])):
-                assert tech["difficulty"] in self.VALID_DIFFICULTY, (
-                    f"{mat_id}.techniques[{i}] difficulty "
-                    f"'{tech['difficulty']}' not valid"
-                )
-
-    def test_paintability_present(self, post_proc):
-        for mat_id, entry in post_proc.items():
-            assert "paintability" in entry, (
-                f"{mat_id} missing paintability section"
-            )
-
-    def test_strengthening_present(self, post_proc):
-        for mat_id, entry in post_proc.items():
-            assert "strengthening" in entry, (
-                f"{mat_id} missing strengthening section"
             )
 
 

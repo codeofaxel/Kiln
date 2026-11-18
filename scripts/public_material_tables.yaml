@@ -5,7 +5,7 @@
 # baseline:  present when the gate was added; listed, not judged.  The list
 #            only shrinks: a table leaves it when it is served instead, or
 #            when it earns a keep row.  A new table may not join it.
-baseline_count: 23
+baseline_count: 22
 keep:
   'gcode.py::_MATERIAL_TEMPS':
     door: the live-printer filament load, unload, purge and wipe commands
@@ -23,7 +23,6 @@ baseline:
   - 'data/design_knowledge/load_tables.json::(top)'
   - 'data/design_knowledge/material_troubleshooting.json::(top)'
   - 'data/design_knowledge/materials.json::(top)'
-  - 'data/design_knowledge/post_processing.json::(top)'
   - 'data/design_knowledge/printer_material_compatibility.json::default'
   - 'data/design_knowledge/skin_contact.json::(top)'
   - 'data/printer_intelligence.json::default.materials'
