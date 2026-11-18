@@ -206,14 +206,35 @@ class MaterialLimits:
         }
 
 
+#: The code the design limits answer a request with that falls outside what
+#: they cover (a nozzle, a layer or a name past their range): a fact about
+#: the request, the same on every ask, never a passing fault.
+_OUTSIDE_WHAT_THEY_COVER = "INVALID_INPUT"
+
+
+def _outside_what_they_cover(miss: Miss, *, on_the_line: str, wont: str) -> str | None:
+    """The sentence for a request the design limits do not cover, in their
+    own words (the range they cover), or ``None`` for any other miss.  It
+    says no "right now" and offers no retry: asking again gets the same."""
+    if miss.cause != "refused" or miss.code != _OUTSIDE_WHAT_THEY_COVER or not miss.detail.strip():
+        return None
+    covered = " ".join(miss.detail.split()).rstrip(". ")
+    return f"{on_the_line.rstrip('. ')}. {covered}, so here Kiln {wont.strip().rstrip('.')}."
+
+
 def miss_sentence(miss: Miss) -> str:
     """The one sentence for a miss, in the served-answer voice."""
+    on_the_line = "How steep, how far and how thin a part can go depends on the plastic"
+    wont = "checks the part against the general figures and won't call them this plastic's own"
+    outside = _outside_what_they_cover(miss, on_the_line=on_the_line, wont=wont)
+    if outside is not None:
+        return outside[:-1] + "; leave extra margin."
     return sentence(
         miss,
         feature="design limits",
-        on_the_line="How steep, how far and how thin a part can go depends on the plastic",
+        on_the_line=on_the_line,
         cannot="get this plastic's own limits",
-        wont="checks the part against the general figures and won't call them this plastic's own",
+        wont=wont,
         safe_remedy="leave extra margin",
         then="check again" + free_account_note(miss),
     )
@@ -384,15 +405,20 @@ class SlicedFloors:
 def sliced_miss_sentence(miss: Miss, general_wall_mm: float) -> str:
     """The one sentence for a miss of what Kiln's slice keeps, in the
     served-answer voice."""
+    on_the_line = "Whether a thin wall or pin is left out when sliced depends on the slicer and the nozzle"
+    wont = (
+        f"warns about thin walls and pins from the general minimum wall ({general_wall_mm:g} mm) "
+        "instead and stops nothing"
+    )
+    outside = _outside_what_they_cover(miss, on_the_line=on_the_line, wont=wont)
+    if outside is not None:
+        return outside
     return sentence(
         miss,
         feature="slicer check",
-        on_the_line="Whether a thin wall or pin is left out when sliced depends on the slicer and the nozzle",
+        on_the_line=on_the_line,
         cannot="check exactly what its slicer leaves out",
-        wont=(
-            f"warns about thin walls and pins from the general minimum wall ({general_wall_mm:g} mm) "
-            "instead and stops nothing"
-        ),
+        wont=wont,
         then="check again for Kiln's exact check" + free_account_note(miss),
     )
 
