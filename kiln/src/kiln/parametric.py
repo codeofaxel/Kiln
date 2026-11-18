@@ -380,18 +380,16 @@ def validate_openscad_parameters(
 
     warnings: list[ParameterWarning] = []
 
-    # Load material design limits if available
+    # The material's limits, from the one helper every check reads.
     mat_limits: dict[str, Any] = {}
     if material:
         try:
-            from kiln.design_intelligence import get_material_profile
+            from kiln.material_limits import limits_for
 
-            profile = get_material_profile(material)
-            if profile and profile.design_limits:
-                mat_limits = profile.design_limits
+            mat_limits = limits_for(material).design_limits()
         except Exception:
             _logger.debug(
-                "Could not load material profile for validation",
+                "Could not load material limits for validation",
                 exc_info=True,
             )
 
@@ -467,8 +465,10 @@ def validate_openscad_parameters(
                     )
                 )
 
-        # Hole / diameter checks
-        if "hole" in name_lower or "diameter" in name_lower:
+        # Hole checks: a parameter named for a hole.  A pin or a bare
+        # diameter is not a hole (a boss, a rod and a pin each have a
+        # limit of their own, or none this check knows).
+        if "hole" in name_lower and "pin" not in name_lower:
             min_hole = mat_limits.get("min_hole_diameter_mm")
             if min_hole is not None and p.value < min_hole:
                 warnings.append(
@@ -518,8 +518,9 @@ def validate_openscad_parameters(
                     )
                 )
 
-        # Overhang / angle checks
-        if "overhang" in name_lower or "angle" in name_lower:
+        # Overhang checks: a parameter named for an overhang.  Any other
+        # angle (a chamfer, a draft, a thread) is not an overhang.
+        if "overhang" in name_lower:
             max_overhang = mat_limits.get("max_unsupported_overhang_deg")
             if max_overhang is not None and p.value > max_overhang:
                 warnings.append(

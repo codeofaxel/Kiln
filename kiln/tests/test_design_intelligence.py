@@ -393,7 +393,9 @@ class TestPerCallerEntitlement:
         assert pla.thermal["print_temp_range_c"] == public["pla"]["thermal"]["print_temp_range_c"]
         assert pla.thermal["max_service_temp_c"] == 50
         assert pla.chemical["food_safe"] == "conditional"
-        assert pla.design_limits["min_wall_thickness_mm"] == 0.8
+        from kiln.material_limits import limits_for
+
+        assert limits_for("pla").design_limits()["min_wall_thickness_mm"] == 0.8
 
     def test_entitlement_is_re_asked_but_the_same_payload_is_merged_once(
         self, tiered_overlay
@@ -589,19 +591,17 @@ class TestMaterialProfiles:
             assert len(p.agent_guidance) > 0, f"{p.material_id} missing guidance"
 
     def test_every_material_has_design_limits(self):
-        # Safety-floor: every material has the process-floor design limits
-        # in public materials.json (min_wall_thickness_mm,
-        # max_unsupported_overhang_deg).  The engineering-grade limits
-        # (snap_fit_tolerance_mm, max_cantilever_length_mm,
-        # living_hinge_viable, etc.) live in the kiln-pro overlay and are
-        # asserted in kiln-pro's overlay sanity test.
+        # Every material's limits are read from the one helper every check
+        # reads (kiln.material_limits); a public profile carries the
+        # general block, never a plastic's own figures.
+        from kiln.design_intelligence import get_public_material_profile
+        from kiln.material_limits import limits_for
+
         for p in list_material_profiles():
-            assert "min_wall_thickness_mm" in p.design_limits, (
-                f"{p.material_id} missing min_wall_thickness_mm"
-            )
-            assert "max_unsupported_overhang_deg" in p.design_limits, (
-                f"{p.material_id} missing max_unsupported_overhang_deg"
-            )
+            limits = limits_for(p.material_id).design_limits()
+            assert "min_wall_thickness_mm" in limits, p.material_id
+            assert "max_unsupported_overhang_deg" in limits, p.material_id
+            assert get_public_material_profile(p.material_id).design_limits["basis"] == "general"
 
 
 # ---------------------------------------------------------------------------

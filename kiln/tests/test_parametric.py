@@ -412,10 +412,10 @@ class TestUpdateOpenscadParameter:
 class TestValidateOpenscadParameters:
     """validate_openscad_parameters checks values against limits."""
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_derived_params_are_skipped(self, mock_profile):
         mock_profile.return_value = SimpleNamespace(
-            design_limits={"min_wall_thickness_mm": 1.2},
+            design_limits=lambda: {"min_wall_thickness_mm": 1.2},
         )
         code = (
             "wall = 0.5; // mm\n"
@@ -442,10 +442,10 @@ class TestValidateOpenscadParameters:
         assert len(warnings) == 1
         assert warnings[0].limit_type == "max"
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_material_wall_thickness_violation(self, mock_profile):
         mock_profile.return_value = SimpleNamespace(
-            design_limits={"min_wall_thickness_mm": 1.2},
+            design_limits=lambda: {"min_wall_thickness_mm": 1.2},
         )
         code = "wall_thickness = 0.8; // mm"
         warnings = validate_openscad_parameters(code, material="pla")
@@ -454,10 +454,10 @@ class TestValidateOpenscadParameters:
             for w in warnings
         )
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_material_hole_diameter_violation(self, mock_profile):
         mock_profile.return_value = SimpleNamespace(
-            design_limits={"min_hole_diameter_mm": 2.0},
+            design_limits=lambda: {"min_hole_diameter_mm": 2.0},
         )
         code = "hole_size = 1.0; // mm"
         warnings = validate_openscad_parameters(code, material="pla")
@@ -466,19 +466,19 @@ class TestValidateOpenscadParameters:
             for w in warnings
         )
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_parameter_within_limits_no_warning(self, mock_profile):
         mock_profile.return_value = SimpleNamespace(
-            design_limits={"min_wall_thickness_mm": 1.0},
+            design_limits=lambda: {"min_wall_thickness_mm": 1.0},
         )
         code = "wall_thickness = 2.0; // mm"
         warnings = validate_openscad_parameters(code, material="pla")
         assert warnings == []
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_multiple_violations(self, mock_profile):
         mock_profile.return_value = SimpleNamespace(
-            design_limits={
+            design_limits=lambda: {
                 "min_wall_thickness_mm": 1.2,
                 "min_hole_diameter_mm": 2.0,
             },
@@ -502,19 +502,19 @@ class TestValidateOpenscadParameters:
         names = {w.parameter_name for w in warnings}
         assert names == {"width", "height"}
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_bridge_span_exceeds_max(self, mock_profile):
         mock_profile.return_value = SimpleNamespace(
-            design_limits={"max_bridge_length_mm": 20},
+            design_limits=lambda: {"max_bridge_length_mm": 20},
         )
         code = "bridge_span = 30; // mm"
         warnings = validate_openscad_parameters(code, material="pla")
         assert any(w.limit_type == "max" for w in warnings)
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_overhang_angle_exceeds_max(self, mock_profile):
         mock_profile.return_value = SimpleNamespace(
-            design_limits={"max_unsupported_overhang_deg": 50},
+            design_limits=lambda: {"max_unsupported_overhang_deg": 50},
         )
         code = "overhang_angle = 60; // degrees"
         warnings = validate_openscad_parameters(code, material="pla")
@@ -524,11 +524,11 @@ class TestValidateOpenscadParameters:
         code = "module box() { cube([10,10,10]); }"
         assert validate_openscad_parameters(code) == []
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_recommended_wall_warning(self, mock_profile):
         """Value between min and recommended triggers a recommendation warning."""
         mock_profile.return_value = SimpleNamespace(
-            design_limits={
+            design_limits=lambda: {
                 "min_wall_thickness_mm": 0.8,
                 "recommended_wall_thickness_mm": 1.6,
             },
@@ -537,10 +537,10 @@ class TestValidateOpenscadParameters:
         warnings = validate_openscad_parameters(code, material="pla")
         assert any("recommended" in w.message for w in warnings)
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.material_limits.limits_for")
     def test_pin_diameter_violation(self, mock_profile):
         mock_profile.return_value = SimpleNamespace(
-            design_limits={"min_pin_diameter_mm": 3.0},
+            design_limits=lambda: {"min_pin_diameter_mm": 3.0},
         )
         code = "pin_width = 1.5; // mm"
         warnings = validate_openscad_parameters(code, material="pla")

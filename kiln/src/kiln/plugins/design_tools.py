@@ -234,7 +234,7 @@ class _DesignToolsPlugin:
             build_volume_z: float | None = None,
             nozzle_diameter: float | None = None,
             layer_height: float | None = None,
-            max_overhang_angle: float = 45.0,
+            max_overhang_angle: float | None = None,
         ) -> dict:
             """Run a ruthless audit of an original design before printing.
 
@@ -270,6 +270,7 @@ class _DesignToolsPlugin:
                     size; the report says which it used.
                 layer_height: Layer height in mm.
                 max_overhang_angle: Supportless overhang threshold in degrees.
+                    Left out, the material's own limit.
             """
             from kiln.original_design import audit_original_design as _audit
 

@@ -62,12 +62,11 @@ def print_frame(
     layer height is the one stated, else the bundled slicing profile's for
     that printer, else Kiln's default profile's.  The overhang limit is the
     printability analyzer's own for the material
-    (:func:`kiln.printability._resolve_overhang_threshold`); it sizes the plan
-    and is never said, since with Kiln Pro it is the tuning for the material.
+    (:func:`kiln.printability.overhang_threshold_deg`); it sizes the plan and
+    is never said, since a plastic's own figure is Kiln's to serve.
     """
     from kiln.assumed_nozzle import assumed_nozzle, stock_setting
-    from kiln.design_intelligence import load_pro_overlay_or_empty
-    from kiln.printability import _resolve_overhang_threshold
+    from kiln.printability import _resolve_overhang_threshold, material_overhangs
     from kiln.slicer_profiles import get_slicer_profile
 
     nozzle = assumed_nozzle(printer_id or None, stated=nozzle_mm, or_only_printer=True)
@@ -88,7 +87,7 @@ def print_frame(
     if layer is None:  # a nozzle finer than the default profile's layers
         layer, layer_from = nozzle.diameter_mm / 2.0, "half the nozzle width"
 
-    overhang = _resolve_overhang_threshold(None, material or None, load_pro_overlay_or_empty("printability_judgment"))
+    overhang = _resolve_overhang_threshold(None, material or None, material_overhangs(material or None))
     frame = PrintFrame(nozzle_mm=nozzle.diameter_mm, layer_mm=layer, overhang_deg=overhang)
     said = {
         "nozzle": nozzle.to_dict(),

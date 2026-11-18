@@ -15,6 +15,7 @@ wall is thin all the way down.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import trimesh
 
 from kiln import printability as P
@@ -66,6 +67,7 @@ def test_a_free_standing_thin_wall_is_still_a_wall():
     assert walls.fine_detail_count == 0
 
 
+@pytest.mark.usefixtures("kilns_slice_lines")
 def test_the_print_door_passes_the_ridge_and_refuses_the_wall(tmp_path):
     """The wall is 0.1 mm, thinner than Kiln's slice lays a line; a 0.3 mm one
     prints as one thin line (test_printability_judges_what_the_slicer_drops.py)."""

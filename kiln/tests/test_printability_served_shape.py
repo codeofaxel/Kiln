@@ -108,13 +108,17 @@ def _install_tuning(monkeypatch) -> None:
         "warping": copy.deepcopy(P._WARPING_PUBLIC_DEFAULTS),
         "thermal_stress": copy.deepcopy(P._THERMAL_STRESS_PUBLIC_DEFAULTS),
         "adhesion_force": copy.deepcopy(P._ADHESION_FORCE_PUBLIC_DEFAULTS),
-        "overhangs": {"default_limit_deg": 45.0, "material_limits_deg": {"abs": OVERHANG_LIMIT_DEG}},
     }
     import kiln.design_intelligence as di
 
     monkeypatch.setattr(
         di, "load_pro_overlay_or_empty",
         lambda kind: judgment if kind == "printability_judgment" else {},
+    )
+    # The plastic's own overhang figure, as the design-limits helper hands it.
+    monkeypatch.setattr(
+        P, "material_overhangs",
+        lambda material: {"overhangs": {"default_limit_deg": 45.0, "material_limits_deg": {"abs": OVERHANG_LIMIT_DEG}}},
     )
 
 
