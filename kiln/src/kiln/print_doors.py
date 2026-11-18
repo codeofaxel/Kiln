@@ -211,8 +211,9 @@ def _static_text(node: ast.AST) -> str | None:
 
 def _fixed_commands_are_not_a_start(node: ast.Call) -> bool:
     """True when every command in the call is a literal whose word is
-    known and is not a print start, nor a file run by a path the validator
-    refuses.  A variable, or an unparseable word, is not vouched for."""
+    known and is not a print start, nor a file run or restarted that the
+    validator refuses.  A variable, or an unparseable word, is not vouched
+    for."""
     from kiln.gcode import _runs_a_file_unseen
 
     if not node.args:

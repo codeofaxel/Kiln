@@ -75,6 +75,38 @@ RUNS_A_PRINT_FILE = [
     'M471 S"/gcodes" T"/sys" D1',
     'M471 S"/gcodes/part.gcode" T"part.g"',
     'M505 P"0:/gcodes"',
+    # Read the way the firmware reads parameters: a letter starts one with no
+    # space before it, in either case, and a line it cannot read one way only
+    # is refused.
+    'M98P"/gcodes/part.gcode"',
+    'M98 R1P"/gcodes/part.gcode"',
+    'M98 P"/macros/purge.g"P"/gcodes/part.gcode"',
+    'M98 P"/macros/purge.g" p"/gcodes/part.gcode"',
+    'M98 P"/macros/purge.g" S{1}',
+    "M98 Pconfig.g",
+    'M98 P""',
+    "M98",
+    "M98 R1",
+    'M471 S"/gcodes/part.gcode"',
+    "M471 S\"/gcodes/part.gcode\" T/gcodes/b.gcode",
+    'M471 S"/gcodes/part.gcode"T"/macros/part.g"',
+    # A word with a subcode is the word.
+    'M98.1 P"/gcodes/part.gcode"',
+    "M24.1",
+    'M32.5 "part.gcode"',
+]
+
+#: The files the firmware keeps to start an interrupted print again, and the
+#: words that run them.
+RESTARTS_AN_INTERRUPTED_PRINT = [
+    'M98 P"resurrect.g"',
+    'M98 P"0:/sys/resurrect.g"',
+    'M98 P"/SYS/Resurrect.g"',
+    'M98 P"/macros/../sys/./resurrect.g"',
+    'M98 P"resurrect-prologue.g"',
+    "M916",
+    "M1000",
+    "M1000 S",
 ]
 
 #: The printer's own macros, which a person wrote and keeps, still run, and
@@ -85,9 +117,44 @@ THE_PRINTERS_OWN_MACROS = [
     'M98 P"/macros/Load Filament (PLA).g"',
     'M98 P"0:/macros/purge.g"',
     'M98 P"/MACROS/Purge.g"',
-    "M98 Pconfig.g",
+    'M98P"/macros/purge.g"',
+    'M98 R1 P"/macros/purge.g"',
+    'M98 P"/macros/purge.g" R1',
+    'm98 p"0:/macros/purge.g"',
+    'M98 P"/macros/say ""hi"".g"',
     'M471 S"0:/gcodes/a.gcode" T"0:/gcodes/b.gcode"',
+    'M471 S"/gcodes/a.gcode"T"/gcodes/b.gcode"',
 ]
+
+
+@pytest.mark.parametrize("dialect", list(gcode.GCodeDialect))
+@pytest.mark.parametrize("line", RESTARTS_AN_INTERRUPTED_PRINT)
+def test_an_interrupted_print_is_not_restarted_by_a_raw_command(dialect, line):
+    result = gcode.validate_gcode([line], dialect=dialect)
+    assert result.valid is False and result.commands == [], (line, result.errors)
+    assert "resume_print" in result.errors[0], result.errors
+
+
+@pytest.mark.parametrize(
+    "lines, dialect",
+    [
+        (["G28", "SDCARD_PRINT_FILE FILENAME=other.gcode"], gcode.GCodeDialect.KLIPPER),
+        (["G28", 'M98 P"0:/gcodes/other.gcode"'], gcode.GCodeDialect.GENERIC),
+        (["G28", "M23 other.gcode", "M24"], gcode.GCodeDialect.MARLIN),
+    ],
+    ids=["klipper", "reprapfirmware", "marlin"],
+)
+def test_a_print_file_that_starts_another_file_is_refused(tmp_path, lines, dialect):
+    path = tmp_path / "part.gcode"
+    path.write_text("\n".join(lines) + "\n")
+    assert gcode.scan_gcode_file(str(path), dialect=dialect, macros=True).valid is False
+
+
+def test_a_print_file_calling_its_own_macros_still_passes(tmp_path):
+    path = tmp_path / "part.gcode"
+    path.write_text('PRINT_START EXTRUDER=200 BED=60\nM98 P"/macros/purge.g"\nG1 X10 Y10 F3000\n')
+    result = gcode.scan_gcode_file(str(path), dialect=gcode.GCodeDialect.KLIPPER, macros=True)
+    assert result.valid is True, result.errors
 
 
 @pytest.mark.parametrize("dialect", list(gcode.GCodeDialect))
