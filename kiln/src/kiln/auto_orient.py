@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import generic_limits
 from kiln.generation.validation import _SUPPORTED_MESH_FORMATS, _parse_mesh_file
 from kiln.printability import (
     _analyze_bed_adhesion,
@@ -628,7 +629,7 @@ def apply_orientation(
 def estimate_supports(
     file_path: str,
     *,
-    max_overhang_angle: float = 45.0,
+    max_overhang_angle: float = generic_limits.OVERHANG_UNSUPPORTED_DEG,
     plate_number: int | None = None,
 ) -> SupportEstimate:
     """Estimate support volume for a mesh in its current orientation.

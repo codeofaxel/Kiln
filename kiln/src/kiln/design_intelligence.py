@@ -1404,13 +1404,15 @@ def _public_material_profile_from_data(
         if "hard_to_bond" in bonding
         else {}
     )
+    from kiln.material_limits import general_design_limits
+
     return _PublicMaterialProfile(
         material_id=material_id.lower(),
         display_name=data["display_name"],
         category=data["category"],
         thermal=dict(data.get("thermal") or {}),
         chemical=dict(data.get("chemical") or {}),
-        design_limits=dict(data.get("design_limits") or {}),
+        design_limits=general_design_limits(),
         bonding=bonding_floor,
     )
 
@@ -1498,11 +1500,10 @@ def list_public_material_profiles() -> list[_PublicMaterialProfile]:
 # ---------------------------------------------------------------------------
 #
 # Public Kiln's materials.json carries only the safety floor: thermal
-# limits, chemical safety (UV/food/outgassing), process-floor design
-# limits (min wall thickness, overhangs), and brand identification +
-# safety-relevant tunings.  The curated layer (mechanical
-# properties, design_limits beyond process floor, use_case_ratings,
-# agent_guidance paragraphs) ships in kiln-pro's overlay.
+# limits, chemical safety (UV/food/outgassing), and brand identification +
+# safety-relevant tunings.  A plastic's design limits are read through
+# :mod:`kiln.material_limits`.  The curated layer (mechanical properties,
+# use_case_ratings, agent_guidance paragraphs) ships in kiln-pro's overlay.
 #
 # When Kiln Pro has no pick to give (a plain install, a caller below Pro
 # on Kiln's servers), ``recommend_material_for_design`` answers with this
@@ -3487,10 +3488,15 @@ def get_design_constraints(
     # Add material-specific guidance
     if recommendation and recommendation.material:
         combined_guidance.extend(recommendation.material.agent_guidance)
-        # Merge material design limits
+        # Merge material design limits: the curated keys a profile carries,
+        # then the plastic's limits from the one helper every check reads.
+        from kiln.material_limits import limits_for
+
         for key, value in recommendation.material.design_limits.items():
             limit_key = f"material_{key}"
             combined_rules[limit_key] = value
+        for key, value in limits_for(recommendation.material.material_id).design_limits().items():
+            combined_rules[f"material_{key}"] = value
 
     if printer_profile:
         combined_guidance.extend(printer_profile.agent_notes)

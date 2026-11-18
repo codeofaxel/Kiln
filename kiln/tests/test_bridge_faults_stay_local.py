@@ -200,6 +200,22 @@ def test_the_pairing_check(monkeypatch, caplog):
     _assert_kept_local(out, caplog)
 
 
+def test_the_design_limits(monkeypatch, caplog):
+    from kiln import _pro_material_limits_bridge as bridge
+    from kiln import material_limits
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, for_the_wire=_raise)
+    material_limits.forget()
+    try:
+        limits = material_limits.limits_for("pla")
+        assert limits.basic and limits.miss is not None
+        out = {"limits": limits.to_dict(), "notes": limits.notes()}
+        assert out["notes"]
+        _assert_kept_local(out, caplog)
+    finally:
+        material_limits.forget()
+
+
 def test_the_multi_material_check(monkeypatch, caplog):
     from kiln import _pro_material_pairing_bridge as bridge
     from kiln.material_safety import check_material_compatibility

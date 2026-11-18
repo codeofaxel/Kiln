@@ -24,7 +24,7 @@ from typing import Any, ClassVar, Literal
 
 import numpy as np
 
-from kiln import _vec, step_import
+from kiln import _vec, generic_limits, step_import
 from kiln.generation.validation import (
     _SUPPORTED_MESH_FORMATS,
     _bed_threshold_z,
@@ -1025,21 +1025,14 @@ _ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
     ],
 }
 
-# Public floor: the universal 45° rule that every cited 3D-printing
-# source treats as the safety-baseline angle below which any FDM
-# material prints cleanly without supports.  The free tier sees this
-# floor for every material.  Pro+ overlay (``printability_judgment``
-# overlay's ``overhangs`` block) supplies per-material limits keyed by
-# filament identifier; warp-prone materials (TPU, PP) drop below 45°,
-# forgiving materials (PLA, pla_plus) can sit above it.  The lookup
-# falls back to ``default_limit_deg`` when a material is absent from
-# the overlay's ``material_limits_deg``, and to the public 45° rule
-# when the overlay itself is absent.
+# The general overhang figure (kiln.generic_limits), the angle every
+# check falls back to.  A plastic's own figure reaches the lookup as an
+# ``overhangs`` block built by :func:`material_overhangs`; the lookup
+# falls back to ``default_limit_deg`` when a material is absent from the
+# block's ``material_limits_deg``, and to these defaults when no block
+# is given.
 _OVERHANGS_PUBLIC_DEFAULTS: dict[str, Any] = {
-    "default_limit_deg": 45.0,
-    # Free tier ships zero per-material overrides — the universal 45°
-    # rule is the only floor.  Pro+ overlay provides the per-material
-    # SME-tuned values; see kiln3d.com for tier details.
+    "default_limit_deg": generic_limits.OVERHANG_UNSUPPORTED_DEG,
     "material_limits_deg": {},
 }
 
@@ -1081,15 +1074,31 @@ def _resolve_overhang_threshold(
     return float(default_limit)
 
 
+def material_overhangs(material: str | None) -> dict[str, Any]:
+    """The ``overhangs`` block :func:`_resolve_overhang_threshold` reads for
+    *material*: the plastic's own figure, or its family's, from the one
+    helper every check reads (:func:`kiln.material_limits.limits_for`), over
+    the general figure.  With no figure of its own, the general figure only."""
+    from kiln.material_limits import OVERHANG, limits_for
+
+    config: dict[str, Any] = {
+        "default_limit_deg": generic_limits.OVERHANG_UNSUPPORTED_DEG,
+        "material_limits_deg": {},
+    }
+    if material:
+        limits = limits_for(material)
+        if limits.is_own(OVERHANG) and limits.value(OVERHANG):
+            config["material_limits_deg"] = {material: float(limits.value(OVERHANG))}
+    return {"overhangs": config}
+
+
 def overhang_threshold_deg(material: str | None = None) -> float:
     """The overhang angle, from vertical, past which a face of *material*
     counts as an overhang here -- the angle :func:`analyze_printability`
     reads its verdict against, and the one a slice's support threshold is
-    written from.  Per-material values reach it through the kiln-pro
-    overlay; without one, the 45 degree floor."""
-    from kiln.design_intelligence import load_pro_overlay_or_empty
-
-    return _resolve_overhang_threshold(None, material, load_pro_overlay_or_empty("printability_judgment"))
+    written from.  The plastic's own figure where Kiln has one
+    (:func:`material_overhangs`); without one, the general figure."""
+    return _resolve_overhang_threshold(None, material, material_overhangs(material))
 
 
 def judge_supports(
@@ -1143,13 +1152,11 @@ def _judge_supports_here(
 ) -> SupportJudgement:
     """:func:`judge_supports`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
-    from kiln.design_intelligence import load_pro_overlay_or_empty
 
     nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
     mesh_path = _mesh_path_for_analysis(file_path, plate_number)
     triangles, _vertices, bbox, z_min = _load_mesh_for_analysis(mesh_path)
-    overlay = load_pro_overlay_or_empty("printability_judgment")
-    threshold = _resolve_overhang_threshold(max_overhang_angle, material, overlay)
+    threshold = _resolve_overhang_threshold(max_overhang_angle, material, material_overhangs(material))
     judged = _judge_supports(
         triangles, z_min, bbox,
         resolved_threshold=threshold, layer_height=layer_height,
@@ -4344,10 +4351,9 @@ _BED_PROXIMATE_CEILING_MM: float = 0.61
 # on.
 _BRIDGE_SUPPORTED_EDGE_DROP_MM: float = 1e-3
 
-# Two-sided bridge spans up to this print reliably without supports —
-# the same universal 10 mm rule the public scoring has always used
-# (the pro overlay layers per-material limits on top).
-_MAX_SELF_SUPPORTING_BRIDGE_MM: float = 10.0
+# Two-sided bridge spans up to this print reliably without supports:
+# the general bridge figure (kiln.generic_limits).
+_MAX_SELF_SUPPORTING_BRIDGE_MM: float = generic_limits.BRIDGE_MAX_MM
 
 # One-sided lateral reach: an extruded line anchors to the line laid
 # next to it, so deck points within a few extrusion widths (0.4 mm
@@ -5513,7 +5519,7 @@ def _analyze_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
     *,
-    max_overhang_angle: float = 45.0,
+    max_overhang_angle: float = generic_limits.OVERHANG_UNSUPPORTED_DEG,
     layer_height: float = 0.2,
     normalize_winding: bool = True,
     bbox: dict[str, float] | None = None,
@@ -7935,26 +7941,27 @@ def _material_wall_floor(
     component_size_uniformity: float,
     genus: int,
 ) -> float | None:
-    """The material's minimum wall, when kiln-pro has one to give.
+    """The material's minimum wall, when there is one to give.
 
     Asked BEFORE the walls are measured, so the thin-wall block reports
     against the same floor kiln-pro's material wall rule judges by
     (https://kiln3d.com) — one measurement that both read, never a
-    second pass re-measured to agree.  ``None`` — no kiln-pro, a kiln-pro
-    that predates the question, no floor for this material or this
-    caller — leaves the nozzle as the threshold, the safety floor every
-    tier gets.
+    second pass re-measured to agree.  Without kiln-pro's rule here, the
+    plastic's own recommended wall from the one helper every check reads
+    (:func:`_plastic_recommended_wall`).  ``None`` — no floor of the
+    plastic's own for this caller — leaves the nozzle as the threshold,
+    the safety floor every tier gets.
     """
     try:
         from kiln_pro.bridge import pro_features
     except ImportError:
-        return None
+        return _plastic_recommended_wall(material, nozzle_diameter)
     try:
         if not pro_features.is_available("printability_overlay"):
-            return None
+            return _plastic_recommended_wall(material, nozzle_diameter)
         resolve = getattr(pro_features.printability_overlay, "resolve_wall_floor", None)
         if resolve is None:
-            return None
+            return _plastic_recommended_wall(material, nozzle_diameter)
         floor = resolve(
             material,
             printer_id=printer_id,
@@ -7967,7 +7974,18 @@ def _material_wall_floor(
     except Exception:  # noqa: BLE001 — the overlay must never break the public path
         logger.debug("material wall floor unavailable", exc_info=True)
         return None
-    return floor if floor > 0.0 else None
+    return floor if floor > 0.0 else _plastic_recommended_wall(material, nozzle_diameter)
+
+
+def _plastic_recommended_wall(material: str, nozzle_diameter: float) -> float | None:
+    """The plastic's own recommended wall at *nozzle_diameter*
+    (:func:`kiln.material_limits.limits_for`), or ``None`` when the plastic
+    has none of its own for this caller."""
+    from kiln.material_limits import WALL_RECOMMENDED, limits_for
+
+    limits = limits_for(material, nozzle_mm=nozzle_diameter)
+    own = limits.value(WALL_RECOMMENDED) if limits.is_own(WALL_RECOMMENDED) else None
+    return float(own) if own and own > 0 else None
 
 
 def _tell_whoever_runs_this_machine(file_path: str, stopped: Exception) -> None:
@@ -8983,7 +9001,7 @@ def _analyze_printability_here(
     # because 38° is below the supports estimator's 45° floor.  Pin
     # them together so the verdict and the volume estimate agree.
     _resolved_threshold = _resolve_overhang_threshold(
-        max_overhang_angle, material, judgment_overlay,
+        max_overhang_angle, material, material_overhangs(material),
     )
     # Connected-component count: one closed body = 1; a multi-body mesh
     # = N components.  Exposed for the kiln-pro overlay.

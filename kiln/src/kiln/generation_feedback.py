@@ -1452,16 +1452,28 @@ def enhance_prompt_with_design_intelligence(
     rules = brief.combined_rules
     mat = brief.recommended_material
     mat_limits: dict[str, Any] = {}
-    if mat and mat.material and hasattr(mat.material, "design_limits"):
-        mat_limits = mat.material.design_limits or {}
+    if mat and mat.material:
+        from kiln.material_limits import limits_for
+
+        # The curated keys a profile carries, then the plastic's limits from
+        # the one helper every check reads.
+        mat_limits = {
+            **(getattr(mat.material, "design_limits", None) or {}),
+            **limits_for(mat.material.material_id).design_limits(),
+        }
 
     # -----------------------------------------------------------------
     # Core constraints (always included regardless of budget)
     # -----------------------------------------------------------------
     core_constraints: list[str] = []
 
-    # Wall thickness — prefer material-specific recommended value
-    rec_wall = mat_limits.get("recommended_wall_thickness_mm") or rules.get("min_wall_thickness_mm")
+    # Wall thickness — the material's recommended wall, or the brief's own
+    # minimum when that is stricter.
+    wall_candidates = [
+        float(v) for v in (mat_limits.get("recommended_wall_thickness_mm"), rules.get("min_wall_thickness_mm"))
+        if isinstance(v, (int, float))
+    ]
+    rec_wall = max(wall_candidates) if wall_candidates else None
     if rec_wall:
         core_constraints.append(f"minimum wall thickness {rec_wall}mm")
 
@@ -1485,7 +1497,9 @@ def enhance_prompt_with_design_intelligence(
         )
 
     # Material-specific overhang/bridge limits
-    overhang_limit = mat_limits.get("max_unsupported_overhang_deg", 50)
+    from kiln.generic_limits import OVERHANG_UNSUPPORTED_DEG
+
+    overhang_limit = mat_limits.get("max_unsupported_overhang_deg", OVERHANG_UNSUPPORTED_DEG)
     core_constraints.append(f"no overhangs greater than {overhang_limit} degrees")
 
     bridge_limit = mat_limits.get("max_bridge_length_mm")
@@ -1805,8 +1819,15 @@ def build_parametric_generation_prompt(
         if material:
             mat_profile = get_material_profile(material)
             if mat_profile:
-                dl = mat_profile.design_limits or {}
+                from kiln.material_limits import limits_for
+
+                # The curated keys a profile carries, then the plastic's
+                # limits from the one helper every check reads.
+                plastic_limits = limits_for(material)
+                dl = {**(mat_profile.design_limits or {}), **plastic_limits.design_limits()}
                 lines = [f"// Material: {mat_profile.display_name} \u2014 Design limits:"]
+                if plastic_limits.basic:
+                    lines.append("// (general figures: this plastic's own limits were not available)")
                 rec_wall = dl.get("recommended_wall_thickness_mm")
                 if rec_wall:
                     lines.append(f"// - Recommended wall thickness: {rec_wall}mm")

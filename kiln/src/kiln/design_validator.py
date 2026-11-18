@@ -364,13 +364,17 @@ def validate_design(
     material_name = ""
     material_limits: dict[str, Any] = {}
 
-    if rec_material and rec_material.material:
-        material_name = rec_material.material.display_name
-        material_limits = rec_material.material.design_limits
-
     resolved_material_id: str | None = None
+    limits_notes: list[str] = []
     if rec_material and rec_material.material:
+        from kiln.material_limits import limits_for
+
+        material_name = rec_material.material.display_name
         resolved_material_id = rec_material.material.material_id
+        # One plastic's limits, from the one helper every check reads.
+        plastic_limits = limits_for(resolved_material_id)
+        material_limits = plastic_limits.design_limits()
+        limits_notes = plastic_limits.notes()
 
     # 4. Run checks.
     checks: list[DesignValidationCheck] = []
@@ -430,6 +434,8 @@ def validate_design(
     overall_pass = critical_count == 0
 
     summary = _build_summary(checks, failed_checks, material_name)
+    if limits_notes:
+        summary = " ".join([summary, *limits_notes])
 
     return DesignValidationReport(
         file_path=file_path,

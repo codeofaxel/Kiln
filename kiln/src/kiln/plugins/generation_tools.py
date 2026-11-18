@@ -72,7 +72,7 @@ class _GenerationToolsPlugin:
             build_volume_z: float | None = None,
             nozzle_diameter: float | None = None,
             layer_height: float | None = None,
-            max_overhang_angle: float = 45.0,
+            max_overhang_angle: float | None = None,
             timeout: int = 600,
             max_attempts: int = 2,
             goal_id: str = "",
@@ -132,6 +132,7 @@ class _GenerationToolsPlugin:
                 nozzle_diameter: Printer nozzle diameter in mm.
                 layer_height: Printer layer height in mm.
                 max_overhang_angle: Supportless overhang threshold in degrees.
+                    Left out, the material's own limit.
                 timeout: Max seconds to wait per generation attempt.
                 max_attempts: Max corrective generation attempts.
             """

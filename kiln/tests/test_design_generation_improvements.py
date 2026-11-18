@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import struct
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -465,18 +466,19 @@ class TestEnhancedPromptEnrichment:
     """Design intelligence prompt enrichment with per-material constraints."""
 
     def test_material_overhang_limit_used(self):
-        """Should use material-specific overhang angle, not hardcoded 50."""
+        """Should use the plastic's own overhang angle, not a hardcoded one."""
         from kiln.generation_feedback import enhance_prompt_with_design_intelligence
 
-        # Mock design intelligence to return material with 55-degree limit
+        # The plastic's limits come from the one helper every check reads;
+        # the profile carries only the curated keys (a cantilever here).
         mock_material = MagicMock()
         mock_material.material.display_name = "PETG"
-        mock_material.material.design_limits = {
+        mock_material.material.design_limits = {"max_cantilever_length_mm": 40}
+        served = SimpleNamespace(design_limits=lambda: {
             "max_unsupported_overhang_deg": 55,
             "recommended_wall_thickness_mm": 1.5,
             "max_bridge_length_mm": 12,
-            "max_cantilever_length_mm": 40,
-        }
+        })
 
         mock_brief = MagicMock()
         mock_brief.combined_rules = {"min_wall_thickness_mm": 1.2}
@@ -485,7 +487,8 @@ class TestEnhancedPromptEnrichment:
         mock_brief.combined_guidance = []
 
         with patch("kiln.design_intelligence.get_design_constraints", return_value=mock_brief), \
-             patch("kiln.design_intelligence.get_printer_design_profile", return_value=None):
+             patch("kiln.design_intelligence.get_printer_design_profile", return_value=None), \
+             patch("kiln.material_limits.limits_for", return_value=served):
             result = enhance_prompt_with_design_intelligence("test prompt", max_length=2000)
 
         assert "55 degrees" in result.improved_prompt
