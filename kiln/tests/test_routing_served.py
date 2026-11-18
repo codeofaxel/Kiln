@@ -265,7 +265,20 @@ class TestAMissIsBasic:
     def test_signed_out_says_signing_in_gets_the_pick(self, doors):
         with plain_install_served(SIGNED_OUT):
             reply = doors["recommend_material"](intent="strong")
-        assert reply["message"].endswith("Sign in and ask again for Kiln's pick for this part.")
+        assert reply["message"].endswith("Sign in and Kiln picks the plastic for this part.")
+
+    def test_both_material_picks_say_a_miss_the_same_way(self, doors):
+        """The recommender and the design pick share one signed-out sentence
+        and one plastics list, narrowed by the food floor for a food part."""
+        from kiln.design_intelligence import basic_material_answer
+        from kiln.served_answer import Miss
+
+        with plain_install_served(SIGNED_OUT):
+            pick = doors["recommend_material"](intent="a cup for drinking coffee")
+        design = basic_material_answer("a cup for drinking coffee", None, Miss("signed_out", code="ACCOUNT_REQUIRED"))
+        assert pick["plastics"] == design["plastics"]
+        assert pick["message"].split(". ")[-1] == design["message"].split(". ")[-1]
+        assert "ABS" not in design["plastics"]
 
     def test_a_food_brief_lists_only_what_the_food_floor_keeps(self, doors):
         from kiln.material_basics import plastics_printer_can_melt

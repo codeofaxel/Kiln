@@ -28,7 +28,7 @@ import pytest
 
 from kiln import _pro_material_pick_bridge as bridge
 from kiln import design_intelligence as di
-from kiln.material_basics import plastics_printer_can_melt
+from kiln.material_basics import basic_plastics, plastics_printer_can_melt
 from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 #: A pick as ``material_floor_pick`` sends it.
@@ -271,9 +271,8 @@ class TestAMissPicksNothing:
 
     def test_the_basic_reply_reads_nothing_about_a_material(self, monkeypatch):
         """With every reader of the material catalogue made to fail, the basic
-        reply still comes back whole: it reads the nozzle table only."""
-        from kiln import material_safety
-
+        reply still comes back whole: it reads the nozzle table, and for a
+        part that touches food only the public food-contact floor."""
         def _no(*_a, **_k):
             raise AssertionError("the basic reply read the material catalogue")
 
@@ -283,9 +282,11 @@ class TestAMissPicksNothing:
         for name in ("get_material_profile", "get_public_material_profile", "list_public_material_profiles",
                      "list_material_profiles"):
             monkeypatch.setattr(di, name, _no)
-        monkeypatch.setattr(material_safety, "_food_ratings", _no)
-        out = _door()("shelf bracket that holds 10 lbs, food safe, worn on the wrist", max_hotend_temp_c=240)
-        assert out["basic"] is True and out["plastics"] == plastics_printer_can_melt(240)
+        for text in ("shelf bracket that holds 10 lbs, worn on the wrist",
+                     "shelf bracket that holds 10 lbs, food safe, worn on the wrist"):
+            out = _door()(text, max_hotend_temp_c=240)
+            assert out["basic"] is True and out["plastics"] == basic_plastics(text, 240)
+        assert _door()("shelf bracket", max_hotend_temp_c=240)["plastics"] == plastics_printer_can_melt(240)
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +343,9 @@ class TestTheDesignAnalysis:
         assert brief["recommended_material"] is None
         basic = brief["material_basic"]
         assert basic["basic"] is True and basic["why"] == "signed_out"
-        assert basic["plastics"] == plastics_printer_can_melt(None)
+        # A part that touches food lists only what the food-contact floor allows.
+        assert basic["plastics"] == basic_plastics("a cereal bowl to eat from", None)
+        assert "ABS" not in basic["plastics"] and basic["plastics"]
         assert basic["food_contact_use_case_detected"] is True
 
 

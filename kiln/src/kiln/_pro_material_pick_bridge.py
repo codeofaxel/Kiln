@@ -31,7 +31,7 @@ import logging
 import time
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error, sentence
+from kiln.served_answer import Miss, classify_answer, classify_transport_error
 
 logger = logging.getLogger(__name__)
 
@@ -66,16 +66,9 @@ def pick(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss | N
 def miss_sentence(miss: Miss | None) -> str:
     """The one line a door says when no pick came: Kiln did not pick a
     plastic for this part, why, and what fixes it."""
-    if miss is None:
-        miss = Miss("unanswered", detail="no pick")
-    return sentence(
-        miss,
-        feature=FEATURE,
-        on_the_line="Kiln did not pick a plastic for this part",
-        cannot="pick one",
-        wont="lists the plastics this printer can melt instead",
-        then="Kiln picks the plastic for this part" if miss.cause == "signed_out" else "ask again",
-    )
+    from kiln.material_basics import basic_pick_line
+
+    return basic_pick_line(miss, feature=FEATURE)
 
 
 #: ``_local``'s answer when kiln-pro is not on this computer.

@@ -528,18 +528,11 @@ def basic_materials(intent: str, miss: Miss, *, printer_id: str = "") -> BasicMa
     """The answer when Kiln's material recommendation gives none: no pick,
     the plastics the printer can melt (unranked), the food-contact floor and
     the skin-contact caution, and one sentence saying why and what fixes it."""
-    from kiln import served_answer
     from kiln._pro_routing_bridge import FEATURE
-    from kiln.material_basics import plastics_printer_can_melt
-    from kiln.material_safety import (
-        filter_food_safe_materials,
-        use_case_implies_food_contact,
-    )
+    from kiln.material_basics import basic_pick_line, basic_plastics
 
     limit = _hotend_limit_c(printer_id)
-    plastics = plastics_printer_can_melt(limit)
-    if use_case_implies_food_contact(intent):
-        plastics = filter_food_safe_materials(plastics, require="yes_or_conditional")
+    plastics = basic_plastics(intent, limit)
     cautions: list[str] = []
     try:
         from kiln.design_intelligence import use_case_implies_skin_contact
@@ -548,17 +541,7 @@ def basic_materials(intent: str, miss: Miss, *, printer_id: str = "") -> BasicMa
             cautions.append(f"{_SKIN_LEAD} {_SKIN_TAIL}")
     except Exception:  # noqa: BLE001 — advisory is best-effort
         logger.debug("Skin-contact advisory skipped", exc_info=True)
-    note = served_answer.sentence(
-        miss,
-        feature=FEATURE,
-        on_the_line="Kiln did not pick a plastic for this part",
-        cannot="pick one",
-        wont=(
-            "lists the plastics this printer can melt instead" if limit is not None
-            else "lists common plastics instead"
-        ),
-        then="ask again for Kiln's pick for this part",
-    )
+    note = basic_pick_line(miss, feature=FEATURE, hotend_known=limit is not None)
     return BasicMaterials(plastics=plastics, note=note, miss=miss, hotend_limit_c=limit, cautions=cautions)
 
 

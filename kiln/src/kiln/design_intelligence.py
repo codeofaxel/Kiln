@@ -1706,9 +1706,9 @@ def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: 
     :param miss: The :class:`kiln.served_answer.Miss` saying why no pick came.
     """
     from kiln import served_answer
-    from kiln._pro_material_pick_bridge import miss_sentence
+    from kiln._pro_material_pick_bridge import FEATURE
     from kiln.load_bearing_detector import detect_load_bearing
-    from kiln.material_basics import plastics_printer_can_melt
+    from kiln.material_basics import basic_pick_line, basic_plastics
     from kiln.material_safety import food_contact_nozzle_advisory, use_case_implies_food_contact
 
     text = requirements_text if isinstance(requirements_text, str) else ""
@@ -1723,8 +1723,8 @@ def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: 
     out: dict[str, Any] = {
         "success": True,
         "basic": True,
-        "message": miss_sentence(miss),
-        "plastics": plastics_printer_can_melt(max_hotend_temp_c),
+        "message": basic_pick_line(miss, feature=FEATURE, hotend_known=max_hotend_temp_c is not None),
+        "plastics": basic_plastics(text, max_hotend_temp_c),
         "warnings": warnings,
     }
     if use_case_implies_food_contact(text):
