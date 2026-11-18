@@ -998,13 +998,10 @@ def _safety_fields(safety_result: dict[str, Any]) -> dict[str, Any]:
 
 
 def plate_material_safety(parts: list[ColorPart]) -> dict[str, Any]:
-    """What :func:`compose_multicolor_3mf` says about *parts*' materials, without composing.
+    """The composer's material verdict for *parts*, without composing.
 
-    ``{"success": True, ...}`` with the same safety fields a composed plate
-    carries (``hardware_warnings``, ``safety_basic``, ``safety_caution`` and
-    the rest), or the composer's own refusal for materials that must never
-    share a print.  A door that prints a plate it composed on an earlier call
-    reads this, so the call that starts the print says what the plate's
+    The same safety fields a composed plate carries, or the composer's own
+    refusal, so the call that prints a plate built earlier says what its
     preview said.
     """
     safety_result = _material_check(_specified_materials(parts))
