@@ -976,6 +976,33 @@ class TestARetryBesideTheFailedPart:
         assert len(self.printer.started) == 1
         assert [os.path.basename(c.file_name) for c in self.cleared if c] == [os.path.basename(rescaled)]
 
+    @pytest.mark.parametrize("token", ["none", "for another part"])
+    @pytest.mark.parametrize("door, arg", [("retry", "model_path"), ("slice_and_print", "input_path")])
+    def test_a_yes_with_no_preview_of_this_part_sends_nothing(self, monkeypatch, tmp_path, door, arg, token):
+        """The person said go, and no preview of this part is on this call:
+        refused before anything is sent, so the printer keeps no file."""
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        other = self._token(_cube(tmp_path / "other.stl", size=10.0)) if token != "none" else None
+        tool = "retry_print_with_fix" if door == "retry" else "slice_and_print"
+
+        def _print():
+            if door == "retry":
+                return self._retry(model, preview_token=other)
+            from kiln.plugins import slicer_tools
+            from tests.test_watchdog_attached_to_every_print import _plugin_tools
+
+            sap = _plugin_tools(slicer_tools)["slice_and_print"]
+            return sap(input_path=model, printer_name="workshop", skip_validation=True, preview_token=other)
+
+        out = self._asked_then(monkeypatch, model, _print, tool=tool, arg=arg)
+        assert self.printer.uploaded == [] and self.printer.started == [], out
+        expected = "PREVIEW_NOT_CONFIRMED" if token == "none" else "PREVIEW_TOKEN_INVALID"
+        assert out["error"]["code"] == expected, out
+
     @staticmethod
     def _step(path, size: float = 20.0) -> str:
         pytest.importorskip("OCP", reason="a real STEP file needs the CAD kernel to write and convert")

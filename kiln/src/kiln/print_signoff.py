@@ -82,6 +82,7 @@ __all__ = [
     "take",
     "require_signoff",
     "signoff_required",
+    "token_rejected_message",
     "token_verdict",
     "adapter_verdict",
 ]
@@ -694,6 +695,11 @@ def exemption_verdict(
     return None
 
 
+def token_rejected_message(reason: str | None) -> str:
+    """What a start is told when its preview token does not fit the print."""
+    return f"Preview token rejected: {reason}. Re-render the preview and issue a fresh token."
+
+
 def token_verdict(
     tool: str,
     file_name: str,
@@ -722,11 +728,7 @@ def token_verdict(
             preview_token, file_name, printer_id=printer_id or None,
         )
         if not ok:
-            return Verdict(
-                ok=False,
-                code=CODE_TOKEN_INVALID,
-                message=f"Preview token rejected: {reason}. Re-render the preview and issue a fresh token.",
-            )
+            return Verdict(ok=False, code=CODE_TOKEN_INVALID, message=token_rejected_message(reason))
         door = getattr(token, "door", "") or ""
     except Exception as exc:  # noqa: BLE001 — a broken gate must not brick printing
         logger.warning("Preview gate validation failed: %s", exc)

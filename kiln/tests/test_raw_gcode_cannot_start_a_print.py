@@ -225,6 +225,37 @@ def test_the_interceptor_blocks_a_quote_left_open_at_a_semicolon():
     assert interceptor.intercept(session.session_id, 'M117 "a;b"').action == InterceptionAction.ALLOW
 
 
+#: Writing a file into the folders whose files run as macros, however the
+#: place is spelled.
+WRITES_INTO_A_MACRO_FOLDER = [
+    'M28 "0:/macros/job.g"',
+    "M28 0:/macros/job.g",
+    "M28 /MACROS/Job.g",
+    'M28 "0:/gcodes/../macros/job.g"',
+    'M28 "/sys/daemon.g"',
+    'M559 P"0:/sys/daemon.g"',
+    'M559 P"daemon.g"',
+    "M559",
+    'M560 P"0:/macros/job.g"',
+    'M560 P"/sys/config.g"',
+    'G4 S0 M28 "0:/macros/job.g"',
+]
+#: Writing a print file among the print files, or a page among the pages.
+WRITES_ELSEWHERE = ['M28 "0:/gcodes/part.gcode"', "M28 part.gcode", 'M560 P"0:/www/index.html"', 'M560 P"reprap.htm"']
+
+
+@pytest.mark.parametrize("line", WRITES_INTO_A_MACRO_FOLDER)
+def test_writing_a_file_into_a_macro_folder_is_refused(line):
+    for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
+        assert result.valid is False and result.commands == [], (line, result.errors)
+        assert "/macros" in result.errors[0], result.errors
+
+
+@pytest.mark.parametrize("line", WRITES_ELSEWHERE)
+def test_writing_a_file_elsewhere_is_still_a_write(line):
+    assert gcode.validate_gcode([line]).valid is True, line
+
+
 @pytest.mark.parametrize("line", THE_PRINTERS_OWN_MACROS)
 def test_the_printers_own_macros_still_run(line):
     for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
@@ -276,6 +307,15 @@ def test_the_send_gcode_tool_never_runs_a_print_file_as_a_macro(monkeypatch):
     monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
     result = _tool()('M98 P"0:/gcodes/part.gcode"')
     assert result["success"] is False
+    adapter.send_gcode.assert_not_called()
+
+
+def test_the_send_gcode_tool_never_writes_a_file_into_a_macro_folder(monkeypatch):
+    adapter = _adapter()
+    monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
+    monkeypatch.setattr(server, "_check_confirmation", lambda *_a, **_k: None)
+    result = _tool()('M28 "0:/macros/job.g"\nG1 X10\nM29')
+    assert result["success"] is False, result
     adapter.send_gcode.assert_not_called()
 
 

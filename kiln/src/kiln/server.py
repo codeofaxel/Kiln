@@ -4411,9 +4411,55 @@ def _no_yes_before_sending(
 
     file_name = print_signoff.approved_part(file_name)
     exempt, aimed, granted = _said_go(tool_name, file_name, printer_name)
-    if exempt is not None or granted is not None:
+    if exempt is not None:
         return None
-    return _no_yes_error(tool_name, file_name, preview_token, aimed)
+    if granted is None:
+        return _no_yes_error(tool_name, file_name, preview_token, aimed)
+    return _no_preview_before_sending(tool_name, file_name, preview_token, granted, printer_name)
+
+
+def _no_preview_before_sending(
+    tool_name: str, file_name: str, preview_token: str | None, granted: Any, printer_name: str | None,
+) -> dict | None:
+    """The preview half of the gate, asked before a door sends its file and
+    without spending the token: ``None`` when this call's token is good for
+    *file_name*, or the door that took the yes judged the preview."""
+    if not preview_token:
+        if granted.door:
+            return None
+        return _changed_part_error(tool_name, file_name) or _unseen_error(tool_name, file_name)
+    try:
+        from kiln.preview_gate import get_preview_gate
+
+        ok, reason, _token = get_preview_gate().validate_detail(
+            preview_token, file_name, printer_id=_token_printer_id(printer_name), consume=False,
+        )
+    except Exception:  # noqa: BLE001 — a gate that cannot read the token is the full gate's to judge
+        return None
+    if ok:
+        return None
+    from kiln import print_signoff
+
+    return _changed_part_error(tool_name, file_name) or _error_dict(
+        print_signoff.token_rejected_message(reason), code="PREVIEW_TOKEN_INVALID",
+    )
+
+
+def _token_printer_id(printer_name: str | None) -> str | None:
+    """The printer model a preview token is matched against for a start on *printer_name*."""
+    return _resolve_printer_model_live(printer_name) if printer_name else _PRINTER_MODEL
+
+
+def _unseen_error(tool_name: str, file_name: str) -> dict:
+    """The refusal for a print a person said go to with no preview of it on record."""
+    name = os.path.basename(str(file_name or "")) or "this file"
+    return _error_dict(
+        f"{tool_name} refuses to proceed: a yes was given for {name}, but no preview of it "
+        "is on record — the dialog describes a job, it cannot show one. Show the print "
+        "first (the inline 3D stage, else a viewer link, else the PNG renders), then call "
+        "issue_preview_token(file_path, door=<stage|url|png>) and pass preview_token=<token>.",
+        code="PREVIEW_NOT_CONFIRMED",
+    )
 
 
 def _preview_gate_error(
@@ -4518,11 +4564,7 @@ def _preview_gate_error(
             file_name,
             preview_token,
             printer_name=printer_name,
-            printer_id=(
-                _resolve_printer_model_live(printer_name)
-                if printer_name
-                else _PRINTER_MODEL
-            ),
+            printer_id=_token_printer_id(printer_name),
         )
         if not verdict.ok:
             print_signoff.clear()
@@ -4540,16 +4582,7 @@ def _preview_gate_error(
 
     if not saw:
         print_signoff.clear()
-        if block := _changed_part_error(tool_name, file_name):
-            return block
-        name = os.path.basename(str(file_name or "")) or "this file"
-        return _error_dict(
-            f"{tool_name} refuses to proceed: a yes was given for {name}, but no preview of it "
-            "is on record — the dialog describes a job, it cannot show one. Show the print "
-            "first (the inline 3D stage, else a viewer link, else the PNG renders), then call "
-            "issue_preview_token(file_path, door=<stage|url|png>) and pass preview_token=<token>.",
-            code="PREVIEW_NOT_CONFIRMED",
-        )
+        return _changed_part_error(tool_name, file_name) or _unseen_error(tool_name, file_name)
     if is_hosted_multitenant() and grade_of(granted.source) == GRADE_B:
         print_signoff.clear()
         _audit(

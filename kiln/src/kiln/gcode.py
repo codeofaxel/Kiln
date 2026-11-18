@@ -247,6 +247,14 @@ _RUNS_A_FILE: dict[str, str] = {
     "M916": _RESUMES_A_PRINT.replace("from the printer's resume file", "after a power failure (M916)"),
     "M1000": _RESUMES_A_PRINT.replace("from the printer's resume file", "after a power failure (M1000)"),
 }
+#: Words that write a file on the printer, and the folder a bare name lands in.
+_WRITES_A_FILE: dict[str, str] = {"M28": "/gcodes", "M559": "/sys", "M560": "/www"}
+#: Where each of those writes when no file is named.
+_WRITES_BY_DEFAULT: dict[str, str] = {"M559": "/sys/config.g", "M560": "/www/index.html"}
+_WRITES_INTO_A_MACRO_FOLDER = (
+    "Writing a file into the printer's /sys or /macros folder ({word}) is blocked unless it names, readably, a "
+    "place outside them -- a file there runs as a macro, which no one is shown first"
+)
 #: Macro words, in a print file, that start another file on the printer.
 _MACRO_STARTS: dict[str, str] = {
     "SDCARD_PRINT_FILE": (
@@ -590,9 +598,37 @@ def _runs_a_file_unseen(cmd: str, cleaned: str) -> str | None:
     elif word == "M471":
         paths = _paths_named(cleaned, "T", None)
         unseen = paths is None or any(path is None or _in_a_macro_folder(path) for path in paths)
+    elif word in _WRITES_A_FILE:
+        paths = _paths_written(word, cleaned)
+        if paths is None or any(path is None or _in_a_macro_folder(path) for path in paths):
+            return _WRITES_INTO_A_MACRO_FOLDER.format(word=word)
+        return None
     else:
         unseen = word in _RUNS_A_FILE
     return _RUNS_A_FILE[word] if unseen else None
+
+
+def _paths_written(word: str, cleaned: str) -> list[str | None] | None:
+    """The card paths a file-writing *word* on *cleaned* writes to (``None``
+    for one that cannot be read as a path), or ``None`` when the line cannot
+    be read one way only.  ``M28`` takes its name as the rest of the line,
+    quoted or not; the others take it as ``P``."""
+    folder = _WRITES_A_FILE[word]
+    if word == "M28":
+        first = _CMD_RE.match(cleaned)
+        rest = cleaned[first.end() if first else 0 :].strip()
+        if rest.startswith('"'):
+            close = _closing_quote(rest, 0)
+            if close is None:
+                return None
+            rest = rest[1:close].replace('""', '"')
+        return [_card_path(rest, folder)]
+    values = _quoted_params(cleaned, "P")
+    if values is None:
+        return None
+    if not values:
+        return [_WRITES_BY_DEFAULT[word]]
+    return [None if value is None else _card_path(value, folder) for value in values]
 
 
 def _extract_param(line: str, letter: str) -> float | None:
