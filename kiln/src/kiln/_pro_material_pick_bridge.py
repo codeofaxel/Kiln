@@ -29,6 +29,7 @@ fail to answer, is left alone for a while.  Nothing here raises.
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import time
@@ -53,6 +54,10 @@ _CONSULT_TIMEOUT_S: float = 4.0
 #: After the servers fail to answer, how long the pick is not asked for; a
 #: miss said again meanwhile says when Kiln asks again.
 SERVICE_BACKOFF_S: float = 300.0
+#: The longest description of one part the pick reads, on every path.
+MAX_REQUIREMENTS_CHARS = 2000
+#: What a longer description is told, once, with nothing asked.
+TOO_LONG = f"Describe the part in {MAX_REQUIREMENTS_CHARS:,} characters or fewer."
 
 _service_down_until: float = 0.0
 _last_miss: Miss | None = None
@@ -62,11 +67,52 @@ def pick(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss | N
     """Kiln's pick for one part as public Kiln's ``MaterialRecommendation``,
     or ``(None, miss)`` saying why there is none.  *printer* is the four
     capability fields ``recommend_material_for_design`` takes.  Never
-    raises."""
-    local = _local(requirements_text, printer)
-    if local is not _NOT_HERE:
-        return local
-    return _served(requirements_text, printer)
+    raises.
+
+    A description longer than :data:`MAX_REQUIREMENTS_CHARS` is refused here
+    with :data:`TOO_LONG`, nothing asked.  Within one tool call
+    (:func:`kiln.tool_context.call_memo`) the same part on the same printer
+    is asked for once: a door whose helpers each read the analysis gets one
+    answer, each helper its own copy."""
+    if isinstance(requirements_text, str) and len(requirements_text) > MAX_REQUIREMENTS_CHARS:
+        return None, Miss("refused", code="INVALID_ARGUMENT", detail=TOO_LONG)
+    memo, key = _call_memo(), _memo_key(requirements_text, printer)
+    if memo is not None and key is not None and key in memo:
+        return copy.deepcopy(memo[key])
+    answer = _local(requirements_text, printer)
+    if answer is _NOT_HERE:
+        answer = _served(requirements_text, printer)
+    if memo is not None and key is not None:
+        memo[key] = copy.deepcopy(answer)
+    return answer
+
+
+def _call_memo() -> dict[Any, Any] | None:
+    try:
+        from kiln.tool_context import call_memo
+
+        return call_memo()
+    except Exception:  # noqa: BLE001 -- no memo: ask as usual
+        return None
+
+
+def _memo_key(requirements_text: Any, printer: dict[str, Any]) -> Any:
+    """The memo key for one part on one printer, or ``None`` when it cannot
+    be one."""
+    supported = printer.get("supported_materials")
+    key = (
+        "material_pick",
+        requirements_text,
+        printer.get("printer_has_enclosure"),
+        printer.get("printer_has_direct_drive"),
+        printer.get("max_hotend_temp_c"),
+        tuple(supported) if isinstance(supported, list) else supported,
+    )
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
 
 
 #: ``_local``'s answer when kiln-pro is not on this computer.
@@ -316,4 +362,7 @@ def _rebuild_floor(pick: Any) -> Any:
     )
 
 
-__all__ = ["FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "PRO_FEATURE", "WIRE_TOOL", "pick"]
+__all__ = [
+    "FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "MAX_REQUIREMENTS_CHARS", "PRO_FEATURE", "TOO_LONG", "WIRE_TOOL",
+    "pick",
+]

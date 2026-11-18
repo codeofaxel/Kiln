@@ -580,6 +580,51 @@ class TestRepliesBuiltFromTheAnalysisSayBasic:
         assert any(c.startswith("designed for ") for c in prompt["constraints_added"])
 
 
+class TestOneAskPerPart:
+    """The pick reads at most one part's description, and one tool call asks
+    for one part once."""
+
+    @pytest.mark.parametrize("plan", ["free", "pro"])
+    def test_a_description_too_long_is_refused_once_in_plain_words(self, monkeypatch, plan):
+        """A part described in more than 2,000 characters is refused here,
+        with nothing asked of the servers, in words that name no field."""
+        _plan(monkeypatch, plan)
+        asked = _servers(monkeypatch, {bridge.WIRE_TOOL: _ok(_KILN_PRO_PICK), bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        out = _door()("shelf " * 400, max_hotend_temp_c=250)
+        assert asked == [] and out["basic"] is True and out["why"] == "refused"
+        assert out["message"].endswith("Describe the part in 2,000 characters or fewer.")
+        assert "requirements" not in out["message"] and "_" not in out["message"]
+        assert len("x" * bridge.MAX_REQUIREMENTS_CHARS) == 2000
+        assert _door()("x" * 2000)["material"]["material_id"] in {"petg", "asa"}
+
+    def test_one_tool_call_asks_for_the_pick_once(self, monkeypatch, tmp_path):
+        """An audit reads the analysis three times (its brief, its prompt, its
+        validation); within one tool call the servers are asked once, and
+        each reader still gets its own copy."""
+        from kiln import tool_context
+
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        audit = _tools("kiln.plugins.design_tools")["audit_original_design"]
+        token = tool_context.enter_tool("audit_original_design", {})
+        try:
+            out = audit(_cube(tmp_path / "cube.stl"), "shelf bracket that holds 10 lbs")
+            again = di.recommend_material_for_design("shelf bracket that holds 10 lbs")
+            again.warnings.append("changed by one reader")
+            assert "changed by one reader" not in di.recommend_material_for_design(
+                "shelf bracket that holds 10 lbs").warnings
+        finally:
+            tool_context.leave_tool(token)
+        assert out["success"] is True and len(asked) == 1
+        # A new call asks again: the memo lives for one call only.
+        token = tool_context.enter_tool("analyze_design_requirements", {})
+        try:
+            di.get_design_constraints("shelf bracket that holds 10 lbs")
+        finally:
+            tool_context.leave_tool(token)
+        assert len(asked) == 2
+
+
 # ---------------------------------------------------------------------------
 # The engine is not here
 # ---------------------------------------------------------------------------
