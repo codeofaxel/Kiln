@@ -22,7 +22,10 @@ about more than Kiln's own check would, never less.
 A check that reads a plastic only because the person named none reads it
 inside :func:`assuming`: the assumed plastic's own figures, without spending
 the person's daily allowance of plastics on Kiln's servers and with nothing
-said about them.
+said about them.  The same holds wherever :data:`ASSUMED_PLASTIC` is read
+inside a tool call whose own arguments name no plastic
+(:func:`call_names_no_plastic`): a door's own default is not the person's
+choice, whatever the door hands on.
 
 A served answer is kept for the life of the process, per plastic and
 scenario, so a session asks once.  When kiln-pro is on this computer nothing
@@ -193,10 +196,7 @@ class MaterialLimits:
         lines: list[str] = []
         if self.miss is None and not self.known and self.material:
             lines.append(UNRECOGNISED)
-        if _category(self.material_id) == "thermoplastic_elastomer":
-            lines.append(FLEXIBLE_CAUTION)
-        if self.material_id and self.material_id.endswith("_esd") and self.value(ESD_WALL) is None:
-            lines.append(STATIC_SAFE_UNKNOWN)
+        lines.extend(general_figures_leave_out(self.material_id, static_safe_wall_read=self.value(ESD_WALL) is not None))
         return lines
 
     def to_dict(self) -> dict[str, Any]:
@@ -246,6 +246,21 @@ STATIC_SAFE_UNKNOWN = (
     "This static-safe grade's own minimum wall for its electrical "
     "property is not known here; the wall figure is the general one."
 )
+
+
+def general_figures_leave_out(material_id: str | None, *, static_safe_wall_read: bool = False) -> list[str]:
+    """What a reply says beside the general figures for the plastic
+    *material_id*: for a flexible plastic, that they are for rigid ones
+    (:data:`FLEXIBLE_CAUTION`); for a static-safe grade whose own minimum
+    wall was not read (*static_safe_wall_read* false), that it is not known
+    here (:data:`STATIC_SAFE_UNKNOWN`).  Empty for any other plastic.  The
+    one place these are decided, for every reader of the general figures."""
+    lines: list[str] = []
+    if _category(material_id) == "thermoplastic_elastomer":
+        lines.append(FLEXIBLE_CAUTION)
+    if material_id and material_id.endswith("_esd") and not static_safe_wall_read:
+        lines.append(STATIC_SAFE_UNKNOWN)
+    return lines
 
 
 def _said_on_the_call(limits: MaterialLimits) -> MaterialLimits:
@@ -325,22 +340,68 @@ def _general(nozzle: float, layer: float | None) -> tuple[dict[str, float | None
     return figures, basis
 
 
+#: The words a tool argument's name carries when it names a plastic
+#: (``material``, ``loaded_material``, ``filament_type``, ``materials``).
+_PLASTIC_ARGUMENT_WORDS = ("material", "filament", "plastic")
+
+
+def _names_a_plastic(key: Any, value: Any) -> bool:
+    """True when the argument *key* = *value* names a plastic: a plastic's
+    argument holding a word, or a list or table of them.  A switch
+    (``support_material``) names none."""
+    if not isinstance(key, str) or not any(word in key.lower() for word in _PLASTIC_ARGUMENT_WORDS):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, dict)):
+        return bool(value)
+    return False
+
+
+def call_names_no_plastic() -> bool:
+    """True while a tool call runs whose own arguments name no plastic.
+
+    A check such a call makes of :data:`ASSUMED_PLASTIC` reads it as the
+    plastic assumed because the person named none, as :func:`assuming`
+    does, whatever spelling the door hands on: a door whose own default is
+    PLA has not been told PLA.  ``False`` outside a tool call, where nothing
+    says what the person named."""
+    try:
+        from kiln.tool_context import current_tool_arguments, current_tool_name
+    except ImportError:  # pragma: no cover - the module ships beside this one
+        return False
+    if current_tool_name() is None:
+        return False
+    return not any(_names_a_plastic(key, value) for key, value in current_tool_arguments().items())
+
+
+def _the_calls_default(material: str) -> bool:
+    """True when *material* is :data:`ASSUMED_PLASTIC` read inside a tool
+    call that named no plastic (:func:`call_names_no_plastic`)."""
+    return material.strip().lower() == ASSUMED_PLASTIC and call_names_no_plastic()
+
+
 @contextlib.contextmanager
 def assuming(material: str | None) -> Iterator[str]:
     """The plastic a check reads: *material* when the person named one, else
     :data:`ASSUMED_PLASTIC`.  Inside the block the assumed plastic's limits
     are its own figures, read without spending the person's daily allowance
     of plastics on Kiln's servers, and nothing is said about them; a plastic
-    the person named is read as always."""
+    the person named is read as always.  :data:`ASSUMED_PLASTIC` handed in
+    by a tool call that named no plastic (a door's own default) is read as
+    the assumed one, under the spelling handed in."""
+    plastic = ASSUMED_PLASTIC
     if isinstance(material, str) and material.strip():
-        yield material
-        return
+        if not _the_calls_default(material):
+            yield material
+            return
+        plastic = material
     from kiln import _pro_material_limits_bridge as bridge
 
     token = _assumed.set(_assumed.get() | {ASSUMED_PLASTIC})
     try:
         with bridge.assuming_here(ASSUMED_PLASTIC):
-            yield ASSUMED_PLASTIC
+            yield plastic
     finally:
         _assumed.reset(token)
 
@@ -372,7 +433,7 @@ def limits_for(
     key = (name.lower(), round(nozzle, 3), layer, enclosed, pin_height_mm)
     answer = None if local else _answers.get(key)
     miss: Miss | None = None
-    assumed = name.lower() in _assumed.get()
+    assumed = name.lower() in _assumed.get() or _the_calls_default(name)
     if answer is None:
         answer, miss = bridge.ask(
             name, nozzle_mm=nozzle, layer_height_mm=layer, enclosed=enclosed, pin_height_mm=pin_height_mm,
