@@ -269,6 +269,32 @@ def _food_ratings() -> dict[str, str]:
     return ratings
 
 
+@lru_cache(maxsize=1)
+def _catalog_ventilation() -> tuple[frozenset[str], frozenset[str]]:
+    """``(catalog keys, keys whose record says ventilation is required)``,
+    read straight from the public catalog for the same reason as
+    :func:`_food_ratings`.  An unreadable catalog gives two empty sets."""
+    try:
+        data = json.loads(_materials_json_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset(), frozenset()
+    keys = frozenset(k for k, v in data.items() if not k.startswith("_") and isinstance(v, dict))
+    vented = frozenset(k for k in keys if (data[k].get("chemical") or {}).get("ventilation_required") is True)
+    return keys, vented
+
+
+def needs_ventilation(material: str) -> bool:
+    """True when the public catalog's record for *material* says printing it
+    needs ventilation.  The name is matched as the catalog spells it
+    (:func:`kiln.catalog_keys.resolve_material_key`, never a family); a
+    material the catalog does not hold is ``False``."""
+    from kiln.catalog_keys import resolve_material_key
+
+    keys, vented = _catalog_ventilation()
+    key = resolve_material_key(material, keys) if isinstance(material, str) else None
+    return key in vented
+
+
 def food_catalog_key(material: str) -> str:
     """A material name in the catalog's key form: ``"PETG-HF"`` -> ``"petg_hf"``,
     ``"PLA+"`` -> ``"pla_plus"``."""
@@ -666,7 +692,10 @@ def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, 
 def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
     """The multi-material check this computer can make alone: the refused
     pairs from :data:`_REFUSED_PAIRS`, the conservative purge, the abrasive
-    floor, and a warning per other pair from :func:`basic_pair_finding`."""
+    floor, the enclosure line for a material the catalog says needs
+    ventilation (:func:`needs_ventilation`), and a warning per other pair
+    from :func:`basic_pair_finding`.  With one material loaded there is no
+    pair, and ``caution`` speaks of its hardware alone."""
     from kiln.served_answer import Miss, fields, sentence
 
     if not isinstance(miss, Miss):
@@ -705,6 +734,10 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
             msg = f"{mat} requires a hardened/wear-resistant nozzle (not standard brass)."
             if msg not in hardware_warnings:
                 hardware_warnings.append(msg)
+        if needs_ventilation(mat):
+            msg = f"{mat} requires an enclosure to prevent warping and fume issues."
+            if msg not in hardware_warnings:
+                hardware_warnings.append(msg)
 
     purge_matrix: list[list[float]] = []
     for i in range(n):
@@ -733,21 +766,35 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
     else:
         level = "ok"
         message = "One material, so there are no pairs to check."
-    caution = sentence(
-        miss,
-        feature="multi-material check",
-        on_the_line=(
-            "Kiln's multi-material check says which loaded materials work together "
-            "and how much to purge between them"
-        ),
-        cannot="check how these materials pair",
-        wont=(
-            "refused only the pairs that must never share a print and set the "
-            "conservative purge between the others"
-        ),
-        safe_remedy="run a small test piece before a long print",
-        then="compose again",
-    )
+    if len(set(clean)) == 1:
+        # One material: no pair to judge, only the hardware it needs.
+        caution = sentence(
+            miss,
+            feature="material check",
+            on_the_line="Kiln's material check says what hardware a loaded material needs",
+            cannot="check what hardware this material needs",
+            wont=(
+                "warned only from the material's name and the catalog on this computer"
+                + (", and set the conservative purge between its colours" if n > 1 else "")
+            ),
+            then="compose again",
+        )
+    else:
+        caution = sentence(
+            miss,
+            feature="multi-material check",
+            on_the_line=(
+                "Kiln's multi-material check says which loaded materials work together "
+                "and how much to purge between them"
+            ),
+            cannot="check how these materials pair",
+            wont=(
+                "refused only the pairs that must never share a print and set the "
+                "conservative purge between the others"
+            ),
+            safe_remedy="run a small test piece before a long print",
+            then="compose again",
+        )
     return {
         "safe": not incompatible_pairs,
         "level": level,

@@ -149,6 +149,48 @@ class TestABasicCheck:
             "PETG-CF requires a hardened/wear-resistant nozzle (not standard brass)."
         ]
 
+    @pytest.mark.parametrize(
+        "materials,warned",
+        [
+            (["ABS", "ASA"], ["ABS", "ASA"]),
+            (["PC", "NYLON", "PA"], ["PC", "NYLON", "PA"]),
+            (["ABS"], ["ABS"]),
+            (["PLA", "PETG", "TPU"], []),
+        ],
+    )
+    def test_the_enclosure_and_fume_caution_holds_offline(self, monkeypatch, materials, warned):
+        """A material the catalog says needs ventilation keeps its enclosure
+        line when Kiln's check does not answer, in the served check's words."""
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(materials)
+        assert result["basic"] is True
+        assert result["hardware_warnings"] == [
+            f"{m} requires an enclosure to prevent warping and fume issues." for m in warned
+        ]
+
+    def test_the_offline_enclosure_line_is_the_served_one(self, monkeypatch):
+        served = {"success": True, "names": ["ABS"],
+                  "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 40}]],
+                  "hardware": [{"hardened_nozzle": False, "enclosure": True}]}
+        _served(monkeypatch, served)
+        online = check_material_compatibility(["ABS"])["hardware_warnings"]
+        _served(monkeypatch, _SIGNED_OUT)
+        assert check_material_compatibility(["ABS"])["hardware_warnings"] == online
+
+    @pytest.mark.parametrize("materials", [["ABS"], ["PLA", "PLA", "PLA"]])
+    def test_one_material_says_nothing_about_pairs(self, monkeypatch, materials):
+        """With one material loaded there is no pair to refuse or purge
+        between, so the line saying why the check is missing speaks of the
+        material's hardware."""
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(materials)
+        assert result["basic"] is True and result["why"] == "signed_out"
+        assert "Kiln can't check what hardware this material needs right now because" in result["caution"]
+        assert "pair" not in result["caution"]
+        assert ("conservative purge between its colours" in result["caution"]) is (len(materials) > 1)
+        assert result["caution"].endswith("Sign in and compose again.")
+
 
 class TestTheFlushMatrix:
     def test_each_pair_purges_what_the_check_says(self):
