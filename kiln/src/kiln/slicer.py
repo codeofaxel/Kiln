@@ -709,6 +709,31 @@ def _keep_print_package(made_path: str, out_file: str) -> None:
             os.remove(made_path)
 
 
+def nozzle_bed_for_slice(
+    input_path: str, profile: str | None, filament_map: Any = None, *, slots: int | None = None,
+) -> tuple[float, float, float, float] | None:
+    """The bed a slice of the 3MF at *input_path* with *profile* is laid out
+    and checked on when it is for more than one nozzle: the bed the
+    profile's nozzle record states, for a plate of two or more filaments
+    (*slots*, else read from the file) or one given a filament-to-nozzle
+    map.  ``None`` for anything else.  Never raises."""
+    from kiln.slicer_profiles import nozzle_bed, nozzles_of
+
+    bed = nozzle_bed(nozzles_of(profile))
+    if bed is None or not str(input_path).lower().endswith(".3mf"):
+        return None
+    if filament_map not in (None, "", []):
+        return bed
+    if slots is None:
+        try:
+            from kiln.multicolor_3mf import detect_3mf_multicolor
+
+            slots = int((detect_3mf_multicolor(input_path) or {}).get("filament_slots_needed", 0))
+        except Exception:  # noqa: BLE001 -- an unreadable plate reads as one filament
+            slots = 0
+    return bed if slots >= 2 else None
+
+
 def _is_bambu_studio(info: SlicerInfo) -> bool:
     """Whether *info* is Bambu Studio itself, by name."""
     return "bambu" in f"{info.name or ''} {os.path.basename(info.path or '')}".lower()
@@ -1403,7 +1428,12 @@ def _slice_with_orca(
             from kiln.multicolor_3mf import multicolor_filament_colors
 
             filament_colors = multicolor_filament_colors(multicolor, slots)
-            tower = _wipe_tower_placement(settings, input_abs, slots)
+            from kiln.slicer_profiles import rect_polygon, shared_reach
+
+            # Every nozzle prints the tower, so it stands where all reach.
+            shared = shared_reach(nozzles) if nozzles else None
+            tower_settings = settings if shared is None else {**settings, "bed_shape": rect_polygon(shared)}
+            tower = _wipe_tower_placement(tower_settings, input_abs, slots)
             wipe_xy = None if tower is None else tower[:2]
             logger.info(
                 "Multicolor 3MF: emitting %d filament presets "
@@ -1788,7 +1818,11 @@ def _slice_file(
     if taken is not None:
         input_abs = taken.path
 
-    if ext == ".3mf":
+    from kiln.slicer_profiles import nozzle_bed, nozzle_positions, nozzles_of, profile_with_overrides, rect_polygon
+
+    # A printer with a bed of its own for more than one nozzle has its 3MF
+    # judged once the slice is known to be for one nozzle or more.
+    if ext == ".3mf" and nozzle_bed(nozzles_of(profile)) is None:
         _check_3mf_on_bed(input_abs, profile)
 
     # Find slicer
@@ -1834,12 +1868,18 @@ def _slice_file(
     # that way, and a plate of two or more filaments or a map the caller
     # gave.  It is made by Bambu Studio or not at all; one filament with no
     # map slices for one nozzle, as it does without the record.
-    from kiln.slicer_profiles import nozzle_positions, nozzles_of
-
     nozzles = nozzles_of(profile)
     asked_map = checked_filament_map(
         filament_map, filaments=max(slots_needed, 1), positions=nozzle_positions(nozzles),
     )
+    if ext == ".3mf" and nozzle_bed(nozzles) is not None:
+        wider = nozzle_bed_for_slice(input_abs, profile, asked_map, slots=slots_needed)
+        if wider is not None:
+            # Checked and sliced on the bed the nozzles print on.
+            profile = profile_with_overrides(
+                profile, {"bed_shape": rect_polygon(wider)}, prefix=f"{Path(profile).stem}_", stated=False,
+            )
+        _check_3mf_on_bed(input_abs, profile)
     if nozzles is not None and not (asked_map or slots_needed >= 2):
         nozzles = None
     multicolor_switched = False

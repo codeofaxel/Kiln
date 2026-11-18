@@ -320,6 +320,36 @@ def printer_bed(printer_id: str | None) -> PrinterBed | None:
     return None
 
 
+def two_nozzle_bed(printer_id: str | None) -> PrinterBed | None:
+    """The bed *printer_id*'s record states for slicing with more than one
+    nozzle, as tall as its own bed; ``None`` when it states none."""
+    from kiln.slicer_profiles import nozzle_bed, printer_nozzles
+
+    rect = nozzle_bed(printer_nozzles(printer_id))
+    own = printer_bed(printer_id) if rect is not None else None
+    if rect is None or own is None or rect[0] != 0 or rect[1] != 0:
+        return None
+    return PrinterBed((rect[2], rect[3], own.volume[2]), own.printer_id, BED_FROM_CATALOGUE)
+
+
+def sliced_file_bed(gcode_path: str | None, printer_id: str | None) -> PrinterBed | None:
+    """The bed the sliced file at *gcode_path* is held to: the printer's bed
+    for more than one nozzle (:func:`two_nozzle_bed`) when the file was
+    sliced for more than one, else :func:`printer_bed`."""
+    two = two_nozzle_bed(printer_id)
+    if two is not None and gcode_path:
+        from kiln.gcode import slicer_nozzle_diameters, states_several_nozzles
+
+        try:
+            text = Path(gcode_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        stated = slicer_nozzle_diameters(text)
+        if states_several_nozzles(text) or (stated and len(stated[-1]) >= 2):
+            return two
+    return printer_bed(printer_id)
+
+
 def printer_bed_volume(printer_id: str | None) -> tuple[float, float, float] | None:
     """:func:`printer_bed`'s size alone."""
     bed = printer_bed(printer_id)
@@ -888,7 +918,7 @@ def validate_gcode_for_printer(
 ) -> dict[str, Any]:
     """Validate a gcode file's X/Y move range against a printer's bed."""
     bbox = compute_gcode_bbox(gcode_path)
-    bed = bed or printer_bed(printer_id)
+    bed = bed or sliced_file_bed(gcode_path, printer_id)
     fit = _fit_on(bbox, bed, printer_id, source="gcode")
     _say_what_prints_past_the_bed(fit, gcode_path, bed.volume if bed is not None else None)
     if fit["ok"]:
@@ -902,8 +932,8 @@ def _check_3mf_plate(
     threemf_path: str, printer_id: str | None, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
     """:func:`check_bed_fit` on a .gcode.3mf's plate against *bed*, else :func:`printer_bed`, its refusal worded by its cause (:func:`_say_what_prints_past_the_bed`)."""
-    bed = bed or printer_bed(printer_id)
     with _plate_gcode_file(threemf_path) as gcode_path:
+        bed = bed or sliced_file_bed(gcode_path, printer_id)
         fit = _fit_on(compute_gcode_bbox(gcode_path) if gcode_path else None, bed, printer_id, source="3mf")
         _say_what_prints_past_the_bed(fit, gcode_path, bed.volume if bed is not None else None)
     return fit

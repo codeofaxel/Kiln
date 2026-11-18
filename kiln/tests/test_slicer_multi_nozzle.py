@@ -727,3 +727,131 @@ class TestTheSliceModelDoorSendsThePackage(TestTheSliceModelDoor):
         assert reply["output_3mf_path"].endswith(".gcode.3mf")
         assert reply["recommended_upload_path"] == reply["output_3mf_path"]
         assert not any("more than one nozzle" in w for w in reply.get("warnings", []))
+
+
+# ---------------------------------------------------------------------------
+# The bed a plate for more than one nozzle is laid out on
+# ---------------------------------------------------------------------------
+
+#: The invented machine's record with a wider bed for its two nozzles and
+#: where each of them reaches (invented numbers).
+_WIDE = {
+    **_NOZZLES,
+    "bed": "0x0,260x0,260x200,0x200",
+    "positions": [{"id": 1, "reach": "0x0,230x0,230x200,0x200"}, {"id": 2, "reach": "30x0,260x0,260x200,30x200"}],
+}
+
+
+def _plate_at(tmp_path: Path, *xs: float) -> str:
+    """One 20 mm cube per filament, its left edge at each of *xs*, as a 3MF."""
+    name = "_".join(f"{x:g}" for x in xs)
+    parts = [
+        ColorPart(_cube(tmp_path / f"{name}_{i}.stl", x), extruder=i + 1, name=f"part{i}") for i, x in enumerate(xs)
+    ]
+    composed = compose_multicolor_3mf(parts, output_path=str(tmp_path / f"plate_{name}.3mf"))
+    assert composed["success"], composed
+    return composed["output_path"]
+
+
+class TestTheBedForMoreThanOneNozzle:
+    def test_the_records_bed_and_reaches_are_read(self):
+        assert slicer_profiles.nozzle_bed(_WIDE) == (0.0, 0.0, 260.0, 200.0)
+        assert slicer_profiles.nozzle_reaches(_WIDE) == [(0.0, 0.0, 230.0, 200.0), (30.0, 0.0, 260.0, 200.0)]
+        assert slicer_profiles.shared_reach(_WIDE) == (30.0, 0.0, 230.0, 200.0)
+        assert slicer_profiles.rect_polygon((30.0, 0.0, 230.0, 200.0)) == "30x0,230x0,230x200,30x200"
+
+    @pytest.mark.parametrize("block", [_NOZZLES, {**_WIDE, "sliced_as": 1}, {**_WIDE, "bed": "wide"}])
+    def test_a_record_with_no_readable_bed_states_none(self, block):
+        assert slicer_profiles.nozzle_bed(block) is None
+
+    def _slice(self, tmp_path, plate, nozzles=_WIDE, **kwargs):
+        seen: dict = {}
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("; filament_map = 1,2\n", seen)),
+        ):
+            slice_file(plate, output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, nozzles), **kwargs)
+        return seen
+
+    def test_a_part_only_the_second_nozzle_reaches_is_sliced_on_the_wider_bed(self, tmp_path):
+        seen = self._slice(tmp_path, _plate_at(tmp_path, 100.0, 235.0))
+        assert seen["machine"]["printable_area"] == ["0x0", "260x0", "260x200", "0x200"]
+        # Every nozzle prints the tower, so it stands where both reach.
+        assert 30.0 <= float(seen["process"]["wipe_tower_x"]) <= 230.0
+
+    def test_without_a_bed_in_the_record_the_same_plate_is_off_the_bed(self, tmp_path):
+        with pytest.raises(SlicerError, match="bed"):
+            self._slice(tmp_path, _plate_at(tmp_path, 100.0, 235.0), nozzles=_NOZZLES)
+
+    def test_a_plate_of_one_filament_keeps_the_printers_own_bed(self, tmp_path):
+        with pytest.raises(SlicerError, match="bed"):
+            self._slice(tmp_path, _plate_at(tmp_path, 235.0))
+
+    def test_the_slice_decides_its_bed_the_same_way_every_door_asks(self, tmp_path):
+        from kiln.slicer import nozzle_bed_for_slice
+
+        profile = _profile(tmp_path, _WIDE)
+        assert nozzle_bed_for_slice(_plate_at(tmp_path, 100.0, 235.0), profile) == (0.0, 0.0, 260.0, 200.0)
+        one = _plate_at(tmp_path, 40.0)
+        assert nozzle_bed_for_slice(one, profile) is None
+        assert nozzle_bed_for_slice(one, profile, [2]) == (0.0, 0.0, 260.0, 200.0)
+        assert nozzle_bed_for_slice(one, _profile(tmp_path, _NOZZLES), [2]) is None
+
+
+class TestASlicedFileIsHeldToTheBedItWasSlicedFor:
+    @pytest.fixture
+    def invented_bed(self, monkeypatch):
+        from kiln.printers import bed_fit
+
+        own = bed_fit.PrinterBed((200.0, 200.0, 180.0), "invented_two", bed_fit.BED_FROM_CATALOGUE)
+        monkeypatch.setattr(bed_fit, "printer_bed", lambda printer_id: own if printer_id else None)
+        monkeypatch.setattr(slicer_profiles, "printer_nozzles", lambda printer_id: _WIDE)
+        return bed_fit
+
+    @pytest.mark.parametrize(
+        "header, width",
+        [
+            ("; nozzle_diameter = 0.4,0.4\n", 260.0),
+            ("; filament_map = 1,2\n", 260.0),
+            ("; nozzle_diameter = 0.4\n; filament_map = 1,1\n", 200.0),
+        ],
+    )
+    def test_by_what_the_file_states(self, tmp_path, invented_bed, header, width):
+        gcode = tmp_path / "plate.gcode"
+        gcode.write_text(f"{header}G28\nG1 X240 Y20 E1\n")
+        assert invented_bed.sliced_file_bed(str(gcode), "invented_two").volume == (width, 200.0, 180.0)
+        fit = invented_bed.validate_gcode_for_printer(str(gcode), "invented_two")
+        assert fit["ok"] is (width > 240.0), fit
+
+
+class TestAPlateIsComposedOnTheBedItPrintsOn:
+    @pytest.fixture
+    def invented_printer_bed(self, monkeypatch):
+        from kiln.printers import bed_fit
+
+        own = bed_fit.PrinterBed((200.0, 200.0, 180.0), "invented_two", bed_fit.BED_FROM_CATALOGUE)
+        monkeypatch.setattr(bed_fit, "printer_bed", lambda printer_id: own if printer_id else None)
+        monkeypatch.setattr(slicer_profiles, "printer_nozzles", lambda printer_id: _WIDE)
+
+    def _placed_x(self, tmp_path, parts):
+        from kiln.printers.bed_fit import compute_3mf_geometry_bbox
+
+        composed = compose_multicolor_3mf(parts, output_path=str(tmp_path / "c.3mf"), printer_id="invented_two")
+        assert composed["success"], composed
+        return compute_3mf_geometry_bbox(composed["output_path"])["x_max"]
+
+    def test_two_filaments_stay_where_only_the_second_nozzle_reaches(self, tmp_path, invented_printer_bed):
+        parts = [
+            ColorPart(_cube(tmp_path / "a.stl", 100.0), extruder=1, name="a"),
+            ColorPart(_cube(tmp_path / "b.stl", 235.0), extruder=2, name="b"),
+        ]
+        assert self._placed_x(tmp_path, parts) == pytest.approx(255.0)
+
+    def test_one_filament_is_brought_back_onto_the_printers_own_bed(self, tmp_path, invented_printer_bed):
+        parts = [
+            ColorPart(_cube(tmp_path / "a.stl", 100.0), extruder=1, name="a"),
+            ColorPart(_cube(tmp_path / "b.stl", 235.0), extruder=1, name="b"),
+        ]
+        assert self._placed_x(tmp_path, parts) <= 200.0

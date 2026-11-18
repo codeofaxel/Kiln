@@ -1158,6 +1158,78 @@ def nozzle_positions(nozzles: Any) -> int:
     return raw if raw >= 2 else 1
 
 
+Rect = tuple[float, float, float, float]
+
+
+def _rect_of(polygon: Any) -> Rect | None:
+    """``"0x0,200x0,200x200,0x200"`` as ``(x_min, y_min, x_max, y_max)``;
+    ``None`` unless it reads as three corners or more."""
+    if not isinstance(polygon, str):
+        return None
+    points: list[tuple[float, float]] = []
+    for corner in polygon.split(","):
+        x, sep, y = corner.strip().partition("x")
+        try:
+            points.append((float(x), float(y)))
+        except ValueError:
+            return None
+        if not sep:
+            return None
+    if len(points) < 3:
+        return None
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def nozzle_bed(nozzles: Any) -> Rect | None:
+    """The bed a nozzle record states for slicing with more than one
+    nozzle, or ``None`` when it states none Kiln can read."""
+    if nozzle_positions(nozzles) < 2:
+        return None
+    return _rect_of(nozzles.get("bed"))
+
+
+def nozzle_reaches(nozzles: Any) -> list[Rect] | None:
+    """Where each nozzle position of the record reaches, in position order,
+    or ``None`` unless every position states a reach Kiln can read."""
+    if nozzle_positions(nozzles) < 2:
+        return None
+    positions = nozzles.get("positions")
+    if not isinstance(positions, list) or not positions:
+        return None
+    reaches = [_rect_of(p.get("reach")) if isinstance(p, Mapping) else None for p in positions]
+    return None if any(r is None for r in reaches) else reaches  # type: ignore[return-value]
+
+
+def shared_reach(nozzles: Any) -> Rect | None:
+    """The part of the bed every nozzle position of the record reaches, or
+    ``None`` when the reaches are not stated or do not overlap."""
+    reaches = nozzle_reaches(nozzles)
+    if not reaches:
+        return None
+    x0, y0 = max(r[0] for r in reaches), max(r[1] for r in reaches)
+    x1, y1 = min(r[2] for r in reaches), min(r[3] for r in reaches)
+    return (x0, y0, x1, y1) if x0 < x1 and y0 < y1 else None
+
+
+def rect_polygon(rect: Rect) -> str:
+    """*rect* as a bed shape: ``"x0xy0,x1xy0,x1xy1,x0xy1"``."""
+    x0, y0, x1, y1 = (f"{v:g}" for v in rect)
+    return f"{x0}x{y0},{x1}x{y0},{x1}x{y1},{x0}x{y1}"
+
+
+def printer_nozzles(printer_id: str | None) -> dict[str, Any] | None:
+    """The nozzle record of *printer_id*'s slicer profile when it is sliced
+    for more than one nozzle; ``None`` otherwise.  Never raises."""
+    if not printer_id:
+        return None
+    try:
+        return _sliced_nozzles(get_slicer_profile(str(printer_id)).id)
+    except Exception:  # noqa: BLE001 -- no record reads as one nozzle
+        logger.debug("nozzle record of %s unavailable", printer_id, exc_info=True)
+        return None
+
+
 def _sliced_nozzles(profile_id: str) -> dict[str, Any] | None:
     """The nozzle record of the held profile *profile_id*, when it is
     sliced for two or more nozzle positions; ``None`` otherwise."""

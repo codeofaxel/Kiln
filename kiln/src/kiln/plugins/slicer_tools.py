@@ -308,6 +308,7 @@ def _apply_bed_fit_gate(
     effective_printer_id: str | None,
     auto_center: bool,
     material_id: str | None = None,
+    bed: Any | None = None,
 ) -> tuple[str, dict | None, dict]:
     """Pre-slice safety gate: verify the mesh fits within the printer's
     build volume and hasn't been placed off-bed (origin-centered
@@ -349,7 +350,7 @@ def _apply_bed_fit_gate(
         # rewriter, so those are measured and never fixed.  A STEP the
         # slicer places itself, with one exception -- a part that fits only
         # lying on another face is turned as Kiln's mesh of it.
-        fit = validate_mesh_for_printer(input_path, effective_printer_id)
+        fit = validate_mesh_for_printer(input_path, effective_printer_id, bed=bed)
         fit["approval_carries"] = True  # nothing below moves the mesh but the turn
         if fit.get("fits_on_another_face") and auto_center:
             laid = _lay_step_down_to_fit(input_path, effective_printer_id, fit.get("bbox"))
@@ -1973,9 +1974,17 @@ def _placed_slice(
         # spool.  Every door passes it, or a door slices a material its
         # printer cannot melt and says nothing.
         material_id = material_id or slice_kwargs.get("material") or slice_kwargs.get("loaded_material")
+        # A plate for more than one nozzle is held to the bed they print on.
+        from kiln.printers.bed_fit import two_nozzle_bed
+        from kiln.slicer import nozzle_bed_for_slice
+
+        wider = (
+            two_nozzle_bed(effective_printer_id)
+            if nozzle_bed_for_slice(placed, profile_path, slice_kwargs.get("filament_map")) else None
+        )
         effective_input, gate_err, bed_fit = _apply_bed_fit_gate(
             placed, effective_printer_id, auto_center and place_info.get("plate") != "occupied",
-            material_id=material_id,
+            material_id=material_id, bed=wider,
         )
         info["bed_fit"] = bed_fit
         if gate_err is not None:
@@ -2167,9 +2176,10 @@ def _keep_the_print_on_the_bed(
     prints past the edge (the bed-fit block's note says so) pass through
     untouched.
     """
-    from kiln.printers.bed_fit import _FIT_EPSILON_MM, print_past_the_bed, printer_bed_volume
+    from kiln.printers.bed_fit import _FIT_EPSILON_MM, print_past_the_bed, sliced_file_bed
 
-    volume = printer_bed_volume(printer_id) if printer_id else None
+    bed = sliced_file_bed(getattr(result, "output_path", None), printer_id) if printer_id else None
+    volume = bed.volume if bed is not None else None
     edge = print_past_the_bed(getattr(result, "output_path", None), volume)
     if edge and edge["on_bed"]:
         return result, _brim_without_room(result, volume, _brim_and_skirts(profile_path)[0]), None
@@ -2262,7 +2272,6 @@ def _answer_a_refusal_at_the_edge(
     way, with no second slice.  Returns what :func:`_keep_the_print_on_the_bed`
     returns.
     """
-    from kiln.printers.bed_fit import printer_bed_volume
     from kiln.slicer import REFUSED_OFF_THE_BED, SlicerRefusal
     from kiln.slicer_profiles import profile_with_overrides
 
@@ -2275,7 +2284,10 @@ def _answer_a_refusal_at_the_edge(
         if still.kind != REFUSED_OFF_THE_BED:
             raise
         return None, _refused_off_the_bed(still, brim, resliced=True), None
-    volume = printer_bed_volume(printer_id) if printer_id else None
+    from kiln.printers.bed_fit import sliced_file_bed
+
+    bed = sliced_file_bed(getattr(again, "output_path", None), printer_id) if printer_id else None
+    volume = bed.volume if bed is not None else None
     return _judge_the_slice_without_its_skirt(again, volume, brim, past_mm=None)
 
 

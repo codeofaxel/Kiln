@@ -776,14 +776,16 @@ def _resolve_plate(
 
 
 def plate_bed(
-    plate_width: float, plate_depth: float, printer_id: str | None,
+    plate_width: float, plate_depth: float, printer_id: str | None, *, several_filaments: bool = False,
 ) -> tuple[float, float, float | None, str]:
-    """``(width, depth, height, words)`` of the bed a plate is laid out for."""
+    """``(width, depth, height, words)`` of the bed a plate is laid out for:
+    with *several_filaments*, the bed the printer's nozzles print on when its
+    record states one (:func:`kiln.printers.bed_fit.two_nozzle_bed`)."""
     if printer_id:
         try:
-            from kiln.printers.bed_fit import get_printer_display_name, printer_bed
+            from kiln.printers.bed_fit import get_printer_display_name, printer_bed, two_nozzle_bed
 
-            bed = printer_bed(printer_id)
+            bed = (two_nozzle_bed(printer_id) if several_filaments else None) or printer_bed(printer_id)
         except Exception:  # noqa: BLE001 — placement is advisory, never fatal
             bed = None
             logger.debug("build volume lookup failed for %r", printer_id,
@@ -1069,7 +1071,9 @@ def compose_multicolor_3mf(
     # -----------------------------------------------------------------------
     # Place the GROUP on the plate
     # -----------------------------------------------------------------------
-    plate_w, plate_d, plate_h, bed_words = plate_bed(plate_width, plate_depth, printer_id)
+    plate_w, plate_d, plate_h, bed_words = plate_bed(
+        plate_width, plate_depth, printer_id, several_filaments=len({part.extruder for part in parts}) >= 2,
+    )
     g_min_x = g_min_y = g_min_z = float("inf")
     g_max_x = g_max_y = g_max_z = float("-inf")
     for part, vertices, _ in parsed:
