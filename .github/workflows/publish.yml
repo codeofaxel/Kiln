@@ -103,7 +103,7 @@ jobs:
 
       - name: Download the Mac notification helper
         # actions/download-artifact v8.0.1
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: kiln-notifier-app
           path: notifier-build/
@@ -186,7 +186,7 @@ jobs:
 
       - name: Download built artifacts
         # actions/download-artifact v8.0.1
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: dist-kiln
           path: dist/
@@ -229,7 +229,7 @@ jobs:
       # listing them here is what let an empty pair overwrite a good one.
       - name: Upload signing artifacts to the GitHub release
         # softprops/action-gh-release v3.0.2
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3
         with:
           files: |
             dist/*.sigstore
@@ -244,7 +244,7 @@ jobs:
 
     steps:
       - name: Download kiln artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist-kiln
           path: dist/
@@ -297,7 +297,7 @@ jobs:
 
     steps:
       - name: Download octoprint-cli artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist-octoprint-cli
           path: dist/
@@ -351,7 +351,7 @@ jobs:
 
     steps:
       - name: Download kiln-print artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist-kiln-print
           path: dist/
@@ -370,7 +370,7 @@ jobs:
 
     steps:
       - name: Download kiln-printer artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist-kiln-printer
           path: dist/
