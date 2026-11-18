@@ -8014,7 +8014,10 @@ def _material_wall_floor(
     (https://kiln3d.com) — one measurement that both read, never a
     second pass re-measured to agree.  Without kiln-pro's rule here, the
     plastic's own wall floor from the one helper every check reads
-    (:func:`_plastic_recommended_wall`).  ``None`` — no floor of the
+    (:func:`_plastic_recommended_wall`), which is also the floor when
+    kiln-pro's rule is there but gives this caller no answer: the
+    plastic's own recommended wall is every signed-in account's.  ``None``
+    — no floor of the
     plastic's own for this caller — leaves the nozzle as the threshold,
     the safety floor every tier gets.
     """
@@ -8039,7 +8042,7 @@ def _material_wall_floor(
         floor = float(floor) if floor is not None else 0.0
     except Exception:  # noqa: BLE001 — the overlay must never break the public path
         logger.debug("material wall floor unavailable", exc_info=True)
-        return None
+        return _plastic_recommended_wall(material, nozzle_diameter)
     return floor if floor > 0.0 else _plastic_recommended_wall(material, nozzle_diameter)
 
 
