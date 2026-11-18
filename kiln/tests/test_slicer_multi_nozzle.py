@@ -1063,3 +1063,424 @@ class TestTheTimeLimitOnlyShortens(TestTheSliceModelDoor):
         seen: dict = {}
         self._call(tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen))
         assert seen["timeout"] == SLICE_TIME_LIMIT_S == 300
+
+
+# ---------------------------------------------------------------------------
+# The nozzles the owner fitted
+# ---------------------------------------------------------------------------
+
+#: An invented machine that ships with one nozzle and takes up to three,
+#: each position stating where it reaches (invented numbers).
+_ADD_ON = {
+    "kind": "rack",
+    "stock": 1,
+    "max": 3,
+    "sliced_as": 1,
+    "bed": "0x0,260x0,260x200,0x200",
+    "positions": [
+        {"id": 1, "reach": "0x0,230x0,230x200,0x200"},
+        {"id": 2, "reach": "30x0,260x0,260x200,30x200"},
+        {"id": 3, "reach": "30x0,230x0,230x200,30x200"},
+    ],
+    "switch_seconds": 4.0,
+    "filament_change_seconds": 40,
+}
+
+
+def _fitted(*nozzles: tuple) -> list[dict]:
+    """The owner's statement: ``(id, size, material)`` per fitted nozzle."""
+    return [{"id": i, "fitted": True, "diameter_mm": size, "material": material} for i, size, material in nozzles]
+
+
+_TWO_HARD = _fitted((1, 0.4, "hardened_steel"), (2, 0.4, "hardened_steel"))
+_HARD_AND_BRASS = _fitted((1, 0.4, "hardened_steel"), (2, 0.4, "brass"))
+
+
+@pytest.fixture
+def no_kiln_pro(monkeypatch):
+    """Public Kiln as a customer has it: kiln-pro cannot be imported."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "kiln_pro", None)
+
+
+class TestTheRecordSaysWhatIsFitted:
+    """The owner's statement of each nozzle position, read from the nozzle record."""
+
+    def test_the_served_record_brings_the_positions(self, monkeypatch, no_kiln_pro):
+        from kiln import _pro_nozzle_bridge as bridge
+
+        monkeypatch.setattr(bridge, "_record_memo", {})
+        monkeypatch.setattr(bridge, "_state_memo", {})
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        stated = [
+            {"id": 2, "fitted": True, "diameter_mm": 0.6, "material": "Brass"},
+            {"id": 1, "fitted": True, "diameter_mm": 0.6, "material": "hardened_steel"},
+            {"id": 3, "fitted": False},
+        ]
+        monkeypatch.setattr(
+            "kiln.server._pro_api_call",
+            lambda tool_name, _timeout=30.0, **kwargs: {
+                "success": True, "found": True, "trusted_for_verdicts": True, "diameter_mm": 0.6,
+                "positions": stated,
+            },
+        )
+        assert bridge.consult_recorded_nozzle("shop_two")["positions"] == [
+            {"id": 1, "fitted": True, "diameter_mm": 0.6, "material": "hardened_steel"},
+            {"id": 2, "fitted": True, "diameter_mm": 0.6, "material": "brass"},
+            {"id": 3, "fitted": False, "diameter_mm": None, "material": None},
+        ]
+
+    def test_a_record_nobody_stated_brings_none(self, monkeypatch, no_kiln_pro):
+        from kiln import _pro_nozzle_bridge as bridge
+
+        monkeypatch.setattr(bridge, "_record_memo", {})
+        monkeypatch.setattr(bridge, "_state_memo", {})
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        monkeypatch.setattr(
+            "kiln.server._pro_api_call",
+            lambda tool_name, _timeout=30.0, **kwargs: {
+                "success": True, "found": False, "trusted_for_verdicts": False, "positions": _TWO_HARD,
+            },
+        )
+        assert bridge.consult_recorded_nozzle("shop_two")["positions"] is None
+
+    def test_kiln_pro_beside_it_brings_the_positions(self, monkeypatch):
+        import enum
+        import sys
+        import types
+
+        from kiln import _pro_nozzle_bridge as bridge
+
+        class Material(enum.Enum):
+            HARDENED = "hardened_steel"
+
+        state = types.SimpleNamespace(
+            diameter_mm=0.4,
+            positions=[types.SimpleNamespace(id=1, fitted=True, diameter_mm=0.4, material=Material.HARDENED)],
+        )
+        store = types.ModuleType("kiln_pro.nozzle_intelligence.store_resolver")
+        store.recorded_nozzle = lambda printer_id, *, tool_name: state
+        package = types.ModuleType("kiln_pro.nozzle_intelligence")
+        package.store_resolver = store
+        root = types.ModuleType("kiln_pro")
+        root.nozzle_intelligence = package
+        monkeypatch.setitem(sys.modules, "kiln_pro", root)
+        monkeypatch.setitem(sys.modules, "kiln_pro.nozzle_intelligence", package)
+        monkeypatch.setitem(sys.modules, "kiln_pro.nozzle_intelligence.store_resolver", store)
+        assert bridge.consult_recorded_nozzle("shop_two") == {
+            "diameter_mm": 0.4,
+            "answered": True,
+            "positions": [{"id": 1, "fitted": True, "diameter_mm": 0.4, "material": "hardened_steel"}],
+        }
+
+    def test_an_entry_that_does_not_read_is_left_out(self):
+        from kiln._pro_nozzle_bridge import recorded_positions_of
+
+        read = recorded_positions_of(
+            [{"id": 0, "fitted": True}, {"id": True}, {"id": "1"}, {"id": 1, "fitted": True, "diameter_mm": 9},
+             {"id": 1, "fitted": False}, "nozzle"],
+        )
+        assert read == [{"id": 1, "fitted": True, "diameter_mm": None, "material": None}]
+        assert recorded_positions_of([]) is None and recorded_positions_of(None) is None
+
+
+class TestHowManyNozzlesASliceUses:
+    """The one helper every door reads: the owner's fitted nozzles, bounded."""
+
+    def test_the_fitted_nozzles_count_on_a_printer_that_ships_with_one(self):
+        assert nozzle_positions(_ADD_ON) == 1
+        two = slicer_profiles.fitted_record(_ADD_ON, _fitted((1, 0.4, "brass"), (2, 0.4, "brass")))
+        assert nozzle_positions(two) == 2
+        assert slicer_profiles.nozzle_reaches(two) == [(0.0, 0.0, 230.0, 200.0), (30.0, 0.0, 260.0, 200.0)]
+
+    def test_one_fitted_on_a_two_nozzle_printer_slices_one(self):
+        assert slicer_profiles.fitted_record(_WIDE, _fitted((1, 0.4, "brass"))) is None
+
+    def test_no_statement_is_the_record_as_it_was(self):
+        assert slicer_profiles.fitted_record(_WIDE, None) == _WIDE
+        assert slicer_profiles.fitted_record(_WIDE, [{"id": 1, "fitted": False}]) == _WIDE
+        assert slicer_profiles.fitted_record(_ADD_ON, None) is None
+
+    @pytest.mark.parametrize(
+        "record, fitted, used",
+        [
+            ({**_ADD_ON, "max": 2}, (1, 2, 3), 2),
+            (_ADD_ON, (1, 3), 1),
+            ({**_ADD_ON, "positions": [*_ADD_ON["positions"][:1], {"id": 2, "reach": "wide"}]}, (1, 2), 1),
+            (_ADD_ON, (1, 2, 3), 3),
+        ],
+    )
+    def test_bounded_by_the_record_and_by_the_reaches_it_states(self, record, fitted, used):
+        merged = slicer_profiles._with_fitted(record, _fitted(*((i, 0.4, "brass") for i in fitted)))
+        assert nozzle_positions(merged) == used
+
+    def test_more_fitted_than_a_slice_uses_is_said_in_one_sentence(self):
+        record = slicer_profiles.fitted_record(
+            {**_ADD_ON, "max": 2}, _fitted(*((i, 0.4, "brass") for i in (1, 2, 3))),
+        )
+        said = slicer_profiles.unused_fitted_note(record)
+        assert said == "This slice uses 2 of the 3 nozzles fitted (nozzles 1 and 2); the others are not used."
+
+    def test_a_slice_for_one_of_several_names_no_nozzle(self):
+        record = slicer_profiles.fitted_record(_ADD_ON, _fitted((1, 0.4, "brass"), (3, 0.4, "brass")))
+        said = slicer_profiles.unused_fitted_note(record)
+        assert said == "This slice is for one nozzle of the 2 fitted; the others are not used."
+        assert nozzles_of(None) is None and nozzle_positions(record) == 1
+
+    def test_nothing_is_said_when_every_fitted_nozzle_is_used(self):
+        assert slicer_profiles.unused_fitted_note(slicer_profiles.fitted_record(_WIDE, _TWO_HARD)) == ""
+        assert slicer_profiles.unused_fitted_note(_WIDE) == ""
+
+    def test_one_size_is_the_size_and_two_sizes_are_refused(self):
+        assert slicer_profiles.fitted_size_mm(slicer_profiles._with_fitted(_WIDE, _fitted((1, 0.6, "brass"), (2, 0.6, "brass")))) == 0.6
+        mixed = slicer_profiles._with_fitted(_WIDE, _fitted((1, 0.4, "brass"), (2, 0.6, "brass")))
+        assert slicer_profiles.fitted_size_mm(mixed) is None
+        said = slicer_profiles.mixed_size_refusal(mixed)
+        assert "nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm" in said and "nothing was sliced" in said
+        assert slicer_profiles.mixed_size_refusal(slicer_profiles._with_fitted(_WIDE, _TWO_HARD)) == ""
+
+
+@pytest.fixture
+def owner_says(monkeypatch, no_kiln_pro):
+    """The invented machine's nozzle record answers with the owner's
+    statement set here and no one size of its own; returns a setter."""
+    from kiln import _pro_nozzle_bridge as bridge
+
+    said: dict = {"positions": None}
+
+    def answer(printer_id):
+        return {"diameter_mm": None, "answered": True, "positions": said["positions"]}
+
+    monkeypatch.setattr(bridge, "consult_recorded_nozzle", answer)
+
+    def set_positions(positions):
+        said["positions"] = positions
+
+    return set_positions
+
+
+class TestTheProfileIsWrittenForTheFittedNozzles:
+    def test_nozzles_added_to_a_printer_that_ships_with_one_are_sliced(self, invented_printer, owner_says):
+        invented_printer(_ADD_ON)
+        assert nozzles_of(resolve_slicer_profile("invented_two")) is None
+        owner_says(_fitted((1, 0.4, "brass"), (2, 0.4, "brass")))
+        carried = nozzles_of(resolve_slicer_profile("invented_two"))
+        assert carried is not None and nozzle_positions(carried) == 2
+        assert nozzles_of(slicer_profiles.resolve_multiextruder_profile("invented_two", 2)) == carried
+
+    def test_one_fitted_on_a_two_nozzle_printer_is_written_for_one(self, invented_printer, owner_says):
+        invented_printer(_WIDE)
+        owner_says(_fitted((1, 0.4, "brass")))
+        assert nozzles_of(resolve_slicer_profile("invented_two")) is None
+
+    def test_every_position_is_sliced_at_the_size_fitted(self, invented_printer, owner_says):
+        from kiln.slicer_orca import ini_to_settings
+
+        invented_printer(_WIDE)
+        owner_says(_fitted((1, 0.6, "brass"), (2, 0.6, "brass")))
+        path = resolve_slicer_profile("invented_two")
+        assert ini_to_settings(path)["nozzle_diameter"] == "0.6"
+        assert settings_to_orca_presets(ini_to_settings(path), nozzles=nozzles_of(path)).machine[
+            "nozzle_diameter"
+        ] == ["0.6", "0.6"]
+
+    def test_the_bed_a_plate_is_laid_out_on_follows_what_is_fitted(self, invented_printer, owner_says):
+        invented_printer(_WIDE)
+        owner_says(_fitted((1, 0.4, "brass")))
+        assert slicer_profiles.printer_nozzles("invented_two") is None
+        invented_printer(_ADD_ON)
+        owner_says(_fitted((1, 0.4, "brass"), (2, 0.4, "brass")))
+        assert slicer_profiles.nozzle_bed(slicer_profiles.printer_nozzles("invented_two")) == (0.0, 0.0, 260.0, 200.0)
+
+    def test_the_one_nozzle_fitted_is_the_size_of_a_slice_for_one(self, invented_printer, owner_says):
+        from kiln.slicer_orca import ini_to_settings
+
+        invented_printer(_WIDE)
+        owner_says(_fitted((2, 0.6, "brass")))
+        path = resolve_slicer_profile("invented_two")
+        assert nozzles_of(path) is None
+        assert ini_to_settings(path)["nozzle_diameter"] == "0.6"
+
+
+class TestTheSliceUsesTheFittedNozzles:
+    def _slice(self, tmp_path, run, positions, *, nozzles=_WIDE, filaments=2, **kwargs):
+        record = slicer_profiles.fitted_record(nozzles, positions)
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", run),
+        ):
+            return slice_file(
+                _plate(tmp_path, filaments), output_dir=str(tmp_path / "out"),
+                profile=_profile(tmp_path, record), **kwargs,
+            )
+
+    def test_the_slice_says_which_fitted_nozzles_it_uses(self, tmp_path):
+        seen: dict = {}
+        result = self._slice(
+            tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen),
+            _fitted(*((i, 0.4, "brass") for i in (1, 2, 3))), nozzles={**_ADD_ON, "max": 2},
+        )
+        assert seen["machine"]["nozzle_diameter"] == ["0.4", "0.4"]
+        assert result.message.endswith(
+            "This slice uses 2 of the 3 nozzles fitted (nozzles 1 and 2); the others are not used."
+        )
+        assert not re.search(r"\b(230|260|30)\b", result.message)
+
+    def test_one_fitted_on_a_two_nozzle_printer_slices_for_one(self, tmp_path):
+        seen: dict = {}
+        result = self._slice(tmp_path, _slicer_that_writes("", seen), _fitted((1, 0.4, "brass")))
+        assert seen["machine"]["nozzle_diameter"] == ["0.4"]
+        assert "example_machine_key" not in seen["machine"]
+        assert result.filament_map is None
+        assert "nozzles fitted" not in result.message
+
+    def test_nozzles_of_different_sizes_are_refused_before_slicing(self, tmp_path):
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, _fitted((1, 0.4, "brass"), (2, 0.6, "brass")))
+        assert refused.value.code == "MULTI_NOZZLE_MIXED_SIZES"
+        assert "different sizes" in str(refused.value) and "nothing was sliced" in str(refused.value)
+
+    def test_an_abrasive_filament_mapped_to_a_soft_nozzle_is_refused(self, tmp_path):
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, _HARD_AND_BRASS, material="PLA-CF", filament_map=[1, 2])
+        assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
+        said = str(refused.value)
+        assert said.startswith("Filament 2 is PLA-CF, an abrasive filament")
+        assert "nozzle 2 (brass)" in said and "put it on nozzle 1" in said and "nothing was sliced" in said
+
+    def test_the_slicers_own_map_is_refused_while_a_soft_nozzle_is_fitted(self, tmp_path):
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, _HARD_AND_BRASS, material="PLA-CF")
+        assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
+        said = str(refused.value)
+        assert "the slicer chooses each filament's nozzle" in said
+        assert "give a filament-to-nozzle map with them on nozzle 1" in said
+
+    def test_a_soft_nozzle_of_unknown_material_is_not_wear_resistant(self, tmp_path):
+        unknown = _fitted((1, 0.4, "hardened_steel"), (2, 0.4, None))
+        with pytest.raises(NozzleMapError, match=r"nozzle 2 \(material not on record\)"):
+            self._slice(tmp_path, _never_runs, unknown, material="PLA-CF")
+
+    def test_no_wear_resistant_nozzle_says_to_fit_one(self, tmp_path):
+        with pytest.raises(NozzleMapError, match="fit a hardened one for them"):
+            self._slice(
+                tmp_path, _never_runs, _fitted((1, 0.4, "brass"), (2, 0.4, "stainless_steel")), material="PLA-CF",
+            )
+
+    def test_an_abrasive_filament_on_wear_resistant_nozzles_slices(self, tmp_path):
+        seen: dict = {}
+        result = self._slice(
+            tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen), _TWO_HARD, material="PLA-CF",
+        )
+        assert result.success and seen["machine"]["nozzle_diameter"] == ["0.4", "0.4"]
+
+    def test_a_plain_filament_with_a_soft_nozzle_slices(self, tmp_path):
+        seen: dict = {}
+        result = self._slice(tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen), _HARD_AND_BRASS)
+        assert result.success
+
+    def test_the_files_own_filament_names_one_abrasive_slot(self, tmp_path):
+        composed = Path(_plate(tmp_path))
+        plate = tmp_path / "stated.3mf"
+        with zipfile.ZipFile(composed) as src, zipfile.ZipFile(plate, "w") as out:
+            for name in src.namelist():
+                out.writestr(name, src.read(name))
+            out.writestr("Metadata/project_settings.config", json.dumps({"filament_type": ["PLA", "PETG-CF"]}))
+        record = slicer_profiles.fitted_record(_WIDE, _HARD_AND_BRASS)
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _never_runs),
+            pytest.raises(NozzleMapError) as refused,
+        ):
+            slice_file(
+                str(plate), output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, record),
+                filament_map=[1, 2],
+            )
+        said = str(refused.value)
+        assert said.startswith("Filament 2 is PETG-CF, an abrasive filament")
+        assert "nozzle 1 (hardened steel)" not in said and "put it on nozzle 1" in said
+
+    def test_the_slice_model_door_answers_with_the_refusal(self, tmp_path, monkeypatch):
+        from kiln import monitor_twin
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        monkeypatch.setattr(monitor_twin, "_TWIN_DIR", tmp_path / "twin")
+        monkeypatch.setattr(monitor_twin, "_SLICES_FILE", tmp_path / "twin" / "slices.json")
+        monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", tmp_path / "twin" / "active.json")
+        record = slicer_profiles.fitted_record(_WIDE, _HARD_AND_BRASS)
+        with (
+            patch("kiln.server._check_auth", return_value=None),
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _never_runs),
+        ):
+            reply = _slice_model_tool()(
+                input_path=_plate(tmp_path), output_dir=str(tmp_path / "out"), printer_id=None,
+                profile=_profile(tmp_path, record), material="PLA-CF",
+            )
+        assert reply["success"] is False
+        assert reply.get("code") == "ABRASIVE_ON_SOFT_NOZZLE" or "ABRASIVE_ON_SOFT_NOZZLE" in json.dumps(reply)
+
+
+class TestTheEstimateCountsTheFittedNozzles:
+    @pytest.fixture
+    def row(self, monkeypatch):
+        from kiln import pre_estimate
+
+        held = {"row": {"tool_change": {"tool_changer": "ams", "tool_change_seconds": 90}, "nozzles": dict(_ADD_ON)}}
+        monkeypatch.setattr(pre_estimate, "_profile_row", lambda printer_id: held["row"] if printer_id else {})
+        return held
+
+    def _estimate(self, **kwargs):
+        from kiln.pre_estimate import estimate_from_dimensions
+
+        return estimate_from_dimensions(
+            40, 40, 20, materials=["PLA", "PLA"], material_fractions=[0.5, 0.5], printer_id="invented_two",
+            layer_height_mm=0.2, **kwargs,
+        )
+
+    def test_a_second_nozzle_fitted_is_timed_as_switches(self, row):
+        two = _fitted((1, 0.4, "brass"), (2, 0.4, "brass"))
+        est = self._estimate(filament_map=[1, 2], fitted_positions=two)
+        assert (est.nozzle_switches, est.filament_swaps) == (est.tool_changes, 0) and est.tool_changes > 0
+
+    def test_the_estimate_door_reads_the_owners_statement(self, monkeypatch, owner_says, row):
+        from kiln.plugins.estimate_tools import _EstimateToolsPlugin
+
+        tools: dict = {}
+
+        class _FakeMcp:
+            def tool(self, name=None, **_kwargs):
+                def decorator(fn):
+                    tools[name or fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        _EstimateToolsPlugin().register(_FakeMcp())
+        owner_says(_fitted((1, 0.4, "brass"), (2, 0.4, "brass")))
+        reply = tools["estimate_before_design"](
+            width_mm=40, depth_mm=40, height_mm=20, materials="PLA,PLA", material_fractions="0.5,0.5",
+            printer_id="invented_two", layer_height_mm=0.2, filament_map=[1, 2],
+        )
+        assert reply["success"], reply
+        assert reply["estimate"]["nozzle_switches"] > 0
+
+
+class TestTheWearResistantNozzles:
+    @pytest.mark.parametrize("material", ["hardened_steel", "Hardened Steel", "cht-hardened", "ruby_tip", "tungsten_carbide"])
+    def test_these_take_an_abrasive_filament(self, material):
+        from kiln.material_safety import is_wear_resistant_nozzle
+
+        assert is_wear_resistant_nozzle(material)
+
+    @pytest.mark.parametrize("material", ["brass", "cht_brass", "stainless_steel", "unknown", "custom", "", None])
+    def test_these_do_not(self, material):
+        from kiln.material_safety import is_wear_resistant_nozzle
+
+        assert not is_wear_resistant_nozzle(material)

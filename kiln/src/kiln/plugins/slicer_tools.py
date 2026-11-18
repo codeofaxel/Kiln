@@ -3091,7 +3091,14 @@ class _SlicerToolsPlugin:
                     that cannot reach its part is refused with
                     ``NOZZLE_CANNOT_REACH``; a slicer that cannot slice for
                     more than one nozzle with
-                    ``MULTI_NOZZLE_NEEDS_BAMBU_STUDIO``.  The response's
+                    ``MULTI_NOZZLE_NEEDS_BAMBU_STUDIO``.  The nozzles a
+                    slice uses are the ones the owner recorded as fitted
+                    (``set_nozzle_state``), when they did.  Before slicing,
+                    nozzles of different sizes are refused with
+                    ``MULTI_NOZZLE_MIXED_SIZES``, and an abrasive filament
+                    on a nozzle that is not wear-resistant, or left to the
+                    slicer's own map while one is fitted, with
+                    ``ABRASIVE_ON_SOFT_NOZZLE``.  The response's
                     ``filament_map`` block says which nozzle printed each
                     filament.
                 plate_number: Which plate to slice of a slicer project that

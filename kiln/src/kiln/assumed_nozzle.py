@@ -281,6 +281,24 @@ def assumed_nozzle(
     return AssumedNozzle(DEFAULT_MM, "default", pid, record_unreachable, inferred, not_read)
 
 
+def recorded_positions(printer_id: str | None) -> list[dict[str, Any]] | None:
+    """The nozzle positions the owner stated for *printer_id* on its nozzle
+    record (:func:`kiln._pro_nozzle_bridge.consult_recorded_nozzle`), or
+    ``None``: no printer, no record, a record that states none, or one that
+    could not be asked.  Never raises."""
+    pid = (printer_id or "").strip()
+    if not pid:
+        return None
+    try:
+        from kiln import _pro_nozzle_bridge
+
+        positions = _pro_nozzle_bridge.consult_recorded_nozzle(pid).get("positions")
+    except Exception:  # noqa: BLE001 -- the record is one reading, never the check
+        logger.debug("assumed nozzle: positions lookup failed", exc_info=True)
+        return None
+    return positions if isinstance(positions, list) and positions else None
+
+
 def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> AssumedNozzle:
     """The nozzle a slice for the model *profile_id* is for.
 
@@ -312,4 +330,6 @@ def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> Assu
     return assumed_nozzle(key)
 
 
-__all__ = ["DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile", "stock_setting"]
+__all__ = [
+    "DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile", "recorded_positions", "stock_setting",
+]

@@ -242,20 +242,22 @@ def nozzle_unchecked(printer_id: str, *, at: str = "preflight") -> dict[str, Any
 
 
 def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
-    """The nozzle size on record for *printer_id*, when somebody recorded one.
+    """The nozzle on record for *printer_id*, when somebody recorded one.
 
-    ``{"diameter_mm": float | None, "answered": bool}``.  ``diameter_mm`` is
-    set only for a record a person or the machine stated; a catalogue
-    default is nobody's record and comes back ``None``.  ``answered`` is
-    ``False`` when the record could not be asked at all (offline, signed
-    out, no answer), so a caller can tell "no record" from "could not ask".
-    From kiln-pro locally when it is installed, asked every time; else
-    from the hosted door with a short timeout, and only that answer is
-    remembered, for :data:`RECORD_MEMO_S`.
+    ``{"diameter_mm": float | None, "answered": bool, "positions": list | None}``.
+    ``diameter_mm`` is set only for a record a person or the machine stated;
+    a catalogue default is nobody's record and comes back ``None``.
+    ``positions`` is the owner's statement of each nozzle position, when the
+    record holds one (:func:`recorded_positions_of`), else ``None``.
+    ``answered`` is ``False`` when the record could not be asked at all
+    (offline, signed out, no answer), so a caller can tell "no record" from
+    "could not ask".  From kiln-pro locally when it is installed, asked
+    every time; else from the hosted door with a short timeout, and only
+    that answer is remembered, for :data:`RECORD_MEMO_S`.
     """
     pid = (printer_id or "").strip() if isinstance(printer_id, str) else ""
     if not pid:
-        return {"diameter_mm": None, "answered": True}
+        return {"diameter_mm": None, "answered": True, "positions": None}
     if available():
         # Asked of the store each time, never remembered: the read is local,
         # the record can change between two checks, and a process that
@@ -265,13 +267,19 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
         try:
             from kiln_pro.nozzle_intelligence.store_resolver import recorded_nozzle
         except ImportError:  # a kiln-pro from before this door existed
-            return {"diameter_mm": None, "answered": True}
+            return {"diameter_mm": None, "answered": True, "positions": None}
         try:
             state = recorded_nozzle(pid, tool_name=RECORD_TOOL)
         except Exception:  # noqa: BLE001 -- one rung of a check, never the check
             logger.debug("recorded nozzle lookup failed", exc_info=True)
-            return {"diameter_mm": None, "answered": True}
-        return {"diameter_mm": state.diameter_mm if state is not None else None, "answered": True}
+            return {"diameter_mm": None, "answered": True, "positions": None}
+        if state is None:
+            return {"diameter_mm": None, "answered": True, "positions": None}
+        return {
+            "diameter_mm": state.diameter_mm,
+            "answered": True,
+            "positions": recorded_positions_of(getattr(state, "positions", None)),
+        }
     now = time.monotonic()
     memo = _record_memo.get(pid)
     if memo is not None and now - memo[0] < RECORD_MEMO_S:
@@ -279,6 +287,43 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     answer = _served_recorded_nozzle(pid)
     _record_memo[pid] = (now, answer)
     return answer
+
+
+def _field(entry: Any, name: str) -> Any:
+    """*name* of one stated position, a mapping or an object alike."""
+    return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
+
+
+def recorded_positions_of(raw: Any) -> list[dict[str, Any]] | None:
+    """The nozzle positions a record states, as plain entries, or ``None``.
+
+    Each entry is ``{"id": int, "fitted": bool, "diameter_mm": float | None,
+    "material": str | None}``, in id order.  An entry with no whole-number id
+    of 1 or more is left out, and so is a second entry for an id already
+    read.  A record that states no positions, or none that read, is
+    ``None``.  Never raises.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+    read: dict[int, dict[str, Any]] = {}
+    for entry in raw:
+        pid = _field(entry, "id")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid < 1 or pid in read:
+            continue
+        size = _field(entry, "diameter_mm")
+        try:
+            size = float(size) if size is not None and not isinstance(size, bool) else None
+        except (TypeError, ValueError):
+            size = None
+        material = getattr(_field(entry, "material"), "value", _field(entry, "material"))
+        word = str(material).strip().lower() if material is not None else ""
+        read[pid] = {
+            "id": pid,
+            "fitted": _field(entry, "fitted") is True,
+            "diameter_mm": size if size is not None and 0 < size <= 5 else None,
+            "material": word or None,
+        }
+    return [read[pid] for pid in sorted(read)] or None
 
 
 #: The servers' last answer for each printer's nozzle record, for
@@ -317,9 +362,13 @@ def _served_state(printer_id: str) -> dict[str, Any] | None:
 def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     answer = _served_state(printer_id)
     if answer is None:
-        return {"diameter_mm": None, "answered": False}
+        return {"diameter_mm": None, "answered": False, "positions": None}
     stated = answer.get("found") and answer.get("trusted_for_verdicts")
-    return {"diameter_mm": answer.get("diameter_mm") if stated else None, "answered": True}
+    return {
+        "diameter_mm": answer.get("diameter_mm") if stated else None,
+        "answered": True,
+        "positions": recorded_positions_of(answer.get("positions")) if stated else None,
+    }
 
 
 #: The memo key for :func:`consult_only_recorded_nozzle`; no printer is named so.
@@ -879,6 +928,7 @@ __all__ = [
     "consult_capacity",
     "consult_only_recorded_nozzle",
     "consult_recorded_nozzle",
+    "recorded_positions_of",
     "consult_sliced_file",
     "forget_recorded_nozzle",
     "nozzle_unchecked",

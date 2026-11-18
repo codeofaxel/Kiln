@@ -991,6 +991,7 @@ def _fit_nozzle(
     stated: Collection[str] = (),
     printer_name: str | None = None,
     profile_nozzle_mm: float | None = None,
+    nozzles: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Slice for the nozzle that is fitted, in place, and say which.
 
@@ -1027,6 +1028,11 @@ def _fit_nozzle(
     the answer, and a stated layer height outside the window is kept and
     named.  Returns what was done, for the reply; ``None`` for a profile
     that states no nozzle.
+
+    For a printer with a nozzle record (*nozzles*), the owner's stated
+    nozzle positions are read for the same machine and returned as
+    ``positions``; when every nozzle a slice uses was stated at one size
+    (:func:`fitted_size_mm`), that is the size on record.
     """
     sizes = _numbers(settings.get("nozzle_diameter"))
     if not sizes:
@@ -1036,10 +1042,24 @@ def _fit_nozzle(
     from kiln.assumed_nozzle import AssumedNozzle, nozzle_for_profile
 
     changed: dict[str, str] = {}
+    positions: list[dict[str, Any]] | None = None
     if "nozzle_diameter" in stated:
         answer = AssumedNozzle(own, "stated", printer_name or None)
+        if isinstance(nozzles, Mapping):
+            from kiln.assumed_nozzle import recorded_positions
+
+            positions = recorded_positions(answer.printer_id)
     else:
         answer = nozzle_for_profile(profile_id, printer_name)
+        if isinstance(nozzles, Mapping):
+            from kiln.assumed_nozzle import recorded_positions
+
+            positions = recorded_positions(answer.printer_id)
+            size = fitted_size_mm(_with_fitted(nozzles, positions))
+            if size is not None:
+                answer = AssumedNozzle(
+                    size, "record", answer.printer_id, answer.record_unreachable, answer.inferred_printer,
+                )
         fitted = answer.source in ("record", "printer_setting")
         if fitted and uniform and abs(answer.diameter_mm - own) > _NOZZLE_SAME_MM:
             raw = str(settings["nozzle_diameter"])
@@ -1104,7 +1124,7 @@ def _fit_nozzle(
             f" The profile is written for {own:g} mm: line widths follow the nozzle,"
             " and speeds, retraction and cooling are the profile's."
         )
-    return {
+    fit: dict[str, Any] = {
         "diameter_mm": answer.diameter_mm,
         "source": answer.source,
         "printer_id": answer.printer_id,
@@ -1112,6 +1132,9 @@ def _fit_nozzle(
         "changed": changed,
         "note": " ".join([said, *notes]),
     }
+    if positions is not None:
+        fit["positions"] = positions
+    return fit
 
 
 def _with_nozzle_fit(ini: str, fit: dict[str, Any] | None) -> str:
@@ -1146,16 +1169,173 @@ def nozzle_fit_of(profile_path: str | None) -> dict[str, Any] | None:
 _NOZZLES_MARK = "# kiln_nozzles = "
 
 
+#: The key a nozzle record carries the owner's stated nozzle positions under
+#: (:func:`fitted_record`), each ``{"id", "fitted", "diameter_mm", "material"}``.
+_FITTED_KEY = "fitted"
+
+
 def nozzle_positions(nozzles: Any) -> int:
-    """How many nozzle positions the nozzle record *nozzles* is sliced for
-    (its ``sliced_as``): 1 for no record, a record that does not say, or
-    one that says fewer than two."""
+    """How many nozzle positions a slice with the nozzle record *nozzles* uses.
+
+    The one answer every door reads.  With the owner's fitted positions on
+    the record (:func:`fitted_record`): the record's positions in order from
+    the first, while each is fitted and states a reach Kiln can read, and at
+    most the record's ``max``; never fewer than 1.  Without them, the
+    record's ``sliced_as``: 1 for no record, a record that does not say, or
+    one that says fewer than two.
+    """
     if not isinstance(nozzles, Mapping):
         return 1
+    if _owner_positions(nozzles) is not None:
+        return max(1, len(_used_positions(nozzles)))
     raw = nozzles.get("sliced_as")
     if isinstance(raw, bool) or not isinstance(raw, int):
         return 1
     return raw if raw >= 2 else 1
+
+
+def _owner_positions(nozzles: Any) -> list[Mapping[str, Any]] | None:
+    """The owner's stated positions on *nozzles*, or ``None`` when the
+    record carries none with a fitted nozzle."""
+    raw = nozzles.get(_FITTED_KEY) if isinstance(nozzles, Mapping) else None
+    if not isinstance(raw, list):
+        return None
+    stated = [entry for entry in raw if isinstance(entry, Mapping)]
+    return stated if any(entry.get("fitted") is True for entry in stated) else None
+
+
+def _whole(raw: Any) -> int | None:
+    """*raw* as a whole number of 1 or more, else ``None``."""
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1 else None
+
+
+def _used_positions(nozzles: Any) -> list[Mapping[str, Any]]:
+    """The record positions a slice uses, in order: from the first, while
+    each is one the owner fitted and states a readable reach, at most the
+    record's ``max``.  Empty with no owner statement."""
+    stated = _owner_positions(nozzles)
+    positions = nozzles.get("positions") if isinstance(nozzles, Mapping) else None
+    if stated is None or not isinstance(positions, list):
+        return []
+    fitted = {entry.get("id") for entry in stated if entry.get("fitted") is True}
+    most = _whole(nozzles.get("max"))
+    used: list[Mapping[str, Any]] = []
+    for index, entry in enumerate(positions):
+        if most is not None and len(used) >= most:
+            break
+        if not isinstance(entry, Mapping) or entry.get("id", index + 1) not in fitted:
+            break
+        if _rect_of(entry.get("reach")) is None:
+            break
+        used.append(entry)
+    return used
+
+
+def _stated_for(nozzles: Any, position: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+    """The owner's statement for the record *position* at *index*, or ``{}``."""
+    pid = position.get("id", index + 1)
+    return next((e for e in _owner_positions(nozzles) or () if e.get("id") == pid), {})
+
+
+def used_nozzles(nozzles: Any) -> list[dict[str, Any]]:
+    """The nozzles a slice with *nozzles* uses, as the owner stated them:
+    ``{"id", "diameter_mm", "material"}`` per nozzle, in slice order (entry
+    ``k`` is the slice's nozzle ``k + 1``).  Empty when the record carries
+    no owner statement."""
+    used = []
+    for index, position in enumerate(_used_positions(nozzles)):
+        said = _stated_for(nozzles, position, index)
+        used.append(
+            {
+                "id": position.get("id", index + 1),
+                "diameter_mm": said.get("diameter_mm"),
+                "material": said.get("material"),
+            }
+        )
+    return used
+
+
+def fitted_count(nozzles: Any) -> int:
+    """How many nozzles the owner stated fitted on *nozzles*; 0 for none."""
+    return sum(1 for entry in _owner_positions(nozzles) or () if entry.get("fitted") is True)
+
+
+def _with_fitted(nozzles: Any, positions: Any) -> dict[str, Any] | None:
+    """The printer's record *nozzles* with the owner's *positions* on it
+    when any is fitted; the record alone otherwise.  ``None`` for no record."""
+    if not isinstance(nozzles, Mapping):
+        return None
+    record = {key: value for key, value in nozzles.items() if key != _FITTED_KEY}
+    stated = [dict(entry) for entry in positions if isinstance(entry, Mapping)] if isinstance(positions, list) else []
+    if any(entry.get("fitted") is True for entry in stated):
+        record[_FITTED_KEY] = stated
+    return record
+
+
+def fitted_record(nozzles: Any, positions: Any) -> dict[str, Any] | None:
+    """The nozzle record a slice carries: the printer's record *nozzles*
+    with the owner's stated *positions* on it.
+
+    ``None`` when a slice with it uses one nozzle and the owner fitted no
+    more than that -- so a printer sliced with one nozzle carries nothing,
+    exactly as with no statement.  *positions* is the shape
+    :func:`kiln._pro_nozzle_bridge.recorded_positions_of` reads; ``None`` or
+    no fitted entry is no statement.
+    """
+    record = _with_fitted(nozzles, positions)
+    if record is None:
+        return None
+    used = nozzle_positions(record)
+    return record if used >= 2 or fitted_count(record) > used else None
+
+
+def fitted_size_mm(nozzles: Any) -> float | None:
+    """The one size the nozzles a slice with *nozzles* may print with were
+    stated at -- each nozzle it uses, or for a slice for one nozzle every
+    nozzle fitted -- or ``None``: no statement, a nozzle with no size, or
+    sizes that differ."""
+    if nozzle_positions(nozzles) >= 2:
+        sizes = [n["diameter_mm"] for n in used_nozzles(nozzles)]
+    else:
+        sizes = [e.get("diameter_mm") for e in _owner_positions(nozzles) or () if e.get("fitted") is True]
+    if not sizes or any(not isinstance(size, (int, float)) or isinstance(size, bool) for size in sizes):
+        return None
+    return sizes[0] if max(sizes) - min(sizes) <= _NOZZLE_SAME_MM else None
+
+
+def _nozzle_words(ids: list[Any]) -> str:
+    """``nozzle 1`` / ``nozzles 1 and 2`` / ``nozzles 1, 2 and 3``."""
+    named = [str(i) for i in ids]
+    if len(named) == 1:
+        return f"nozzle {named[0]}"
+    return f"nozzles {', '.join(named[:-1])} and {named[-1]}"
+
+
+def mixed_size_refusal(nozzles: Any) -> str:
+    """The sentence refusing a slice with *nozzles* when the nozzles it uses
+    were stated at different sizes; ``""`` otherwise."""
+    used = [n for n in used_nozzles(nozzles) if isinstance(n["diameter_mm"], (int, float))]
+    if len(used) < 2 or max(n["diameter_mm"] for n in used) - min(n["diameter_mm"] for n in used) <= _NOZZLE_SAME_MM:
+        return ""
+    sizes = " and ".join(f"nozzle {n['id']} is {n['diameter_mm']:g} mm" for n in used)
+    return (
+        f"The nozzles this print would use are different sizes ({sizes}), and Kiln slices for more "
+        "than one nozzle only when they are one size, so nothing was sliced; slice it with one "
+        "filament for one nozzle, or fit nozzles of one size."
+    )
+
+
+def unused_fitted_note(nozzles: Any) -> str:
+    """One sentence when the owner fitted more nozzles than a slice with
+    *nozzles* uses, saying which it uses; ``""`` otherwise."""
+    fitted = fitted_count(nozzles)
+    used = nozzle_positions(nozzles)
+    if fitted <= used:
+        return ""
+    if used < 2:
+        return f"This slice is for one nozzle of the {fitted} fitted; the others are not used."
+    ids = [n["id"] for n in used_nozzles(nozzles)]
+    return f"This slice uses {used} of the {fitted} nozzles fitted ({_nozzle_words(ids)}); the others are not used."
 
 
 Rect = tuple[float, float, float, float]
@@ -1190,14 +1370,16 @@ def nozzle_bed(nozzles: Any) -> Rect | None:
 
 
 def nozzle_reaches(nozzles: Any) -> list[Rect] | None:
-    """Where each nozzle position of the record reaches, in position order,
-    or ``None`` unless every position states a reach Kiln can read."""
-    if nozzle_positions(nozzles) < 2:
+    """Where each nozzle position a slice with the record uses reaches
+    (:func:`nozzle_positions`), in position order, or ``None`` unless every
+    one of them states a reach Kiln can read."""
+    used = nozzle_positions(nozzles)
+    if used < 2:
         return None
     positions = nozzles.get("positions")
     if not isinstance(positions, list) or not positions:
         return None
-    reaches = [_rect_of(p.get("reach")) if isinstance(p, Mapping) else None for p in positions]
+    reaches = [_rect_of(p.get("reach")) if isinstance(p, Mapping) else None for p in positions[:used]]
     return None if any(r is None for r in reaches) else reaches  # type: ignore[return-value]
 
 
@@ -1219,22 +1401,29 @@ def rect_polygon(rect: Rect) -> str:
 
 
 def printer_nozzles(printer_id: str | None) -> dict[str, Any] | None:
-    """The nozzle record of *printer_id*'s slicer profile when it is sliced
-    for more than one nozzle; ``None`` otherwise.  Never raises."""
+    """The nozzle record of *printer_id*'s slicer profile, with the nozzles
+    its owner stated fitted on it (:func:`fitted_record`), when a slice uses
+    more than one nozzle; ``None`` otherwise.  Never raises."""
     if not printer_id:
         return None
     try:
-        return _sliced_nozzles(get_slicer_profile(str(printer_id)).id)
+        block = _nozzle_block(get_slicer_profile(str(printer_id)).id)
+        if block is None:
+            return None
+        from kiln.assumed_nozzle import recorded_positions
+
+        record = fitted_record(block, recorded_positions(str(printer_id)))
+        return record if nozzle_positions(record) >= 2 else None
     except Exception:  # noqa: BLE001 -- no record reads as one nozzle
         logger.debug("nozzle record of %s unavailable", printer_id, exc_info=True)
         return None
 
 
-def _sliced_nozzles(profile_id: str) -> dict[str, Any] | None:
-    """The nozzle record of the held profile *profile_id*, when it is
-    sliced for two or more nozzle positions; ``None`` otherwise."""
+def _nozzle_block(profile_id: str) -> dict[str, Any] | None:
+    """The nozzle record of the held profile *profile_id*, whatever it is
+    sliced for, or ``None`` when it states none."""
     block = (_raw_rows.get(profile_id) or {}).get("nozzles")
-    return dict(block) if nozzle_positions(block) >= 2 else None
+    return dict(block) if isinstance(block, Mapping) else None
 
 
 def _nozzles_key(nozzles: dict[str, Any] | None) -> dict[str, str]:
@@ -1251,9 +1440,17 @@ def _with_nozzles(ini: str, nozzles: dict[str, Any] | None) -> str:
 
 
 def nozzles_of(profile_path: str | None) -> dict[str, Any] | None:
-    """The nozzle record the profile at *profile_path* carries, or ``None``:
-    a profile for a printer sliced with one nozzle, one Kiln did not write,
-    or one that cannot be read.  Never raises."""
+    """The nozzle record the profile at *profile_path* carries when a slice
+    with it uses more than one nozzle (:func:`nozzle_positions`), or
+    ``None``: a profile for a printer sliced with one nozzle, one Kiln did
+    not write, or one that cannot be read.  Never raises."""
+    block = nozzle_record_of(profile_path)
+    return block if nozzle_positions(block) >= 2 else None
+
+
+def nozzle_record_of(profile_path: str | None) -> dict[str, Any] | None:
+    """The nozzle record the profile at *profile_path* carries, whatever a
+    slice with it uses, or ``None`` when it carries none.  Never raises."""
     if not profile_path:
         return None
     try:
@@ -1261,7 +1458,7 @@ def nozzles_of(profile_path: str | None) -> dict[str, Any] | None:
             for line in profile_lines(fh.read()):
                 if line.startswith(_NOZZLES_MARK):
                     block = json.loads(line[len(_NOZZLES_MARK):])
-                    return block if nozzle_positions(block) >= 2 else None
+                    return block if isinstance(block, dict) else None
     except (OSError, UnicodeDecodeError, ValueError):
         logger.debug("nozzle record of %s could not be read", profile_path, exc_info=True)
     return None
@@ -1469,9 +1666,11 @@ def resolve_slicer_profile(
     # for the nozzle the slice is for.  A printer with no bundled profile is
     # still asked for by the model the door named, not by the generic one's.
     model = profile.id if profile.id != "default" else printer_id
+    block = _nozzle_block(profile.id)
     fit = _fit_nozzle(
         merged, model, stated=overrides or (), printer_name=printer_name,
         profile_nozzle_mm=next(iter(_numbers(profile.settings.get("nozzle_diameter"))), None),
+        nozzles=block,
     )
     # After the merge: an override can switch relative-E on, replace the
     # layer_gcode that was satisfying the rule, change the temperatures the
@@ -1485,7 +1684,7 @@ def resolve_slicer_profile(
     # reasons, and the file says the reason) and which keys the caller
     # stated (an override equal to the printer's own value is still theirs).
     stated = sorted(overrides or ())
-    nozzles = _sliced_nozzles(profile.id)
+    nozzles = fitted_record(block, (fit or {}).get("positions"))
     fit_key = _settings_hash(
         {**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True), **_nozzles_key(nozzles)}
     )
@@ -1892,9 +2091,11 @@ def resolve_multiextruder_profile(
         overrides = one_spelling(overrides)
         merged.update(overrides or {})
     model = profile.id if profile.id != "default" else printer_id
+    block = _nozzle_block(profile.id)
     fit = _fit_nozzle(
         merged, model, stated=overrides or (), printer_name=printer_name,
         profile_nozzle_mm=next(iter(_numbers(profile.settings.get("nozzle_diameter"))), None),
+        nozzles=block,
     )
     # Setting layer_gcode unconditionally would be right for the Bambu
     # profiles this builder is used with and wrong for anything with
@@ -1902,7 +2103,7 @@ def resolve_multiextruder_profile(
     _apply_printer_invariants(merged, profile.id)
 
     stated = sorted(overrides or ())
-    nozzles = _sliced_nozzles(profile.id)
+    nozzles = fitted_record(block, (fit or {}).get("positions"))
     fit_key = _settings_hash(
         {**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True), **_nozzles_key(nozzles)}
     )

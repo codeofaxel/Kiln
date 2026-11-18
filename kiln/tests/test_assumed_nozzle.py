@@ -154,7 +154,7 @@ class TestTheRecordLookup:
         import types
 
         self._record_beside(monkeypatch, lambda pid: types.SimpleNamespace(diameter_mm=0.6))
-        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": 0.6, "answered": True}
+        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": 0.6, "answered": True, "positions": None}
 
     def test_with_kiln_pro_beside_it_the_record_is_asked_every_time(self, monkeypatch):
         # A nozzle recorded a moment ago must be the next check's answer,
@@ -170,7 +170,7 @@ class TestTheRecordLookup:
 
     def test_no_record_is_no_answer(self, monkeypatch):
         self._record_beside(monkeypatch, lambda pid: None)
-        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": None, "answered": True}
+        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": None, "answered": True, "positions": None}
 
     def test_the_record_is_asked_for_and_nothing_else(self, monkeypatch):
         """The lookup that also fetched a catalogue default is not called:
@@ -191,7 +191,7 @@ class TestTheRecordLookup:
             raise RuntimeError("store unreadable")
 
         self._record_beside(monkeypatch, broken)
-        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": None, "answered": True}
+        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": None, "answered": True, "positions": None}
 
     def test_without_kiln_pro_the_served_door_is_asked(self, monkeypatch):
         asked: list[str] = []
@@ -202,7 +202,7 @@ class TestTheRecordLookup:
 
         monkeypatch.setattr(bridge, "available", lambda: False)
         monkeypatch.setattr("kiln.server._pro_api_call", served)
-        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": 0.6, "answered": True}
+        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": 0.6, "answered": True, "positions": None}
         # Remembered: a check asked again a moment later does not ask again.
         assert bridge.consult_recorded_nozzle("shop_a1")["diameter_mm"] == 0.6
         assert asked == ["get_nozzle_state"]
@@ -217,7 +217,7 @@ class TestTheRecordLookup:
 
         monkeypatch.setattr(bridge, "available", lambda: False)
         monkeypatch.setattr("kiln.server._pro_api_call", served)
-        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": None, "answered": False}
+        assert bridge.consult_recorded_nozzle("shop_a1") == {"diameter_mm": None, "answered": False, "positions": None}
 
     def test_a_refusal_is_not_an_answer(self, monkeypatch):
         monkeypatch.setattr(bridge, "available", lambda: False)

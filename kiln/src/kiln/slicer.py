@@ -199,8 +199,10 @@ class SliceTimeLimitError(SlicerError):
 
 class NozzleMapError(SlicerError):
     """A slice for more than one nozzle that cannot be run as asked: the
-    filament-to-nozzle map does not fit the print or the printer, or the
-    slicer in hand cannot slice for more than one nozzle.  Raised before
+    filament-to-nozzle map does not fit the print or the printer, the
+    nozzles it would use are fitted at different sizes, an abrasive
+    filament would print through a nozzle that is not wear-resistant, or
+    the slicer in hand cannot slice for more than one nozzle.  Raised before
     any slicer is launched; ``code`` is the door's error code."""
 
     def __init__(self, message: str, *, code: str) -> None:
@@ -811,6 +813,75 @@ def checked_filament_map(filament_map: Any, *, filaments: int, positions: int) -
     return asked
 
 
+def _nozzle_said(nozzle: dict[str, Any]) -> str:
+    """``nozzle 2 (brass)`` / ``nozzle 2 (material not on record)``."""
+    material = str(nozzle.get("material") or "").strip().lower()
+    if not material or material == "unknown":
+        return f"nozzle {nozzle['id']} (material not on record)"
+    return f"nozzle {nozzle['id']} ({material.replace('_', ' ')})"
+
+
+def abrasive_nozzle_refusal(
+    nozzles: Any, slot_materials: Sequence[Sequence[str]], filament_map: Sequence[int] | None,
+) -> str:
+    """The sentence refusing a slice that would print an abrasive filament
+    through a nozzle that is not wear-resistant, or ``""``.
+
+    *nozzles* is the record the slice carries; only the nozzles its owner
+    stated (:func:`kiln.slicer_profiles.used_nozzles`) are judged.
+    *slot_materials* lists, per filament slot in order, every word naming
+    that filament's material; a slot is abrasive when any word is
+    (:func:`kiln.material_safety.is_abrasive_filament`).  With
+    *filament_map*, an abrasive filament mapped to a nozzle that is not
+    wear-resistant (:func:`kiln.material_safety.is_wear_resistant_nozzle`)
+    is refused; with none, the slicer's own choice is refused while any
+    nozzle the slice uses is not wear-resistant.  The sentence names the
+    filament and the nozzle that can take it.
+    """
+    from kiln.material_safety import is_abrasive_filament, is_wear_resistant_nozzle
+    from kiln.slicer_profiles import used_nozzles
+
+    used = used_nozzles(nozzles)
+    if not used:
+        return ""
+    abrasive: list[tuple[int, str]] = []
+    for slot, words in enumerate(slot_materials, start=1):
+        word = next((w for w in words if w and is_abrasive_filament(w)), None)
+        if word is not None:
+            abrasive.append((slot, word.strip()))
+    soft = [n for n in used if not is_wear_resistant_nozzle(n.get("material"))]
+    if filament_map:
+        mapped = {slot: filament_map[slot - 1] for slot, _word in abrasive if slot - 1 < len(filament_map)}
+        on_soft = {
+            slot for slot, nozzle in mapped.items()
+            if 1 <= nozzle <= len(used) and not is_wear_resistant_nozzle(used[nozzle - 1].get("material"))
+        }
+        abrasive = [(slot, word) for slot, word in abrasive if slot in on_soft]
+        soft = [used[k - 1] for k in sorted({mapped[slot] for slot in on_soft})]
+    if not abrasive or not soft:
+        return ""
+    slots = [slot for slot, _word in abrasive]
+    named = sorted({word for _slot, word in abrasive})
+    if len(slots) == 1:
+        filament, it = f"Filament {slots[0]} is {named[0]}, an abrasive filament", "it"
+    else:
+        listed = f"{', '.join(map(str, slots[:-1]))} and {slots[-1]}"
+        filament, it = f"Filaments {listed} are abrasive ({', '.join(named)})", "them"
+    nozzles_said = " and ".join(_nozzle_said(n) for n in soft)
+    verb = "is" if len(soft) == 1 else "are"
+    if filament_map:
+        where = f"the filament-to-nozzle map puts {it} on {nozzles_said}, which {verb} not wear-resistant"
+    else:
+        where = f"the slicer chooses each filament's nozzle and {nozzles_said} {verb} not wear-resistant"
+    hard = [str(n["id"]) for n in used if is_wear_resistant_nozzle(n.get("material"))]
+    if hard:
+        on = f"nozzle {' or '.join(hard)}"
+        fix = f"put {it} on {on}" if filament_map else f"give a filament-to-nozzle map with {it} on {on}"
+    else:
+        fix = f"no nozzle this print uses is wear-resistant, so fit a hardened one for {it}"
+    return f"{filament}, and {where}, so nothing was sliced; {fix}."
+
+
 def filament_map_of(gcode_path: str | None) -> dict[str, Any] | None:
     """The filament-to-nozzle map the sliced file at *gcode_path* states,
     or ``None`` when it states none or cannot be read.  Never raises.
@@ -839,6 +910,27 @@ def filament_map_of(gcode_path: str | None) -> dict[str, Any] | None:
     if mode:
         read["mode"] = mode
     return read
+
+
+def _slot_materials(input_path: str, materials: Sequence[str | None], slots: int) -> list[list[str]]:
+    """Per filament slot, every word naming its material: each of
+    *materials* (the words the slice names every slot by) and, for a 3MF
+    that states one per slot, the file's own.  Never raises."""
+    named = [str(word).strip() for word in materials if word and str(word).strip()]
+    words = [list(named) for _ in range(slots)]
+    if not str(input_path).lower().endswith(".3mf"):
+        return words
+    try:
+        from kiln.file_metadata import slicer_settings
+
+        stated = re.split(r"[;,]", str(slicer_settings(input_path).get("filament_type") or ""))
+    except Exception:  # noqa: BLE001 -- a file that cannot be read adds no word
+        logger.debug("filament types of %s not read", input_path, exc_info=True)
+        return words
+    for slot, word in enumerate(stated[:slots]):
+        if word.strip():
+            words[slot].append(word.strip())
+    return words
 
 
 def _printer_name_of(profile: str | None) -> str | None:
@@ -1833,7 +1925,16 @@ def _slice_file(
     if taken is not None:
         input_abs = taken.path
 
-    from kiln.slicer_profiles import nozzle_bed, nozzle_positions, nozzles_of, profile_with_overrides, rect_polygon
+    from kiln.slicer_profiles import (
+        mixed_size_refusal,
+        nozzle_bed,
+        nozzle_positions,
+        nozzle_record_of,
+        nozzles_of,
+        profile_with_overrides,
+        rect_polygon,
+        unused_fitted_note,
+    )
 
     # A printer with a bed of its own for more than one nozzle has its 3MF
     # judged once the slice is known to be for one nozzle or more.
@@ -1887,6 +1988,9 @@ def _slice_file(
     asked_map = checked_filament_map(
         filament_map, filaments=max(slots_needed, 1), positions=nozzle_positions(nozzles),
     )
+    several_filaments = bool(asked_map) or slots_needed >= 2
+    if nozzles is not None and several_filaments and (mixed := mixed_size_refusal(nozzles)):
+        raise NozzleMapError(mixed, code="MULTI_NOZZLE_MIXED_SIZES")
     if ext == ".3mf" and nozzle_bed(nozzles) is not None:
         wider = nozzle_bed_for_slice(input_abs, profile, asked_map, slots=slots_needed)
         if wider is not None:
@@ -1895,8 +1999,11 @@ def _slice_file(
                 profile, {"bed_shape": rect_polygon(wider)}, prefix=f"{Path(profile).stem}_", stated=False,
             )
         _check_3mf_on_bed(input_abs, profile)
-    if nozzles is not None and not (asked_map or slots_needed >= 2):
+    if nozzles is not None and not several_filaments:
         nozzles = None
+    # The owner fitted more nozzles than this slice uses: said once, with
+    # the slice, when it prints more than one filament.
+    unused_note = unused_fitted_note(nozzle_record_of(profile)) if several_filaments else ""
     multicolor_switched = False
     if nozzles is not None and not _is_bambu_studio(slicer):
         studio = _find_bambu_studio() if slicer_path is None else None
@@ -1956,6 +2063,16 @@ def _slice_file(
         )
     except MaterialRefused as exc:
         raise MaterialNotPrintableError(str(exc), code=exc.code, verdict=exc.verdict) from exc
+    if nozzles is not None:
+        abrasive = abrasive_nozzle_refusal(
+            nozzles,
+            _slot_materials(
+                input_abs, [material, filament.filament_type, filament.material], max(slots_needed, 1),
+            ),
+            asked_map,
+        )
+        if abrasive:
+            raise NozzleMapError(abrasive, code="ABRASIVE_ON_SOFT_NOZZLE")
     # Supports, decided at the same place for the same reason: a part the
     # printability engine says needs them was sliced without them by every
     # tool door, and the estimate was of that file.  A caller's statement
@@ -2053,13 +2170,16 @@ def _slice_file(
                     sliced_input, faces = painted
                     supports = replace(supports, kept_off_painted=faces)
     try:
-        return _say_left_out(say_project_plate(_slice_decided(
+        result = _say_left_out(say_project_plate(_slice_decided(
             slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,
             profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
             nozzles=nozzles, filament_map=asked_map,
         ), taken), left_out)
+        if unused_note:
+            result.message = f"{result.message} {unused_note}".strip()
+        return result
     finally:
         for scratch in (layer_scratch, kept_off_scratch):
             if scratch is not None:

@@ -894,10 +894,11 @@ class _EstimateToolsPlugin:
                 eff_infill: float | None = None if infill_percent < 0 else infill_percent
                 eff_layer: float | None = layer_height_mm if layer_height_mm > 0 else None
                 eff_printer: str | None = printer_id if printer_id else None
-                from kiln.assumed_nozzle import assumed_nozzle
+                from kiln.assumed_nozzle import assumed_nozzle, recorded_positions
 
                 nozzle = assumed_nozzle(eff_printer, stated=nozzle_mm, or_only_printer=True)
                 nozzle_mm = nozzle.diameter_mm
+                fitted = recorded_positions(nozzle.printer_id)
                 eff_addon: str | None = tool_changer_addon if tool_changer_addon.strip() else None
 
                 # Parse template overrides
@@ -922,6 +923,7 @@ class _EstimateToolsPlugin:
                         electricity_rate=electricity_rate,
                         printer_wattage=printer_wattage,
                         filament_map=filament_map,
+                        fitted_positions=fitted,
                     )
                 else:
                     if width_mm <= 0 or depth_mm <= 0 or height_mm <= 0:
@@ -946,6 +948,7 @@ class _EstimateToolsPlugin:
                         electricity_rate=electricity_rate,
                         printer_wattage=printer_wattage,
                         filament_map=filament_map,
+                        fitted_positions=fitted,
                     )
 
                 # Build human-readable summary
