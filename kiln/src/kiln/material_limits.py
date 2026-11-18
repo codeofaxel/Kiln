@@ -100,6 +100,10 @@ class MaterialLimits:
     figures: dict[str, float | None] = field(default_factory=dict)
     basis: dict[str, str] = field(default_factory=dict)
     miss: Miss | None = None
+    #: The line Kiln's servers sent when they answered this plastic with the
+    #: general figures because the caller's daily allowance of plastics was
+    #: used; empty otherwise.
+    allowance: str = ""
 
     def value(self, quantity: str) -> float | None:
         """The figure for *quantity*, ``None`` where it does not apply."""
@@ -140,7 +144,8 @@ class MaterialLimits:
     def notes(self) -> list[str]:
         """What a reply should say about where its figures came from: why the
         plastic's own were not read (once per cause in a tool call, or in a
-        process outside one), and for a flexible or static-safe plastic
+        process outside one) -- a miss, or the day's allowance of plastics
+        used (:attr:`allowance`) -- and for a flexible or static-safe plastic
         answered generally, what the general figures leave out.  Empty when
         the plastic's own figures were read."""
         lines: list[str] = []
@@ -148,7 +153,10 @@ class MaterialLimits:
         if self.miss is not None and self.miss.cause not in said:
             said.add(self.miss.cause)
             lines.append(miss_sentence(self.miss))
-        if self.miss is not None or not self.known:
+        if self.allowance and self.allowance not in said:
+            said.add(self.allowance)
+            lines.append(self.allowance)
+        if self.miss is not None or self.allowance or not self.known:
             category = _category(self.material_id)
             if category == "thermoplastic_elastomer":
                 lines.append(
@@ -260,15 +268,24 @@ def limits_for(
         answer, miss = bridge.ask(
             name, nozzle_mm=nozzle, layer_height_mm=layer, enclosed=enclosed, pin_height_mm=pin_height_mm,
         )
-        if answer is not None and not local:
+        # An answer the allowance cut to the general figures holds only for
+        # today, so it is not kept.
+        if answer is not None and not local and not answer.get("allowance"):
             _answers[key] = answer
     if answer is None:
         return MaterialLimits(name, public_id, public_id is not None, nozzle, layer, figures, basis, miss)
     for quantity, figure in answer["limits"].items():
         figures[quantity] = float(figure["value"]) if figure.get("value") is not None else None
         basis[quantity] = str(figure["basis"])
+    allowance = str(answer.get("allowance") or "")
+    if allowance:
+        # Said in the reply of the call that read it, whichever door it was.
+        from kiln.reading_notes import LIMITS_KEY, note_said
+
+        note_said(LIMITS_KEY, allowance)
     return MaterialLimits(
         name, answer.get("material_id") or public_id, bool(answer["known"]), nozzle, layer, figures, basis,
+        allowance=allowance,
     )
 
 

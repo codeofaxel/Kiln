@@ -369,8 +369,14 @@ def validate_design(
         printer_model=printer_model,
     )
 
-    # 2. Run printability analysis.
-    report = analyze_printability(file_path, build_volume=build_volume)
+    # 2. Run printability analysis, for the plastic the checks judge: one
+    # plastic's limits read for the call, not a second one's as well.
+    picked = brief.recommended_material
+    report = analyze_printability(
+        file_path,
+        build_volume=build_volume,
+        material=(picked.material.material_id if picked and picked.material else None) or "pla",
+    )
     report_dict = report.to_dict()
 
     overhangs = report_dict.get("overhangs", {})

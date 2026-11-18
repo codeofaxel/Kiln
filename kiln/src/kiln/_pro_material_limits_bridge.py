@@ -166,14 +166,26 @@ def _served(material: str | None, scenario: dict[str, Any]) -> tuple[dict[str, A
     return None, miss or Miss("unanswered", detail="no design limits in the answer")
 
 
+#: The longest allowance line an answer may carry.
+_ALLOWANCE_MAX_CHARS = 400
+
+
 def _kept(answer: dict[str, Any], wanted: tuple[str, ...] = QUANTITIES) -> dict[str, Any]:
-    """Only what a check reads, so nothing else an answer carries travels on."""
+    """Only what a check reads, so nothing else an answer carries travels on.
+
+    ``allowance`` is the line Kiln's servers send when they answered this
+    plastic with the general figures because the caller's daily allowance
+    of plastics was used; it is kept to be said, never read as a figure."""
     material_id = answer.get("material_id")
-    return {
+    kept: dict[str, Any] = {
         "known": answer["known"],
         "material_id": material_id if isinstance(material_id, str) else None,
         "limits": {q: dict(answer["limits"][q]) for q in wanted if q in answer["limits"]},
     }
+    allowance = answer.get("allowance")
+    if isinstance(allowance, str) and allowance.strip() and len(allowance) <= _ALLOWANCE_MAX_CHARS:
+        kept["allowance"] = allowance.strip()
+    return kept
 
 
 def _is_figure(figure: Any) -> bool:
