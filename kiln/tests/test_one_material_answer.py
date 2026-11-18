@@ -388,9 +388,6 @@ class TestOneTableAtEveryDoor:
             "kiln.cost_estimator.resolve_material instead"
         )
 
-    def test_a_ranking_price_list_is_still_there_to_name(self):
-        assert all((_SRC / rel).is_file() for rel in _RANKING_PRICES)
-
 
 _MATERIALS = {"PLA", "PETG", "ABS", "TPU", "ASA", "NYLON", "PC"}
 #: A name that says a mapping holds a density or a price.
@@ -487,18 +484,13 @@ def _restated_pla_density() -> list[str]:
     return sorted(found)
 
 
-#: Price tables that rank materials against each other rather than estimate
-#: a print; their prices are relative.  Listed so the gate names them.
-_RANKING_PRICES = {"material_routing.py"}
-
-
 def _restated_prices() -> list[str]:
     """A table price bound to a name that says cost or price, or a price
     per kg written into text ("~$25/kg")."""
     prices = {row.cost_per_kg_usd for row in BUILTIN_MATERIALS.values()}
     found = set()
     for rel, tree in _modules():
-        if rel == "cost_estimator.py" or rel in _RANKING_PRICES:
+        if rel == "cost_estimator.py":
             continue
         for node in ast.walk(tree):
             if (

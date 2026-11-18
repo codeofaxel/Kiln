@@ -1364,8 +1364,17 @@ class TestRecommendMaterialOnHand:
 
     The mixed-fleet contract: two printers with different loads must
     produce an answer attributed to the RIGHT machine, and scoping to
-    one printer must hide the other machine's loads.
+    one printer must hide the other machine's loads.  The pick itself is
+    Kiln's served answer, stood in here (tests._routing_served); where the
+    material is comes from this computer's own records.
     """
+
+    @pytest.fixture(autouse=True)
+    def _served(self):
+        from tests._routing_served import plain_install_served, stand_in_answer
+
+        with plain_install_served(answer_for=stand_in_answer) as sent:
+            yield sent
 
     @pytest.fixture()
     def seeded_db(self, tmp_path):
@@ -1563,10 +1572,10 @@ class TestListAvailableMaterials:
     """Tests for list_available_materials tool."""
 
     def test_returns_materials(self, intelligence_tools) -> None:
-        mock_mat = MagicMock()
-        mock_mat.to_dict.return_value = {"name": "PLA", "strength": 6}
+        from tests._routing_served import plain_install_served, record
 
-        with patch("kiln.material_routing.list_materials", return_value=[mock_mat, mock_mat]):
+        served = {"success": True, "status": "ok", "materials": [record("pla"), record("petg")]}
+        with plain_install_served(served):
             result = intelligence_tools["list_available_materials"]()
         assert result["success"] is True
         assert result["count"] == 2

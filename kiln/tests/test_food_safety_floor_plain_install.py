@@ -38,18 +38,23 @@ def _names(rec) -> list[str]:
 
 
 class TestRecommendMaterial:
+    """With no answer from Kiln's servers there is no pick: the plastics the
+    printer can melt are listed, and a food brief lists only what the food
+    floor keeps.  The served pick's own floor is pinned beside the recommender."""
+
     def test_cereal_container_is_never_offered_a_not_food_safe_material(self):
         from kiln.material_routing import recommend_material
 
-        offered = _names(recommend_material(CEREAL))
-        assert offered, "the recommender offered nothing at all"
-        assert not set(offered) & NOT_FOOD_SAFE, offered
+        reply = recommend_material(CEREAL).to_dict()
+        assert reply["basic"] is True and reply["plastics"], reply
+        assert not {p.lower() for p in reply["plastics"]} & NOT_FOOD_SAFE, reply["plastics"]
+        assert not _names(reply), "a basic answer never picks a material"
 
-    def test_a_brief_with_no_food_still_sees_the_whole_catalog(self):
+    def test_a_brief_with_no_food_still_sees_every_plastic(self):
         from kiln.material_routing import recommend_material
 
-        offered = _names(recommend_material("outdoor bracket for a garden fence, sun all day"))
-        assert set(offered) & {"asa", "abs", "petg"}, offered
+        reply = recommend_material("outdoor bracket for a garden fence, sun all day").to_dict()
+        assert {p.lower() for p in reply["plastics"]} & {"asa", "abs", "petg"}, reply
 
 
 def _design_tools():

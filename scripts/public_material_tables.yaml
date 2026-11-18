@@ -5,7 +5,7 @@
 # baseline:  present when the gate was added; listed, not judged.  The list
 #            only shrinks: a table leaves it when it is served instead, or
 #            when it earns a keep row.  A new table may not join it.
-baseline_count: 30
+baseline_count: 28
 keep:
   'gcode.py::_MATERIAL_TEMPS':
     door: the live-printer filament load, unload, purge and wipe commands
@@ -33,8 +33,6 @@ baseline:
   - 'data/support_profiles.json::(top)'
   - 'design_reasoning.py::_MATERIAL_DEFAULTS'
   - 'emboss_generator.py::MATERIAL_DEPTHS'
-  - 'material_routing.py::_CATALOG_ALIASES'
-  - 'material_routing.py::_MATERIALS'
   - 'material_safety.py::MATERIAL_PROCESS'
   - 'material_substitution.py::_build_builtin_rules:self._add_bidirectional()'
   - 'materials.py::MATERIAL_TEMPS'

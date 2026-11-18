@@ -25,6 +25,8 @@ from typing import Any
 
 import pytest
 
+from tests import _routing_served as routing_served
+
 FREE_BAND = {
     "success": True,
     "status": "ok",
@@ -85,6 +87,9 @@ def servers(monkeypatch, plain_install):
         state["asked"].append((tool_name, {k: v for k, v in kwargs.items() if not k.startswith("_")}))
         if tool_name == "abrasive_escalation":
             return dict(state["abrasive"])
+        if tool_name == routing_served.WIRE:
+            # The material pick the advisory is about, stood in.
+            return routing_served.stand_in_answer(kwargs)
         return {"success": False, "code": "SERVER_UNREACHABLE"}
 
     monkeypatch.setattr(server, "_pro_api_call", _pro_api_call)
