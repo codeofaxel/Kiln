@@ -112,7 +112,25 @@ def _plan_includes_the_pick() -> bool:
         return False
 
 
+def _already_missed() -> Miss | None:
+    """The miss of a call Kiln's servers were already asked for and did not
+    answer (``kiln.served_public`` runs it here after that), so they are not
+    asked a second time; ``None`` otherwise."""
+    try:
+        from kiln import served_public
+
+        if served_public.already_missed():
+            _answer, miss = served_public.answer_or_missed(FLOOR_WIRE_TOOL, {})
+            return miss if isinstance(miss, Miss) else Miss("unanswered")
+    except Exception:  # noqa: BLE001 -- unreadable: ask as usual
+        logger.debug("served_public state unreadable", exc_info=True)
+    return None
+
+
 def _served(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss | None]:
+    held = _already_missed()
+    if held is not None:
+        return None, held
     if time.monotonic() < _service_down_until:
         return None, _last_miss or Miss("unanswered", code="SERVER_UNREACHABLE", detail="not asked again yet")
     if _plan_includes_the_pick():

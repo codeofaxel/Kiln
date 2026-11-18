@@ -251,6 +251,18 @@ class TestAMissPicksNothing:
         out = _door()("cable clip")
         assert out["basic"] is True and [tool for tool, _ in asked] == [bridge.WIRE_TOOL]
 
+    def test_a_call_the_servers_already_missed_is_not_asked_again(self, monkeypatch):
+        """The tool ran here because Kiln's servers missed the call already
+        (served_public): the pick says that miss and asks nothing more."""
+        from kiln import served_public
+        from kiln.served_answer import Miss
+
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        with served_public.here_after(Miss("offline", code="SERVER_UNREACHABLE")):
+            out = _door()("cable clip")
+        assert asked == [] and out["basic"] is True and out["why"] == "offline"
+
     def test_a_pick_this_computer_cannot_read_is_a_miss(self, monkeypatch):
         _plan(monkeypatch, "free")
         _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok({**_FLOOR_PICK, "material_id": "unobtanium"})})
