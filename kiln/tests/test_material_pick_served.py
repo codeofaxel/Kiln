@@ -612,14 +612,17 @@ class TestOneAskPerPart:
                 "shelf bracket that holds 10 lbs").warnings
         finally:
             tool_context.leave_tool(token)
-        assert out["success"] is True and len(asked) == 1
+        # Only the pick is counted: the same call also asks the design-limits
+        # wire for the picked plastic's limits, which is a different question.
+        picks = lambda: [a for a in asked if a[0] == bridge.FLOOR_WIRE_TOOL]  # noqa: E731
+        assert out["success"] is True and len(picks()) == 1
         # A new call asks again: the memo lives for one call only.
         token = tool_context.enter_tool("analyze_design_requirements", {})
         try:
             di.get_design_constraints("shelf bracket that holds 10 lbs")
         finally:
             tool_context.leave_tool(token)
-        assert len(asked) == 2
+        assert len(picks()) == 2
 
 
 # ---------------------------------------------------------------------------
