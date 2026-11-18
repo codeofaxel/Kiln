@@ -838,6 +838,70 @@ class TestMultiMaterialPrintWaitsForTheGo:
         assert started[0]["signoff"]["source"] == "derived", started[0]["signoff"]
         assert started[0]["signoff"]["door"] == "stage", started[0]["signoff"]
 
+    @staticmethod
+    def _window_for(monkeypatch, tmp_path, printer: str | None = None):
+        """A window a person opened at a terminal, for *printer* (the default
+        printer when not given): ``(the printer it names, the window)``."""
+        from kiln import consent_windows, server
+        from kiln.print_consent import SOURCE_TERMINAL
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        named = printer or server._resolve_effective_printer_name(None)
+        return named, consent_windows._open_window(seconds=600, scope=(named,), source=SOURCE_TERMINAL)
+
+    def test_a_window_for_the_printer_a_plate_is_aimed_at_prints_it_with_no_printer_named(self, tmp_path, monkeypatch):
+        """Inside a window opened for the default printer, the plate a call
+        naming no printer prints there starts once, carrying that window and
+        the printers it names, nothing wider."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+
+        aimed, window = self._window_for(monkeypatch, tmp_path)
+        objects = self._objects(TestPerObjectPrintsRefuse()._stl(tmp_path))
+        with self._printer() as started:
+            plate = server.multi_material_print(objects_json=objects)["plate_path"]
+            token = get_preview_gate().issue(plate, door="stage").token
+            printed = server.multi_material_print(objects_json=objects, preview_token=token)
+
+        assert printed["success"] is True, printed
+        assert [s["model_path"] for s in started] == [plate]
+        assert started[0]["signoff"]["window_id"] == window.id, started[0]["signoff"]
+        assert started[0]["signoff"]["scope"] == [aimed], started[0]["signoff"]
+
+    def test_a_window_for_another_printer_prints_nothing_on_the_default_one(self, tmp_path, monkeypatch):
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+
+        self._window_for(monkeypatch, tmp_path, printer="not_the_default")
+        objects = self._objects(TestPerObjectPrintsRefuse()._stl(tmp_path))
+        with self._printer() as started:
+            plate = server.multi_material_print(objects_json=objects)["plate_path"]
+            token = get_preview_gate().issue(plate, door="stage").token
+            refused = server.multi_material_print(objects_json=objects, preview_token=token)
+
+        assert started == [], "a window started a print on a printer it does not name"
+        assert refused["error"]["code"] == "PREVIEW_NOT_CONFIRMED", refused
+
+    def test_multi_color_copies_prints_inside_a_window_for_its_printer(self, tmp_path, monkeypatch):
+        """The copies door takes no printer name, so it prints on the default
+        printer: a window that names it covers the plate of copies."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+
+        _aimed, window = self._window_for(monkeypatch, tmp_path)
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with self._printer() as started:
+            token = get_preview_gate().issue(stl, door="stage").token
+            printed = server.multi_color_copies(
+                model_path=stl, copies=2, ams_slots=[0, 1], material="PETG",
+                colors=["#ff0000", "#00ff00"], printer_id="bambu_a1", preview_token=token,
+            )
+
+        assert printed["success"] is True, printed
+        assert len(started) == 1, started
+        assert started[0]["signoff"]["source"] == "derived", started[0]["signoff"]
+        assert started[0]["signoff"]["window_id"] == window.id, started[0]["signoff"]
+
 
 # ===========================================================================
 # preflight_check says what the printer carries

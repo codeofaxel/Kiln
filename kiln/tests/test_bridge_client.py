@@ -454,7 +454,7 @@ def test_an_agent_starting_under_the_print_the_person_approved_at_its_asking_is_
 
 
 def test_a_call_that_names_no_printer_gets_a_consent_aimed_at_none(tmp_path):
-    """The gate matches a consent against the name the call used; the
+    """The gate matches a consent against the printer the call is aimed at; the
     hosted server already held the record to the printer it was made
     for, so a call aimed at the default printer is not refused for
     naming none."""

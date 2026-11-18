@@ -368,12 +368,29 @@ class TestADerivedPlateRidesAYes:
         assert carried is not None and carried.source == SOURCE_DERIVED and carried.door == "stage"
         assert consent_for(file_name="plate.3mf", printer_name=None) is None
 
-    def test_print_plate_object_starts_the_object_on_the_yes_its_plate_got(self, monkeypatch, tmp_path):
-        """The object is cut from the plate the person saw and said go to;
-        the start's own gate accepts the object on that yes.  Extraction,
-        upload and the printer are stood in; both gates are real."""
-        from kiln.preview_gate import get_preview_gate
+    def test_a_window_carried_to_the_plate_covers_the_printer_it_names_and_no_other(self):
+        """A start that names no printer goes to the printer it is aimed at;
+        a window carried to the plate covers that start when it names that
+        printer, keeps its own list of printers, and covers no other."""
+        from kiln import print_signoff
+        from kiln.print_consent import SOURCE_WINDOW
 
+        print_signoff.grant(
+            "a_plate_door", "input.stl", None,
+            source=SOURCE_WINDOW, door="stage", scope=("garage",), window_id="w_1",
+        )
+        with server._covered_by_approval("a_plate_door", "input.stl", "plate.3mf", None):
+            here = consent_for(file_name="plate.3mf", printer_name=None, aimed_at="garage")
+            elsewhere = consent_for(file_name="plate.3mf", printer_name=None, aimed_at="workshop")
+            named_elsewhere = consent_for(file_name="plate.3mf", printer_name="workshop", aimed_at="workshop")
+        assert here is not None and here.scope == ("garage",) and here.window_id == "w_1", here
+        assert elsewhere is None and named_elsewhere is None
+
+    @staticmethod
+    def _plate_object_bench(monkeypatch, tmp_path) -> tuple[object, list[object]]:
+        """``print_plate_object`` with extraction, upload and the printer stood
+        in, and the inner ``start_print`` gate real: ``(the plate, what that
+        gate said)``."""
         monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
         plate = tmp_path / "plate.gcode.3mf"
         plate.write_bytes(b"PK\x03\x04 the plate")
@@ -396,6 +413,30 @@ class TestADerivedPlateRidesAYes:
             return {"success": True}
 
         monkeypatch.setattr(server, "start_print", _start)
+        return plate, inner
+
+    def test_print_plate_object_with_no_printer_named_starts_inside_a_window_for_its_printer(
+        self, monkeypatch, tmp_path,
+    ):
+        from kiln import consent_windows
+        from kiln.preview_gate import get_preview_gate
+        from kiln.print_consent import SOURCE_TERMINAL
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        aimed = server._resolve_effective_printer_name(None)
+        consent_windows._open_window(seconds=600, scope=(aimed,), source=SOURCE_TERMINAL)
+        plate, inner = self._plate_object_bench(monkeypatch, tmp_path)
+        token = get_preview_gate().issue(str(plate), door="stage").token
+        server.print_plate_object(file_path=str(plate), object_name="cube", preview_token=token)
+        assert inner == [None], inner
+
+    def test_print_plate_object_starts_the_object_on_the_yes_its_plate_got(self, monkeypatch, tmp_path):
+        """The object is cut from the plate the person saw and said go to;
+        the start's own gate accepts the object on that yes.  Extraction,
+        upload and the printer are stood in; both gates are real."""
+        from kiln.preview_gate import get_preview_gate
+
+        plate, inner = self._plate_object_bench(monkeypatch, tmp_path)
         token = get_preview_gate().issue(str(plate), door="stage").token
         said_go = set_consent(PrintConsent(tool="print_plate_object", file_name=str(plate), printer_name=None))
         try:

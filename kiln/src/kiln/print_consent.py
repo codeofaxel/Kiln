@@ -820,15 +820,17 @@ def consent_for(
     terminal.  ``None`` is the honest answer for "nobody said go" and for
     "somebody said go to a different print" alike.
 
-    *aimed_at* is the printer an unnamed call resolves to, for matching a
-    window; the consent recorded for the call is matched on the name the
-    call used, as before.
+    *aimed_at* is the printer an unnamed call resolves to.  A window, and
+    the consent recorded for the call, are both matched on the printer the
+    start is aimed at: a yes that names its printers covers an unnamed
+    start only when it names the one that start goes to.
     """
     consent = _current.get()
     if consent is not None:
         # A yes was given for THIS call.  If it is about another print,
         # that is a mismatch to refuse, not a gap to fill from elsewhere.
-        return consent if consent.matches(file_name=file_name, printer_name=printer_name) else None
+        aimed = printer_name or aimed_at
+        return consent if consent.matches(file_name=file_name, printer_name=aimed) else None
     hosted = _ask_hosted_hook(file_name=file_name, printer_name=printer_name)
     if hosted is not None:
         return hosted if hosted.matches(file_name=file_name, printer_name=printer_name) else None
