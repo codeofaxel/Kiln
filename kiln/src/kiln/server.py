@@ -318,7 +318,6 @@ from kiln.tiers_and_terms import (
     paywall_fields,
     session_expired_message,
     signin_hint_fields,
-    tier_required_message,
     upgrade_link,
     upgrade_nudge_block,
 )
@@ -26020,24 +26019,8 @@ def decorate_surface(
         content_info: dict[str, Any] = {}
 
         if ctype == "svg":
-            # SVG logo decoration is a Pro feature
-            try:
-                from kiln_pro.bridge import pro_features
-
-                if pro_features is None:
-                    raise ImportError("kiln-pro not installed")
-            except ImportError:
-                _refund_decoration_quota(quota_consumed)
-                return _error_dict(
-                    tier_required_message(
-                        "SVG logo decoration",
-                        "pro",
-                        "Free tier supports PNG/JPG photos and text",
-                    ),
-                    code="PRO_REQUIRED",
-                    extra={**signin_hint_fields(), **paywall_fields("pro")},
-                )
-
+            # An SVG mark is a decoration like a photo or text: it spends the
+            # same monthly allowance, at every plan.
             from kiln.image_to_surface import prepare_svg_for_emboss
 
             # Pass face size so SVG strokes scale to printable widths.
