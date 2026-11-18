@@ -516,12 +516,19 @@ class TestRepliesBuiltFromTheAnalysisSayBasic:
     validator's report and every prompt builder carry the analysis's basic
     block, never a material that silently went missing."""
 
-    def test_the_validators_report(self, tmp_path):
-        out = _tools("kiln.plugins.design_tools")["validate_design_for_requirements"](
-            _cube(tmp_path / "cube.stl"), "shelf bracket that holds 10 lbs",
-        )
+    def test_the_validators_report_and_prompt_say_basic_only_with_no_pick(self, monkeypatch, tmp_path):
+        tools = _tools("kiln.plugins.design_tools")
+        out = tools["validate_design_for_requirements"](_cube(tmp_path / "cube.stl"), "shelf bracket that holds 10 lbs")
         assert out["success"] is True and out["material"] is None
         _says_basic(out["material_basic"])
+        # With a pick, neither reply carries the block and the prompt names the material.
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        report = tools["validate_design_for_requirements"](_cube(tmp_path / "cube.stl"), "shelf bracket")
+        prompt = tools["build_generation_prompt"]("shelf bracket")["prompt"]
+        assert report["material"] == "petg" and "material_basic" not in report
+        assert "material_basic" not in prompt
+        assert any(c.startswith("designed for ") for c in prompt["constraints_added"])
 
     def test_the_generation_prompt(self):
         out = _tools("kiln.plugins.design_tools")["build_generation_prompt"]("shelf bracket that holds 10 lbs")
@@ -568,16 +575,6 @@ class TestRepliesBuiltFromTheAnalysisSayBasic:
             "shelf bracket that holds 10 lbs", provider="meshy", max_iterations=1,
         )
         _says_basic(out["material_basic"])
-
-    def test_a_reply_with_a_pick_carries_no_basic_block(self, monkeypatch, tmp_path):
-        _plan(monkeypatch, "free")
-        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
-        tools = _tools("kiln.plugins.design_tools")
-        report = tools["validate_design_for_requirements"](_cube(tmp_path / "cube.stl"), "shelf bracket")
-        prompt = tools["build_generation_prompt"]("shelf bracket")["prompt"]
-        assert report["material"] == "petg" and "material_basic" not in report
-        assert "material_basic" not in prompt
-        assert any(c.startswith("designed for ") for c in prompt["constraints_added"])
 
 
 class TestOneAskPerPart:
