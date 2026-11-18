@@ -675,13 +675,9 @@ _SLIC3R_STARTUP_CRASH_RETURNCODES = frozenset(
     -sig for sig in present_signals("SIGTRAP", "SIGSEGV", "SIGBUS")
 )
 
-# The Orca dialect keeps SIGSEGV out of its retry set on purpose: -11 on
-# that path is a crash inside the slicer program, said to the person as
-# one, and retrying it would crash the same way twice more just to say
-# the same thing later (the openscad_runner rule about not retrying real
-# answers).  The known upstream crash is on the slicers' own multi-extruder
-# Bambu Lab system presets, which the flat single-extruder presets Kiln
-# writes never send.  The locale race has not been captured on
+# The Orca dialect leaves SIGSEGV out of its retry set: -11 on that path is
+# reported to the person as a crash inside the slicer program and is not
+# retried (the openscad_runner rule about not retrying real answers).  The locale race has not been captured on
 # an Orca binary; TRAP/BUS are covered so that if it ever is, the user
 # gets the re-draw instead of the failure.
 _ORCA_STARTUP_CRASH_RETURNCODES = frozenset(
