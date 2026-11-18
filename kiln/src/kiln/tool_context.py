@@ -19,6 +19,10 @@ Each call also carries a list of the notes its readers made about the files
 it read (:mod:`kiln.reading_notes`): a mesh reader deep under a door can say
 what a file is without every door between the two passing it up.
 
+And a memo (:func:`call_memo`) for an answer a door asks of Kiln's servers
+that several helpers under one door need: asked once per call, never kept
+past it.
+
 Kept in its own tiny module so kiln-pro can import it without booting the
 server, and so a missing attribute on an older public install degrades to
 ``None`` rather than an ImportError at the gate.
@@ -31,7 +35,7 @@ from contextvars import ContextVar, Token
 from types import MappingProxyType
 from typing import Any
 
-_Call = tuple[str, Mapping[str, Any], list[Any]]
+_Call = tuple[str, Mapping[str, Any], list[Any], dict[Any, Any]]
 
 _current_call: ContextVar[_Call | None] = ContextVar("kiln_current_tool_call", default=None)
 
@@ -59,9 +63,20 @@ def call_notes() -> list[Any] | None:
     return call[2] if call else None
 
 
+def call_memo() -> dict[Any, Any] | None:
+    """The running call's memo, written in place, or ``None`` outside one.
+
+    One dict per call, shared by reference like :func:`call_notes`, and gone
+    when the call ends: one call is one caller, so nothing in it reaches
+    another call.
+    """
+    call = _current_call.get()
+    return call[3] if call else None
+
+
 def enter_tool(name: str, arguments: Mapping[str, Any] | None = None) -> Token[_Call | None]:
     """Mark ``name`` as the running tool; pair with :func:`leave_tool`."""
-    return _current_call.set((name, MappingProxyType(dict(arguments or {})), []))
+    return _current_call.set((name, MappingProxyType(dict(arguments or {})), [], {}))
 
 
 def leave_tool(token: Token[_Call | None]) -> None:

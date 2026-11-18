@@ -29,6 +29,7 @@ fail to answer, is left alone for a while.  Nothing here raises.
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import time
@@ -46,10 +47,17 @@ FLOOR_WIRE_TOOL = "material_floor_pick"
 LOCAL_MODULE = "kiln_pro.material_floor_pick"
 #: What a person reads about a miss, filled in by :mod:`kiln.served_answer`.
 FEATURE = "material pick"
+#: The same for Kiln Pro's own pick, when it is the one that missed.
+PRO_FEATURE = "Pro pick"
 #: A pick is asked on the way to a make; the miss is said if this passes.
 _CONSULT_TIMEOUT_S: float = 4.0
-#: After the servers fail to answer, how long the pick is not asked for.
+#: After the servers fail to answer, how long the pick is not asked for; a
+#: miss said again meanwhile says when Kiln asks again.
 SERVICE_BACKOFF_S: float = 300.0
+#: The longest description of one part the pick reads, on every path.
+MAX_REQUIREMENTS_CHARS = 2000
+#: What a longer description is told, once, with nothing asked.
+TOO_LONG = f"Describe the part in {MAX_REQUIREMENTS_CHARS:,} characters or fewer."
 
 _service_down_until: float = 0.0
 _last_miss: Miss | None = None
@@ -59,11 +67,52 @@ def pick(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss | N
     """Kiln's pick for one part as public Kiln's ``MaterialRecommendation``,
     or ``(None, miss)`` saying why there is none.  *printer* is the four
     capability fields ``recommend_material_for_design`` takes.  Never
-    raises."""
-    local = _local(requirements_text, printer)
-    if local is not _NOT_HERE:
-        return local
-    return _served(requirements_text, printer)
+    raises.
+
+    A description longer than :data:`MAX_REQUIREMENTS_CHARS` is refused here
+    with :data:`TOO_LONG`, nothing asked.  Within one tool call
+    (:func:`kiln.tool_context.call_memo`) the same part on the same printer
+    is asked for once: a door whose helpers each read the analysis gets one
+    answer, each helper its own copy."""
+    if isinstance(requirements_text, str) and len(requirements_text) > MAX_REQUIREMENTS_CHARS:
+        return None, Miss("refused", code="INVALID_ARGUMENT", detail=TOO_LONG)
+    memo, key = _call_memo(), _memo_key(requirements_text, printer)
+    if memo is not None and key is not None and key in memo:
+        return copy.deepcopy(memo[key])
+    answer = _local(requirements_text, printer)
+    if answer is _NOT_HERE:
+        answer = _served(requirements_text, printer)
+    if memo is not None and key is not None:
+        memo[key] = copy.deepcopy(answer)
+    return answer
+
+
+def _call_memo() -> dict[Any, Any] | None:
+    try:
+        from kiln.tool_context import call_memo
+
+        return call_memo()
+    except Exception:  # noqa: BLE001 -- no memo: ask as usual
+        return None
+
+
+def _memo_key(requirements_text: Any, printer: dict[str, Any]) -> Any:
+    """The memo key for one part on one printer, or ``None`` when it cannot
+    be one."""
+    supported = printer.get("supported_materials")
+    key = (
+        "material_pick",
+        requirements_text,
+        printer.get("printer_has_enclosure"),
+        printer.get("printer_has_direct_drive"),
+        printer.get("max_hotend_temp_c"),
+        tuple(supported) if isinstance(supported, list) else supported,
+    )
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
 
 
 #: ``_local``'s answer when kiln-pro is not on this computer.
@@ -119,9 +168,13 @@ def _served(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss 
     held = _already_missed()
     if held is not None:
         return None, held
-    if time.monotonic() < _service_down_until:
-        return None, _last_miss or Miss("unanswered", code="SERVER_UNREACHABLE", detail="not asked again yet")
-    pro_missed: Miss | None = None
+    wait = _service_down_until - time.monotonic()
+    if wait > 0:
+        # Said again, not asked: when the servers last went unanswered, and
+        # how long until Kiln asks them again.
+        last = _last_miss or Miss("unanswered", code="SERVER_UNREACHABLE")
+        return None, Miss(last.cause, last.code, last.detail, retry_after_s=wait)
+    pro_note: str | None = None
     if _plan_includes_the_pick():
         rec, miss = _ask(WIRE_TOOL, requirements_text, printer)
         # Kiln Pro's pick, or a miss asking again would only repeat; a part
@@ -129,14 +182,14 @@ def _served(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss 
         # is asked as every other plan is, and the answer says so once.
         if rec is not None or (miss is not None and miss.cause != "refused"):
             return rec, miss
-        pro_missed = _why_not_kiln_pros(miss)
+        from kiln.material_basics import pro_pick_missed_line
+
+        pro_note = pro_pick_missed_line(_why_not_kiln_pros(miss), feature=PRO_FEATURE)
     rec, miss = _ask(FLOOR_WIRE_TOOL, requirements_text, printer)
     if rec is None and miss is None:
         miss = Miss("unanswered", detail="no pick in the answer")
-    if rec is not None and pro_missed is not None:
-        from kiln.material_basics import pro_pick_missed_line
-
-        rec.warnings.insert(0, pro_pick_missed_line(pro_missed, feature=FEATURE))
+    if rec is not None and pro_note is not None:
+        rec.warnings.insert(0, pro_note)
     return rec, miss
 
 
@@ -152,12 +205,13 @@ _PLAN_RECORD_FIX = (
 _OFFERS_A_PLAN = re.compile(r"kiln3d\.com/pricing|\bneeds Kiln (?:Pro|Business|Enterprise)\b")
 
 
-def _why_not_kiln_pros(miss: Miss | None) -> Miss:
+def _why_not_kiln_pros(miss: Miss | None) -> Miss | None:
     """Why Kiln Pro's pick did not come, for a caller this computer counts as
     holding Kiln Pro: the servers' own words, except words that offer the
-    plan, which are never said to someone who holds it."""
+    plan, which are never said to someone who holds it.  ``None`` when Kiln
+    Pro's pick answered and had nothing for the part."""
     if miss is None:
-        return Miss("unanswered", detail="no Kiln Pro pick in the answer")
+        return None
     if _OFFERS_A_PLAN.search(miss.detail or ""):
         return Miss(miss.cause, miss.code, _PLAN_RECORD_FIX)
     return miss
@@ -198,11 +252,14 @@ def _ask(tool: str, requirements_text: str, printer: dict[str, Any]) -> tuple[An
 
 
 def _note_miss(miss: Miss) -> Miss:
-    """The servers did not answer (not a refusal): leave the pick alone for a
-    while so a make does not wait on it again and again, and say the same
-    miss meanwhile."""
+    """The servers did not answer: leave the pick alone for a while so a make
+    does not wait on it again and again, and meanwhile say that miss again
+    with the time left.  Only a server that did not answer; an offline
+    computer, a sign-in and a refusal are asked again at once, since each
+    gets the same miss until something changes and the change is the
+    person's to make."""
     global _service_down_until, _last_miss
-    if miss.no_answer:
+    if miss.cause == "unanswered":
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
         _last_miss = miss
     logger.debug("material pick not served (%s)", miss.cause)
@@ -224,6 +281,24 @@ def _score(pick: dict[str, Any]) -> float | None:
         return None
 
 
+def _named_on_the_wire(pick: dict[str, Any]) -> Any:
+    """The picked material as the servers named it (its name and family),
+    for a material this computer's catalogue does not record: a newer one
+    than this install knows still shows, with no heat or chemistry beside it
+    that this computer cannot vouch for.  Unnamed, its id is its name."""
+    from kiln.design_intelligence import MaterialProfile
+
+    name = pick.get("display_name")
+    category = pick.get("category")
+    return MaterialProfile(
+        material_id=pick["material_id"],
+        display_name=name if isinstance(name, str) and name.strip() else pick["material_id"],
+        category=category if isinstance(category, str) else "",
+        thermal={},
+        chemical={},
+    )
+
+
 def _rebuild(pick: Any) -> Any:
     """Kiln Pro's served pick as public Kiln's ``MaterialRecommendation``, or
     ``None`` when it is not one."""
@@ -231,10 +306,10 @@ def _rebuild(pick: Any) -> Any:
 
     if not isinstance(pick, dict) or not isinstance(pick.get("material_id"), str):
         return None
-    profile = get_material_profile(pick["material_id"])
     score = _score(pick)
-    if profile is None or score is None:
+    if score is None:
         return None
+    profile = get_material_profile(pick["material_id"]) or _named_on_the_wire(pick)
     return MaterialRecommendation(
         material=profile,
         score=score,
@@ -251,7 +326,8 @@ def _rebuild_floor(pick: Any) -> Any:
     ``MaterialRecommendation``, or ``None`` when it is not one: the material
     as this computer's own catalogue records it (its name, family, heat and
     chemistry), and, when nothing met the constraints, that material's own
-    design limits as the summary."""
+    design limits as the summary.  A material the catalogue does not record
+    is shown as the servers named it."""
     from kiln.design_intelligence import (
         MaterialProfile,
         MaterialRecommendation,
@@ -260,25 +336,33 @@ def _rebuild_floor(pick: Any) -> Any:
 
     if not isinstance(pick, dict) or not isinstance(pick.get("material_id"), str):
         return None
-    record = get_public_material_profile(pick["material_id"])
     score = _score(pick)
-    if record is None or score is None:
+    if score is None:
         return None
-    return MaterialRecommendation(
-        material=MaterialProfile(
+    record = get_public_material_profile(pick["material_id"])
+    if record is None:
+        material, limits = _named_on_the_wire(pick), {}
+    else:
+        material = MaterialProfile(
             material_id=record.material_id,
             display_name=record.display_name,
             category=record.category,
             thermal=record.thermal,
             chemical=record.chemical,
-        ),
+        )
+        limits = record.design_limits if pick.get("fallback") is True else {}
+    return MaterialRecommendation(
+        material=material,
         score=score,
         reasons=_strings(pick.get("reasons")),
         warnings=_strings(pick.get("warnings")),
-        design_limits_summary=record.design_limits if pick.get("fallback") is True else {},
+        design_limits_summary=limits,
         alternatives=_dicts(pick.get("alternatives")),
         recommended_brands=_dicts(pick.get("recommended_brands")),
     )
 
 
-__all__ = ["FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "WIRE_TOOL", "pick"]
+__all__ = [
+    "FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "MAX_REQUIREMENTS_CHARS", "PRO_FEATURE", "TOO_LONG", "WIRE_TOOL",
+    "pick",
+]

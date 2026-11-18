@@ -385,12 +385,18 @@ class ImprovedPrompt:
     iteration: int  # which retry attempt this is
     expected_improvements: list[str]
     sanity: SanityResult | None = None
+    #: When no material was picked for the part: the design analysis's basic
+    #: material block (``kiln.design_intelligence.material_basic_of``), so a
+    #: prompt with no material constraint says why.
+    material_basic: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["feedback_applied"] = [f.to_dict() for f in self.feedback_applied]
         if self.sanity is not None:
             data["sanity"] = self.sanity.to_dict()
+        if self.material_basic is None:
+            del data["material_basic"]
         return data
 
 
@@ -1424,6 +1430,7 @@ def enhance_prompt_with_design_intelligence(
         from kiln.design_intelligence import (
             get_design_constraints,
             get_printer_design_profile,
+            material_basic_of,
         )
 
         brief = get_design_constraints(
@@ -1666,6 +1673,7 @@ def enhance_prompt_with_design_intelligence(
             iteration=0,
             expected_improvements=[],
             sanity=check_prompt_sanity(prompt, prompt, budget=limit),
+            material_basic=material_basic_of(brief),
         )
 
     # Build the enhanced prompt — use more constraints when budget allows
@@ -1718,6 +1726,7 @@ def enhance_prompt_with_design_intelligence(
             f"and {len(anti_clauses)} anti-patterns applied",
         ],
         sanity=sanity,
+        material_basic=material_basic_of(brief),
     )
 
 
@@ -1871,6 +1880,7 @@ def build_parametric_generation_prompt(
             f"Parametric OpenSCAD prompt with {len(inner.constraints_added)} "
             "design constraints applied",
         ],
+        material_basic=inner.material_basic,
     )
 
 

@@ -177,24 +177,30 @@ class TestTheServedPick:
         ("pro_reply", "said"),
         [
             ({"success": True, "status": "ok", "known": False, "pick": None},
-             "because Kiln's material pick didn't answer"),
+             "This is the pick every plan gets, not Kiln Pro's pick. Kiln Pro's pick had nothing for this part."),
             ({"success": False, "status": "error", "code": "TIER_REQUIRED", "required_tier": "pro",
               "error": "Kiln Pro's material pick needs Kiln Pro. Upgrade at https://kiln3d.com/pricing."},
-             "signing in again brings this computer's record of the plan up to date"),
+             "because Kiln's Pro pick said no, so it gives the pick every plan gets instead. Kiln's servers do not "
+             "count this computer's sign-in as Kiln Pro; signing in again brings this computer's record of the "
+             "plan up to date"),
             ({"status": "error", "success": False, "code": "INVALID_ARGUMENT",
-              "error": "requirements_text must describe the part."},
-             "requirements_text must describe the part."),
+              "error": "Describe the part in a sentence or two."},
+             "because Kiln's Pro pick said no, so it gives the pick every plan gets instead. Describe the part in "
+             "a sentence or two."),
         ],
     )
     def test_a_kiln_pro_plan_given_the_every_plan_pick_is_told_once_and_never_sold(self, monkeypatch, pro_reply, said):
         """A caller whose plan includes Kiln Pro, handed the pick every plan
         gets, reads one line saying so (why and what fixes it), and nothing
-        that offers the plan they hold."""
+        that offers the plan they hold.  The line names Kiln Pro's pick as
+        what did not come, never the pick it is shown beside, and a Kiln Pro
+        pick that answered with nothing for the part is not a miss."""
         _plan(monkeypatch, "pro")
         _servers(monkeypatch, {bridge.WIRE_TOOL: pro_reply, bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
         rec = di.recommend_material_for_design("shelf bracket")
         line = rec.warnings[0]
         assert line.startswith("This is the pick every plan gets, not Kiln Pro's pick.") and said in line
+        assert "Kiln's material pick" not in line and "didn't answer" not in line
         assert sum("not Kiln Pro's pick" in w for w in rec.warnings) == 1
         assert "kiln3d.com/pricing" not in line and "Upgrade" not in line and "needs Kiln" not in line
         assert rec.warnings[1:] == _FLOOR_PICK["warnings"]
@@ -260,6 +266,25 @@ class TestAMissPicksNothing:
         assert out["plastics"] == plastics_printer_can_melt(250)
         assert "score" not in out and "material" not in out
 
+    @pytest.mark.usefixtures("free_caller")
+    def test_a_ceiling_too_large_to_be_a_number_lists_every_plastic(self):
+        """Signed out, a hotend ceiling no float can hold still gets the basic
+        list (every plastic, as for no ceiling), never a failed reply."""
+        out = _door()("cable clip", max_hotend_temp_c=10**400)
+        assert out["success"] is True and out["basic"] is True
+        assert out["plastics"] == plastics_printer_can_melt(None)
+        assert plastics_printer_can_melt(float("nan")) == plastics_printer_can_melt(None)
+
+    def test_a_ceiling_the_servers_refuse_still_lists_every_plastic(self, monkeypatch):
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: {
+            "status": "error", "success": False, "code": "INVALID_ARGUMENT",
+            "error": "Give the hotend's ceiling in whole degrees C, above 0 and at most 600.",
+        }})
+        out = _door()("cable clip", max_hotend_temp_c=10**400)
+        assert out["success"] is True and out["basic"] is True and out["why"] == "refused"
+        assert out["plastics"] == plastics_printer_can_melt(None)
+
     def test_the_plastics_are_the_ones_the_hotend_melts(self, monkeypatch):
         _plan(monkeypatch, "free")
         _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})
@@ -268,10 +293,39 @@ class TestAMissPicksNothing:
 
     def test_servers_that_do_not_answer_are_left_alone_for_a_while(self, monkeypatch):
         _plan(monkeypatch, "free")
-        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _silent})
         for _ in range(3):
             out = _door()("cable clip")
-            assert out["basic"] is True and out["why"] == "offline"
+            assert out["basic"] is True and out["why"] == "unanswered"
+        assert len(asked) == 1
+
+    def test_a_miss_said_again_says_when_kiln_asks_again(self, monkeypatch):
+        """While the servers are left alone, the miss is said in the past
+        ("when last asked") with the real wait, never "wait a minute"; once
+        the wait is over Kiln asks again."""
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _silent})
+        first = _door()("cable clip")
+        assert "Kiln's material pick didn't answer, so" in first["message"]
+        assert "Wait a minute and ask again" in first["message"] and "retry_after_s" not in first
+        again = _door()("cable clip")
+        assert "Kiln's material pick didn't answer when last asked, so" in again["message"]
+        assert again["message"].endswith("Wait about 5 minutes and ask again for Kiln's pick for this part.")
+        assert 290 <= again["retry_after_s"] <= 300 and again["retryable"] is True
+        assert len(asked) == 1
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        assert _door()("cable clip")["material"]["material_id"] == "petg"
+
+    def test_an_offline_computer_is_asked_again_at_once(self, monkeypatch):
+        """Only a server that did not answer is left alone: back online, the
+        next ask gets the pick, never a stale "this computer is offline"."""
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})
+        assert _door()("cable clip")["why"] == "offline"
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        out = _door()("cable clip")
+        assert out["material"]["material_id"] == "petg" and "basic" not in out
         assert len(asked) == 1
 
     def test_a_kiln_pro_plan_offline_is_not_asked_twice(self, monkeypatch):
@@ -294,9 +348,28 @@ class TestAMissPicksNothing:
 
     def test_a_pick_this_computer_cannot_read_is_a_miss(self, monkeypatch):
         _plan(monkeypatch, "free")
-        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok({**_FLOOR_PICK, "material_id": "unobtanium"})})
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok({**_FLOOR_PICK, "score": None})})
         out = _door()("cable clip")
         assert out["basic"] is True and "material" not in out
+
+    @pytest.mark.parametrize(("plan", "wire"), [("free", bridge.FLOOR_WIRE_TOOL), ("pro", bridge.WIRE_TOOL)])
+    def test_a_material_this_computer_does_not_know_is_shown_as_the_servers_named_it(self, monkeypatch, plan, wire):
+        """A pick of a material newer than this install's catalogue is the
+        pick, named as the servers named it, never "didn't answer, wait a
+        minute"; nothing this computer cannot vouch for is said about it, and
+        the food floor still refuses a material it does not know."""
+        _plan(monkeypatch, plan)
+        newer = {**_FLOOR_PICK, "material_id": "petg_new_blend", "display_name": "PETG New Blend",
+                 "category": "thermoplastic"}
+        asked = _servers(monkeypatch, {wire: _ok(newer)})
+        out = _door()("cable clip")
+        assert "basic" not in out and [tool for tool, _ in asked] == [wire]
+        assert out["material"]["material_id"] == "petg_new_blend"
+        assert out["material"]["display_name"] == "PETG New Blend" and out["material"]["category"] == "thermoplastic"
+        assert out["material"]["thermal"] == {} and out["material"]["chemical"] == {}
+        assert out["score"] == 62.0 and out["reasons"] == newer["reasons"]
+        food = _door()("cookie cutter, food safe")
+        assert food["food_safety"]["primary_material_verdict"] == "refuse"
 
     def test_the_basic_reply_reads_nothing_about_a_material(self, monkeypatch):
         """With every reader of the material catalogue made to fail, the basic
@@ -383,6 +456,170 @@ class TestTheDesignAnalysis:
         assert basic["plastics"] == basic_plastics("a cereal bowl to eat from", None)
         assert "ABS" not in basic["plastics"] and basic["plastics"]
         assert basic["food_contact_use_case_detected"] is True
+
+
+# ---------------------------------------------------------------------------
+# Replies built from the analysis
+# ---------------------------------------------------------------------------
+
+
+def _cube(path) -> str:
+    import struct
+
+    lo, hi = 0.0, 20.0
+    v = {(a, b, c): (hi if a else lo, hi if b else lo, hi if c else lo) for a in (0, 1) for b in (0, 1) for c in (0, 1)}
+    quads = [
+        ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)), ((0, 0, 1), (0, 1, 1), (1, 1, 1), (1, 0, 1)),
+        ((0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)), ((1, 0, 0), (1, 0, 1), (1, 1, 1), (1, 1, 0)),
+        ((0, 0, 0), (0, 0, 1), (1, 0, 1), (1, 0, 0)), ((0, 1, 0), (1, 1, 0), (1, 1, 1), (0, 1, 1)),
+    ]
+    tris = [t for a, b, c, d in quads for t in ((a, b, c), (a, c, d))]
+    with open(path, "wb") as fh:
+        fh.write(b"cube".ljust(80, b"\x00") + struct.pack("<I", len(tris)))
+        for tri in tris:
+            fh.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            for corner in tri:
+                fh.write(struct.pack("<3f", *v[corner]))
+            fh.write(struct.pack("<H", 0))
+    return str(path)
+
+
+def _tools(module: str) -> dict[str, Any]:
+    import importlib
+
+    plugin = importlib.import_module(module).plugin
+    tools: dict = {}
+
+    class _Mcp:
+        def tool(self, **_kw):
+            def keep(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return keep
+
+    plugin.register(_Mcp())
+    return tools
+
+
+def _says_basic(block: Any) -> None:
+    """A reply's basic material block: Kiln did not pick, why, and the fix."""
+    assert isinstance(block, dict) and block["basic"] is True and block["why"] == "signed_out"
+    assert block["message"].startswith("Kiln did not pick a plastic for this part.")
+    assert "Sign in and Kiln picks the plastic for this part." in block["message"]
+    assert block["plastics"]
+
+
+@pytest.mark.usefixtures("free_caller")
+class TestRepliesBuiltFromTheAnalysisSayBasic:
+    """With no pick, a reply built from the design analysis says so: the
+    validator's report and every prompt builder carry the analysis's basic
+    block, never a material that silently went missing."""
+
+    def test_the_validators_report_and_prompt_say_basic_only_with_no_pick(self, monkeypatch, tmp_path):
+        tools = _tools("kiln.plugins.design_tools")
+        out = tools["validate_design_for_requirements"](_cube(tmp_path / "cube.stl"), "shelf bracket that holds 10 lbs")
+        assert out["success"] is True and out["material"] is None
+        _says_basic(out["material_basic"])
+        # With a pick, neither reply carries the block and the prompt names the material.
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        report = tools["validate_design_for_requirements"](_cube(tmp_path / "cube.stl"), "shelf bracket")
+        prompt = tools["build_generation_prompt"]("shelf bracket")["prompt"]
+        assert report["material"] == "petg" and "material_basic" not in report
+        assert "material_basic" not in prompt
+        assert any(c.startswith("designed for ") for c in prompt["constraints_added"])
+
+    def test_the_generation_prompt(self):
+        out = _tools("kiln.plugins.design_tools")["build_generation_prompt"]("shelf bracket that holds 10 lbs")
+        prompt = out["prompt"]
+        assert not any(c.startswith("designed for ") for c in prompt["constraints_added"])
+        _says_basic(prompt["material_basic"])
+
+    def test_the_parametric_prompt(self):
+        from kiln.generation_feedback import build_parametric_generation_prompt
+
+        _says_basic(build_parametric_generation_prompt("shelf bracket that holds 10 lbs").to_dict()["material_basic"])
+
+    def test_generate_model(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import kiln.server as srv
+        from kiln.generation import GenerationJob, GenerationStatus
+
+        gen = MagicMock()
+        gen.display_name = "Stand-in"
+        gen.generate.return_value = GenerationJob(
+            id="j1", provider="meshy", prompt="p", status=GenerationStatus.PENDING, progress=0,
+            created_at=0.0, format="stl",
+        )
+        monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(srv, "_get_generation_provider", lambda *_a, **_k: gen)
+        out = srv.generate_model("shelf bracket that holds 10 lbs", provider="meshy")
+        _says_basic(out["design_intelligence"]["material_basic"])
+
+    def test_iterate_design(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import kiln.server as srv
+        from kiln.generation import GenerationJob, GenerationStatus
+
+        gen = MagicMock()
+        gen.generate.return_value = GenerationJob(
+            id="j1", provider="meshy", prompt="p", status=GenerationStatus.PENDING, progress=0,
+            created_at=0.0, format="stl",
+        )
+        monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(srv, "_get_generation_provider", lambda *_a, **_k: gen)
+        out = _tools("kiln.plugins.design_reasoning_tools")["iterate_design"](
+            "shelf bracket that holds 10 lbs", provider="meshy", max_iterations=1,
+        )
+        _says_basic(out["material_basic"])
+
+
+class TestOneAskPerPart:
+    """The pick reads at most one part's description, and one tool call asks
+    for one part once."""
+
+    @pytest.mark.parametrize("plan", ["free", "pro"])
+    def test_a_description_too_long_is_refused_once_in_plain_words(self, monkeypatch, plan):
+        """A part described in more than 2,000 characters is refused here,
+        with nothing asked of the servers, in words that name no field."""
+        _plan(monkeypatch, plan)
+        asked = _servers(monkeypatch, {bridge.WIRE_TOOL: _ok(_KILN_PRO_PICK), bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        out = _door()("shelf " * 400, max_hotend_temp_c=250)
+        assert asked == [] and out["basic"] is True and out["why"] == "refused"
+        assert out["message"].endswith("Describe the part in 2,000 characters or fewer.")
+        assert "requirements" not in out["message"] and "_" not in out["message"]
+        assert len("x" * bridge.MAX_REQUIREMENTS_CHARS) == 2000
+        assert _door()("x" * 2000)["material"]["material_id"] in {"petg", "asa"}
+
+    def test_one_tool_call_asks_for_the_pick_once(self, monkeypatch, tmp_path):
+        """An audit reads the analysis three times (its brief, its prompt, its
+        validation); within one tool call the servers are asked once, and
+        each reader still gets its own copy."""
+        from kiln import tool_context
+
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        audit = _tools("kiln.plugins.design_tools")["audit_original_design"]
+        token = tool_context.enter_tool("audit_original_design", {})
+        try:
+            out = audit(_cube(tmp_path / "cube.stl"), "shelf bracket that holds 10 lbs")
+            again = di.recommend_material_for_design("shelf bracket that holds 10 lbs")
+            again.warnings.append("changed by one reader")
+            assert "changed by one reader" not in di.recommend_material_for_design(
+                "shelf bracket that holds 10 lbs").warnings
+        finally:
+            tool_context.leave_tool(token)
+        assert out["success"] is True and len(asked) == 1
+        # A new call asks again: the memo lives for one call only.
+        token = tool_context.enter_tool("analyze_design_requirements", {})
+        try:
+            di.get_design_constraints("shelf bracket that holds 10 lbs")
+        finally:
+            tool_context.leave_tool(token)
+        assert len(asked) == 2
 
 
 # ---------------------------------------------------------------------------
