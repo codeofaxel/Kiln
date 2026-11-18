@@ -235,6 +235,24 @@ def _score(pick: dict[str, Any]) -> float | None:
         return None
 
 
+def _named_on_the_wire(pick: dict[str, Any]) -> Any:
+    """The picked material as the servers named it (its name and family),
+    for a material this computer's catalogue does not record: a newer one
+    than this install knows still shows, with no heat or chemistry beside it
+    that this computer cannot vouch for.  Unnamed, its id is its name."""
+    from kiln.design_intelligence import MaterialProfile
+
+    name = pick.get("display_name")
+    category = pick.get("category")
+    return MaterialProfile(
+        material_id=pick["material_id"],
+        display_name=name if isinstance(name, str) and name.strip() else pick["material_id"],
+        category=category if isinstance(category, str) else "",
+        thermal={},
+        chemical={},
+    )
+
+
 def _rebuild(pick: Any) -> Any:
     """Kiln Pro's served pick as public Kiln's ``MaterialRecommendation``, or
     ``None`` when it is not one."""
@@ -242,10 +260,10 @@ def _rebuild(pick: Any) -> Any:
 
     if not isinstance(pick, dict) or not isinstance(pick.get("material_id"), str):
         return None
-    profile = get_material_profile(pick["material_id"])
     score = _score(pick)
-    if profile is None or score is None:
+    if score is None:
         return None
+    profile = get_material_profile(pick["material_id"]) or _named_on_the_wire(pick)
     return MaterialRecommendation(
         material=profile,
         score=score,
@@ -262,7 +280,8 @@ def _rebuild_floor(pick: Any) -> Any:
     ``MaterialRecommendation``, or ``None`` when it is not one: the material
     as this computer's own catalogue records it (its name, family, heat and
     chemistry), and, when nothing met the constraints, that material's own
-    design limits as the summary."""
+    design limits as the summary.  A material the catalogue does not record
+    is shown as the servers named it."""
     from kiln.design_intelligence import (
         MaterialProfile,
         MaterialRecommendation,
@@ -271,22 +290,27 @@ def _rebuild_floor(pick: Any) -> Any:
 
     if not isinstance(pick, dict) or not isinstance(pick.get("material_id"), str):
         return None
-    record = get_public_material_profile(pick["material_id"])
     score = _score(pick)
-    if record is None or score is None:
+    if score is None:
         return None
-    return MaterialRecommendation(
-        material=MaterialProfile(
+    record = get_public_material_profile(pick["material_id"])
+    if record is None:
+        material, limits = _named_on_the_wire(pick), {}
+    else:
+        material = MaterialProfile(
             material_id=record.material_id,
             display_name=record.display_name,
             category=record.category,
             thermal=record.thermal,
             chemical=record.chemical,
-        ),
+        )
+        limits = record.design_limits if pick.get("fallback") is True else {}
+    return MaterialRecommendation(
+        material=material,
         score=score,
         reasons=_strings(pick.get("reasons")),
         warnings=_strings(pick.get("warnings")),
-        design_limits_summary=record.design_limits if pick.get("fallback") is True else {},
+        design_limits_summary=limits,
         alternatives=_dicts(pick.get("alternatives")),
         recommended_brands=_dicts(pick.get("recommended_brands")),
     )

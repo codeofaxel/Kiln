@@ -348,9 +348,28 @@ class TestAMissPicksNothing:
 
     def test_a_pick_this_computer_cannot_read_is_a_miss(self, monkeypatch):
         _plan(monkeypatch, "free")
-        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok({**_FLOOR_PICK, "material_id": "unobtanium"})})
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok({**_FLOOR_PICK, "score": None})})
         out = _door()("cable clip")
         assert out["basic"] is True and "material" not in out
+
+    @pytest.mark.parametrize(("plan", "wire"), [("free", bridge.FLOOR_WIRE_TOOL), ("pro", bridge.WIRE_TOOL)])
+    def test_a_material_this_computer_does_not_know_is_shown_as_the_servers_named_it(self, monkeypatch, plan, wire):
+        """A pick of a material newer than this install's catalogue is the
+        pick, named as the servers named it, never "didn't answer, wait a
+        minute"; nothing this computer cannot vouch for is said about it, and
+        the food floor still refuses a material it does not know."""
+        _plan(monkeypatch, plan)
+        newer = {**_FLOOR_PICK, "material_id": "petg_new_blend", "display_name": "PETG New Blend",
+                 "category": "thermoplastic"}
+        asked = _servers(monkeypatch, {wire: _ok(newer)})
+        out = _door()("cable clip")
+        assert "basic" not in out and [tool for tool, _ in asked] == [wire]
+        assert out["material"]["material_id"] == "petg_new_blend"
+        assert out["material"]["display_name"] == "PETG New Blend" and out["material"]["category"] == "thermoplastic"
+        assert out["material"]["thermal"] == {} and out["material"]["chemical"] == {}
+        assert out["score"] == 62.0 and out["reasons"] == newer["reasons"]
+        food = _door()("cookie cutter, food safe")
+        assert food["food_safety"]["primary_material_verdict"] == "refuse"
 
     def test_the_basic_reply_reads_nothing_about_a_material(self, monkeypatch):
         """With every reader of the material catalogue made to fail, the basic
