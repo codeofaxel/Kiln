@@ -36,6 +36,12 @@ def _needs_the_a1_record() -> None:
     if get_slicer_profile("bambu_a1").id != "bambu_a1":
         pytest.skip("no record for the A1 here: public CI holds no real printer's profile")
 
+def _working(settings: dict[str, str], motion: dict[str, float]) -> float:
+    """The start sequence's acceleration, raised to any role the settings state."""
+    stated = [float(settings[key]) for key in sp_mod._ROLE_ACCELERATIONS if settings.get(key)]
+    return max(motion["accel"], *stated)
+
+
 _LIMIT_KEYS = (
     "machine_max_acceleration_extruding",
     "machine_max_acceleration_travel",
@@ -101,7 +107,7 @@ class TestTheEstimateCarriesIt:
                 assert not set(_LIMIT_KEYS) & set(settings), pid
                 continue
             checked += 1
-            accel = f"{motion['accel']:g}"
+            accel = f"{_working(settings, motion):g}"
             assert settings["machine_max_acceleration_extruding"] == f"{accel},{accel}", pid
             x = f"{motion['max_accel_x']:g}"
             assert settings["machine_max_acceleration_x"] == f"{x},{x}", pid
@@ -111,13 +117,14 @@ class TestTheEstimateCarriesIt:
         """Stated accelerations are written into the print and the machine
         runs them, so the estimate must not clamp them down."""
         _needs_the_a1_record()
-        settings = _ini(resolve_slicer_profile("bambu_a1", overrides={"infill_acceleration": "8000"}))
-        assert settings["machine_max_acceleration_extruding"] == "8000,8000"
+        settings = _ini(resolve_slicer_profile("bambu_a1", overrides={"infill_acceleration": "30000"}))
+        assert settings["machine_max_acceleration_extruding"] == "30000,30000"
 
     def test_the_multi_extruder_door(self) -> None:
         _needs_the_a1_record()
         settings = _ini(resolve_multiextruder_profile("bambu_a1", 4))
-        assert settings["machine_max_acceleration_extruding"] == "6000,6000"
+        accel = f"{_working(settings, start_sequence_motion('bambu_a1')):g}"
+        assert settings["machine_max_acceleration_extruding"] == f"{accel},{accel}"
 
     def test_a_callers_own_limit_is_theirs(self) -> None:
         settings = _ini(
