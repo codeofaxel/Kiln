@@ -23089,7 +23089,9 @@ def compare_material_properties(
     Use this when deciding between materials for a project (e.g. PLA vs PETG
     for an outdoor bracket) or when switching materials for a reprint. Deeper
     engineering trade-offs are answered one question at a time by Kiln's
-    servers.
+    servers.  The design limits are each plastic's own where Kiln's servers
+    give them; ``design_limits_basis`` marks each figure, and a figure every
+    plastic shares is marked ``general``.
 
     Args:
         material_a: First material (e.g. ``"pla"``).
@@ -23163,16 +23165,7 @@ def compare_material_properties(
                     ("warping_tendency", "warping_tendency"),
                 ),
             ),
-            "design_limits": _fixed_diff(
-                prof_a.design_limits,
-                prof_b.design_limits,
-                (
-                    ("min_wall_mm", "min_wall_thickness_mm"),
-                    ("max_overhang_deg", "max_unsupported_overhang_deg"),
-                    ("max_bridge_mm", "max_bridge_length_mm"),
-                    ("min_hole_diameter_mm", "min_hole_diameter_mm"),
-                ),
-            ),
+            **_compared_design_limits(a_id, b_id),
             "summary": summary_lines,
         }
     except Exception as exc:
@@ -23181,6 +23174,45 @@ def compare_material_properties(
             f"Failed to compare materials: {exc}",
             code="INTERNAL_ERROR",
         )
+
+
+def _compared_design_limits(a_id: str, b_id: str) -> dict[str, Any]:
+    """Two plastics' design limits side by side, from the one helper every
+    check reads (:func:`kiln.material_limits.limits_for`): each figure with
+    whose it is (``plastic`` or ``family`` for the plastic's own, ``general``
+    for the figure every plastic shares), and why a figure is general when it
+    is (offline, signed out, the day's allowance, a flexible plastic)."""
+    from kiln.material_limits import BRIDGE, ESD_WALL, HOLE_USABLE, OVERHANG, WALL_RECOMMENDED, limits_for
+
+    fields = (
+        ("min_wall_mm", None),
+        ("recommended_wall_mm", WALL_RECOMMENDED),
+        ("max_overhang_deg", OVERHANG),
+        ("max_bridge_mm", BRIDGE),
+        ("min_hole_diameter_mm", HOLE_USABLE),
+    )
+    values: dict[str, dict[str, Any]] = {name: {} for name, _ in fields}
+    basis: dict[str, dict[str, str]] = {name: {} for name, _ in fields}
+    notes: list[str] = []
+    for material_id in (a_id, b_id):
+        limits = limits_for(material_id)
+        for name, quantity in fields:
+            if quantity is None:
+                # The wall that closes, or a static-safe grade's own minimum.
+                values[name][material_id] = limits.wall_floor_mm()
+                basis[name][material_id] = (
+                    limits.basis.get(ESD_WALL, "general")
+                    if limits.value(ESD_WALL) and limits.wall_floor_mm() == float(limits.value(ESD_WALL))
+                    else "general"
+                )
+            else:
+                values[name][material_id] = limits.value(quantity)
+                basis[name][material_id] = limits.basis.get(quantity, "general")
+        notes.extend(line for line in limits.notes() if line not in notes)
+    out: dict[str, Any] = {"design_limits": values, "design_limits_basis": basis}
+    if notes:
+        out["design_limits_note"] = notes
+    return out
 
 
 @mcp.tool(annotations=read_only("Material slicer overrides"))

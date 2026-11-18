@@ -104,6 +104,11 @@ class SliceSupports:
     #: How many faces of the file the slicer was handed are painted to be
     #: supported; above zero, the slice supports nothing else.  Never served.
     under_painted: int = field(default=0, repr=False)
+    #: Whether the support threshold was written from the plastic's own
+    #: overhang figure.  The reply then states the decision and not the
+    #: threshold, as the printability reply states its verdict and not the
+    #: angle; the profile carries it.  Never served.
+    own_angle: bool = field(default=False, repr=False)
 
     @property
     def note(self) -> str:
@@ -138,8 +143,10 @@ class SliceSupports:
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        for bookkeeping in ("kept_off", "under", "under_painted"):
+        for bookkeeping in ("kept_off", "under", "under_painted", "own_angle"):
             d.pop(bookkeeping)
+        if self.own_angle:
+            d["settings"] = {k: v for k, v in d["settings"].items() if k != "support_material_threshold"}
         d["note"] = self.note
         return d
 
@@ -515,11 +522,12 @@ def decide_supports(
     Nothing is kept between calls: one process serves every customer on
     the hosted server, and a reading takes 0.1 s on an ordinary part.
     """
-    from kiln.printability import judge_supports, support_verdict
+    from kiln.printability import judge_supports, material_overhangs, support_verdict
 
+    plastic = (material or "pla").lower()
     try:
         judged = judge_supports(
-            input_path, material=(material or "pla").lower(), nozzle_diameter=nozzle_diameter,
+            input_path, material=plastic, nozzle_diameter=nozzle_diameter,
             **({"clear_with_none_held": True} if on_anyway else {}),
         )
     except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
@@ -535,6 +543,7 @@ def decide_supports(
             settings=support_settings(judged.overhang_threshold_deg),
             kept_off=tuple(judged.support_kept_off_faces),
             under=tuple(getattr(judged, "support_under_faces", ())),
+            own_angle=bool(material_overhangs(plastic)["overhangs"]["material_limits_deg"]),
         )
     return SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",

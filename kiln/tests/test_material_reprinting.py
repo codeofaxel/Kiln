@@ -181,11 +181,13 @@ class TestCompareMaterialProperties:
         result = compare_material_properties("pla", "petg")
         assert result["success"] is True
         assert result["materials"] == ["pla", "petg"]
-        assert set(result) == {
+        # Why a figure is general is said only when one is.
+        assert set(result) - {"design_limits_note"} == {
             "success",
             "materials",
             "thermal",
             "design_limits",
+            "design_limits_basis",
             "summary",
         }
 

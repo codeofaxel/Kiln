@@ -2985,6 +2985,7 @@ def get_design_constraints(
     *,
     material: str | None = None,
     printer_model: str | None = None,
+    material_limits: bool = True,
 ) -> DesignBrief:
     """Decompose functional requirements into a complete design-requirements analysis.
 
@@ -2999,6 +3000,10 @@ def get_design_constraints(
         summer heat"``).
     :param material: Optional material override (skip recommendation).
     :param printer_model: Optional printer model for capability lookup.
+    :param material_limits: Whether the combined rules carry the
+        recommended plastic's design limits (``material_*``).  A caller that
+        shows none of them leaves them out, so the plastic's limits are not
+        read for it.
     """
     # 1. Match functional requirements
     constraints = match_requirements(requirements_text)
@@ -3117,8 +3122,9 @@ def get_design_constraints(
         for key, value in recommendation.material.design_limits.items():
             limit_key = f"material_{key}"
             combined_rules[limit_key] = value
-        for key, value in limits_for(recommendation.material.material_id).design_limits().items():
-            combined_rules[f"material_{key}"] = value
+        if material_limits:
+            for key, value in limits_for(recommendation.material.material_id).design_limits().items():
+                combined_rules[f"material_{key}"] = value
 
     if printer_profile:
         combined_guidance.extend(printer_profile.agent_notes)
