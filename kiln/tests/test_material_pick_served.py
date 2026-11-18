@@ -208,6 +208,39 @@ class TestTheServedPick:
         _plan(monkeypatch, "free")
         assert di.recommend_material_for_design("shelf bracket").warnings == _FLOOR_PICK["warnings"]
 
+    def test_a_stale_kiln_pro_record_meeting_a_free_server_is_told_to_sign_in_and_never_pitched(self, monkeypatch):
+        """The servers answer the pick every plan gets, as for a free caller,
+        with the load caution and its plan sentence; this computer counts the
+        caller as holding Kiln Pro, so the reply says how to bring the record
+        up to date and keeps the caution, never the plan sentence."""
+        _plan(monkeypatch, "pro")
+        pitched = dict(_FLOOR_PICK, warnings=[
+            "Load not checked for this material.",
+            f"{di._PICK_LOAD_CAUTION} Kiln Pro sizes the part for the weight and how long it's held; see "
+            "https://kiln3d.com/pricing.",
+        ])
+        refusal = {"success": False, "status": "error", "code": "TIER_REQUIRED", "required_tier": "pro",
+                   "error": "Kiln Pro's material pick needs Kiln Pro. Upgrade at https://kiln3d.com/pricing."}
+        _servers(monkeypatch, {bridge.WIRE_TOOL: refusal, bridge.FLOOR_WIRE_TOOL: _ok(pitched)})
+        rec = di.recommend_material_for_design("shelf bracket that holds books")
+        assert "signing in again" in rec.warnings[0]
+        assert di._PICK_LOAD_CAUTION in rec.warnings
+        assert not any("kiln3d.com/pricing" in w or "sizes the part" in w for w in rec.warnings), rec.warnings
+
+    @pytest.mark.parametrize("ceiling", [None, float("nan"), float("inf"), "hot", True])
+    def test_a_hotend_ceiling_that_is_not_a_number_is_refused_here_and_never_waits(self, monkeypatch, ceiling):
+        """Refused before anything is asked, in plain words, and never read as
+        Kiln's servers not answering: the next good ask is asked at once."""
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        rec, miss = di.material_pick_for_design("shelf bracket", max_hotend_temp_c=ceiling)
+        assert rec is None and asked == []
+        assert (miss.cause, miss.code, miss.detail) == ("refused", "INVALID_ARGUMENT", bridge.BAD_CEILING)
+        assert miss.retry_after_s == 0
+        rec, miss = di.material_pick_for_design("shelf bracket", max_hotend_temp_c=260)
+        assert miss is None and rec.material.material_id == "petg"
+        assert [tool for tool, _ in asked] == [bridge.FLOOR_WIRE_TOOL]
+
     @pytest.mark.usefixtures("free_caller")
     def test_the_door_returns_the_pick_with_its_cautions(self, monkeypatch):
         _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
