@@ -26,7 +26,8 @@ Every table found is one of, in ``scripts/public_material_tables.yaml``:
 A table in neither list fails.  So does a stale entry, a ``keep`` with no
 door or reason, and a baseline that grew.
 
-Bounds: it finds tables by material names in keys, in a row's
+Bounds: it finds tables by material names in keys (a pair key written as a
+set or tuple of literal names included), in a row's
 ``material`` field and in literal arguments, so a table keyed another way,
 or built from names held in variables, is unseen; a table split
 across several small mappings (fewer names each than the floor) is unseen;
@@ -126,8 +127,29 @@ def tables_in_json(doc: Any, names: set[str], path: str = "") -> Iterator[tuple[
                 yield from tables_in_json(value, names, f"{path}[{index}]")
 
 
+#: Callables whose one literal argument makes a key of several names.
+_SET_KEY_CALLS = ("frozenset", "set", "tuple")
+
+
 def _literal_key(node: ast.AST) -> Any:
-    return node.value if isinstance(node, ast.Constant) else None
+    """A dict key as text: a literal string, or the names of a pair key
+    written as a set or tuple of literals (``frozenset({"PLA", "ABS"})``,
+    ``("PLA", "ABS")``), joined with ``/`` so each name is read."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in _SET_KEY_CALLS
+        and len(node.args) == 1
+        and not node.keywords
+    ):
+        node = node.args[0]
+    if isinstance(node, (ast.Set, ast.Tuple, ast.List)):
+        parts = [e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+        if parts and len(parts) == len(node.elts):
+            return "/".join(parts)
+    return None
 
 
 def _has_literal(node: ast.AST) -> bool:
