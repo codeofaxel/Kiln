@@ -7,7 +7,9 @@ kiln-pro's and are tested there.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import signal
 import threading
 
 import pytest
@@ -637,6 +639,90 @@ class TestMaterialOptimizedMode:
         # Exclude last layer (may be remainder merged).
         for h in plan.layer_heights[1:-1]:
             assert h <= profile.bridge_layer_height_mm + 0.001
+
+
+# ---------------------------------------------------------------------------
+# TestEveryPlanIsBounded
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def _deadline(seconds: float):
+    """Fail, instead of waiting forever, where the platform has a timer."""
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _expired(_signum, _frame):
+        raise TimeoutError(f"still planning after {seconds} s")
+
+    previous = signal.signal(signal.SIGALRM, _expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+class TestEveryPlanIsBounded:
+    """No value keeps the walk running: a height or nozzle no plan is made
+    for, too many regions, a layer that is not thicker than zero and a plan
+    past the layer ceiling are all refused before or as the layers are laid."""
+
+    @pytest.mark.parametrize("height", [float("nan"), float("inf"), float("-inf"), "tall", None, True])
+    def test_a_height_that_is_not_a_finite_number_is_refused(self, slicer, profile, height):
+        with _deadline(2.0), pytest.raises(AdaptiveSlicerError, match="finite number"):
+            slicer.generate_plan([], profile, model_height_mm=height)
+
+    def test_a_height_taller_than_any_printer_kiln_knows_of_is_refused(self, slicer, profile):
+        from kiln.adaptive_slicer import max_build_height_mm
+
+        tallest = max_build_height_mm()
+        with _deadline(2.0), pytest.raises(AdaptiveSlicerError, match="taller than any printer"):
+            slicer.generate_plan([], profile, model_height_mm=tallest + 1.0)
+        assert slicer.generate_plan([], profile, model_height_mm=tallest).total_layers > 0
+
+    def test_the_tallest_height_is_the_catalogues_own(self):
+        from kiln.adaptive_slicer import max_build_height_mm
+        from kiln.printer_intelligence import _read_public_json
+
+        rated = [
+            row["rated_build_volume_mm"][2]
+            for row in _read_public_json().values()
+            if isinstance(row, dict) and isinstance(row.get("rated_build_volume_mm"), list)
+        ]
+        assert rated and max_build_height_mm() == max(rated)
+
+    @pytest.mark.parametrize("nozzle", [0.01, 0.0, -0.4, 5.0, float("nan"), float("inf"), "0.4"])
+    def test_a_nozzle_no_plan_is_made_for_is_refused(self, slicer, profile, nozzle):
+        with _deadline(2.0), pytest.raises(AdaptiveSlicerError, match="Nozzle diameter"):
+            slicer.generate_plan([], profile, model_height_mm=20.0, nozzle_diameter_mm=nozzle)
+
+    @pytest.mark.parametrize("nozzle", [0.01, 5.0, float("nan")])
+    def test_generic_settings_refuse_the_same_nozzles(self, nozzle):
+        with pytest.raises(AdaptiveSlicerError, match="Nozzle diameter"):
+            generic_profile("PLA", nozzle_diameter_mm=nozzle)
+
+    def test_too_many_regions_are_refused(self, slicer, profile):
+        regions = [
+            GeometryRegion(region_type=RegionType.STANDARD, z_start_mm=0.0, z_end_mm=10.0, area_pct=1.0)
+        ] * 201
+        with _deadline(5.0), pytest.raises(AdaptiveSlicerError, match="at most 200 regions"):
+            slicer.generate_plan(regions, profile, model_height_mm=10.0)
+
+    def test_a_layer_that_is_not_thicker_than_zero_is_refused(self, slicer, profile):
+        flat = dataclasses.replace(profile, max_layer_height_mm=0.0, first_layer_height_mm=0.0)
+        with _deadline(2.0), pytest.raises(AdaptiveSlicerError, match="thicker than zero"):
+            slicer.generate_plan([], flat, model_height_mm=20.0)
+
+    def test_a_plan_past_the_layer_ceiling_is_refused(self, slicer, profile, monkeypatch):
+        import kiln.adaptive_slicer as eng
+
+        monkeypatch.setattr(eng, "_MAX_PLAN_LAYERS", 10)
+        with pytest.raises(AdaptiveSlicerError, match="more than 10 layers"):
+            slicer.generate_plan([], profile, model_height_mm=20.0)
+        assert slicer.generate_plan([], profile, model_height_mm=1.0).total_layers <= 10
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,9 @@ Usage::
 
 from __future__ import annotations
 
+import functools
 import logging
+import math
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -267,6 +269,88 @@ _BASELINE_FAN_PCT = 50.0
 
 
 # ---------------------------------------------------------------------------
+# What a plan is made for: every plan is bounded before its first layer
+# ---------------------------------------------------------------------------
+
+#: The nozzle sizes, in mm, a plan or a material's settings are made for.
+_PLAN_NOZZLE_MM = (0.1, 2.0)
+#: The tallest part, in mm, planned when the printer catalogue cannot be read.
+_FALLBACK_BUILD_HEIGHT_MM = 2000.0
+#: The most layers one plan holds.
+_MAX_PLAN_LAYERS = 100_000
+#: The most regions one plan reads.
+_MAX_PLAN_REGIONS = 200
+
+
+def _is_number(value: Any) -> bool:
+    """A finite int or float (a bool is not a size)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+@functools.lru_cache(maxsize=1)
+def max_build_height_mm() -> float:
+    """The tallest rated build height in Kiln's printer catalogue, in mm:
+    the tallest part a plan is made for.  The fallback stands in when the
+    catalogue cannot be read."""
+    try:
+        from kiln.printer_intelligence import _read_public_json
+
+        rows = _read_public_json()
+    except Exception:  # noqa: BLE001 -- an unreadable catalogue is the fallback, never a crash
+        return _FALLBACK_BUILD_HEIGHT_MM
+    heights: list[float] = []
+    for row in rows.values() if isinstance(rows, dict) else ():
+        if not isinstance(row, dict):
+            continue
+        volume = row.get("rated_build_volume_mm") or row.get("build_volume_mm")
+        if isinstance(volume, dict):
+            volume = [volume.get("x"), volume.get("y"), volume.get("z")]
+        if isinstance(volume, (list, tuple)) and len(volume) >= 3 and _is_number(volume[2]) and volume[2] > 0:
+            heights.append(float(volume[2]))
+    return max(heights) if heights else _FALLBACK_BUILD_HEIGHT_MM
+
+
+def check_nozzle(nozzle_diameter_mm: Any) -> float:
+    """*nozzle_diameter_mm* as a float, when it is a size a plan is made for.
+
+    :raises AdaptiveSlicerError: for a value that is not a finite number, or
+        one outside :data:`_PLAN_NOZZLE_MM`.
+    """
+    if not _is_number(nozzle_diameter_mm):
+        raise AdaptiveSlicerError(
+            f"Nozzle diameter must be a finite number of millimetres, got {nozzle_diameter_mm!r}."
+        )
+    low, high = _PLAN_NOZZLE_MM
+    if not low <= nozzle_diameter_mm <= high:
+        raise AdaptiveSlicerError(
+            f"Nozzle diameter must be between {low:g} and {high:g} mm, got {nozzle_diameter_mm:g}."
+        )
+    return float(nozzle_diameter_mm)
+
+
+def check_plan_inputs(model_height_mm: Any, nozzle_diameter_mm: Any) -> None:
+    """Refuse a height or nozzle no plan is made for, before any layer.
+
+    The height must be a finite number above zero and no taller than
+    :func:`max_build_height_mm`; the nozzle must pass :func:`check_nozzle`.
+
+    :raises AdaptiveSlicerError: naming what is wrong.
+    """
+    if not _is_number(model_height_mm):
+        raise AdaptiveSlicerError(
+            f"Model height must be a finite number of millimetres, got {model_height_mm!r}."
+        )
+    if model_height_mm <= 0:
+        raise AdaptiveSlicerError(f"Model height must be positive, got {model_height_mm}.")
+    tallest = max_build_height_mm()
+    if model_height_mm > tallest:
+        raise AdaptiveSlicerError(
+            f"Model height {model_height_mm:g} mm is taller than any printer Kiln knows of ({tallest:g} mm)."
+        )
+    check_nozzle(nozzle_diameter_mm)
+
+
+# ---------------------------------------------------------------------------
 # Generic settings: any material, from the nozzle size alone
 # ---------------------------------------------------------------------------
 
@@ -294,9 +378,12 @@ def generic_profile(material: str = "", *, nozzle_diameter_mm: float = 0.4) -> M
     (:func:`kiln.printability._resolve_overhang_threshold` with no
     material).  *material* is carried as a name and changes nothing else.
     The two fields a plan never reads are left unstated.
+
+    :raises AdaptiveSlicerError: for a nozzle :func:`check_nozzle` refuses.
     """
     from kiln.printability import _resolve_overhang_threshold
 
+    nozzle_diameter_mm = check_nozzle(nozzle_diameter_mm)
     low = round(nozzle_diameter_mm * _MIN_LAYER_NOZZLE_RATIO, 3)
     high = round(nozzle_diameter_mm * _MAX_LAYER_NOZZLE_RATIO, 3)
     middle = round(nozzle_diameter_mm * _GENERIC_LAYER_NOZZLE_RATIO, 3)
@@ -421,10 +508,16 @@ class AdaptiveSlicer:
         :param printer: Optional printer name.
         :param nozzle_diameter_mm: Nozzle diameter in mm.
         :returns: An :class:`AdaptiveLayerPlan`.
-        :raises AdaptiveSlicerError: If model_height_mm <= 0.
+        :raises AdaptiveSlicerError: For a height or nozzle
+            :func:`check_plan_inputs` refuses, more than
+            :data:`_MAX_PLAN_REGIONS` regions, a layer that would not be
+            thicker than zero, or a plan past :data:`_MAX_PLAN_LAYERS` layers.
         """
-        if model_height_mm <= 0:
-            raise AdaptiveSlicerError(f"Model height must be positive, got {model_height_mm}.")
+        check_plan_inputs(model_height_mm, nozzle_diameter_mm)
+        if len(regions) > _MAX_PLAN_REGIONS:
+            raise AdaptiveSlicerError(
+                f"A plan reads at most {_MAX_PLAN_REGIONS} regions, got {len(regions)}."
+            )
 
         with self._lock:
             layer_heights: list[float] = []
@@ -451,6 +544,17 @@ class AdaptiveSlicer:
                         layer_heights[-1] += remaining
                         break
                     height = max(remaining, material_profile.min_layer_height_mm)
+
+                if not height > 0:
+                    raise AdaptiveSlicerError(
+                        f"These settings lay a layer {height} mm thick at {round(z, 4)} mm; "
+                        "every layer must be thicker than zero."
+                    )
+                if layer_idx >= _MAX_PLAN_LAYERS:
+                    raise AdaptiveSlicerError(
+                        f"This plan would take more than {_MAX_PLAN_LAYERS} layers; "
+                        "check the model height and the layer settings."
+                    )
 
                 speed = self._compute_layer_speed(z, regions, material_profile)
                 if layer_idx == 0:

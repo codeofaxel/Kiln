@@ -20,10 +20,13 @@ import kiln-pro):
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import importlib.util
 import json
+import signal
 import sys
+import threading
 import urllib.error
 from pathlib import Path
 from typing import Any
@@ -270,6 +273,64 @@ def _floor_angle() -> float:
     from kiln.printability import _resolve_overhang_threshold
 
     return _resolve_overhang_threshold(None, None, None)
+
+
+@contextlib.contextmanager
+def _deadline(seconds: float):
+    """Fail, instead of waiting forever, where the platform has a timer."""
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _expired(_signum, _frame):
+        raise TimeoutError(f"still planning after {seconds} s")
+
+    previous = signal.signal(signal.SIGALRM, _expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+class TestAMissRefusesWhatNoPlanIsMadeFor:
+    """The generic answer is bounded the same way the served one is."""
+
+    @pytest.mark.parametrize("height", [float("nan"), float("inf"), 1e7])
+    @pytest.mark.parametrize("door", ["generate", "quick"])
+    def test_a_height_no_plan_is_made_for(self, served, door, height):
+        _, answers = served
+        answers.append(MISSES["signed_out"])
+        with _deadline(2.0):
+            if door == "generate":
+                out = doors.generate_adaptive_slicing_plan([], "PLA", height, nozzle_diameter_mm=0.4)
+            else:
+                out = doors.quick_adaptive_plan("PLA", height, nozzle_diameter_mm=0.4)
+        assert out["success"] is False, out
+        assert "finite number" in out["error"] or "taller than any printer" in out["error"]
+
+    @pytest.mark.parametrize("nozzle", [0.01, 3.0])
+    @pytest.mark.parametrize("door", ["generate", "quick", "profile"])
+    def test_a_nozzle_no_plan_is_made_for(self, served, door, nozzle):
+        _, answers = served
+        answers.append(MISSES["offline"])
+        with _deadline(2.0):
+            if door == "generate":
+                out = doors.generate_adaptive_slicing_plan(REGIONS, "PLA", 10.0, nozzle_diameter_mm=nozzle)
+            elif door == "quick":
+                out = doors.quick_adaptive_plan("PLA", 10.0, nozzle_diameter_mm=nozzle)
+            else:
+                out = doors.get_material_slicing_profile("PLA", nozzle_diameter_mm=nozzle)
+        assert out["success"] is False and "Nozzle diameter must be between" in out["error"]
+
+    def test_too_many_regions(self, served):
+        _, answers = served
+        answers.append(MISSES["unanswered"])
+        many = [{"region_type": "standard", "z_start_mm": 0.0, "z_end_mm": 10.0, "area_pct": 1.0}] * 201
+        with _deadline(5.0):
+            out = doors.generate_adaptive_slicing_plan(many, "PLA", 10.0, nozzle_diameter_mm=0.4)
+        assert out["success"] is False and "at most 200 regions" in out["error"]
 
 
 # ---------------------------------------------------------------------------
