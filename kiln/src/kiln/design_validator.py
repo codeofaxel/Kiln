@@ -138,6 +138,22 @@ def _check_wall_thickness(
     )
 
 
+def _unmeasured_wall_check(required_mm: float) -> DesignValidationCheck:
+    """The wall check when the analysis could not measure the file's walls:
+    it says so and states no thickness."""
+    return DesignValidationCheck(
+        check_name="wall_thickness",
+        passed=False,
+        severity="warning",
+        actual_value="not measured",
+        required_value=required_mm,
+        fix_suggestion=(
+            "Kiln could not measure this file's walls. Make sure the thinnest wall "
+            f"is at least {required_mm:.1f} mm."
+        ),
+    )
+
+
 def _check_overhang_angle(
     max_overhang_deg: float,
     limit_deg: float,
@@ -379,49 +395,53 @@ def validate_design(
 
     resolved_material_id: str | None = None
     limits_notes: list[str] = []
-    if rec_material and rec_material.material:
-        from kiln.material_limits import limits_for
+    from kiln.material_limits import WALL_RECOMMENDED, limits_for
 
+    if rec_material and rec_material.material:
         material_name = rec_material.material.display_name
         resolved_material_id = rec_material.material.material_id
         # One plastic's limits, from the one helper every check reads.
         plastic_limits = limits_for(resolved_material_id)
         material_limits = plastic_limits.design_limits()
-        # The wall check warns below the recommended wall: the plastic's own
-        # where it was read, the general three-line wall otherwise.
-        from kiln.material_limits import WALL_RECOMMENDED
-
-        recommended = plastic_limits.value(WALL_RECOMMENDED)
-        if recommended:
-            material_limits.setdefault("recommended_wall_thickness_mm", float(recommended))
         limits_notes = plastic_limits.notes()
+    else:
+        # No plastic picked: the wall check reads the general figures
+        # (nothing asked).
+        plastic_limits = limits_for(None)
+    # The wall check warns below the recommended wall: the plastic's own
+    # where it was read, the general three-line wall otherwise.
+    wall_limits = dict(material_limits) or {
+        "min_wall_thickness_mm": plastic_limits.wall_floor_mm(),
+    }
+    recommended = plastic_limits.value(WALL_RECOMMENDED)
+    if recommended:
+        wall_limits.setdefault("recommended_wall_thickness_mm", float(recommended))
+        if material_limits:
+            material_limits.setdefault("recommended_wall_thickness_mm", float(recommended))
 
     # 4. Run checks.
     checks: list[DesignValidationCheck] = []
 
-    # Wall thickness — only check if thin walls were actually detected.
-    # The printability engine returns nozzle_diameter as min_wall when
-    # no thin walls exist, which would be a false positive.
-    min_wall_required = _resolve_wall_thickness(rules, material_limits)
-    wall_floor = _wall_floor(rules, material_limits)
+    # Wall thickness: the thinnest wall the analysis measured, judged for
+    # every caller against the wall that closes (critical below it) and the
+    # recommended wall (a warning below it).
+    min_wall_required = _resolve_wall_thickness(rules, wall_limits)
+    wall_floor = _wall_floor(rules, wall_limits)
     brief_wall = rules.get("min_wall_thickness_mm")
     if isinstance(brief_wall, (int, float)):
         # A wall under half the brief's own minimum stays critical, as the
         # material floor is.
         wall_floor = max(wall_floor or 0.0, 0.5 * float(brief_wall))
-    thin_wall_count = thin_walls.get("thin_wall_count", 0)
-    if min_wall_required is not None and thin_wall_count > 0:
-        actual_min_wall = thin_walls.get("min_wall_thickness_mm", float("inf"))
-        checks.append(
-            _check_wall_thickness(
-                actual_min_wall, min_wall_required, material_name=material_name, floor_mm=wall_floor,
+    if min_wall_required is not None:
+        measured_wall = thin_walls.get("min_wall_thickness_mm")
+        if isinstance(measured_wall, (int, float)) and not isinstance(measured_wall, bool) and measured_wall > 0:
+            checks.append(
+                _check_wall_thickness(
+                    float(measured_wall), min_wall_required, material_name=material_name, floor_mm=wall_floor,
+                )
             )
-        )
-    elif min_wall_required is not None:
-        # No thin walls detected — pass the check with a reasonable value.
-        checks.append(
-            _check_wall_thickness(min_wall_required, min_wall_required, material_name=material_name)
-        )
+        else:
+            checks.append(_unmeasured_wall_check(min_wall_required))
 
     # Overhang angle
     overhang_limit = material_limits.get("max_unsupported_overhang_deg")
