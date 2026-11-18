@@ -421,9 +421,11 @@ def validate_design(
         material_limits = plastic_limits.design_limits()
         limits_notes = plastic_limits.notes()
     else:
-        # No plastic picked: the wall check reads the general figures
-        # (nothing asked).
-        plastic_limits = limits_for(None)
+        # No plastic picked: the wall check reads the plastic the person
+        # named through the one helper every check reads (which says once
+        # when it cannot place the name), else the general figures with
+        # nothing asked.
+        plastic_limits = limits_for(material or None)
     # The wall check warns below the recommended wall: the plastic's own
     # where it was read, the general three-line wall otherwise.
     wall_limits = dict(material_limits) or {

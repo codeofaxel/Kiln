@@ -183,11 +183,16 @@ class MaterialLimits:
         return lines
 
     def cautions(self) -> list[str]:
-        """For a flexible or static-safe plastic answered with the general
-        figures, what they leave out.  Empty when its own were read."""
+        """For a plastic answered with the general figures, what a reply
+        should say beside them: that Kiln does not recognise the name (when
+        Kiln's design limits answered and could not place it), and for a
+        flexible or static-safe plastic what the general figures leave out.
+        Empty when its own were read."""
         if self.miss is None and not self.allowance and self.known:
             return []
         lines: list[str] = []
+        if self.miss is None and not self.known and self.material:
+            lines.append(UNRECOGNISED)
         if _category(self.material_id) == "thermoplastic_elastomer":
             lines.append(FLEXIBLE_CAUTION)
         if self.material_id and self.material_id.endswith("_esd") and self.value(ESD_WALL) is None:
@@ -223,6 +228,13 @@ def _outside_what_they_cover(miss: Miss, *, on_the_line: str, wont: str) -> str 
     return f"{on_the_line.rstrip('. ')}. {covered}, so here Kiln {wont.strip().rstrip('.')}."
 
 
+#: Said when Kiln's design limits answered and could not place the plastic
+#: named: the one name reader every check goes through, so every door says
+#: the same.
+UNRECOGNISED = (
+    "Kiln doesn't recognise the plastic named, so the checks use the general figures; "
+    "name it the way Kiln lists its plastics (PLA, PETG, ABS, ...) to check it against its own."
+)
 #: What the general figures leave out for a flexible plastic.
 FLEXIBLE_CAUTION = (
     "The general figures are for ordinary rigid plastics; a flexible "
@@ -486,6 +498,7 @@ __all__ = [
     "PER_PLASTIC",
     "GENERAL_BLOCK_NOTE",
     "STATIC_SAFE_UNKNOWN",
+    "UNRECOGNISED",
     "MaterialLimits",
     "SlicedFloors",
     "assuming",
