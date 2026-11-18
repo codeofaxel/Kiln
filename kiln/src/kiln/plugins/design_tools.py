@@ -400,6 +400,13 @@ class _DesignToolsPlugin:
             printer capabilities, and ease of printing.  Returns the top
             recommendation with reasoning, warnings, and alternatives.
 
+            The pick is Kiln's, asked of Kiln's servers by a signed-in
+            install (any plan).  When no pick comes (offline, signed out, no
+            answer) the reply is basic (``basic: true``): the plastics this
+            printer can melt, unranked, the cautions for this part in
+            ``warnings``, and a ``message`` saying why there is no pick and
+            what fixes it.
+
             **Which material tool to use:**
 
             - Designing a part and need engineering specs? → ``recommend_design_material`` (this tool)
@@ -415,15 +422,19 @@ class _DesignToolsPlugin:
                     drive extruder (needed for TPU).
                 max_hotend_temp_c: Maximum hotend temperature in Celsius.
             """
-            from kiln.design_intelligence import recommend_material_for_design
+            from kiln.design_intelligence import basic_material_answer, material_pick_for_design
 
             try:
-                rec = recommend_material_for_design(
+                rec, miss = material_pick_for_design(
                     requirements,
                     printer_has_enclosure=printer_has_enclosure,
                     printer_has_direct_drive=printer_has_direct_drive,
                     max_hotend_temp_c=max_hotend_temp_c,
                 )
+                if rec is None:
+                    # No pick: the plastics this printer can melt, the
+                    # cautions for this part, and why.
+                    return basic_material_answer(requirements, max_hotend_temp_c, miss)
                 result = rec.to_dict()
                 result["success"] = True
 
@@ -497,6 +508,8 @@ class _DesignToolsPlugin:
                 # kiln-pro is present the per-exposure verdict is layered on.
                 # Advisory only — never asserts skin-safe, never blocks.
                 from kiln.design_intelligence import (
+                    _SKIN_CONTACT_LEAD,
+                    _SKIN_CONTACT_TAIL,
                     get_skin_contact_floor,
                     use_case_implies_skin_contact,
                 )
@@ -533,11 +546,7 @@ class _DesignToolsPlugin:
                             pass
                         result["skin_contact"] = sc
                         result.setdefault("warnings", []).append(
-                            "SKIN CONTACT: no 3D-printed part is skin-safe, "
-                            "hypoallergenic, or biocompatible. "
-                            + (floor.honesty_note or "")
-                            + " For any mouth, eye, broken-skin, piercing, or "
-                            "implant use, see a medical professional."
+                            f"{_SKIN_CONTACT_LEAD} {floor.honesty_note or ''} {_SKIN_CONTACT_TAIL}"
                         )
 
                 # Bonding caveat (reverse-link to the adhesive intelligence),

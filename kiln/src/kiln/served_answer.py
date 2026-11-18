@@ -282,6 +282,12 @@ def classify_answer(answer: Any) -> Miss | None:
     text = text.strip()[:_DETAIL_LIMIT]
     why = answer.get("why")
     if why in CAUSES:
+        # An envelope that already decided why carries the server's own words
+        # in ``why_detail``; its ``error`` is that envelope's whole sentence,
+        # which would read as a second sentence inside the door's own.
+        if "why_detail" in answer:
+            raw = answer.get("why_detail")
+            text = str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else ""
         return Miss(why, code, text)
     if code in SIGNED_OUT_CODES:
         return Miss("signed_out", code, text)
@@ -534,7 +540,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_material_bridge": ("served_answer", "one material's catalogue record (a family's brand figures) the first time a door asks, kept on this computer; a miss is the record last kept, else the family's own range for a brand, each door saying why"),
     "kiln._pro_fleet_materials_bridge": ("served_answer", "a material answer across several machines (Kiln Business), from the rows the install sends and kept nowhere; a miss gives no cross-machine answer and says why, and one machine's own answer is never asked for"),
     "kiln._pro_print_fix_bridge": ("served_answer", "Kiln Pro's filament for a print refused because the printer cannot melt the one chosen: the closest ones it can melt, checked against the part's saved goal, asked only when the signed-in plan includes Kiln Pro and kept nowhere; a miss says why once and the refusal stands with the filaments the printer runs, never a filament Kiln did not check"),
-    "kiln._pro_material_pick_bridge": ("served_answer", "Kiln Pro's material pick for one part, asked only when the signed-in plan includes it and kept nowhere; a miss answers with the safety floor and its warnings"),
+    "kiln._pro_material_pick_bridge": ("served_answer", "Kiln's material pick for one part on every signed-in plan (Kiln Pro's own pick when the plan includes it), kept nowhere; a miss picks nothing: it lists the plastics the printer can melt with the part's cautions and says why"),
     "kiln._pro_routing_bridge": ("served_answer", "the material pick for an intent and the material list behind it, free at every plan and kept nowhere; a miss picks nothing, lists the plastics the printer can melt (or each material's name and category) with the food and skin cautions, and says why once"),
     "kiln._pro_material_pairing_bridge": ("served_answer", "whether two materials share one dual-extrusion print, and the multi-material check a compose makes; a miss answers from the nozzle temperature ranges alone, marked basic, never says a pair is compatible, still refuses the pairs that must never share a print and purges conservatively"),
     "kiln._pro_material_limits_bridge": ("served_answer", "one plastic's design limits (how steep a face may lean, how far a bridge may span, how thin a wall and a pin may go) for every design check, the printability check and a slice's support threshold, free at every plan, asked per plastic and scenario and kept for the process; a miss checks against the general figures, marks them general, says why once per cause and never calls them the plastic's own"),

@@ -38,20 +38,24 @@ _NOT_HERE = object()
 #: The key each question's answer carries.
 _ANSWER_KEY = {"plan": "plan", "quick_plan": "plan", "profile": "profile", "materials": "materials"}
 
+#: The key the one line rides under, the same on every basic answer.
+NOTE_KEY = "message"
+
 #: Per door: what is on the line, what Kiln can't do, what it did instead,
-#: and what to ask again for.  ``{m}`` is the material.
+#: and what the fix leads to.  ``{m}`` is the material.  Nothing promises
+#: tuned settings: Kiln may not tune a material it was asked about.
 _WORDS: dict[str, tuple[str, str, str, str]] = {
     "plan": (
         "This plan uses generic settings worked out from the nozzle size, not settings tuned to {m}",
-        "get the settings tuned to {m}",
+        "check whether it has settings tuned to {m}",
         "planned the layers with the generic settings",
-        "ask again for settings tuned to {m}",
+        "ask again",
     ),
     "profile": (
         "These are generic settings worked out from the nozzle size, not settings tuned to {m}",
-        "get the settings tuned to {m}",
+        "check whether it has settings tuned to {m}",
         "gave the generic settings",
-        "ask again for settings tuned to {m}",
+        "ask again",
     ),
     "materials": (
         "Kiln's servers list the materials Kiln tunes",
@@ -61,7 +65,7 @@ _WORDS: dict[str, tuple[str, str, str, str]] = {
     ),
 }
 
-__all__ = ["CONSULT_TIMEOUT_S", "LOCAL_MODULE", "WIRE_TOOL", "ask", "basic"]
+__all__ = ["CONSULT_TIMEOUT_S", "LOCAL_MODULE", "NOTE_KEY", "WIRE_TOOL", "ask", "basic"]
 
 
 def ask(question: str, **fields: Any) -> tuple[dict[str, Any] | None, Miss | None]:
@@ -85,7 +89,7 @@ def basic(miss: Miss, material: Any = "", door: str = "plan") -> dict[str, Any]:
     text = served_answer.sentence(
         miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont, then=then,
     )
-    out: dict[str, Any] = {"basic": True, "basic_note": text, "retryable": miss.no_answer}
+    out: dict[str, Any] = {"basic": True, NOTE_KEY: text, "retryable": miss.no_answer}
     out.update(served_answer.fields(miss))
     return out
 

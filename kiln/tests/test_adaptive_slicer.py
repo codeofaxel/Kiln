@@ -716,6 +716,36 @@ class TestEveryPlanIsBounded:
         with _deadline(2.0), pytest.raises(AdaptiveSlicerError, match="thicker than zero"):
             slicer.generate_plan([], flat, model_height_mm=20.0)
 
+    def test_a_plan_whose_layers_would_name_too_many_regions_is_refused(self, slicer):
+        thin = generic_profile("PLA", nozzle_diameter_mm=0.1)
+        tall = [
+            GeometryRegion(region_type=RegionType.STANDARD, z_start_mm=0.0, z_end_mm=1000.0, area_pct=1.0)
+        ] * 200
+        with _deadline(5.0), pytest.raises(AdaptiveSlicerError, match="more than 250,000 regions"):
+            slicer.generate_plan(tall, thin, model_height_mm=1000.0, nozzle_diameter_mm=0.1)
+        # The same regions over a short part, or a few over the tall one, still plan.
+        assert slicer.generate_plan(tall[:5], thin, model_height_mm=1000.0, nozzle_diameter_mm=0.1).total_layers
+        assert slicer.generate_plan(tall, thin, model_height_mm=5.0, nozzle_diameter_mm=0.1).total_layers
+
+    def test_more_regions_than_a_plan_reads_are_refused_before_any_is_read(self):
+        raw = [{"region_type": "standard", "z_start_mm": "not read"}] * 201
+        with pytest.raises(AdaptiveSlicerError, match="at most 200 regions"):
+            _parse_region_dicts(raw, 10.0)
+
+    @pytest.mark.parametrize("value", [10**400, -(10**400)], ids=["huge", "huge_negative"])
+    def test_a_whole_number_too_large_is_not_a_size(self, slicer, profile, value):
+        with pytest.raises(AdaptiveSlicerError, match="finite number"):
+            slicer.generate_plan([], profile, model_height_mm=value)
+        with pytest.raises(AdaptiveSlicerError, match="Nozzle diameter must be a finite number"):
+            generic_profile("PLA", nozzle_diameter_mm=value)
+        with pytest.raises(AdaptiveSlicerError, match="int too large"):
+            _parse_region_dicts([{"region_type": "bulk", "z_start_mm": value}], 10.0)
+
+    def test_a_refusal_repeats_at_most_64_characters_of_a_value(self, slicer, profile):
+        with pytest.raises(AdaptiveSlicerError) as caught:
+            slicer.generate_plan([], profile, model_height_mm="y" * 10_000)
+        assert len(str(caught.value)) < 200
+
     def test_a_plan_past_the_layer_ceiling_is_refused(self, slicer, profile, monkeypatch):
         import kiln.adaptive_slicer as eng
 

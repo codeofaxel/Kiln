@@ -41,10 +41,37 @@ LOCAL_MODULE = "kiln_pro.intent_materials.engine"
 #: What a person reads about a miss, filled in by :mod:`kiln.served_answer`.
 FEATURE = "material recommendation"
 
+#: The longest description of what a part is for that is asked about.
+MAX_INTENT_CHARS = 10_000
+#: The most on-hand material names one ask carries, and how much of each.
+MAX_NAMES = 500
+MAX_NAME_CHARS = 120
+
 #: ``_local``'s answer when kiln-pro is not on this computer.
 _NOT_HERE = object()
 
-__all__ = ["FEATURE", "LOCAL_MODULE", "WIRE_TOOL", "catalogue", "pick"]
+__all__ = [
+    "FEATURE",
+    "LOCAL_MODULE",
+    "MAX_INTENT_CHARS",
+    "MAX_NAMES",
+    "MAX_NAME_CHARS",
+    "WIRE_TOOL",
+    "catalogue",
+    "pick",
+    "refusal_for",
+]
+
+
+def refusal_for(intent: Any) -> str | None:
+    """Why the door refuses this request before asking, or ``None``: a
+    description of the part that is not text, or longer than
+    :data:`MAX_INTENT_CHARS` characters."""
+    if not isinstance(intent, str):
+        return "Invalid intent: say what the part is for, as text."
+    if len(intent) > MAX_INTENT_CHARS:
+        return f"Invalid intent: say what the part is for in at most {MAX_INTENT_CHARS:,} characters."
+    return None
 
 
 def pick(
@@ -66,7 +93,7 @@ def pick(
         "intent": str(intent or ""),
         "printer_capabilities": printer_capabilities,
         "budget_usd": budget_usd,
-        "on_hand_materials": sent,
+        "on_hand_materials": None if sent is None else sent[:MAX_NAMES],
         "inventory_recorded": bool(inventory_recorded),
     }
     answer, miss = _ask("pick", request)
@@ -89,12 +116,14 @@ def catalogue() -> tuple[list[dict[str, Any]] | None, Miss | None]:
 
 def _names_for_the_wire(names: list[str] | None) -> list[str] | None:
     """The on-hand material names as they leave this computer: read off its
-    own records, so each passes the outbound guard."""
+    own records, so each passes the outbound guard, and cut to
+    :data:`MAX_NAME_CHARS` characters (a material is named in its first
+    words)."""
     if names is None:
         return None
     from kiln.outbound_guard import scrub
 
-    return [str(scrub(str(name))) for name in names]
+    return [str(scrub(str(name)))[:MAX_NAME_CHARS] for name in names]
 
 
 def _ask(want: str, request: dict[str, Any]) -> tuple[Any, Miss | None]:
@@ -116,7 +145,7 @@ def _local(want: str, request: dict[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         from kiln.served_answer import local_fault
 
-        return local_fault(exc, where="the material recommender on this computer")
+        return local_fault(exc, where="Kiln's material recommender")
 
 
 def _served(want: str, request: dict[str, Any]) -> tuple[Any, Miss | None]:
@@ -171,18 +200,29 @@ def _is_answer(want: str, answer: Any) -> bool:
     if want == "catalogue":
         materials = answer.get("materials")
         return isinstance(materials, list) and all(_is_record(m) for m in materials)
+    pick = answer.get("pick")
     alternatives = answer.get("alternatives")
+    catalog = answer.get("on_hand_catalog", {})
+    status = answer.get("on_hand_status")
+    better = answer.get("better_catalog_option")
     return (
-        _is_record(answer.get("pick"))
-        and isinstance(answer.get("score"), (int, float))
-        and not isinstance(answer.get("score"), bool)
+        _is_record(pick)
+        and _is_number(answer.get("score"))
         and isinstance(answer.get("settings"), dict)
         and isinstance(answer.get("sentence"), str)
         and isinstance(alternatives, list)
         and all(isinstance(a, dict) and isinstance(a.get("name"), str) for a in alternatives)
-        and answer.get("on_hand_status") in (None, "on_hand", "no_inventory_recorded", "needs_purchase")
-        and isinstance(answer.get("on_hand_catalog", {}), dict)
-        and (answer.get("better_catalog_option") is None or isinstance(answer.get("better_catalog_option"), dict))
+        and status in (None, "on_hand", "no_inventory_recorded", "needs_purchase")
+        and isinstance(catalog, dict)
+        and all(isinstance(k, str) and isinstance(v, str) for k, v in catalog.items())
+        # The pick is said to be on hand only when it is one of the shelf's.
+        and (status != "on_hand" or pick["name"] in catalog.values())
+        and (better is None or (
+            _is_record(better)
+            and isinstance(better.get("sentence"), str)
+            and _is_number(better.get("score"))
+            and _is_number(better.get("score_gap"))
+        ))
     )
 
 
@@ -192,3 +232,7 @@ def _is_record(value: Any) -> bool:
         and isinstance(value.get("name"), str)
         and isinstance(value.get("display_name"), str)
     )
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)

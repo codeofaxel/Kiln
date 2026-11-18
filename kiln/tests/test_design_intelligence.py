@@ -610,73 +610,12 @@ class TestMaterialProfiles:
 
 
 class TestMaterialRecommendation:
-    def test_load_bearing_excludes_pla(self):
-        rec = recommend_material_for_design("shelf bracket that holds 10 lbs")
-        assert rec.material.material_id != "pla"
-        assert rec.material.material_id != "tpu"
+    """The pick is Kiln's servers' (tests/test_material_pick_served.py);
+    this install answers for it only by handing it back."""
 
-    def test_outdoor_prefers_asa(self):
-        rec = recommend_material_for_design(
-            "garden sign that lives outside in the sun",
-            printer_has_enclosure=True,
-        )
-        assert rec.material.material_id == "asa"
-
-    def test_flexible_requires_tpu(self):
-        rec = recommend_material_for_design("flexible phone case that absorbs drops")
-        assert rec.material.material_id == "tpu"
-
-    def test_food_contact_prefers_petg(self):
-        rec = recommend_material_for_design("cookie cutter, food safe")
-        assert rec.material.material_id == "petg"
-
-    def test_no_enclosure_excludes_abs(self):
-        rec = recommend_material_for_design(
-            "strong bracket",
-            printer_has_enclosure=False,
-        )
-        # ABS/ASA should be penalized without enclosure
-        assert rec.material.material_id not in ("abs", "asa")
-
-    def test_hotend_limit_penalizes_high_temp(self):
-        rec = recommend_material_for_design(
-            "strong durable part",
-            max_hotend_temp_c=230,
-        )
-        # Should not recommend PC (needs 270+)
-        assert rec.material.material_id != "polycarbonate"
-
-    def test_no_direct_drive_penalizes_tpu(self):
-        rec = recommend_material_for_design(
-            "flexible gasket",
-            printer_has_direct_drive=False,
-        )
-        # TPU should be heavily penalized
-        for w in rec.warnings:
-            if "tpu" in rec.material.material_id:
-                assert "direct drive" in w.lower()
-
-    def test_recommendation_has_alternatives(self):
-        rec = recommend_material_for_design("strong functional part")
-        assert len(rec.alternatives) > 0
-
-    def test_recommendation_to_dict(self):
-        rec = recommend_material_for_design("simple prototype")
-        d = rec.to_dict()
-        assert "material" in d
-        assert "score" in d
-        assert "alternatives" in d
-
-    def test_aesthetic_prefers_pla(self):
-        rec = recommend_material_for_design("beautiful decorative figurine for display")
-        assert rec.material.material_id == "pla"
-
-    def test_heat_resistant_excludes_pla(self):
-        rec = recommend_material_for_design(
-            "mount near a heat source in a car",
-            printer_has_enclosure=True,
-        )
-        assert rec.material.material_id != "pla"
+    def test_no_pick_is_none_and_never_a_guess(self):
+        # Signed out: nothing on this computer picks.
+        assert recommend_material_for_design("shelf bracket that holds 10 lbs") is None
 
 
 # ---------------------------------------------------------------------------
@@ -828,10 +767,13 @@ class TestDesignBrief:
         assert brief.recommended_material is not None
         assert len(brief.combined_guidance) > 0
 
-    def test_load_bearing_brief_excludes_pla(self):
+    def test_load_bearing_brief_with_no_pick_lists_plastics(self):
+        # Signed out: no pick, the plastics this printer can melt instead, and
+        # the requirements are still matched.
         brief = get_design_constraints("wall shelf bracket that holds 10 lbs")
-        assert brief.recommended_material is not None
-        assert brief.recommended_material.material.material_id != "pla"
+        assert brief.recommended_material is None
+        assert brief.material_basic["basic"] is True and brief.material_basic["plastics"]
+        assert any("load-bearing" in w for w in brief.material_basic["warnings"])
         assert len(brief.functional_constraints) > 0
 
     def test_material_override(self):
@@ -868,7 +810,7 @@ class TestDesignBrief:
     def test_empty_requirements_still_works(self):
         brief = get_design_constraints("")
         assert isinstance(brief, DesignBrief)
-        assert brief.recommended_material is not None
+        assert brief.recommended_material is not None or brief.material_basic["basic"] is True
 
     @requires_printer_profiles_overlay
     def test_printer_model_influences_brief(self):

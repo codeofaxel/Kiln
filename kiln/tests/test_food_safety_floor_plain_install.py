@@ -91,7 +91,7 @@ class TestRecommendDesignMaterial:
     def tool(self, monkeypatch):
         import kiln.design_intelligence as di
 
-        monkeypatch.setattr(di, "recommend_material_for_design", lambda *a, **k: _AbsFirst())
+        monkeypatch.setattr(di, "material_pick_for_design", lambda *a, **k: (_AbsFirst(), None))
         return _design_tools()["recommend_design_material"]
 
     def test_a_top_pick_rated_not_food_safe_is_overridden(self, tool):

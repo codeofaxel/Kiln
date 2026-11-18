@@ -1,16 +1,19 @@
-"""The plastics a printer can melt, read from the nozzle temperature table
-Kiln ships with.
+"""What a material pick says when it has no pick: the plastics a printer can
+melt, read from the nozzle temperature table Kiln ships with, and one line
+saying why there is no pick and what fixes it.
 
 A door with no answer from Kiln's servers names these instead of picking
 one: a list a person can choose from, with no ranking and no judgement
-about the part.
+about the part beyond the food-contact floor.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from kiln.gcode import _MATERIAL_TEMPS
 
-__all__ = ["plastics_printer_can_melt"]
+__all__ = ["basic_pick_line", "basic_plastics", "plastics_printer_can_melt"]
 
 
 def plastics_printer_can_melt(max_hotend_temp_c: float | None = None) -> list[str]:
@@ -28,3 +31,36 @@ def plastics_printer_can_melt(max_hotend_temp_c: float | None = None) -> list[st
     except (TypeError, ValueError):
         return names
     return [name for name in names if _MATERIAL_TEMPS[name][0] <= ceiling]
+
+
+def basic_plastics(use_text: Any, max_hotend_temp_c: float | None = None) -> list[str]:
+    """The plastics a basic answer lists: those the hotend can melt, kept to
+    the ones the food-contact floor allows when the part touches food."""
+    from kiln.material_safety import filter_food_safe_materials, use_case_implies_food_contact
+
+    plastics = plastics_printer_can_melt(max_hotend_temp_c)
+    if use_case_implies_food_contact(use_text if isinstance(use_text, str) else ""):
+        plastics = filter_food_safe_materials(plastics, require="yes_or_conditional")
+    return plastics
+
+
+def basic_pick_line(miss: Any, *, feature: str, hotend_known: bool = True) -> str:
+    """The one line a material pick says when no pick came: Kiln did not pick
+    a plastic for this part, why (:mod:`kiln.served_answer`), and what fixes
+    it.  *hotend_known* says whether the list was narrowed to the printer."""
+    from kiln.served_answer import Miss, sentence
+
+    if miss is None:
+        miss = Miss("unanswered", detail="no pick")
+    return sentence(
+        miss,
+        feature=feature,
+        on_the_line="Kiln did not pick a plastic for this part",
+        cannot="pick one",
+        wont="lists the plastics this printer can melt instead" if hotend_known else "lists common plastics instead",
+        then=(
+            "Kiln picks the plastic for this part"
+            if miss.cause == "signed_out"
+            else "ask again for Kiln's pick for this part"
+        ),
+    )

@@ -13,7 +13,9 @@ cautions every install says (abrasive filament, skin contact).
 When Kiln's servers give no answer there is no pick.  The reply is basic: the
 plastics the printer can melt, read from the nozzle temperature table Kiln
 ships with, unranked, with the food-contact floor and the skin-contact caution
-applied as for any pick, and one sentence saying why and what fixes it.
+applied as for any pick, and one sentence saying why and what fixes it.  When
+the materials on hand were asked, the list is the person's own as recorded,
+with where each one is and the abrasive-filament caution for a filled one.
 """
 
 from __future__ import annotations
@@ -53,13 +55,15 @@ class MaterialRecommendation:
 @dataclass
 class BasicMaterials:
     """No pick: the plastics the printer can melt, unranked, and why Kiln
-    did not pick one."""
+    did not pick one.  When the materials on hand were asked, the plastics
+    are the person's own, as recorded, with where each one is (``on_hand``)."""
 
     plastics: list[str]
     note: str
     miss: Miss
     hotend_limit_c: float | None = None
     cautions: list[str] = field(default_factory=list)
+    on_hand: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         from kiln.served_answer import fields
@@ -70,6 +74,8 @@ class BasicMaterials:
             "message": "\n\n".join([*self.cautions, self.note]),
             "plastics": list(self.plastics),
         }
+        if self.on_hand is not None:
+            out["on_hand"] = [dict(row) for row in self.on_hand]
         if self.hotend_limit_c is not None:
             out["hotend_limit_c"] = self.hotend_limit_c
         out["retryable"] = self.miss.no_answer
@@ -284,7 +290,7 @@ def recommend_material(
         inventory_recorded=bool(on_hand),
     )
     if answer is None:
-        return basic_materials(intent, miss or Miss("unanswered"), printer_id=printer_id)
+        return basic_materials(intent, miss or Miss("unanswered"), printer_id=printer_id, on_hand=on_hand)
 
     top = dict(answer["pick"])
     if answer.get("fallback"):
@@ -347,9 +353,7 @@ def recommend_material(
         }
         if on_hand_status == "no_inventory_recorded":
             reasoning = (
-                "NOT ON HAND: no spools or loaded materials are recorded — "
-                "record inventory with add_spool or an AMS/CFS sync to get "
-                "on-hand answers. Catalog recommendation follows; purchase "
+                f"{_NOTHING_RECORDED} Catalog recommendation follows; purchase "
                 f"required.\n\n{reasoning}"
             )
         else:
@@ -524,22 +528,26 @@ def _hotend_limit_c(printer_id: str) -> float | None:
     return float(profile.max_hotend_temp)
 
 
-def basic_materials(intent: str, miss: Miss, *, printer_id: str = "") -> BasicMaterials:
+def basic_materials(
+    intent: str,
+    miss: Miss,
+    *,
+    printer_id: str = "",
+    on_hand: list[dict[str, Any]] | None = None,
+) -> BasicMaterials:
     """The answer when Kiln's material recommendation gives none: no pick,
     the plastics the printer can melt (unranked), the food-contact floor and
-    the skin-contact caution, and one sentence saying why and what fixes it."""
-    from kiln import served_answer
-    from kiln._pro_routing_bridge import FEATURE
-    from kiln.material_basics import plastics_printer_can_melt
-    from kiln.material_safety import (
-        filter_food_safe_materials,
-        use_case_implies_food_contact,
-    )
+    the skin-contact caution, and one sentence saying why and what fixes it.
 
-    limit = _hotend_limit_c(printer_id)
-    plastics = plastics_printer_can_melt(limit)
-    if use_case_implies_food_contact(intent):
-        plastics = filter_food_safe_materials(plastics, require="yes_or_conditional")
+    When *on_hand* was asked, the plastics are the person's own, as recorded
+    and unranked, with where each one is, past the food-contact floor and
+    with the abrasive-filament caution for each filled one.  When nothing on
+    hand is left, the printer's plastics are listed and said not to be on
+    hand.
+    """
+    from kiln._pro_routing_bridge import FEATURE
+    from kiln.material_basics import basic_pick_line, basic_plastics
+
     cautions: list[str] = []
     try:
         from kiln.design_intelligence import use_case_implies_skin_contact
@@ -548,18 +556,107 @@ def basic_materials(intent: str, miss: Miss, *, printer_id: str = "") -> BasicMa
             cautions.append(f"{_SKIN_LEAD} {_SKIN_TAIL}")
     except Exception:  # noqa: BLE001 — advisory is best-effort
         logger.debug("Skin-contact advisory skipped", exc_info=True)
-    note = served_answer.sentence(
+
+    shelf = _shelf_basics(intent, on_hand) if on_hand is not None else None
+    if shelf:
+        names, rows = shelf
+        for name in names:
+            caution = _abrasive_caution(name)
+            if caution:
+                cautions.append(caution)
+        note = _basic_line(miss, wont="lists the materials you have on hand instead")
+        return BasicMaterials(plastics=names, note=note, miss=miss, cautions=cautions, on_hand=rows)
+
+    limit = _hotend_limit_c(printer_id)
+    plastics = basic_plastics(intent, limit)
+    if on_hand is not None:
+        cautions.append(_not_on_hand_line(on_hand))
+    note = basic_pick_line(miss, feature=FEATURE, hotend_known=limit is not None)
+    return BasicMaterials(
+        plastics=plastics, note=note, miss=miss, hotend_limit_c=limit, cautions=cautions,
+        on_hand=[] if on_hand is not None else None,
+    )
+
+
+#: The first sentence an answer from the materials on hand says when nothing
+#: is recorded at all.
+_NOTHING_RECORDED = (
+    "NOT ON HAND: no spools or loaded materials are recorded — "
+    "record inventory with add_spool or an AMS/CFS sync to get "
+    "on-hand answers."
+)
+
+
+def _shelf_basics(
+    intent: str, on_hand: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]] | None:
+    """The materials on hand as recorded, unranked, past the food-contact
+    floor, and where each one is; ``None`` when none is left."""
+    from kiln.material_safety import filter_food_safe_materials, use_case_implies_food_contact
+
+    index: dict[str, list[dict[str, Any]]] = {}
+    for entry in on_hand:
+        name = str(entry.get("material_type", "") or "")
+        if name and (entry.get("loaded_on") or entry.get("shelf_spools")):
+            index.setdefault(name, []).append(entry)
+    names = list(index)
+    if use_case_implies_food_contact(intent):
+        names = filter_food_safe_materials(names, require="yes_or_conditional")
+    if not names:
+        return None
+    rows = []
+    for name in names:
+        where = _availability_for(name, index)
+        rows.append({
+            "material_type": name,
+            "status": where["status"],
+            "loaded_on": [r.get("printer_name") for r in where["loaded_on"]],
+            "shelf_spools": len(where["shelf_spools"]),
+        })
+    return names, rows
+
+
+def _not_on_hand_line(on_hand: list[dict[str, Any]]) -> str:
+    """Why the plastics listed are not the person's own."""
+    if not on_hand:
+        return f"{_NOTHING_RECORDED} The plastics listed are not on hand."
+    have = ", ".join(sorted({
+        str(e.get("material_type", "")) for e in on_hand if e.get("material_type")
+    })) or "your recorded materials"
+    return (
+        f"NOT ON HAND: nothing you have recorded ({have}) matches this request — "
+        f"the plastics listed need to be purchased."
+    )
+
+
+def _abrasive_caution(name: str) -> str:
+    try:
+        from kiln.material_safety import abrasive_nozzle_floor
+
+        return abrasive_nozzle_floor(name) or ""
+    except Exception:  # noqa: BLE001 — advisory is best-effort
+        logger.debug("Abrasive-filament floor skipped", exc_info=True)
+        return ""
+
+
+def _basic_line(miss: Miss, *, wont: str) -> str:
+    """The one line a basic answer says, for a list other than the printer's
+    plastics."""
+    from kiln import served_answer
+    from kiln._pro_routing_bridge import FEATURE
+
+    return served_answer.sentence(
         miss,
         feature=FEATURE,
         on_the_line="Kiln did not pick a plastic for this part",
         cannot="pick one",
-        wont=(
-            "lists the plastics this printer can melt instead" if limit is not None
-            else "lists common plastics instead"
+        wont=wont,
+        then=(
+            "Kiln picks the plastic for this part"
+            if miss.cause == "signed_out"
+            else "ask again for Kiln's pick for this part"
         ),
-        then="ask again for Kiln's pick for this part",
     )
-    return BasicMaterials(plastics=plastics, note=note, miss=miss, hotend_limit_c=limit, cautions=cautions)
 
 
 def material_list() -> dict[str, Any]:
@@ -576,18 +673,27 @@ def material_list() -> dict[str, Any]:
 
 
 def basic_material_list(miss: Miss) -> dict[str, Any]:
-    """Names and categories only, from the material catalogue Kiln ships with."""
+    """The plastics a basic pick lists (the nozzle temperature table Kiln
+    ships with), by name and category only, as the material catalogue Kiln
+    ships with names them."""
     from kiln import served_answer
     from kiln._pro_routing_bridge import FEATURE
 
     named: list[dict[str, Any]] = []
     try:
+        from kiln.catalog_keys import resolve_material_key
         from kiln.design_intelligence import list_public_material_profiles
+        from kiln.material_basics import plastics_printer_can_melt
 
-        named = [
-            {"name": p.material_id, "display_name": p.display_name, "category": p.category}
-            for p in list_public_material_profiles()
-        ]
+        profiles = {p.material_id: p for p in list_public_material_profiles()}
+        for plastic in plastics_printer_can_melt(None):
+            key = resolve_material_key(plastic, list(profiles))
+            if key is not None:
+                named.append({
+                    "name": key,
+                    "display_name": profiles[key].display_name,
+                    "category": profiles[key].category,
+                })
     except Exception:  # noqa: BLE001 -- an unreadable catalogue lists nothing, and says why
         logger.debug("material names unreadable", exc_info=True)
     note = served_answer.sentence(
@@ -595,7 +701,7 @@ def basic_material_list(miss: Miss) -> dict[str, Any]:
         feature=FEATURE,
         on_the_line="Kiln did not list each material's properties",
         cannot="list them",
-        wont="lists names and categories only",
+        wont="lists common plastics by name and category only",
         then="ask again for the full list",
     )
     out: dict[str, Any] = {

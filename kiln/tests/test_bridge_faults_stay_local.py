@@ -187,6 +187,8 @@ def test_the_material_recommendation(monkeypatch, caplog):
     _stub(monkeypatch, bridge.LOCAL_MODULE, for_the_wire=_raise)
     out = {"pick": recommend_material("strong").to_dict(), "list": material_list()}
     assert out["pick"]["basic"] is True and out["list"]["basic"] is True
+    # Read on a person's computer and on Kiln's servers alike: no "this computer".
+    assert out["pick"]["why_detail"] == out["list"]["why_detail"] == "Kiln's material recommender stopped"
     _assert_kept_local(out, caplog)
 
 

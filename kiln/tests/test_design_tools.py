@@ -1108,11 +1108,11 @@ class TestMatchDesignRequirements:
 class TestRecommendDesignMaterial:
     """Tests for recommend_design_material MCP tool."""
 
-    @patch("kiln.design_intelligence.recommend_material_for_design")
+    @patch("kiln.design_intelligence.material_pick_for_design")
     def test_happy_path(self, mock_fn, registered_tools):
-        mock_fn.return_value = SimpleNamespace(
+        mock_fn.return_value = (SimpleNamespace(
             to_dict=lambda: {"material": "petg", "reasoning": "Best for outdoor use"},
-        )
+        ), None)
 
         result = registered_tools["recommend_design_material"]("outdoor shelf bracket")
 
@@ -1125,11 +1125,11 @@ class TestRecommendDesignMaterial:
             max_hotend_temp_c=300,
         )
 
-    @patch("kiln.design_intelligence.recommend_material_for_design")
+    @patch("kiln.design_intelligence.material_pick_for_design")
     def test_passes_printer_constraints(self, mock_fn, registered_tools):
-        mock_fn.return_value = SimpleNamespace(
+        mock_fn.return_value = (SimpleNamespace(
             to_dict=lambda: {"material": "nylon"},
-        )
+        ), None)
 
         registered_tools["recommend_design_material"](
             "load-bearing bracket",
@@ -1145,18 +1145,18 @@ class TestRecommendDesignMaterial:
             max_hotend_temp_c=280,
         )
 
-    @patch("kiln.design_intelligence.recommend_material_for_design", side_effect=RuntimeError("boom"))
+    @patch("kiln.design_intelligence.material_pick_for_design", side_effect=RuntimeError("boom"))
     def test_exception(self, mock_fn, registered_tools):
         result = registered_tools["recommend_design_material"]("anything")
 
         assert result["success"] is False
         assert "boom" in result["error"]
 
-    @patch("kiln.design_intelligence.recommend_material_for_design")
+    @patch("kiln.design_intelligence.material_pick_for_design")
     def test_skin_contact_floor_surfaced_for_wearable(self, mock_rec, registered_tools):
         # A worn-against-skin request surfaces the free skin-contact floor +
         # a warning inline — the caution reaches the user without asking.
-        mock_rec.return_value = SimpleNamespace(to_dict=lambda: {"material": "pla"})
+        mock_rec.return_value = (SimpleNamespace(to_dict=lambda: {"material": "pla"}), None)
 
         result = registered_tools["recommend_design_material"]("a ring worn daily")
 
@@ -1167,23 +1167,23 @@ class TestRecommendDesignMaterial:
         assert sc["refer_to_medical"] and sc["honesty_note"]
         assert any("SKIN CONTACT" in w for w in result.get("warnings", []))
 
-    @patch("kiln.design_intelligence.recommend_material_for_design")
+    @patch("kiln.design_intelligence.material_pick_for_design")
     def test_no_skin_contact_block_for_non_wearable(self, mock_rec, registered_tools):
-        mock_rec.return_value = SimpleNamespace(to_dict=lambda: {"material": "petg"})
+        mock_rec.return_value = (SimpleNamespace(to_dict=lambda: {"material": "petg"}), None)
 
         result = registered_tools["recommend_design_material"]("an outdoor shelf bracket")
 
         assert "skin_contact" not in result
 
     @patch("kiln.design_intelligence.get_material_profile")
-    @patch("kiln.design_intelligence.recommend_material_for_design")
+    @patch("kiln.design_intelligence.material_pick_for_design")
     def test_bonding_caveat_surfaced(self, mock_rec, mock_profile, registered_tools):
         # Recommender picks PP; its (Pro-overlay) bonding block is very_hard,
         # so the tool surfaces a structured bonding block + a top-of-list
         # warning and points at recommend_adhesive.
-        mock_rec.return_value = SimpleNamespace(
+        mock_rec.return_value = (SimpleNamespace(
             to_dict=lambda: {"material": "pp", "reasoning": "stiff + chemical"},
-        )
+        ), None)
         mock_profile.return_value = SimpleNamespace(
             bonding={
                 "bonding_difficulty": "very_hard",
@@ -1204,11 +1204,11 @@ class TestRecommendDesignMaterial:
         assert any("hard to bond" in w for w in result.get("warnings", []))
 
     @patch("kiln.design_intelligence.get_material_profile")
-    @patch("kiln.design_intelligence.recommend_material_for_design")
+    @patch("kiln.design_intelligence.material_pick_for_design")
     def test_bonding_absent_for_free_tier(self, mock_rec, mock_profile, registered_tools):
         # Free tier: overlay absent -> profile.bonding empty -> no bonding key,
         # no bonding warning, recommendation otherwise unaffected.
-        mock_rec.return_value = SimpleNamespace(to_dict=lambda: {"material": "petg"})
+        mock_rec.return_value = (SimpleNamespace(to_dict=lambda: {"material": "petg"}), None)
         mock_profile.return_value = SimpleNamespace(bonding={}, bonding_caveat=lambda: "")
 
         result = registered_tools["recommend_design_material"]("outdoor bracket")
@@ -1217,13 +1217,13 @@ class TestRecommendDesignMaterial:
         assert "bonding" not in result
 
     @patch("kiln.design_intelligence.get_material_profile")
-    @patch("kiln.design_intelligence.recommend_material_for_design")
+    @patch("kiln.design_intelligence.material_pick_for_design")
     @pytest.mark.usefixtures("free_caller")
     def test_bonding_floor_nudge_free_tier(self, mock_rec, mock_profile, registered_tools):
         # Free tier with the public common-knowledge floor flag (no overlay):
         # a minimal bonding block (hard_to_bond + upgrade_url, no Pro fields)
         # and the upgrade nudge as a top-of-list warning.
-        mock_rec.return_value = SimpleNamespace(to_dict=lambda: {"material": "pp"})
+        mock_rec.return_value = (SimpleNamespace(to_dict=lambda: {"material": "pp"}), None)
         mock_profile.return_value = SimpleNamespace(
             bonding={"hard_to_bond": True},
             bonding_caveat=lambda: (
