@@ -363,13 +363,13 @@ class TestEveryDoor:
             assert resp["error"]["message"].startswith("The last print, jar v2, is still on the plate (since ")
             assert "won't start this one" in resp["error"]["message"]
             assert resp["slice"]["output_path"] == gcode
-            assert resp["placement"]["ok"] is True and resp["approval_carries"] is False
+            assert resp["placement"]["ok"] is True and resp["approval_carries"] is True
             assert resp["start"] == {"allowed": False, "why": resp["error"]["message"]}
             return
         assert resp["success"] is True
         assert resp["placement"]["ok"] is True and resp["placement"]["schema"] == bridge.SCHEMA
-        assert resp["approval_carries"] is False
-        assert "jar v2" in resp["approval_note"] and "approve from here" in resp["approval_note"]
+        assert resp["approval_carries"] is True
+        assert "jar v2" in resp["approval_note"] and "carries" in resp["approval_note"]
         # A slice beside the occupant is not a print beside it: the result
         # says so, so an agent does not go on to start it by hand.
         assert resp["start"]["allowed"] is False
@@ -686,7 +686,7 @@ class TestKeepAndFormats:
         assert err is None and placed == stl
         assert asked.asked[0]["placement"] == "keep" and asked.asked[0]["placed_by"] == "keep"
         assert asked.asked[0]["keep_at_mm"] == [100.0, 100.0]
-        assert info["approval_carries"] is False
+        assert info["approval_carries"] is True
 
     def test_a_3mf_is_placed_by_its_build_items(self, tmp_path, machine, monkeypatch):
         import zipfile
@@ -1058,7 +1058,7 @@ class TestEveryCallerOfTheSlicer:
             result = pipelines.quick_print(model_path=stl, printer_id="ender3", skip_validation=True, placement=[40, 40])
         step = next(s for s in result.steps if s.name == "slice")
         assert step.success is True
-        assert step.data["placement"]["ok"] is True and step.data["approval_carries"] is False
+        assert step.data["placement"]["ok"] is True and step.data["approval_carries"] is True
         bbox = compute_mesh_bbox(spy.call_args.args[0])
         assert (bbox["x_min"], bbox["y_min"]) == pytest.approx((40.0, 40.0))
 
@@ -1097,7 +1097,7 @@ class TestEveryCallerOfTheSlicer:
             res = runner.invoke(cli, ["slice", stl, "--printer-id", "ender3", "--placement", "[40, 40]", "--json"])
         assert res.exit_code == 0, res.output
         data = json.loads(res.output)
-        assert data["data"]["placement"]["ok"] is True and data["data"]["approval_carries"] is False
+        assert data["data"]["placement"]["ok"] is True and data["data"]["approval_carries"] is True
         assert spy.call_args.args[0].endswith("_placed.stl")
         with patch("kiln.slicer.slice_file", spy):
             res = runner.invoke(cli, ["slice", stl, "--printer-id", "ender3", "--placement", "front-left"])
@@ -1409,7 +1409,7 @@ class TestEveryDoorThatStartsAPrint:
                 names = [s.name for s in result.steps]
                 assert names[-1] == "start_print", (run.__name__, names, [s.message for s in result.steps])
                 slice_step = next(s for s in result.steps if s.name == "slice")
-                assert slice_step.success is True and slice_step.data["approval_carries"] is False
+                assert slice_step.success is True and slice_step.data["approval_carries"] is True
                 start = result.steps[-1]
                 assert result.success is False and start.success is False
                 assert start.data["error"]["code"] == "PLATE_OCCUPIED_START_NOT_YET"
@@ -1437,7 +1437,7 @@ class TestEveryDoorThatStartsAPrint:
             resp = tools["retry_print_with_fix"](model_path=stl, printer_id="ender3", skip_diagnosis=True, skip_validation=True, placement=[40, 40])
         assert resp["success"] is False and resp["error"]["code"] == "PLATE_OCCUPIED_START_NOT_YET"
         assert resp["slice"]["output_path"] == gcode and resp["placement"]["ok"] is True
-        assert resp["approval_carries"] is False
+        assert resp["approval_carries"] is True
 
     def test_generate_and_print_refuses_the_auto_start_and_keeps_the_upload(self, tmp_path, machine, monkeypatch):
         import kiln.server as srv

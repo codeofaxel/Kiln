@@ -18,7 +18,9 @@ from __future__ import annotations
 import ast
 import asyncio
 import inspect
+import os
 import pathlib
+import sys
 
 import pytest
 
@@ -34,6 +36,7 @@ from kiln.print_consent import (
     set_consent,
     why_not_asked,
 )
+from tests.test_watchdog_attached_to_every_print import _Bench
 
 # ---------------------------------------------------------------------------
 # A consent is about one print
@@ -602,6 +605,324 @@ class TestARetryIsAPrintLikeAnyOther:
         assert self.printer.started == ["anything.gcode"]
 
 
+class TestARetryBesideTheFailedPart:
+    """A retry placed beside the part that failed is the same part, moved on
+    the plate: the person's yes and the preview for the model print it with
+    no new question, and the plate is still checked before it starts.  A
+    mesh Kiln repairs or rescales is another part: it is refused in plain
+    words before anything is sent, and printed once the person is asked
+    about the file the refusal names.
+
+    The real gate, the real wrapper asking a scripted host, the real
+    adapter template and its start judge, the real pre-print check; the
+    slicer, the placement verdict and the printer are stood in."""
+
+    @pytest.fixture(autouse=True)
+    def _bench(self, monkeypatch, tmp_path):
+        from kiln import consent_windows, monitor_twin, print_signoff, screen_code
+        from kiln.print_watchdog import PrintWatchdog
+        from kiln.printers import base
+        from kiln.registry import PrinterRegistry
+        from tests.test_quiet_start import JAR
+        from tests.test_watchdog_attached_to_every_print import _NullHeaterWatchdog, _on_the_server
+
+        monkeypatch.setattr(base, "_PRINT_STARTED_HOOKS", ())
+        monkeypatch.setattr(base, "_PRINT_ENDED_HOOKS", ())
+        monkeypatch.setattr(server, "_print_lifecycle_hooks_installed", False)
+        monkeypatch.setattr(server, "_registry", PrinterRegistry())
+        monkeypatch.setattr(server, "_adapter", None)
+        monkeypatch.setattr(server, "_print_watchdogs", {})
+        monkeypatch.setattr(server, "_tool_limiter", server._ToolRateLimiter())
+        monkeypatch.setattr(server, "_TOOL_RATE_LIMITS", {})
+        monkeypatch.setattr(server, "_get_heater_watchdog", lambda: _NullHeaterWatchdog)
+        monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(server, "_pro_api_call", lambda tool, **kw: {"status": "error", "error": "no network in tests"})
+        monkeypatch.setattr(PrintWatchdog, "start", lambda self: None)
+        monkeypatch.setattr(base, "_preflight_upload_or_raise", lambda adapter, path: path)
+        monkeypatch.setattr("kiln.printers.bed_fit.get_build_volume", lambda pid: (256.0, 256.0, 256.0))
+        monkeypatch.setattr("kiln.emergency.get_emergency_coordinator", lambda: _Unlatched())
+        for var in ("KILN_SKIP_PREVIEW_GATE", "KILN_HOSTED_MULTITENANT"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("KILN_SKIP_PREFLIGHT", "1")
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        twin = tmp_path / "twin"
+        twin.mkdir()
+        monkeypatch.setattr(monitor_twin, "_TWIN_DIR", twin)
+        monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
+        monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
+        monkeypatch.setattr(screen_code, "_show_hook", lambda issued: False)
+        monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: False)
+        print_signoff._reset_for_tests()
+        print_consent._reset_for_tests()
+        consent_windows._reset_for_tests()
+        screen_code._reset_for_tests()
+        self.printer = _BesideBench()
+        _on_the_server(workshop=self.printer)
+        self.cleared: list[object] = []
+        take = print_signoff.take
+        monkeypatch.setattr(
+            print_signoff, "take", lambda *a, **k: self.cleared.append(c := take(*a, **k)) or c,
+        )
+        self.asked: list[str] = []
+        self.jar = JAR
+        yield
+        print_signoff._reset_for_tests()
+        print_consent._reset_for_tests()
+        consent_windows._reset_for_tests()
+        screen_code._reset_for_tests()
+
+    def _occupied(self, monkeypatch):
+        """The failed part is still on the plate, and the placement verdict
+        finds room beside it with a plan for this machine."""
+        from kiln import _pro_placement_bridge as bridge
+        from kiln.plate_state import mark_occupied
+        from tests.test_plate_placement_doors import _Bridge, _verdict
+        from tests.test_quiet_start import _plan_verdict
+
+        mark_occupied(self.printer, self.jar)
+        monkeypatch.setattr(bridge, "ask", _Bridge((_verdict(ok=True, at=(200.0, 20.0)), None), (_plan_verdict(self.printer), None)))
+
+    def _slicer(self, monkeypatch, tmp_path, *, then=None):
+        from kiln.monitor_twin import note_sliced
+        from kiln.slicer import SliceResult
+        from tests.test_quiet_start import _body
+
+        self.sliced: list[str] = []
+
+        def _slice(path, **kw):
+            # What the real slicer writes and notes, so the printer-side
+            # file traces back to the mesh it was sliced from.
+            self.sliced.append(path)
+            gcode = tmp_path / (os.path.splitext(os.path.basename(path))[0] + ".gcode")
+            gcode.write_text(_body())
+            note_sliced(path, str(gcode))
+            if then is not None:
+                then()
+            return SliceResult(success=True, output_path=str(gcode), slicer="bench", message="sliced")
+
+        monkeypatch.setattr("kiln.slicer.slice_file", _slice)
+        monkeypatch.setattr("kiln.slicer_profiles.resolve_slicer_profile", lambda *a, **k: None)
+        monkeypatch.setattr(server, "_map_printer_hint_to_profile_id", lambda *a, **k: None)
+        monkeypatch.setattr(server, "_PRINTER_MODEL", None)
+
+    def _retry(self, model: str, **kwargs):
+        from kiln.plugins import smart_print_tools
+        from tests.test_watchdog_attached_to_every_print import _plugin_tools
+
+        retry = _plugin_tools(smart_print_tools)["retry_print_with_fix"]
+        kwargs.setdefault("skip_validation", True)
+        return retry(model_path=model, printer_name="workshop", skip_diagnosis=True, **kwargs)
+
+    def _asked_then(self, monkeypatch, model: str, call):
+        """The wrapper asks the person about *model* on a host that draws a
+        dialog, they say yes, and *call* runs in that same call's context."""
+        async def _person(ctx, message, **_kw):
+            self.asked.append(message)
+            return DialogAnswer("accept", "", choice=CHOICE_THIS_PRINT)
+
+        async def _no_account(*_a, **_k):
+            return None
+
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda *_a: True)
+        monkeypatch.setattr(server, "ask_user_to_confirm", _person)
+        monkeypatch.setattr(server, "_consent_from_account", _no_account)
+
+        async def _the_call():
+            await server._obtain_print_consent(
+                "retry_print_with_fix", {"model_path": model, "printer_name": "workshop"}, object(),
+            )
+            return call()
+
+        return asyncio.run(_the_call())
+
+    @staticmethod
+    def _token(path: str) -> str:
+        from kiln.preview_gate import get_preview_gate
+
+        return get_preview_gate().issue(path, door="stage").token
+
+    def test_the_persons_yes_for_the_model_prints_it_beside_the_failed_part(self, monkeypatch, tmp_path):
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        out = self._asked_then(
+            monkeypatch, model,
+            lambda: self._retry(model, placement=[200, 20], preview_token=self._token(model)),
+        )
+        assert out.get("success") is True, out
+        assert len(self.asked) == 1 and "bracket" in self.asked[0], "one question, about the model"
+        assert [os.path.basename(p) for p in self.sliced] == ["bracket_placed.stl"], "the part was moved, not changed"
+        assert self.printer.started == ["bracket_placed.gcode.3mf"]
+        # The start rode the person's yes for the model and the stage it was
+        # shown on -- carried to the moved copy, never a yes nobody gave.
+        assert [(c.source, c.door, os.path.basename(c.file_name)) for c in self.cleared if c] == [
+            (SOURCE_ELICITED, "stage", "bracket.stl"),
+        ], self.cleared
+        assert out["approval_carries"] is True and "carries" in out["approval_note"]
+        # The plate was judged at the start: the file started the quiet way,
+        # every switch the plan names off, and it is recorded beside the jar.
+        (_name, kwargs), = self.printer.impl_calls
+        assert kwargs.get("bed_leveling") is False and kwargs.get("timelapse") is False
+        from kiln.plate_state import read
+
+        assert [j.file for j in read(self.printer).jobs] == ["jar_v2.gcode.3mf", "bracket_placed.gcode.3mf"]
+
+    def test_the_plate_is_still_checked_when_the_yes_carries(self, monkeypatch, tmp_path):
+        """The yes carried to the moved copy, and the plate check still had
+        the last word: a part put down beside the jar after the plan was made
+        stops the start, whoever said yes."""
+        from kiln.plate_state import PLATE_CHANGED_CODE, mark_occupied
+        from tests.test_plate_placement_doors import _cube
+        from tests.test_quiet_start import COASTER
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path, then=lambda: mark_occupied(self.printer, COASTER, keep_previous=True))
+        model = _cube(tmp_path / "bracket.stl")
+        out = self._asked_then(
+            monkeypatch, model,
+            lambda: self._retry(model, placement=[200, 20], preview_token=self._token(model)),
+        )
+        assert self.printer.started == [], out
+        assert out["error"]["code"] == PLATE_CHANGED_CODE, out
+
+    @pytest.mark.parametrize("yes", ["window", "always_allow", "ci_bypass"])
+    def test_every_other_kind_of_yes_prints_it_beside_the_failed_part(self, monkeypatch, tmp_path, yes):
+        from kiln import consent_windows
+        from kiln.print_consent import SOURCE_ALWAYS, SOURCE_TERMINAL, SOURCE_WINDOW
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        if yes == "window":
+            window = consent_windows._open_window(seconds=600, scope=("workshop",), source=SOURCE_TERMINAL)
+            expected = (SOURCE_WINDOW, window.id)
+        elif yes == "always_allow":
+            monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
+            monkeypatch.setattr(consent_windows, "always_allow_is_yours", lambda: True)
+            window = consent_windows.open_always(printer_name="workshop", typed_name="workshop", told_no_camera=True)
+            expected = (SOURCE_ALWAYS, window.id)
+        else:
+            monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+            expected = None
+        self._occupied(monkeypatch)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl")
+        token = None if yes == "ci_bypass" else self._token(model)
+        out = self._retry(model, placement=[200, 20], preview_token=token)
+        assert out.get("success") is True, out
+        assert self.printer.started == ["bracket_placed.gcode.3mf"]
+        if expected is not None:
+            assert [(c.source, c.window_id) for c in self.cleared if c] == [expected], self.cleared
+
+    def test_a_rescaled_mesh_is_another_part_asked_about_once_on_the_file_named(self, monkeypatch, tmp_path):
+        """The pre-print check rescales a part drawn in metres: what would
+        print is not what the person was shown.  Refused in plain words with
+        nothing sent, and the file the refusal names prints once the person
+        is shown it and asked about it -- one question, never a dead end."""
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl", size=0.02)
+        refused = self._asked_then(
+            monkeypatch, model,
+            lambda: self._retry(model, skip_validation=False, preview_token=self._token(model)),
+        )
+        assert self.printer.started == [] and self.printer.uploaded == [], "nothing sent for a part nobody saw"
+        assert refused["error"]["code"] == "PREVIEW_NOT_CONFIRMED", refused
+        changed = refused["changed_part"]
+        assert changed["how"] == "rescaled" and changed["was"] == os.path.realpath(model)
+        message = refused["error"]["message"]
+        assert "Kiln rescaled bracket.stl before printing it" in message
+        assert "not the part the person was shown and said yes to" in message
+        assert f'model_path="{changed["now"]}"' in message and "asked about it once" in message
+        assert "was shown, and nobody said go" not in message, "the rescaled file was never shown"
+
+        rescaled = changed["now"]
+        self.asked.clear()
+        out = self._asked_then(
+            monkeypatch, rescaled,
+            lambda: self._retry(rescaled, skip_validation=False, preview_token=self._token(rescaled)),
+        )
+        assert out.get("success") is True, out
+        assert len(self.asked) == 1 and print_consent.display_name(rescaled) in self.asked[0]
+        assert len(self.printer.started) == 1
+        assert [os.path.basename(c.file_name) for c in self.cleared if c] == [os.path.basename(rescaled)]
+
+    def test_a_window_does_not_let_the_old_preview_stand_for_a_changed_part(self, monkeypatch, tmp_path):
+        """Inside a window nobody is asked, and the preview is still the
+        part's: a token for the model as drawn does not cover the rescaled
+        one, and the refusal says why in the same plain words."""
+        from kiln import consent_windows
+        from kiln.print_consent import SOURCE_TERMINAL
+        from tests.test_plate_placement_doors import _cube
+
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        consent_windows._open_window(seconds=600, scope=("workshop",), source=SOURCE_TERMINAL)
+        self._slicer(monkeypatch, tmp_path)
+        model = _cube(tmp_path / "bracket.stl", size=0.02)
+        out = self._retry(model, skip_validation=False, preview_token=self._token(model))
+        assert self.printer.started == [], out
+        assert out["changed_part"]["how"] == "rescaled", out
+        assert "Kiln rescaled bracket.stl before printing it" in out["error"]["message"]
+
+
+class _Unlatched:
+    def get_latch_status(self, printer_id: str) -> dict:
+        return {"latched": False, "critical_interlocks_pending": []}
+
+    def __getattr__(self, name: str):
+        return lambda *a, **k: None
+
+
+class _BesideBench(_Bench):
+    """A real adapter that talks to nothing, with what a start beside a part
+    asks of a machine: a serial, homed axes, and the real 3MF wrap."""
+    printer_id = "bambu_a1"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.serial = "01P00A000000001"
+        self._printer_model = "bambu_a1"
+        self.homed = {"x", "y", "z"}
+        self.uploaded: list[str] = []
+        self.impl_calls: list[tuple[str, dict]] = []
+
+    @property
+    def name(self) -> str:
+        return "bambu"
+
+    def homed_axes_now(self):
+        return set(self.homed)
+
+    def homed_axes_field(self) -> str:
+        return "print.home_flag[bits 0-2]"
+
+    def upload_file(self, file_path: str):
+        self.uploaded.append(file_path)
+        return super().upload_file(file_path)
+
+    def wrap_gcode_as_3mf(self, gcode_path, *, stl_paths=None, source_3mf_path=None, quiet_start=None, lift_floor_mm=None):
+        from kiln.monitor_twin import note_wrapped
+        from kiln.printers.bambu_3mf import BambuPrintSettings, build_bambu_3mf
+
+        out = os.path.splitext(gcode_path)[0] + ".gcode.3mf"
+        build_bambu_3mf(
+            pathlib.Path(gcode_path).read_text(), out, settings=BambuPrintSettings(),
+            quiet_start=quiet_start, printer_model="bambu_a1",
+        )
+        note_wrapped(gcode_path, out)
+        return out
+
+    def _start_print_impl(self, file_name: str, **kwargs):
+        self.impl_calls.append((file_name, dict(kwargs)))
+        return super()._start_print_impl(file_name, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # What the person is actually shown
 # ---------------------------------------------------------------------------
@@ -1027,7 +1348,8 @@ _STANDS_IN_FOR_A_PERSON = {
     ("pipelines.py::_start_print", _CARRIED): "the yes a pipeline stored when its door started it",
     ("print_signoff.py::grant_from_record", _CARRIED): "a stored clearance, re-granted for the start it was stored for",
     ("print_signoff.py::grant_from_record", "SOURCE_QUEUED"): (
-        "a stored job record that names no source: every door that queues takes the gate first"
+        "a queued job whose stored yes names no source: every door that queues asks the person "
+        "before it queues, so someone said yes to it before it was queued"
     ),
     ("print_signoff.py::exemption_verdict", "SOURCE_CI_BYPASS"): "the audited KILN_SKIP_PREVIEW_GATE switch",
     ("print_signoff.py::exemption_verdict", "SOURCE_RESUME"): "a resume Kiln made, of the job the printer reports paused",

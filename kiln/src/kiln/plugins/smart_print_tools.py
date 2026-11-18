@@ -105,7 +105,11 @@ class _SmartPrintToolsPlugin:
                 preview_token: Token from ``issue_preview_token`` proving this
                     model was shown to the person before printing.  Required
                     beside their go-ahead: a print is shown to its owner
-                    before it starts.
+                    before it starts.  Placed beside a part on the plate,
+                    the model is the same part, so the token and the yes
+                    for ``model_path`` cover it; a mesh the check repairs
+                    or rescales is another part, and the refusal names the
+                    file to show and ask about once.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("print"):
