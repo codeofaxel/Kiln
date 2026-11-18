@@ -260,6 +260,25 @@ class TestAMissPicksNothing:
         assert out["plastics"] == plastics_printer_can_melt(250)
         assert "score" not in out and "material" not in out
 
+    @pytest.mark.usefixtures("free_caller")
+    def test_a_ceiling_too_large_to_be_a_number_lists_every_plastic(self):
+        """Signed out, a hotend ceiling no float can hold still gets the basic
+        list (every plastic, as for no ceiling), never a failed reply."""
+        out = _door()("cable clip", max_hotend_temp_c=10**400)
+        assert out["success"] is True and out["basic"] is True
+        assert out["plastics"] == plastics_printer_can_melt(None)
+        assert plastics_printer_can_melt(float("nan")) == plastics_printer_can_melt(None)
+
+    def test_a_ceiling_the_servers_refuse_still_lists_every_plastic(self, monkeypatch):
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: {
+            "status": "error", "success": False, "code": "INVALID_ARGUMENT",
+            "error": "Give the hotend's ceiling in whole degrees C, above 0 and at most 600.",
+        }})
+        out = _door()("cable clip", max_hotend_temp_c=10**400)
+        assert out["success"] is True and out["basic"] is True and out["why"] == "refused"
+        assert out["plastics"] == plastics_printer_can_melt(None)
+
     def test_the_plastics_are_the_ones_the_hotend_melts(self, monkeypatch):
         _plan(monkeypatch, "free")
         _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})

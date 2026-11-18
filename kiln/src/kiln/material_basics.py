@@ -20,15 +20,17 @@ def plastics_printer_can_melt(max_hotend_temp_c: float | None = None) -> list[st
     """The plastics in the nozzle temperature table whose lowest printing
     temperature the hotend reaches, in the table's order.
 
-    With no hotend ceiling, or one that is not a number, every plastic in
-    the table.
+    With no hotend ceiling, or one that is not a number (too large to be
+    one included), every plastic in the table.
     """
     names = list(_MATERIAL_TEMPS)
     if max_hotend_temp_c is None:
         return names
     try:
         ceiling = float(max_hotend_temp_c)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return names
+    if ceiling != ceiling:  # NaN
         return names
     return [name for name in names if _MATERIAL_TEMPS[name][0] <= ceiling]
 
