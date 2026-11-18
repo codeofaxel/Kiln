@@ -278,6 +278,133 @@ def test_a_tool_that_does_not_start_a_print_is_never_asked_about(monkeypatch):
     ) is None
 
 
+def _ask_about_the_multi_material_plate(monkeypatch, arguments: dict) -> tuple[list[str], object]:
+    """Drive the wrapper for ``multi_material_print``: ``(the questions put,
+    the consent on record for its plate inside the call)``."""
+    monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+    monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+    asked: list[str] = []
+
+    async def _accept(ctx, message, **_kw):
+        asked.append(message)
+        return DialogAnswer("accept", "", choice=CHOICE_THIS_PRINT)
+
+    monkeypatch.setattr(server, "ask_user_to_confirm", _accept)
+
+    async def _run():
+        token = await server._obtain_print_consent("multi_material_print", arguments, _Ctx())
+        try:
+            return consent_for(file_name="kiln_multi_material.3mf", printer_name=None)
+        finally:
+            if token is not None:
+                reset_consent(token)
+
+    return asked, asyncio.run(_run())
+
+
+def test_the_call_that_prints_a_built_plate_asks_about_that_plate(monkeypatch):
+    """multi_material_print names no file: the plate is one it builds.  The
+    call carrying the plate's preview token is the one that prints it, so
+    that call puts the question, about that plate."""
+    asked, granted = _ask_about_the_multi_material_plate(
+        monkeypatch, {"objects_json": "[]", "preview_token": "kp_shown"},
+    )
+    assert len(asked) == 1 and "kiln multi material" in asked[0], asked
+    assert granted is not None and granted.source == SOURCE_ELICITED
+
+
+def test_the_call_that_builds_the_plate_asks_nobody(monkeypatch):
+    """Without a token the call builds the plate for preview and starts
+    nothing; there is nothing yet to say go to."""
+    asked, granted = _ask_about_the_multi_material_plate(monkeypatch, {"objects_json": "[]"})
+    assert asked == [] and granted is None
+
+
+# ---------------------------------------------------------------------------
+# A plate built from an approved input starts on that input's yes, never on
+# a preview check alone
+# ---------------------------------------------------------------------------
+
+
+class TestADerivedPlateRidesAYes:
+    """``_covered_by_approval`` records that a plate the call built is the
+    print its input was approved for.  It carries a person's yes forward; a
+    clearance that is only a preview check has no yes in it to carry."""
+
+    @pytest.fixture(autouse=True)
+    def _no_clearance_either_side(self):
+        from kiln import print_signoff
+
+        print_signoff.clear()
+        yield
+        print_signoff.clear()
+
+    @staticmethod
+    def _consent_inside(approved: str = "input.stl", derived: str = "plate.3mf"):
+        with server._covered_by_approval("a_plate_door", approved, derived, None):
+            return consent_for(file_name=derived, printer_name=None)
+
+    def test_a_preview_check_alone_carries_no_yes(self):
+        from kiln import print_signoff
+
+        print_signoff.grant("a_plate_door", "input.stl", None, source=print_signoff.SOURCE_PREVIEW_TOKEN, door="stage")
+        assert self._consent_inside() is None
+
+    def test_no_clearance_carries_no_yes(self):
+        assert self._consent_inside() is None
+
+    def test_a_yes_for_another_file_is_not_carried(self):
+        from kiln import print_signoff
+
+        print_signoff.grant("a_plate_door", "other.stl", None, source=SOURCE_ELICITED, door="stage")
+        assert self._consent_inside() is None
+
+    def test_a_persons_yes_is_carried_to_the_plate_for_the_inner_call_only(self):
+        from kiln import print_signoff
+        from kiln.print_consent import SOURCE_DERIVED
+
+        print_signoff.grant("a_plate_door", "input.stl", None, source=SOURCE_ELICITED, door="stage")
+        carried = self._consent_inside()
+        assert carried is not None and carried.source == SOURCE_DERIVED and carried.door == "stage"
+        assert consent_for(file_name="plate.3mf", printer_name=None) is None
+
+    def test_print_plate_object_starts_the_object_on_the_yes_its_plate_got(self, monkeypatch, tmp_path):
+        """The object is cut from the plate the person saw and said go to;
+        the start's own gate accepts the object on that yes.  Extraction,
+        upload and the printer are stood in; both gates are real."""
+        from kiln.preview_gate import get_preview_gate
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        plate = tmp_path / "plate.gcode.3mf"
+        plate.write_bytes(b"PK\x03\x04 the plate")
+        gcode = tmp_path / "cube.gcode"
+        gcode.write_text("G28\n")
+        monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+        monkeypatch.setattr(server, "_resolve_target_printer_type", lambda *_a, **_k: "octoprint")
+        monkeypatch.setattr(
+            "kiln.generation.validation.extract_plate_object_gcode",
+            lambda *_a, **_k: {
+                "output_path": str(gcode), "matched_object": {"name": "cube"}, "all_objects": [{"name": "cube"}],
+                "skipped_lines": 0, "estimated_time_minutes": 1,
+            },
+        )
+        monkeypatch.setattr(server, "upload_file", lambda *_a, **_k: {"success": True, "file_name": "cube.gcode"})
+        inner: list[object] = []
+
+        def _start(*, file_name, printer_name=None, **_kw):
+            inner.append(server._preview_gate_error("start_print", file_name, None, printer_name=printer_name))
+            return {"success": True}
+
+        monkeypatch.setattr(server, "start_print", _start)
+        token = get_preview_gate().issue(str(plate), door="stage").token
+        said_go = set_consent(PrintConsent(tool="print_plate_object", file_name=str(plate), printer_name=None))
+        try:
+            server.print_plate_object(file_path=str(plate), object_name="cube", preview_token=token)
+        finally:
+            reset_consent(said_go)
+        assert inner == [None], inner
+
+
 # ---------------------------------------------------------------------------
 # What the person is actually shown
 # ---------------------------------------------------------------------------
@@ -340,54 +467,152 @@ _SRC = pathlib.Path(server.__file__).parent
 _MODULES = [_SRC / "server.py", *sorted((_SRC / "plugins").glob("*.py"))]
 
 
-def _gate_callers() -> set[str]:
-    """Every function that asks the preview gate for a verdict.
+#: What a function does on its way to a print start, however it is spelled:
+#: asks the gate, checks a preview token, or runs an inner start under the
+#: approval its input got.
+_START_SIGNS = frozenset({"_preview_gate_error", "token_verdict", "_covered_by_approval"})
+#: The names a plugin calls the server module by.
+_SERVER_MODULE_NAMES = frozenset({"_srv", "server"})
 
-    This is the authoritative set of tools that must not print without
-    consent — they said so themselves by calling the gate.
+#: Tools that reach a start and are never asked about, each with why that is
+#: not a print started unasked.  Shrinks only: an entry that is asked about
+#: now, or no longer reaches a start, fails as stale.
+_REACHES_A_START_UNASKED = {
+    "smart_reprint": (
+        "hands reprint_with_material no preview token and takes none, so a "
+        "start it reaches needs a yes already on record for that file, with "
+        "the door it was shown through: never a print nobody said go to"
+    ),
+}
+
+
+def _start_reachers(modules: list[pathlib.Path]) -> set[str]:
+    """Every function in *modules* that reaches a print start.
+
+    Found by what a function does rather than by one spelling: it calls one
+    of :data:`_START_SIGNS`, or it calls by name (or through the server
+    module) a function that does, at any depth.  A door that checks its
+    preview its own way and starts through another door is found as surely
+    as one that calls the gate.  A call through an adapter object is the
+    printer's own start, guarded by the clearance backstop, and is not
+    followed here.
     """
-    found: set[str] = set()
-    for path in _MODULES:
-        tree = ast.parse(path.read_text())
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for node in ast.walk(fn):
-                if not isinstance(node, ast.Call):
-                    continue
-                name = (
-                    node.func.attr
-                    if isinstance(node.func, ast.Attribute)
-                    else getattr(node.func, "id", "")
-                )
-                if name != "_preview_gate_error":
-                    continue
-                # Plugin tools are nested inside their register() function,
-                # so attribute the call to the function that actually
-                # contains it, not to every ancestor.
-                owner = min(
-                    (
-                        f for f in ast.walk(tree)
-                        if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
-                        and f.lineno <= node.lineno <= (f.end_lineno or 0)
-                    ),
-                    key=lambda f: (f.end_lineno or 0) - f.lineno,
-                )
-                found.add(owner.name)
-    return found
+    signs: set[str] = set()
+    calls: dict[str, set[str]] = {}
+
+    class _Calls(ast.NodeVisitor):
+        # Plugin tools are nested inside their register() function, so a call
+        # belongs to the innermost function that contains it.
+        def __init__(self) -> None:
+            self.inside: list[str] = []
+
+        def visit_FunctionDef(self, node: ast.AST) -> None:
+            self.inside.append(node.name)
+            self.generic_visit(node)
+            self.inside.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            if self.inside and isinstance(func, (ast.Name, ast.Attribute)):
+                owner = self.inside[-1]
+                if isinstance(func, ast.Name):
+                    name, by_name = func.id, True
+                else:
+                    name = func.attr
+                    by_name = isinstance(func.value, ast.Name) and func.value.id in _SERVER_MODULE_NAMES
+                if name in _START_SIGNS:
+                    signs.add(owner)
+                if by_name:
+                    calls.setdefault(owner, set()).add(name)
+            self.generic_visit(node)
+
+    for path in modules:
+        _Calls().visit(ast.parse(path.read_text()))
+    reach = set(signs)
+    while more := {fn for fn, called in calls.items() if called & reach} - reach:
+        reach |= more
+    return reach
+
+
+def _consent_doors() -> set[str]:
+    """The registered tools that reach a print start."""
+    server._ensure_internal_tool_plugins_registered()
+    tools = {t.name for t in server.mcp._tool_manager.list_tools()}
+    doors = _start_reachers(_MODULES) & tools
+    # A sweep that silently found nothing would pass every check below.
+    assert {"start_print", "print_plate_object", "multi_material_print"} <= doors, sorted(doors)
+    return doors
+
+
+def _asked_about() -> set[str]:
+    """The tools the wrapper asks about: by an argument, or by the plate they build."""
+    return set(server._CONSENT_FILE_ARG) | set(server._CONSENT_BUILT_PLATE)
 
 
 def test_every_gated_tool_is_asked_about():
     """The wrapper needs the answer BEFORE the tool runs, so it cannot read
     the gate calls at runtime and the mapping is written by hand.  This is
-    the pin: a new print tool that gates itself but is missing here would
+    the pin: a new print tool that reaches a start but is missing here would
     never prompt anyone, and would look completely fine.
     """
-    gated = _gate_callers() - {"_preview_gate_error"}
-    missing = gated - set(server._CONSENT_FILE_ARG)
+    missing = _consent_doors() - _asked_about() - set(_REACHES_A_START_UNASKED)
     assert missing == set(), (
-        f"these tools gate their print but are never asked about: {missing}"
+        f"these tools reach a print start but are never asked about: {sorted(missing)}"
     )
+
+
+def test_every_door_left_unasked_still_says_why():
+    """The exceptions stay true: each still reaches a start and is still
+    not asked about, or it leaves the list."""
+    doors, asked = _consent_doors(), _asked_about()
+    stale = {t for t in _REACHES_A_START_UNASKED if t not in doors or t in asked}
+    assert stale == set(), f"no longer an unasked door; remove from _REACHES_A_START_UNASKED: {sorted(stale)}"
+
+
+def test_the_asked_rosters_do_not_overlap():
+    """A tool is asked about one way: by the argument naming its file, or by
+    the plate it builds, never both."""
+    assert set(server._CONSENT_FILE_ARG).isdisjoint(server._CONSENT_BUILT_PLATE)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # The preview checked its own way, the start run under the plate's
+        # approval through another door: every sign at once.
+        "verdict = print_signoff.token_verdict('door', plate, preview_token)\n"
+        "    with _covered_by_approval('door', plate, plate, None):\n"
+        "        return run_reslice_and_print(model_path=plate)\n",
+        "verdict = print_signoff.token_verdict('door', plate, preview_token)\n",
+        "with _covered_by_approval('door', plate, plate, None):\n        return 1\n",
+        "return run_reslice_and_print(model_path=plate)\n",
+        "return _srv.run_reslice_and_print(model_path=plate)\n",
+        "return _print_the_plate(plate)\n",
+    ],
+    ids=["all_signs", "token_only", "covered_only", "inner_door", "inner_door_via_server", "through_a_helper"],
+)
+def test_a_door_is_found_by_any_way_it_reaches_a_start(tmp_path, body):
+    """Each way a tool can reach a start is enough on its own for the sweep
+    to find it, including a door that never names the gate."""
+    module = tmp_path / "doors.py"
+    module.write_text(
+        "def run_reslice_and_print(model_path, preview_token=None):\n"
+        "    return _preview_gate_error('run_reslice_and_print', model_path, preview_token)\n"
+        "\n"
+        "def _print_the_plate(plate):\n"
+        "    return run_reslice_and_print(model_path=plate)\n"
+        "\n"
+        "def door(plate, preview_token=None):\n"
+        f"    {body}"
+        "\n"
+        "def adapter_door(adapter, plate):\n"
+        "    return adapter.run_reslice_and_print(plate)\n"
+    )
+    found = _start_reachers([module])
+    assert "door" in found
+    assert "adapter_door" not in found
 
 
 def test_the_argument_each_tool_is_asked_about_still_exists():

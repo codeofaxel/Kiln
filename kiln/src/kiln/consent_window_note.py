@@ -14,8 +14,8 @@ mutation there is silently lost; only the lowlevel handler (via
 :func:`kiln.mcp_compat.wrap_call_tool_result`) sees the real result
 object.  One hook covers every door the MCP side has — ``start_print``,
 ``slice_and_print``, ``run_quick_print``, the queue, the plate tools —
-because it keys on the same table the consent wrapper keys on
-(``_CONSENT_FILE_ARG``), so a tool that is asked for consent is a tool
+because it keys on the same roster the consent wrapper keys on
+(``_asks_for_consent``), so a tool that is asked for consent is a tool
 that carries the note.  The CLI's doors print their own line
 (``cli_gate``), and ``kiln consent status`` shows the same facts.
 
@@ -239,7 +239,7 @@ def _attach(inner: Any, ctx: Any, name: str | None, arguments: dict | None) -> N
             return
         import kiln.server as _srv
 
-        if name not in _srv._CONSENT_FILE_ARG:
+        if not _srv._asks_for_consent(name):
             return
         args = arguments if isinstance(arguments, dict) else {}
         printer_name = args.get("printer_name") or None

@@ -2764,6 +2764,42 @@ _CONSENT_FILE_ARG: dict[str, str] = {
 }
 
 
+def _multi_material_plate() -> str:
+    """Where ``multi_material_print`` builds the plate it shows, then prints."""
+    from kiln.output_paths import kiln_temp_dir
+
+    return os.path.join(kiln_temp_dir(), "kiln_multi_material.3mf")
+
+
+#: The tools whose print is a plate they build themselves, at a place the
+#: tool fixes rather than an argument names, and where it is.  The call
+#: carrying a preview token prints the plate an earlier call built and
+#: showed, so that call is asked about that plate; a call without one only
+#: builds the plate and starts nothing.  A tool is in this map or in
+#: ``_CONSENT_FILE_ARG``, never both, and both are pinned by
+#: ``test_every_gated_tool_is_asked_about``.
+_CONSENT_BUILT_PLATE: dict[str, Callable[[], str]] = {
+    "multi_material_print": _multi_material_plate,
+}
+
+
+def _asks_for_consent(tool_name: str) -> bool:
+    """Whether *tool_name* is a print the person is asked about."""
+    return tool_name in _CONSENT_FILE_ARG or tool_name in _CONSENT_BUILT_PLATE
+
+
+def _consent_subject(tool_name: str, arguments: dict[str, Any]) -> str | None:
+    """The file the person is asked about for this call, or ``None`` when
+    this call is not a print anyone is asked about."""
+    arg_name = _CONSENT_FILE_ARG.get(tool_name)
+    if arg_name is not None:
+        return str(arguments.get(arg_name) or "")
+    built = _CONSENT_BUILT_PLATE.get(tool_name)
+    if built is not None and arguments.get("preview_token"):
+        return built()
+    return None
+
+
 def _consent_filament_line(
     tool_name: str, file_value: str, printer_name: str | None
 ) -> str | None:
@@ -2854,14 +2890,13 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     server keeps none; a write failed) does not withdraw the yes to THIS
     print; it is audited and the print goes ahead on the single yes.
     """
-    arg_name = _CONSENT_FILE_ARG.get(tool_name)
-    if arg_name is None or ctx is None:
+    file_value = _consent_subject(tool_name, arguments)
+    if file_value is None or ctx is None:
         return None
     if tool_name in _RUN_TOOLS:
         return await _ask_for_a_run(tool_name, arguments, ctx)
     if os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in ("1", "true", "yes"):
         return None  # one switch turns off consent prompts, as it always did
-    file_value = str(arguments.get(arg_name) or "")
     # A resume continues a print that already had its yes, so nobody is
     # asked again -- but only for a resume file Kiln made for the job the
     # printer reports paused right now (print_signoff.verified_resume).  The
@@ -4039,25 +4074,41 @@ def _covered_by_approval(
     is the record that the two are one print: a consent for the derived
     file, sourced ``derived``, alive only for the inner call.
 
-    The outer gate established both facts for the input — the door it was
-    shown through and the person's yes — so the derived consent carries
-    that door (or ``derived`` when the outer clearance is already spent),
-    which the inner gate reads as the SAW half the way it reads a
-    terminal's judged door.
+    It is recorded only when this call's clearance is a person's yes for
+    *approved_file*: the outer gate (:func:`_preview_gate_error`) cleared
+    the input on both facts, the door it was shown through and the yes.
+    The derived consent carries that door, which the inner gate reads as
+    the SAW half the way it reads a terminal's judged door.  A clearance
+    that is a preview check alone (:func:`kiln.print_signoff.token_verdict`),
+    one for another file, or none at all has no yes to carry: nothing is
+    recorded, and the inner start meets its gate as any start does.
     """
     from kiln import print_signoff
+    from kiln.print_consent import grade_of
 
     outer = print_signoff.current()
+    said_go = (
+        outer is not None
+        and (grade_of(outer.source) is not None or outer.source == SOURCE_DERIVED)
+        and outer.covers(file_name=approved_file, printer_name=printer_name)
+    )
+    if not said_go:
+        logger.debug(
+            "%s: no yes for %s on this call, so %s starts on its own gate",
+            tool_name, approved_file, derived_file,
+        )
+        yield
+        return
     token = set_consent(
         PrintConsent(
             tool=tool_name,
             file_name=derived_file,
             printer_name=printer_name,
             source=SOURCE_DERIVED,
-            door=(outer.door if outer and outer.door else "derived"),
-            scope=outer.scope if outer else None,
-            identity=outer.identity if outer else "",
-            window_id=outer.window_id if outer else "",
+            door=outer.door or "derived",
+            scope=outer.scope,
+            identity=outer.identity,
+            window_id=outer.window_id,
         )
     )
     try:
@@ -23767,6 +23818,22 @@ def smart_reprint(
         )
 
 
+def _multi_material_recipe(
+    part_specs: list[dict[str, Any]], material_ids: list[str], printer_id: str | None,
+) -> str:
+    """A digest of what a multi-material plate is built from: each object's
+    file, material, colour, name and group, and the printer model the plate
+    is laid out for.  The same objects give the same digest."""
+    import hashlib
+    import json
+
+    rows = [
+        [os.path.abspath(spec["stl_path"]), str(mat).lower(), spec["color"], spec["name"], spec["group"]]
+        for spec, mat in zip(part_specs, material_ids, strict=True)
+    ]
+    return hashlib.sha256(json.dumps([rows, printer_id or ""]).encode("utf-8")).hexdigest()
+
+
 @mcp.tool(annotations=destructive("Multi-material print"))
 def multi_material_print(
     objects_json: str | list[dict[str, Any]],
@@ -23845,9 +23912,11 @@ def multi_material_print(
             top of the material settings (e.g.
             ``'{"fill_density": "30%"}'``).
         slicer_path: Explicit path to slicer binary.
-        preview_token: Token from ``issue_preview_token`` proving the plate
-            was shown to the person before printing.  Required beside their
-            go-ahead: a print is shown to its owner before it starts.
+        preview_token: Token from ``issue_preview_token`` on the plate a
+            call without one built (``plate_path``), proving it was shown to
+            the person before printing.  The call carrying it prints that
+            plate, for the same objects, once the person says go: a print
+            is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -24022,16 +24091,18 @@ def multi_material_print(
                 }
             )
 
-        from kiln.output_paths import kiln_temp_dir
-
-        output_3mf = _os.path.join(kiln_temp_dir(), "kiln_multi_material.3mf")
+        output_3mf = _multi_material_plate()
+        recipe = _multi_material_recipe(part_specs, [o["material_id"] for o in objects], printer_id)
+        recipe_path = output_3mf + ".built_from"
         # The thing printed is the PLATE, which does not exist until this
         # call builds it — so the first call builds it and hands it back
-        # for preview, and the second call, token in hand, prints the plate
-        # the person saw.  Verified against the plate as it sits on disk
-        # BEFORE any rebuild: a rebuild is new bytes, and the yes was about
-        # the bytes that were shown.  No elicitation here: the consent
-        # subject is a file the tool-call wrapper cannot name.
+        # for preview, and the call carrying its token prints the plate the
+        # person saw, once they have said go (the approval dialog asks about
+        # the plate: _CONSENT_BUILT_PLATE).  Judged against the plate as it
+        # sits on disk BEFORE any rebuild: a rebuild is new bytes, and the
+        # yes was about the bytes that were shown.  And only for the objects
+        # it was built from: the plate's temperatures, tray map and safety
+        # lines are read from this call's objects.
         from kiln import print_signoff
 
         plate_cleared = False
@@ -24042,16 +24113,23 @@ def multi_material_print(
                     "preview_token to rebuild it, preview it, and issue a fresh token.",
                     code="PREVIEW_TOKEN_INVALID",
                 )
-            plate_verdict = print_signoff.token_verdict(
-                "multi_material_print", output_3mf, preview_token,
-                printer_name=printer_name, printer_id=_resolve_printer_model_live(printer_name),
-            )
-            if not plate_verdict.ok:
-                return _error_dict(plate_verdict.message, code="PREVIEW_TOKEN_INVALID")
-            _audit(
-                "multi_material_print", "preview_gate_satisfied",
-                details={"file": output_3mf, "consent": plate_verdict.source, "door": plate_verdict.door},
-            )
+            try:
+                with open(recipe_path, encoding="utf-8") as fh:
+                    built_from = fh.read().strip()
+            except OSError:
+                built_from = ""
+            if built_from != recipe:
+                return _error_dict(
+                    f"The plate at {output_3mf} was built from other objects, or laid out for another "
+                    "printer model, than this call names, so its preview token does not cover what this "
+                    "call would print. Call multi_material_print with these objects and no preview_token "
+                    "to build their plate, show it, and issue a fresh token.",
+                    code="PREVIEW_TOKEN_INVALID",
+                )
+            if block := _preview_gate_error(
+                "multi_material_print", output_3mf, preview_token, printer_name=printer_name,
+            ):
+                return block
             plate_cleared = True
         try:
             try:
@@ -24072,9 +24150,18 @@ def multi_material_print(
                 # layout packed for a wider bed and composed at the 256
                 # default would be shifted — undoing the arrangement.  An
                 # unknown id falls back to the same default on both sides.
+                with contextlib.suppress(OSError):
+                    _os.remove(recipe_path)
                 compose_result = compose_multicolor_3mf(
                     positioned, output_path=output_3mf, printer_id=printer_id or None,
                 )
+                if compose_result.get("success"):
+                    # What this plate was built from, for the call that prints it.
+                    try:
+                        with open(recipe_path, "w", encoding="utf-8") as fh:
+                            fh.write(recipe)
+                    except OSError as exc:
+                        logger.warning("multi_material_print: could not record what the plate was built from: %s", exc)
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-material 3MF: {exc}",
@@ -24232,7 +24319,7 @@ def multi_material_print(
                     plate_verdict.message
                     + f" The plate is built at {output_3mf}: show it to the user (stage, link, "
                     "or renders), call issue_preview_token on that path, and call "
-                    "multi_material_print again with preview_token.",
+                    "multi_material_print again with the same objects and preview_token.",
                     code="PREVIEW_NOT_CONFIRMED",
                     extra={"plate_path": output_3mf, "printed": False, **_composer_safety(compose_result)},
                 )
