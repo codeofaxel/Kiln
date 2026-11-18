@@ -99,14 +99,16 @@ files:
 
   design_knowledge/materials.json:
     classification: safety_floor
-    fields: [display_name, category, thermal, slicing, chemical, design_limits,
+    fields: [display_name, category, thermal, slicing, chemical,
              bonding, brand_profiles]
     why: >-
       38 materials' floor: softening and service temperatures, print and bed
       ranges, warping, the volumetric ceiling, the UV / food / outgassing
-      words, the eight design limits and the hazards, because the free heat
-      and food verdicts, the enclosure check, a signed-out slice and every
-      free make's validation read them offline.  brand_profiles is a ROSTER
+      words and the hazards, because the free heat and food verdicts, the
+      enclosure check and a signed-out slice read them offline.  A plastic's
+      design limits are not here: the general figures are
+      kiln/generic_limits.py and a plastic's own are served per query
+      (kiln.material_limits).  brand_profiles is a ROSTER
       since 2026-10-16 (brand and product name per profile id); a brand's own
       tune (ranges, optimum, enclosure, hardened nozzle, AMS) is the family's
       catalogue record in kiln-pro, part of Kiln Pro, served one material at
