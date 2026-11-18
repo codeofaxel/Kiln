@@ -676,10 +676,12 @@ _SLIC3R_STARTUP_CRASH_RETURNCODES = frozenset(
 )
 
 # The Orca dialect keeps SIGSEGV out of its retry set on purpose: -11 on
-# that path is the deterministic Bambu-preset crash above, a real verdict
-# with a real message, and retrying it would crash the same way twice
-# more just to say the same thing later (the openscad_runner rule about
-# not retrying real answers).  The locale race has not been captured on
+# that path is a crash inside the slicer program, said to the person as
+# one, and retrying it would crash the same way twice more just to say
+# the same thing later (the openscad_runner rule about not retrying real
+# answers).  The known upstream crash is on the slicers' own multi-extruder
+# Bambu Lab system presets, which the flat single-extruder presets Kiln
+# writes never send.  The locale race has not been captured on
 # an Orca binary; TRAP/BUS are covered so that if it ever is, the user
 # gets the re-draw instead of the failure.
 _ORCA_STARTUP_CRASH_RETURNCODES = frozenset(
@@ -1304,12 +1306,12 @@ def _slice_with_orca(
             printer_name = _printer_name_of(profile)
             if printer_name and printer_name.startswith("Bambu Lab"):
                 raise SlicerError(
-                    f"{slicer_name} crashed while slicing. This is a "
-                    f"known crash in BambuStudio and OrcaSlicer themselves, on Bambu Lab "
-                    f"printer profiles specifically — their own bundled Bambu presets "
-                    f"crash the same way, and the same Kiln code slices other printers "
-                    f"fine. Slice this printer with PrusaSlicer instead; Kiln wraps the "
-                    f"result as a Bambu 3MF itself, so nothing about the print is lost.\n"
+                    f"{slicer_name} crashed while slicing. The crash is inside "
+                    f"{slicer_name} itself, not in your model or your settings. Slice "
+                    f"again, and if it crashes the same way, slice this printer with "
+                    f"PrusaSlicer instead; Kiln wraps the result as a Bambu 3MF itself, "
+                    f"so nothing about the print is lost. Please report it with "
+                    f"report_issue so it can be looked into.\n"
                     f"{_INSTALL_SLICER}"
                 )
             for_printer = f" for the {printer_name}" if printer_name else ""
