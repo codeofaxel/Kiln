@@ -295,6 +295,16 @@ class TestAbrasiveFilament:
             "PLA Carbon Fiber",
             "Glass Fiber Nylon",
             "glass-fibre PA",
+            "Carbon Fibre PETG",
+            "CPE Carbon",          # a maker's carbon-filled grade, named for its filler alone
+            "Carbon Black PLA-CF",  # a black carbon-fibre grade is still carbon fibre
+            "Glass-filled PETG",
+            "Bronze-fill PLA",
+            "steelFill",
+            "Glow PLA",
+            "Glow-in-the-dark PETG",
+            "Magnetic PLA",
+            "PLA filled with bamboo",
         ],
     )
     def test_filled_filament_is_abrasive(self, material):
@@ -310,6 +320,12 @@ class TestAbrasiveFilament:
             "Bronze PETG",
             "Sea Glass PLA",
             "Redwood PLA",
+            "PLA Basic Refill",          # a refill spool, not a filler
+            "PETG Refill",
+            "Fillamentum PLA Extrafill",  # a maker's name and a product line
+            "Extrafill PLA",
+            "Carbon Black PLA",          # a pigment
+            "carbon-black PETG",
             "", "   ",
         ],
     )

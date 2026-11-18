@@ -841,17 +841,29 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
 # Abrasive-filament floor
 # ---------------------------------------------------------------------------
 
+#: The fillers a filled filament is named for, as they appear before "fill".
+_FILLERS = (
+    r"COPPER|BRONZE|BRASS|STEEL|IRON|ALUMINI?UM|TITANIUM|TUNGSTEN|METAL|MAGNET(?:IC)?"
+    r"|WOOD|BAMBOO|CORK|STONE|MARBLE|MINERAL|CERAMIC|GLASS|CARBON|GLOW"
+)
+
 #: Fill wording in a filled filament's own name.  Whole words, because
 #: "CARBON" as a bare substring reads POLYCARBONATE as carbon-filled, and
-#: "GLASS" alone reads a sea-glass colourway as glass fibre.  Metal fill
-#: is left to the ``FILL`` rule below: "Copper" on a spool is far more
-#: often a colour than a filler, but "Copperfill" never is.
+#: "GLASS" alone reads a sea-glass colourway as glass fibre; "carbon black"
+#: is a pigment, not a filler.  Metal fill is matched with its "fill":
+#: "Copper" on a spool is far more often a colour than a filler, but
+#: "Copperfill" never is.  "Fill" on its own is a product word ("Refill",
+#: "Extrafill", a maker's name), so it counts only after a filler or as
+#: "filled".
 _ABRASIVE_FILL_PATTERNS = (
-    r"\bCARBON\b",
+    r"\bCARBON\b(?!\s*-?\s*BLACK)",
     r"\bWOOD\b",
     r"\bMETAL\b",
+    r"\bMAGNETIC\b",
+    r"\bGLOW\b",
     r"GLASS\s*-?\s*FIB",
-    r"FILL",
+    rf"(?:{_FILLERS})\s*-?\s*FILL",
+    r"\bFILLED\b",
 )
 
 #: Fill suffixes, matched as whole tokens so "PETG" never reads as "GF"
