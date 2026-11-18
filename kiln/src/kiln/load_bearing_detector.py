@@ -171,15 +171,18 @@ _MED_CONF_SCORE = 70
 # ---------------------------------------------------------------------------
 
 # Match patterns like "5 lbs", "10 lb", "2 kg", "50 N", "20 newtons",
-# "10 grams", "8 oz", "100 g", with various spacings.
+# "10 grams", "8 oz", "100 g", with various spacings.  Each number starts
+# where a run of digits starts (``(?<!\d)``): a match always does, since the
+# unit cannot follow a digit, so the matches are the same, and a long run of
+# digits is read once instead of once per digit.
 _LOAD_PATTERNS: list[tuple[re.Pattern[str], float]] = [
     # (pattern, conversion factor to newtons; assumes "weight" load on Earth)
-    (re.compile(r"(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)\b", re.I), 4.448),
-    (re.compile(r"(\d+(?:\.\d+)?)\s*(?:kgs?|kilograms?|kilogrammes?)\b", re.I), 9.81),
-    (re.compile(r"(\d+(?:\.\d+)?)\s*(?:gs?|grams?|grammes?)\b", re.I), 0.00981),
-    (re.compile(r"(\d+(?:\.\d+)?)\s*(?:ozs?|ounces?)\b", re.I), 0.278),
-    (re.compile(r"(\d+(?:\.\d+)?)\s*(?:newtons?)\b", re.I), 1.0),
-    (re.compile(r"(\d+(?:\.\d+)?)\s*N\b"), 1.0),
+    (re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)\b", re.I), 4.448),
+    (re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:kgs?|kilograms?|kilogrammes?)\b", re.I), 9.81),
+    (re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:gs?|grams?|grammes?)\b", re.I), 0.00981),
+    (re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:ozs?|ounces?)\b", re.I), 0.278),
+    (re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:newtons?)\b", re.I), 1.0),
+    (re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*N\b"), 1.0),
 ]
 
 
