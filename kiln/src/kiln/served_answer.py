@@ -55,6 +55,7 @@ import errno
 import http.client
 import json
 import logging
+import math
 import re
 import socket
 import ssl
@@ -125,6 +126,9 @@ class Miss:
     cause: str
     code: str = ""
     detail: str = ""
+    #: Seconds until Kiln asks again on its own, for a miss said again from
+    #: an earlier ask instead of asked now; 0 when it was asked now.
+    retry_after_s: float = 0.0
 
     def __post_init__(self) -> None:
         if self.cause not in CAUSES:
@@ -407,10 +411,21 @@ def sentence(
 
 
 def _cause_and_fix(miss: Miss, feature: str) -> tuple[str, str]:
-    """What *miss* reads as, and what fixes it."""
+    """What *miss* reads as, and what fixes it.  A no-answer said again
+    from an earlier ask says so, and the wait is the real one."""
     if miss.cause == "signed_out" and miss.code == SESSION_EXPIRED_CODE:
         return _SESSION_EXPIRED
-    return _CAUSE_CLAUSE[miss.cause].format(feature=feature), _FIX[miss.cause]
+    cause, fix = _CAUSE_CLAUSE[miss.cause].format(feature=feature), _FIX[miss.cause]
+    if miss.cause == "unanswered" and miss.retry_after_s > 0:
+        cause += " when last asked"
+        fix = f"wait about {_minutes(miss.retry_after_s)}"
+    return cause, fix
+
+
+def _minutes(seconds: float) -> str:
+    """*seconds* as whole minutes, rounded up, never fewer than one."""
+    whole = max(1, math.ceil(seconds / 60))
+    return f"{whole} minute" if whole == 1 else f"{whole} minutes"
 
 
 def clause(miss: Miss, *, feature: str, cannot: str, then: str = "try again") -> str:
@@ -427,11 +442,15 @@ def clause(miss: Miss, *, feature: str, cannot: str, then: str = "try again") ->
     return out
 
 
-def fields(miss: Miss | None) -> dict[str, str]:
-    """The machine-readable twin of the sentence, to splat beside it."""
+def fields(miss: Miss | None) -> dict[str, Any]:
+    """The machine-readable twin of the sentence, to splat beside it, with
+    ``retry_after_s`` (whole seconds) for a no-answer said again."""
     if miss is None:
         return {}
-    return {"why": miss.cause, "why_code": miss.code, "why_detail": miss.detail}
+    out = {"why": miss.cause, "why_code": miss.code, "why_detail": miss.detail}
+    if miss.retry_after_s > 0:
+        out["retry_after_s"] = math.ceil(miss.retry_after_s)
+    return out
 
 
 # ---------------------------------------------------------------------------

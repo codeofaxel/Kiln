@@ -287,10 +287,39 @@ class TestAMissPicksNothing:
 
     def test_servers_that_do_not_answer_are_left_alone_for_a_while(self, monkeypatch):
         _plan(monkeypatch, "free")
-        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _silent})
         for _ in range(3):
             out = _door()("cable clip")
-            assert out["basic"] is True and out["why"] == "offline"
+            assert out["basic"] is True and out["why"] == "unanswered"
+        assert len(asked) == 1
+
+    def test_a_miss_said_again_says_when_kiln_asks_again(self, monkeypatch):
+        """While the servers are left alone, the miss is said in the past
+        ("when last asked") with the real wait, never "wait a minute"; once
+        the wait is over Kiln asks again."""
+        _plan(monkeypatch, "free")
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _silent})
+        first = _door()("cable clip")
+        assert "Kiln's material pick didn't answer, so" in first["message"]
+        assert "Wait a minute and ask again" in first["message"] and "retry_after_s" not in first
+        again = _door()("cable clip")
+        assert "Kiln's material pick didn't answer when last asked, so" in again["message"]
+        assert again["message"].endswith("Wait about 5 minutes and ask again for Kiln's pick for this part.")
+        assert 290 <= again["retry_after_s"] <= 300 and again["retryable"] is True
+        assert len(asked) == 1
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        assert _door()("cable clip")["material"]["material_id"] == "petg"
+
+    def test_an_offline_computer_is_asked_again_at_once(self, monkeypatch):
+        """Only a server that did not answer is left alone: back online, the
+        next ask gets the pick, never a stale "this computer is offline"."""
+        _plan(monkeypatch, "free")
+        _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _offline})
+        assert _door()("cable clip")["why"] == "offline"
+        asked = _servers(monkeypatch, {bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
+        out = _door()("cable clip")
+        assert out["material"]["material_id"] == "petg" and "basic" not in out
         assert len(asked) == 1
 
     def test_a_kiln_pro_plan_offline_is_not_asked_twice(self, monkeypatch):

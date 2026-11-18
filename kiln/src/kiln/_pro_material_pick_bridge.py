@@ -48,7 +48,8 @@ LOCAL_MODULE = "kiln_pro.material_floor_pick"
 FEATURE = "material pick"
 #: A pick is asked on the way to a make; the miss is said if this passes.
 _CONSULT_TIMEOUT_S: float = 4.0
-#: After the servers fail to answer, how long the pick is not asked for.
+#: After the servers fail to answer, how long the pick is not asked for; a
+#: miss said again meanwhile says when Kiln asks again.
 SERVICE_BACKOFF_S: float = 300.0
 
 _service_down_until: float = 0.0
@@ -119,8 +120,12 @@ def _served(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss 
     held = _already_missed()
     if held is not None:
         return None, held
-    if time.monotonic() < _service_down_until:
-        return None, _last_miss or Miss("unanswered", code="SERVER_UNREACHABLE", detail="not asked again yet")
+    wait = _service_down_until - time.monotonic()
+    if wait > 0:
+        # Said again, not asked: when the servers last went unanswered, and
+        # how long until Kiln asks them again.
+        last = _last_miss or Miss("unanswered", code="SERVER_UNREACHABLE")
+        return None, Miss(last.cause, last.code, last.detail, retry_after_s=wait)
     pro_missed: Miss | None = None
     if _plan_includes_the_pick():
         rec, miss = _ask(WIRE_TOOL, requirements_text, printer)
@@ -198,11 +203,14 @@ def _ask(tool: str, requirements_text: str, printer: dict[str, Any]) -> tuple[An
 
 
 def _note_miss(miss: Miss) -> Miss:
-    """The servers did not answer (not a refusal): leave the pick alone for a
-    while so a make does not wait on it again and again, and say the same
-    miss meanwhile."""
+    """The servers did not answer: leave the pick alone for a while so a make
+    does not wait on it again and again, and meanwhile say that miss again
+    with the time left.  Only a server that did not answer; an offline
+    computer, a sign-in and a refusal are asked again at once, since each
+    gets the same miss until something changes and the change is the
+    person's to make."""
     global _service_down_until, _last_miss
-    if miss.no_answer:
+    if miss.cause == "unanswered":
         _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
         _last_miss = miss
     logger.debug("material pick not served (%s)", miss.cause)
