@@ -81,9 +81,8 @@ class PrinterError(Exception):
     """Base exception for all printer-related errors.
 
     The message is the sentence a person reads.  ``detail`` holds specifics
-    for an agent, not a person, and ``code`` names the refusal for an agent
-    or a script (:func:`kiln.failure_kind.named_code`); neither belongs in
-    the message.
+    for an agent and ``code`` names the refusal for an agent or a script
+    (:func:`kiln.failure_kind.named_code`); neither belongs in the message.
     """
 
     def __init__(

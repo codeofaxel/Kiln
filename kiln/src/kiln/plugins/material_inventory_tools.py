@@ -368,7 +368,13 @@ class _MaterialInventoryToolsPlugin:
 
         @mcp.tool(annotations=read_only("Plan fleet job assignment"))
         def optimize_fleet_assignment(jobs: list[dict[str, Any]]) -> dict:
-            """The same answer as ``assign_jobs(jobs)``, for clients that call it by this name."""
+            """The same answer as ``assign_jobs(jobs)``, for clients that call it by this name.
+
+            Args:
+                jobs: List of job dicts, each with ``file_name``,
+                    ``material_type``, ``required_grams`` and optionally
+                    ``color``.
+            """
             return _assign("optimize_fleet_assignment", jobs, None)
 
         @mcp.tool(annotations=read_only("Suggest spool swaps"))
