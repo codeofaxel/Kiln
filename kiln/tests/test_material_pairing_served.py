@@ -76,6 +76,18 @@ def _served(monkeypatch, reply: Any) -> list[dict[str, Any]]:
     return asks
 
 
+def _free_plan(monkeypatch) -> None:
+    """This computer is signed in on the Free plan: the plan check pitches
+    Kiln Pro for anything it holds back."""
+    import kiln.licensing as licensing
+
+    monkeypatch.setattr(
+        licensing, "check_tier",
+        lambda *_a, **_k: (False, "This feature needs Kiln Pro. See https://kiln3d.com/pricing"),
+        raising=False,
+    )
+
+
 def _answer(**overrides: Any) -> dict[str, Any]:
     out = {
         "success": True, "material_a": "pla", "material_b": "tpu", "found": "pair", "compatible": True,
@@ -125,13 +137,77 @@ class TestTheServedVerdict:
         assert out["caution"].startswith("Nothing here covers this pair; reason it out from the general rules below")
         assert "not available" not in out["caution"]
 
-    def test_one_material_in_both_places_is_said_to_bond_to_itself(self, monkeypatch):
+    def test_a_verdict_with_the_notes_read_and_none_written_sells_no_plan(self, monkeypatch):
+        """Kiln's servers say they read the curated notes for this caller, and
+        this pair has none written: the caution says no note exists at any
+        plan, and names no plan to buy."""
+        _free_plan(monkeypatch)
+        _served(monkeypatch, _answer(notes="", notes_read=True))
+        out = _door()("pla", "tpu")
+        assert out["caution"].startswith("The verdict is here, but not the reasoning behind it")
+        assert out["caution"].endswith("No curated note has been established for this one at any tier yet.")
+        assert "kiln3d.com/pricing" not in json.dumps(out) and "Kiln Pro" not in json.dumps(out)
+        assert "notes_read" not in out, "the flag is how the answer was read, never part of the reply"
+
+    def test_a_pair_nothing_covers_with_the_notes_read_sells_no_plan(self, monkeypatch):
+        _free_plan(monkeypatch)
+        rules = ["Materials with similar print temperatures usually bond better."]
         _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
-                                     notes="No compatibility data for abs + abs.", material_a="abs",
-                                     material_b="abs", general_rules=["A stand-in rule."]))
-        out = _door()("ABS", "abs")
-        assert "bonds to itself" in out["caution"]
-        assert "Nothing here covers" not in out["caution"] and "not available" not in out["caution"]
+                                     notes="No compatibility data for pla + hips. Check general rules.",
+                                     material_b="hips", general_rules=rules, notes_read=True))
+        out = _door()("pla", "hips")
+        assert out["general_rules"] == rules
+        assert out["caution"].startswith("Nothing here covers this pair; reason it out from the general rules below")
+        assert "kiln3d.com/pricing" not in json.dumps(out) and "Kiln Pro" not in json.dumps(out)
+
+    def test_the_notes_that_came_are_the_reply_and_nothing_is_cautioned(self, monkeypatch):
+        _served(monkeypatch, _answer(notes="Bonds mechanically; use interlocking geometry.", notes_read=True,
+                                     general_rules=["A stand-in rule."]))
+        out = _door()("pla", "tpu")
+        assert out["notes"] == "Bonds mechanically; use interlocking geometry."
+        assert out["general_rules"] == ["A stand-in rule."] and out["caution"] == ""
+
+    @pytest.mark.parametrize("flag", [None, "yes", 1])
+    def test_an_answer_that_does_not_say_it_read_the_notes_is_judged_here(self, monkeypatch, flag):
+        """An answer with no word on the notes (or a word that is not a yes or
+        a no) is read as before: this computer decides whether the notes could
+        be read, and here they could not."""
+        _free_plan(monkeypatch)
+        reply = _answer(notes="")
+        if flag is not None:
+            reply["notes_read"] = flag
+        _served(monkeypatch, reply)
+        out = _door()("pla", "tpu")
+        assert "No curated note has been established" not in out["caution"]
+        assert out["caution"].endswith("Kiln Pro carries the curated notes for this. See https://kiln3d.com/pricing")
+
+    @pytest.mark.parametrize("pair", [("ABS", "abs"), ("pla", "PLA"), ("PETG-CF", "petg_cf")])
+    def test_one_material_in_both_places_is_said_to_bond_to_itself(self, monkeypatch, pair):
+        """A served answer for one material twice reads the way the basic
+        answer does: ``compatible`` is never a no beside a line saying the
+        material bonds to itself, and that line is the notes."""
+        a, b = (name.lower() for name in pair)
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes=f"No compatibility data for {a} + {b}. Check general rules.",
+                                     material_a=a, material_b=b, general_rules=["A stand-in rule."]))
+        out = _door()(*pair)
+        assert re.match(r"^Both are .+: one material shares its own nozzle temperature and bonds to itself\.$",
+                        out["notes"]), out["notes"]
+        assert out["compatible"] is None
+        assert out["caution"] == ""
+        assert "No compatibility data" not in json.dumps(out)
+        assert "basic" not in out and "why" not in out
+
+    @pytest.mark.parametrize("pair", [("pla", "pla"), ("PETG-CF", "petg_cf")])
+    def test_one_material_twice_reads_the_same_served_or_basic(self, monkeypatch, pair):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        basic = _door()(*pair)
+        a, b = (name.lower() for name in pair)
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes=f"No compatibility data for {a} + {b}.", material_a=a, material_b=b))
+        served = _door()(*pair)
+        for key in ("compatible", "interface_adhesion", "notes", "support_pair"):
+            assert served[key] == basic[key], key
 
 
 class TestABasicAnswer:

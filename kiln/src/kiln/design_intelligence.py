@@ -236,6 +236,7 @@ def unestablished_caution(
     what_is_unknown: str,
     *,
     curated_entry_exists: bool | None = None,
+    table_read: bool | None = None,
 ) -> str:
     """The honest answer when a caution's only source could not be read.
 
@@ -281,9 +282,13 @@ def unestablished_caution(
         :func:`curated_entry_exists` at the call site.  ``None`` keeps the
         table-level behaviour, for callers whose overlay is keyed by something
         the entity id alone cannot address (a material PAIR, a nested block).
+    :param table_read: Whether the table was read for this caller, when the
+        answer itself says so (an answer from Kiln's servers states whether
+        they read it).  ``None`` asks this computer.
     :returns: The caution, or ``""`` in state 3 only.
     """
-    if not _engineering_overlay_loaded(overlay_kind):
+    loaded = _engineering_overlay_loaded(overlay_kind) if table_read is None else table_read
+    if not loaded:
         from kiln.tiers_and_terms import plan_offer
 
         product = _upgrade_product_name(overlay_kind)
@@ -3518,9 +3523,11 @@ def check_multi_material_compatibility(
     """Check if two materials can be co-printed in a dual-extrusion setup.
 
     Kiln's pairing verdict (kiln-pro, https://kiln3d.com) gives the
-    compatibility, the interface adhesion and the soluble-support record when
-    one of the two dissolves away from the other; it is asked for through
-    :mod:`kiln._pro_material_pairing_bridge`.  When it does not come (offline, signed
+    compatibility, the interface adhesion, the soluble-support record when
+    one of the two dissolves away from the other, and the curated notes and
+    general rules for the pair; it is asked for through
+    :mod:`kiln._pro_material_pairing_bridge`.  The answer says whether those
+    notes were read for this caller, and the caution follows what it says.  When it does not come (offline, signed
     out, no answer, refused) the report is a basic answer made here from the
     nozzle temperature ranges alone (:func:`_basic_pairing_report`), and says
     so.
@@ -3544,6 +3551,10 @@ def check_multi_material_compatibility(
     b = answer["material_b"]
     notes = answer["notes"]
     rules = list(answer["general_rules"])
+    # Whether the curated notes and rules were read for this caller, when the
+    # answer says so; otherwise this computer is asked.
+    notes_read = answer.get("notes_read")
+    notes_read = notes_read if isinstance(notes_read, bool) else None
 
     def _verdict_caution() -> str:
         """A verdict with no notes: yes/no, and nothing about what actually
@@ -3557,17 +3568,23 @@ def check_multi_material_compatibility(
             "and purging if you try the pair anyway. Run a small test piece "
             "before committing to a long print.",
             curated_entry_exists=False,
+            table_read=notes_read,
         )
 
+    compatible = answer["compatible"]
     if answer["found"] == "none":
         # No data covers the pair, and the answer's note says so.  One
-        # material in both places bonds to itself; otherwise the caution
-        # says whether the general rules came with the answer.
+        # material in both places bonds to itself, said the way the basic
+        # answer says it: that line is the notes and ``compatible`` is
+        # ``None``, never a no beside it.  Otherwise the caution says
+        # whether the general rules came with the answer.
         from kiln.catalog_keys import same_material_spelling
         from kiln.material_safety import basic_pair_finding
 
         if same_material_spelling(a, b):
-            caution = basic_pair_finding(a, b)[0]
+            notes = basic_pair_finding(a, b)[0]
+            compatible = None
+            caution = ""
         elif rules:
             caution = unestablished_caution(
                 "multi_material_pairing",
@@ -3575,6 +3592,7 @@ def check_multi_material_compatibility(
                 "rules below, and treat it as untested rather than fine — a "
                 "test piece is the only thing that will tell you.",
                 curated_entry_exists=False,
+                table_read=notes_read,
             )
         else:
             caution = unestablished_caution(
@@ -3584,13 +3602,14 @@ def check_multi_material_compatibility(
                 "Treat it as untested rather than fine — a test piece is the "
                 "only thing that will tell you.",
                 curated_entry_exists=False,
+                table_read=notes_read,
             )
     else:
         caution = "" if notes else _verdict_caution()
     return _with_nozzle_lines(MultiMaterialReport(
         material_a=a,
         material_b=b,
-        compatible=answer["compatible"],
+        compatible=compatible,
         interface_adhesion=answer["interface_adhesion"],
         notes=notes,
         support_pair=answer["support_pair"],
