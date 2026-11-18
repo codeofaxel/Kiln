@@ -3021,8 +3021,16 @@ def get_design_constraints(
     # 2. Recommend material (unless overridden)
     recommendation: MaterialRecommendation | None = None
     material_basic: dict[str, Any] | None = None
+    # The limits of a named plastic the catalogue cannot place, read through
+    # the one helper every check reads (which says once when Kiln's design
+    # limits cannot place it either).
+    unplaced_limits = None
     if material:
         profile = get_material_profile(material)
+        if profile is None and material_limits:
+            from kiln.material_limits import limits_for
+
+            unplaced_limits = limits_for(material)
         if profile:
             warnings: list[str] = []
             if printer_profile:
@@ -3130,6 +3138,11 @@ def get_design_constraints(
         if material_limits:
             for key, value in limits_for(recommendation.material.material_id).design_limits().items():
                 combined_rules[f"material_{key}"] = value
+    elif unplaced_limits is not None and unplaced_limits.known:
+        # Kiln's design limits placed a name the catalogue could not: the
+        # plastic's own limits, as for a recommended one.
+        for key, value in unplaced_limits.design_limits().items():
+            combined_rules[f"material_{key}"] = value
 
     if printer_profile:
         combined_guidance.extend(printer_profile.agent_notes)

@@ -1468,6 +1468,14 @@ def enhance_prompt_with_design_intelligence(
             **(getattr(mat.material, "design_limits", None) or {}),
             **limits_for(mat.material.material_id).design_limits(),
         }
+    elif material:
+        from kiln.material_limits import limits_for
+
+        # A name the catalogue cannot place: the plastic's own limits where
+        # Kiln's design limits place it (the brief read them already).
+        named = limits_for(material)
+        if named.known:
+            mat_limits = named.design_limits()
 
     # -----------------------------------------------------------------
     # Core constraints (always included regardless of budget)
