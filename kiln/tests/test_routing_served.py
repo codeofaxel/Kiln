@@ -487,6 +487,24 @@ class TestOverLongInput:
             reply = doors["recommend_material"](intent="a shelf bracket")
         assert reply["basic"] is True and reply["why"] == "refused"
 
+    def test_an_over_long_printer_name_is_refused_and_never_said_back(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id="p" * 100_000)
+        assert sent == [], "a request with an over-long printer name was sent to Kiln's servers"
+        assert reply["success"] is False and reply["error"]["code"] == "VALIDATION_ERROR"
+        assert reply["error"]["message"] == "Invalid printer_id: name a registered printer in at most 200 characters."
+        assert len(json.dumps(reply)) < 1_000
+
+    def test_a_printer_name_that_is_not_text_is_refused(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id=["x1c"])
+        assert sent == [] and reply["error"]["code"] == "VALIDATION_ERROR"
+
+    def test_a_printer_name_at_the_limit_is_answered_for(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id="p" * 200)
+        assert len(_picks(sent)) == 1 and reply["answered_for_printer"] == "p" * 200
+
     def test_an_intent_at_the_limit_is_asked(self, doors):
         with plain_install_served(served_pick()) as sent:
             reply = doors["recommend_material"](intent="x" * 10_000)

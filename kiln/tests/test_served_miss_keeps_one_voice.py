@@ -118,6 +118,34 @@ def test_a_signed_out_miss_never_names_the_served_tool(wire, _signed_out_plain_i
     assert miss.detail.startswith("Kiln"), miss.detail
 
 
+#: Every name a bridge gives the sign-in sentence for what was asked for.
+_SIGN_IN_NAMES = (
+    _pro_routing_bridge.SIGN_IN_NAME,
+    _pro_material_pick_bridge.SIGN_IN_NAME,
+    _pro_material_pick_bridge.PRO_SIGN_IN_NAME,
+    _pro_substitution_bridge.SIGN_IN_NAME,
+    _pro_adaptive_bridge.SIGN_IN_NAME,
+    _pro_material_pairing_bridge.SIGN_IN_NAME,
+    _pro_material_pairing_bridge.MIX_SIGN_IN_NAME,
+    _pro_material_limits_bridge.SIGN_IN_NAME,
+)
+
+
+@pytest.mark.parametrize("name", _SIGN_IN_NAMES)
+def test_each_sign_in_name_is_one_thing_so_the_sentence_reads(name):
+    """The sign-in sentence says "{name} is free to use": a name whose last
+    word is a plural reads "...substitutes is free to use"."""
+    last = name.split()[-1]
+    assert not (last.endswith("s") and not last.endswith("ss")), name
+
+
+@pytest.mark.parametrize("wire", sorted(_signed_out_misses()))
+def test_a_signed_out_miss_says_the_name_with_is(wire, _signed_out_plain_install):
+    miss = _signed_out_misses()[wire]()
+    subject, sep, _rest = miss.detail.partition(" is free to use")
+    assert sep and subject in _SIGN_IN_NAMES, miss.detail
+
+
 # ---------------------------------------------------------------------------
 # A refusal whose ``error`` is a bare code word is said in the servers' own
 # sentence, found elsewhere in their answer, at every door.

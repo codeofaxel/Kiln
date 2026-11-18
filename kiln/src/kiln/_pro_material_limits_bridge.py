@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 #: The served tool that answers one plastic's limits.
 WIRE_TOOL = "material_limits"
 #: What the sign-in sentence calls the answer asked for.
-SIGN_IN_NAME = "Kiln's design limits for each plastic"
+SIGN_IN_NAME = "Kiln's design-limit check"
 #: Where the same answer is read from when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.material_limits.engine"
 #: The quantities an answer carries, each ``{value, unit, basis}``.

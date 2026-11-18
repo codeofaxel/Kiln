@@ -173,7 +173,7 @@ class TestTheServedAnswer:
         answers.append(_ok(SERVED[:1]))
         assert _best("PETG") == {"success": True, "material": "PETG", "substitute": SERVED[0]}
 
-    def test_no_substitute_is_said_as_it_always_was(self, served):
+    def test_no_substitute_says_none_was_found(self, served):
         calls, answers = served
         answers.append(_ok([]))
         assert _best("PLA") == {
@@ -220,6 +220,9 @@ class TestAMissIsTheBasicList:
             assert f'"{key}"' not in json.dumps(out), key
         _assert_basic_line(out["note"], "PLA")
         assert "same family" in out["note"] and "not ranked" in out["note"]
+        # Asked about a material, never a part; the material is named once.
+        assert "this part" not in out["note"] and "not checked against any part" in out["note"]
+        assert out["note"].count("PLA (Polylactic Acid)") == 1, out["note"]
 
     @pytest.mark.parametrize("cause", sorted(_misses()))
     def test_the_best_door_names_no_best(self, served, cause):
@@ -260,6 +263,7 @@ class TestAMissIsTheBasicList:
         assert out["basic"] is True and out["substitutes"] == [] and out["count"] == 0
         assert out["note"].startswith(f"Kiln's catalogue lists no other filament of the same family as {named}.")
         assert "basic substitute" not in out["note"]
+        assert out["note"].count(named) == 1, out["note"]
 
     @pytest.mark.parametrize("door", ["find", "best"])
     def test_a_name_the_catalogue_does_not_know_is_never_repeated(self, served, door):

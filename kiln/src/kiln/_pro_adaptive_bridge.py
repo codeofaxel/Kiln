@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 #: The hosted door, asked when kiln-pro is not installed here.
 WIRE_TOOL = "adaptive_slicing_answer"
 #: What the sign-in sentence calls the answer asked for.
-SIGN_IN_NAME = "Kiln's tuned slicing settings"
+SIGN_IN_NAME = "Kiln's tuned slicing"
 #: Where the same answer is read when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.adaptive_slicing.engine"
 #: A person is waiting on the answer; past this, generic settings answer.
