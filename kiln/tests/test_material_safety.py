@@ -97,6 +97,34 @@ class TestTheServedCheck:
                        "compatible before printing.",
         }
 
+    def test_a_filled_filament_gets_the_hardened_nozzle_line_from_its_name(self, monkeypatch):
+        """Kiln's answer marks no hardened nozzle for PETG-CF; the line comes
+        from the name, the same words a check with no answer gives."""
+        served = {"success": True, "names": ["PLA", "PETG-CF"],
+                  "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 30}],
+                            [0, 1, {"known": False, "level": "caution", "purge_volume_mm3": 80}],
+                            [1, 1, {"known": False, "level": "caution", "purge_volume_mm3": 80}]],
+                  "hardware": [{"hardened_nozzle": False, "enclosure": False},
+                               {"hardened_nozzle": False, "enclosure": False}]}
+        _served(monkeypatch, served)
+        online = check_material_compatibility(["PLA", "PETG-CF"])
+        assert "basic" not in online and online["level"] == "caution"
+        assert online["hardware_warnings"] == [
+            "PETG-CF requires a hardened/wear-resistant nozzle (not standard brass)."
+        ]
+        _served(monkeypatch, _SIGNED_OUT)
+        assert check_material_compatibility(["PLA", "PETG-CF"])["hardware_warnings"] == online["hardware_warnings"]
+
+    def test_a_marked_filament_is_warned_once(self, monkeypatch):
+        served = {**_ENTRIES, "names": ["PLA", "PLA-CF"],
+                  "hardware": [{"hardened_nozzle": False, "enclosure": False},
+                               {"hardened_nozzle": True, "enclosure": False}]}
+        _served(monkeypatch, served)
+        assert check_material_compatibility(["PLA", "PLA-CF"])["hardware_warnings"] == [
+            "PLA-CF requires a hardened/wear-resistant nozzle (not standard brass)."
+        ]
+
     def test_an_answer_missing_a_pair_is_a_basic_check(self, monkeypatch):
         _served(monkeypatch, {**_ENTRIES, "pairs": _ENTRIES["pairs"][:1]})
         check = check_material_compatibility(["PLA", "PETG"])

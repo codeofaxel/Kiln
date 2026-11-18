@@ -1273,7 +1273,9 @@ class _DesignToolsPlugin:
 
             Returns compatibility (yes/no), interface adhesion quality,
             notes on temperature management, and soluble support dissolution
-            instructions when applicable.
+            instructions when applicable.  A filled filament (carbon, glass,
+            wood or metal) also gets ``hardware_warnings`` saying it needs a
+            hardened nozzle.
 
             When Kiln's pairing verdict cannot be had (offline, signed out,
             no answer, refused), the answer is ``basic: true``:

@@ -865,6 +865,10 @@ class MultiMaterialReport:
     ``why`` / ``why_code`` / ``why_detail`` beside it
     (:func:`kiln.served_answer.fields`).  Those four keys appear on a basic
     answer only.
+
+    ``hardware_warnings`` names a filled filament's need for a hardened
+    nozzle (:func:`kiln.material_safety.is_abrasive_filament`), on every
+    answer, served or basic; it appears only when there is one.
     """
 
     material_a: str
@@ -879,12 +883,15 @@ class MultiMaterialReport:
     why: str = ""
     why_code: str = ""
     why_detail: str = ""
+    hardware_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
         if not self.basic:
             for key in _BASIC_ANSWER_KEYS:
                 out.pop(key, None)
+        if not self.hardware_warnings:
+            out.pop("hardware_warnings", None)
         return out
 
 
@@ -3503,7 +3510,7 @@ def check_multi_material_compatibility(
         raise ValueError(problem)
     answer, miss = pairing.co_print(material_a, material_b)
     if answer is None:
-        return _basic_pairing_report(material_a, material_b, miss)
+        return _with_nozzle_lines(_basic_pairing_report(material_a, material_b, miss))
 
     a = answer["material_a"]
     b = answer["material_b"]
@@ -3536,7 +3543,7 @@ def check_multi_material_compatibility(
         )
     else:
         caution = "" if notes else _verdict_caution()
-    return MultiMaterialReport(
+    return _with_nozzle_lines(MultiMaterialReport(
         material_a=a,
         material_b=b,
         compatible=answer["compatible"],
@@ -3545,7 +3552,19 @@ def check_multi_material_compatibility(
         support_pair=answer["support_pair"],
         general_rules=rules,
         caution=caution,
-    )
+    ))
+
+
+def _with_nozzle_lines(report: MultiMaterialReport) -> MultiMaterialReport:
+    """*report* with the hardened-nozzle line for each filled filament it
+    names (:func:`kiln.material_safety.is_abrasive_filament`), read from the
+    names alone so a served and a basic answer say it the same way."""
+    from kiln.catalog_keys import material_label
+    from kiln.material_safety import hardened_nozzle_line, is_abrasive_filament
+
+    labels = dict.fromkeys(material_label(m) for m in (report.material_a, report.material_b))
+    report.hardware_warnings = [hardened_nozzle_line(label) for label in labels if label and is_abrasive_filament(label)]
+    return report
 
 
 def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiMaterialReport:

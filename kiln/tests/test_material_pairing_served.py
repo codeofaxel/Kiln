@@ -179,13 +179,42 @@ class TestABasicAnswer:
     def test_a_basic_reply_carries_nothing_from_a_pairing_table(self, monkeypatch, pair):
         _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
         out = _door()(*pair)
+        filled = {"hardware_warnings"} if pair == ("cf_pla", "pla") else set()
         assert set(out) == {"material_a", "material_b", "compatible", "interface_adhesion", "notes", "support_pair",
-                            "general_rules", "caution", "basic", "why", "why_code", "why_detail", "success"}
+                            "general_rules", "caution", "basic", "why", "why_code", "why_detail", "success"} | filled
         assert out["compatible"] is None and out["interface_adhesion"] == "unknown"
         assert out["support_pair"] is None and out["general_rules"] == []
         assert any(shape.match(out["notes"]) for shape in _BASIC_NOTES), out["notes"]
         for grade in ("excellent", "good", "moderate", "poor"):
             assert grade not in json.dumps(out), grade
+
+
+class TestAFilledFilament:
+    """A filled filament needs a hardened nozzle whatever the verdict says,
+    and the reply says so the same way served or basic."""
+
+    _LINE = "PETG-CF requires a hardened/wear-resistant nozzle (not standard brass)."
+
+    def test_a_served_answer_carries_the_hardened_nozzle_line(self, monkeypatch):
+        _served(monkeypatch, _answer(material_a="petg-cf", material_b="pla"))
+        out = _door()("PETG-CF", "pla")
+        assert out["hardware_warnings"] == [self._LINE]
+        assert out["compatible"] is True, "the verdict itself is unchanged"
+
+    def test_a_basic_answer_carries_the_same_line(self, monkeypatch):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        out = _door()("PETG-CF", "pla")
+        assert out["basic"] is True and out["hardware_warnings"] == [self._LINE]
+
+    def test_one_line_per_material_and_none_for_an_unfilled_pair(self, monkeypatch):
+        _served(monkeypatch, _answer(material_a="petg_cf", material_b="pa6_gf"))
+        assert _door()("petg_cf", "pa6_gf")["hardware_warnings"] == [
+            self._LINE, "PA6-GF requires a hardened/wear-resistant nozzle (not standard brass).",
+        ]
+        _served(monkeypatch, _answer(material_a="petg-cf", material_b="petg_cf"))
+        assert _door()("petg-cf", "petg_cf")["hardware_warnings"] == [self._LINE]
+        _served(monkeypatch, _answer())
+        assert "hardware_warnings" not in _door()("pla", "tpu")
 
 
 class TestANameTooLong:

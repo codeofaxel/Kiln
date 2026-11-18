@@ -590,8 +590,10 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
 def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, Any] | None:
     """The multi-material check for *clean* (one name per loaded part, in
     order), built from Kiln's answer for every pair of its distinct names
-    (:func:`kiln._pro_material_pairing_bridge.mix_check`).  ``None`` when the answer
-    leaves out a pair the parts need."""
+    (:func:`kiln._pro_material_pairing_bridge.mix_check`).  A filled filament
+    (:func:`is_abrasive_filament`) gets the hardened-nozzle line whatever the
+    answer says, as it does with no answer.  ``None`` when the answer leaves
+    out a pair the parts need."""
     names = entries["names"]
     by_pair: dict[frozenset, dict[str, Any]] = {
         frozenset({names[i], names[j]}): entry for i, j, entry in entries["pairs"]
@@ -649,8 +651,8 @@ def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, 
     hardware_warnings: list[str] = []
     for mat in clean:
         flag = flags.get(mat) or {}
-        if flag.get("hardened_nozzle"):
-            msg = f"{mat} requires a hardened/wear-resistant nozzle (not standard brass)."
+        if flag.get("hardened_nozzle") or is_abrasive_filament(mat):
+            msg = hardened_nozzle_line(mat)
             if msg not in hardware_warnings:
                 hardware_warnings.append(msg)
         if flag.get("enclosure"):
@@ -754,7 +756,7 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
     hardware_warnings: list[str] = []
     for mat in clean:
         if is_abrasive_filament(mat):
-            msg = f"{mat} requires a hardened/wear-resistant nozzle (not standard brass)."
+            msg = hardened_nozzle_line(mat)
             if msg not in hardware_warnings:
                 hardware_warnings.append(msg)
         if needs_ventilation(mat):
@@ -885,6 +887,12 @@ def is_abrasive_filament(material: str) -> bool:
             if token == prefix:
                 return True
     return False
+
+
+def hardened_nozzle_line(material: str) -> str:
+    """The hardware line a multi-material answer gives a material that needs a
+    hardened nozzle, naming it as written."""
+    return f"{material} requires a hardened/wear-resistant nozzle (not standard brass)."
 
 
 def abrasive_nozzle_floor(material: str) -> str:
