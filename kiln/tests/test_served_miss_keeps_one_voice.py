@@ -175,6 +175,15 @@ def test_a_code_word_with_no_sentence_beside_it_is_no_reason_rather_than_a_word(
     assert "upgrade_required" not in line and "gave no reason" in line
 
 
+def test_the_version_floor_names_the_fix():
+    """The servers name the Kiln they need; the fix is the person's own, so
+    the sentence ends with it, with or without the servers' sentence."""
+    for answer in (_VERSION_FLOOR, {"success": False, "error": "upgrade_required", "code": "UPGRADE_REQUIRED"}):
+        line = basic_pick_line(served_answer.classify_answer(answer), feature="material pick")
+        assert "Update Kiln and " in line, line
+        assert "upgrade_required" not in line
+
+
 def test_a_code_word_takes_the_message_when_there_is_no_upgrade_block():
     miss = served_answer.classify_answer(
         {"status": "error", "code": "SUSPENDED", "error": "suspended", "message": "This account is paused."}

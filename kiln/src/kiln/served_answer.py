@@ -81,6 +81,11 @@ _FIX = {
     "refused": "",  # the server's own words carry the fix
 }
 
+#: The servers' version floor (HTTP 426): their words name the Kiln it needs,
+#: and the fix is this install's own, so the sentence says it.
+UPGRADE_REQUIRED_CODE = "UPGRADE_REQUIRED"
+_UPGRADE_FIX = "update Kiln"
+
 #: The one ``signed_out`` that is not a stranger: this install HAD a
 #: sign-in and can no longer renew it.  Same cause, and the same fix in
 #: substance, but the person is told the truth of it -- the session ran
@@ -420,7 +425,7 @@ def sentence(
     cause, fix = _cause_and_fix(miss, feature)
     if miss.cause == "refused" and not miss.detail:
         cause += " and gave no reason"
-        fix = "wait a minute"
+        fix = fix or "wait a minute"
     out = f"{_cap(on_the_line).rstrip('. ')}. Kiln can't {cannot.strip()} right now because {cause}, so it {wont.strip().rstrip('.')}."
     if miss.cause == "refused" and miss.detail:
         out += f" {_sentence_of(miss.detail)}"
@@ -436,6 +441,8 @@ def _cause_and_fix(miss: Miss, feature: str) -> tuple[str, str]:
     if miss.cause == "signed_out" and miss.code == SESSION_EXPIRED_CODE:
         return _SESSION_EXPIRED
     cause, fix = _CAUSE_CLAUSE[miss.cause].format(feature=feature), _FIX[miss.cause]
+    if miss.cause == "refused" and miss.code == UPGRADE_REQUIRED_CODE:
+        fix = _UPGRADE_FIX
     if miss.cause == "unanswered" and miss.retry_after_s > 0:
         cause += " when last asked"
         fix = f"wait about {_minutes(miss.retry_after_s)}"
