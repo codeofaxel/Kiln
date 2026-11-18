@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -198,7 +199,10 @@ class MaterialLimits:
         if self.miss is None and not self.known and self.material:
             lines.append(UNRECOGNISED)
         plastic = self.material_id or _plastic_written_first(self.material)
-        lines.extend(general_figures_leave_out(plastic, static_safe_wall_read=self.value(ESD_WALL) is not None))
+        lines.extend(general_figures_leave_out(
+            plastic, static_safe_wall_read=self.value(ESD_WALL) is not None,
+            flexible=self.material_id is None and _written_as_flexible(self.material),
+        ))
         return lines
 
     def to_dict(self) -> dict[str, Any]:
@@ -250,15 +254,18 @@ STATIC_SAFE_UNKNOWN = (
 )
 
 
-def general_figures_leave_out(material_id: str | None, *, static_safe_wall_read: bool = False) -> list[str]:
+def general_figures_leave_out(
+    material_id: str | None, *, static_safe_wall_read: bool = False, flexible: bool = False,
+) -> list[str]:
     """What a reply says beside the general figures for the plastic
-    *material_id*: for a flexible plastic, that they are for rigid ones
+    *material_id*: for a flexible plastic (or one the caller found named
+    flexible, *flexible*), that they are for rigid ones
     (:data:`FLEXIBLE_CAUTION`); for a static-safe grade whose own minimum
     wall was not read (*static_safe_wall_read* false), that it is not known
     here (:data:`STATIC_SAFE_UNKNOWN`).  Empty for any other plastic.  The
     one place these are decided, for every reader of the general figures."""
     lines: list[str] = []
-    if _category(material_id) == "thermoplastic_elastomer":
+    if flexible or _category(material_id) == _FLEXIBLE_CATEGORY:
         lines.append(FLEXIBLE_CAUTION)
     if material_id and material_id.endswith("_esd") and not static_safe_wall_read:
         lines.append(STATIC_SAFE_UNKNOWN)
@@ -318,17 +325,36 @@ def _public_id(material: str | None) -> str | None:
     return resolve_material_key(str(material), _catalogue().keys())
 
 
-def _plastic_written_first(material: str | None) -> str | None:
-    """The catalog plastic *material* is written as a grade of, or ``None``.
-
-    A printer reports a spool of a grade as its plastic and then the grade
-    ("TPU-AMS", "TPU 95A HF"), so the word's first part names the plastic
-    when the catalog holds it.  Read only for what the general figures leave
-    out for that plastic, never for a figure."""
+def _written_words(material: str | None) -> list[str]:
     from kiln.catalog_keys import _slug
 
-    first = _slug(str(material or "")).split("_", 1)[0]
-    return first if first in _catalogue() else None
+    return [word for word in _slug(str(material or "")).split("_") if word]
+
+
+def _plastic_written_first(material: str | None) -> str | None:
+    """The catalog plastic *material* is written as a grade or a brand's
+    spool of, or ``None``.
+
+    A spool is named by its plastic and a grade or a brand, in either order
+    ("TPU-AMS", "TPU 95A HF", "Generic TPU", "CR-TPU"), so any word of it
+    that the catalog holds names the plastic; a flexible one is read first.
+    Read only for what the general figures leave out for that plastic,
+    never for a figure."""
+    held = [word for word in _written_words(material) if word in _catalogue()]
+    flexible = next((word for word in held if _category(word) == _FLEXIBLE_CATEGORY), None)
+    return flexible or (held[0] if held else None)
+
+
+#: The catalog category of a flexible plastic.
+_FLEXIBLE_CATEGORY = "thermoplastic_elastomer"
+#: A word for a flexible plastic the catalog holds no record of, or one
+#: written with its hardness run on ("TPU95A").
+_FLEXIBLE_WORD_RE = re.compile(r"^(?:tpe|tpu)(?:\d+[a-d]?)?$")
+
+
+def _written_as_flexible(material: str | None) -> bool:
+    """Whether a word of *material* names a flexible plastic."""
+    return any(_FLEXIBLE_WORD_RE.match(word) for word in _written_words(material))
 
 
 def _category(material_id: str | None) -> str | None:
