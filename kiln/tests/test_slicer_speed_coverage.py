@@ -92,10 +92,10 @@ DERIVED: frozenset[str] = frozenset(
 )
 
 _NO_ACCELERATION = (
-    "Stated by Kiln for a printer whose own start sequence sets one "
-    "(slicer_profiles._ensure_acceleration_coverage); otherwise none, and "
-    "every slicer is told to write no acceleration command, so the printer "
-    "keeps its own.  Either way the same values reach every slicer."
+    "The default is stated for a printer whose own start sequence sets one "
+    "(slicer_profiles._ensure_acceleration_coverage), and a role by the "
+    "printer's record; otherwise none, and the printer keeps its own.  "
+    "Either way the same values reach every slicer."
 )
 _ESTIMATE_ONLY = (
     "Used for the time estimate only (machine_limits_usage defaults to "
@@ -351,8 +351,8 @@ class TestEveryDoorDerivesThem:
 
 
 class TestTheAccelerationsAreStated:
-    """A printer whose start sequence sets its acceleration prints at it in
-    every slicer; one with none states none."""
+    """A printer whose start sequence sets its acceleration states it; one
+    with none states none."""
 
     _SPEEDS = {
         "perimeter_speed": "200",
@@ -375,24 +375,13 @@ class TestTheAccelerationsAreStated:
             settings = self._effective(printer_id)
             assert float(settings["default_acceleration"]) == working, printer_id
 
-    def test_the_first_layer_and_visible_surfaces_keep_step_with_their_speed(self) -> None:
+    def test_no_role_is_added_to_the_default(self) -> None:
         settings = self._effective("bambu_p1s")
-        working = float(settings["default_acceleration"])
-        fastest = 250.0
-        assert float(settings["first_layer_acceleration"]) == round(working * 50 / fastest)
-        assert float(settings["external_perimeter_acceleration"]) == round(working * 150 / fastest)
-        top = speed_mm_s(settings, "top_solid_infill_speed")
-        assert float(settings["top_solid_infill_acceleration"]) == round(working * top / fastest)
-
-    def test_no_role_runs_above_the_working_acceleration(self) -> None:
-        settings = self._effective("bambu_p1s", first_layer_speed="400")
-        working = float(settings["default_acceleration"])
-        assert all(float(settings[key]) <= working for key in sp_mod._ROLE_ACCELERATIONS if key in settings)
+        assert [key for key in sp_mod._ROLE_ACCELERATIONS if key in settings] == ["default_acceleration"]
 
     def test_a_stated_acceleration_is_never_replaced(self) -> None:
         own = self._effective("bambu_p1s", default_acceleration="4000")
         assert own["default_acceleration"] == "4000"
-        assert "first_layer_acceleration" not in own
         role = self._effective("bambu_p1s", first_layer_acceleration="700")
         assert role["first_layer_acceleration"] == "700"
         assert float(role["default_acceleration"]) > 700
@@ -553,8 +542,8 @@ class TestOrcaCarriesThePace:
 
 
 class TestALimitTheSlicerAddedOnItsOwnIsTakenOut:
-    """One slicer opens every Marlin file with machine limits nobody asked
-    for.  The door takes that opening run out and nothing else."""
+    """Machine limits the settings did not ask for are taken out of the
+    opening run of the executable block, and nothing else is."""
 
     _FILE = (
         "; HEADER_BLOCK_END\n"
@@ -1139,9 +1128,8 @@ def door_slices(tmp_path_factory: pytest.TempPathFactory) -> dict[tuple[str, str
 
 class TestEverySlicerWritesTheAccelerationsKilnStates:
     """The G-code of every installed slicer carries the accelerations the
-    settings state and no motion limit besides.  A slicer handed nothing for
-    a setting answers from its own defaults, each in its own way, so this is
-    judged on the file each one writes."""
+    settings state and no motion limit besides, judged on the file each one
+    writes."""
 
     @pytest.mark.parametrize("slicer", list(_SLICERS))
     def test_no_motion_limit_kiln_did_not_ask_for(self, slicer: str, door_slices) -> None:

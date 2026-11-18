@@ -1402,17 +1402,12 @@ _EXECUTABLE_BLOCK_START = "; EXECUTABLE_BLOCK_START"
 
 
 def _drop_unasked_machine_limits(gcode_path: str) -> int:
-    """Take the machine limits a slicer wrote on its own out of *gcode_path*.
+    """Take the run of machine-limit lines that opens the executable block
+    out of *gcode_path*.
 
-    One slicer of this family opens every Marlin-flavoured file with machine
-    limits whether or not it was asked to, filled from its own defaults
-    wherever the settings state none.  Settings that do not ask for limits
-    in the G-code get none, as from every other slicer Kiln drives: the
-    printer keeps its own.
-
-    Only the run of limit lines that opens the executable block is taken;
-    a limit anywhere else (a start sequence's own, a person's custom
-    G-code) is theirs and stays.  Returns the number of lines taken.
+    For settings that did not ask for limits in the G-code, so the printer
+    keeps its own.  A limit anywhere else (a start sequence's, a person's
+    custom G-code) stays.  Returns the number of lines taken.
     """
     taken = 0
     tmp_path = f"{gcode_path}.limits"

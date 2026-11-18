@@ -125,11 +125,8 @@ _PROCESS_ACCELERATION: dict[str, tuple[str, str]] = {
     "travel_acceleration": ("travel_acceleration", "default_acceleration"),
 }
 
-# Accelerations one slicer of the family has and another does not, written
-# for all of them: a preset key a slicer does not know is ignored, and one it
-# knows and was not handed is filled from its own defaults.  Short travels
-# fall back to travel's, as PrusaSlicer documents; a first-layer travel is a
-# travel; the prime tower prints at the default.
+# Accelerations that only some slicers of the family read, written for all
+# of them, with the PrusaSlicer key each falls back to.
 _FAMILY_ACCELERATION: dict[str, tuple[str, str]] = {
     "travel_short_distance_acceleration": ("travel_short_distance_acceleration", "travel_acceleration"),
     "first_layer_travel_acceleration": ("initial_layer_travel_acceleration", "travel_acceleration"),
@@ -746,11 +743,9 @@ def settings_to_orca_presets(
         if raw:
             process[dst] = raw
 
-    # Every role is written out, stated or not, so none of them falls
-    # through to the slicer's own per-role numbers: the stated value, else
-    # PrusaSlicer's documented fallback, down to the default.  With no
-    # default stated every role is "0", which each slicer of this family
-    # reads as no acceleration command, and the printer keeps its own.
+    # Every role is written out, stated or not: the stated value, else its
+    # fallback, down to the default; "0" throughout when no default is
+    # stated, and the printer keeps its own.
     default_accel = _acceleration(settings, "default_acceleration")
     process["default_acceleration"] = f"{default_accel:g}"
     role_accels = {
