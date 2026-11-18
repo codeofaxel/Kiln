@@ -125,13 +125,33 @@ class TestTheServedVerdict:
         assert out["caution"].startswith("Nothing here covers this pair; reason it out from the general rules below")
         assert "not available" not in out["caution"]
 
-    def test_one_material_in_both_places_is_said_to_bond_to_itself(self, monkeypatch):
+    @pytest.mark.parametrize("pair", [("ABS", "abs"), ("pla", "PLA"), ("PETG-CF", "petg_cf")])
+    def test_one_material_in_both_places_is_said_to_bond_to_itself(self, monkeypatch, pair):
+        """A served answer for one material twice reads the way the basic
+        answer does: ``compatible`` is never a no beside a line saying the
+        material bonds to itself, and that line is the notes."""
+        a, b = (name.lower() for name in pair)
         _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
-                                     notes="No compatibility data for abs + abs.", material_a="abs",
-                                     material_b="abs", general_rules=["A stand-in rule."]))
-        out = _door()("ABS", "abs")
-        assert "bonds to itself" in out["caution"]
-        assert "Nothing here covers" not in out["caution"] and "not available" not in out["caution"]
+                                     notes=f"No compatibility data for {a} + {b}. Check general rules.",
+                                     material_a=a, material_b=b, general_rules=["A stand-in rule."]))
+        out = _door()(*pair)
+        assert re.match(r"^Both are .+: one material shares its own nozzle temperature and bonds to itself\.$",
+                        out["notes"]), out["notes"]
+        assert out["compatible"] is None
+        assert out["caution"] == ""
+        assert "No compatibility data" not in json.dumps(out)
+        assert "basic" not in out and "why" not in out
+
+    @pytest.mark.parametrize("pair", [("pla", "pla"), ("PETG-CF", "petg_cf")])
+    def test_one_material_twice_reads_the_same_served_or_basic(self, monkeypatch, pair):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        basic = _door()(*pair)
+        a, b = (name.lower() for name in pair)
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes=f"No compatibility data for {a} + {b}.", material_a=a, material_b=b))
+        served = _door()(*pair)
+        for key in ("compatible", "interface_adhesion", "notes", "support_pair"):
+            assert served[key] == basic[key], key
 
 
 class TestABasicAnswer:

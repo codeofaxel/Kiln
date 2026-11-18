@@ -3559,15 +3559,20 @@ def check_multi_material_compatibility(
             curated_entry_exists=False,
         )
 
+    compatible = answer["compatible"]
     if answer["found"] == "none":
         # No data covers the pair, and the answer's note says so.  One
-        # material in both places bonds to itself; otherwise the caution
-        # says whether the general rules came with the answer.
+        # material in both places bonds to itself, said the way the basic
+        # answer says it: that line is the notes and ``compatible`` is
+        # ``None``, never a no beside it.  Otherwise the caution says
+        # whether the general rules came with the answer.
         from kiln.catalog_keys import same_material_spelling
         from kiln.material_safety import basic_pair_finding
 
         if same_material_spelling(a, b):
-            caution = basic_pair_finding(a, b)[0]
+            notes = basic_pair_finding(a, b)[0]
+            compatible = None
+            caution = ""
         elif rules:
             caution = unestablished_caution(
                 "multi_material_pairing",
@@ -3590,7 +3595,7 @@ def check_multi_material_compatibility(
     return _with_nozzle_lines(MultiMaterialReport(
         material_a=a,
         material_b=b,
-        compatible=answer["compatible"],
+        compatible=compatible,
         interface_adhesion=answer["interface_adhesion"],
         notes=notes,
         support_pair=answer["support_pair"],
