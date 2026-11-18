@@ -256,6 +256,18 @@ _RUNS_A_FILE: dict[str, str] = {
 _WRITES_A_FILE: dict[str, str] = {"M28": "/gcodes", "M559": "/sys", "M560": "/www"}
 #: Where each of those writes when no file is named.
 _WRITES_BY_DEFAULT: dict[str, str] = {"M559": "/sys/config.g", "M560": "/www/index.html"}
+#: Words that run the files of the filament named in ``S`` (load, unload, its
+#: settings) from the filaments folder.
+_FILAMENT_WORDS = frozenset({"M701", "M702", "M703"})
+_RUNS_A_FILAMENT_FILE = (
+    "{word} is blocked unless the filament it names (S) is one plain name in quotes -- no folder, no step up, "
+    "no expression -- because a name that reaches outside the printer's filaments folder runs a file no one "
+    "is shown first"
+)
+_MAKES_A_FOLDER = (
+    "Making a folder (M470) is blocked unless it names, in quotes, a place outside the printer's "
+    f"{_MACRO_FOLDER_NAMES} folders -- the files there run as macros, which no one is shown first"
+)
 _WRITES_INTO_A_MACRO_FOLDER = (
     "Writing a file into the printer's " + _MACRO_FOLDER_NAMES + " folder ({word}) is blocked unless it names, "
     "readably, a place outside them -- a file there runs as a macro, which no one is shown first"
@@ -579,6 +591,17 @@ def _card_path(value: str | None, folder: str | None) -> str | None:
 _SHORT_ALIAS_RE = re.compile(r"~\d")
 
 
+def _plain_name(value: str | None) -> bool:
+    """Whether *value* (a quoted parameter's text; ``None`` when unquoted) is
+    one plain name the card reads only as itself: no folder, no step up, no
+    expression, nothing the card reads as another name."""
+    if not value or ".." in value or value == "." or any(char in value for char in "/\\{}:"):
+        return False
+    if any(ord(char) < 32 for char in value) or value != value.strip():
+        return False
+    return not value.endswith((".", " ")) and _SHORT_ALIAS_RE.search(value) is None
+
+
 def _in_a_macro_folder(path: str | None) -> bool:
     """Whether *path* (from :func:`_card_path`) is a macro folder or inside one."""
     return path is not None and f"{path.rstrip('/')}/".startswith(_MACRO_FOLDERS)
@@ -615,6 +638,15 @@ def _runs_a_file_unseen(cmd: str, cleaned: str) -> str | None:
         paths = _paths_written(word, cleaned)
         if paths is None or any(path is None or _in_a_macro_folder(path) for path in paths):
             return _WRITES_INTO_A_MACRO_FOLDER.format(word=word)
+        return None
+    elif word == "M470":
+        paths = _paths_named(cleaned, "P", None)
+        unseen = paths is None or any(path is None or _in_a_macro_folder(path) for path in paths)
+        return _MAKES_A_FOLDER if unseen else None
+    elif word in _FILAMENT_WORDS:
+        names = _quoted_params(cleaned, "S")
+        if names is None or len(names) > 1 or (names and not _plain_name(names[0])):
+            return _RUNS_A_FILAMENT_FILE.format(word=word)
         return None
     else:
         unseen = word in _RUNS_A_FILE

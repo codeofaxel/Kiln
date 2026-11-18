@@ -275,6 +275,41 @@ def test_the_filament_folders_own_files_still_run():
     assert gcode.validate_gcode([line]).valid is True
 
 
+#: Filament words naming a filament that reaches outside the filaments
+#: folder, or that the card reads as another name.
+FILAMENT_WORDS_REACHING_OUT = [
+    'M701 S"../gcodes/part"',
+    'M701 S"..\\gcodes\\part"',
+    'M701 S".."',
+    'M701 S"PLA."',
+    'M701 S"PLA "',
+    'M701 S" PLA"',
+    'M701 S"FILAME~1"',
+    'M701 S"{global.part}"',
+    'M701 S"0:PLA"',
+    "M701 SPLA",
+    'M701 S"PLA" S"../gcodes/part"',
+    'M702 S"../gcodes/part"',
+    'M703 S"../gcodes/part"',
+    'G4 S0 M701 S"../gcodes/part"',
+]
+#: Making a folder where the macro words read their files.
+MAKES_A_MACRO_FOLDER = ['M470 P"/filaments/part"', 'M470 P"0:/macros/new"', 'M470 P"/sys./x"', 'M470 P"part"', "M470"]
+
+
+@pytest.mark.parametrize("line", FILAMENT_WORDS_REACHING_OUT + MAKES_A_MACRO_FOLDER)
+def test_a_filament_or_folder_word_that_reaches_a_file_unseen_is_refused(line):
+    for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
+        assert result.valid is False and result.commands == [], (line, result.errors)
+
+
+@pytest.mark.parametrize(
+    "line", ['M701 S"PLA"', 'M701 S"PETG-CF 0.6"', "M702", "M703", "M701 T0 L50", 'M470 P"/gcodes/parts"'],
+)
+def test_a_plain_filament_name_and_a_folder_among_the_prints_still_work(line):
+    assert gcode.validate_gcode([line]).valid is True, gcode.validate_gcode([line]).errors
+
+
 @pytest.mark.parametrize("line", WRITES_INTO_A_MACRO_FOLDER)
 def test_writing_a_file_into_a_macro_folder_is_refused(line):
     for result in (gcode.validate_gcode([line]), gcode.validate_commands([line], "ender3")):
