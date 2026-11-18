@@ -128,9 +128,11 @@ class TestTheDoorsPrintTheProfile:
         own = ini_to_settings(resolve_slicer_profile("bambu_a1"))
         for key in _SPEEDS:
             assert printed[key] == own[key], (key, printed[key], own[key])
-        # The table's accelerations (M204 per role) are gone too: the machine
-        # runs what its own start sequence set, as the estimate assumes.
-        assert "default_acceleration" not in printed
+        # No table's accelerations ride along either: the ones handed over
+        # are the profile's own, which the estimate was made with.
+        accelerations = {key for key in (*printed, *own) if key.endswith("_acceleration")}
+        for key in accelerations:
+            assert printed.get(key) == own.get(key), (key, printed.get(key), own.get(key))
 
     def test_the_reslice_door_hands_its_pipeline_no_table_speeds(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served_roster_records,

@@ -1,13 +1,12 @@
 """A Bambu estimate runs at the acceleration the machine will really run.
 
-Kiln slices a Bambu print with no acceleration commands of its own and wraps
-it after the maker's start sequence, so the printer prints at whatever that
-sequence set.  The estimate is timed at the acceleration that start sequence
-sets.
+Kiln wraps a Bambu print after the maker's start sequence, and the print
+runs at the acceleration that sequence sets: the profile states it, and the
+estimate is timed at it.
 
-The limits ride in the estimate only.  The slicer-backed half proves the
-G-code is untouched by them: every feedrate identical, and no motion
-command written.
+The machine limits ride in the estimate only.  The slicer-backed half proves
+the G-code is untouched by them: every feedrate and every acceleration
+identical, and no machine limit written.
 """
 
 from __future__ import annotations
@@ -187,6 +186,10 @@ def _feedrates(gcode: str) -> set[str]:
     return set(re.findall(r"^G1 [^;\n]*F(\d+(?:\.\d+)?)", gcode, re.MULTILINE))
 
 
+def _accelerations(gcode: str) -> set[float]:
+    return {float(v) for v in re.findall(r"^M204\s+S(\d+(?:\.\d+)?)\s*$", gcode, re.MULTILINE)}
+
+
 @pytest.mark.skipif(_PRUSA is None, reason="PrusaSlicer not installed")
 class TestOnlyTheEstimateMoves:
     def test_faster_estimate_same_gcode(self, tmp_path: Path, served_roster_records) -> None:
@@ -206,4 +209,11 @@ class TestOnlyTheEstimateMoves:
         fast, slow = _slice(own, model), _slice(defaults, model)
         assert _seconds(fast) < 0.95 * _seconds(slow), (_seconds(fast), _seconds(slow))
         assert _feedrates(fast) == _feedrates(slow), "a machine limit changed the G-code"
-        assert not re.search(r"^(M201|M203|M204|M205)\b", fast, re.MULTILINE)
+        assert _accelerations(fast) == _accelerations(slow), "a machine limit changed the G-code"
+        stated = {
+            float(value)
+            for key, value in ini_to_settings(own).items()
+            if key in sp_mod._ROLE_ACCELERATIONS and float(value) > 0
+        }
+        assert _accelerations(fast) <= stated, (_accelerations(fast), stated)
+        assert not re.search(r"^(M201|M203|M205|M204(?![^;\n]*\bS))\b", fast, re.MULTILINE)

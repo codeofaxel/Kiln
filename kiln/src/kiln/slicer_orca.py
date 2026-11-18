@@ -125,6 +125,17 @@ _PROCESS_ACCELERATION: dict[str, tuple[str, str]] = {
     "travel_acceleration": ("travel_acceleration", "default_acceleration"),
 }
 
+# Accelerations one slicer of the family has and another does not, written
+# for all of them: a preset key a slicer does not know is ignored, and one it
+# knows and was not handed is filled from its own defaults.  Short travels
+# fall back to travel's, as PrusaSlicer documents; a first-layer travel is a
+# travel; the prime tower prints at the default.
+_FAMILY_ACCELERATION: dict[str, tuple[str, str]] = {
+    "travel_short_distance_acceleration": ("travel_short_distance_acceleration", "travel_acceleration"),
+    "first_layer_travel_acceleration": ("initial_layer_travel_acceleration", "travel_acceleration"),
+    "wipe_tower_acceleration": ("prime_tower_acceleration", "default_acceleration"),
+}
+
 # The machine limits Orca clamps a role's acceleration to (same name on both
 # sides).
 _ACCELERATION_CLAMP_LIMITS: tuple[str, ...] = (
@@ -523,7 +534,7 @@ def _acceleration(settings: dict[str, str], key: str) -> float:
             value = 0.0
         if value > 0 or key == "default_acceleration":
             return max(value, 0.0)
-        key = _PROCESS_ACCELERATION.get(key, ("", "default_acceleration"))[1]
+        key = (_PROCESS_ACCELERATION.get(key) or _FAMILY_ACCELERATION.get(key) or ("", "default_acceleration"))[1]
     return 0.0
 
 
@@ -735,16 +746,20 @@ def settings_to_orca_presets(
         if raw:
             process[dst] = raw
 
-    # "0" when the settings state no acceleration, which is
-    # PrusaSlicer's own default and leaves the printer's acceleration alone.
-    # Once a default is stated, every role is written out, so none of them
-    # falls through to Orca's per-role numbers.
+    # Every role is written out, stated or not, so none of them falls
+    # through to the slicer's own per-role numbers: the stated value, else
+    # PrusaSlicer's documented fallback, down to the default.  With no
+    # default stated every role is "0", which each slicer of this family
+    # reads as no acceleration command, and the printer keeps its own.
     default_accel = _acceleration(settings, "default_acceleration")
     process["default_acceleration"] = f"{default_accel:g}"
+    role_accels = {
+        src: _acceleration(settings, src) if default_accel else 0.0
+        for src in (*_PROCESS_ACCELERATION, *_FAMILY_ACCELERATION)
+    }
+    for src, (dst, _fallback) in (*_PROCESS_ACCELERATION.items(), *_FAMILY_ACCELERATION.items()):
+        process[dst] = f"{role_accels[src]:g}"
     if default_accel:
-        role_accels = {src: _acceleration(settings, src) for src in _PROCESS_ACCELERATION}
-        for src, (dst, _fallback) in _PROCESS_ACCELERATION.items():
-            process[dst] = f"{role_accels[src]:g}"
         # Orca clamps every M204 to its machine limits even when it does not
         # emit them -- measured: 5500 and 8000 came out as 1500, its default,
         # where PrusaSlicer wrote them as asked.  A limit the settings do not

@@ -911,6 +911,59 @@ def _ensure_estimate_motion(settings: dict[str, str], profile_id: str) -> None:
             settings[key] = _limit(motion[source])
 
 
+#: The roles that accelerate in step with their own speed: the layer that
+#: has to stick, and the surfaces a person sees.
+_PACED_ACCELERATIONS: dict[str, str] = {
+    "first_layer_acceleration": "first_layer_speed",
+    "external_perimeter_acceleration": "external_perimeter_speed",
+    "top_solid_infill_acceleration": "top_solid_infill_speed",
+}
+
+#: The speeds a profile's pace is read from.
+_PACE_SPEEDS: tuple[str, ...] = (
+    "perimeter_speed",
+    "external_perimeter_speed",
+    "infill_speed",
+    "solid_infill_speed",
+)
+
+
+def _ensure_acceleration_coverage(settings: dict[str, str], profile_id: str) -> None:
+    """State the accelerations the print runs at, in place.
+
+    A slicer handed no acceleration answers in its own way: one writes none,
+    another writes its own defaults into the G-code.  Kiln states them, so
+    every slicer it drives writes the same ones.
+
+    The working acceleration is the one the printer's own start sequence
+    sets (:func:`kiln.printers.bambu_3mf.start_sequence_motion`), the same
+    reading the estimate is made at.  The first layer and the visible
+    surfaces (:data:`_PACED_ACCELERATIONS`) take the share of it that their
+    speed is of the profile's fastest; no role runs above it.
+
+    A stated ``default_acceleration`` is the author speaking and nothing is
+    added to it; a stated role is kept.  A printer with no start sequence of
+    its own states none, and every slicer is told to write none: the printer
+    keeps its own.
+    """
+    if "default_acceleration" in settings:
+        return
+    from kiln.printers.bambu_3mf import start_sequence_motion
+
+    nozzle = str(settings.get("nozzle_diameter", "0.4")).replace(";", ",").split(",")[0]
+    working = (start_sequence_motion(profile_id, nozzle) or {}).get("accel")
+    if not working:
+        return
+    settings["default_acceleration"] = f"{working:g}"
+    fastest = max((speed_mm_s(settings, key) or 0.0 for key in _PACE_SPEEDS), default=0.0)
+    if not fastest:
+        return
+    for role, speed_key in _PACED_ACCELERATIONS.items():
+        speed = speed_mm_s(settings, speed_key)
+        if speed and role not in settings:
+            settings[role] = f"{round(working * min(1.0, speed / fastest)):g}"
+
+
 def _ensure_bed(settings: dict[str, str], profile_id: str, printer_id: str) -> None:
     """Give the generic profile the bed of the printer it is standing in for.
 
@@ -1143,6 +1196,8 @@ def _apply_printer_invariants(settings: dict[str, str], profile_id: str) -> None
     _ensure_flow_ceiling(settings, profile_id)
     _ensure_estimate_motion(settings, profile_id)
     _apply_profile_invariants(settings)
+    # After the speeds are complete: the paced roles read them.
+    _ensure_acceleration_coverage(settings, profile_id)
 
 
 #: How thin walls are laid, stated on every profile Kiln writes instead of
