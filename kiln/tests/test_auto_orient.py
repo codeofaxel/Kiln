@@ -1289,6 +1289,60 @@ class TestKilnProRankingOnAPlainInstall:
 
 
 
+
+class TestAKilnProPlanIsToldWhenItsOrderMisses:
+    """A Kiln Pro plan on a plain install whose order does not arrive is
+    ranked by bed contact, and ``auto_orient_model`` says so once a session:
+    what was on the line, why, what Kiln did instead and the fix, in the four
+    causes' shared words.  The result itself is the floor's, unchanged."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_session(self):
+        from kiln import served_public
+
+        served_public._reset_for_tests()
+        yield
+        served_public._reset_for_tests()
+
+    def test_a_signed_out_miss_is_said_once_with_why_and_the_fix(self, tmp_path, monkeypatch):
+        _served_ranking(monkeypatch, {
+            "success": False, "status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "Sign in.",
+        })
+        stl = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        out = _auto_orient_tool()(file_path=stl)
+        assert out["success"] is True and out["why"] == "signed_out"
+        assert out["warnings"] == [
+            "Kiln Pro orders this part's poses on Kiln's servers. Kiln can't get that order right now "
+            "because Kiln is signed out, so it ranked them by bed contact on this computer. "
+            "Sign in and try again."
+        ]
+        again = _auto_orient_tool()(file_path=stl)
+        assert "warnings" not in again and "why" not in again, "said once a session"
+
+    def test_servers_that_do_not_answer_are_said_too(self, tmp_path, monkeypatch):
+        def offline(kwargs):
+            raise ConnectionError("no route to host")
+
+        _served_ranking(monkeypatch, offline)
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 20, 20, 5))
+        assert out["why"] in ("offline", "unanswered")
+        assert "ranked them by bed contact on this computer" in out["warnings"][0]
+
+    def test_an_order_that_arrives_says_nothing(self, tmp_path, monkeypatch):
+        _served_ranking(
+            monkeypatch,
+            lambda kw: {"success": True, "status": "ok", "known": True,
+                        "order": list(range(len(kw["candidates"])))},
+        )
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 20, 20, 5))
+        assert "warnings" not in out and "why" not in out
+
+    def test_a_free_plan_is_told_nothing_about_a_miss(self, tmp_path, monkeypatch):
+        _hide_scorer(monkeypatch)
+        out = _auto_orient_tool()(file_path=_make_flat_cube_stl(tmp_path, 20, 20, 5))
+        assert "warnings" not in out and "why" not in out
+
+
 # ---------------------------------------------------------------------------
 # Copies at named places, and how many a clear bed holds
 # ---------------------------------------------------------------------------
