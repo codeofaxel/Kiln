@@ -1157,6 +1157,30 @@ def _isolate_slice_ledger(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_upload_memory():
+    """Start and end each test with no remembered uploads.
+
+    The server keeps, for the life of its process, which local file each
+    printer-side name was uploaded from, and every start asks it for a copy
+    of the file it is starting.  The join is by base name and a test's temp
+    files outlive the test, so an upload of ``part.gcode`` in one test is
+    the local copy a later test's start of ``part.gcode`` finds: that start
+    is answered from a file the test never made.  The same class as the
+    slice ledger above.  A test that wants an entry puts it there itself.
+    """
+    server = sys.modules.get("kiln.server")
+    remembered = getattr(server, "_UPLOADED_FROM", None)
+    if isinstance(remembered, dict):
+        remembered.clear()
+    yield
+    # The server may have been imported by the test itself.
+    server = sys.modules.get("kiln.server")
+    remembered = getattr(server, "_UPLOADED_FROM", None)
+    if isinstance(remembered, dict):
+        remembered.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_kiln_db(tmp_path, monkeypatch):
     """Keep the suite out of the developer's real ``~/.kiln/kiln.db``.
 
