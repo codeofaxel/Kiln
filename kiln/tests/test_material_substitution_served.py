@@ -306,16 +306,21 @@ class TestAMissIsTheBasicList:
         assert all("food_safe" in s for s in out["substitutes"])
 
 
+#: The names the substitution rules were built with, by digest
+#: (tests/_moved_away.py).
+_RULE_BUILDER_NAMES = frozenset({
+    "6731b9696a96338bd653e2043ccab853d2c37e3fb498db82f8024971b39d2a76",
+    "19544c80bcc71d7b7e27912ca41d59d065ad4282ab9dcc2f3fc4f188fb29289f",
+    "d7f3690eb7f99844f61bc84c21e8c0efc3dd252a9f93b55352bb811dd2c86493",
+})
+
+
 class TestTheRulesAreNotInThisPackage:
     def test_the_rules_module_is_gone(self):
         assert importlib.util.find_spec("kiln.material_substitution") is None
 
     def test_no_public_source_builds_substitution_rules(self):
+        from tests._moved_away import tokens_back
+
         src = Path(__file__).resolve().parents[1] / "src" / "kiln"
-        offenders = [
-            str(path.relative_to(src))
-            for path in src.rglob("*.py")
-            if any(word in path.read_text(encoding="utf-8", errors="replace")
-                   for word in ("_add_bidirectional", "SubstitutionMatrix", "_build_builtin_rules"))
-        ]
-        assert offenders == []
+        assert tokens_back(_RULE_BUILDER_NAMES, src) == []

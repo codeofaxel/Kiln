@@ -77,6 +77,53 @@ def strings_back(sentences: dict[str, int], package: Path = PACKAGE) -> list[str
     return found
 
 
+def tokens_back(digests: Iterable[str], package: Path = PACKAGE) -> list[str]:
+    """``file: digest`` for every Python file in *package* whose text holds a
+    name (a run of letters, digits and underscores, anywhere: code, a string,
+    a comment) whose digest is one of *digests*."""
+    wanted = set(digests)
+    found: list[str] = []
+    for path in sorted(package.rglob("*.py")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        hits = {key for token in set(re.findall(r"[A-Za-z0-9_]+", text)) if (key := digest(token)) in wanted}
+        found.extend(f"{path.relative_to(package)}: {key}" for key in sorted(hits))
+    return found
+
+
+def _identifiers(tree: ast.AST) -> set[str]:
+    """Every name *tree*'s code uses or defines (not its strings or comments)."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.arg, ast.keyword)) and node.arg:
+            names.add(node.arg)
+        elif isinstance(node, ast.alias):
+            names.update(n for n in (node.name, node.asname) if n)
+    return names
+
+
+def names_back(digests: Iterable[str], package: Path = PACKAGE) -> list[str]:
+    """``file: digest`` for every Python file in *package* whose code uses or
+    defines a name (a variable, field, function, class, argument or keyword)
+    whose digest is one of *digests*.  The same word as a string, a dict key
+    for one, is not a name."""
+    wanted = set(digests)
+    found: list[str] = []
+    for path in sorted(package.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        hits = {key for name in _identifiers(tree) if (key := digest(name)) in wanted}
+        found.extend(f"{path.relative_to(package)}: {key}" for key in sorted(hits))
+    return found
+
+
 def files_back(digests: Iterable[str], package: Path = PACKAGE) -> list[str]:
     """Every file in *package* whose name's digest is one of *digests*."""
     wanted = set(digests)

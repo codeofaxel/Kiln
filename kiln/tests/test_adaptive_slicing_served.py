@@ -449,12 +449,21 @@ def test_a_fault_in_kiln_pro_here_is_a_generic_answer_that_names_nothing(served,
 # ---------------------------------------------------------------------------
 
 
+#: The per-material table's name, and the slicer's two readers of it, by
+#: digest (tests/_moved_away.py).
+_TABLE_NAME = frozenset({"d2e48bb0ab1871174ce3d34b082e45f391970ba90735737bfbb5844992c323ef"})
+_TABLE_READERS = frozenset({
+    "066b1796370cdf19af3bb32850f2c362906035f05e7d63739537366c6753dadb",
+    "fe1ae58bc2c12551bf1f7e5fa691e38528e043871c308a8c2798d6e2bbca3424",
+})
+
+
 def test_the_per_material_table_is_not_in_this_package():
     import kiln.adaptive_slicer as eng
+    from tests._moved_away import attributes_back
 
-    assert not hasattr(eng, "_MATERIAL_PROFILES")
-    assert not hasattr(eng.AdaptiveSlicer, "get_material_profile")
-    assert not hasattr(eng.AdaptiveSlicer, "list_supported_materials")
+    assert attributes_back(eng, _TABLE_NAME) == []
+    assert attributes_back(eng.AdaptiveSlicer, _TABLE_READERS) == []
     spec = importlib.util.spec_from_file_location(
         "audit_public_material_tables_for_adaptive", REPO / "scripts" / "audit_public_material_tables.py"
     )
