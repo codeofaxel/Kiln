@@ -32,9 +32,11 @@ from typing import Any
 
 from kiln.slicer_profiles import (
     ORCA_PLATE_TYPES,
+    TEMPERATURE_KEYS,
     UnsafeSettingError,
     ensure_layer_e_reset,
     judged_numbers,
+    nozzle_positions,
     refuse_unsafe_settings,
     speed_mm_s,
 )
@@ -44,6 +46,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PRIME_TOWER_WIDTH_MM",
     "OrcaPresets",
+    "PresetExtrasError",
     "SpellingConflict",
     "drawn_brim_type",
     "in_prusaslicer_spelling",
@@ -613,6 +616,66 @@ def _extruding_relative(settings: dict[str, str]) -> dict[str, str]:
     return relative
 
 
+#: The three presets a nozzle record's ``preset_extras`` may add to.
+_EXTRAS_PRESETS: tuple[str, ...] = ("machine", "process", "filament")
+
+
+class PresetExtrasError(UnsafeSettingError):
+    """A nozzle record whose ``preset_extras`` are not the shape this
+    writer lays over a preset, refused before any preset is written."""
+
+
+def _preset_extras(nozzles: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """The ``preset_extras`` of *nozzles*, by preset, checked.
+
+    Each of ``machine`` / ``process`` / ``filament`` is a mapping of setting
+    name to a string or a list of strings.  A name is held to the rules
+    every other setting is (:func:`refuse_unsafe_settings`: the shape of a
+    name, never a program to run), and may not command a heater: a
+    temperature is stated in the settings, where it is checked against the
+    printer.  Anything else raises :class:`PresetExtrasError` or the
+    setting rule's own error.
+    """
+    raw = (nozzles or {}).get("preset_extras")
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise PresetExtrasError("The printer's nozzle record has preset extras Kiln cannot read, so nothing was sliced.")
+    extras: dict[str, dict[str, Any]] = {}
+    for preset, body in raw.items():
+        if preset not in _EXTRAS_PRESETS or not isinstance(body, Mapping):
+            raise PresetExtrasError(
+                f"The printer's nozzle record has preset extras for {str(preset)!r}, which is not a "
+                "preset Kiln writes, so nothing was sliced."
+            )
+        # Names only: an extra's value is written as JSON, where a G-code
+        # value keeps its real line breaks.
+        refuse_unsafe_settings(dict.fromkeys(body, ""))
+        for key, value in body.items():
+            if key in TEMPERATURE_KEYS or (prusa_key_for(key) or key) in TEMPERATURE_KEYS:
+                raise PresetExtrasError(
+                    f"The printer's nozzle record sets the temperature {key!r} outside the settings "
+                    "Kiln checks against the printer, so nothing was sliced."
+                )
+            listed = isinstance(value, list) and all(isinstance(item, str) for item in value)
+            if not (isinstance(value, str) or listed):
+                raise PresetExtrasError(
+                    f"The printer's nozzle record gives {key!r} a value that is neither text nor a "
+                    "list of text, so nothing was sliced."
+                )
+        extras[preset] = {key: (list(value) if isinstance(value, list) else value) for key, value in body.items()}
+    return extras
+
+
+def _for_nozzle_positions(machine: dict[str, Any], positions: int) -> None:
+    """Widen, in place, each per-extruder value of *machine* that holds one
+    entry to *positions* entries of it."""
+    for key in _MACHINE_PER_EXTRUDER.values():
+        value = machine.get(key)
+        if isinstance(value, list) and len(value) == 1:
+            machine[key] = value * positions
+
+
 def settings_to_orca_presets(
     settings: dict[str, str],
     *,
@@ -620,6 +683,7 @@ def settings_to_orca_presets(
     filament_colors: Sequence[str] | None = None,
     wipe_tower_xy: tuple[float, float] | None = None,
     wipe_tower_width_mm: float | None = None,
+    nozzles: Mapping[str, Any] | None = None,
 ) -> OrcaPresets:
     """Translate Kiln's flat PrusaSlicer settings into Orca presets.
 
@@ -641,9 +705,20 @@ def settings_to_orca_presets(
             single-filament.
         wipe_tower_width_mm: The tower's width along X when the placement
             chose one; :data:`PRIME_TOWER_WIDTH_MM` otherwise.
+        nozzles: The printer's nozzle record
+            (:func:`kiln.slicer_profiles.nozzles_of`).  One sliced for two
+            or more nozzle positions widens the machine's per-extruder
+            values to that many entries and lays the record's served preset
+            extras over the presets, the filament's onto every filament
+            preset.  ``None``, or a record sliced for one position, leaves
+            the presets exactly as they are without it.
 
     Returns:
         An :class:`OrcaPresets` with the preset bodies filled in.
+
+    Raises:
+        UnsafeSettingError: A setting, or a preset extra, this writer
+            refuses to serialize.
     """
     # The same refusal as the .ini writer (kiln.slicer_profiles), at this
     # writer: a key or value carrying a line break is never serialized.
@@ -867,6 +942,15 @@ def settings_to_orca_presets(
         else:
             bodies[preset][key] = text
 
+    # --- more than one nozzle position ----------------------------------
+    # After everything above, so a served extra is the last word on its key.
+    positions = nozzle_positions(nozzles)
+    if positions >= 2:
+        extras = _preset_extras(nozzles)
+        _for_nozzle_positions(machine, positions)
+        for preset in _EXTRAS_PRESETS:
+            bodies[preset].update(extras.get(preset, {}))
+
     if not multicolor:
         return OrcaPresets(machine=machine, process=process, filament=filament)
 
@@ -897,6 +981,7 @@ def write_orca_presets(
     filament_colors: Sequence[str] | None = None,
     wipe_tower_xy: tuple[float, float] | None = None,
     wipe_tower_width_mm: float | None = None,
+    nozzles: Mapping[str, Any] | None = None,
 ) -> OrcaPresets:
     """Serialize *settings* to preset files in *out_dir*.
 
@@ -911,6 +996,7 @@ def write_orca_presets(
         filament_colors=filament_colors,
         wipe_tower_xy=wipe_tower_xy,
         wipe_tower_width_mm=wipe_tower_width_mm,
+        nozzles=nozzles,
     )
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
 

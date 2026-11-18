@@ -1138,6 +1138,63 @@ def nozzle_fit_of(profile_path: str | None) -> dict[str, Any] | None:
     return None
 
 
+#: The comment line a written profile carries its printer's nozzle record
+#: on, when that record is sliced for more than one nozzle position.  A
+#: comment, as :data:`_NOZZLE_FIT_MARK` is, so every slicer ignores it and
+#: every profile derived from this one still carries it to
+#: :func:`nozzles_of`.
+_NOZZLES_MARK = "# kiln_nozzles = "
+
+
+def nozzle_positions(nozzles: Any) -> int:
+    """How many nozzle positions the nozzle record *nozzles* is sliced for
+    (its ``sliced_as``): 1 for no record, a record that does not say, or
+    one that says fewer than two."""
+    if not isinstance(nozzles, Mapping):
+        return 1
+    raw = nozzles.get("sliced_as")
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return 1
+    return raw if raw >= 2 else 1
+
+
+def _sliced_nozzles(profile_id: str) -> dict[str, Any] | None:
+    """The nozzle record of the held profile *profile_id*, when it is
+    sliced for two or more nozzle positions; ``None`` otherwise."""
+    block = (_raw_rows.get(profile_id) or {}).get("nozzles")
+    return dict(block) if nozzle_positions(block) >= 2 else None
+
+
+def _nozzles_key(nozzles: dict[str, Any] | None) -> dict[str, str]:
+    """*nozzles* as an entry of a profile's cache key; nothing with none,
+    so a profile that carries no record keeps the key it had."""
+    return {_NOZZLES_MARK: json.dumps(nozzles, sort_keys=True)} if nozzles else {}
+
+
+def _with_nozzles(ini: str, nozzles: dict[str, Any] | None) -> str:
+    """*ini* carrying *nozzles* on its comment line; unchanged with none."""
+    if not nozzles:
+        return ini
+    return f"{ini}{_NOZZLES_MARK}{json.dumps(nozzles, sort_keys=True)}\n"
+
+
+def nozzles_of(profile_path: str | None) -> dict[str, Any] | None:
+    """The nozzle record the profile at *profile_path* carries, or ``None``:
+    a profile for a printer sliced with one nozzle, one Kiln did not write,
+    or one that cannot be read.  Never raises."""
+    if not profile_path:
+        return None
+    try:
+        with open(profile_path, encoding="utf-8", newline="") as fh:
+            for line in profile_lines(fh.read()):
+                if line.startswith(_NOZZLES_MARK):
+                    block = json.loads(line[len(_NOZZLES_MARK):])
+                    return block if nozzle_positions(block) >= 2 else None
+    except (OSError, UnicodeDecodeError, ValueError):
+        logger.debug("nozzle record of %s could not be read", profile_path, exc_info=True)
+    return None
+
+
 def _apply_printer_invariants(settings: dict[str, str], profile_id: str) -> None:
     """The rules that need to know the printer, then every general one."""
     _ensure_flow_ceiling(settings, profile_id)
@@ -1356,17 +1413,23 @@ def resolve_slicer_profile(
     # reasons, and the file says the reason) and which keys the caller
     # stated (an override equal to the printer's own value is still theirs).
     stated = sorted(overrides or ())
-    fit_key = _settings_hash({**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True)})
+    nozzles = _sliced_nozzles(profile.id)
+    fit_key = _settings_hash(
+        {**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True), **_nozzles_key(nozzles)}
+    )
     cache_key = _cache_key(f"{profile.id}:{fit_key}:{','.join(stated)}:{standing_in_for or ''}")
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
-    ini_content = _with_nozzle_fit(
-        _settings_to_ini(
-            merged, profile.display_name, printer_id=profile.id, stated=stated,
-            standing_in_for=standing_in_for,
+    ini_content = _with_nozzles(
+        _with_nozzle_fit(
+            _settings_to_ini(
+                merged, profile.display_name, printer_id=profile.id, stated=stated,
+                standing_in_for=standing_in_for,
+            ),
+            fit,
         ),
-        fit,
+        nozzles,
     )
 
     path = _write_profile(ini_content, prefix=f"{profile.id}_")
@@ -1767,19 +1830,25 @@ def resolve_multiextruder_profile(
     _apply_printer_invariants(merged, profile.id)
 
     stated = sorted(overrides or ())
-    fit_key = _settings_hash({**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True)})
+    nozzles = _sliced_nozzles(profile.id)
+    fit_key = _settings_hash(
+        {**merged, _NOZZLE_FIT_MARK: json.dumps(fit, sort_keys=True), **_nozzles_key(nozzles)}
+    )
     cache_key = _cache_key(f"{profile.id}_mme{num_extruders}:{fit_key}:{','.join(stated)}")
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
         return _temp_cache[cache_key]
 
-    ini_content = _with_nozzle_fit(
-        _settings_to_ini(
-            merged,
-            f"{profile.display_name} (AMS {num_extruders}-color)",
-            printer_id=profile.id,
-            stated=stated,
+    ini_content = _with_nozzles(
+        _with_nozzle_fit(
+            _settings_to_ini(
+                merged,
+                f"{profile.display_name} (AMS {num_extruders}-color)",
+                printer_id=profile.id,
+                stated=stated,
+            ),
+            fit,
         ),
-        fit,
+        nozzles,
     )
 
     path = _write_profile(ini_content, prefix=f"{profile.id}_mme{num_extruders}_")

@@ -37,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -181,6 +181,19 @@ class ProjectPlateError(SlicerError):
 REFUSED_OFF_THE_BED = "off_the_bed"
 #: The print paths of two objects on the plate collide.
 REFUSED_PATHS_COLLIDE = "paths_collide"
+#: A filament was put on a nozzle that cannot reach a part it prints.
+REFUSED_NOZZLE_REACH = "nozzle_cannot_reach"
+
+
+class NozzleMapError(SlicerError):
+    """A slice for more than one nozzle that cannot be run as asked: the
+    filament-to-nozzle map does not fit the print or the printer, or the
+    slicer in hand cannot slice for more than one nozzle.  Raised before
+    any slicer is launched; ``code`` is the door's error code."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class SlicerRefusal(SlicerError):
@@ -262,6 +275,9 @@ class SliceResult:
     #: say it; the key's name is what the stage looks for
     #: (:func:`kiln.stage_link.find_mesh_path`).
     stage_mesh_path: str | None = None
+    #: Which nozzle printed each filament, as the sliced file states it
+    #: (:func:`filament_map_of`); ``None`` for a slice made for one nozzle.
+    filament_map: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -282,6 +298,8 @@ class SliceResult:
             d["layer"] = self.layer.to_dict()
         if self.project_plate is not None:
             d["project_plate"] = self.project_plate
+        if self.filament_map is not None:
+            d["filament_map"] = self.filament_map
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -600,9 +618,12 @@ _ORCA_SIGSEGV_RETURNCODES = frozenset({-11, 139})
 _ORCA_REFUSAL_WORDS = (
     (REFUSED_OFF_THE_BED, re.compile(r"found gcode (?:in )?unprintable|g-code outside of the printable area", re.IGNORECASE)),
     (REFUSED_PATHS_COLLIDE, re.compile(r"path conflicts? found", re.IGNORECASE)),
+    (REFUSED_NOZZLE_REACH, re.compile(r"cannot be mapped to correct extruders", re.IGNORECASE)),
 )
 #: Return codes read as a refusal, by kind.
-_ORCA_REFUSAL_STATUSES = {152: REFUSED_OFF_THE_BED, 154: REFUSED_OFF_THE_BED, 155: REFUSED_PATHS_COLLIDE}
+_ORCA_REFUSAL_STATUSES = {
+    152: REFUSED_OFF_THE_BED, 154: REFUSED_OFF_THE_BED, 155: REFUSED_PATHS_COLLIDE, 190: REFUSED_NOZZLE_REACH,
+}
 #: The two objects the slicer names in a path conflict.
 _PATH_CONFLICT_OBJECTS = re.compile(r"path conflicts? found between (.+?) and (.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
@@ -648,7 +669,133 @@ def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal
             f"slice again.",
             kind=kind, code="OBJECTS_COLLIDE", slicer=slicer_name, objects=objects,
         )
+    if kind == REFUSED_NOZZLE_REACH:
+        return SlicerRefusal(
+            f"{slicer_name} refused to slice: that nozzle cannot reach this part; move it toward "
+            f"the middle or use the other nozzle.",
+            kind=kind, code="NOZZLE_CANNOT_REACH", slicer=slicer_name,
+        )
     return None
+
+
+# ---------------------------------------------------------------------------
+# More than one nozzle
+# ---------------------------------------------------------------------------
+
+_INSTALL_BAMBU_STUDIO = (
+    "Kiln slices for more than one nozzle with Bambu Studio: install it from "
+    "bambulab.com/download/studio, or set KILN_SLICER_PATH to its binary, and slice again."
+)
+
+#: The lines of a sliced file that state its filament-to-nozzle map.
+_FILAMENT_MAP_LINE = re.compile(r"^;\s*filament_map\s*=\s*(.+?)\s*$")
+_FILAMENT_MAP_MODE_LINE = re.compile(r"^;\s*filament_map_mode\s*=\s*(.+?)\s*$")
+
+
+def _is_bambu_studio(info: SlicerInfo) -> bool:
+    """Whether *info* is Bambu Studio itself, by name."""
+    return "bambu" in f"{info.name or ''} {os.path.basename(info.path or '')}".lower()
+
+
+def _find_bambu_studio() -> SlicerInfo | None:
+    """The installed Bambu Studio, if any, from the same places
+    :func:`find_slicer` looks; ``None`` quietly."""
+    candidates = [found for name in _SLICER_NAMES if (found := shutil.which(name))]
+    candidates.extend(p for p in _MACOS_PATHS if os.path.isfile(p) and os.access(p, os.X_OK))
+    env_path = os.environ.get("KILN_SLICER_PATH")
+    if env_path and os.path.isfile(env_path) and os.access(env_path, os.X_OK):
+        candidates.append(env_path)
+    for path in candidates:
+        info = SlicerInfo(path=path, name=Path(path).stem.lower())
+        if _is_bambu_studio(info):
+            return info
+    return None
+
+
+def checked_filament_map(filament_map: Any, *, filaments: int, positions: int) -> list[int] | None:
+    """*filament_map* as a list of nozzle numbers, one per filament, or
+    ``None`` when none was given.
+
+    Entry ``i`` is the nozzle (1 for the first) that prints filament
+    ``i + 1``.  Accepts a list of whole numbers or the same as
+    comma-separated text.
+
+    Raises:
+        NozzleMapError: The printer is sliced for one nozzle
+            (``NOZZLE_MAP_NOT_USED``), an entry is not a whole number or
+            names a nozzle the printer does not have (``NO_SUCH_NOZZLE``),
+            or the map does not have one entry per filament
+            (``NOZZLE_MAP_WRONG_LENGTH``).
+    """
+    if filament_map is None or filament_map == "" or filament_map == []:
+        return None
+    if positions < 2:
+        raise NozzleMapError(
+            "A filament-to-nozzle map was given, and this printer is sliced with one nozzle, so "
+            "there is nothing to map. Leave the map out and slice again.",
+            code="NOZZLE_MAP_NOT_USED",
+        )
+    entries = filament_map.split(",") if isinstance(filament_map, str) else list(filament_map)
+    asked: list[int] = []
+    for entry in entries:
+        text = str(entry).strip()
+        if isinstance(entry, bool) or not text.isdigit() or not 1 <= int(text) <= positions:
+            raise NozzleMapError(
+                f"The filament-to-nozzle map names nozzle {text or entry!r}, and this printer has "
+                f"nozzles 1 to {positions}. Give one of those numbers for each filament and slice again.",
+                code="NO_SUCH_NOZZLE",
+            )
+        asked.append(int(text))
+    if len(asked) != filaments:
+        raise NozzleMapError(
+            f"The filament-to-nozzle map has {len(asked)} "
+            f"{'entry' if len(asked) == 1 else 'entries'}, and this print uses {filaments} "
+            f"{'filament' if filaments == 1 else 'filaments'}. Give one nozzle number for each "
+            f"filament, in filament order, and slice again.",
+            code="NOZZLE_MAP_WRONG_LENGTH",
+        )
+    return asked
+
+
+def filament_map_of(gcode_path: str | None) -> dict[str, Any] | None:
+    """The filament-to-nozzle map the sliced file at *gcode_path* states,
+    or ``None`` when it states none or cannot be read.  Never raises.
+
+    ``filament_to_nozzle`` lists, per filament in order, the nozzle (1 for
+    the first) that printed it; ``nozzle_filaments`` is the same read the
+    other way, nozzle number to the filaments (1 for the first) on it;
+    ``mode`` is who chose the map, in the slicer's own word, when the file
+    says.
+    """
+    if not gcode_path:
+        return None
+    stated: list[int] | None = None
+    mode: str | None = None
+    try:
+        with open(gcode_path, errors="replace", encoding="utf-8") as fh:
+            for line in fh:
+                if not line.startswith(";"):
+                    continue
+                found = _FILAMENT_MAP_LINE.match(line)
+                if found and stated is None:
+                    parts = [part.strip() for part in found.group(1).split(",")]
+                    if parts and all(part.isdigit() for part in parts):
+                        stated = [int(part) for part in parts]
+                    continue
+                found = _FILAMENT_MAP_MODE_LINE.match(line)
+                if found and mode is None:
+                    mode = found.group(1)
+    except OSError:
+        return None
+    if stated is None:
+        return None
+    by_nozzle: dict[str, list[int]] = {}
+    for filament, nozzle in enumerate(stated, start=1):
+        by_nozzle.setdefault(str(nozzle), []).append(filament)
+    read: dict[str, Any] = {"filament_to_nozzle": stated, "nozzle_filaments": by_nozzle}
+    if mode:
+        read["mode"] = mode
+    return read
 
 
 def _printer_name_of(profile: str | None) -> str | None:
@@ -1171,6 +1318,8 @@ def _slice_with_orca(
     timeout: int,
     multicolor: dict[str, Any] | None = None,
     drawn_as: str | None = None,
+    nozzles: dict[str, Any] | None = None,
+    filament_map: list[int] | None = None,
 ) -> SliceResult:
     """Slice through the BambuStudio/OrcaSlicer command line.
 
@@ -1184,6 +1333,14 @@ def _slice_with_orca(
     Orca names its own output (``plate_1.gcode``) inside ``--outputdir``
     rather than taking an output path, so it writes to a private directory
     and the result is moved to where the caller asked for it.
+
+    *nozzles* is the printer's nozzle record when the slice is for more
+    than one nozzle (:func:`kiln.slicer_orca.settings_to_orca_presets`).
+    *filament_map* is the caller's filament-to-nozzle map, already checked
+    (:func:`checked_filament_map`): the slicer is told to use it, and a
+    file that states any other map is not kept.  With none, the slicer
+    maps the filaments itself.  The result's ``filament_map`` is what the
+    file states.
     """
     with tempfile.TemporaryDirectory(prefix="kiln_orca_") as work_dir:
         cmd: list[str] = [slicer.path, "--slice", "0", "--outputdir", work_dir]
@@ -1254,9 +1411,12 @@ def _slice_with_orca(
             filament_colors=filament_colors,
             wipe_tower_xy=wipe_xy,
             wipe_tower_width_mm=None if tower is None else tower[2],
+            nozzles=nozzles,
         )
         cmd += ["--load-settings", f"{presets.machine_path};{presets.process_path}"]
         cmd += ["--load-filaments", ";".join(presets.filament_paths)]
+        if filament_map:
+            cmd += ["--filament-map-mode", "Manual", "--filament-map", ",".join(str(n) for n in filament_map)]
 
         if extra_args:
             cmd.extend(extra_args)
@@ -1302,6 +1462,13 @@ def _slice_with_orca(
         if result.returncode in _ORCA_SIGSEGV_RETURNCODES and not crashed_after_finishing:
             slicer_name = os.path.basename(slicer.path)
             printer_name = _printer_name_of(profile)
+            if nozzles:
+                raise SlicerError(
+                    f"{slicer_name} crashed while slicing this print for more than one nozzle "
+                    f"(it was stopped by signal {_signal_of(result.returncode)}): the slicer "
+                    f"failed, not the print. Slice again; if it crashes the same way, check that "
+                    f"{slicer_name} is up to date."
+                )
             if printer_name and printer_name.startswith("Bambu Lab"):
                 raise SlicerError(
                     f"{slicer_name} crashed while slicing. This is a "
@@ -1364,6 +1531,14 @@ def _slice_with_orca(
                 f"or scale it down so it fits one plate."
             )
 
+        used_map = filament_map_of(str(produced[0])) if nozzles else None
+        if filament_map and (used_map or {}).get("filament_to_nozzle") != filament_map:
+            raise SlicerError(
+                f"{os.path.basename(slicer.path)} did not slice with the filament-to-nozzle map "
+                f"that was asked for, so the file was not kept. Slice again without a map to let "
+                f"the slicer choose, or check that this slicer is up to date."
+            )
+
         shutil.move(str(produced[0]), out_file)
 
     _record_slice(profile, input_abs, out_file, drawn_as=drawn_as)
@@ -1390,6 +1565,7 @@ def _slice_with_orca(
         message=message,
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
+        filament_map=used_map,
     )
 
 
@@ -1406,7 +1582,7 @@ def slice_file(input_path: str, **kwargs: Any) -> SliceResult:
     """
     try:
         return _slice_file(input_path, **kwargs)
-    except (SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal, ProjectPlateError):
+    except (SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal, ProjectPlateError, NozzleMapError):
         # A refusal is about where the print lands, never its unit, and a
         # door answers it by its kind: rewrapped, it would lose both.
         raise
@@ -1530,10 +1706,18 @@ def _slice_file(
     loaded_material: str | None = None,
     loaded_determined_by: str = LOADED_OBSERVED,
     plate_number: int | None = None,
+    filament_map: Sequence[int] | str | None = None,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
 
     Args:
+        filament_map: For a printer sliced with more than one nozzle, the
+            nozzle (1 for the first) each filament prints from, one entry
+            per filament in filament order.  Left out, the slicer maps the
+            filaments itself.  A map that does not fit the print or the
+            printer, or one given for a printer sliced with one nozzle, is
+            refused before slicing (:class:`NozzleMapError`).  The result's
+            ``filament_map`` says which nozzle printed each filament.
         plate_number: Which plate to slice of a project that holds several
             (1 for the first).  Such a project is never sliced on a guess:
             with none named the slice is refused and the refusal lists the
@@ -1630,7 +1814,29 @@ def _slice_file(
     # the slicer was AUTO-detected, prefer an installed Orca/BambuStudio for
     # this input — the user asked for their colors, not for a binary.  An
     # explicit slicer_path is an explicit choice and is honoured as given.
+    # A slice for more than one nozzle: a printer whose record is sliced
+    # that way, and a plate of two or more filaments or a map the caller
+    # gave.  It is made by Bambu Studio or not at all; one filament with no
+    # map slices for one nozzle, as it does without the record.
+    from kiln.slicer_profiles import nozzle_positions, nozzles_of
+
+    nozzles = nozzles_of(profile)
+    asked_map = checked_filament_map(
+        filament_map, filaments=max(slots_needed, 1), positions=nozzle_positions(nozzles),
+    )
+    if nozzles is not None and not (asked_map or slots_needed >= 2):
+        nozzles = None
     multicolor_switched = False
+    if nozzles is not None and not _is_bambu_studio(slicer):
+        studio = _find_bambu_studio() if slicer_path is None else None
+        if studio is None:
+            raise NozzleMapError(
+                f"This print is for more than one nozzle, and {os.path.basename(slicer.path)} "
+                f"cannot slice that through Kiln, so nothing was sliced. {_INSTALL_BAMBU_STUDIO}",
+                code="MULTI_NOZZLE_NEEDS_BAMBU_STUDIO",
+            )
+        slicer = studio
+        multicolor_switched = slots_needed >= 2
     if (
         slicer_path is None
         and slots_needed >= 2
@@ -1781,6 +1987,7 @@ def _slice_file(
             profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
+            nozzles=nozzles, filament_map=asked_map,
         ), taken), left_out)
     finally:
         for scratch in (layer_scratch, kept_off_scratch):
@@ -1807,6 +2014,8 @@ def _slice_decided(
     nozzle: dict[str, Any] | None,
     supports: Any,
     layer: SliceLayer | None,
+    nozzles: dict[str, Any] | None = None,
+    filament_map: list[int] | None = None,
 ) -> SliceResult:
     """Run the slicer on *sliced_input* with everything :func:`_slice_file`
     decided; *input_abs* is the part as the caller named it."""
@@ -1825,6 +2034,8 @@ def _slice_decided(
             timeout=timeout,
             multicolor=multicolor,
             drawn_as=drawn,
+            # Named only for a slice for more than one nozzle.
+            **({"nozzles": nozzles, "filament_map": filament_map} if nozzles else {}),
         )
         result.filament = filament
         result.nozzle = nozzle

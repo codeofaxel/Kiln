@@ -2532,6 +2532,14 @@ def _auto_wrap_bambu_3mf(
         return (None, f"Bambu auto-wrap failed: {exc}")
 
 
+#: Said on a slice made for more than one nozzle, in place of a print package.
+_MULTI_NOZZLE_NOT_PACKAGED = (
+    "This file was sliced for more than one nozzle. Kiln has not packaged it for the printer, "
+    "so it is not ready to upload or start: the response's filament_map says which nozzle "
+    "prints each filament."
+)
+
+
 def _steer_to_wrapped_upload(
     response: dict,
     threemf_path: str,
@@ -3032,10 +3040,25 @@ class _SlicerToolsPlugin:
             material: str | None = None,
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
             Args:
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order (``[2, 1]``
+                    puts filament 1 on nozzle 2).  Leave unset to let the
+                    slicer map the filaments itself.  A map that does not
+                    fit the print or the printer is refused before slicing
+                    (``NOZZLE_MAP_WRONG_LENGTH``, ``NO_SUCH_NOZZLE``,
+                    ``NOZZLE_MAP_NOT_USED``); a filament put on a nozzle
+                    that cannot reach its part is refused with
+                    ``NOZZLE_CANNOT_REACH``; a slicer that cannot slice for
+                    more than one nozzle with
+                    ``MULTI_NOZZLE_NEEDS_BAMBU_STUDIO``.  The response's
+                    ``filament_map`` block says which nozzle printed each
+                    filament.
                 plate_number: Which plate to slice of a slicer project that
                     holds several plates (1 for the first).  Leave unset for
                     any other file.  A several-plate project with none named
@@ -3130,6 +3153,7 @@ class _SlicerToolsPlugin:
                     output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
+                    **({"filament_map": filament_map} if filament_map else {}),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3152,7 +3176,13 @@ class _SlicerToolsPlugin:
                 # Use the (possibly centered) STL for thumbnail generation
                 # so the LCD preview matches the sliced geometry.
                 _gcode_path = result.to_dict().get("output_path")
-                if _gcode_path:
+                multi_nozzle = isinstance(result.filament_map, dict)
+                if _gcode_path and multi_nozzle:
+                    # A file sliced for more than one nozzle is handed back
+                    # as G-code only: the print package states one nozzle.
+                    threemf_path, warning = None, None
+                    response.setdefault("warnings", []).append(_MULTI_NOZZLE_NOT_PACKAGED)
+                elif _gcode_path:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
                         _gcode_path, effective_printer_id, effective_input,
                         quiet_start=sinfo.get("quiet_start"), lift_floor_mm=sinfo.get("lift_floor_mm"),
@@ -3196,7 +3226,7 @@ class _SlicerToolsPlugin:
                     _steer_to_wrapped_upload(
                         response, threemf_path, effective_printer_id,
                     )
-                elif _gcode_path:
+                elif _gcode_path and not multi_nozzle:
                     # Every other printer prints this G-code as it stands,
                     # so it leaves here carrying its preview and its weight.
                     _steer_to_complete_gcode(

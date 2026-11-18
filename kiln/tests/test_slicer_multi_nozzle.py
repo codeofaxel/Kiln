@@ -1,0 +1,544 @@
+"""Slicing for a printer with more than one nozzle position.
+
+Covered here, with an invented machine and placeholder preset extras: the
+printer's nozzle record travels from the resolved profile to the preset
+writer; the writer widens its per-extruder values and lays the record's
+preset extras over the presets, and writes the same bytes as before when
+there is no record or the record is sliced for one nozzle; a caller's
+filament-to-nozzle map is checked, handed to the slicer and read back from
+the sliced file; and each refusal is said in plain words before or after
+the slicer runs.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import struct
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+from kiln import slicer_profiles
+from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+from kiln.slicer import (
+    REFUSED_NOZZLE_REACH,
+    NozzleMapError,
+    SlicerError,
+    SlicerInfo,
+    SlicerRefusal,
+    _orca_refusal,
+    checked_filament_map,
+    filament_map_of,
+    slice_file,
+)
+from kiln.slicer_orca import PresetExtrasError, settings_to_orca_presets, write_orca_presets
+from kiln.slicer_profiles import (
+    ProgramSettingError,
+    nozzle_positions,
+    nozzles_of,
+    profile_with_overrides,
+    resolve_slicer_profile,
+)
+
+_SETTINGS = {
+    "nozzle_diameter": "0.4",
+    "retract_length": "0.8",
+    "layer_height": "0.2",
+    "bed_shape": "0x0,200x0,200x200,0x200",
+    "temperature": "220",
+    "bed_temperature": "60",
+    "use_relative_e_distances": "1",
+    "gcode_flavor": "marlin",
+}
+
+#: An invented machine's nozzle record.  The extras are placeholders: the
+#: writer lays over whatever the record carries.
+_NOZZLES = {
+    "kind": "fixed_pair",
+    "sliced_as": 2,
+    "preset_extras": {
+        "machine": {"example_machine_key": ["a", "b"], "gcode_flavor": "klipper"},
+        "process": {"example_process_key": "p"},
+        "filament": {"example_filament_key": ["f"]},
+    },
+}
+
+_COLORS = ["#FFFFFF", "#000000"]
+
+
+def _studio() -> SlicerInfo:
+    return SlicerInfo(path="/fake/BambuStudio", name="bambustudio")
+
+
+def _orca() -> SlicerInfo:
+    return SlicerInfo(path="/fake/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
+
+
+def _prusa() -> SlicerInfo:
+    return SlicerInfo(path="/fake/PrusaSlicer", name="prusa-slicer", version="PrusaSlicer-2.9.4 based on Slic3r")
+
+
+def _cube(path: Path, x: float) -> str:
+    lo, hi, y = x, x + 20.0, 90.0
+    v = [
+        (lo, y, 0), (hi, y, 0), (hi, y + 20, 0), (lo, y + 20, 0),
+        (lo, y, 10), (hi, y, 10), (hi, y + 20, 10), (lo, y + 20, 10),
+    ]
+    faces = [
+        (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+    ]
+    with open(path, "wb") as fh:
+        fh.write(b"\0" * 80)
+        fh.write(struct.pack("<I", len(faces)))
+        for a, b, c in faces:
+            fh.write(struct.pack("<3f", 0, 0, 0))
+            for i in (a, b, c):
+                fh.write(struct.pack("<3f", *v[i]))
+            fh.write(struct.pack("<H", 0))
+    return str(path)
+
+
+def _plate(tmp_path: Path, filaments: int = 2) -> str:
+    """One 20 mm cube per filament, side by side, as a 3MF."""
+    parts = [
+        ColorPart(_cube(tmp_path / f"part{i}.stl", 40.0 + 60.0 * i), extruder=i + 1, name=f"part{i}")
+        for i in range(filaments)
+    ]
+    composed = compose_multicolor_3mf(parts, output_path=str(tmp_path / "plate.3mf"))
+    assert composed["success"], composed
+    return composed["output_path"]
+
+
+def _profile(tmp_path: Path, nozzles: dict | None = _NOZZLES) -> str:
+    """A profile for the invented machine, carrying *nozzles* when given."""
+    ini = tmp_path / "invented.ini"
+    body = "".join(f"{k} = {v}\n" for k, v in _SETTINGS.items())
+    ini.write_text(slicer_profiles._with_nozzles(body, nozzles))
+    return str(ini)
+
+
+def _slicer_that_writes(header: str, seen: dict, returncode: int = 0, said: str = ""):
+    """A stand-in for the slicer run: records the command line, the timeout
+    and the presets it was handed, and writes *header* as the sliced file."""
+
+    def run(cmd, *, timeout, retryable_returncodes, remove_partial_output, output_is_complete, cwd=None):
+        seen["cmd"], seen["timeout"] = list(cmd), timeout
+        machine, process = cmd[cmd.index("--load-settings") + 1].split(";")
+        seen["machine"] = json.loads(Path(machine).read_text())
+        seen["process"] = json.loads(Path(process).read_text())
+        seen["filaments"] = [
+            json.loads(Path(f).read_text()) for f in cmd[cmd.index("--load-filaments") + 1].split(";")
+        ]
+        work_dir = cmd[cmd.index("--outputdir") + 1]
+        if returncode == 0:
+            Path(work_dir, "plate_1.gcode").write_text(f"{header}T0\nT1\n; filament used [mm] = 1.0, 1.0\n")
+        else:
+            Path(work_dir, "result.json").write_text(json.dumps({"error_string": said}))
+        return SimpleNamespace(returncode=returncode, stdout="", stderr="")
+
+    return run
+
+
+def _never_runs(*_args, **_kwargs):
+    raise AssertionError("the slicer was launched")
+
+
+# ---------------------------------------------------------------------------
+# The preset writer
+# ---------------------------------------------------------------------------
+
+
+class TestThePresetWriter:
+    def test_a_record_for_two_positions_widens_the_per_extruder_values(self):
+        presets = settings_to_orca_presets(_SETTINGS, nozzles=_NOZZLES)
+        assert presets.machine["nozzle_diameter"] == ["0.4", "0.4"]
+        assert presets.machine["retraction_length"] == ["0.8", "0.8"]
+
+    def test_three_positions_are_three_entries(self):
+        presets = settings_to_orca_presets(_SETTINGS, nozzles={"sliced_as": 3})
+        assert presets.machine["nozzle_diameter"] == ["0.4", "0.4", "0.4"]
+
+    def test_the_extras_are_laid_over_each_preset_and_win(self):
+        presets = settings_to_orca_presets(_SETTINGS, nozzles=_NOZZLES)
+        assert presets.machine["example_machine_key"] == ["a", "b"]
+        # A key the writer already wrote from the settings is replaced.
+        assert presets.machine["gcode_flavor"] == "klipper"
+        assert presets.process["example_process_key"] == "p"
+        assert presets.filament["example_filament_key"] == ["f"]
+
+    def test_an_extra_wins_over_a_widened_value(self):
+        nozzles = {"sliced_as": 2, "preset_extras": {"machine": {"nozzle_diameter": ["0.4", "0.6"]}}}
+        assert settings_to_orca_presets(_SETTINGS, nozzles=nozzles).machine["nozzle_diameter"] == ["0.4", "0.6"]
+
+    def test_the_filament_extras_reach_every_filament_preset(self):
+        presets = settings_to_orca_presets(_SETTINGS, filament_colors=_COLORS, nozzles=_NOZZLES)
+        assert [f["example_filament_key"] for f in presets.filaments] == [["f"], ["f"]]
+        assert [f["filament_colour"] for f in presets.filaments] == [["#FFFFFF"], ["#000000"]]
+
+    @pytest.mark.parametrize("nozzles", [None, {}, {"sliced_as": 1, "preset_extras": _NOZZLES["preset_extras"]}])
+    @pytest.mark.parametrize("colors", [None, _COLORS])
+    def test_no_record_or_one_position_writes_the_same_bytes(self, tmp_path, nozzles, colors):
+        before, after = tmp_path / "before", tmp_path / "after"
+        write_orca_presets(_SETTINGS, str(before), filament_colors=colors, wipe_tower_xy=(10.0, 10.0))
+        write_orca_presets(
+            _SETTINGS, str(after), filament_colors=colors, wipe_tower_xy=(10.0, 10.0), nozzles=nozzles,
+        )
+        names = sorted(p.name for p in before.iterdir())
+        assert names == sorted(p.name for p in after.iterdir()) and len(names) == (4 if colors else 3)
+        for name in names:
+            assert (before / name).read_bytes() == (after / name).read_bytes(), name
+
+    def test_one_position_leaves_the_extras_out(self):
+        presets = settings_to_orca_presets(_SETTINGS, nozzles={**_NOZZLES, "sliced_as": 1})
+        assert "example_machine_key" not in presets.machine
+        assert presets.machine["nozzle_diameter"] == ["0.4"]
+
+    def test_an_extra_that_runs_a_program_is_refused(self):
+        nozzles = {"sliced_as": 2, "preset_extras": {"process": {"post_process": ["/bin/anything"]}}}
+        with pytest.raises(ProgramSettingError):
+            settings_to_orca_presets(_SETTINGS, nozzles=nozzles)
+
+    @pytest.mark.parametrize("key", ["nozzle_temperature", "hot_plate_temp", "chamber_temperatures"])
+    def test_an_extra_that_commands_a_heater_is_refused(self, key):
+        nozzles = {"sliced_as": 2, "preset_extras": {"filament": {key: ["400"]}}}
+        with pytest.raises(PresetExtrasError, match="temperature"):
+            settings_to_orca_presets(_SETTINGS, nozzles=nozzles)
+
+    @pytest.mark.parametrize(
+        "extras",
+        [
+            {"printer": {"example": "x"}},
+            {"machine": ["example"]},
+            {"machine": {"example": 4}},
+            {"machine": {"example": ["a", 2]}},
+            "machine",
+        ],
+    )
+    def test_extras_of_another_shape_are_refused(self, extras):
+        with pytest.raises(PresetExtrasError):
+            settings_to_orca_presets(_SETTINGS, nozzles={"sliced_as": 2, "preset_extras": extras})
+
+    @pytest.mark.parametrize("raw, positions", [(2, 2), (4, 4), (1, 1), (0, 1), ("2", 1), (True, 1), (None, 1)])
+    def test_the_positions_a_record_is_sliced_for(self, raw, positions):
+        assert nozzle_positions({"sliced_as": raw}) == positions
+
+
+# ---------------------------------------------------------------------------
+# The record travels with the profile
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def invented_printer(monkeypatch):
+    """A held profile for an invented machine; returns a setter for its
+    nozzle record."""
+    slicer_profiles._load()
+    row = {"display_name": "Invented Two", "slicer": "prusaslicer", "notes": "", "settings": dict(_SETTINGS)}
+    monkeypatch.setitem(slicer_profiles._cache, "invented_two", slicer_profiles._parse_profile("invented_two", row))
+    monkeypatch.setitem(slicer_profiles._raw_rows, "invented_two", row)
+    monkeypatch.setattr(slicer_profiles, "_temp_cache", {})
+
+    def set_nozzles(block):
+        row.pop("nozzles", None)
+        if block is not None:
+            row["nozzles"] = block
+
+    return set_nozzles
+
+
+class TestTheRecordTravelsWithTheProfile:
+    def test_the_resolved_profile_carries_the_record(self, invented_printer):
+        invented_printer(_NOZZLES)
+        assert nozzles_of(resolve_slicer_profile("invented_two")) == _NOZZLES
+
+    def test_a_profile_derived_from_it_still_carries_the_record(self, invented_printer):
+        invented_printer(_NOZZLES)
+        derived = profile_with_overrides(resolve_slicer_profile("invented_two"), {"layer_height": "0.12"})
+        assert nozzles_of(derived) == _NOZZLES
+
+    def test_the_several_extruder_profile_carries_it_too(self, invented_printer):
+        invented_printer(_NOZZLES)
+        assert nozzles_of(slicer_profiles.resolve_multiextruder_profile("invented_two", 2)) == _NOZZLES
+
+    @pytest.mark.parametrize("block", [{"kind": "single", "sliced_as": 1, "preset_extras": {}}, {"stock": 1, "max": 4}])
+    def test_a_record_for_one_position_leaves_the_profile_as_it_was(self, invented_printer, block):
+        invented_printer(None)
+        plain = Path(resolve_slicer_profile("invented_two")).read_bytes()
+        invented_printer(block)
+        path = resolve_slicer_profile("invented_two")
+        assert Path(path).read_bytes() == plain
+        assert nozzles_of(path) is None
+
+    def test_the_settings_are_the_same_with_and_without_the_record(self, invented_printer):
+        from kiln.slicer_orca import ini_to_settings
+
+        invented_printer(None)
+        plain = ini_to_settings(resolve_slicer_profile("invented_two"))
+        invented_printer(_NOZZLES)
+        assert ini_to_settings(resolve_slicer_profile("invented_two")) == plain
+
+    def test_a_profile_with_no_record_has_none(self, tmp_path):
+        assert nozzles_of(_profile(tmp_path, None)) is None
+        assert nozzles_of(None) is None
+        assert nozzles_of(str(tmp_path / "missing.ini")) is None
+
+
+# ---------------------------------------------------------------------------
+# The filament-to-nozzle map
+# ---------------------------------------------------------------------------
+
+
+class TestTheMapIsChecked:
+    def test_a_map_that_fits_is_the_list_asked_for(self):
+        assert checked_filament_map([2, 1], filaments=2, positions=2) == [2, 1]
+        assert checked_filament_map("2, 1", filaments=2, positions=2) == [2, 1]
+
+    @pytest.mark.parametrize("nothing", [None, "", []])
+    def test_no_map_is_none(self, nothing):
+        assert checked_filament_map(nothing, filaments=2, positions=2) is None
+        assert checked_filament_map(nothing, filaments=1, positions=1) is None
+
+    @pytest.mark.parametrize("asked", [[1], [1, 2, 1]])
+    def test_the_wrong_length_is_refused(self, asked):
+        with pytest.raises(NozzleMapError) as refused:
+            checked_filament_map(asked, filaments=2, positions=2)
+        assert refused.value.code == "NOZZLE_MAP_WRONG_LENGTH"
+        assert "one nozzle number for each filament" in str(refused.value)
+
+    @pytest.mark.parametrize("asked", [[1, 3], [0, 1], [1, -1], [1, "left"], [1, 1.5], [True, 1]])
+    def test_a_nozzle_the_printer_does_not_have_is_refused(self, asked):
+        with pytest.raises(NozzleMapError) as refused:
+            checked_filament_map(asked, filaments=2, positions=2)
+        assert refused.value.code == "NO_SUCH_NOZZLE"
+        assert "nozzles 1 to 2" in str(refused.value)
+
+    def test_a_map_for_a_printer_sliced_with_one_nozzle_is_refused(self):
+        with pytest.raises(NozzleMapError) as refused:
+            checked_filament_map([1, 1], filaments=2, positions=1)
+        assert refused.value.code == "NOZZLE_MAP_NOT_USED"
+
+
+class TestTheMapIsReadBack:
+    def test_the_map_and_who_chose_it(self, tmp_path):
+        gcode = tmp_path / "a.gcode"
+        gcode.write_text("; filament_map_mode = Manual\n; filament_map = 2,1,2\nG1 X1\n")
+        assert filament_map_of(str(gcode)) == {
+            "filament_to_nozzle": [2, 1, 2],
+            "nozzle_filaments": {"2": [1, 3], "1": [2]},
+            "mode": "Manual",
+        }
+
+    def test_a_file_that_states_no_map_has_none(self, tmp_path):
+        gcode = tmp_path / "a.gcode"
+        gcode.write_text("; filament_map_mode = Manual\n; filament_mapping = 1,2\nG1 X1\n")
+        assert filament_map_of(str(gcode)) is None
+        assert filament_map_of(str(tmp_path / "missing.gcode")) is None
+        assert filament_map_of(None) is None
+
+    def test_a_map_that_is_not_numbers_is_not_read(self, tmp_path):
+        gcode = tmp_path / "a.gcode"
+        gcode.write_text("; filament_map = left,right\n")
+        assert filament_map_of(str(gcode)) is None
+
+
+# ---------------------------------------------------------------------------
+# The slice
+# ---------------------------------------------------------------------------
+
+
+class TestTheSlice:
+    def _slice(self, tmp_path, run, *, slicer=None, studio=None, filaments=2, nozzles=_NOZZLES, **kwargs):
+        with (
+            patch("kiln.slicer.find_slicer", return_value=slicer or _studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=studio),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", run),
+        ):
+            return slice_file(
+                _plate(tmp_path, filaments), output_dir=str(tmp_path / "out"),
+                profile=_profile(tmp_path, nozzles), **kwargs,
+            )
+
+    def test_the_map_asked_for_is_handed_to_the_slicer_and_read_back(self, tmp_path):
+        seen: dict = {}
+        header = "; filament_map = 2,1\n; filament_map_mode = Manual\n"
+        result = self._slice(tmp_path, _slicer_that_writes(header, seen), filament_map=[2, 1], timeout=77)
+        cmd = seen["cmd"]
+        at = cmd.index("--filament-map-mode")
+        assert cmd[at:at + 4] == ["--filament-map-mode", "Manual", "--filament-map", "2,1"]
+        assert seen["timeout"] == 77
+        assert result.filament_map == {
+            "filament_to_nozzle": [2, 1], "nozzle_filaments": {"2": [1], "1": [2]}, "mode": "Manual",
+        }
+        assert result.to_dict()["filament_map"]["filament_to_nozzle"] == [2, 1]
+
+    def test_the_presets_handed_over_are_for_both_positions(self, tmp_path):
+        seen: dict = {}
+        self._slice(tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen))
+        assert seen["machine"]["nozzle_diameter"] == ["0.4", "0.4"]
+        assert seen["machine"]["example_machine_key"] == ["a", "b"]
+        assert seen["process"]["example_process_key"] == "p"
+        assert [f["example_filament_key"] for f in seen["filaments"]] == [["f"], ["f"]]
+
+    def test_with_no_map_the_slicer_chooses_and_its_choice_is_reported(self, tmp_path):
+        seen: dict = {}
+        header = "; filament_map = 1,2\n; filament_map_mode = Auto For Flush\n"
+        result = self._slice(tmp_path, _slicer_that_writes(header, seen))
+        assert not any(arg.startswith("--filament-map") for arg in seen["cmd"])
+        assert result.filament_map["filament_to_nozzle"] == [1, 2]
+        assert result.filament_map["mode"] == "Auto For Flush"
+
+    @pytest.mark.parametrize("header", ["; filament_map = 1,2\n", ""])
+    def test_a_file_sliced_with_another_map_is_not_kept(self, tmp_path, header):
+        with pytest.raises(SlicerError, match="did not slice with the filament-to-nozzle map"):
+            self._slice(tmp_path, _slicer_that_writes(header, {}), filament_map=[2, 1])
+        assert list((tmp_path / "out").glob("*.gcode")) == []
+
+    @pytest.mark.parametrize(
+        "asked, code",
+        [([1], "NOZZLE_MAP_WRONG_LENGTH"), ([1, 2, 1], "NOZZLE_MAP_WRONG_LENGTH"), ([1, 3], "NO_SUCH_NOZZLE")],
+    )
+    def test_a_map_that_does_not_fit_is_refused_before_slicing(self, tmp_path, asked, code):
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, filament_map=asked)
+        assert refused.value.code == code
+
+    def test_a_map_for_a_one_nozzle_printer_is_refused_before_slicing(self, tmp_path):
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, nozzles=None, filament_map=[1, 1])
+        assert refused.value.code == "NOZZLE_MAP_NOT_USED"
+
+    @pytest.mark.parametrize("slicer", [_prusa(), _orca()])
+    def test_a_slicer_that_cannot_do_it_is_refused_before_launching(self, tmp_path, slicer):
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, slicer=slicer)
+        assert refused.value.code == "MULTI_NOZZLE_NEEDS_BAMBU_STUDIO"
+        said = str(refused.value)
+        assert "Bambu Studio" in said and "install" in said and "nothing was sliced" in said
+
+    def test_an_explicit_slicer_is_not_swapped_for_another(self, tmp_path):
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, slicer=_orca(), studio=_studio(), slicer_path="/fake/OrcaSlicer")
+        assert refused.value.code == "MULTI_NOZZLE_NEEDS_BAMBU_STUDIO"
+
+    @pytest.mark.parametrize("slicer", [_prusa(), _orca()])
+    def test_an_installed_bambu_studio_is_used_instead(self, tmp_path, slicer):
+        seen: dict = {}
+        result = self._slice(
+            tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen), slicer=slicer, studio=_studio(),
+        )
+        assert seen["cmd"][0] == "/fake/BambuStudio"
+        assert result.filament_map["filament_to_nozzle"] == [1, 2]
+
+    def test_one_filament_and_no_map_slices_for_one_nozzle(self, tmp_path):
+        with_record, without = {}, {}
+        result = self._slice(
+            tmp_path, _slicer_that_writes("; filament_map = 1\n", with_record), slicer=_orca(), filaments=1,
+        )
+        self._slice(tmp_path, _slicer_that_writes("", without), slicer=_orca(), filaments=1, nozzles=None)
+        assert result.filament_map is None
+        # Each run names its presets after its own profile file.
+        named = {"name", "printer_model", "compatible_printers"}
+
+        def body(preset: dict) -> dict:
+            return {key: value for key, value in preset.items() if key not in named}
+
+        assert body(with_record["machine"]) == body(without["machine"])
+        assert body(with_record["process"]) == body(without["process"])
+        assert [body(f) for f in with_record["filaments"]] == [body(f) for f in without["filaments"]]
+        assert with_record["machine"]["nozzle_diameter"] == ["0.4"]
+
+    def test_one_filament_with_a_map_slices_for_the_nozzle_named(self, tmp_path):
+        seen: dict = {}
+        result = self._slice(
+            tmp_path, _slicer_that_writes("; filament_map = 2\n", seen), filaments=1, filament_map=[2],
+        )
+        assert seen["cmd"][seen["cmd"].index("--filament-map") + 1] == "2"
+        assert seen["machine"]["nozzle_diameter"] == ["0.4", "0.4"]
+        assert result.filament_map["nozzle_filaments"] == {"2": [1]}
+
+    def test_a_filament_on_a_nozzle_that_cannot_reach_is_refused_in_plain_words(self, tmp_path):
+        said = "Some filaments cannot be mapped to correct extruders for multi-extruder Printer."
+        with pytest.raises(SlicerRefusal) as refused:
+            self._slice(tmp_path, _slicer_that_writes("", {}, returncode=190, said=said), filament_map=[2, 1])
+        assert refused.value.kind == REFUSED_NOZZLE_REACH
+        assert refused.value.code == "NOZZLE_CANNOT_REACH"
+        assert (
+            "that nozzle cannot reach this part; move it toward the middle or use the other nozzle"
+            in str(refused.value)
+        )
+        assert not re.search(r"\d", str(refused.value))
+        assert list((tmp_path / "out").glob("*.gcode")) == []
+
+    @pytest.mark.parametrize("status, said", [(190, ""), (1, "Some filaments cannot be mapped to correct extruders")])
+    def test_the_refusal_is_known_by_its_status_or_its_words(self, status, said):
+        refusal = _orca_refusal("BambuStudio", status, said)
+        assert refusal is not None and refusal.kind == REFUSED_NOZZLE_REACH
+
+
+# ---------------------------------------------------------------------------
+# The slice_model door
+# ---------------------------------------------------------------------------
+
+
+def _slice_model_tool():
+    from kiln.plugins.slicer_tools import _SlicerToolsPlugin
+
+    tools: dict = {}
+
+    class _FakeMcp:
+        def tool(self, name=None, **_kwargs):
+            def decorator(fn):
+                tools[name or fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    _SlicerToolsPlugin().register(_FakeMcp())
+    return tools["slice_model"]
+
+
+class TestTheSliceModelDoor:
+    @pytest.fixture(autouse=True)
+    def _isolated(self, monkeypatch, tmp_path):
+        from kiln import monitor_twin
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        twin = tmp_path / "twin"
+        monkeypatch.setattr(monitor_twin, "_TWIN_DIR", twin)
+        monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
+        monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
+
+    def _call(self, tmp_path, run, **kwargs):
+        with (
+            patch("kiln.server._check_auth", return_value=None),
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", run),
+        ):
+            return _slice_model_tool()(
+                input_path=_plate(tmp_path), output_dir=str(tmp_path / "out"), printer_id=None,
+                profile=_profile(tmp_path), **kwargs,
+            )
+
+    def test_the_map_reaches_the_slicer_and_the_reply_says_what_was_used(self, tmp_path):
+        seen: dict = {}
+        reply = self._call(
+            tmp_path, _slicer_that_writes("; filament_map = 2,1\n; filament_map_mode = Manual\n", seen),
+            filament_map=[2, 1],
+        )
+        assert reply["success"], reply
+        assert seen["cmd"][seen["cmd"].index("--filament-map") + 1] == "2,1"
+        assert reply["filament_map"]["filament_to_nozzle"] == [2, 1]
+        assert "output_3mf_path" not in reply
+        assert any("more than one nozzle" in w and "not ready to upload" in w for w in reply["warnings"])
+
+    def test_a_map_that_does_not_fit_is_the_doors_refusal(self, tmp_path):
+        reply = self._call(tmp_path, _never_runs, filament_map=[1, 2, 2])
+        assert reply["success"] is False
+        assert reply["error"]["code"] == "NOZZLE_MAP_WRONG_LENGTH"
+        assert "one nozzle number for each filament" in reply["error"]["message"]
