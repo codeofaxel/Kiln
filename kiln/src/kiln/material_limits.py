@@ -196,10 +196,7 @@ class MaterialLimits:
         lines: list[str] = []
         if self.miss is None and not self.known and self.material:
             lines.append(UNRECOGNISED)
-        if _category(self.material_id) == "thermoplastic_elastomer":
-            lines.append(FLEXIBLE_CAUTION)
-        if self.material_id and self.material_id.endswith("_esd") and self.value(ESD_WALL) is None:
-            lines.append(STATIC_SAFE_UNKNOWN)
+        lines.extend(general_figures_leave_out(self.material_id, static_safe_wall_read=self.value(ESD_WALL) is not None))
         return lines
 
     def to_dict(self) -> dict[str, Any]:
@@ -249,6 +246,21 @@ STATIC_SAFE_UNKNOWN = (
     "This static-safe grade's own minimum wall for its electrical "
     "property is not known here; the wall figure is the general one."
 )
+
+
+def general_figures_leave_out(material_id: str | None, *, static_safe_wall_read: bool = False) -> list[str]:
+    """What a reply says beside the general figures for the plastic
+    *material_id*: for a flexible plastic, that they are for rigid ones
+    (:data:`FLEXIBLE_CAUTION`); for a static-safe grade whose own minimum
+    wall was not read (*static_safe_wall_read* false), that it is not known
+    here (:data:`STATIC_SAFE_UNKNOWN`).  Empty for any other plastic.  The
+    one place these are decided, for every reader of the general figures."""
+    lines: list[str] = []
+    if _category(material_id) == "thermoplastic_elastomer":
+        lines.append(FLEXIBLE_CAUTION)
+    if material_id and material_id.endswith("_esd") and not static_safe_wall_read:
+        lines.append(STATIC_SAFE_UNKNOWN)
+    return lines
 
 
 def _said_on_the_call(limits: MaterialLimits) -> MaterialLimits:
