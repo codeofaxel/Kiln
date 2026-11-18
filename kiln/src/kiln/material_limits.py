@@ -19,6 +19,11 @@ check knows what a slice will leave out.  It is the same for every plastic.
 With no answer, both are the general minimum wall: a heads-up that may warn
 about more than Kiln's own check would, never less.
 
+A check that reads a plastic only because the person named none reads it
+inside :func:`assuming`: the assumed plastic's own figures, without spending
+the person's daily allowance of plastics on Kiln's servers and with nothing
+said about them.
+
 A served answer is kept for the life of the process, per plastic and
 scenario, so a session asks once.  When kiln-pro is on this computer nothing
 is kept: one caller's answer never reaches the next.
@@ -26,14 +31,17 @@ is kept: one caller's answer never reaches the next.
 
 from __future__ import annotations
 
+import contextlib
 import json
+from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from kiln import generic_limits as _generic
-from kiln.served_answer import Miss, sentence
+from kiln.served_answer import Miss, free_account_note, sentence
 
 OVERHANG = "overhang_unsupported_deg"
 BRIDGE = "bridge_max_mm"
@@ -56,6 +64,11 @@ GENERAL_ONLY: tuple[str, ...] = (WALL_MIN, BRIDGE_CLEAN, HOLE_FORMS, HOLE_USABLE
 
 #: A figure the plastic itself, or its family, has.
 OWN_BASES = ("plastic", "family")
+
+#: The plastic a check reads when the person named none.
+ASSUMED_PLASTIC = "pla"
+#: The plastics read here because the person named none (:func:`assuming`).
+_assumed: ContextVar[frozenset[str]] = ContextVar("kiln_material_limits_assumed", default=frozenset())
 
 _DATA = Path(__file__).resolve().parent / "data" / "design_knowledge" / "materials.json"
 
@@ -166,18 +179,24 @@ class MaterialLimits:
         if self.allowance and self.allowance not in said:
             said.add(self.allowance)
             lines.append(self.allowance)
-        if self.miss is not None or self.allowance or not self.known:
-            category = _category(self.material_id)
-            if category == "thermoplastic_elastomer":
-                lines.append(
-                    "The general figures are for ordinary rigid plastics; a flexible "
-                    "plastic needs more margin than they give."
-                )
-            if self.material_id and self.material_id.endswith("_esd") and self.value(ESD_WALL) is None:
-                lines.append(
-                    "This static-safe grade's own minimum wall for its electrical "
-                    "property is not known here; the wall figure is the general one."
-                )
+        lines.extend(self.cautions())
+        return lines
+
+    def cautions(self) -> list[str]:
+        """For a plastic answered with the general figures, what a reply
+        should say beside them: that Kiln does not recognise the name (when
+        Kiln's design limits answered and could not place it), and for a
+        flexible or static-safe plastic what the general figures leave out.
+        Empty when its own were read."""
+        if self.miss is None and not self.allowance and self.known:
+            return []
+        lines: list[str] = []
+        if self.miss is None and not self.known and self.material:
+            lines.append(UNRECOGNISED)
+        if _category(self.material_id) == "thermoplastic_elastomer":
+            lines.append(FLEXIBLE_CAUTION)
+        if self.material_id and self.material_id.endswith("_esd") and self.value(ESD_WALL) is None:
+            lines.append(STATIC_SAFE_UNKNOWN)
         return lines
 
     def to_dict(self) -> dict[str, Any]:
@@ -193,16 +212,75 @@ class MaterialLimits:
         }
 
 
+#: The code the design limits answer a request with that falls outside what
+#: they cover (a nozzle, a layer or a name past their range): a fact about
+#: the request, the same on every ask, never a passing fault.
+_OUTSIDE_WHAT_THEY_COVER = "INVALID_INPUT"
+
+
+def _outside_what_they_cover(miss: Miss, *, on_the_line: str, wont: str) -> str | None:
+    """The sentence for a request the design limits do not cover, in their
+    own words (the range they cover), or ``None`` for any other miss.  It
+    says no "right now" and offers no retry: asking again gets the same."""
+    if miss.cause != "refused" or miss.code != _OUTSIDE_WHAT_THEY_COVER or not miss.detail.strip():
+        return None
+    covered = " ".join(miss.detail.split()).rstrip(". ")
+    return f"{on_the_line.rstrip('. ')}. {covered}, so here Kiln {wont.strip().rstrip('.')}."
+
+
+#: Said when Kiln's design limits answered and could not place the plastic
+#: named: the one name reader every check goes through, so every door says
+#: the same.
+UNRECOGNISED = (
+    "Kiln doesn't recognise the plastic named, so the checks use the general figures; "
+    "name it the way Kiln lists its plastics (PLA, PETG, ABS, ...) to check it against its own."
+)
+#: What the general figures leave out for a flexible plastic.
+FLEXIBLE_CAUTION = (
+    "The general figures are for ordinary rigid plastics; a flexible "
+    "plastic needs more margin than they give."
+)
+#: What the general figures leave out for a static-safe grade whose own
+#: minimum wall was not read.
+STATIC_SAFE_UNKNOWN = (
+    "This static-safe grade's own minimum wall for its electrical "
+    "property is not known here; the wall figure is the general one."
+)
+
+
+def _said_on_the_call(limits: MaterialLimits) -> MaterialLimits:
+    """*limits*, after noting on the running call, once whichever door read
+    it, why its figures are not the plastic's own (a miss, or the day's
+    allowance used) and what the general figures leave out for this plastic
+    (:meth:`MaterialLimits.cautions`): every door's reply says it, the doors
+    that never read :meth:`MaterialLimits.notes` included
+    (:func:`kiln.reading_notes.note_said`, under ``limits_note``)."""
+    from kiln.reading_notes import LIMITS_KEY, note_said
+
+    if limits.miss is not None:
+        note_said(LIMITS_KEY, miss_sentence(limits.miss))
+    if limits.allowance:
+        note_said(LIMITS_KEY, limits.allowance)
+    for line in limits.cautions():
+        note_said(LIMITS_KEY, line)
+    return limits
+
+
 def miss_sentence(miss: Miss) -> str:
     """The one sentence for a miss, in the served-answer voice."""
+    on_the_line = "How steep, how far and how thin a part can go depends on the plastic"
+    wont = "checks the part against the general figures and won't call them this plastic's own"
+    outside = _outside_what_they_cover(miss, on_the_line=on_the_line, wont=wont)
+    if outside is not None:
+        return outside[:-1] + "; leave extra margin."
     return sentence(
         miss,
         feature="design limits",
-        on_the_line="How steep, how far and how thin a part can go depends on the plastic",
+        on_the_line=on_the_line,
         cannot="get this plastic's own limits",
-        wont="checks the part against the general figures and won't call them this plastic's own",
+        wont=wont,
         safe_remedy="leave extra margin",
-        then="check again",
+        then="check again" + free_account_note(miss),
     )
 
 
@@ -247,6 +325,26 @@ def _general(nozzle: float, layer: float | None) -> tuple[dict[str, float | None
     return figures, basis
 
 
+@contextlib.contextmanager
+def assuming(material: str | None) -> Iterator[str]:
+    """The plastic a check reads: *material* when the person named one, else
+    :data:`ASSUMED_PLASTIC`.  Inside the block the assumed plastic's limits
+    are its own figures, read without spending the person's daily allowance
+    of plastics on Kiln's servers, and nothing is said about them; a plastic
+    the person named is read as always."""
+    if isinstance(material, str) and material.strip():
+        yield material
+        return
+    from kiln import _pro_material_limits_bridge as bridge
+
+    token = _assumed.set(_assumed.get() | {ASSUMED_PLASTIC})
+    try:
+        with bridge.assuming_here(ASSUMED_PLASTIC):
+            yield ASSUMED_PLASTIC
+    finally:
+        _assumed.reset(token)
+
+
 def limits_for(
     material: str | None,
     *,
@@ -274,32 +372,31 @@ def limits_for(
     key = (name.lower(), round(nozzle, 3), layer, enclosed, pin_height_mm)
     answer = None if local else _answers.get(key)
     miss: Miss | None = None
+    assumed = name.lower() in _assumed.get()
     if answer is None:
         answer, miss = bridge.ask(
             name, nozzle_mm=nozzle, layer_height_mm=layer, enclosed=enclosed, pin_height_mm=pin_height_mm,
+            assumed=assumed,
         )
         # An answer the allowance cut to the general figures holds only for
         # today, so it is not kept.
         if answer is not None and not local and not answer.get("allowance"):
             _answers[key] = answer
     if answer is None:
-        return MaterialLimits(name, public_id, public_id is not None, nozzle, layer, figures, basis, miss)
+        missed = MaterialLimits(name, public_id, public_id is not None, nozzle, layer, figures, basis, miss)
+        # A plastic read because the person named none says nothing about it.
+        return missed if assumed else _said_on_the_call(missed)
     why: dict[str, str] = {}
     for quantity, figure in answer["limits"].items():
         figures[quantity] = float(figure["value"]) if figure.get("value") is not None else None
         basis[quantity] = str(figure["basis"])
         if isinstance(figure.get("note"), str) and figure["note"]:
             why[quantity] = figure["note"]
-    allowance = str(answer.get("allowance") or "")
-    if allowance:
-        # Said in the reply of the call that read it, whichever door it was.
-        from kiln.reading_notes import LIMITS_KEY, note_said
-
-        note_said(LIMITS_KEY, allowance)
-    return MaterialLimits(
+    read = MaterialLimits(
         name, answer.get("material_id") or public_id, bool(answer["known"]), nozzle, layer, figures, basis,
-        allowance=allowance, why=why,
+        allowance=str(answer.get("allowance") or ""), why=why,
     )
+    return read if assumed else _said_on_the_call(read)
 
 
 #: What a material lookup says beside the general block.
@@ -349,16 +446,21 @@ class SlicedFloors:
 def sliced_miss_sentence(miss: Miss, general_wall_mm: float) -> str:
     """The one sentence for a miss of what Kiln's slice keeps, in the
     served-answer voice."""
+    on_the_line = "Whether a thin wall or pin is left out when sliced depends on the slicer and the nozzle"
+    wont = (
+        f"warns about thin walls and pins from the general minimum wall ({general_wall_mm:g} mm) "
+        "instead and stops nothing"
+    )
+    outside = _outside_what_they_cover(miss, on_the_line=on_the_line, wont=wont)
+    if outside is not None:
+        return outside
     return sentence(
         miss,
         feature="slicer check",
-        on_the_line="Whether a thin wall or pin is left out when sliced depends on the slicer and the nozzle",
+        on_the_line=on_the_line,
         cannot="check exactly what its slicer leaves out",
-        wont=(
-            f"warns about thin walls and pins from the general minimum wall ({general_wall_mm:g} mm) "
-            "instead and stops nothing"
-        ),
-        then="check again for Kiln's exact check",
+        wont=wont,
+        then="check again for Kiln's exact check" + free_account_note(miss),
     )
 
 
@@ -390,11 +492,16 @@ def sliced_floors(*, nozzle_mm: float | None) -> SlicedFloors:
 
 
 __all__ = [
+    "ASSUMED_PLASTIC",
+    "FLEXIBLE_CAUTION",
     "GENERAL_ONLY",
     "PER_PLASTIC",
     "GENERAL_BLOCK_NOTE",
+    "STATIC_SAFE_UNKNOWN",
+    "UNRECOGNISED",
     "MaterialLimits",
     "SlicedFloors",
+    "assuming",
     "general_design_limits",
     "limits_for",
     "miss_sentence",

@@ -1120,14 +1120,15 @@ def judge_supports(
     nozzle_diameter: float | None = None,
     layer_height: float = 0.2,
     max_overhang_angle: float | None = None,
-    material: str = "pla",
+    material: str | None = None,
     printer_id: str | None = None,
     clear_with_none_held: bool = False,
     plate_number: int | None = None,
 ) -> SupportJudgement:
     """The support verdict's inputs for *file_path*, and nothing else.
     *plate_number* names the plate of a several-plate project
-    (:func:`_mesh_path_for_analysis`).
+    (:func:`_mesh_path_for_analysis`).  *material* left unsaid is read as
+    the plastic a check assumes (:func:`kiln.material_limits.assuming`).
 
     *clear_with_none_held* asks for the faces a slice keeps supports off
     even when the verdict holds none: for a slice that carries supports on
@@ -1141,15 +1142,18 @@ def judge_supports(
     and runs where that analysis runs: through kiln-pro's memory-capped
     runner when there is one (a ``MemoryError`` is the cap), else here.
     """
-    kwargs = dict(
-        nozzle_diameter=nozzle_diameter, layer_height=layer_height,
-        max_overhang_angle=max_overhang_angle, material=material, printer_id=printer_id,
-        clear_with_none_held=clear_with_none_held, plate_number=plate_number,
-    )
-    runner = _analysis_runner()
-    if runner is None:
-        return _judge_supports_here(file_path, **kwargs)
-    return runner(_judge_supports_here, file_path, **kwargs)
+    from kiln.material_limits import assuming
+
+    with assuming(material) as plastic:
+        kwargs = dict(
+            nozzle_diameter=nozzle_diameter, layer_height=layer_height,
+            max_overhang_angle=max_overhang_angle, material=plastic, printer_id=printer_id,
+            clear_with_none_held=clear_with_none_held, plate_number=plate_number,
+        )
+        runner = _analysis_runner()
+        if runner is None:
+            return _judge_supports_here(file_path, **kwargs)
+        return runner(_judge_supports_here, file_path, **kwargs)
 
 
 def _judge_supports_here(
@@ -8010,7 +8014,10 @@ def _material_wall_floor(
     (https://kiln3d.com) — one measurement that both read, never a
     second pass re-measured to agree.  Without kiln-pro's rule here, the
     plastic's own wall floor from the one helper every check reads
-    (:func:`_plastic_recommended_wall`).  ``None`` — no floor of the
+    (:func:`_plastic_recommended_wall`), which is also the floor when
+    kiln-pro's rule is there but gives this caller no answer: the
+    plastic's own recommended wall is every signed-in account's.  ``None``
+    — no floor of the
     plastic's own for this caller — leaves the nozzle as the threshold,
     the safety floor every tier gets.
     """
@@ -8035,7 +8042,7 @@ def _material_wall_floor(
         floor = float(floor) if floor is not None else 0.0
     except Exception:  # noqa: BLE001 — the overlay must never break the public path
         logger.debug("material wall floor unavailable", exc_info=True)
-        return None
+        return _plastic_recommended_wall(material, nozzle_diameter)
     return floor if floor > 0.0 else _plastic_recommended_wall(material, nozzle_diameter)
 
 
@@ -8094,7 +8101,7 @@ def analyze_printability(
     layer_height: float | None = None,
     max_overhang_angle: float | None = None,
     build_volume: tuple[float, float, float] | None = None,
-    material: str = "pla",
+    material: str | None = None,
     infill_percent: float = 20.0,
     include_hole_detection: bool = True,
     printer_id: str | None = None,
@@ -8117,7 +8124,9 @@ def analyze_printability(
     :param build_volume: Optional (X, Y, Z) build volume in mm.  If
         provided, the report will warn if the model exceeds it.  Takes
         precedence over the bed *printer_id* would resolve.
-    :param material: Material ID for warping and cost analysis (default ``"pla"``).
+    :param material: Material ID for warping and cost analysis.  Left
+        unsaid, PLA, read as the plastic a check assumes because the person
+        named none (:func:`kiln.material_limits.assuming`).
     :param infill_percent: Interior infill density (0-100) for cost estimation.
     :param include_hole_detection: When True (default), also run
         :func:`kiln.generation.validation.detect_holes` and surface the
@@ -8167,22 +8176,25 @@ def analyze_printability(
     and the report are the same either way.  Without kiln-pro, or without
     that runner, it runs here.
     """
-    kwargs: dict[str, Any] = {
-        "nozzle_diameter": nozzle_diameter,
-        "layer_height": layer_height,
-        "max_overhang_angle": max_overhang_angle,
-        "build_volume": build_volume,
-        "material": material,
-        "infill_percent": infill_percent,
-        "include_hole_detection": include_hole_detection,
-        "printer_id": printer_id,
-        "slicer_style": slicer_style,
-        "plate_number": plate_number,
-    }
-    runner = _analysis_runner()
-    if runner is None:
-        return _analyze_printability_here(file_path, **kwargs)
-    return runner(_analyze_printability_here, file_path, **kwargs)
+    from kiln.material_limits import assuming
+
+    with assuming(material) as plastic:
+        kwargs: dict[str, Any] = {
+            "nozzle_diameter": nozzle_diameter,
+            "layer_height": layer_height,
+            "max_overhang_angle": max_overhang_angle,
+            "build_volume": build_volume,
+            "material": plastic,
+            "infill_percent": infill_percent,
+            "include_hole_detection": include_hole_detection,
+            "printer_id": printer_id,
+            "slicer_style": slicer_style,
+            "plate_number": plate_number,
+        }
+        runner = _analysis_runner()
+        if runner is None:
+            return _analyze_printability_here(file_path, **kwargs)
+        return runner(_analyze_printability_here, file_path, **kwargs)
 
 
 def _analysis_runner() -> Callable[..., Any] | None:

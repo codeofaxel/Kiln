@@ -533,7 +533,7 @@ CALLERS = {
     "plugins/_validation_pipeline_internals.py::_step_watertight_check": "engine: a step of the shared check",
     "plugins/_validation_pipeline_internals.py::_step_repair": "engine: a step of the shared check",
     # Callers that read an engine for information and decide nothing.
-    "slicer_supports.py::decide_supports": "reads: decides a slice's supports; prints nothing",
+    "slicer_supports.py::_decide_supports": "reads: decides a slice's supports; prints nothing",
     "support_assessment.py::_shared_verdict": "reads: the one support verdict, for the assessment",
     "design_reasoning.py::_support_call": (
         "reads: the one support verdict, for the slicer settings' supports; a file it cannot "
