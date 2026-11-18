@@ -310,6 +310,9 @@ class TestAbrasiveFilament:
             "Carbon Black PLA-CF",  # a black carbon-fibre grade is still carbon fibre
             "Glass-filled PETG",
             "Bronze-fill PLA",
+            "timber-fill PLA",
+            "PLA Timber Fill",
+            "hempfill PETG",
             "steelFill",
             "Glow PLA",
             "Glow-in-the-dark PETG",
@@ -330,6 +333,8 @@ class TestAbrasiveFilament:
             "Bronze PETG",
             "Sea Glass PLA",
             "Redwood PLA",
+            "Timber Brown PLA",          # a colourway named for wood, not a filler
+            "Hemp Beige PETG",
             "PLA Basic Refill",          # a refill spool, not a filler
             "PETG Refill",
             "Fillamentum PLA Extrafill",  # a maker's name and a product line

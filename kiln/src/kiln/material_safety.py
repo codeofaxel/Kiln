@@ -844,7 +844,7 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
 #: The fillers a filled filament is named for, as they appear before "fill".
 _FILLERS = (
     r"COPPER|BRONZE|BRASS|STEEL|IRON|ALUMINI?UM|TITANIUM|TUNGSTEN|METAL|MAGNET(?:IC)?"
-    r"|WOOD|BAMBOO|CORK|STONE|MARBLE|MINERAL|CERAMIC|GLASS|CARBON|GLOW"
+    r"|WOOD|TIMBER|BAMBOO|HEMP|CORK|STONE|MARBLE|MINERAL|CERAMIC|GLASS|CARBON|GLOW"
 )
 
 #: Fill wording in a filled filament's own name.  Whole words, because
