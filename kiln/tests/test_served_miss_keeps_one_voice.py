@@ -116,3 +116,66 @@ def test_a_signed_out_miss_never_names_the_served_tool(wire, _signed_out_plain_i
     for name in (wire.split("/")[0], "intent_materials", "material_floor_pick"):
         assert name not in miss.detail, miss.detail
     assert miss.detail.startswith("Kiln"), miss.detail
+
+
+# ---------------------------------------------------------------------------
+# A refusal whose ``error`` is a bare code word is said in the servers' own
+# sentence, found elsewhere in their answer, at every door.
+# ---------------------------------------------------------------------------
+
+_HEADLINE = "Kiln 9.9.9 or newer is required to continue."
+#: The servers' version floor, as it answers (HTTP 426): the person's sentence
+#: is in the upgrade block, the ``error`` field is a code word.
+_VERSION_FLOOR = {
+    "success": False,
+    "error": "upgrade_required",
+    "code": "UPGRADE_REQUIRED",
+    "upgrade": {"headline": _HEADLINE, "target": "9.9.9"},
+}
+
+
+def test_a_code_word_refusal_is_said_in_the_servers_sentence():
+    miss = served_answer.classify_answer(_VERSION_FLOOR)
+    assert miss is not None and miss.cause == "refused" and miss.code == "UPGRADE_REQUIRED"
+    assert miss.detail == _HEADLINE
+
+
+def test_a_code_word_with_no_sentence_beside_it_is_no_reason_rather_than_a_word():
+    miss = served_answer.classify_answer({"success": False, "error": "upgrade_required", "code": "UPGRADE_REQUIRED"})
+    assert miss is not None and miss.detail == ""
+    line = basic_pick_line(miss, feature="material pick")
+    assert "upgrade_required" not in line and "gave no reason" in line
+
+
+def test_a_code_word_takes_the_message_when_there_is_no_upgrade_block():
+    miss = served_answer.classify_answer(
+        {"status": "error", "code": "SUSPENDED", "error": "suspended", "message": "This account is paused."}
+    )
+    assert miss is not None and miss.detail == "This account is paused."
+
+
+@pytest.mark.parametrize("wire", sorted(_signed_out_misses()))
+def test_every_material_bridge_says_the_version_floor_in_words(wire, _signed_out_plain_install, monkeypatch):
+    import kiln.server as srv
+
+    monkeypatch.setattr(srv, "_pro_api_call", lambda *_a, **_k: dict(_VERSION_FLOOR))
+    miss = _signed_out_misses()[wire]()
+    assert miss is not None and miss.cause == "refused", miss
+    assert miss.detail == _HEADLINE, miss.detail
+
+
+def test_the_material_doors_never_end_on_the_code_word(_signed_out_plain_install, monkeypatch):
+    import json
+
+    import kiln.server as srv
+    from kiln.material_routing import recommend_material
+
+    monkeypatch.setattr(srv, "_pro_api_call", lambda *_a, **_k: dict(_VERSION_FLOOR))
+    replies = {
+        "find_material_substitute": srv.find_material_substitute("PLA"),
+        "recommend_material": recommend_material("a shelf bracket").to_dict(),
+    }
+    for door, reply in replies.items():
+        said = json.dumps(reply)
+        assert "upgrade_required" not in said, (door, reply)
+        assert _HEADLINE in said, (door, reply)

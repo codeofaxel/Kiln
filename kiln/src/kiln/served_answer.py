@@ -285,13 +285,14 @@ def classify_answer(answer: Any) -> Miss | None:
         return None
     text = text.strip()[:_DETAIL_LIMIT]
     why = answer.get("why")
-    if why in CAUSES:
+    if why in CAUSES and "why_detail" in answer:
         # An envelope that already decided why carries the server's own words
         # in ``why_detail``; its ``error`` is that envelope's whole sentence,
         # which would read as a second sentence inside the door's own.
-        if "why_detail" in answer:
-            raw = answer.get("why_detail")
-            text = str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else ""
+        raw = answer.get("why_detail")
+        text = str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else ""
+    text = _in_words(text, answer)
+    if why in CAUSES:
         return Miss(why, code, text)
     if code in SIGNED_OUT_CODES:
         return Miss("signed_out", code, text)
@@ -300,6 +301,25 @@ def classify_answer(answer: Any) -> Miss | None:
     if not code or code in UNANSWERED_CODES or answer.get("retryable") is True:
         return Miss("unanswered", code, text)
     return Miss("refused", code, text)
+
+
+def _in_words(text: str, answer: dict[str, Any]) -> str:
+    """*text* when it is words for a person; otherwise the sentence the
+    servers put elsewhere in *answer* (an upgrade block's headline, then its
+    ``message``, then its ``detail``), or nothing.  A refusal's ``error`` can
+    be a bare code word ("upgrade_required"), which would otherwise end the
+    door's own sentence as if it were one."""
+    if not text or any(ch.isspace() for ch in text):
+        return text
+    upgrade = answer.get("upgrade")
+    for said in (
+        upgrade.get("headline") if isinstance(upgrade, dict) else None,
+        answer.get("message"),
+        answer.get("detail"),
+    ):
+        if isinstance(said, str) and any(ch.isspace() for ch in said.strip()):
+            return said.strip()[:_DETAIL_LIMIT]
+    return ""
 
 
 def classify_transport_error(exc: BaseException, *, host: str | None = None, probe: bool = True) -> Miss:
