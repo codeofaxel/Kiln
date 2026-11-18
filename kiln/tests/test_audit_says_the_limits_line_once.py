@@ -3,10 +3,10 @@
 The audit carries the design validator's report whole, and beside it a gate
 and a reason that repeat what the validator found.  The validator's summary
 also says why its figures were the general ones (the day's allowance used)
-and what they leave out for a flexible plastic; repeated by the gate and
-its details, the reply said the plan's line three times.  The report says
-it; the gate and the reason repeat only what the checks found.  Stood in
-here: an install without kiln-pro whose server answers past the allowance.
+and what they leave out for a flexible plastic.  The report says it; the
+gate and the reason repeat only what the checks found, so the reply says
+each once.  Stood in here: an install without kiln-pro whose server answers
+past the allowance.
 """
 
 from __future__ import annotations

@@ -1,12 +1,11 @@
 """A plastic Kiln cannot place is said once, on every check that read it.
 
 A name Kiln's design limits cannot place ("Acme ABS", "ABS+") is answered
-with the general figures.  The OpenSCAD parameter check and the design
-validator passed such a part silently, as if the plastic had been read.
-Every check reads the name through the one helper, and its reply says once
-that Kiln does not recognise it.  A miss (no answer at all) says nothing
-of the kind: nothing was asked to place it.  Stood in here: an install
-without kiln-pro whose server answers.
+with the general figures.  Every check reads the name through the one
+helper, and its reply says once that Kiln does not recognise it: the
+OpenSCAD parameter check and the design validator included.  A miss (no
+answer at all) says nothing of the kind: nothing was asked to place it.
+Stood in here: an install without kiln-pro whose server answers.
 """
 
 from __future__ import annotations

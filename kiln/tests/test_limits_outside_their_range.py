@@ -1,11 +1,10 @@
 """A request the design limits do not cover is said as the range it is.
 
 Kiln's design limits cover nozzles, layers and names within a range; a
-request outside it is refused the same way on every ask.  Said through the
-served-answer voice it read as a passing miss ("right now ... said no",
-"check again").  It is said as what it is: the range the limits cover, what
-Kiln does instead, and no retry.  Stood in here: an install without
-kiln-pro whose server refuses a 2.5 mm nozzle.
+request outside it is refused the same way on every ask, so it is said as
+what it is: the range the limits cover and what Kiln does instead, never as
+a passing miss ("right now", "check again").  Stood in here: an install
+without kiln-pro whose server refuses a 2.5 mm nozzle.
 """
 
 from __future__ import annotations

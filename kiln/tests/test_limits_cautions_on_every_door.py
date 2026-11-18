@@ -3,11 +3,10 @@
 When a check reads a plastic's design limits and gets the general figures
 instead of its own (a miss, or the day's allowance used), a flexible plastic
 needs more margin than they give and a static-safe grade's own minimum wall
-is not known.  The doors that build their own words said this; the others
-(the printability check, the prompt builders, a slice) said nothing.  The
-one helper every check reads now notes the reason and the caution on the
-running call, so every door's reply says them once.  Stood in here: an
-install without kiln-pro, never signed in.
+is not known.  The one helper every check reads notes the reason and the
+caution on the running call, so every door's reply says them once: the
+printability check and the prompt builders as well as the doors that word
+their own.  Stood in here: an install without kiln-pro, never signed in.
 """
 
 from __future__ import annotations
