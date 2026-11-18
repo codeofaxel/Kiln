@@ -593,10 +593,13 @@ class _DesignReasoningToolsPlugin:
             try:
                 from kiln.design_intelligence import get_design_constraints
 
+                # The advisor shows the brief's own rules, never the
+                # plastic's design limits, so it does not read them.
                 brief = get_design_constraints(
                     prompt,
                     material=material or None,
                     printer_model=printer_model or None,
+                    material_limits=False,
                 )
                 if brief.recommended_material:
                     mat = brief.recommended_material
