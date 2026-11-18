@@ -177,24 +177,30 @@ class TestTheServedPick:
         ("pro_reply", "said"),
         [
             ({"success": True, "status": "ok", "known": False, "pick": None},
-             "because Kiln's material pick didn't answer"),
+             "This is the pick every plan gets, not Kiln Pro's pick. Kiln Pro's pick had nothing for this part."),
             ({"success": False, "status": "error", "code": "TIER_REQUIRED", "required_tier": "pro",
               "error": "Kiln Pro's material pick needs Kiln Pro. Upgrade at https://kiln3d.com/pricing."},
-             "signing in again brings this computer's record of the plan up to date"),
+             "because Kiln's Pro pick said no, so it gives the pick every plan gets instead. Kiln's servers do not "
+             "count this computer's sign-in as Kiln Pro; signing in again brings this computer's record of the "
+             "plan up to date"),
             ({"status": "error", "success": False, "code": "INVALID_ARGUMENT",
-              "error": "requirements_text must describe the part."},
-             "requirements_text must describe the part."),
+              "error": "Describe the part in a sentence or two."},
+             "because Kiln's Pro pick said no, so it gives the pick every plan gets instead. Describe the part in "
+             "a sentence or two."),
         ],
     )
     def test_a_kiln_pro_plan_given_the_every_plan_pick_is_told_once_and_never_sold(self, monkeypatch, pro_reply, said):
         """A caller whose plan includes Kiln Pro, handed the pick every plan
         gets, reads one line saying so (why and what fixes it), and nothing
-        that offers the plan they hold."""
+        that offers the plan they hold.  The line names Kiln Pro's pick as
+        what did not come, never the pick it is shown beside, and a Kiln Pro
+        pick that answered with nothing for the part is not a miss."""
         _plan(monkeypatch, "pro")
         _servers(monkeypatch, {bridge.WIRE_TOOL: pro_reply, bridge.FLOOR_WIRE_TOOL: _ok(_FLOOR_PICK)})
         rec = di.recommend_material_for_design("shelf bracket")
         line = rec.warnings[0]
         assert line.startswith("This is the pick every plan gets, not Kiln Pro's pick.") and said in line
+        assert "Kiln's material pick" not in line and "didn't answer" not in line
         assert sum("not Kiln Pro's pick" in w for w in rec.warnings) == 1
         assert "kiln3d.com/pricing" not in line and "Upgrade" not in line and "needs Kiln" not in line
         assert rec.warnings[1:] == _FLOOR_PICK["warnings"]

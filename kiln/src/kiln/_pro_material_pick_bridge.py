@@ -46,6 +46,8 @@ FLOOR_WIRE_TOOL = "material_floor_pick"
 LOCAL_MODULE = "kiln_pro.material_floor_pick"
 #: What a person reads about a miss, filled in by :mod:`kiln.served_answer`.
 FEATURE = "material pick"
+#: The same for Kiln Pro's own pick, when it is the one that missed.
+PRO_FEATURE = "Pro pick"
 #: A pick is asked on the way to a make; the miss is said if this passes.
 _CONSULT_TIMEOUT_S: float = 4.0
 #: After the servers fail to answer, how long the pick is not asked for; a
@@ -126,7 +128,7 @@ def _served(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss 
         # how long until Kiln asks them again.
         last = _last_miss or Miss("unanswered", code="SERVER_UNREACHABLE")
         return None, Miss(last.cause, last.code, last.detail, retry_after_s=wait)
-    pro_missed: Miss | None = None
+    pro_note: str | None = None
     if _plan_includes_the_pick():
         rec, miss = _ask(WIRE_TOOL, requirements_text, printer)
         # Kiln Pro's pick, or a miss asking again would only repeat; a part
@@ -134,14 +136,14 @@ def _served(requirements_text: str, printer: dict[str, Any]) -> tuple[Any, Miss 
         # is asked as every other plan is, and the answer says so once.
         if rec is not None or (miss is not None and miss.cause != "refused"):
             return rec, miss
-        pro_missed = _why_not_kiln_pros(miss)
+        from kiln.material_basics import pro_pick_missed_line
+
+        pro_note = pro_pick_missed_line(_why_not_kiln_pros(miss), feature=PRO_FEATURE)
     rec, miss = _ask(FLOOR_WIRE_TOOL, requirements_text, printer)
     if rec is None and miss is None:
         miss = Miss("unanswered", detail="no pick in the answer")
-    if rec is not None and pro_missed is not None:
-        from kiln.material_basics import pro_pick_missed_line
-
-        rec.warnings.insert(0, pro_pick_missed_line(pro_missed, feature=FEATURE))
+    if rec is not None and pro_note is not None:
+        rec.warnings.insert(0, pro_note)
     return rec, miss
 
 
@@ -157,12 +159,13 @@ _PLAN_RECORD_FIX = (
 _OFFERS_A_PLAN = re.compile(r"kiln3d\.com/pricing|\bneeds Kiln (?:Pro|Business|Enterprise)\b")
 
 
-def _why_not_kiln_pros(miss: Miss | None) -> Miss:
+def _why_not_kiln_pros(miss: Miss | None) -> Miss | None:
     """Why Kiln Pro's pick did not come, for a caller this computer counts as
     holding Kiln Pro: the servers' own words, except words that offer the
-    plan, which are never said to someone who holds it."""
+    plan, which are never said to someone who holds it.  ``None`` when Kiln
+    Pro's pick answered and had nothing for the part."""
     if miss is None:
-        return Miss("unanswered", detail="no Kiln Pro pick in the answer")
+        return None
     if _OFFERS_A_PLAN.search(miss.detail or ""):
         return Miss(miss.cause, miss.code, _PLAN_RECORD_FIX)
     return miss
@@ -289,4 +292,4 @@ def _rebuild_floor(pick: Any) -> Any:
     )
 
 
-__all__ = ["FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "WIRE_TOOL", "pick"]
+__all__ = ["FEATURE", "FLOOR_WIRE_TOOL", "LOCAL_MODULE", "PRO_FEATURE", "WIRE_TOOL", "pick"]

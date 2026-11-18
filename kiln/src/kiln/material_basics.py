@@ -68,19 +68,25 @@ def basic_pick_line(miss: Any, *, feature: str, hotend_known: bool = True) -> st
     )
 
 
+#: What a line about Kiln Pro's pick says first, whatever came of it.
+_NOT_KILN_PROS = "This is the pick every plan gets, not Kiln Pro's pick"
+
+
 def pro_pick_missed_line(miss: Any, *, feature: str) -> str:
     """The one line said beside the pick every plan gets when the caller's
     plan includes Kiln Pro and Kiln Pro's own pick did not come: why
     (:mod:`kiln.served_answer`) and what fixes it, never an offer of the plan
-    the caller holds."""
-    from kiln.served_answer import Miss, sentence
+    the caller holds.  *feature* names Kiln Pro's pick, the thing that
+    missed.  *miss* ``None`` is Kiln Pro's pick answering with nothing for
+    the part, which is not a miss and has nothing to fix."""
+    from kiln.served_answer import sentence
 
     if miss is None:
-        miss = Miss("unanswered", detail="no Kiln Pro pick")
+        return f"{_NOT_KILN_PROS}. Kiln Pro's pick had nothing for this part."
     return sentence(
         miss,
         feature=feature,
-        on_the_line="This is the pick every plan gets, not Kiln Pro's pick",
+        on_the_line=_NOT_KILN_PROS,
         cannot="give Kiln Pro's pick",
         wont="gives the pick every plan gets instead",
         then="ask again for Kiln Pro's pick",
