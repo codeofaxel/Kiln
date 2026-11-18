@@ -367,20 +367,22 @@ class _LimitWords:
     pin: str = "the general minimum pin diameter"
     bridge: str = "the general max bridge length"
     overhang: str = "the general max unsupported overhang"
+    #: Why the wall floor is a static-safe grade's own minimum, where the
+    #: answer says so; empty otherwise.
+    static_safe_why: str = ""
 
     @classmethod
     def of(cls, limits: Any) -> _LimitWords:
-        from kiln.generic_limits import wall_min_mm
         from kiln.material_limits import BRIDGE, ESD_WALL, OVERHANG, PIN, WALL_RECOMMENDED
 
         general = cls()
-        esd = limits.value(ESD_WALL)
-        static_safe = bool(esd) and float(esd) >= wall_min_mm(limits.nozzle_mm)
+        static_safe = limits.static_safe_floor()
 
         def own(quantity: str, words: str, fallback: str) -> str:
             return words if limits.is_own(quantity) else fallback
 
         return cls(
+            static_safe_why=limits.why.get(ESD_WALL, "") if static_safe else "",
             min_wall="this plastic's static-safe minimum wall" if static_safe else general.min_wall,
             recommended_wall=own(WALL_RECOMMENDED, "this plastic's recommended wall thickness", general.recommended_wall),
             hole=general.hole,
@@ -494,6 +496,12 @@ def validate_openscad_parameters(
                         ),
                     )
                 )
+                if words.static_safe_why:
+                    # Why a static-safe grade's minimum is a floor of its
+                    # own, said once in the call's reply.
+                    from kiln.reading_notes import LIMITS_KEY, note_said
+
+                    note_said(LIMITS_KEY, words.static_safe_why)
             rec_wall = mat_limits.get("recommended_wall_thickness_mm")
             if (
                 rec_wall is not None

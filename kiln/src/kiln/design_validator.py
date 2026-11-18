@@ -100,13 +100,16 @@ def _check_wall_thickness(
     *,
     material_name: str = "",
     floor_mm: float | None = None,
+    floor_why: str = "",
 ) -> DesignValidationCheck:
     """Check wall thickness against the required wall.
 
     *floor_mm* is the thinnest wall the plastic closes at all: below it the
     check is critical.  Between it and *required_mm* (the recommended wall,
     or the brief's own minimum) it is a warning.  With no floor given, a wall
-    under half the required one is critical."""
+    under half the required one is critical.  *floor_why* says why the floor
+    is what it is (a static-safe grade's electrical minimum), said with a
+    critical result."""
     passed = min_wall_mm >= required_mm
     material_clause = f" for {material_name}" if material_name else ""
     critical_below = floor_mm if floor_mm is not None else required_mm * 0.5
@@ -121,6 +124,13 @@ def _check_wall_thickness(
             f"{material_clause}. Thinnest point is {min_wall_mm:.2f} mm "
             f"— thicken thin regions or increase the wall count in the slicer."
         )
+        if floor_why:
+            # The floor is the plastic's electrical minimum: the model's
+            # walls have to be drawn thicker, and why is said.
+            fix = (
+                f"Increase wall thickness to at least {required_mm:.1f} mm"
+                f"{material_clause}. Thinnest point is {min_wall_mm:.2f} mm. {floor_why}"
+            )
     else:
         severity = "warning"
         fix = (
@@ -441,9 +451,16 @@ def validate_design(
     if min_wall_required is not None:
         measured_wall = thin_walls.get("min_wall_thickness_mm")
         if isinstance(measured_wall, (int, float)) and not isinstance(measured_wall, bool) and measured_wall > 0:
+            from kiln.material_limits import ESD_WALL
+
             checks.append(
                 _check_wall_thickness(
                     float(measured_wall), min_wall_required, material_name=material_name, floor_mm=wall_floor,
+                    floor_why=(
+                        plastic_limits.why.get(ESD_WALL, "")
+                        if plastic_limits.static_safe_floor() and wall_floor == plastic_limits.wall_floor_mm()
+                        else ""
+                    ),
                 )
             )
         else:

@@ -104,6 +104,10 @@ class MaterialLimits:
     #: general figures because the caller's daily allowance of plastics was
     #: used; empty otherwise.
     allowance: str = ""
+    #: Why a figure is what it is, per quantity, where the answer says so
+    #: (a static-safe grade's minimum wall is a floor for its electrical
+    #: property, not for strength).
+    why: dict[str, str] = field(default_factory=dict)
 
     def value(self, quantity: str) -> float | None:
         """The figure for *quantity*, ``None`` where it does not apply."""
@@ -124,6 +128,12 @@ class MaterialLimits:
         esd = self.value(ESD_WALL)
         wall = self.value(WALL_MIN) or _generic.wall_min_mm(self.nozzle_mm)
         return max(float(esd), float(wall)) if esd else float(wall)
+
+    def static_safe_floor(self) -> bool:
+        """True when the wall floor is a static-safe grade's own electrical
+        minimum rather than the wall that closes."""
+        esd = self.value(ESD_WALL)
+        return bool(esd) and self.wall_floor_mm() == float(esd)
 
     def design_limits(self) -> dict[str, float]:
         """The figures under the names a design check's reply carries.  The
@@ -274,9 +284,12 @@ def limits_for(
             _answers[key] = answer
     if answer is None:
         return MaterialLimits(name, public_id, public_id is not None, nozzle, layer, figures, basis, miss)
+    why: dict[str, str] = {}
     for quantity, figure in answer["limits"].items():
         figures[quantity] = float(figure["value"]) if figure.get("value") is not None else None
         basis[quantity] = str(figure["basis"])
+        if isinstance(figure.get("note"), str) and figure["note"]:
+            why[quantity] = figure["note"]
     allowance = str(answer.get("allowance") or "")
     if allowance:
         # Said in the reply of the call that read it, whichever door it was.
@@ -285,7 +298,7 @@ def limits_for(
         note_said(LIMITS_KEY, allowance)
     return MaterialLimits(
         name, answer.get("material_id") or public_id, bool(answer["known"]), nozzle, layer, figures, basis,
-        allowance=allowance,
+        allowance=allowance, why=why,
     )
 
 

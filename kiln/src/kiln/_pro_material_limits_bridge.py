@@ -166,8 +166,19 @@ def _served(material: str | None, scenario: dict[str, Any]) -> tuple[dict[str, A
     return None, miss or Miss("unanswered", detail="no design limits in the answer")
 
 
-#: The longest allowance line an answer may carry.
+#: The longest allowance line, or note on a figure, an answer may carry.
 _ALLOWANCE_MAX_CHARS = 400
+
+
+def _kept_figure(figure: dict[str, Any]) -> dict[str, Any]:
+    """A figure's value, unit and basis, and the sentence saying why it is
+    what it is where the answer gives one (``note``: a static-safe grade's
+    minimum wall is a floor for its electrical property)."""
+    kept = {key: figure[key] for key in ("value", "unit", "basis") if key in figure}
+    note = figure.get("note")
+    if isinstance(note, str) and note.strip() and len(note) <= _ALLOWANCE_MAX_CHARS:
+        kept["note"] = note.strip()
+    return kept
 
 
 def _kept(answer: dict[str, Any], wanted: tuple[str, ...] = QUANTITIES) -> dict[str, Any]:
@@ -180,7 +191,7 @@ def _kept(answer: dict[str, Any], wanted: tuple[str, ...] = QUANTITIES) -> dict[
     kept: dict[str, Any] = {
         "known": answer["known"],
         "material_id": material_id if isinstance(material_id, str) else None,
-        "limits": {q: dict(answer["limits"][q]) for q in wanted if q in answer["limits"]},
+        "limits": {q: _kept_figure(answer["limits"][q]) for q in wanted if q in answer["limits"]},
     }
     allowance = answer.get("allowance")
     if isinstance(allowance, str) and allowance.strip() and len(allowance) <= _ALLOWANCE_MAX_CHARS:
