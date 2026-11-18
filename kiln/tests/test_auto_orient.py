@@ -1317,7 +1317,8 @@ class TestAKilnProPlanIsToldWhenItsOrderMisses:
             "Sign in and try again."
         ]
         again = _auto_orient_tool()(file_path=stl)
-        assert "warnings" not in again and "why" not in again, "said once a session"
+        assert "warnings" not in again, "said in words once a session"
+        assert again["why"] == "signed_out", "the cause rides every miss"
 
     def test_servers_that_do_not_answer_are_said_too(self, tmp_path, monkeypatch):
         def offline(kwargs):

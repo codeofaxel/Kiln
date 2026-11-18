@@ -9221,15 +9221,19 @@ def _analyze_printability_here(
             "minimum feature size manually."
         )
 
-    # Upsell hook: when the judgment overlay is absent, the
-    # warping / thermal-stress / adhesion-force recommendations come
-    # from the public safety-floor templates. With the overlay, curated /
-    # printer-tuned / brand-aware guidance. One non-intrusive line.
+    # When the judgment overlay is absent, the warping / thermal-stress /
+    # adhesion-force recommendations come from the public safety-floor
+    # templates; with it, curated, printer-tuned guidance.  One line says so,
+    # only to someone who would be buying the plan: an account whose plan
+    # ended, and one whose plan already includes it, are not sold it here.
     if not judgment_overlay:
-        recommendations.append(
-            "Curated, brand-tuned recommendations (printer-specific bed temps, "
-            "enclosure choice, filament profile) are available with Kiln Pro."
-        )
+        from kiln.tiers_and_terms import plan_offer
+
+        if plan_offer("pro", "Curated, brand-tuned recommendations").buying:
+            recommendations.append(
+                "Curated, brand-tuned recommendations (printer-specific bed temps, "
+                "enclosure choice, filament profile) are available with Kiln Pro."
+            )
 
     # Estimate print time modifier: supports and bridges add time.
     time_mod = 1.0
