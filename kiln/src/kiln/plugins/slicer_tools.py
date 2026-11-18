@@ -3076,7 +3076,8 @@ class _SlicerToolsPlugin:
 
             Args:
                 time_limit_seconds: How long the slicer may run, in whole
-                    seconds.  Leave unset for Kiln's own limit.  A slicer
+                    seconds, up to Kiln's own limit (``SLICE_TIME_LIMIT_S``);
+                    a longer one is refused.  Leave unset for Kiln's own limit.  A slicer
                     still running at the limit is stopped and the slice is
                     refused (``SLICE_TOOK_TOO_LONG``); nothing is sliced.
                 filament_map: Only for a printer with more than one nozzle:
@@ -3161,12 +3162,17 @@ class _SlicerToolsPlugin:
                 return err
             if err := _srv._refuse_unknown_printer(printer_name, "slice for"):
                 return err
+            from kiln.slicer import SLICE_TIME_LIMIT_S
+
             if time_limit_seconds is not None and (
-                isinstance(time_limit_seconds, bool) or not isinstance(time_limit_seconds, int) or time_limit_seconds < 1
+                isinstance(time_limit_seconds, bool)
+                or not isinstance(time_limit_seconds, int)
+                or not 1 <= time_limit_seconds <= SLICE_TIME_LIMIT_S
             ):
                 return _srv._error_dict(
-                    "time_limit_seconds is how long the slicer may run, in whole seconds of 1 or more. "
-                    "Give one, or leave it out for Kiln's own limit.",
+                    f"time_limit_seconds is how long the slicer may run, in whole seconds from 1 to "
+                    f"{SLICE_TIME_LIMIT_S}; it can shorten Kiln's own limit, never lengthen it. Give one in "
+                    "that range, or leave it out for Kiln's own limit.",
                     code="INVALID_INPUT",
                 )
 

@@ -185,6 +185,11 @@ REFUSED_PATHS_COLLIDE = "paths_collide"
 REFUSED_NOZZLE_REACH = "nozzle_cannot_reach"
 
 
+#: How long, in seconds, a slicer may run before it is stopped, unless a
+#: caller asks for less.
+SLICE_TIME_LIMIT_S = 300
+
+
 class SliceTimeLimitError(SlicerError):
     """The slicer ran past the time limit and was stopped; nothing was
     sliced.  ``code`` is the door's error code."""
@@ -1757,7 +1762,7 @@ def _slice_file(
     profile: str | None = None,
     slicer_path: str | None = None,
     extra_args: list[str] | None = None,
-    timeout: int = 300,
+    timeout: int = SLICE_TIME_LIMIT_S,
     material: str | None = None,
     loaded_material: str | None = None,
     loaded_determined_by: str = LOADED_OBSERVED,

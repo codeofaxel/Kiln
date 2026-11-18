@@ -1039,3 +1039,27 @@ class TestTheChangeCountIsBounded:
                 40, 40, 1e6, materials=["PLA", "PLA"], printer_id="invented_two", layer_height_mm=1e-9,
                 filament_map=[1, 2],
             )
+
+
+class TestTheTimeLimitOnlyShortens(TestTheSliceModelDoor):
+    @pytest.mark.parametrize("limit", [301, 3600, 10**9])
+    def test_a_limit_past_kilns_own_is_refused(self, tmp_path, limit):
+        from kiln.slicer import SLICE_TIME_LIMIT_S
+
+        reply = self._call(tmp_path, _never_runs, time_limit_seconds=limit)
+        assert reply["success"] is False and reply["error"]["code"] == "INVALID_INPUT"
+        assert f"from 1 to {SLICE_TIME_LIMIT_S}" in reply["error"]["message"]
+
+    @pytest.mark.parametrize("limit", [7, 300])
+    def test_a_limit_within_it_reaches_the_slicer(self, tmp_path, limit):
+        seen: dict = {}
+        reply = self._call(tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen), time_limit_seconds=limit)
+        assert reply["success"], reply
+        assert seen["timeout"] == limit
+
+    def test_with_none_the_slicer_runs_under_kilns_own_limit(self, tmp_path):
+        from kiln.slicer import SLICE_TIME_LIMIT_S
+
+        seen: dict = {}
+        self._call(tmp_path, _slicer_that_writes("; filament_map = 1,2\n", seen))
+        assert seen["timeout"] == SLICE_TIME_LIMIT_S == 300
