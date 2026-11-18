@@ -748,12 +748,19 @@ class _IntelligenceToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln._pro_routing_bridge import refusal_for
                 from kiln.material_routing import (
                     BasicMaterials,
                 )
                 from kiln.material_routing import (
                     recommend_material as _recommend,
                 )
+
+                # A request Kiln's servers could not read is refused here,
+                # before anything is asked or scanned.
+                refused = refusal_for(intent)
+                if refused is not None:
+                    return _srv._error_dict(refused, code="VALIDATION_ERROR")
 
                 caps = {
                     "has_enclosure": has_enclosure,
@@ -799,10 +806,13 @@ class _IntelligenceToolsPlugin:
                     on_hand=on_hand,
                 )
                 if isinstance(rec, BasicMaterials):
-                    # No pick: the plastics this printer can melt, and why.
+                    # No pick: the plastics this printer can melt (or the
+                    # materials on hand, when asked), and why.
                     basic = rec.to_dict()
                     if printer_id:
                         basic["answered_for_printer"] = printer_id
+                    if on_hand_only:
+                        basic["on_hand_scope"] = f"printer:{printer_id}" if printer_id else "fleet"
                     return basic
 
                 response = {"success": True, "recommendation": rec.to_dict()}

@@ -344,19 +344,159 @@ class TestAMissIsBasic:
         assert _picks(sent) == [] and reply["basic"] is True and reply["why"] == "offline"
 
     @pytest.mark.parametrize("cause", sorted(MISSES))
-    def test_the_list_door_gives_names_and_categories_only(self, doors, cause):
+    def test_the_list_door_gives_the_basic_plastics_by_name_and_category(self, doors, cause):
+        """The same plastics a basic pick lists, named as the catalogue names
+        them, with nothing else of the catalogue."""
+        from kiln.catalog_keys import resolve_material_key
         from kiln.design_intelligence import list_public_material_profiles
+        from kiln.material_basics import plastics_printer_can_melt
 
         with plain_install_served(MISSES[cause]):
             reply = doors["list_available_materials"]()
         assert reply["success"] is True and reply["basic"] is True and reply["why"] == cause
+        profiles = {p.material_id: p for p in list_public_material_profiles()}
+        keys = [resolve_material_key(p, list(profiles)) for p in plastics_printer_can_melt(None)]
+        assert None not in keys
         assert reply["materials"] == [
-            {"name": p.material_id, "display_name": p.display_name, "category": p.category}
-            for p in list_public_material_profiles()
+            {"name": k, "display_name": profiles[k].display_name, "category": profiles[k].category} for k in keys
         ]
-        assert reply["count"] == len(reply["materials"]) > 0
+        assert reply["count"] == len(reply["materials"]) == len(plastics_printer_can_melt(None))
         assert reply["message"].startswith("Kiln did not list each material's properties. Kiln can't list them right now because ")
+        assert "lists common plastics by name and category only." in reply["message"]
         _assert_one_voice(reply["message"])
+
+
+# ---------------------------------------------------------------------------
+# A miss when the materials on hand were asked: the person's own shelf
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def filled_shelf(tmp_path, monkeypatch):
+    """PETG-CF loaded on x1c and TPU loaded on a1."""
+    from kiln.persistence import KilnDB
+
+    db = KilnDB(db_path=str(tmp_path / "filled.db"))
+    db.save_material("x1c", 0, "PETG-CF", color="black", remaining_grams=750.0)
+    db.save_material("a1", 0, "TPU", color="red", remaining_grams=300.0)
+    monkeypatch.setattr("kiln.persistence.get_db", lambda *a, **k: db)
+    yield db
+    db.close()
+
+
+class TestAMissFromTheMaterialsOnHand:
+    def test_the_list_is_the_shelf_as_recorded_with_where_each_one_is(self, doors, filled_shelf):
+        with plain_install_served(SIGNED_OUT):
+            reply = doors["recommend_material"](intent="flexible gasket", on_hand_only=True, printer_id="x1c")
+        assert reply["basic"] is True and "recommendation" not in reply
+        assert reply["plastics"] == ["PETG-CF"]
+        assert reply["on_hand"] == [{"material_type": "PETG-CF", "status": "loaded", "loaded_on": ["x1c"], "shelf_spools": 0}]
+        assert reply["on_hand_scope"] == "printer:x1c" and reply["answered_for_printer"] == "x1c"
+        caution, note = reply["message"].split("\n\n")
+        assert caution.startswith("ABRASIVE FILAMENT: PETG-CF ")
+        assert "lists the materials you have on hand instead" in note
+        _assert_one_voice(note)
+
+    def test_every_machine_counts_when_no_printer_is_named(self, doors, filled_shelf):
+        with plain_install_served(SIGNED_OUT):
+            reply = doors["recommend_material"](intent="flexible gasket", on_hand_only=True)
+        assert sorted(reply["plastics"]) == ["PETG-CF", "TPU"] and reply["on_hand_scope"] == "fleet"
+        assert {row["material_type"]: row["loaded_on"] for row in reply["on_hand"]} == {"PETG-CF": ["x1c"], "TPU": ["a1"]}
+
+    def test_the_food_floor_keeps_what_the_person_owns_off_a_mug(self, doors, filled_shelf):
+        """Nothing on the shelf may touch food, so nothing owned is listed and
+        the plastics listed are said not to be on hand."""
+        from kiln.material_basics import basic_plastics
+
+        with plain_install_served(SIGNED_OUT):
+            reply = doors["recommend_material"](intent="coffee mug", on_hand_only=True)
+        assert reply["plastics"] == basic_plastics("coffee mug") and reply["on_hand"] == []
+        assert not {"PETG-CF", "TPU"} & set(reply["plastics"]) and reply["on_hand_scope"] == "fleet"
+        assert reply["message"].startswith(
+            "NOT ON HAND: nothing you have recorded (PETG-CF, TPU) matches this request — "
+            "the plastics listed need to be purchased.\n\n"
+        )
+
+    def test_an_empty_shelf_says_nothing_is_recorded(self, doors, tmp_path, monkeypatch):
+        from kiln.persistence import KilnDB
+
+        db = KilnDB(db_path=str(tmp_path / "bare.db"))
+        monkeypatch.setattr("kiln.persistence.get_db", lambda *a, **k: db)
+        try:
+            with plain_install_served(SIGNED_OUT):
+                reply = doors["recommend_material"](intent="strong", on_hand_only=True)
+        finally:
+            db.close()
+        assert reply["on_hand"] == [] and reply["on_hand_scope"] == "fleet"
+        assert reply["message"].startswith(
+            "NOT ON HAND: no spools or loaded materials are recorded — record inventory with add_spool "
+            "or an AMS/CFS sync to get on-hand answers. The plastics listed are not on hand.\n\n"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Over-long input
+# ---------------------------------------------------------------------------
+
+
+class TestOverLongInput:
+    def test_an_over_long_intent_is_refused_before_anything_is_asked(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a bracket " * 1_160)
+        assert sent == [], "an over-long intent was sent to Kiln's servers"
+        assert reply["success"] is False and reply["error"]["code"] == "VALIDATION_ERROR"
+        assert reply["error"]["message"] == "Invalid intent: say what the part is for in at most 10,000 characters."
+
+    def test_an_intent_at_the_limit_is_asked(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="x" * 10_000)
+        assert len(_picks(sent)) == 1 and reply["success"] is True and "basic" not in reply
+
+    def test_a_long_spool_name_is_cut_on_the_way_and_still_answers(self, doors, tmp_path, monkeypatch):
+        from kiln.persistence import KilnDB
+
+        long_name = "PETG " + "TRANSLUCENT SKY BLUE " * 6 + "X" * 4  # the inventory records capitals
+        assert len(long_name) > 120
+        db = KilnDB(db_path=str(tmp_path / "long.db"))
+        db.save_material("x1c", 0, long_name, color="blue", remaining_grams=600.0)
+        monkeypatch.setattr("kiln.persistence.get_db", lambda *a, **k: db)
+
+        def answer_for(request):
+            names = request["on_hand_materials"]
+            return served_pick("petg", "PETG", on_hand_status="on_hand",
+                               on_hand_catalog={n: "petg" for n in names if n.lower().startswith("petg")})
+
+        try:
+            with plain_install_served(answer_for=answer_for) as sent:
+                reply = doors["recommend_material"](intent="strong", on_hand_only=True, printer_id="x1c")
+        finally:
+            db.close()
+        (request,) = _picks(sent)
+        assert request["on_hand_materials"] == [long_name[:120]]
+        rec = reply["recommendation"]
+        assert rec["availability"]["as_recorded"] == [long_name]
+        assert [r["printer_name"] for r in rec["availability"]["loaded_on"]] == ["x1c"]
+
+
+# ---------------------------------------------------------------------------
+# An answer of the wrong shape is a miss, never a crash
+# ---------------------------------------------------------------------------
+
+
+class TestAMalformedAnswerIsAMiss:
+    @pytest.mark.parametrize("broken", [
+        {"better": {"name": "tpu"}},
+        {"better": {"name": "tpu", "display_name": "TPU", "sentence": "s", "score": "high", "score_gap": 1.0}},
+        {"on_hand_catalog": {"PETG": ["petg"]}},
+        {"on_hand_catalog": {"PETG": "petg"}, "name": "abs"},
+    ], ids=["better-without-names", "better-score-not-a-number", "catalog-value-not-a-name", "pick-not-on-the-shelf"])
+    def test_the_door_answers_basic(self, doors, shelf, broken):
+        answer = served_pick(broken.get("name", "petg"), on_hand_status="on_hand",
+                             on_hand_catalog=broken.get("on_hand_catalog", {"PETG": "petg"}), better=broken.get("better"))
+        with plain_install_served(answer):
+            reply = doors["recommend_material"](intent="strong", on_hand_only=True)
+        assert reply["success"] is True and reply["basic"] is True, reply
+        assert reply["why"] == "unanswered" and "recommendation" not in reply
 
 
 # ---------------------------------------------------------------------------
