@@ -22781,9 +22781,12 @@ def find_material_substitute(
 ) -> dict:
     """Find substitute filament materials when your preferred material is unavailable (returns ranked list).
 
-    Checks a built-in knowledge base of FDM filament compatibility and returns
-    ranked alternatives with trade-off descriptions.  For a single best match,
-    use ``get_best_material_substitute`` instead.
+    Kiln's servers rank the alternatives and describe what each swap trades
+    away, for any signed-in Kiln account (a free one included).  Signed out,
+    offline or unanswered, the reply is a basic list instead (``basic:
+    true``): the other filaments of the same family in Kiln's catalogue,
+    unranked, with a ``note`` saying why and how to get the ranked list.  For
+    a single best match, use ``get_best_material_substitute`` instead.
 
     Args:
         material: The original filament material (e.g. "PLA", "PETG", "ABS").
@@ -22792,23 +22795,16 @@ def find_material_substitute(
         min_score: Minimum compatibility score threshold (0.0–1.0).
     """
     try:
-        from kiln.material_substitution import (
-            SubstitutionReason,
-            find_substitutes,
-        )
+        from kiln import _pro_substitution_bridge as substitution
 
-        reason_enum = None
-        if reason:
-            try:
-                reason_enum = SubstitutionReason(reason.lower())
-            except ValueError:
-                return _error_dict(
-                    f"Invalid reason: {reason!r}. Valid: {[r.value for r in SubstitutionReason]}",
-                    code="VALIDATION_ERROR",
-                )
-
-        subs = find_substitutes(material, "fdm", reason=reason_enum, min_score=min_score)
-        sub_dicts = [s.to_dict() for s in subs]
+        refused = substitution.invalid_reason(reason)
+        if refused is not None:
+            return _error_dict(refused, code="VALIDATION_ERROR")
+        asked = substitution.ask(material, reason=reason, min_score=min_score)
+        if asked.refusal is not None:
+            return _error_dict(asked.refusal["error"], code=asked.refusal["code"])
+        basic = asked.miss is not None
+        sub_dicts = substitution.basic_substitutes(material) if basic else list(asked.substitutes or [])
         # Food-safety preservation: if the source material is rated food
         # safe, mark any substitute that is NOT as a safety regression so
         # callers don't silently swap a pet bowl's PETG for ABS.  Public
@@ -22846,6 +22842,11 @@ def find_material_substitute(
             "substitutes": sub_dicts,
             "count": len(sub_dicts),
         }
+        if basic:
+            # No ranking came back: the list is the basic one, said so.
+            result["basic"] = True
+            result["note"] = substitution.basic_line(asked.miss, material, found=bool(sub_dicts), reason=reason)
+            result.update(substitution.miss_fields(asked.miss))
         if food_safety_check is not None:
             result["food_safety"] = food_safety_check
         return result
@@ -22858,19 +22859,37 @@ def find_material_substitute(
 def get_best_material_substitute(material: str) -> dict:
     """Get the single best substitute for a filament material (quick shortcut).
 
-    Returns one top-ranked alternative. For a full ranked list with trade-off
-    details and filtering, use ``find_material_substitute`` instead.
+    Returns one top-ranked alternative, ranked by Kiln's servers for any
+    signed-in Kiln account.  Signed out, offline or unanswered, no best is
+    named: the reply is the basic list (``basic: true``) of same-family
+    filaments, unranked, with a ``note`` saying why.  For a full ranked list
+    with trade-off details and filtering, use ``find_material_substitute``
+    instead.
 
     Args:
         material: The original filament material (e.g. "PLA", "PETG").
     """
     try:
-        from kiln.material_substitution import get_best_substitute
+        from kiln import _pro_substitution_bridge as substitution
 
-        sub = get_best_substitute(material, "fdm")
-        if sub is None:
+        asked = substitution.ask(material, best=True)
+        if asked.refusal is not None:
+            return _error_dict(asked.refusal["error"], code=asked.refusal["code"])
+        if asked.miss is not None:
+            # Without Kiln's ranking no best is named: the basic list instead.
+            basic = substitution.basic_substitutes(material)
+            return {
+                "success": True,
+                "material": material,
+                "basic": True,
+                "substitutes": basic,
+                "note": substitution.basic_line(asked.miss, material, found=bool(basic)),
+                **substitution.miss_fields(asked.miss),
+            }
+        subs = asked.substitutes or []
+        if not subs:
             return {"success": True, "material": material, "substitute": None, "message": "No substitutes found"}
-        return {"success": True, "material": material, "substitute": sub.to_dict()}
+        return {"success": True, "material": material, "substitute": subs[0]}
     except Exception as exc:
         logger.exception("Error in get_best_material_substitute")
         return _error_dict(f"Failed to get best material substitute: {exc}", code="SUBSTITUTION_ERROR")

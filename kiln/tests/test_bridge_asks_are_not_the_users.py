@@ -50,6 +50,10 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks a material inventory door about several "
         "machines on Kiln Business; the cross-machine answer is what they reached for"
     ),
+    "_pro_substitution_bridge": (
+        "runs only when the person asks find_material_substitute or "
+        "get_best_material_substitute; the ranked substitutes are the feature they reached for"
+    ),
     "_pro_material_pick_bridge": (
         "runs only when the person asks what material a part should be, on a "
         "plan that includes Kiln Pro; the pick is the feature they reached for"
