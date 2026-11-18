@@ -714,7 +714,7 @@ class TestARetryBesideTheFailedPart:
         kwargs.setdefault("skip_validation", True)
         return retry(model_path=model, printer_name="workshop", skip_diagnosis=True, **kwargs)
 
-    def _asked_then(self, monkeypatch, model: str, call):
+    def _asked_then(self, monkeypatch, model: str, call, *, tool: str = "retry_print_with_fix", arg: str = "model_path"):
         """The wrapper asks the person about *model* on a host that draws a
         dialog, they say yes, and *call* runs in that same call's context."""
         async def _person(ctx, message, **_kw):
@@ -729,9 +729,7 @@ class TestARetryBesideTheFailedPart:
         monkeypatch.setattr(server, "_consent_from_account", _no_account)
 
         async def _the_call():
-            await server._obtain_print_consent(
-                "retry_print_with_fix", {"model_path": model, "printer_name": "workshop"}, object(),
-            )
+            await server._obtain_print_consent(tool, {arg: model, "printer_name": "workshop"}, object())
             return call()
 
         return asyncio.run(_the_call())
@@ -977,6 +975,54 @@ class TestARetryBesideTheFailedPart:
         assert len(self.asked) == 1 and print_consent.display_name(rescaled) in self.asked[0]
         assert len(self.printer.started) == 1
         assert [os.path.basename(c.file_name) for c in self.cleared if c] == [os.path.basename(rescaled)]
+
+    @staticmethod
+    def _step(path, size: float = 20.0) -> str:
+        pytest.importorskip("OCP", reason="a real STEP file needs the CAD kernel to write and convert")
+        from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+        from OCP.IFSelect import IFSelect_RetDone
+        from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+        writer = STEPControl_Writer()
+        writer.Transfer(BRepPrimAPI_MakeBox(size, size, size).Shape(), STEPControl_StepModelType.STEPControl_AsIs)
+        assert writer.Write(str(path)) == IFSelect_RetDone
+        return str(path)
+
+    def _print_step(self, door: str, model: str, token: str):
+        from kiln.plugins import slicer_tools
+        from tests.test_watchdog_attached_to_every_print import _plugin_tools
+
+        if door == "retry":
+            return self._retry(model, skip_validation=False, preview_token=token)
+        sap = _plugin_tools(slicer_tools)["slice_and_print"]
+        return sap(input_path=model, printer_name="workshop", preview_token=token)
+
+    @pytest.mark.parametrize("door, arg", [("retry", "model_path"), ("slice_and_print", "input_path")])
+    def test_a_step_file_only_converted_prints_on_the_yes_for_it(self, monkeypatch, tmp_path, door, arg):
+        """The check turns a STEP file into a mesh and changes nothing else:
+        the same part, so the person's one yes for the STEP prints it, and
+        nothing says Kiln repaired it."""
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._slicer(monkeypatch, tmp_path)
+        model = self._step(tmp_path / "bracket.step")
+        tool = "retry_print_with_fix" if door == "retry" else "slice_and_print"
+        out = self._asked_then(
+            monkeypatch, model, lambda: self._print_step(door, model, self._token(model)), tool=tool, arg=arg,
+        )
+        assert out.get("success") is True, out
+        assert len(self.asked) == 1 and "bracket" in self.asked[0], "one question, about the STEP"
+        assert len(self.printer.started) == 1
+        assert [(c.source, os.path.basename(c.file_name)) for c in self.cleared if c] == [(SOURCE_ELICITED, "bracket.step")]
+        assert "repaired" not in str(out.get("error") or "")
+
+    def test_a_step_file_converted_and_rescaled_is_another_part(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(server, "preflight_check", lambda *a, **k: {"ready": True, "summary": "ready"})
+        self._slicer(monkeypatch, tmp_path)
+        model = self._step(tmp_path / "bracket.step", size=0.02)
+        out = self._asked_then(monkeypatch, model, lambda: self._print_step("retry", model, self._token(model)))
+        assert self.printer.started == [] and self.printer.uploaded == [], out
+        assert out["changed_part"]["how"] == "rescaled", out
+        assert "Kiln rescaled bracket.step before printing it" in out["error"]["message"]
 
     def test_a_window_does_not_let_the_old_preview_stand_for_a_changed_part(self, monkeypatch, tmp_path):
         """Inside a window nobody is asked, and the preview is still the

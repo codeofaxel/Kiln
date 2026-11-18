@@ -548,11 +548,18 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
         )
     path = report.get("validated_path") or input_path
     if path != input_path:
-        # A repaired or rescaled mesh is another part than the one shown.
-        from kiln.print_signoff import COPY_REPAIRED, COPY_RESCALED, note_copy
+        # A repaired or rescaled mesh is another part than the one shown; a
+        # file only converted to a mesh is the same part.
+        from kiln.print_signoff import COPY_CONVERTED, COPY_REPAIRED, COPY_RESCALED, note_copy
 
         rescaled = any(c.get("name") == "auto_scale" and c.get("passed") for c in report.get("checks") or [])
-        note_copy(input_path, path, how=COPY_RESCALED if rescaled else COPY_REPAIRED)
+        if rescaled:
+            how = COPY_RESCALED
+        elif report.get("conversion") is not None and not report.get("repaired"):
+            how = COPY_CONVERTED
+        else:
+            how = COPY_REPAIRED
+        note_copy(input_path, path, how=how)
     return PrintGate(path=path, report=report)
 
 

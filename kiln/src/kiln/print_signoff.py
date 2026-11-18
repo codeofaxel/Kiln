@@ -64,6 +64,7 @@ __all__ = [
     "SOURCE_QUEUED",
     "SOURCE_PRIOR_APPROVAL",
     "SOURCE_RESUME",
+    "COPY_CONVERTED",
     "COPY_MOVED",
     "COPY_REPAIRED",
     "COPY_RESCALED",
@@ -311,8 +312,13 @@ COPY_MOVED = "moved"
 COPY_REPAIRED = "repaired"
 #: The mesh was rescaled: a different part from the one shown.
 COPY_RESCALED = "rescaled"
+#: The part was turned into another file format and nothing else: a yes for
+#: the part covers the copy.
+COPY_CONVERTED = "converted"
 
-_COPY_KINDS = frozenset({COPY_MOVED, COPY_REPAIRED, COPY_RESCALED})
+_COPY_KINDS = frozenset({COPY_MOVED, COPY_REPAIRED, COPY_RESCALED, COPY_CONVERTED})
+#: The copies that are still the part the person was shown.
+_SAME_PART = frozenset({COPY_MOVED, COPY_CONVERTED})
 
 #: How far a chain of copies is followed back (a copy of a copy of ...).
 _MAX_COPY_HOPS = 4
@@ -368,14 +374,14 @@ def _copy_record(path: str) -> tuple[str, str] | None:
 
 def approved_part(path: str) -> str:
     """The file a person's yes and preview name for *path*: the part a copy
-    that only moved it was made from, followed back to the first, else
-    *path* itself.  A copy that changed the part stops the walk.  Never
-    raises."""
+    that only moved or converted it was made from, followed back to the
+    first, else *path* itself.  A copy that changed the part stops the
+    walk.  Never raises."""
     current = str(path or "")
     try:
         for _ in range(_MAX_COPY_HOPS):
             record = _copy_record(current) if current else None
-            if record is None or record[1] != COPY_MOVED:
+            if record is None or record[1] not in _SAME_PART:
                 break
             current = record[0]
     except Exception:  # noqa: BLE001 -- unreadable lineage is no lineage
@@ -391,7 +397,7 @@ def changed_from(path: str) -> tuple[str, str] | None:
         record = _copy_record(approved_part(path))
     except Exception:  # noqa: BLE001
         return None
-    if record is None or record[1] == COPY_MOVED:
+    if record is None or record[1] in _SAME_PART:
         return None
     return record
 
