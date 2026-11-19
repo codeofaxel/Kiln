@@ -911,6 +911,27 @@ def _ensure_estimate_motion(settings: dict[str, str], profile_id: str) -> None:
             settings[key] = _limit(motion[source])
 
 
+def _ensure_acceleration_coverage(settings: dict[str, str], profile_id: str) -> None:
+    """State the acceleration the print runs at, in place.
+
+    Every slicer Kiln drives is handed the same accelerations.  A printer
+    whose own start sequence sets one
+    (:func:`kiln.printers.bambu_3mf.start_sequence_motion`) states it as
+    the default, which is the one the estimate is made at.  A stated
+    ``default_acceleration`` is kept, and so is every stated role.  A
+    printer with no start sequence of its own states none, and keeps its
+    own.
+    """
+    if "default_acceleration" in settings:
+        return
+    from kiln.printers.bambu_3mf import start_sequence_motion
+
+    nozzle = str(settings.get("nozzle_diameter", "0.4")).replace(";", ",").split(",")[0]
+    working = (start_sequence_motion(profile_id, nozzle) or {}).get("accel")
+    if working:
+        settings["default_acceleration"] = f"{working:g}"
+
+
 def _ensure_bed(settings: dict[str, str], profile_id: str, printer_id: str) -> None:
     """Give the generic profile the bed of the printer it is standing in for.
 
@@ -1466,6 +1487,7 @@ def _apply_printer_invariants(settings: dict[str, str], profile_id: str) -> None
     _ensure_flow_ceiling(settings, profile_id)
     _ensure_estimate_motion(settings, profile_id)
     _apply_profile_invariants(settings)
+    _ensure_acceleration_coverage(settings, profile_id)
 
 
 #: How thin walls are laid, stated on every profile Kiln writes instead of

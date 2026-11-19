@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-18T00:32:09.349005+00:00",
+  "generated": "2026-11-18T18:11:43.788606+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -23999,6 +23999,19 @@
             "default": null,
             "title": "Printer Reading",
             "description": "What the printer itself reports as its nozzle, filled in by the caller's own Kiln when it can reach the machine, so the answer can say whether the printer agrees with the new record.  Used only where this process cannot read the printer; leave it unset by hand."
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Position",
+            "description": "The nozzle position the swap was at, numbered from 1 as the printer numbers them.  Omitted, position 1. Below 1, or past what the printer takes when Kiln knows the model, it is refused with ``VALIDATION_ERROR``."
           }
         },
         "required": [
@@ -24478,6 +24491,35 @@
             "default": null,
             "title": "Printer Reading",
             "description": "What the printer itself reports as its nozzle, filled in by the caller's own Kiln when it can reach the machine, so the answer can say whether the printer agrees with the new record.  Used only where this process cannot read the printer; leave it unset by hand."
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Position",
+            "description": "Which nozzle position ``material`` and ``diameter_mm`` describe, numbered from 1 as the printer numbers them.  Omitted, they describe position 1, the printer's main nozzle.  Given without either of them, or below 1, it is refused with ``VALIDATION_ERROR``."
+          },
+          "fitted_positions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fitted Positions",
+            "description": "The positions that hold a nozzle, e.g. ``[1, 2]``; every other position is recorded as empty.  It must include 1.  Omitted, which positions are fitted stays as recorded."
           }
         },
         "required": [

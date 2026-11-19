@@ -1007,11 +1007,9 @@ _SLIC3R_STARTUP_CRASH_RETURNCODES = frozenset(
     -sig for sig in present_signals("SIGTRAP", "SIGSEGV", "SIGBUS")
 )
 
-# The Orca dialect keeps SIGSEGV out of its retry set on purpose: -11 on
-# that path is the deterministic Bambu-preset crash above, a real verdict
-# with a real message, and retrying it would crash the same way twice
-# more just to say the same thing later (the openscad_runner rule about
-# not retrying real answers).  The locale race has not been captured on
+# The Orca dialect leaves SIGSEGV out of its retry set: -11 on that path is
+# reported to the person as a crash inside the slicer program and is not
+# retried (the openscad_runner rule about not retrying real answers).  The locale race has not been captured on
 # an Orca binary; TRAP/BUS are covered so that if it ever is, the user
 # gets the re-draw instead of the failure.
 _ORCA_STARTUP_CRASH_RETURNCODES = frozenset(
@@ -1664,12 +1662,12 @@ def _slice_with_orca(
                 )
             if printer_name and printer_name.startswith("Bambu Lab"):
                 raise SlicerError(
-                    f"{slicer_name} crashed while slicing. This is a "
-                    f"known crash in BambuStudio and OrcaSlicer themselves, on Bambu Lab "
-                    f"printer profiles specifically — their own bundled Bambu presets "
-                    f"crash the same way, and the same Kiln code slices other printers "
-                    f"fine. Slice this printer with PrusaSlicer instead; Kiln wraps the "
-                    f"result as a Bambu 3MF itself, so nothing about the print is lost.\n"
+                    f"{slicer_name} crashed while slicing. The crash is inside "
+                    f"{slicer_name} itself, not in your model or your settings. Slice "
+                    f"again, and if it crashes the same way, slice this printer with "
+                    f"PrusaSlicer instead; Kiln wraps the result as a Bambu 3MF itself, "
+                    f"so nothing about the print is lost. Please report it with "
+                    f"report_issue so it can be looked into.\n"
                     f"{_INSTALL_SLICER}"
                 )
             for_printer = f" for the {printer_name}" if printer_name else ""
@@ -1732,6 +1730,8 @@ def _slice_with_orca(
                 f"the slicer choose, or check that this slicer is up to date."
             )
 
+        if str(settings.get("machine_limits_usage", "")).strip() != "emit_to_gcode":
+            _drop_unasked_machine_limits(str(produced[0]))
         shutil.move(str(produced[0]), out_file)
         made_package: str | None = None
         written = Path(work_dir, _SLICER_PACKAGE_NAME)
@@ -1767,6 +1767,48 @@ def _slice_with_orca(
         stderr=(result.stderr or "").strip(),
         filament_map=used_map,
     )
+
+
+#: A machine-limit line a slicer opens a file with: the axis limits, and the
+#: acceleration limits in their ``P``/``R``/``T`` form (a print's own
+#: acceleration is ``M204 S`` and is never one of these).
+_MACHINE_LIMIT_LINE = re.compile(r"^(?:M201|M203|M205|M204(?=[^;\n]*\b[PRT]))\b")
+_MACHINE_LIMIT_PROGRESS = re.compile(r"^M73\b")
+_EXECUTABLE_BLOCK_START = "; EXECUTABLE_BLOCK_START"
+
+
+def _drop_unasked_machine_limits(gcode_path: str) -> int:
+    """Take the run of machine-limit lines that opens the executable block
+    out of *gcode_path*.
+
+    For settings that did not ask for limits in the G-code, so the printer
+    keeps its own.  A limit anywhere else (a start sequence's, a person's
+    custom G-code) stays.  Returns the number of lines taken.
+    """
+    taken = 0
+    tmp_path = f"{gcode_path}.limits"
+    with open(gcode_path, encoding="utf-8", errors="surrogateescape", newline="") as src, open(
+        tmp_path, "w", encoding="utf-8", errors="surrogateescape", newline=""
+    ) as dst:
+        in_opening = False
+        for line in src:
+            if in_opening:
+                if _MACHINE_LIMIT_LINE.match(line):
+                    taken += 1
+                    continue
+                if line.strip() and not _MACHINE_LIMIT_PROGRESS.match(line):
+                    in_opening = False
+                    dst.write(line)
+                    dst.writelines(src)
+                    break
+            elif line.strip() == _EXECUTABLE_BLOCK_START:
+                in_opening = True
+            dst.write(line)
+    if taken:
+        os.replace(tmp_path, gcode_path)
+    else:
+        os.unlink(tmp_path)
+    return taken
 
 
 def slice_file(input_path: str, **kwargs: Any) -> SliceResult:

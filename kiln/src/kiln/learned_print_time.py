@@ -54,6 +54,12 @@ WINDOW = 20
 #: heating and levelling are most of it, whatever the printer's pace.
 MIN_ESTIMATE_SECONDS = 600.0
 
+#: Said beside a slicer's time that Kiln has not yet corrected from the
+#: printer's own prints: what that time covers.
+WARM_UP_IS_EXTRA = (
+    "Print time, from the first layer. Warm-up before it (heating, homing, levelling if on) is extra."
+)
+
 #: Real time over slicer time outside this range is not a pace: a print left
 #: paused, or a file sliced for another machine.
 RATIO_BOUNDS = (0.5, 2.5)
@@ -265,8 +271,8 @@ def learned_time(
             "prints": prints,
             "learned": False,
             "said": (
-                f"About {_duration(slicer_seconds)} by the slicer's estimate. Kiln corrects it from your own "
-                f"prints {on} once it has timed {MIN_PRINTS} ({so_far})."
+                f"About {_duration(slicer_seconds)} by the slicer's estimate. {WARM_UP_IS_EXTRA} Kiln corrects "
+                f"it from your own prints {on} once it has timed {MIN_PRINTS} ({so_far})."
             ),
         }
     seconds = float(slicer_seconds) * pace.factor

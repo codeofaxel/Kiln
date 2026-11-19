@@ -74,9 +74,15 @@ class OrientationResult:
     #: turn changes can be said in its own units
     #: (:func:`describe_orientation_change`).
     original: OrientationCandidate | None = None
+    #: Why Kiln Pro's order, which the signed-in plan includes, did not arrive
+    #: (a :class:`kiln.served_answer.Miss`), or ``None``.  Not part of the
+    #: result's dict: the door that shows the result says it, once.
+    ranking_miss: Any = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        out.pop("ranking_miss", None)
+        return out
 
 
 @dataclass
@@ -324,17 +330,18 @@ def _measure_orientation(
     }
 
 
-def _kiln_pro_ranking(poses: list[dict[str, float]]) -> Any:
-    """Kiln Pro's order of every pose measured, best first, asked once, or
-    ``None`` for the floor (see :mod:`kiln._pro_orientation_bridge`).  *poses*
-    are :func:`_measure_orientation`'s facts, the original pose first."""
+def _kiln_pro_ranking(poses: list[dict[str, float]]) -> tuple[Any, Any]:
+    """Kiln Pro's order of every pose measured, best first, asked once, and
+    why it did not arrive when the plan includes it: ``(ranking, miss)``,
+    ``(None, None)`` for the floor (see :mod:`kiln._pro_orientation_bridge`).
+    *poses* are :func:`_measure_orientation`'s facts, the original pose first."""
     from kiln import _pro_orientation_bridge
 
     try:
-        return _pro_orientation_bridge.rank(poses)
+        return _pro_orientation_bridge.rank_or_miss(poses)
     except Exception:  # noqa: BLE001 -- the bed-contact floor still answers
         logger.debug("Kiln Pro orientation ranking unavailable", exc_info=True)
-        return None
+        return None, None
 
 
 def _kiln_pro_ranking_note() -> str | None:
@@ -427,7 +434,7 @@ def find_optimal_orientation(
         measured.append(((rx, ry, rz), pose))
         facts.append(pose_facts)
 
-    ranking = _kiln_pro_ranking(facts)
+    ranking, ranking_miss = _kiln_pro_ranking(facts)
     # Every score shown is the floor's, at every tier: Kiln Pro's ranking
     # arrives as an order, never a score, in process on Kiln's servers and
     # served to a plain install alike.
@@ -458,6 +465,7 @@ def find_optimal_orientation(
         original_score=orig_score,
         improvement_percentage=round(improvement, 1),
         original=_candidate((0.0, 0.0, 0.0), orig),
+        ranking_miss=ranking_miss,
     )
 
 
