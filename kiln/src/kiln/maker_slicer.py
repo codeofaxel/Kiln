@@ -6,7 +6,11 @@ than one nozzle, and where that slicer's own bundled settings keep the
 printer's start, change and end routines.  This module answers, for one slice:
 
 * which installed slicer makes it (:func:`slicer_for_several_nozzles`), or
-  why none can, in one sentence;
+  why none can, in one sentence: when the maker's slicer is missing or too
+  old, the slice is made for one nozzle instead (:class:`Miss`), and a
+  person can be told what to install (:func:`install_words`);
+* whether the maker's slicer is ready on this computer, without slicing
+  (:func:`ready_for`);
 * the routines read from that slicer's own files on this computer, and the
   name and version they came from (:class:`SeveralNozzleSlicer`);
 * the settings file a slicer that reads PrusaSlicer's settings is handed
@@ -16,8 +20,10 @@ printer's start, change and end routines.  This module answers, for one slice:
 * a copy of a 3MF that says where the purge tower stands
   (:func:`with_tower_position`).
 
-Every slice door reaches this through :func:`kiln.slicer.slice_file`.  The
-refusal when no slicer can make the slice lives in :func:`_miss` alone.
+Every slice door reaches this through :func:`kiln.slicer.slice_file`.  What
+a slicer that cannot make the slice does -- a slice for one nozzle instead,
+or a refusal -- is decided in :func:`_miss` alone.  Kiln never installs a
+slicer: it names the page and, on a Mac with Homebrew, the command.
 """
 
 from __future__ import annotations
@@ -43,18 +49,43 @@ _UNNAMED = "bambu_studio"
 @dataclass(frozen=True)
 class _Known:
     """A slicer a record can name: what people call it, the words its binary
-    or version banner carries, and where it is downloaded."""
+    or version banner carries, where it is downloaded, and its Homebrew
+    cask, when it has one."""
 
     said: str
     marks: tuple[str, ...]
     download: str
+    cask: str | None = None
 
 
 _KNOWN: dict[str, _Known] = {
-    "bambu_studio": _Known("Bambu Studio", ("bambu",), "bambulab.com/download/studio"),
-    "prusaslicer": _Known("PrusaSlicer", ("prusaslicer", "prusa-slicer"), "prusa3d.com/prusaslicer"),
+    "bambu_studio": _Known("Bambu Studio", ("bambu",), "bambulab.com/download/studio", "bambu-studio"),
+    "prusaslicer": _Known("PrusaSlicer", ("prusaslicer", "prusa-slicer"), "prusa3d.com/p/prusaslicer", "prusaslicer"),
     "orcaslicer": _Known("OrcaSlicer", ("orca",), "orcaslicer.com"),
 }
+
+#: What a person does about a :class:`Miss`.
+INSTALL = "install"
+UPDATE = "update"
+
+
+@dataclass(frozen=True)
+class Miss:
+    """Why the maker's slicer cannot make a slice for more than one nozzle
+    on this computer, when installing or updating it is the fix: ``slicer``
+    is the record's word for it, ``need`` :data:`INSTALL` or :data:`UPDATE`,
+    ``have`` the version installed and ``floor`` the oldest Kiln accepts,
+    when known."""
+
+    slicer: str
+    need: str
+    have: str | None = None
+    floor: str | None = None
+
+    @property
+    def said(self) -> str:
+        """The slicer's name, as people call it."""
+        return _KNOWN[self.slicer].said
 
 _VERSION = re.compile(r"\d+(?:\.\d+)+")
 #: A routine's setting name: lowercase words ending in ``gcode``.
@@ -143,20 +174,89 @@ def _find(slicer_id: str) -> Any | None:
     return None
 
 
-def _miss(slicer_id: str, why: str) -> Exception:
-    """The refusal when no installed slicer can make a slice for more than
-    one nozzle: nothing is sliced, and the sentence names the slicer this
-    printer's maker publishes and what to do.  The one place that decides
-    what such a miss does."""
-    from kiln.slicer import NozzleMapError
+def _miss(slicer_id: str, why: str, *, need: str | None = None, have: str | None = None,
+          floor: str | None = None, fix: str | None = None) -> Exception:
+    """What a slice for more than one nozzle does when the slicer *slicer_id*
+    cannot make it here.  The one place that decides.
+
+    With *need* (:data:`INSTALL` or :data:`UPDATE`: the maker's slicer is
+    missing, or older than Kiln needs) the answer is
+    :class:`kiln.slicer.OneNozzleInstead`: :func:`kiln.slicer.slice_file`
+    slices the print for one nozzle and says so, and anywhere else it is the
+    refusal its message says.  With none, the slice is refused: the sentence
+    says *why*, names the slicer this printer's maker publishes, and says
+    what to do (*fix*, or install or update it).
+    """
+    from kiln.slicer import NozzleMapError, OneNozzleInstead
 
     known = _KNOWN[slicer_id]
-    return NozzleMapError(
-        f"This print is for more than one nozzle, and {why}, so nothing was sliced. "
-        f"Kiln slices this printer for more than one nozzle with {known.said}: install or update it from "
-        f"{known.download}, or set KILN_SLICER_PATH to its binary, and slice again.",
-        code=NEEDS_MAKER_SLICER,
+    remedy = fix or (
+        f"install or update it from {known.download}, or set KILN_SLICER_PATH to its binary, and slice again"
     )
+    said = (
+        f"This print is for more than one nozzle, and {why}, so nothing was sliced. "
+        f"Kiln slices this printer for more than one nozzle with {known.said}: {remedy}."
+    )
+    if need is None:
+        return NozzleMapError(said, code=NEEDS_MAKER_SLICER)
+    return OneNozzleInstead(
+        said, code=NEEDS_MAKER_SLICER, miss=Miss(slicer=slicer_id, need=need, have=have, floor=floor),
+    )
+
+
+def _version_miss(slicer_id: str, info: Any, floor: str | None) -> tuple[str | None, Miss | None]:
+    """The version of the installed slicer *info*, as numbers joined by
+    dots (``None`` when it cannot be read), and the :class:`Miss` when it
+    is older than *floor*."""
+    from kiln import slicer as _slicer
+
+    version = getattr(info, "version", None) or _slicer._get_version(info.path)
+    read = _numbers(version)
+    shown = ".".join(str(part) for part in read) if read else None
+    if floor and _older(version, floor):
+        return shown, Miss(slicer=slicer_id, need=UPDATE, have=shown, floor=floor)
+    return shown, None
+
+
+def ready_for(nozzles: Any) -> Miss | None:
+    """Whether the slicer the nozzle record *nozzles* names is installed on
+    this computer and new enough to slice for more than one nozzle:
+    ``None`` when it is, else the :class:`Miss`.  Reads no settings bundle
+    and slices nothing."""
+    named = named_slicer(nozzles)
+    slicer_id, floor = named["name"], named["min_version"]
+    info = _find(slicer_id)
+    if info is None:
+        return Miss(slicer=slicer_id, need=INSTALL, floor=floor)
+    return _version_miss(slicer_id, info, floor)[1] if floor else None
+
+
+def install_words(miss: Miss) -> dict[str, str]:
+    """Where a person gets the slicer *miss* names: ``download``, the
+    maker's own page, on every computer; and on a Mac with Homebrew,
+    ``command``, the line that installs it (or updates it, when Homebrew
+    installed it).  Kiln runs neither: an agent may offer the command and
+    runs it only on the person's yes."""
+    known = _KNOWN[miss.slicer]
+    words = {"download": known.download}
+    command = _brew_command(known.cask, update=miss.need == UPDATE)
+    if command:
+        words["command"] = command
+    return words
+
+
+def _brew_command(cask: str | None, *, update: bool) -> str | None:
+    """The Homebrew line for *cask* on this Mac, or ``None``: not a Mac, no
+    Homebrew, no cask, or an update of a copy Homebrew did not install."""
+    if not cask or sys.platform != "darwin":
+        return None
+    brew = shutil.which("brew")
+    if not brew:
+        return None
+    if not update:
+        return f"brew install --cask {cask}"
+    caskroom = Path(brew).parent.parent / "Caskroom" / cask
+    return f"brew upgrade --cask {cask}" if caskroom.is_dir() else None
 
 
 def _nozzle_size(profile: str | None) -> str:
@@ -183,24 +283,31 @@ def slicer_for_several_nozzles(
     *profile* is the slice's settings file: its nozzle size picks the
     routines of a record that keeps them per size.
 
-    Raises :class:`kiln.slicer.NozzleMapError` (:data:`NEEDS_MAKER_SLICER`)
-    when the record's slicer is not installed, is older than the record
-    accepts, or does not hold the printer's routines.
+    Raises :class:`kiln.slicer.OneNozzleInstead` (:data:`NEEDS_MAKER_SLICER`)
+    when the record's slicer is not installed or is older than the record
+    accepts, or its settings bundle is; and
+    :class:`kiln.slicer.NozzleMapError` (the same code) when the caller
+    named another slicer while the record's is installed, or the record's
+    slicer does not hold the printer's routines.
     """
-    from kiln import slicer as _slicer
-
     named = named_slicer(nozzles)
     slicer_id = named["name"]
     said = _KNOWN[slicer_id].said
-    info = current if _is(slicer_id, current) else (None if chosen else _find(slicer_id))
+    in_hand = os.path.basename(getattr(current, "path", "") or "") or "the slicer in use"
+    info = current if _is(slicer_id, current) else _find(slicer_id)
     if info is None:
-        raise _miss(slicer_id, f"{os.path.basename(getattr(current, 'path', '') or 'the slicer in use')} cannot slice that through Kiln")
-    version = getattr(info, "version", None) or _slicer._get_version(info.path)
-    read = _numbers(version)
-    shown = ".".join(str(part) for part in read) if read else None
-    floor = named["min_version"]
-    if floor and _older(version, floor):
-        raise _miss(slicer_id, f"the {said} installed is {shown}, older than the {floor} Kiln needs for it")
+        raise _miss(slicer_id, f"{in_hand} cannot slice that through Kiln and {said} is not installed", need=INSTALL)
+    if info is not current and chosen:
+        raise _miss(
+            slicer_id, f"{in_hand} was named for it",
+            fix=f"{said} is installed, so leave the slicer unnamed, or name {said}, and slice again",
+        )
+    shown, old = _version_miss(slicer_id, info, named["min_version"])
+    if old is not None:
+        raise _miss(
+            slicer_id, f"the {said} installed is {shown}, older than the {old.floor} Kiln needs for it",
+            need=UPDATE, have=shown, floor=old.floor,
+        )
     sliced_with: dict[str, Any] = {"slicer": slicer_id, "name": said, "version": shown}
     routines: dict[str, str] = {}
     if named["routines"] is not None:
@@ -312,6 +419,7 @@ def _maker_routines(
     if isinstance(floor, str) and _older(shown, floor):
         raise _miss(
             slicer_id, f"the printer settings in the {said} installed are version {shown}, older than the {floor} Kiln needs",
+            need=UPDATE,
         )
     try:
         resolved = _resolved(sections, wanted)

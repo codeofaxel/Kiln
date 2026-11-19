@@ -430,13 +430,37 @@ class TestTheSlice:
             self._slice(tmp_path, _never_runs, nozzles=None, filament_map=[1, 1])
         assert refused.value.code == "NOZZLE_MAP_NOT_USED"
 
-    @pytest.mark.parametrize("slicer", [_prusa(), _orca()])
-    def test_a_slicer_that_cannot_do_it_is_refused_before_launching(self, tmp_path, slicer):
+    def test_without_bambu_studio_the_print_is_sliced_for_one_nozzle(self, tmp_path, monkeypatch):
+        from kiln import maker_slicer, maker_slicer_notes
+
+        monkeypatch.setattr(maker_slicer_notes, "store_path", lambda: tmp_path / "notes.json")
+        monkeypatch.setattr(maker_slicer, "_brew_command", lambda *_a, **_k: None)
+        with_record, without = {}, {}
+        result = self._slice(tmp_path, _slicer_that_writes("", with_record), slicer=_orca())
+        self._slice(tmp_path, _slicer_that_writes("", without), slicer=_orca(), nozzles=None)
+        # The presets handed over are the ones a printer sliced with one nozzle gets.
+        named = {"name", "printer_model", "compatible_printers"}
+
+        def body(preset: dict) -> dict:
+            return {key: value for key, value in preset.items() if key not in named}
+
+        assert body(with_record["machine"]) == body(without["machine"])
+        assert not any(arg.startswith("--filament-map") for arg in with_record["cmd"])
+        assert result.filament_map is None and result.sliced_with is None
+        assert result.one_nozzle["filament_swaps"] == 1
+        assert result.one_nozzle["maker_slicer"] == {
+            "name": "Bambu Studio", "need": "install", "download": "bambulab.com/download/studio",
+        }
+        assert "Sliced for one nozzle: 1 filament swap." in result.message
+        assert "Install Bambu Studio (free) and Kiln uses both nozzles on its own" in result.message
+
+    def test_without_bambu_studio_a_map_is_refused_before_launching(self, tmp_path):
         with pytest.raises(NozzleMapError) as refused:
-            self._slice(tmp_path, _never_runs, slicer=slicer)
+            self._slice(tmp_path, _never_runs, slicer=_prusa(), filament_map=[2, 1])
         assert refused.value.code == "MULTI_NOZZLE_NEEDS_MAKER_SLICER"
         said = str(refused.value)
         assert "Bambu Studio" in said and "install" in said and "nothing was sliced" in said
+        assert "leave the map out" in said
 
     def test_an_explicit_slicer_is_not_swapped_for_another(self, tmp_path):
         with pytest.raises(NozzleMapError) as refused:
@@ -764,10 +788,10 @@ class TestTheBedForMoreThanOneNozzle:
     def test_a_record_with_no_readable_bed_states_none(self, block):
         assert slicer_profiles.nozzle_bed(block) is None
 
-    def _slice(self, tmp_path, plate, nozzles=_WIDE, **kwargs):
+    def _slice(self, tmp_path, plate, nozzles=_WIDE, slicer=None, **kwargs):
         seen: dict = {}
         with (
-            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer.find_slicer", return_value=slicer or _studio()),
             patch("kiln.slicer._find_bambu_studio", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("; filament_map = 1,2\n", seen)),
@@ -793,11 +817,22 @@ class TestTheBedForMoreThanOneNozzle:
         from kiln.slicer import nozzle_bed_for_slice
 
         profile = _profile(tmp_path, _WIDE)
-        assert nozzle_bed_for_slice(_plate_at(tmp_path, 100.0, 235.0), profile) == (0.0, 0.0, 260.0, 200.0)
-        one = _plate_at(tmp_path, 40.0)
-        assert nozzle_bed_for_slice(one, profile) is None
-        assert nozzle_bed_for_slice(one, profile, [2]) == (0.0, 0.0, 260.0, 200.0)
-        assert nozzle_bed_for_slice(one, _profile(tmp_path, _NOZZLES), [2]) is None
+        with patch("kiln.slicer._find_bambu_studio", return_value=_studio()):
+            assert nozzle_bed_for_slice(_plate_at(tmp_path, 100.0, 235.0), profile) == (0.0, 0.0, 260.0, 200.0)
+            one = _plate_at(tmp_path, 40.0)
+            assert nozzle_bed_for_slice(one, profile) is None
+            assert nozzle_bed_for_slice(one, profile, [2]) == (0.0, 0.0, 260.0, 200.0)
+            assert nozzle_bed_for_slice(one, _profile(tmp_path, _NOZZLES), [2]) is None
+
+    def test_without_the_makers_slicer_a_plate_is_held_to_the_printers_own_bed(self, tmp_path):
+        from kiln.slicer import nozzle_bed_for_slice
+
+        plate = _plate_at(tmp_path, 100.0, 235.0)
+        with patch("kiln.slicer._find_bambu_studio", return_value=None):
+            # Every door asks the same question, and is answered the printer's own bed.
+            assert nozzle_bed_for_slice(plate, _profile(tmp_path, _WIDE)) is None
+        with pytest.raises(SlicerError, match="bed"):
+            self._slice(tmp_path, plate, slicer=_orca())
 
 
 class TestASlicedFileIsHeldToTheBedItWasSlicedFor:

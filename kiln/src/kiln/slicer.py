@@ -210,6 +210,19 @@ class NozzleMapError(SlicerError):
         self.code = code
 
 
+class OneNozzleInstead(NozzleMapError):
+    """A slice for more than one nozzle that the printer's maker's slicer
+    would make, when that slicer is missing or older than Kiln needs on this
+    computer (:func:`kiln.maker_slicer._miss`).  :func:`slice_file` slices
+    it for one nozzle instead; anywhere else it is the refusal its message
+    says.  ``miss`` is the :class:`kiln.maker_slicer.Miss` that names the
+    slicer and whether it is to be installed or updated."""
+
+    def __init__(self, message: str, *, code: str, miss: Any) -> None:
+        super().__init__(message, code=code)
+        self.miss = miss
+
+
 class SlicerRefusal(SlicerError):
     """The slicer finished the slice and refused the result.
 
@@ -298,6 +311,12 @@ class SliceResult:
     #: print from the nozzle of the same number, ``filament_to_nozzle``
     #: (:mod:`kiln.maker_slicer`).  ``None`` for a slice made for one nozzle.
     sliced_with: dict[str, Any] | None = None
+    #: A print Kiln would slice for more than one nozzle, sliced for one
+    #: because the printer's maker's slicer is missing or too old here:
+    #: ``filament_swaps``, read from the sliced file, and when the reply names
+    #: the slicer that would use every nozzle, ``maker_slicer``
+    #: (:mod:`kiln.maker_slicer_notes`).  ``None`` for any other slice.
+    one_nozzle: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -322,6 +341,8 @@ class SliceResult:
             d["filament_map"] = self.filament_map
         if self.sliced_with is not None:
             d["sliced_with"] = self.sliced_with
+        if self.one_nozzle is not None:
+            d["one_nozzle"] = self.one_nozzle
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -728,27 +749,40 @@ def _keep_print_package(made_path: str, out_file: str) -> None:
 
 def nozzle_bed_for_slice(
     input_path: str, profile: str | None, filament_map: Any = None, *, slots: int | None = None,
+    maker_ready: bool | None = None,
 ) -> tuple[float, float, float, float] | None:
     """The bed a slice of the 3MF at *input_path* with *profile* is laid out
     and checked on when it is for more than one nozzle: the bed the
     profile's nozzle record states, for a plate of two or more filaments
     (*slots*, else read from the file) or one given a filament-to-nozzle
-    map.  ``None`` for anything else.  Never raises."""
+    map.  ``None`` for anything else, and while the slicer the record names
+    is missing or too old here (:func:`kiln.maker_slicer.ready_for`), since
+    the plate is then sliced for one nozzle; *maker_ready* answers that for
+    a caller that already knows.  Never raises."""
     from kiln.slicer_profiles import nozzle_bed, nozzles_of
 
-    bed = nozzle_bed(nozzles_of(profile))
+    record = nozzles_of(profile)
+    bed = nozzle_bed(record)
     if bed is None or not str(input_path).lower().endswith(".3mf"):
         return None
-    if filament_map not in (None, "", []):
-        return bed
-    if slots is None:
-        try:
-            from kiln.multicolor_3mf import detect_3mf_multicolor
+    if filament_map in (None, "", []):
+        if slots is None:
+            try:
+                from kiln.multicolor_3mf import detect_3mf_multicolor
 
-            slots = int((detect_3mf_multicolor(input_path) or {}).get("filament_slots_needed", 0))
-        except Exception:  # noqa: BLE001 -- an unreadable plate reads as one filament
-            slots = 0
-    return bed if slots >= 2 else None
+                slots = int((detect_3mf_multicolor(input_path) or {}).get("filament_slots_needed", 0))
+            except Exception:  # noqa: BLE001 -- an unreadable plate reads as one filament
+                slots = 0
+        if slots < 2:
+            return None
+    if maker_ready is None:
+        try:
+            from kiln.maker_slicer import ready_for
+
+            maker_ready = ready_for(record) is None
+        except Exception:  # noqa: BLE001 -- a slicer that cannot be judged is not ready
+            maker_ready = False
+    return bed if maker_ready else None
 
 
 def _is_bambu_studio(info: SlicerInfo) -> bool:
@@ -984,6 +1018,15 @@ def _slot_materials(input_path: str, materials: Sequence[str | None], slots: int
         if word.strip():
             words[slot].append(word.strip())
     return words
+
+
+def _printer_id_of(profile: str | None) -> str | None:
+    """The id of the printer whose bundled profile Kiln built *profile*
+    from, or ``None`` for a profile that is the caller's own."""
+    from kiln.slicer_profiles import profile_origin
+
+    origin = profile_origin(profile)
+    return origin.printer_id or origin.standing_in_for
 
 
 def _printer_name_of(profile: str | None) -> str | None:
@@ -2139,35 +2182,53 @@ def _slice_file(
     # explicit slicer_path is an explicit choice and is honoured as given.
     # A slice for more than one nozzle: a printer whose record is sliced
     # that way, and a plate of two or more filaments or a map the caller
-    # gave.  It is made by Bambu Studio or not at all; one filament with no
-    # map slices for one nozzle, as it does without the record.
+    # gave.  It is made by the slicer the record names.  With that slicer
+    # missing or too old here, the plate is sliced for one nozzle, exactly as
+    # a printer sliced with one nozzle is, and the result says so; a map
+    # cannot be kept on one nozzle, so with a map it is refused.  One
+    # filament with no map slices for one nozzle, as it does without the
+    # record.
     nozzles = nozzles_of(profile)
     asked_map = checked_filament_map(
         filament_map, filaments=max(slots_needed, 1), positions=nozzle_positions(nozzles),
     )
     several_filaments = bool(asked_map) or slots_needed >= 2
-    if nozzles is not None and several_filaments and (mixed := mixed_size_refusal(nozzles)):
+    several = None
+    instead: OneNozzleInstead | None = None
+    would_use = 1
+    printer = _printer_id_of(profile) if nozzles is not None and several_filaments else None
+    if nozzles is not None and several_filaments:
+        from kiln.maker_slicer import slicer_for_several_nozzles
+
+        try:
+            several = slicer_for_several_nozzles(nozzles, slicer, chosen=slicer_path is not None, profile=profile)
+        except OneNozzleInstead as miss:
+            if asked_map:
+                raise NozzleMapError(
+                    f"{miss} A filament-to-nozzle map needs it too: leave the map out and Kiln slices this "
+                    "print for one nozzle, with filament swaps.",
+                    code=miss.code,
+                ) from miss
+            instead = miss
+            would_use = nozzle_positions(nozzles)
+    if several is not None and (mixed := mixed_size_refusal(nozzles)):
         raise NozzleMapError(mixed, code="MULTI_NOZZLE_MIXED_SIZES")
     if ext == ".3mf" and nozzle_bed(nozzles) is not None:
-        wider = nozzle_bed_for_slice(input_abs, profile, asked_map, slots=slots_needed)
+        wider = nozzle_bed_for_slice(input_abs, profile, asked_map, slots=slots_needed, maker_ready=instead is None)
         if wider is not None:
             # Checked and sliced on the bed the nozzles print on.
             profile = profile_with_overrides(
                 profile, {"bed_shape": rect_polygon(wider)}, prefix=f"{Path(profile).stem}_", stated=False,
             )
         _check_3mf_on_bed(input_abs, profile)
-    mappable = nozzles is not None
-    if nozzles is not None and not several_filaments:
+    mappable = nozzles is not None and instead is None
+    if nozzles is not None and (not several_filaments or instead is not None):
         nozzles = None
     # The owner fitted more nozzles than this slice uses: said once, with
     # the slice, when it prints more than one filament.
-    unused_note = unused_fitted_note(nozzle_record_of(profile)) if several_filaments else ""
+    unused_note = unused_fitted_note(nozzle_record_of(profile)) if several_filaments and instead is None else ""
     multicolor_switched = False
-    several = None
-    if nozzles is not None:
-        from kiln.maker_slicer import slicer_for_several_nozzles
-
-        several = slicer_for_several_nozzles(nozzles, slicer, chosen=slicer_path is not None, profile=profile)
+    if several is not None:
         if several.info.path != slicer.path:
             slicer = several.info
             multicolor_switched = slots_needed >= 2
@@ -2341,7 +2402,11 @@ def _slice_file(
         ), taken), left_out)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
-        return result
+        from kiln import maker_slicer_notes
+
+        return maker_slicer_notes.after_slice(
+            result, printer=printer, miss=instead.miss if instead else None, nozzles=would_use,
+        )
     finally:
         for scratch in (layer_scratch, kept_off_scratch):
             if scratch is not None:

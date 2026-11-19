@@ -649,6 +649,14 @@ def set_printer_model(
     if support is not None and said_support:
         out["support"] = support.state
         notes = [*notes, said_support]
+    # A model sliced for more than one nozzle whose maker's slicer is missing
+    # or too old here: said once per printer, at every door that sets one up.
+    from kiln.maker_slicer_notes import setup_line
+
+    two_nozzles = setup_line(key)
+    if two_nozzles:
+        out["two_nozzles"] = two_nozzles
+        notes = [*notes, two_nozzles]
     was = f" (was {previous})" if previous and previous != key else ""
     out["message"] = " ".join([f"{target} is now set up as {key}{was}.", said, *notes])
     return out

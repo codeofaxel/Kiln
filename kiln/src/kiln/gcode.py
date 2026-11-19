@@ -1886,6 +1886,34 @@ def extruded_mm_per_tool(gcode: str | Iterable[str]) -> list[float]:
     return out
 
 
+def tool_changes(gcode: str | Iterable[str]) -> tuple[int, int]:
+    """``(changes, tools)``: how many times the file changes tool, and how
+    many different tools it selects.
+
+    A ``T<n>`` command selects a tool; the first selection arms it, and each
+    later one naming a different tool is a change.  A pseudo-tool
+    (``T255``, ``T1000``) neither changes nor counts, as in
+    :func:`extruded_mm_per_tool`.  Never raises.
+    """
+    lines = gcode.splitlines() if isinstance(gcode, str) else gcode
+    tools: set[int] = set()
+    changes = 0
+    active: int | None = None
+    for raw in lines:
+        code = raw.split(";", 1)[0].strip()
+        head = _COMMAND_WORD_RE.match(code) if code else None
+        if head is None or head.group(3) or head.group(1).upper() != "T":
+            continue
+        number = int(head.group(2))
+        if number >= FIRST_PSEUDO_TOOL:
+            continue
+        tools.add(number)
+        if active is not None and number != active:
+            changes += 1
+        active = number
+    return changes, len(tools)
+
+
 @dataclass(frozen=True)
 class SlicerFilamentTotals:
     """What a slicer wrote about the filament a file uses, per extruder.

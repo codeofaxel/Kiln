@@ -3,9 +3,12 @@
 Covered here, with an invented machine, an invented settings bundle and
 placeholder extras: a nozzle record names its maker's slicer and the lowest
 version accepted; that slicer is used when installed and never swapped for
-one the caller named; a slicer that is missing, too old, or without the
-printer's routines is refused in one sentence that names the slicer to
-install; the routines are read from the newest copy of the slicer's own
+one the caller named; with that slicer missing or too old the print is
+sliced for one nozzle instead, and the result says how many filament swaps
+the file makes and, the first time on a printer or for many swaps, what to
+install; a map, a slicer named while the maker's one is installed, or a
+slicer without the printer's routines is refused in one sentence that names
+the slicer; the routines are read from the newest copy of the slicer's own
 bundle through its parents; a slicer of PrusaSlicer's kind is handed the
 record's extras as given, one nozzle size per nozzle and those routines,
 with the purge tower stood clear of the parts; and the result and the sliced
@@ -21,7 +24,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kiln import maker_slicer, print_lineage, slicer_profiles
+from kiln import maker_slicer, maker_slicer_notes, print_lineage, slicer_profiles
 from kiln.maker_slicer import (
     NEEDS_MAKER_SLICER,
     named_slicer,
@@ -30,7 +33,7 @@ from kiln.maker_slicer import (
     with_tower_position,
 )
 from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
-from kiln.slicer import NozzleMapError, SlicerInfo, ini_to_settings, slice_file
+from kiln.slicer import NozzleMapError, OneNozzleInstead, SlicerInfo, ini_to_settings, slice_file
 from kiln.slicer_orca import PresetExtrasError
 
 from .test_slicer_multi_nozzle import _cube
@@ -114,10 +117,12 @@ def _bundle(folder: Path, version: str = "1.2.0") -> Path:
 
 
 def _profile(tmp_path: Path, record: dict | None = None) -> str:
-    """The invented machine's profile, carrying its record with two nozzles fitted."""
+    """The invented machine's profile, as Kiln writes one for a printer, carrying
+    its record with two nozzles fitted."""
     nozzles = slicer_profiles.fitted_record(record or _RECORD, _TWO_FITTED)
     ini = tmp_path / "invented.ini"
-    ini.write_text(slicer_profiles._with_nozzles("".join(f"{k} = {v}\n" for k, v in _SETTINGS.items()), nozzles))
+    body = slicer_profiles._settings_to_ini(dict(_SETTINGS), "Invented Three", printer_id="invented_three")
+    ini.write_text(slicer_profiles._with_nozzles(body, nozzles))
     return str(ini)
 
 
@@ -193,6 +198,23 @@ class TestWhichSlicerMakesTheSlice:
             self._choose(tmp_path, _prusa("2.4.9"))
         said = str(refused.value)
         assert "2.4.9" in said and "2.5.0" in said and "nothing was sliced" in said
+
+    def test_a_missing_or_old_makers_slicer_is_a_miss_a_slice_can_make_for_one_nozzle(self, tmp_path):
+        with pytest.raises(OneNozzleInstead) as old:
+            self._choose(tmp_path, _prusa("2.4.9"))
+        assert (old.value.miss.need, old.value.miss.have, old.value.miss.floor) == ("update", "2.4.9", "2.5.0")
+        with pytest.raises(OneNozzleInstead) as missing:
+            self._choose(tmp_path, _orca())
+        assert (missing.value.miss.slicer, missing.value.miss.need) == ("prusaslicer", "install")
+        with pytest.raises(OneNozzleInstead) as old_bundle:
+            self._choose(tmp_path, _prusa(), bundles=[_bundle(tmp_path / "app", "1.1.9")])
+        assert old_bundle.value.miss.need == "update" and old_bundle.value.miss.floor is None
+
+    def test_a_named_slicer_while_the_makers_is_installed_is_no_miss_but_a_refusal(self, tmp_path):
+        with pytest.raises(NozzleMapError) as refused:
+            self._choose(tmp_path, _orca(), chosen=True, found=_prusa())
+        assert not isinstance(refused.value, OneNozzleInstead)
+        assert "PrusaSlicer is installed" in str(refused.value)
 
     @pytest.mark.parametrize("version", ["2.5.0", "2.5", "2.10.0", "3.0"])
     def test_a_slicer_at_or_above_the_floor_is_accepted(self, tmp_path, version):
@@ -314,8 +336,31 @@ def _slicer_that_writes(seen: dict):
     return run
 
 
+def _slicer_swapping(seen: dict, swaps: int):
+    """A PrusaSlicer stand-in whose sliced file changes filament *swaps* times."""
+    body = "".join(f"T{i % 2}\nG1 X{i} Y1 E1\n" for i in range(swaps + 1))
+
+    def run(cmd, *, timeout, retryable_returncodes, remove_partial_output, output_is_complete, cwd=None):
+        seen["settings"] = ini_to_settings(cmd[cmd.index("--load") + 1])
+        seen["input"] = cmd[cmd.index("--export-gcode") + 1]
+        with zipfile.ZipFile(seen["input"]) as plate:
+            seen["tower"] = maker_slicer._TOWER_MEMBER in plate.namelist()
+        Path(cmd[cmd.index("--output") + 1]).write_text(f"G28\n{body}; done\n")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    return run
+
+
 def _never_runs(*_args, **_kwargs):
     raise AssertionError("the slicer was launched")
+
+
+@pytest.fixture
+def notes(tmp_path, monkeypatch):
+    """What Kiln said kept in a file of the test's own, on a computer with no Homebrew."""
+    monkeypatch.setattr(maker_slicer_notes, "store_path", lambda: tmp_path / "notes.json")
+    monkeypatch.setattr(maker_slicer, "_brew_command", lambda *_a, **_k: None)
+    return tmp_path / "notes.json"
 
 
 class TestTheSlice:
@@ -370,10 +415,67 @@ class TestTheSlice:
         result = self._slice(tmp_path, _slicer_that_writes(seen), slicer=_orca(), found=_prusa())
         assert seen["cmd"][0] == "/fake/PrusaSlicer" and result.sliced_with["slicer"] == "prusaslicer"
 
-    def test_a_slicer_too_old_is_refused_before_launching(self, tmp_path):
+    def test_a_slicer_too_old_slices_for_one_nozzle_and_says_so(self, tmp_path, notes):
+        seen: dict = {}
+        result = self._slice(tmp_path, _slicer_swapping(seen, 1), slicer=_prusa("2.4.0"))
+        assert result.success and result.sliced_with is None and result.filament_map is None
+        # Exactly as a printer sliced with one nozzle: none of the record's extras or routines.
+        assert "example_machine_key" not in seen["settings"] and "toolchange_gcode" not in seen["settings"]
+        assert seen["tower"] is False
+        assert result.one_nozzle == {
+            "filament_swaps": 1,
+            "maker_slicer": {"name": "PrusaSlicer", "need": "update", "download": "prusa3d.com/p/prusaslicer"},
+        }
+        assert result.to_dict()["one_nozzle"] == result.one_nozzle
+        assert "Sliced for one nozzle: 1 filament swap. " in result.message
+        assert result.message.endswith(
+            "Update PrusaSlicer to 2.5.0 or newer (free) and Kiln uses both nozzles on its own: "
+            "prusa3d.com/p/prusaslicer."
+        )
+
+    def test_a_missing_makers_slicer_slices_with_the_slicer_in_hand(self, tmp_path, notes):
+        record = {**_RECORD, "maker_slicer": {"name": "bambu_studio"}}
+        seen: dict = {}
+        result = self._slice(tmp_path, _slicer_swapping(seen, 3), record=record)
+        assert result.slicer and "toolchange_gcode" not in seen["settings"]
+        assert result.one_nozzle["filament_swaps"] == 3
+        assert "Install Bambu Studio (free) and Kiln uses both nozzles on its own: bambulab.com/download/studio." in (
+            result.message
+        )
+
+    def test_the_slicer_is_named_first_then_only_for_many_swaps(self, tmp_path, notes):
+        def said(swaps: int) -> bool:
+            result = self._slice(tmp_path, _slicer_swapping({}, swaps), slicer=_prusa("2.4.0"))
+            assert f"Sliced for one nozzle: {swaps} filament swaps." in result.message
+            assert ("Update PrusaSlicer" in result.message) is ("maker_slicer" in result.one_nozzle)
+            return "maker_slicer" in result.one_nozzle
+
+        assert said(2) is True
+        assert said(2) is False
+        assert said(maker_slicer_notes.SWAPS_WORTH_SAYING - 1) is False
+        assert said(maker_slicer_notes.SWAPS_WORTH_SAYING) is True
+        assert said(3) is False
+
+    def test_both_nozzles_are_said_once_after_a_slice_for_one(self, tmp_path, notes):
+        self._slice(tmp_path, _slicer_swapping({}, 1), slicer=_prusa("2.4.0"))
+        first = self._slice(tmp_path, _slicer_that_writes({}))
+        assert first.sliced_with is not None and first.message.endswith(maker_slicer_notes.BOTH_NOW)
+        again = self._slice(tmp_path, _slicer_that_writes({}))
+        assert maker_slicer_notes.BOTH_NOW not in again.message
+
+    def test_a_map_cannot_be_kept_on_one_nozzle_so_it_is_refused(self, tmp_path, notes):
         with pytest.raises(NozzleMapError) as refused:
-            self._slice(tmp_path, _never_runs, slicer=_prusa("2.4.0"))
-        assert refused.value.code == NEEDS_MAKER_SLICER and "2.4.0" in str(refused.value)
+            self._slice(tmp_path, _never_runs, slicer=_prusa("2.4.0"), filament_map=[1, 2])
+        said = str(refused.value)
+        assert refused.value.code == NEEDS_MAKER_SLICER and "2.4.0" in said
+        assert "leave the map out" in said and "for one nozzle" in said
+        assert not notes.exists()
+
+    def test_on_the_shared_server_nothing_is_kept_and_no_slicer_is_named(self, tmp_path, notes, monkeypatch):
+        monkeypatch.setattr(maker_slicer_notes, "_hosted", lambda: True)
+        result = self._slice(tmp_path, _slicer_swapping({}, 25), slicer=_prusa("2.4.0"))
+        assert result.one_nozzle == {"filament_swaps": 25}
+        assert "PrusaSlicer" not in result.message and not notes.exists()
 
     def test_a_map_that_moves_a_filament_is_refused(self, tmp_path):
         with pytest.raises(NozzleMapError) as refused:

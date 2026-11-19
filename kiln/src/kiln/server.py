@@ -14438,6 +14438,12 @@ def register_printer(
     say its ``message``, ask its ``ask``, and only after the person says
     yes make the call its ``install`` names.
 
+    When Kiln slices this printer for more than one nozzle and the slicer
+    its maker publishes is missing or too old on this computer, the reply
+    carries ``two_nozzles``, once per printer: one line saying what to
+    install.  Kiln installs nothing; you may offer the command it names and
+    run it only when the person says yes.
+
     Once the address has answered, Kiln reads the id the machine reports
     for itself (a Prusa Link printer's serial, a Duet board's unique id,
     the host serial Moonraker reports) and saves it with the printer, so a
@@ -14901,6 +14907,15 @@ def register_printer(
                     result["bench_offer"] = _offer
             except Exception:
                 logger.debug("bench offer after registration skipped", exc_info=True)
+
+        # A printer sliced for more than one nozzle whose maker's slicer is
+        # missing or too old on this computer: said once, where it is added.
+        from kiln.maker_slicer_notes import setup_line as _nozzles_setup_line
+
+        _nozzles_line = _nozzles_setup_line(live_model)
+        if _nozzles_line:
+            result["two_nozzles"] = _nozzles_line
+            result["message"] += " " + _nozzles_line
 
         # Does the camera answer?  Asked once, here, without a frame: the
         # printer's own camera only when the printer's address answered (an
@@ -21706,6 +21721,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     from kiln._pro_nozzle_bridge import forget_recorded_nozzle
 
                     forget_recorded_nozzle()
+                if _name == "set_nozzle_state":
+                    # A second nozzle recorded as fitted, while the slicer
+                    # that uses it is missing here: said once per printer.
+                    from kiln.maker_slicer_notes import after_nozzle_record
+
+                    answer = after_nozzle_record(answer, call.get("printer_id"))
                 if _name == "record_nozzle_replacement":
                     # A recorded swap is a repair of the printer, which is
                     # here, not on the servers that recorded it.

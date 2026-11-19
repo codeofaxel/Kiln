@@ -280,6 +280,11 @@ class TestCountGcodeTools:
     def test_unreadable_file_returns_none(self, tmp_path):
         assert _count_gcode_tools(str(tmp_path / "gone.gcode")) is None
 
+    def test_pseudo_tools_are_no_change_and_an_indented_selection_is_one(self, tmp_path):
+        g = tmp_path / "pseudo.gcode"
+        g.write_text("T0\nG1 X0\n  T1 ; in a change routine\nT255\nT1\nT1000\nT0\nM104 T1 S200\n")
+        assert _count_gcode_tools(str(g)) == (2, 2)
+
     def test_none_path_returns_none(self):
         assert _count_gcode_tools(None) is None
 

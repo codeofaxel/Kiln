@@ -2867,13 +2867,6 @@ def _maybe_overlay_calibration(
 # kind reads as "not multicolor".
 # ---------------------------------------------------------------------------
 
-# A tool-select command at line start in G-code (``T0``, ``T1`` ...).
-# Word boundary so ``T1`` matches but a hypothetical ``T1x`` doesn't;
-# mid-line forms like ``M104 T0 S200`` are heater targeting, not tool
-# changes, and correctly don't match.
-_GCODE_TOOL_RE = re.compile(r"T(\d+)\b")
-
-
 def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
     """Does this 3MF ask for more than one filament?
 
@@ -2904,31 +2897,19 @@ def _profile_filament_slots(profile_path: str | None) -> int:
 
 
 def _count_gcode_tools(gcode_path: str | None) -> tuple[int, int] | None:
-    """``(tool_changes, distinct_tools)`` from one pass over the G-code.
-
-    Counts line-start ``T<n>`` commands — the form PrusaSlicer emits at
-    every filament change.  A tool CHANGE is a T command selecting a
-    different tool than the active one (the first selection arms, it
-    doesn't change).  Returns ``None`` when the file can't be read, so
-    the caller treats "couldn't measure" as no evidence either way.
+    """``(tool_changes, distinct_tools)`` from one pass over the G-code, by
+    the one rule every reply that counts them uses
+    (:func:`kiln.gcode.tool_changes`).  Returns ``None`` when the file
+    can't be read, so the caller treats "couldn't measure" as no evidence
+    either way.
     """
     if not gcode_path:
         return None
+    from kiln.gcode import tool_changes
+
     try:
-        tools: set[int] = set()
-        changes = 0
-        active: int | None = None
         with open(gcode_path, errors="replace", encoding="utf-8") as fh:
-            for line in fh:
-                m = _GCODE_TOOL_RE.match(line)
-                if not m:
-                    continue
-                n = int(m.group(1))
-                tools.add(n)
-                if active is not None and n != active:
-                    changes += 1
-                active = n
-        return changes, len(tools)
+            return tool_changes(fh)
     except OSError:
         return None
 
@@ -3089,10 +3070,19 @@ class _SlicerToolsPlugin:
                     (``NOZZLE_MAP_WRONG_LENGTH``, ``NO_SUCH_NOZZLE``,
                     ``NOZZLE_MAP_NOT_USED``); a filament put on a nozzle
                     that cannot reach its part is refused with
-                    ``NOZZLE_CANNOT_REACH``; a slicer that cannot slice the
-                    printer for more than one nozzle with
-                    ``MULTI_NOZZLE_NEEDS_MAKER_SLICER`` (the sentence names
-                    the slicer to install or update); on a printer that
+                    ``NOZZLE_CANNOT_REACH``.  When the slicer the printer's
+                    maker publishes is missing or too old on this computer,
+                    the print is sliced for one nozzle with filament swaps
+                    and the result's ``one_nozzle`` says so: the swaps read
+                    from the sliced file, and, the first time on a printer
+                    or for a print of many swaps, ``maker_slicer`` with the
+                    page to get it and, on a Mac with Homebrew, the command.
+                    Kiln installs nothing: offer that command and run it only
+                    when the person says yes.  A map cannot be kept on one
+                    nozzle, so with a map, when a slicer other than the
+                    installed maker's one is named, or when the maker's slicer
+                    holds no settings for this printer, the slice is refused
+                    with ``MULTI_NOZZLE_NEEDS_MAKER_SLICER``; on a printer that
                     prints each filament from the nozzle of its own number,
                     a different map with ``NOZZLE_MAP_FIXED`` and more
                     filaments than nozzles fitted with

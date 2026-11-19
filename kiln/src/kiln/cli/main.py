@@ -2422,6 +2422,11 @@ def auth(
             data["diagnostics"] = creality_diagnostics
         if camera_handshake is not None:
             data["camera_check"] = {**camera_handshake.to_dict(), "line": camera_line}
+        from kiln.maker_slicer_notes import setup_line as _nozzles_setup_line
+
+        nozzles_line = _nozzles_setup_line(printer_model or (prusa_diagnostics or {}).get("profile_id"))
+        if nozzles_line:
+            data["two_nozzles"] = nozzles_line
 
         if printer_type == "prusalink" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
             checks = prusa_diagnostics.get("checks", [])
@@ -2476,6 +2481,8 @@ def auth(
         click.echo(format_response("success", data=data, json_mode=json_mode))
         if not json_mode and camera_line:
             click.echo(camera_line)
+        if not json_mode and nozzles_line:
+            click.echo(nozzles_line)
         if not json_mode and prusa_diagnostics is not None:
             profile_id = prusa_diagnostics.get("profile_id")
             file_count = prusa_diagnostics.get("file_count")
@@ -9872,6 +9879,11 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         click.echo(f"  Saved printer '{name}' to {saved.path}")
         if saved.notice:
             click.echo(click.style(f"  {saved.notice}", fg="yellow"))
+        from kiln.maker_slicer_notes import setup_line as _nozzles_setup_line
+
+        nozzles_line = _nozzles_setup_line(printer_model)
+        if nozzles_line:
+            click.echo(f"  {nozzles_line}")
     except OSError as exc:
         click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
         sys.exit(1)
@@ -12305,6 +12317,20 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                 checks.append({"name": "printer_name", "ok": True, "warn": True, "detail": note["sentence"]})
     except Exception as exc:  # noqa: BLE001 -- a name is never worth failing a checkup
         logger.debug("printer name check skipped: %s", exc)
+
+    # 5c. A printer sliced for more than one nozzle: is its maker's slicer
+    #     here, new enough to use them all?  Said every run, reachable or not.
+    if printer_cfg and printer_cfg.get("printer_model"):
+        try:
+            from kiln._pro_nozzle_bridge import consult_recorded_nozzle
+            from kiln.maker_slicer_notes import doctor_row
+
+            _fitted = consult_recorded_nozzle(str(name_label)).get("positions")
+            _nozzles_row = doctor_row(printer_cfg.get("printer_model"), positions=_fitted)
+            if _nozzles_row is not None:
+                checks.append(_nozzles_row)
+        except Exception as exc:  # noqa: BLE001 -- a row is never worth failing a checkup
+            logger.debug("nozzle slicer check skipped: %s", exc)
 
     # 6. Printer reachable (use adapter with auth, not raw HTTP)
     verify_adapter = None
