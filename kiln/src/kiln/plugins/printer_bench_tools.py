@@ -274,7 +274,7 @@ def _reply(session: dict[str, Any], ask: str, *, pictures: list[dict[str, Any] |
     shown = [p for p in (pictures or []) if p]
     out: dict[str, Any] = {
         "success": True, "printer_name": session["printer_name"], "step": session["step"], "ask": ask,
-        "options": options or [], "waiting": waiting, "blanks": session["blanks"],
+        "options": options or [], "waiting": waiting,
         "learned": sorted(session["observed"]), "images": shown,
         "next": (f"Call printer_bench again in about {int(CHECK_AGAIN_S)} seconds.") if waiting
         else "Relay the ask word for word, show the picture, and call printer_bench again with the person's answer.",
@@ -558,13 +558,6 @@ def _learned_lines(session: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _unknown_lines(session: dict[str, Any]) -> list[str]:
-    words = {"pause": "where it parks on a pause", "cancel": "where it parks on a cancel", "end": "where it parks when a print ends",
-             "filament_change": "how it changes colour (no way to trigger one without unloading by hand)",
-             "head": "the head's size", "z_travel": "how far it travels in Z", "quiet_start": "whether it can start quietly beside a part"}
-    return [words.get(b, b) for b in session["blanks"] if b not in session["observed"]]
-
-
 # ---------------------------------------------------------------------------
 # The tool
 # ---------------------------------------------------------------------------
@@ -605,8 +598,8 @@ def printer_bench(
         answer: The person's answer to the previous ask, verbatim.
         restart: Begin again from the first ask.
 
-    Returns the next ask, or ``done`` with what Kiln learned, the payoff
-    line, and what it still does not know.
+    Returns the next ask, or ``done`` with what Kiln learned and the payoff
+    line.
     """
     import kiln.server as _srv
     from kiln import plate_state
@@ -642,16 +635,15 @@ def printer_bench(
             first = any(isinstance(r, dict) and r.get("code") == "PLACEMENT_UNKNOWN_PRINTER" for r in verdict.get("refusals") or [])
             if not blanks:
                 bench.note_offer(unit, answer="done")
-                return {"success": True, "step": "done", "printer_name": target_name, "blanks": [], "learned": [],
+                return {"success": True, "step": "done", "printer_name": target_name, "learned": [],
                         "ask": "", "images": [],
                         "message": f"Kiln already knows how {bench._display_name(printer_id)} moves its head; there is nothing to teach it."}
             asked = [b for b in blanks if b in bench.TEACHABLE]
             if not asked:
-                return {"success": True, "step": "done", "printer_name": target_name, "blanks": blanks, "learned": [],
+                return {"success": True, "step": "done", "printer_name": target_name, "learned": [],
                         "ask": "", "images": [],
-                        "message": (f"Kiln still doesn't know {', '.join(b.replace('_', ' ') for b in blanks)} for "
-                                    f"the {bench._display_name(printer_id)}, but a test print can't show those, so "
-                                    "there is nothing for a session to do.")}
+                        "message": (f"A test print has nothing more to teach Kiln about the "
+                                    f"{bench._display_name(printer_id)}, so there is nothing for a session to do.")}
             loggable = bench.can_log_positions(adapter)
             session = {
                 "printer_name": target_name, "printer_id": printer_id, "unit": unit,
@@ -984,17 +976,15 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
         _end_session(session)
         _send_in_background()
         learned = _learned_lines(session)
-        unknown = _unknown_lines(session)
         payoff = _payoff(session) if learned else ""
         return {
             "success": True, "step": "done", "printer_name": name, "ask": "", "images": [],
-            "learned": learned, "still_unknown": unknown, "notes": session.get("notes", []),
+            "learned": learned, "notes": session.get("notes", []),
             "payoff": payoff,
             "first": bool(session.get("first")),
             "message": (("Kiln had no record for this printer; now it has yours. " if session.get("first") and learned else "")
                         + ("Learned: " + "; ".join(learned) + ". " + payoff if learned
-                           else "Nothing new was observed this time, so Kiln still assumes the worst for this printer.")
-                        + (" Still unknown: " + "; ".join(unknown) + "." if unknown else "")),
+                           else "Nothing new was observed this time, so Kiln still assumes the worst for this printer.")),
             "kept_at": str(bench.bench_dir()),
         }
 

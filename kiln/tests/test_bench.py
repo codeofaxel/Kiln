@@ -291,14 +291,15 @@ class TestNeverNaggedTwice:
         machine = _Adapter()
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause", "cancel"], _verdict(ok=True, blanks=["pause", "cancel"])))
         offer = bench.offer_after_registration(machine, "a1")
-        assert offer["tool"] == "printer_bench" and offer["blanks"] == ["pause", "cancel"] and offer["printer_name"] == "a1"
+        assert offer["tool"] == "printer_bench" and offer["printer_name"] == "a1"
+        assert "blanks" not in offer, "an offer names the session, never a list of what Kiln lacks"
         assert offer["first"] is False and "printer_bench" in offer["sentence"]
         assert bench.offer_after_registration(machine, "a1") is None       # once
         fresh = _Adapter(); fresh.serial = "01P00A000000002"
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause", "cancel", "end", "filament_change", "head"],
                                                                         _verdict(ok=False, code="PLACEMENT_UNKNOWN_PRINTER")))
         first = bench.offer_after_registration(fresh, "new")
-        assert first["first"] is True and first["blanks"] == ["pause", "cancel", "end", "head"]
+        assert first["first"] is True and "blanks" not in first
         assert first["sentence"].startswith("Kiln has no record for the") and "can't check a second part beside the first" in first["sentence"]
         assert "A few minutes with a coin-sized test print teaches it" in first["sentence"]
         # Blanks no session can fill are no reason to offer one, and the one
@@ -326,7 +327,7 @@ class TestNeverNaggedTwice:
         worst = "the print head would hit jar (40 mm tall) during a pause at 0.2 mm (this printer's own pause motion is not on record, so the worst case is assumed)"
         resp = _placement_refusal("no", "PLACEMENT_REFUSED", state=state, bed=[256.0, 256.0],
                                   verdict=_verdict(ok=False, sentences=[worst], blanks=["pause", "cancel"]))
-        assert resp["bench_offer"]["tool"] == "printer_bench" and resp["bench_offer"]["blanks"] == ["pause"]
+        assert resp["bench_offer"]["tool"] == "printer_bench" and "blanks" not in resp["bench_offer"]
         assert "printer_bench" in resp["bench_offer"]["sentence"]
         known = _placement_refusal("no", "PLACEMENT_REFUSED", state=state, bed=[256.0, 256.0],
                                    verdict=_verdict(ok=False, sentences=["the head would hit jar during a pause (as its firmware moves)"]))
@@ -575,7 +576,9 @@ class TestTheConversation:
             "Kiln now knows how your Bambu Lab A1 moves, so it keeps the head clear of what's on the plate and can "
             "tell you whether a second part fits. The numbers go to Kiln; once enough Bambu Lab A1 owners agree, "
             "every Bambu Lab A1 owner gets them.")
-        assert len(out["learned"]) == 4 and out["still_unknown"] == []
+        assert len(out["learned"]) == 4
+        assert "still_unknown" not in out and "blanks" not in out, "the last screen says what was learned, never what is missing"
+        assert "unknown" not in out["message"].lower()
         # What was written: one document per block, numbers only, this unit's.
         docs = {d["block"]: d for d in bench.observations_of(m)}
         assert set(docs) == {"pause", "end", "cancel", "head"}
@@ -728,10 +731,11 @@ class TestTheConversation:
         out = _step(server, "yes")
         assert out["step"] == "head_width" and server.log == []
 
-    def test_blanks_no_test_print_can_show_are_said_and_nothing_runs(self, server, monkeypatch):
+    def test_nothing_a_test_print_can_teach_ends_at_once_without_naming_what_is_missing(self, server, monkeypatch):
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["filament_change", "quiet_start"], _verdict(ok=True)))
         out = _step(server)
-        assert out["step"] == "done" and "a test print can't show those" in out["message"] and server.log == []
+        assert out["step"] == "done" and "nothing more to teach" in out["message"] and server.log == []
+        assert "filament" not in out["message"] and "quiet" not in out["message"] and "blanks" not in out
 
     def test_the_payoff_is_true_on_every_tier_and_printer(self, server, monkeypatch):
         tool = server.tool
@@ -879,3 +883,12 @@ class TestTheConversation:
 
         data = json.loads((res.files("kiln") / "data" / "tool_safety.json").read_text())
         assert data["classifications"]["printer_bench"]["level"] == "confirm"
+
+
+def test_no_ask_in_the_session_carries_a_list_of_what_kiln_lacks(tmp_path, monkeypatch):
+    from kiln.plugins import printer_bench_tools as tool
+
+    monkeypatch.setattr(tool, "_save_session", lambda session: None)
+    session = {"printer_name": "a1", "step": "intro", "blanks": ["pause", "cancel", "head"], "observed": {"pause": {}}}
+    reply = tool._reply(session, "Is the plate empty?")
+    assert "blanks" not in reply and reply["learned"] == ["pause"]

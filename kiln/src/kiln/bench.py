@@ -549,7 +549,7 @@ def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] 
                         "A few minutes with a coin-sized test print teaches it; the printer_bench tool runs it.")
         else:
             sentence = offer_sentence(name, teachable)
-        return {"tool": "printer_bench", "printer_name": printer_name, "blanks": teachable, "first": first,
+        return {"tool": "printer_bench", "printer_name": printer_name, "first": first,
                 "minutes": 5, "sentence": sentence}
     except Exception:  # noqa: BLE001
         _logger.debug("bench: registration offer skipped", exc_info=True)
