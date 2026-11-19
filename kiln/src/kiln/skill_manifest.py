@@ -291,7 +291,7 @@ class SkillManifest:
             # The fact and the rule live in kiln.bench so every surface says
             # them one way.
             "get_to_know_a_printer": [
-                "printer_bench(printer_name) — " + AGENT_LEARN_LINE + " The reply is the next ask, or what Kiln learned and what it still does not know",
+                "printer_bench(printer_name) — " + AGENT_LEARN_LINE + " The reply is the next ask, or what Kiln learned",
                 "printer_bench(printer_name, answer=<the person's answer, verbatim>) — hand each answer back; a test print in the session is a real print and shows the normal approval dialog",
             ],
             "failure_recovery": [

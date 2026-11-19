@@ -82,9 +82,9 @@ LEARN_WHEN = (
     "printer is set up, when a reply says Kiln has no record for the printer or "
     "assumes the worst about it, and when the person asks why Kiln cannot do "
     "something on their printer or wants to teach Kiln their printer. "
-    "`printer_bench()` with no answer says what Kiln still does not know about "
-    "the printer, or that there is nothing to teach. Relay each ask word for "
-    "word, show its pictures, and take 'later' as an answer."
+    "`printer_bench()` with no answer starts or resumes it, or says there is "
+    "nothing to teach. Relay each ask word for word, show its pictures, and "
+    "take 'later' as an answer."
 )
 
 AGENT_LEARN_LINE = LEARN_LINE + " " + LEARN_WHEN
