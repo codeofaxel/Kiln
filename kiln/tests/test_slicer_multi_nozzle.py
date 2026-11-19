@@ -434,14 +434,14 @@ class TestTheSlice:
     def test_a_slicer_that_cannot_do_it_is_refused_before_launching(self, tmp_path, slicer):
         with pytest.raises(NozzleMapError) as refused:
             self._slice(tmp_path, _never_runs, slicer=slicer)
-        assert refused.value.code == "MULTI_NOZZLE_NEEDS_BAMBU_STUDIO"
+        assert refused.value.code == "MULTI_NOZZLE_NEEDS_MAKER_SLICER"
         said = str(refused.value)
         assert "Bambu Studio" in said and "install" in said and "nothing was sliced" in said
 
     def test_an_explicit_slicer_is_not_swapped_for_another(self, tmp_path):
         with pytest.raises(NozzleMapError) as refused:
             self._slice(tmp_path, _never_runs, slicer=_orca(), studio=_studio(), slicer_path="/fake/OrcaSlicer")
-        assert refused.value.code == "MULTI_NOZZLE_NEEDS_BAMBU_STUDIO"
+        assert refused.value.code == "MULTI_NOZZLE_NEEDS_MAKER_SLICER"
 
     @pytest.mark.parametrize("slicer", [_prusa(), _orca()])
     def test_an_installed_bambu_studio_is_used_instead(self, tmp_path, slicer):

@@ -317,6 +317,32 @@ def record_slice(
         return None
 
 
+def note_sliced_with(output_path: str | None, sliced_with: dict[str, Any] | None) -> bool:
+    """Keep, on the record of the sliced file at *output_path*, the slicer a
+    slice for more than one nozzle was made with (its name and version, and
+    the settings bundle its routines were read from): ``sliced_with`` on the
+    record, and in every answer about a print of that file
+    (:func:`resolve`).  ``False`` when the file has no record.  Never
+    raises."""
+    if not output_path or not isinstance(sliced_with, dict) or _hosted():
+        return False
+    try:
+        stamps = read_stamps(output_path)
+        if not stamps:
+            return False
+        with _lock:
+            data = _load()
+            for record in data["records"]:
+                if record.get("id") in stamps:
+                    record["sliced_with"] = dict(sliced_with)
+                    _save(data)
+                    return True
+        return False
+    except Exception:  # noqa: BLE001 -- a record never costs a slice
+        logger.debug("slicer not kept on the slice's record", exc_info=True)
+        return False
+
+
 def _fill_signatures(lineage_id: str, model_path: str) -> None:
     try:
         from kiln.community_autofire import signatures_of_model
@@ -401,6 +427,7 @@ def _answer(record: dict[str, Any], matched_by: str) -> dict[str, Any]:
         "signature_v2": model.get("signature_v2") or "",
         "profile": record.get("profile"),
         "stated": record.get("stated") if isinstance(record.get("stated"), dict) else {},
+        **({"sliced_with": record["sliced_with"]} if isinstance(record.get("sliced_with"), dict) else {}),
     }
 
 

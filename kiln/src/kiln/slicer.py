@@ -292,6 +292,12 @@ class SliceResult:
     #: Which nozzle printed each filament, as the sliced file states it
     #: (:func:`filament_map_of`); ``None`` for a slice made for one nozzle.
     filament_map: dict[str, Any] | None = None
+    #: The slicer a slice for more than one nozzle was made with: its name
+    #: and version, the settings bundle its routines were read from and that
+    #: bundle's version when they were, and for a printer whose filaments
+    #: print from the nozzle of the same number, ``filament_to_nozzle``
+    #: (:mod:`kiln.maker_slicer`).  ``None`` for a slice made for one nozzle.
+    sliced_with: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -314,6 +320,8 @@ class SliceResult:
             d["project_plate"] = self.project_plate
         if self.filament_map is not None:
             d["filament_map"] = self.filament_map
+        if self.sliced_with is not None:
+            d["sliced_with"] = self.sliced_with
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -695,11 +703,6 @@ def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal
 # ---------------------------------------------------------------------------
 # More than one nozzle
 # ---------------------------------------------------------------------------
-
-_INSTALL_BAMBU_STUDIO = (
-    "Kiln slices for more than one nozzle with Bambu Studio: install it from "
-    "bambulab.com/download/studio, or set KILN_SLICER_PATH to its binary, and slice again."
-)
 
 #: The name Bambu Studio is given for the print package it writes with a
 #: slice for more than one nozzle, inside the run's output folder.
@@ -1924,6 +1927,68 @@ def _say_left_out(result: SliceResult, left_out: dict[str, int]) -> SliceResult:
 _NO_LAYERS = re.compile(r"no layers were detected", re.IGNORECASE)
 
 
+def _several_nozzle_ini(
+    profile: str | None, nozzles: dict[str, Any], several: Any, *, slots: int, asked_map: list[int] | None,
+) -> str | None:
+    """The settings file for a slice for more than one nozzle by a slicer
+    of PrusaSlicer's kind (:func:`kiln.maker_slicer.several_nozzle_profile`).
+
+    Such a slicer prints each filament from the nozzle of the same number,
+    so a print with more filaments than nozzles used
+    (``MORE_FILAMENTS_THAN_NOZZLES``) and a map that says otherwise
+    (``NOZZLE_MAP_FIXED``) are refused before slicing.
+    """
+    from kiln.maker_slicer import several_nozzle_profile
+    from kiln.slicer_profiles import nozzle_positions
+
+    used = nozzle_positions(nozzles)
+    if slots > used:
+        raise NozzleMapError(
+            f"This print uses {slots} filaments, and this printer prints each filament from a nozzle of its "
+            f"own with {used} fitted, so nothing was sliced. Use {used} filaments or fewer, or record the "
+            "other nozzles as fitted, and slice again.",
+            code="MORE_FILAMENTS_THAN_NOZZLES",
+        )
+    if asked_map and asked_map != list(range(1, len(asked_map) + 1)):
+        raise NozzleMapError(
+            "On this printer filament 1 prints from nozzle 1, filament 2 from nozzle 2 and so on, and a "
+            "different map cannot be sliced, so nothing was sliced. Load each filament on the nozzle of "
+            "its number, or leave the map out, and slice again.",
+            code="NOZZLE_MAP_FIXED",
+        )
+    return several_nozzle_profile(profile, nozzles, used, several.routines)
+
+
+def _stand_the_tower(
+    slic3r_input: str, slicer_profile: str | None, input_abs: str, scratch: str,
+) -> tuple[str, str | None]:
+    """*slic3r_input* and *slicer_profile* with the purge tower stood clear
+    of the parts, for a slice whose settings ask for one: a copy of the 3MF
+    naming the place (:func:`kiln.maker_slicer.with_tower_position`).  With
+    no clear place on the bed, or a file that cannot carry one, the slice is
+    made without a tower.  Anything else is returned as it was."""
+    if not slicer_profile or not slic3r_input.lower().endswith(".3mf"):
+        return slic3r_input, slicer_profile
+    settings = ini_to_settings(slicer_profile)
+    if str(settings.get("wipe_tower", "0")).strip() != "1":
+        return slic3r_input, slicer_profile
+    from kiln.maker_slicer import TOWER_SQUARE_MM, with_tower_position
+    from kiln.slicer_profiles import profile_with_overrides
+
+    try:
+        width = float(settings.get("wipe_tower_width") or TOWER_SQUARE_MM)
+    except ValueError:
+        width = TOWER_SQUARE_MM
+    xy = _wipe_tower_position(settings, input_abs, width)
+    placed = os.path.join(scratch, f"tower_{Path(slic3r_input).name}")
+    if xy is not None and with_tower_position(slic3r_input, placed, xy):
+        return placed, slicer_profile
+    logger.info("No clear place for a purge tower; slicing for more than one nozzle without one.")
+    return slic3r_input, profile_with_overrides(
+        slicer_profile, {"wipe_tower": "0"}, prefix=f"{Path(slicer_profile).stem}_", stated=False,
+    )
+
+
 def _units_question_for(path: str) -> str:
     """The units question *path*'s size raises (``kiln.printability``), or
     ``""`` when it raises none or cannot be measured."""
@@ -2098,16 +2163,18 @@ def _slice_file(
     # the slice, when it prints more than one filament.
     unused_note = unused_fitted_note(nozzle_record_of(profile)) if several_filaments else ""
     multicolor_switched = False
-    if nozzles is not None and not _is_bambu_studio(slicer):
-        studio = _find_bambu_studio() if slicer_path is None else None
-        if studio is None:
-            raise NozzleMapError(
-                f"This print is for more than one nozzle, and {os.path.basename(slicer.path)} "
-                f"cannot slice that through Kiln, so nothing was sliced. {_INSTALL_BAMBU_STUDIO}",
-                code="MULTI_NOZZLE_NEEDS_BAMBU_STUDIO",
-            )
-        slicer = studio
-        multicolor_switched = slots_needed >= 2
+    several = None
+    if nozzles is not None:
+        from kiln.maker_slicer import slicer_for_several_nozzles
+
+        several = slicer_for_several_nozzles(nozzles, slicer, chosen=slicer_path is not None, profile=profile)
+        if several.info.path != slicer.path:
+            slicer = several.info
+            multicolor_switched = slots_needed >= 2
+        if slicer_cli_family(slicer) == _CLI_PRUSA:
+            profile = _several_nozzle_ini(profile, nozzles, several, slots=slots_needed, asked_map=asked_map)
+            if printed_only is None:
+                printed_only = _printed_parts_for_prusa(input_abs)
     if (
         slicer_path is None
         and slots_needed >= 2
@@ -2270,7 +2337,7 @@ def _slice_file(
             profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
-            nozzles=nozzles, filament_map=asked_map,
+            nozzles=nozzles, filament_map=asked_map, several=several,
         ), taken), left_out)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
@@ -2279,6 +2346,23 @@ def _slice_file(
         for scratch in (layer_scratch, kept_off_scratch):
             if scratch is not None:
                 shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _say_sliced_with(result: SliceResult, several: Any) -> SliceResult:
+    """*result* naming the slicer a slice for more than one nozzle was made
+    with, and the sliced file's record keeping it
+    (:func:`kiln.print_lineage.note_sliced_with`).  A slice for one nozzle
+    is returned as it was."""
+    if several is None:
+        return result
+    result.sliced_with = dict(several.sliced_with)
+    try:
+        from kiln.print_lineage import note_sliced_with
+
+        note_sliced_with(result.output_path, result.sliced_with)
+    except Exception:  # noqa: BLE001 -- a record never costs a slice
+        logger.debug("slicer not noted for %s", result.output_path, exc_info=True)
+    return result
 
 
 def _slice_decided(
@@ -2302,9 +2386,13 @@ def _slice_decided(
     layer: SliceLayer | None,
     nozzles: dict[str, Any] | None = None,
     filament_map: list[int] | None = None,
+    several: Any = None,
 ) -> SliceResult:
     """Run the slicer on *sliced_input* with everything :func:`_slice_file`
-    decided; *input_abs* is the part as the caller named it."""
+    decided; *input_abs* is the part as the caller named it.  *several* is
+    the slicer chosen for a slice for more than one nozzle
+    (:class:`kiln.maker_slicer.SeveralNozzleSlicer`): the result and the
+    sliced file's record say which it was."""
     # Two command lines, one function.  Everything below this point is the
     # Slic3r dialect; an Orca/BambuStudio binary needs a different argv AND a
     # different preset format, so it gets its own runner rather than a flag
@@ -2333,7 +2421,7 @@ def _slice_decided(
                 f" (multicolor 3MF: auto-selected "
                 f"{os.path.basename(slicer.path)} to keep the colors)"
             )
-        return result
+        return _say_sliced_with(result, several)
 
     # PrusaSlicer reads each component of a joined object as an object of
     # its own, so a 3MF whose objects hold several parts is handed over in
@@ -2347,6 +2435,8 @@ def _slice_decided(
         joined_copy = os.path.join(parts_dir, Path(input_abs).name)
         if prusa_multipart_copy(sliced_input, joined_copy):
             slic3r_input = joined_copy
+        if several is not None:
+            slic3r_input, slicer_profile = _stand_the_tower(slic3r_input, slicer_profile, input_abs, parts_dir)
     try:
         result = _slice_with_slic3r(
             slicer,
@@ -2364,7 +2454,13 @@ def _slice_decided(
             input_path=input_path,
         )
         result.layer = layer_witnessed(layer, result.output_path)
-        return result
+        if several is not None:
+            # Each filament printed from the nozzle of its own number.
+            slots = max(int((multicolor or {}).get("filament_slots_needed", 0)), 1)
+            several = replace(
+                several, sliced_with={**several.sliced_with, "filament_to_nozzle": list(range(1, slots + 1))},
+            )
+        return _say_sliced_with(result, several)
     finally:
         if parts_dir is not None:
             shutil.rmtree(parts_dir, ignore_errors=True)

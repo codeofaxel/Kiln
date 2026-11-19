@@ -3089,9 +3089,15 @@ class _SlicerToolsPlugin:
                     (``NOZZLE_MAP_WRONG_LENGTH``, ``NO_SUCH_NOZZLE``,
                     ``NOZZLE_MAP_NOT_USED``); a filament put on a nozzle
                     that cannot reach its part is refused with
-                    ``NOZZLE_CANNOT_REACH``; a slicer that cannot slice for
-                    more than one nozzle with
-                    ``MULTI_NOZZLE_NEEDS_BAMBU_STUDIO``.  The nozzles a
+                    ``NOZZLE_CANNOT_REACH``; a slicer that cannot slice the
+                    printer for more than one nozzle with
+                    ``MULTI_NOZZLE_NEEDS_MAKER_SLICER`` (the sentence names
+                    the slicer to install or update); on a printer that
+                    prints each filament from the nozzle of its own number,
+                    a different map with ``NOZZLE_MAP_FIXED`` and more
+                    filaments than nozzles fitted with
+                    ``MORE_FILAMENTS_THAN_NOZZLES``.  The result's
+                    ``sliced_with`` names the slicer and version used.  The nozzles a
                     slice uses are the ones the owner recorded as fitted
                     (``set_nozzle_state``), when they did.  Before slicing,
                     nozzles of different sizes are refused with
