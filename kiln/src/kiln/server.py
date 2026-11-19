@@ -937,6 +937,13 @@ def _build_instructions() -> str:
     if not _CRAFTCLOUD_API_KEY:
         parts.append("ORDERING: " + (ORDERING_STEPS if is_fresh else AGENT_ORDERING_LINE))
 
+    # --- Getting to know a printer ---
+    # After CONSENT for the same reason; get_started carries it for clients
+    # that cut before this.
+    from kiln.bench import AGENT_LEARN_LINE
+
+    parts.append("PRINTER KNOWLEDGE: " + AGENT_LEARN_LINE)
+
     # --- Monitoring & reporting ---
     parts.append(
         "MONITORING: During print jobs, use `monitor_print()` for status — "

@@ -770,6 +770,9 @@ class _UtilityToolsPlugin:
                     "Use `fulfillment_quote` to have a part printed and shipped; an "
                     "order is placed only after the person's own confirmation."
                 )
+            from kiln.bench import AGENT_LEARN_LINE
+
+            _quick_start_base.append(f"8. {AGENT_LEARN_LINE}")
             if _openscad_action_needed:
                 _openscad_step = (
                     f"0. IMPORTANT: {openscad_guidance.get('message', 'Install/upgrade OpenSCAD')} "

@@ -1027,6 +1027,15 @@ def _send_in_background() -> None:
         _logger.debug("bench: send not started", exc_info=True)
 
 
+def _description() -> str:
+    """The tool's description: its docstring, with when to reach for it said
+    second, where a reader who stops early still meets it."""
+    import inspect
+
+    lead, _, rest = inspect.cleandoc(printer_bench.__doc__ or "").partition("\n\n")
+    return f"{lead}\n\nWHEN TO REACH FOR IT: {bench.LEARN_WHEN}\n\n{rest}"
+
+
 class _PrinterBenchPlugin:
     """Help Kiln get to know your printer.
 
@@ -1050,7 +1059,9 @@ class _PrinterBenchPlugin:
         # No structured output: a reply with pictures is [text, image, ...],
         # and a schema built from the dict annotation would reject it exactly
         # when there is a picture to show.
-        mcp.tool(annotations=destructive("Teach Kiln your printer"), structured_output=False)(printer_bench)
+        mcp.tool(
+            annotations=destructive("Teach Kiln your printer"), structured_output=False, description=_description(),
+        )(printer_bench)
 
 
 plugin = _PrinterBenchPlugin()

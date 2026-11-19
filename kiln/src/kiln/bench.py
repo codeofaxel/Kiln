@@ -66,6 +66,29 @@ LIFT_WORDS_MM = {"barely": 0.5, "finger": 10.0, "hand": 100.0}
 #: Zones on the plate (a 3 x 3 grid, 1-9) and the ring around it (10-25).
 PLATE_ZONES = 9
 RING_ZONES = 16
+#: What an agent is told about the session.  One home, read by the connect
+#: instructions, ``get_started``, the skill manifest and the tool's own
+#: description; SKILL.md carries :data:`AGENT_LEARN_LINE` verbatim.
+LEARN_LINE = (
+    "Kiln can get to know a printer: `printer_bench` is a short guided session "
+    "that teaches Kiln what it does not yet know about how a printer moves, for "
+    "a printer new to Kiln and for one it knows only in part. What it learns is "
+    "used for that printer at once."
+)
+
+#: The agent half: when to reach for it, and how to carry it.
+LEARN_WHEN = (
+    "Offer it in one sentence, once per printer, without being asked: after a "
+    "printer is set up, when a reply says Kiln has no record for the printer or "
+    "assumes the worst about it, and when the person asks why Kiln cannot do "
+    "something on their printer or wants to teach Kiln their printer. "
+    "`printer_bench()` with no answer says what Kiln still does not know about "
+    "the printer, or that there is nothing to teach. Relay each ask word for "
+    "word, show its pictures, and take 'later' as an answer."
+)
+
+AGENT_LEARN_LINE = LEARN_LINE + " " + LEARN_WHEN
+
 #: The RPC the documents go through, and its posture: best effort.
 _RPC = "record_printer_motion_observation"
 _TIMEOUT_S = 5

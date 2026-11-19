@@ -17,6 +17,7 @@ from typing import Any
 from kiln.cli_command import kiln_command
 from kiln.curve_resolution import AGENT_ADVICE
 from kiln.front_door import KEYLESS_MAKE_LINE
+from kiln.bench import AGENT_LEARN_LINE
 from kiln.tiers_and_terms import ORDERING_LINE
 
 
@@ -286,6 +287,12 @@ class SkillManifest:
                 "issue_shipping_confirmation_token(quote_id, shipping_option_id) — after the person confirms where it ships",
                 "fulfillment_order(quote_id, shipping_option_id, preview_token, shipping_confirmation_token) — place the order; only after the person's own confirmation",
                 "fulfillment_order_status(order_id) — follow the order to delivery",
+            ],
+            # The fact and the rule live in kiln.bench so every surface says
+            # them one way.
+            "get_to_know_a_printer": [
+                "printer_bench(printer_name) — " + AGENT_LEARN_LINE + " The reply is the next ask, or what Kiln learned and what it still does not know",
+                "printer_bench(printer_name, answer=<the person's answer, verbatim>) — hand each answer back; a test print in the session is a real print and shows the normal approval dialog",
             ],
             "failure_recovery": [
                 "analyze_print_failure_smart(error_message) — automated root cause analysis",
