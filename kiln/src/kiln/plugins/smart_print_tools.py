@@ -51,6 +51,7 @@ class _SmartPrintToolsPlugin:
             skip_validation: bool = False,
             preview_token: str | None = None,
             placement: str | list[float] | None = None,
+            soft_nozzle_confirmed: bool = False,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
 
@@ -74,6 +75,11 @@ class _SmartPrintToolsPlugin:
                overrides, uploads the result, and starts the print.
 
             Args:
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.
                 model_path: Path to the model that failed (STL, OBJ, 3MF,
                     STEP, ...).  One the diagnosis cannot read is said in
                     ``printability_note``.
@@ -317,6 +323,7 @@ class _SmartPrintToolsPlugin:
                     model_path, effective_printer_id=effective_pid, printer_name=printer_name,
                     placement=placement, profile_path=effective_profile, adapter=adapter,
                     material=material, loaded_material=material_detected,
+                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
                 )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(

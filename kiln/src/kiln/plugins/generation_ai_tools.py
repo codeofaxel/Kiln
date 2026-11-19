@@ -753,6 +753,7 @@ class _GenerationAIToolsPlugin:
             material: str | None = None,
             placement: str | list[float] | None = None,
             goal_id: str = "",
+            soft_nozzle_confirmed: bool = False,
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
@@ -766,6 +767,11 @@ class _GenerationAIToolsPlugin:
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
             Args:
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.
                 goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
@@ -977,6 +983,7 @@ class _GenerationAIToolsPlugin:
                     profile_path=effective_profile,
                     material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
+                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
                 )
                 if slice_err is not None:
                     return slice_err

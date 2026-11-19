@@ -162,6 +162,7 @@ class _EstimateToolsPlugin:
             printer_name: str | None = None,
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
+            soft_nozzle_confirmed: bool = False,
         ) -> dict:
             """Primary estimation tool — slice a 3D model and return time, filament, cost, and printability analysis.
 
@@ -180,6 +181,11 @@ class _EstimateToolsPlugin:
             filament will I use?" before committing to a print job.
 
             Args:
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.
                 plate_number: Which plate to estimate of a slicer project that
                     holds several plates (1 for the first).  Leave unset for
                     any other file.  A several-plate project with none named
@@ -246,6 +252,7 @@ class _EstimateToolsPlugin:
                     printer_name=printer_name, placement=placement,
                     profile_path=effective_profile, auto_center=True,
                     material=material or None, plate_number=plate_number,
+                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -555,6 +562,7 @@ class _EstimateToolsPlugin:
             material: str = "",
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
+            soft_nozzle_confirmed: bool = False,
         ) -> dict:
             """Estimate print time and filament usage for a model.
 
@@ -594,6 +602,11 @@ class _EstimateToolsPlugin:
                 estimate never refuses because of the plate: with no safe
                 spot named the estimate is for the part on an empty plate
                 and ``plate_note`` says so.  Not read for a ``.gcode`` input.
+            :param soft_nozzle_confirmed: The owner has said to print anyway a
+                slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive
+                filament through a nozzle on record that is not
+                wear-resistant).  Only on their word, never on your own
+                judgement.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("slicer"):
@@ -630,6 +643,7 @@ class _EstimateToolsPlugin:
                     placement=placement, profile_path=resolved_profile,
                     slicer_path=slicer_path or None, material=material or None,
                     plate_number=plate_number,
+                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
                 )
                 if slice_err is not None:
                     return slice_err

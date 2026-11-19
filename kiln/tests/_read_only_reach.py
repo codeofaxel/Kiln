@@ -797,6 +797,11 @@ DECIDED: dict[str, str] = {
         "made from, and ends that new file with one comment line naming the "
         "record; no command in it changes and nothing is sent."
     ),
+    "kiln.print_lineage.note_soft_nozzle: store write _save": (
+        "adds, to that same record of a file Kiln just sliced on this computer, "
+        "the owner's word to print an abrasive filament through a nozzle that "
+        "is not wear-resistant; the file is not touched and nothing is sent."
+    ),
     "kiln.community_sync.fetch_community_insights: store write _write_cache": (
         "an hour's cache of a summary Kiln's servers computed, so the same "
         "question does not ask the network twice."

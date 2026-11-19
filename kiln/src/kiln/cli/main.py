@@ -4954,6 +4954,13 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
         "Such a project with no plate named is refused, and the refusal lists its plates."
     ),
 )
+@click.option(
+    "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
+    help=(
+        "The owner says to print anyway an abrasive filament through a nozzle on record "
+        "that is not wear-resistant, a slice otherwise refused. Only on their word."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def slice(
@@ -4976,6 +4983,7 @@ def slice(
     ams_mapping: str | None,
     placement: str | None,
     plate_number: int | None,
+    soft_nozzle_confirmed: bool,
     json_mode: bool,
 ) -> None:
     """Slice a 3D model (STL/3MF/STEP) to G-code.
@@ -5091,6 +5099,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, input_file, plan=plan, placement=placement, json_mode=json_mode,
                 slicer=lambda path, **kw: slice_multicolor_copies(path, copies, spacing_mm=spacing, **kw),
+                **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed else {}),
                 slicer_path=slicer,
                 extra_args=extra_args or None,
                 output_dir=output_dir,
@@ -5131,6 +5140,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
                 **fill_kwargs,
+                **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed else {}),
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,
@@ -5360,7 +5370,13 @@ def slice(
         click.echo(format_error(str(exc), code="SLICER_NOT_FOUND", json_mode=json_mode))
         sys.exit(1)
     except SlicerError as exc:
-        click.echo(format_error(str(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
+        from kiln.slicer import SOFT_NOZZLE_CONFIRM
+
+        # The terminal's own spelling of how the owner says print anyway.
+        said = str(exc).replace(
+            SOFT_NOZZLE_CONFIRM, "if the owner says to print it anyway, run it again with --soft-nozzle-confirmed",
+        )
+        click.echo(format_error(said, code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
         sys.exit(1)
     except click.ClickException:
         raise

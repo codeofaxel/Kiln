@@ -455,6 +455,9 @@ def _slice_step_data(result: Any) -> dict[str, Any]:
     supports = getattr(result, "supports", None)
     if supports is not None:
         data["supports"] = supports.to_dict()
+    soft = getattr(result, "soft_nozzle", None)
+    if isinstance(soft, dict):
+        data["soft_nozzle"] = soft
     return data
 
 
@@ -685,8 +688,12 @@ def quick_print(
     skip_validation: bool = False,
     signoff: dict[str, Any] | None = None,
     placement: str | list[float] | None = None,
+    soft_nozzle_confirmed: bool = False,
 ) -> PipelineResult:
     """Validate → slice → preflight → upload → start print in one call.
+
+    ``soft_nozzle_confirmed`` is the owner's word to print anyway a slice
+    refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (:func:`kiln.slicer.slice_file`).
 
     ``placement`` is where the part goes when the plate still holds the
     last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
@@ -815,6 +822,7 @@ def quick_print(
                 slicer_path=slicer_path,
                 material=material,
                 loaded_material=_loaded_material(ctx.get("adapter"), material),
+                **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
@@ -1073,8 +1081,15 @@ def reslice_and_print(
     copies: int | None = None,
     spacing_mm: float = 10.0,
     still_wanted: Callable[[], str | None] | None = None,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
+
+    ``soft_nozzle_confirmed`` is the owner's word to print anyway a slice
+    refused with ``ABRASIVE_ON_SOFT_NOZZLE``; ``filament_map`` is the nozzle
+    each filament prints from on a printer with more than one nozzle
+    (:func:`kiln.slicer.slice_file`, both).
 
     ``still_wanted``, when given, is asked right before the upload and again
     right before the start; a sentence back means the print is no longer
@@ -1234,6 +1249,8 @@ def reslice_and_print(
                 extra_args=extra_args,
                 material=material,
                 loaded_material=_loaded_material(adapter, material),
+                **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
+                **({"filament_map": filament_map} if filament_map else {}),
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
