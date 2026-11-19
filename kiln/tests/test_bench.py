@@ -244,6 +244,36 @@ class TestWhatTheRecordLacks:
         monkeypatch.setattr(bridge, "ask", lambda request: (None, SimpleNamespace(kind="offline")))
         assert bench.blanks_for(_Adapter(), "bambu_a1") == ([], None)
 
+    def test_the_probe_says_it_is_a_session_and_reads_only_what_a_session_can_teach(self, monkeypatch):
+        from kiln import _pro_placement_bridge as bridge
+
+        asked: list[dict] = []
+
+        def answer(teach, quiet_start):
+            def fake_ask(request):
+                asked.append(request)
+                doc = _verdict(ok=True)
+                del doc["record"]["blanks"]
+                doc["record"].update(teach=teach, quiet_start=quiet_start)
+                return doc, None
+            return fake_ask
+
+        monkeypatch.setattr(bridge, "ask", answer(["pause", "head"], True))
+        assert bench.blanks_for(_Adapter(), "bambu_a1")[0] == ["pause", "head"]
+        assert asked[0]["session"] is True
+        # A start Kiln cannot make beside a part on this printer still shapes
+        # the payoff line, so it is read from the record's own answer.
+        monkeypatch.setattr(bridge, "ask", answer([], False))
+        assert bench.blanks_for(_Adapter(), "bambu_a1")[0] == ["quiet_start"]
+        monkeypatch.setattr(bridge, "ask", answer([], True))
+        assert bench.blanks_for(_Adapter(), "bambu_a1")[0] == []
+
+    def test_a_refusal_names_the_blank_it_rests_on_with_no_list_in_the_answer(self):
+        worst = "the print head would hit jar (40 mm tall) during a pause at 0.2 mm (this printer's own pause motion is not on record, so the worst case is assumed)"
+        doc = _verdict(ok=False, sentences=[worst])
+        del doc["record"]["blanks"]
+        assert bench.refusal_blanks(doc) == ["pause"]
+
     def test_a_refusal_names_the_blank_it_rests_on(self):
         worst = "the print head would hit jar (40 mm tall) during a pause at 0.2 mm (this printer's own pause motion is not on record, so the worst case is assumed)"
         assert bench.refusal_blanks(_verdict(ok=False, sentences=[worst])) == ["pause"]

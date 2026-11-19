@@ -411,12 +411,14 @@ def refusal_blanks(verdict: Any) -> list[str]:
 
 
 def blanks_for(adapter: Any, printer_id: str | None) -> tuple[list[str], dict[str, Any] | None]:
-    """What the record for *printer_id* still does not know, read from the
-    verdict itself: a probe request on a clear plate, with this unit's
-    own settings and observations riding it, so a blank the machine or
-    its owner already filled does not count.  ``(blanks, verdict)``; an
-    unknown printer is every blank; no verdict at all is ``([], None)``
-    -- offline is not a reason to nag."""
+    """What a session could still teach about *printer_id*, asked of the
+    placement service as a session: a probe request on a clear plate, with
+    this unit's own settings and observations riding it, so a blank the
+    machine or its owner already filled does not count.  ``(blanks,
+    verdict)``; an unknown printer is every blank; no verdict at all is
+    ``([], None)`` -- offline is not a reason to nag.  ``quiet_start`` is
+    added when the record says a start beside a part would not stand, since
+    the payoff line reads it."""
     try:
         from kiln import _pro_placement_bridge as bridge
 
@@ -425,6 +427,7 @@ def blanks_for(adapter: Any, printer_id: str | None) -> tuple[list[str], dict[st
         request = bridge.request_for(adapter, printer_id, placement="auto", part=part)
         request["plate"] = {"status": "clear", "job": None, "jobs": [], "fingerprint": "", "since": None}
         request["occupant_gcode"] = None
+        request["session"] = True
         verdict, _miss = bridge.ask(request)
     except Exception:  # noqa: BLE001
         return [], None
@@ -436,6 +439,13 @@ def blanks_for(adapter: Any, printer_id: str | None) -> tuple[list[str], dict[st
     record = verdict.get("record")
     if not isinstance(record, dict):
         return [], verdict
+    teach = record.get("teach")
+    if isinstance(teach, list):
+        blanks = [b for b in teach if isinstance(b, str)]
+        if record.get("quiet_start") is not True:
+            blanks.append("quiet_start")
+        return blanks, verdict
+    # A service that answers in the older words.
     return [b for b in (record.get("blanks") or []) if isinstance(b, str)], verdict
 
 
