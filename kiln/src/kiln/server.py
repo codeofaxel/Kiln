@@ -22159,6 +22159,25 @@ def register_configured_printers() -> None:
             )
 
 
+def refresh_configured_printers() -> None:
+    """Bring the live registry up to date with the printers saved on this computer.
+
+    For an entry point that stays up while its owner saves a printer from
+    another program (the web bridge): a printer saved since this process
+    started joins the registry under the names a fresh start would give
+    it.  Additive, like :func:`register_configured_printers`: a printer
+    already registered is left as it is, and nothing is removed.
+
+    The default printer's own settings are read again only while this
+    process has no default printer.  One it has already resolved keeps its
+    connection and the model its safety limits are read from, together,
+    until the process restarts.
+    """
+    if not _PRINTER_HOST and _adapter is None:
+        _reload_env_config()
+    register_configured_printers()
+
+
 
 def _install_goal_argument_note() -> bool:
     """Attach :mod:`kiln.goal_argument`'s reply note to every tool call."""
