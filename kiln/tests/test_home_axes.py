@@ -580,6 +580,7 @@ class TestBambuWithoutAPlan:
                "refusal": {"code": "UNSUPPORTED", "message": "NOT DRIVEN YET. On this model the bed moves in Z."}}
         _serve(monkeypatch, {"home": doc, "park": doc})
         bambu._printer_model = "bambu_x1c"
+        bambu._serial = "00M00A000000001"
         _idle(bambu, monkeypatch)
         with pytest.raises(HomingUnsupported, match="bed moves in Z"):
             bambu.park_head()
@@ -706,6 +707,7 @@ class TestConsentFloor:
 
         asks = _serve(monkeypatch, {"home": doc, "park": _fake_home_doc("bambu_a1_mini", verb="park")})
         bambu._printer_model = "bambu_a1_mini"
+        bambu._serial = "03000A000000001"
         _idle(bambu, monkeypatch)
         return asks
 

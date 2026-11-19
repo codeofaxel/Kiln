@@ -39,7 +39,14 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
     """The one door every surface calls -- for both verbs."""
     import kiln.server as _srv
     from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING
-    from kiln.printers.base import HomingUnsupported, ModelDeclarationRequired, PlateClearRequired, PrinterError
+    from kiln.printer_model_check import MISMATCH_CODE
+    from kiln.printers.base import (
+        HomingUnsupported,
+        ModelDeclarationRequired,
+        PlateClearRequired,
+        PrinterError,
+        PrinterModelDisagrees,
+    )
     from kiln.registry import PrinterNotFoundError
 
     tool_name = "park_head" if action == "park" else "home_axes"
@@ -79,6 +86,8 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
             str(exc), code="PRINTER_MODEL_REQUIRED",
             extra={"outcome": "failed", "printer_model_required": True},
         )
+    except PrinterModelDisagrees as exc:
+        return _srv._error_dict(str(exc), code=MISMATCH_CODE, extra={"outcome": "failed"})
     except HomingUnsupported as exc:
         # Why there was no plan (offline, signed out, unanswered, refused)
         # rides beside the sentence, never inside it.

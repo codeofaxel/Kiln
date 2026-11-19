@@ -403,6 +403,9 @@ def set_printer_model(
     outside the catalogue is recorded as ``<make>_<model>`` under the
     generic limits; one given by a file that states its bed is set up on
     this machine, and *replace* also lets a newer file correct that bed.
+    A catalogue model is refused for a saved Bambu Lab printer whose own
+    serial number names another catalogue model
+    (``MODEL_DISAGREES_WITH_PRINTER``); nothing is written.
     A printer outside the catalogue with no file gets its bed from
     *bed_mm*: the size its maker publishes, *bed_source* saying where, and
     *bed_confirmed* the person's yes (:func:`_bed_given`); *replace* also
@@ -593,6 +596,8 @@ def set_printer_model(
             f"{target} is saved as a {kind} connection, and {key} is not a printer that connection "
             "reaches.  Nothing was changed; name the printer this model belongs to.",
         )
+    if in_catalogue and (said := _serial_disagrees(entry, key, target)) is not None:
+        return refused("MODEL_DISAGREES_WITH_PRINTER", said)
     if previous_key and previous_key != key and not replace:
         return refused(
             "MODEL_ALREADY_SET",
@@ -652,6 +657,35 @@ def set_printer_model(
     was = f" (was {previous})" if previous and previous != key else ""
     out["message"] = " ".join([f"{target} is now set up as {key}{was}.", said, *notes])
     return out
+
+
+def _serial_disagrees(entry: dict[str, Any], key: str, target: str) -> str | None:
+    """Why *key* is not written for a saved printer whose serial number names another model, or ``None``.
+
+    Only a Bambu Lab serial number whose prefix Kiln knows says anything,
+    and only when the model it names is a catalogue row other than *key*;
+    an owner who has said the printer's model stands is taken at their word.
+    """
+    if str(entry.get("type") or "").strip().lower() != "bambu":
+        return None
+    serial = entry.get("serial")
+    try:
+        from kiln.printer_model_check import ModelCheck, _row, declared_model_stands
+        from kiln.printers.bambu import model_of_serial
+
+        named = _row(model_of_serial(serial))
+        if named is None or named == key or declared_model_stands(serial):
+            return None
+        check = ModelCheck("differs", key, key, named)
+    except Exception:  # noqa: BLE001 -- a serial number Kiln cannot read says nothing
+        return None
+    return (
+        f"{target}'s serial number is {check.reported_name}'s, and this says {check.declared_name}.  "
+        "Nothing was changed: the model decides the moves Kiln sends and the limits it checks prints "
+        f"against, and another printer's are wrong for this one.  If it is {check.reported_name}, set it "
+        f"with {check.fix(target)}.  If it is {check.declared_name}, Kiln's record of this printer is "
+        "wrong: say so with the report_issue tool."
+    )
 
 
 def _refused(code: str, message: str, **extra: Any) -> dict[str, Any]:

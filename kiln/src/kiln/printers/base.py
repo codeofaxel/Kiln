@@ -141,6 +141,10 @@ class ModelDeclarationRequired(PrinterError):
     """Raised when a motion needs the catalogue and no printer_model names the row."""
 
 
+class PrinterModelDisagrees(PrinterError):
+    """Raised when a move Kiln plans by model is asked of a printer that reports itself as another model."""
+
+
 class HomingUnsupported(PrinterError):
     """Raised when a backend cannot home the head the way Kiln trusts."""
 
@@ -2860,6 +2864,7 @@ class PrinterAdapter(ABC):
                 "backend declares no filament handling. Use the printer's "
                 "own screen or web UI for that step."
             )
+        self._refuse_move_for_another_model()
 
         if slot is not None:
             try:
@@ -3182,6 +3187,21 @@ class PrinterAdapter(ABC):
         )
         raise PlateClearRequired(message, snapshot_path=witness)
 
+    #: Whether this backend reads what the printer is off the machine's own
+    #: serial number or firmware name, at no cost, so that a move Kiln plans
+    #: by model is refused while that report names another model.
+    _MODEL_REPORT_HOLDS_MOVES: ClassVar[bool] = False
+
+    def _refuse_move_for_another_model(self) -> None:
+        """Refuse a move Kiln plans by model while the printer reports itself as another model."""
+        from kiln.printer_model_check import MISMATCH_CODE, move_refusal
+
+        sentence = move_refusal(self)
+        if sentence is None:
+            return
+        self._count_motion_refusal(MISMATCH_CODE, "another_model")
+        raise PrinterModelDisagrees(sentence)
+
     def declared_printer_model(self) -> str:
         """The printer_model this adapter was built with, as the person wrote it."""
         own = str(getattr(self, "_printer_model", "") or "").strip()
@@ -3354,6 +3374,7 @@ class PrinterAdapter(ABC):
             raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
         if not wanted:
             raise PrinterError(f"Nothing to home: axes {axes!r} names none of X, Y, Z.")
+        self._refuse_move_for_another_model()
         state = self.get_state()
         if state.effective_state == PrinterStatus.PRINTING and not options.get("plan_only"):
             raise PrinterError(
@@ -3505,6 +3526,7 @@ class PrinterAdapter(ABC):
         step = options.get("step")
         if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
             raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
+        self._refuse_move_for_another_model()
         state = self.get_state()
         if state.effective_state == PrinterStatus.PRINTING and not options.get("plan_only"):
             raise PrinterError(

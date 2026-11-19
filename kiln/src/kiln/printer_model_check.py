@@ -15,11 +15,19 @@ comparison every door reads -- the print-start gate, which also judges a part
 against the bed of the printer that answered so a model typed wrong at setup
 cannot start a part bigger than the real bed, and the setup doors, which say
 the disagreement the moment it is made.
+
+A move Kiln sends on its own (a home, a park, a wipe, a purge, the park
+before a filament change) is held to more: it is planned for the model the
+printer was set up as, so it is refused while the printer names another
+(:func:`move_refusal`).  Only a printer whose report is read off its own
+serial number or firmware name is held to this, and only when both models
+are in the catalogue; stopping, pausing, cancelling and status never ask.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,8 +35,13 @@ from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
 
-#: The code a start refused over the disagreement carries.
+#: The code a start or a move refused over the disagreement carries.
 MISMATCH_CODE = "PRINTER_MODEL_DISAGREES"
+
+#: Serial numbers, comma-separated, of printers whose model stands as it was
+#: set up whatever the printer reports.  It is for an owner whose printer
+#: Kiln's own records name wrongly, and it is theirs to set.
+DECLARED_MODEL_STANDS_ENV = "KILN_DECLARED_MODEL_STANDS_FOR"
 
 
 @dataclass(frozen=True)
@@ -70,6 +83,10 @@ class ModelCheck:
             kiln_command(f"set-model {self.reported_row} --printer", printer_name)
             if printer_name else kiln_command("set-model", self.reported_row)
         )
+        # A printer already set up as a model Kiln knows keeps it unless the
+        # change is asked for by name.
+        if self.declared_row:
+            return f"`{line} --replace` (or the set_printer_model tool with replace=true)"
         return f"`{line}` (or the set_printer_model tool)"
 
     def sentence(self, printer_name: str = "") -> str:
@@ -155,4 +172,57 @@ def check_printer_model(adapter: Any, *, declared: str | None = None) -> ModelCh
         return ModelCheck("unchecked", why="the comparison could not run")
 
 
-__all__ = ["MISMATCH_CODE", "ModelCheck", "check_printer_model"]
+def declared_model_stands(serial: object) -> bool:
+    """Whether the owner has said the printer with *serial* is the model it was set up as."""
+    own = str(serial or "").strip().upper()
+    if not own:
+        return False
+    listed = os.environ.get(DECLARED_MODEL_STANDS_ENV, "")
+    return own in {item.strip().upper() for item in listed.split(",")}
+
+
+def move_refusal(adapter: Any) -> str | None:
+    """The sentence that refuses a move Kiln plans by model, or ``None`` to let it run.
+
+    A refusal needs proof: the adapter reads its report off the machine's own
+    serial number or firmware name, that report and the model its moves are
+    planned for (its ``printer_model``) each name a catalogue row, and the
+    two rows differ.  No model set up, no report, a report or a model the
+    catalogue has no row for, and a printer whose owner has said its model
+    stands (:data:`DECLARED_MODEL_STANDS_ENV`) are all ``None``.  Never
+    raises.
+    """
+    try:
+        if not getattr(adapter, "_MODEL_REPORT_HOLDS_MOVES", False):
+            return None
+        planned_for = str(getattr(adapter, "_printer_model", "") or "").strip()
+        if not planned_for:
+            return None
+        check = check_printer_model(adapter, declared=planned_for)
+        if check.status != "differs" or check.declared_row is None:
+            return None
+        if declared_model_stands(getattr(adapter, "serial", "") or getattr(adapter, "_serial", "")):
+            return None
+        name = getattr(adapter, "_kiln_registered_name", None)
+        name = name if isinstance(name, str) else ""
+        return (
+            f"Nothing was sent to {name or 'the printer'}.  It is set up as {check.declared_name}, but it "
+            f"reports itself as {check.reported_name}.  The moves Kiln sends are planned for the model a "
+            f"printer is set up as, and another printer's moves can drive the head into the bed or the "
+            f"frame.  If it is {check.reported_name}, set it with {check.fix(name)} and try again; until "
+            f"then, use the printer's own screen.  If it is {check.declared_name}, Kiln's record of this "
+            "printer is wrong: say so with the report_issue tool."
+        )
+    except Exception:  # noqa: BLE001 -- a comparison that cannot run proves nothing
+        logger.debug("move model check failed", exc_info=True)
+        return None
+
+
+__all__ = [
+    "DECLARED_MODEL_STANDS_ENV",
+    "MISMATCH_CODE",
+    "ModelCheck",
+    "check_printer_model",
+    "declared_model_stands",
+    "move_refusal",
+]
