@@ -166,12 +166,19 @@ def _runs_printers_side_by_side() -> bool:
         return False
 
 
-def which_printer(named: str | None = None, *, machines: list[str] | None = None) -> PrinterChoice:
+def which_printer(
+    named: str | None = None,
+    *,
+    machines: list[str] | None = None,
+    side_by_side: bool | None = None,
+) -> PrinterChoice:
     """The printer a check is about: *named* when the caller named one, else
     chosen by the module's rule.  Never raises.
 
     *machines* is the list to choose among when the caller already holds
-    it; left out, :func:`known_machines` is asked.
+    it; left out, :func:`known_machines` is asked.  *side_by_side* is whether
+    the caller's plan runs printers side by side, when the caller has
+    already read it; left out, the plan is read here.
     """
     asked = (named or "").strip()
     known = tuple(known_machines() if machines is None else machines)
@@ -181,7 +188,7 @@ def which_printer(named: str | None = None, *, machines: list[str] | None = None
         return PrinterChoice(None, NONE)
     if len(known) == 1:
         return PrinterChoice(known[0], ONLY, known)
-    if _runs_printers_side_by_side():
+    if _runs_printers_side_by_side() if side_by_side is None else side_by_side:
         return PrinterChoice(None, SEVERAL, known, every_printer=True)
     held = _working_with(list(known))
     if held is not None:

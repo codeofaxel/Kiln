@@ -102,6 +102,13 @@ class TestTheRule:
         assert choice.machines == ("bench", "garage")
         assert "name the one this is for" in choice.ask
 
+    def test_a_caller_that_already_read_the_plan_is_taken_at_its_word(self, monkeypatch):
+        _registered(monkeypatch, _Registry(default="garage", bench="s1", garage="s2"))
+        monkeypatch.setattr(engagement, "_multi_machine_tier", lambda: True)
+        assert which_printer(side_by_side=False).printer == "garage"
+        monkeypatch.setattr(engagement, "_multi_machine_tier", lambda: False)
+        assert which_printer(side_by_side=True).every_printer is True
+
     def test_several_with_nothing_to_tell_them_apart_is_asked_about(self, monkeypatch):
         _registered(monkeypatch, _Registry(bench="s1", garage="s2"))
         choice = which_printer()
