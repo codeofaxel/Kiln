@@ -753,6 +753,8 @@ class _GenerationAIToolsPlugin:
             material: str | None = None,
             placement: str | list[float] | None = None,
             goal_id: str = "",
+            soft_nozzle_confirmed: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
@@ -766,6 +768,16 @@ class _GenerationAIToolsPlugin:
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
             Args:
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
@@ -962,6 +974,7 @@ class _GenerationAIToolsPlugin:
                 # declared, else the spool the target reports loaded, else
                 # PLA -- the same reading slice_and_print makes, and the
                 # response's slice.filament says which.
+                from kiln.slicer import owner_asks
                 from kiln.plugins.slicer_tools import (
                     _attach_placement,
                     _loaded_material_for,
@@ -977,6 +990,7 @@ class _GenerationAIToolsPlugin:
                     profile_path=effective_profile,
                     material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
+                    **owner_asks(soft_nozzle_confirmed, filament_map),
                 )
                 if slice_err is not None:
                     return slice_err

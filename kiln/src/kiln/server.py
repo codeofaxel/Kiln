@@ -19190,6 +19190,8 @@ def design_to_gcode_pipeline(
     infill_percent: float = 20.0,
     placement: str | list[float] | None = None,
     goal_id: str = "",
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> dict:
     """End-to-end pipeline: description → template → STL → analysis → GCode.
 
@@ -19203,6 +19205,15 @@ def design_to_gcode_pipeline(
     :param goal_id: The saved goal's id from ``design_session``, so this
         make is recorded against the goal and checked against it. Empty
         when there is no goal.
+    :param soft_nozzle_confirmed: The owner has said to print anyway a slice
+        refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament through
+        a nozzle on record that is not wear-resistant).  Only on their word,
+        never on your own judgement.
+    :param filament_map: Only for a printer with more than one nozzle: the
+        nozzle (1 for the first) each filament prints from, one number per
+        filament in filament order.  Leave unset to let the slicer choose; a
+        map that does not fit is refused before slicing, as ``slice_model``
+        refuses it.
     :param description: Natural-language design description.
     :param output_dir: Directory for output files (uses tempdir if empty).
     :param material: Material the slice is set for -- temperatures, melt
@@ -19229,6 +19240,7 @@ def design_to_gcode_pipeline(
             # ([x, y] in mm, a named region, or "keep"); omitted, an occupied
             # plate refuses the slice step.  Same gate as slice_model.
             placement=placement if placement is not None else "auto",
+            slice_asks=_owner_asks(soft_nozzle_confirmed, filament_map),
         )
         result_dict = {"success": result.success, **result.to_dict()}
         if result.success:
@@ -20036,6 +20048,8 @@ def run_quick_print(
     skip_validation: bool = False,
     preview_token: str | None = None,
     placement: str | list[float] | None = None,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> dict:
     """Full print pipeline: validate + slice + safety-check + upload + print (recommended one-shot tool).
 
@@ -20052,6 +20066,16 @@ def run_quick_print(
     7. Start printing
 
     Args:
+        soft_nozzle_confirmed: The owner has said to print anyway a slice
+            refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
+            through a nozzle on record that is not wear-resistant).  Only on
+            their word, never on your own judgement.  The slice step's
+            ``soft_nozzle`` says which filament goes through which nozzle.
+        filament_map: Only for a printer with more than one nozzle: the
+            nozzle (1 for the first) each filament prints from, one number
+            per filament in filament order.  Leave unset to let the slicer
+            choose; a map that does not fit is refused before slicing, as
+            ``slice_model`` refuses it.
         model_path: Path to input model (STL, 3MF, STEP, OBJ).
         printer_name: Registered printer name in fleet.
         printer_id: Printer model ID for auto-profile selection
@@ -20128,6 +20152,7 @@ def run_quick_print(
             skip_validation=skip_validation,
             signoff=signoff,
             placement=placement,
+            **_owner_asks(soft_nozzle_confirmed, filament_map),
         )
         resp = {"success": result.success, **result.to_dict()}
         # Hoist the AMS selection from the start_print step to the top
@@ -20164,6 +20189,8 @@ def run_reslice_and_print(
     skip_validation: bool = False,
     preview_token: str | None = None,
     placement: str | list[float] | None = None,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> dict:
     """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
 
@@ -20186,6 +20213,17 @@ def run_reslice_and_print(
     The printer must be idle and connected.
 
     Args:
+        soft_nozzle_confirmed: The owner has said to print anyway a slice
+            refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
+            through a nozzle on record that is not wear-resistant).  Only on
+            their word, never on your own judgement.  The slice step's
+            ``soft_nozzle`` says which filament goes through which nozzle.
+        filament_map: Only for a printer with more than one nozzle: the
+            nozzle (1 for the first) each filament prints from, one number
+            per filament in filament order (``[2, 1]`` puts filament 1 on
+            nozzle 2).  Leave unset to let the slicer map the filaments.  A
+            map that does not fit the print or the printer is refused before
+            slicing, as ``slice_model`` refuses it.
         model_path: Path to input model (STL, 3MF, STEP, OBJ).
         printer_name: Registered printer name in fleet.
         printer_id: Printer model ID for auto-profile selection
@@ -20279,6 +20317,7 @@ def run_reslice_and_print(
             skip_validation=skip_validation,
             signoff=signoff,
             placement=placement,
+            **_owner_asks(soft_nozzle_confirmed, filament_map),
         )
         resp = {"success": result.success, **result.to_dict()}
         # Surface the AMS tray selection and the start narrative (parity
@@ -20310,6 +20349,7 @@ def _queue_fill_rest(
     signoff: dict[str, Any] | None,
     run: dict[str, Any] | None = None,
     beside_plate: str | None = None,
+    asks: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Queue the copies a fill left as one job for the next plate.
 
@@ -20324,9 +20364,11 @@ def _queue_fill_rest(
     *beside_plate* is the plate record's fingerprint when the person was
     shown this plate's copies laid out beside what is on it: the job may
     then be laid out beside those parts at its turn, and only while the
-    plate still holds exactly them (the queue checks).  ``{"job_id",
-    "printer_name"}``, or ``{"why"}`` when it could not be queued.  Never
-    raises.
+    plate still holds exactly them (the queue checks).  *asks* is the
+    owner's word to print anyway and the filament-to-nozzle map the run was
+    asked with (:func:`kiln.slicer.owner_asks`), which every plate of it is
+    sliced with.  ``{"job_id", "printer_name"}``, or ``{"why"}`` when it
+    could not be queued.  Never raises.
     """
     try:
         from kiln.asset_store import kiln_root, persist_asset
@@ -20346,6 +20388,7 @@ def _queue_fill_rest(
                     "overrides": dict(overrides) if overrides else None,
                     "slicer_path": slicer_path,
                     **({"beside_plate": beside_plate} if beside_plate else {}),
+                    **(dict(asks) if asks else {}),
                 },
                 **({"preview_signoff": signoff} if signoff else {}),
                 **(dict(run) if run else {}),
@@ -20376,6 +20419,8 @@ def multi_copy_print(
     slicer_path: str | None = None,
     preview_token: str | None = None,
     fill: bool = False,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> dict:
     """Print multiple copies of a model arranged on one build plate.
 
@@ -20413,6 +20458,17 @@ def multi_copy_print(
         preview_token: Token from ``issue_preview_token`` proving this model
             was shown to the person before printing.  Required beside their
             go-ahead: a print is shown to its owner before it starts.
+        soft_nozzle_confirmed: The owner has said to print anyway a slice
+            refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
+            through a nozzle on record that is not wear-resistant).  Only on
+            their word, never on your own judgement.  The slice step's
+            ``soft_nozzle`` says which filament goes through which nozzle.
+            With ``fill``, the copies queued for the next plates carry it.
+        filament_map: Only for a printer with more than one nozzle: the
+            nozzle (1 for the first) each filament prints from, one number
+            per filament in filament order.  Leave unset to let the slicer
+            choose; a map that does not fit is refused before slicing, as
+            ``slice_model`` refuses it.
     """
     if err := _check_auth("print"):
         return err
@@ -20462,6 +20518,7 @@ def multi_copy_print(
                 copies=copies,
                 spacing_mm=spacing_mm,
                 signoff=signoff,
+                **_owner_asks(soft_nozzle_confirmed, filament_map),
             )
             placed = None
             limited_by = None
@@ -20485,6 +20542,7 @@ def multi_copy_print(
                 queued = _queue_fill_rest(
                     model_path, rest, printer_name=printer_name, printer_id=printer_id,
                     overrides=parsed_overrides, slicer_path=slicer_path, spacing_mm=spacing_mm, signoff=signoff,
+                    asks=_owner_asks(soft_nozzle_confirmed, filament_map),
                 )
                 if queued.get("job_id"):
                     summary["queued_job_id"] = queued["job_id"]
@@ -20525,6 +20583,7 @@ def multi_copy_print(
                 slicer_path=slicer_path,
                 extra_args=extra_args,
                 signoff=signoff,
+                **_owner_asks(soft_nozzle_confirmed, filament_map),
             )
         else:
             # Fallback: STL mesh duplication
@@ -20563,6 +20622,7 @@ def multi_copy_print(
                 overrides=parsed_overrides,
                 slicer_path=slicer_path,
                 signoff=signoff,
+                **_owner_asks(soft_nozzle_confirmed, filament_map),
             )
 
         summary = {"success": result.success, **result.to_dict()}
@@ -20613,6 +20673,8 @@ def run_benchmark(
     printer_id: str | None = None,
     profile_path: str | None = None,
     skip_validation: bool = False,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> dict:
     """Prepare a benchmark print: validate → slice → upload → report stats.
 
@@ -20629,6 +20691,14 @@ def run_benchmark(
             Defaults to False — user-supplied benchmark meshes are
             pre-tested for printability.  Set to True for known-good
             fixed reference benchmark models.
+        soft_nozzle_confirmed: The owner has said to print anyway a slice
+            refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
+            through a nozzle on record that is not wear-resistant).  Only on
+            their word, never on your own judgement.
+        filament_map: Only for a printer with more than one nozzle: the
+            nozzle (1 for the first) each filament prints from, one number
+            per filament in filament order.  Leave unset to let the slicer
+            choose.
     """
     if err := _check_auth("print"):
         return err
@@ -20639,6 +20709,7 @@ def run_benchmark(
             printer_id=printer_id,
             profile_path=profile_path,
             skip_validation=skip_validation,
+            **_owner_asks(soft_nozzle_confirmed, filament_map),
         )
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
@@ -23258,6 +23329,8 @@ def reprint_with_material(
     preview_token: str | None = None,
     goal_id: str = "",
     chosen_by: str = "",
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> dict:
     """Reprint a model with a different material — the slice is set for it.
 
@@ -23286,6 +23359,16 @@ def reprint_with_material(
     Requires PrusaSlicer or OrcaSlicer installed locally.
 
     Args:
+        soft_nozzle_confirmed: The owner has said to print anyway a slice
+            refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
+            through a nozzle on record that is not wear-resistant).  Only on
+            their word, never on your own judgement.  The slice step's
+            ``soft_nozzle`` says which filament goes through which nozzle.
+        filament_map: Only for a printer with more than one nozzle: the
+            nozzle (1 for the first) each filament prints from, one number
+            per filament in filament order.  Leave unset to let the slicer
+            choose; a map that does not fit is refused before slicing, as
+            ``slice_model`` refuses it.
         file_path: Path to the model file (STL, 3MF, STEP, OBJ).
         material_id: Target material (e.g. ``"petg"``, ``"tpu"``).
         printer_name: Registered printer name in fleet. If omitted,
@@ -23352,6 +23435,8 @@ def reprint_with_material(
                 use_ams=use_ams,
                 ams_mapping=ams_mapping,
                 preview_token=preview_token,
+                soft_nozzle_confirmed=soft_nozzle_confirmed is True,
+                filament_map=filament_map or None,
             )
         goal_said = goal_ask.wait()
 
@@ -23383,6 +23468,8 @@ def smart_reprint(
     auto_ams: bool = True,
     goal_id: str = "",
     chosen_by: str = "",
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> dict:
     """Smart one-shot material-switch reprint — finds the model, detects the
     right AMS slot, adjusts slicer settings, and prints.
@@ -23444,6 +23531,15 @@ def smart_reprint(
         chosen_by: Who picked this material: ``"person"`` when they named it,
             ``"agent"`` when you proposed it.  Kept with the goal's record;
             omitted, it is left unsaid.
+        soft_nozzle_confirmed: The owner has said to print anyway a slice
+            refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
+            through a nozzle on record that is not wear-resistant).  Only on
+            their word, never on your own judgement.
+        filament_map: Only for a printer with more than one nozzle: the
+            nozzle (1 for the first) each filament prints from, one number
+            per filament in filament order.  Leave unset to let the slicer
+            choose; a map that does not fit is refused before slicing, as
+            ``slice_model`` refuses it.
     """
     if err := _check_auth("print"):
         return err
@@ -23697,6 +23793,8 @@ def smart_reprint(
             ams_mapping=detected_ams_mapping,
             goal_id=resolved_brief_id or "",
             chosen_by=chosen_by,
+            soft_nozzle_confirmed=soft_nozzle_confirmed is True,
+            filament_map=filament_map or None,
         )
 
         # Enrich result with smart_reprint context
@@ -23730,6 +23828,8 @@ def multi_material_print(
     extra_overrides: str | dict[str, Any] | None = None,
     slicer_path: str | None = None,
     preview_token: str | None = None,
+    filament_map: list[int] | None = None,
+    soft_nozzle_confirmed: bool = False,
 ) -> dict:
     """Print multiple objects in different materials/colors on one build plate.
 
@@ -23775,7 +23875,9 @@ def multi_material_print(
         2. Arranges the objects side by side on the plate (per ``group``)
            and builds a multi-object 3MF with per-object material assignments
         3. Sets the plate for its materials: the hottest one's temperatures,
-           the slowest one's melt rate, the gentlest cooling
+           the slowest one's melt rate, the gentlest cooling.  On a printer
+           sliced with more than one nozzle each filament keeps its own
+           material's temperatures
         4. Checks AMS slots for matching materials
         5. Slices and prints with correct AMS mapping
 
@@ -23802,6 +23904,18 @@ def multi_material_print(
         preview_token: Token from ``issue_preview_token`` proving the plate
             was shown to the person before printing.  Required beside their
             go-ahead: a print is shown to its owner before it starts.
+        filament_map: Only for a printer with more than one nozzle: the
+            nozzle (1 for the first) each filament prints from, one number
+            per filament (``[2, 1]`` puts filament 1 on nozzle 2).  Filaments
+            are numbered in the order their objects first appear in
+            ``objects_json``, one per material and colour (the result's
+            ``filament_index`` is that number less one).  Leave unset to let
+            the slicer map them.  A map that does not fit is refused before
+            slicing, as ``slice_model`` refuses it.
+        soft_nozzle_confirmed: The owner has said to print anyway a slice
+            refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
+            through a nozzle on record that is not wear-resistant).  Only on
+            their word, never on your own judgement.
     """
     if err := _check_auth("print"):
         return err
@@ -24063,8 +24177,20 @@ def multi_material_print(
         dominant_mat: str | None = None
         if known:
             dominant_mat = max(known, key=lambda m: float(known[m].get("temperature") or 0))
+            # A printer sliced with more than one nozzle heats each filament
+            # to its own material's temperatures, one per filament in
+            # filament order (the slicer's per-filament form); a material
+            # with none of its own takes the hottest one's.
+            in_order = [mat for (mat, _color), _idx in sorted(unique_filaments.items(), key=lambda kv: kv[1])]
+            own_heat = len(in_order) >= 2 and _slices_for_several_nozzles(printer_id, printer_name)
             for key in ("temperature", "first_layer_temperature"):
-                if key in known[dominant_mat]:
+                if key not in known[dominant_mat]:
+                    continue
+                if own_heat:
+                    merged_overrides[key] = ",".join(
+                        str((known.get(m) or {}).get(key) or known[dominant_mat][key]) for m in in_order
+                    )
+                else:
                     merged_overrides[key] = known[dominant_mat][key]
             if beds := _plate_values("bed_temperature"):
                 merged_overrides["bed_temperature"] = merged_overrides["first_layer_bed_temperature"] = f"{max(beds):g}"
@@ -24197,6 +24323,8 @@ def multi_material_print(
                 slicer_path=slicer_path,
                 use_ams=use_ams_flag,
                 ams_mapping=_json.dumps(ams_mapping_list) if ams_mapping_list else None,
+                filament_map=filament_map or None,
+                soft_nozzle_confirmed=soft_nozzle_confirmed is True,
             )
 
         # Enrich result
@@ -24234,6 +24362,27 @@ def multi_material_print(
             f"Failed in multi_material_print: {exc}",
             code="INTERNAL_ERROR",
         )
+
+
+def _owner_asks(soft_nozzle_confirmed: Any, filament_map: Any) -> dict[str, Any]:
+    """:func:`kiln.slicer.owner_asks`, imported when a door slices."""
+    from kiln.slicer import owner_asks
+
+    return owner_asks(soft_nozzle_confirmed, filament_map)
+
+
+def _slices_for_several_nozzles(printer_id: str | None, printer_name: str | None) -> bool:
+    """Whether a plate of several filaments for this printer is sliced with
+    more than one nozzle (:func:`kiln.slicer_profiles.nozzles_of` on the
+    profile a slice for it resolves).  ``False`` when that cannot be told."""
+    try:
+        from kiln.slicer_profiles import nozzles_of
+
+        _pid, profile = _resolve_slice_profile_context(None, printer_id, printer_name)
+        return nozzles_of(profile) is not None
+    except Exception:  # noqa: BLE001 -- a record that cannot be read is one nozzle
+        logger.debug("nozzle count not read for %s", printer_id or printer_name, exc_info=True)
+        return False
 
 
 @mcp.tool(annotations=creates("Merge multicolor G-code"))
@@ -24320,6 +24469,8 @@ def multi_color_copies(
     printer_id: str | None = None,
     slicer_path: str | None = None,
     preview_token: str | None = None,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> dict:
     """Print multiple copies of the same model, each in a different AMS color.
 
@@ -24369,6 +24520,15 @@ def multi_color_copies(
     :param preview_token: Token from ``issue_preview_token`` proving this
         model was shown to the person before printing.  Required beside their
         go-ahead: a print is shown to its owner before it starts.
+    :param soft_nozzle_confirmed: The owner has said to print anyway a slice
+        refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament through
+        a nozzle on record that is not wear-resistant).  Only on their word,
+        never on your own judgement.
+    :param filament_map: Only for a printer with more than one nozzle: the
+        nozzle (1 for the first) each filament prints from, one number per
+        filament in filament order.  Leave unset to let the slicer choose; a
+        map that does not fit is refused before slicing, as ``slice_model``
+        refuses it.
     """
     if err := _check_auth("print"):
         return err
@@ -24583,6 +24743,8 @@ def multi_color_copies(
                 material=material,
                 use_ams=True,
                 ams_mapping=_json.dumps(resolved_slots),
+                soft_nozzle_confirmed=soft_nozzle_confirmed is True,
+                filament_map=filament_map or None,
             )
 
         # Enrich result

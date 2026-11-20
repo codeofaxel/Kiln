@@ -438,6 +438,13 @@ def _loaded_material(adapter: Any, material: str | None) -> str | None:
     return loaded_filament_type(adapter)
 
 
+def _owner_asks(soft_nozzle_confirmed: Any, filament_map: Any) -> dict[str, Any]:
+    """:func:`kiln.slicer.owner_asks`, imported when a pipeline slices."""
+    from kiln.slicer import owner_asks
+
+    return owner_asks(soft_nozzle_confirmed, filament_map)
+
+
 def _slice_step_data(result: Any) -> dict[str, Any]:
     """What a slice step records: the file, the slicer, the filament it was
     weighed with, the nozzle it was sliced for and whether it carries
@@ -455,6 +462,9 @@ def _slice_step_data(result: Any) -> dict[str, Any]:
     supports = getattr(result, "supports", None)
     if supports is not None:
         data["supports"] = supports.to_dict()
+    soft = getattr(result, "soft_nozzle", None)
+    if isinstance(soft, dict):
+        data["soft_nozzle"] = soft
     return data
 
 
@@ -685,8 +695,15 @@ def quick_print(
     skip_validation: bool = False,
     signoff: dict[str, Any] | None = None,
     placement: str | list[float] | None = None,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> PipelineResult:
     """Validate → slice → preflight → upload → start print in one call.
+
+    ``soft_nozzle_confirmed`` is the owner's word to print anyway a slice
+    refused with ``ABRASIVE_ON_SOFT_NOZZLE``; ``filament_map`` is the nozzle
+    each filament prints from on a printer with more than one nozzle
+    (:func:`kiln.slicer.slice_file`, both).
 
     ``placement`` is where the part goes when the plate still holds the
     last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
@@ -815,6 +832,7 @@ def quick_print(
                 slicer_path=slicer_path,
                 material=material,
                 loaded_material=_loaded_material(ctx.get("adapter"), material),
+                **_owner_asks(soft_nozzle_confirmed, filament_map),
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
@@ -1073,8 +1091,15 @@ def reslice_and_print(
     copies: int | None = None,
     spacing_mm: float = 10.0,
     still_wanted: Callable[[], str | None] | None = None,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
+
+    ``soft_nozzle_confirmed`` is the owner's word to print anyway a slice
+    refused with ``ABRASIVE_ON_SOFT_NOZZLE``; ``filament_map`` is the nozzle
+    each filament prints from on a printer with more than one nozzle
+    (:func:`kiln.slicer.slice_file`, both).
 
     ``still_wanted``, when given, is asked right before the upload and again
     right before the start; a sentence back means the print is no longer
@@ -1234,6 +1259,7 @@ def reslice_and_print(
                 extra_args=extra_args,
                 material=material,
                 loaded_material=_loaded_material(adapter, material),
+                **_owner_asks(soft_nozzle_confirmed, filament_map),
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
@@ -1717,6 +1743,8 @@ def benchmark(
     model_path: str | None = None,
     profile_path: str | None = None,
     skip_validation: bool = False,
+    soft_nozzle_confirmed: bool = False,
+    filament_map: list[int] | None = None,
 ) -> PipelineResult:
     """Slice a benchmark model, upload, and report estimated stats.
 
@@ -1742,6 +1770,10 @@ def benchmark(
             Defaults to False — user-supplied benchmark meshes are
             pre-tested for printability before slicing.  Set to True
             for known-good fixed reference models.
+        soft_nozzle_confirmed: The owner's word to print anyway a slice
+            refused with ``ABRASIVE_ON_SOFT_NOZZLE``; *filament_map* is the
+            nozzle each filament prints from (:func:`kiln.slicer.slice_file`,
+            both).
     """
     start = time.time()
     steps: list[PipelineStep] = []
@@ -1833,6 +1865,7 @@ def benchmark(
             placement="auto",
             profile=effective_profile,
             step_start=step_start,
+            **_owner_asks(soft_nozzle_confirmed, filament_map),
         )
         steps.append(step)
         if not step.success or not gcode_path:

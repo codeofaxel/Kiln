@@ -501,6 +501,13 @@ def bambu_filament_type(word: str | None) -> str:
         return _FALLBACK_FILAMENT_TYPE
     if text in BAMBU_FILAMENT_TYPES:
         return text
+    # A fibre-filled filament named in words keeps its fill when Bambu has a
+    # type for it ("Carbon Fiber Nylon" is PA-CF, "Nylon CF" too).
+    fill = "CF" if re.search(r"\bCARBON\b|\bCF\b", text) else "GF" if re.search(r"\bGLASS\b|\bGF\b", text) else ""
+    if fill:
+        for token in re.findall(r"[A-Z0-9]+", text.replace("NYLON", "PA")):
+            if f"{token}-{fill}" in BAMBU_FILAMENT_TYPES:
+                return f"{token}-{fill}"
     try:
         from kiln.slicer_filament import material_density
 

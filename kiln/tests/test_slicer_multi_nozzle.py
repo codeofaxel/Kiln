@@ -1623,3 +1623,322 @@ class TestAMultiMaterialPlateCarriesItsFilaments:
         ):
             slice_file(plate, output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, record), filament_map=[1, 2])
         assert str(refused.value).startswith("Filament 2 is Carbon Fiber PLA, an abrasive filament")
+
+
+class TestTheOwnerMaySayPrintAnyway:
+    """An abrasive filament refused on a nozzle that is not wear-resistant
+    slices once the owner says to print it anyway, and says so."""
+
+    def _slice(self, tmp_path, run, *, filaments=1, **kwargs):
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", run),
+        ):
+            return slice_file(
+                _plate(tmp_path, filaments), output_dir=str(tmp_path / "out"),
+                profile=resolve_slicer_profile("invented_two"), **kwargs,
+            )
+
+    def test_the_refusal_says_how_to_print_anyway_in_one_sentence(self, tmp_path, invented_printer, owner_says):
+        invented_printer(None)
+        owner_says(None, "brass")
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, material="PLA-CF")
+        said = str(refused.value)
+        assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
+        assert said.endswith("; if the owner says to print it anyway, call again with soft_nozzle_confirmed=true.")
+        assert said.count(". ") == 0 and "\n" not in said
+
+    def test_with_the_owners_word_it_slices_and_says_so(self, tmp_path, invented_printer, owner_says):
+        invented_printer(None)
+        owner_says(None, "brass")
+        result = self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA-CF", soft_nozzle_confirmed=True)
+        assert result.success
+        assert result.soft_nozzle["confirmed_by"] == "owner"
+        assert result.soft_nozzle["filaments"] == [{"filament": 1, "material": "PLA-CF"}]
+        assert result.soft_nozzle["nozzles"] == [{"position": None, "material": "brass"}]
+        said = (
+            "On the owner's say-so, PLA-CF, an abrasive filament, prints through the nozzle on record "
+            "(brass), which is not wear-resistant and wears quickly on it."
+        )
+        assert result.soft_nozzle["said"] == said and result.message.endswith(said)
+        assert result.to_dict()["soft_nozzle"] == result.soft_nozzle
+
+    @pytest.mark.parametrize("word", [False, "true", 1])
+    def test_only_true_is_the_owners_word(self, tmp_path, invented_printer, owner_says, word):
+        invented_printer(None)
+        owner_says(None, "brass")
+        with pytest.raises(NozzleMapError):
+            self._slice(tmp_path, _never_runs, material="PLA-CF", soft_nozzle_confirmed=word)
+
+    def test_a_slice_with_nothing_to_confirm_carries_nothing(self, tmp_path, invented_printer, owner_says):
+        invented_printer(None)
+        owner_says(None, "brass")
+        result = self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA", soft_nozzle_confirmed=True)
+        assert result.success and result.soft_nozzle is None and "say-so" not in result.message
+
+    def test_the_sliced_files_map_names_the_nozzle_it_went_through(self, tmp_path, invented_printer, owner_says):
+        invented_printer(_WIDE)
+        owner_says(_HARD_AND_BRASS)
+        both = self._slice(
+            tmp_path, _slicer_that_writes("; filament_map = 1,2\n", {}), filaments=2,
+            material="PLA-CF", soft_nozzle_confirmed=True,
+        )
+        assert both.soft_nozzle["nozzles"] == [{"position": 2, "material": "brass"}]
+        assert "nozzle 2 (brass)" in both.message
+        hard_only = self._slice(
+            tmp_path, _slicer_that_writes("; filament_map = 1,1\n", {}), filaments=2,
+            material="PLA-CF", soft_nozzle_confirmed=True,
+        )
+        assert hard_only.success and hard_only.soft_nozzle is None and "say-so" not in hard_only.message
+
+    def test_the_slices_record_keeps_it_and_a_print_of_it_reports_it(
+        self, tmp_path, invented_printer, owner_says, monkeypatch,
+    ):
+        from kiln import _pro_nozzle_bridge as bridge
+        from kiln import print_lineage, server
+
+        invented_printer(None)
+        owner_says(None, "brass")
+        result = self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA-CF", soft_nozzle_confirmed=True)
+        kept = print_lineage.resolve(result.output_path, local_paths=[result.output_path])["soft_nozzle"]
+        assert kept["confirmed_by"] == "owner" and kept["at"] > 0
+        assert kept["filaments"] == [{"filament": 1, "material": "PLA-CF"}]
+        assert kept["nozzles"] == [{"position": None, "material": "brass"}]
+
+        sent: list[dict] = []
+        monkeypatch.setattr(server, "_pro_api_call", lambda tool, **kw: sent.append({"tool": tool, **kw}) or {})
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        bridge._served_odometer_report("invented_two", 5.0, "start:1", file_name=result.output_path)
+        assert sent[0]["tool"] == bridge.ODOMETER_TOOL
+        assert sent[0]["abrasive_run"] == {"filaments": kept["filaments"], "nozzles": kept["nozzles"]}
+
+        (tmp_path / "plain").mkdir()
+        plain = self._slice(tmp_path / "plain", _slicer_that_writes("", {}), material="PLA")
+        bridge._served_odometer_report("invented_two", 5.0, "start:2", file_name=plain.output_path)
+        assert "abrasive_run" not in sent[1]
+
+    def test_the_print_row_carries_the_word_to_the_account(self, tmp_path, invented_printer, owner_says):
+        from kiln import outcome_courier, print_lineage
+
+        invented_printer(None)
+        owner_says(None, "brass")
+        result = self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA-CF", soft_nozzle_confirmed=True)
+        lineage_id = print_lineage.resolve(result.output_path, local_paths=[result.output_path])["lineage_id"]
+        row = {"version_id": "v1", "outcome": "failed", "determined_by": "observed", "lineage_id": lineage_id}
+        assert outcome_courier.account_row(row, "a" * 32)["soft_nozzle"] == {
+            "confirmed_by": "owner", "filaments": ["PLA-CF"], "nozzles": [{"position": None, "material": "brass"}],
+        }
+        (tmp_path / "p").mkdir()
+        plain = self._slice(tmp_path / "p", _slicer_that_writes("", {}), material="PLA")
+        other = print_lineage.resolve(plain.output_path, local_paths=[plain.output_path])["lineage_id"]
+        assert "soft_nozzle" not in outcome_courier.account_row({**row, "lineage_id": other}, "b" * 32)
+
+    def test_the_slice_model_door_takes_the_owners_word(self, tmp_path, invented_printer, owner_says, monkeypatch):
+        from kiln import monitor_twin
+
+        monkeypatch.setattr(monitor_twin, "_TWIN_DIR", tmp_path / "twin")
+        monkeypatch.setattr(monitor_twin, "_SLICES_FILE", tmp_path / "twin" / "slices.json")
+        monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", tmp_path / "twin" / "active.json")
+        invented_printer(None)
+        owner_says(None, "brass")
+        args = {
+            "input_path": _plate(tmp_path, 1), "output_dir": str(tmp_path / "out"),
+            "profile": resolve_slicer_profile("invented_two"), "material": "PLA-CF",
+        }
+        with (
+            patch("kiln.server._check_auth", return_value=None),
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("", {})),
+        ):
+            refused = _slice_model_tool()(**args)
+            sliced = _slice_model_tool()(**args, soft_nozzle_confirmed=True)
+        assert refused["success"] is False and "soft_nozzle_confirmed=true" in json.dumps(refused)
+        assert sliced["success"] is True, sliced
+        assert sliced["soft_nozzle"]["nozzles"] == [{"position": None, "material": "brass"}]
+
+
+class TestEachFilamentIsLoadedAsItsOwn:
+    """A filament setting stated once per slot gives each slot its own, and a
+    plate's own filament types reach the slicer."""
+
+    def test_one_value_per_slot_gives_each_slot_its_own(self):
+        settings = {**_SETTINGS, "filament_type": "PLA;PLA-CF", "temperature": "220,260", "retract_length": "0.8"}
+        slots = settings_to_orca_presets(settings, filament_colors=_COLORS).filaments
+        assert [f["filament_type"] for f in slots] == [["PLA"], ["PLA-CF"]]
+        assert [f["nozzle_temperature"] for f in slots] == [["220"], ["260"]]
+        # A value stated once is the same in every slot.
+        assert [f["hot_plate_temp"] for f in slots] == [["60"], ["60"]]
+
+    def test_a_served_extra_keeps_its_key(self):
+        nozzles = {**_NOZZLES, "preset_extras": {"filament": {"filament_flow_ratio": ["1"]}}}
+        settings = {**_SETTINGS, "extrusion_multiplier": "0.95,0.98", "temperature": "220,260"}
+        slots = settings_to_orca_presets(settings, filament_colors=_COLORS, nozzles=nozzles).filaments
+        assert [f["filament_flow_ratio"] for f in slots] == [["1"], ["1"]]
+        assert [f["nozzle_temperature"] for f in slots] == [["220"], ["260"]]
+
+    def _stated_plate(self, tmp_path, types):
+        composed = Path(_plate(tmp_path))
+        plate = tmp_path / "stated.3mf"
+        with zipfile.ZipFile(composed) as src, zipfile.ZipFile(plate, "w") as out:
+            for name in src.namelist():
+                out.writestr(name, src.read(name))
+            out.writestr("Metadata/project_settings.config", json.dumps({"filament_type": types}))
+        return str(plate)
+
+    @pytest.mark.parametrize("nozzles", [None, _WIDE])
+    def test_the_plates_own_types_load_each_filament_as_its_type(self, tmp_path, nozzles):
+        record = slicer_profiles.fitted_record(nozzles, _TWO_HARD) if nozzles else None
+        seen: dict = {}
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("; filament_map = 1,2\n", seen)),
+        ):
+            result = slice_file(
+                self._stated_plate(tmp_path, ["PLA", "PETG-CF"]), output_dir=str(tmp_path / "out"),
+                profile=_profile(tmp_path, record),
+            )
+        assert result.success
+        assert [f["filament_type"] for f in seen["filaments"]] == [["PLA"], ["PETG-CF"]]
+
+
+class TestTheFileStatesShortFilamentTypes:
+    """A filament's type reaches the sliced file in the short form a printer
+    reads, never a long name."""
+
+    @pytest.mark.parametrize(
+        ("stated", "loaded"),
+        [
+            (["PLA (Polylactic Acid)", "Carbon Fiber PLA"], [["PLA"], ["PLA-CF"]]),
+            (["PETG (Polyethylene Terephthalate Glycol)", "Carbon Fiber Nylon (PA-CF)"], [["PETG"], ["PA-CF"]]),
+        ],
+    )
+    def test_a_plates_long_names_load_as_short_types(self, tmp_path, stated, loaded):
+        seen: dict = {}
+        plate = TestEachFilamentIsLoadedAsItsOwn()._stated_plate(tmp_path, stated)
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("", seen)),
+        ):
+            assert slice_file(plate, output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, None)).success
+        assert [f["filament_type"] for f in seen["filaments"]] == loaded
+
+    def test_a_name_kiln_cannot_read_keeps_the_profiles_type(self, tmp_path):
+        seen: dict = {}
+        plate = TestEachFilamentIsLoadedAsItsOwn()._stated_plate(tmp_path, ["Mystery Blend", "Carbon Fiber PLA"])
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("", seen)),
+        ):
+            assert slice_file(
+                plate, output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, None), material="PETG",
+            ).success
+        assert [f["filament_type"] for f in seen["filaments"]] == [["PETG"], ["PLA-CF"]]
+
+    @pytest.mark.parametrize(
+        ("declared", "written"), [("Carbon Fiber PLA", "PLA-CF"), ("cf_pla", "PLA-CF"), ("PETG-HF", "PETG-HF")],
+    )
+    def test_a_declared_long_name_is_written_short(self, declared, written):
+        from kiln.slicer_filament import resolve_slice_filament
+
+        assert resolve_slice_filament(declared).filament_type == written
+
+
+class TestMultiMaterialPrintHeatsEachNozzleForItsOwn:
+    """multi_material_print on a printer sliced with more than one nozzle:
+    each filament's own temperatures, and the map the refusal asks for."""
+
+    def _print(self, tmp_path, monkeypatch, *, several: bool, **kwargs):
+        from kiln import server
+
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+        monkeypatch.setattr(server, "_check_auth", lambda *a, **k: None)
+        monkeypatch.setattr(server, "_refuse_undriven_multi_material", lambda *a, **k: None)
+        monkeypatch.setattr(server, "_slices_for_several_nozzles", lambda *a, **k: several)
+        handed: dict = {}
+        monkeypatch.setattr(server, "run_reslice_and_print", lambda **kw: handed.update(kw) or {"success": True})
+        reply = server.multi_material_print(
+            objects_json=[
+                {"file_path": _cube(tmp_path / "a.stl", 40.0), "material_id": "pla"},
+                {"file_path": _cube(tmp_path / "b.stl", 100.0), "material_id": "petg"},
+            ],
+            auto_ams=False, **kwargs,
+        )
+        assert reply.get("success") is True, reply
+        return handed
+
+    def _own(self, material: str, key: str) -> str:
+        from kiln.slicer_material import material_needs
+
+        return str(material_needs(material, printer_id=None).values()[key])
+
+    def test_each_filament_keeps_its_own_temperatures(self, tmp_path, monkeypatch):
+        handed = self._print(tmp_path, monkeypatch, several=True, filament_map=[2, 1], soft_nozzle_confirmed=True)
+        overrides = json.loads(handed["overrides"])
+        for key in ("temperature", "first_layer_temperature"):
+            assert overrides[key] == f"{self._own('pla', key)},{self._own('petg', key)}"
+        assert handed["filament_map"] == [2, 1] and handed["soft_nozzle_confirmed"] is True
+
+    def test_one_nozzle_prints_every_filament_at_the_hottest(self, tmp_path, monkeypatch):
+        handed = self._print(tmp_path, monkeypatch, several=False)
+        overrides = json.loads(handed["overrides"])
+        hottest = max(("pla", "petg"), key=lambda m: float(self._own(m, "temperature")))
+        assert overrides["temperature"] == self._own(hottest, "temperature")
+        assert handed["filament_map"] is None and handed["soft_nozzle_confirmed"] is False
+
+
+class TestTheTerminalTakesTheOwnersWord:
+    """``kiln slice`` says how to print anyway in its own spelling, and its
+    flag reaches the slice."""
+
+    def _run(self, tmp_path, monkeypatch, *args):
+        from click.testing import CliRunner
+
+        import kiln.cli.main as cli_main
+
+        seen: dict = {}
+
+        def placed(ctx, input_file, **kwargs):
+            seen.update(kwargs)
+            if not kwargs.get("soft_nozzle_confirmed"):
+                raise NozzleMapError(
+                    "Filament 1 is PLA-CF, an abrasive filament, and the nozzle on record for this printer is "
+                    "brass, which is not wear-resistant, so nothing was sliced; fit a hardened one for it, or "
+                    f"record the nozzle that is fitted; {slicer_mod.SOFT_NOZZLE_CONFIRM}.",
+                    code="ABRASIVE_ON_SOFT_NOZZLE",
+                )
+            gcode = tmp_path / "out.gcode"
+            gcode.write_text("G1 X1\n")
+            return slicer_mod.SliceResult(success=True, output_path=str(gcode), slicer="x", message="Sliced"), {}
+
+        from kiln import slicer as slicer_mod
+
+        monkeypatch.setenv("KILN_ACCEPT_TERMS", "1")
+        monkeypatch.setattr(cli_main, "_cli_placed_slice", placed)
+        monkeypatch.setattr(cli_main, "_resolve_slice_plan", lambda *a, **k: {
+            "extra_args": [], "printer_id": None, "profile_path": None, "material": "PLA-CF",
+            "declared_material": "PLA-CF", "loaded_material": None, "loaded_determined_by": None,
+        })
+        out = CliRunner().invoke(cli_main.cli, ["slice", _cube(tmp_path / "part.stl", 40.0), *args])
+        return out, seen
+
+    def test_the_refusal_names_the_flag(self, tmp_path, monkeypatch):
+        out, _seen = self._run(tmp_path, monkeypatch, "--json")
+        said = json.loads(out.output)["error"]["message"]
+        assert out.exit_code == 1
+        assert said.endswith("; if the owner says to print it anyway, run it again with --soft-nozzle-confirmed.")
+        assert "soft_nozzle_confirmed=true" not in said
+
+    def test_the_flag_reaches_the_slice(self, tmp_path, monkeypatch):
+        out, seen = self._run(tmp_path, monkeypatch, "--soft-nozzle-confirmed")
+        assert out.exit_code == 0, out.output
+        assert seen["soft_nozzle_confirmed"] is True

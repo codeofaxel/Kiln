@@ -955,22 +955,27 @@ def settings_to_orca_presets(
     # --- more than one nozzle position ----------------------------------
     # After everything above, so a served extra is the last word on its key.
     positions = nozzle_positions(nozzles)
+    served_filament: set[str] = set()
     if positions >= 2:
         extras = _preset_extras(nozzles)
         _for_nozzle_positions(machine, positions)
         for preset in _EXTRAS_PRESETS:
             bodies[preset].update(extras.get(preset, {}))
+        served_filament = set(extras.get("filament", {}))
 
     if not multicolor:
         return OrcaPresets(machine=machine, process=process, filament=filament)
 
-    # One preset per slot, identical but for identity and color.  Every
-    # per-filament vector stays one item long WITHIN each file — Orca
+    # One preset per slot, identical but for identity, color, and any
+    # filament value the settings state once per slot (_per_slot_filament).
+    # Every per-filament vector stays one item long WITHIN each file — Orca
     # sums the slots across the loaded files and cross-checks the vector
     # lengths, so each file must also state filament_is_support.
+    own = _per_slot_filament(settings, len(filament_colors), keep=served_filament)
     filaments: list[dict[str, Any]] = []
     for i, color in enumerate(filament_colors, start=1):
         slot = dict(filament)
+        slot.update(own[i - 1])
         slot["name"] = f"{name}_filament_{i}"
         slot["filament_colour"] = [str(color)]
         slot["filament_is_support"] = ["0"]
@@ -981,6 +986,26 @@ def settings_to_orca_presets(
         filament=filaments[0],
         filaments=tuple(filaments),
     )
+
+
+def _per_slot_filament(settings: Mapping[str, Any], slots: int, *, keep: set[str]) -> list[dict[str, list[str]]]:
+    """Per filament slot, the filament preset values it carries of its own:
+    each filament setting (its ``filament_type`` and the
+    :data:`_FILAMENT_PER_EXTRUDER` keys) whose value states exactly one entry
+    per slot, PrusaSlicer's per-extruder vector (``220,250``,
+    ``PLA;PLA-CF``).  A value with any other count is the same in every slot,
+    and an Orca key in *keep* is left as it stands."""
+    own: list[dict[str, list[str]]] = [{} for _ in range(slots)]
+    pairs = [("filament_type", "filament_type"), *_FILAMENT_PER_EXTRUDER.items()]
+    for src, dst in pairs:
+        if src not in settings or dst in keep:
+            continue
+        pieces = [piece.strip() for piece in re.split(r"[,;]", str(settings[src]))]
+        if len(pieces) != slots or not all(pieces):
+            continue
+        for slot, piece in enumerate(pieces):
+            own[slot][dst] = [piece]
+    return own
 
 
 def write_orca_presets(

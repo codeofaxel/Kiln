@@ -382,6 +382,17 @@ def _cli_print_gate(
     return gate.path
 
 
+def _said_at_the_terminal(exc: Exception) -> str:
+    """A slicing refusal with its asks spelled as this terminal's flags
+    (:func:`kiln.slicer.said_for`)."""
+    from kiln.slicer import said_for
+
+    return said_for(
+        str(exc), confirm="run it again with --soft-nozzle-confirmed",
+        map_with="run it again with a --filament-map that puts",
+    )
+
+
 def _cli_placed_slice(
     ctx: click.Context,
     input_file: str,
@@ -4961,6 +4972,20 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
         "Such a project with no plate named is refused, and the refusal lists its plates."
     ),
 )
+@click.option(
+    "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
+    help=(
+        "The owner says to print anyway an abrasive filament through a nozzle on record "
+        "that is not wear-resistant, a slice otherwise refused. Only on their word."
+    ),
+)
+@click.option(
+    "--filament-map", "filament_map", default=None,
+    help=(
+        "For a printer with more than one nozzle: the nozzle (1 for the first) each filament "
+        "prints from, comma-separated in filament order (e.g. '2,1')."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def slice(
@@ -4983,6 +5008,8 @@ def slice(
     ams_mapping: str | None,
     placement: str | None,
     plate_number: int | None,
+    soft_nozzle_confirmed: bool,
+    filament_map: str | None,
     json_mode: bool,
 ) -> None:
     """Slice a 3D model (STL/3MF/STEP) to G-code.
@@ -5038,7 +5065,7 @@ def slice(
         )
     else:
         window = None
-    from kiln.slicer import SlicerError, SlicerNotFoundError
+    from kiln.slicer import SlicerError, SlicerNotFoundError, owner_asks
 
     try:
         plan = _resolve_slice_plan(
@@ -5098,6 +5125,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, input_file, plan=plan, placement=placement, json_mode=json_mode,
                 slicer=lambda path, **kw: slice_multicolor_copies(path, copies, spacing_mm=spacing, **kw),
+                **owner_asks(soft_nozzle_confirmed),
                 slicer_path=slicer,
                 extra_args=extra_args or None,
                 output_dir=output_dir,
@@ -5138,6 +5166,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
                 **fill_kwargs,
+                **owner_asks(soft_nozzle_confirmed, filament_map),
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,
@@ -5367,7 +5396,7 @@ def slice(
         click.echo(format_error(str(exc), code="SLICER_NOT_FOUND", json_mode=json_mode))
         sys.exit(1)
     except SlicerError as exc:
-        click.echo(format_error(str(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
+        click.echo(format_error(_said_at_the_terminal(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
         sys.exit(1)
     except click.ClickException:
         raise
@@ -10859,6 +10888,20 @@ def generate_download(
         "a region such as front-left or centre, or 'keep'. Omitted, an occupied plate refuses."
     ),
 )
+@click.option(
+    "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
+    help=(
+        "The owner says to print anyway an abrasive filament through a nozzle on record "
+        "that is not wear-resistant, a slice otherwise refused. Only on their word."
+    ),
+)
+@click.option(
+    "--filament-map", "filament_map", default=None,
+    help=(
+        "For a printer with more than one nozzle: the nozzle (1 for the first) each filament "
+        "prints from, comma-separated in filament order (e.g. '2,1')."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def generate_and_print_cmd(
@@ -10874,6 +10917,8 @@ def generate_and_print_cmd(
     auto_print: bool,
     preview_enabled: bool,
     placement: str | None,
+    soft_nozzle_confirmed: bool,
+    filament_map: str | None,
     json_mode: bool,
 ) -> None:
     """Generate a 3D model from text or image, slice it, and upload to the printer.
@@ -10984,8 +11029,11 @@ def generate_and_print_cmd(
             click.echo("Slicing...")
         # The plate may still hold the last print: same shared step as
         # kiln slice (plate gate, slice, second verdict).
+        from kiln.slicer import owner_asks
+
         slice_result, _placement_info = _cli_placed_slice(
             ctx, model_path, plan=plan, placement=placement, json_mode=json_mode,
+            **owner_asks(soft_nozzle_confirmed, filament_map),
             extra_args=plan["extra_args"] or None,
             material=plan.get("declared_material"),
             loaded_material=plan.get("loaded_material"),
@@ -11087,7 +11135,7 @@ def generate_and_print_cmd(
         click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
         sys.exit(1)
     except (SlicerNotFoundError, SlicerError) as exc:
-        click.echo(format_error(str(exc), code="SLICER_ERROR", json_mode=json_mode))
+        click.echo(format_error(_said_at_the_terminal(exc), code="SLICER_ERROR", json_mode=json_mode))
         sys.exit(1)
     except PrinterError as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))

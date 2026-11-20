@@ -184,6 +184,32 @@ def safe_filament_type(name: Any) -> str:
     return text or _TYPE_FALLBACK
 
 
+#: A filament type as slicers and printers write it: letters and digits, a
+#: plus, words joined by hyphens ("PLA", "PLA-CF", "PETG-HF", "PA6-CF").
+_SHORT_TYPE_RE = re.compile(r"[A-Z0-9+]+(?:-[A-Z0-9+]+)*")
+
+
+def slicer_type_name(word: Any) -> str:
+    """*word* as the short filament type a sliced file states and a printer
+    reads ("PLA", "PLA-CF", "PETG"): a word already in that form is kept, in
+    capitals; a long name ("Carbon Fiber PLA", "PLA Polylactic Acid",
+    "cf_pla") becomes the type it names
+    (:func:`kiln.printers.bambu_3mf.bambu_filament_type`); a name that names
+    no type Kiln knows is ``""``, never a guess."""
+    text = " ".join(str(word or "").split()).upper()
+    if _SHORT_TYPE_RE.fullmatch(text):
+        return text
+    from kiln.printers.bambu_3mf import BAMBU_FILAMENT_TYPES, bambu_filament_type
+
+    typed = bambu_filament_type(text)
+    named = re.findall(r"[A-Z0-9]+", text.replace("NYLON", "PA"))
+    if typed.split("-")[0] in named or material_density(text) is not None:
+        return typed
+    # A type named among other words ("Polycarbonate (PC)"); otherwise the
+    # name is not read, and that is said rather than guessed.
+    return next((token for token in named if token in BAMBU_FILAMENT_TYPES), "")
+
+
 def _vector_count(settings: dict[str, str]) -> int:
     """How many extruders the profile declares: its ``nozzle_diameter`` entries."""
     return max(1, len([v for v in str(settings.get("nozzle_diameter", "")).split(",") if v.strip()]))
@@ -261,7 +287,7 @@ def resolve_slice_filament(
             diameter_mm=diameter,
             source=source,
             note=f"{name}{spelled} at {density:g} g/cm³ — {why}",
-            filament_type=as_given,
+            filament_type=slicer_type_name(as_given) or as_given,
             determined_by=(determined_by or None) if source == SOURCE_LOADED else None,
         )
 

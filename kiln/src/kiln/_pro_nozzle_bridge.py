@@ -857,6 +857,11 @@ def record_print_odometer(
     reported to Kiln's servers on a short-lived thread, free on every
     plan for a signed-in account.  Signed out, or a file with no figure,
     and the print is simply not counted; nothing waits and nothing raises.
+
+    A print of a slice the owner said to print anyway with an abrasive
+    filament through a nozzle that is not wear-resistant
+    (:func:`abrasive_run_of`) carries that with its grams, so the nozzle's
+    record keeps it.
     """
     try:
         from kiln_pro.nozzle_intelligence.odometer import record_print_filament
@@ -865,15 +870,47 @@ def record_print_odometer(
     if record_print_filament is None:
         _report_print_grams(printer_id, file_name, grams)
         return None
+    run = abrasive_run_of(file_name)
     try:
-        return record_print_filament(
-            printer_id,
-            file_path=file_name,
-            grams=grams,
-            dedupe_key=file_name,
-        )
+        try:
+            return record_print_filament(
+                printer_id,
+                file_path=file_name,
+                grams=grams,
+                dedupe_key=file_name,
+                **({"abrasive_run": run} if run else {}),
+            )
+        except TypeError:
+            if not run:
+                raise
+            # A kiln-pro that keeps no run still counts the grams.
+            return record_print_filament(printer_id, file_path=file_name, grams=grams, dedupe_key=file_name)
     except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
         return None
+
+
+def abrasive_run_of(file_name: str | None) -> dict[str, Any] | None:
+    """What the owner said to print anyway in the print file *file_name*:
+    ``{"filaments": [{"filament", "material"}], "nozzles": [{"position",
+    "material"}]}`` from the slice's record on this computer
+    (:func:`kiln.print_lineage.resolve`), or ``None`` for every other
+    print.  Never raises."""
+    if not file_name or not isinstance(file_name, str):
+        return None
+    try:
+        from kiln import print_lineage
+        from kiln._pro_cutter_bridge import local_sliced_path
+
+        local = local_sliced_path(file_name)
+        kept = print_lineage.resolve(
+            file_name, local_paths=[local] if local else [], keep_foreign=False,
+        ).get("soft_nozzle")
+    except Exception:  # noqa: BLE001 -- an unread record is no run
+        logger.debug("abrasive run not read for %s", file_name, exc_info=True)
+        return None
+    if not isinstance(kept, dict) or not kept.get("filaments") or not kept.get("nozzles"):
+        return None
+    return {"filaments": list(kept["filaments"]), "nozzles": list(kept["nozzles"])}
 
 
 def _report_print_grams(printer_id: str, file_name: str | None, grams: float | None) -> None:
@@ -894,21 +931,26 @@ def _report_print_grams(printer_id: str, file_name: str | None, grams: float | N
         # One start, one charge; the same file printed again later is
         # another print, so the key carries the moment.
         args=(printer_id, float(grams), f"start:{printer_id}:{file_name}:{time.time():.0f}"),
+        kwargs={"file_name": file_name},
         name="kiln-odometer-report", daemon=True,
     ).start()
 
 
-def _served_odometer_report(printer_id: str, grams: float, dedupe_key: str) -> None:
-    """POST one start's grams to the hosted door.  Runs off the calling thread."""
+def _served_odometer_report(printer_id: str, grams: float, dedupe_key: str, *, file_name: str | None = None) -> None:
+    """POST one start's grams to the hosted door, with what the owner said
+    to print anyway in that file (:func:`abrasive_run_of`).  Runs off the
+    calling thread."""
     global _service_down_until, _service_down_miss
     from kiln.served_answer import classify_answer, classify_transport_error
 
+    run = abrasive_run_of(file_name)
     try:
         from kiln.server import _pro_api_call
 
         answer = _pro_api_call(
             ODOMETER_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False,
             printer_id=printer_id, grams=grams, dedupe_key=dedupe_key,
+            **({"abrasive_run": run} if run else {}),
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
         logger.debug("print-start odometer not served", exc_info=True)
@@ -931,6 +973,7 @@ __all__ = [
     "RECORD_TOOL",
     "SERVICE_BACKOFF_S",
     "WIRE_TOOL",
+    "abrasive_run_of",
     "available",
     "clumping_unchecked",
     "consult_capacity",
