@@ -356,6 +356,7 @@ def request_for(
     from kiln import plate_state
     from kiln.bench import observations_for_request
     from kiln.machine_motion import motion_settings_of
+    from kiln.sliced_routines import routines_for_request
 
     state = plate_state.read(adapter)
     job = state.job
@@ -392,7 +393,7 @@ def request_for(
     else:
         placement_value = str(placement or "auto")
         who = placed_by or (placement_value if placement_value in ("keep", "auto") else "agent")
-    return {
+    doc: dict[str, Any] = {
         "schema": REQUEST_SCHEMA,
         "printer_id": str(printer_id or "").strip().lower(),
         "serial": _serial_of(adapter),
@@ -415,6 +416,13 @@ def request_for(
         # owner's numbers for THIS printer at once.
         "printer_observations": observations_for_request(adapter),
     }
+    # The printer's own routines from a file sliced for it
+    # (:mod:`kiln.sliced_routines`), for THIS printer's verdict; the key is
+    # sent only when there are some.
+    routines = routines_for_request(adapter)
+    if routines:
+        doc["printer_routines"] = routines
+    return doc
 
 
 # ---------------------------------------------------------------------------

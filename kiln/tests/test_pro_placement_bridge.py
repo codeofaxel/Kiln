@@ -291,6 +291,16 @@ class TestTheRequest:
         assert bridge.request_for(m, "bambu_a1", placement="auto", part=None)["placed_by"] == "auto"
         assert bridge.request_for(m, "bambu_a1", placement=(5, 6), part=None, placed_by="human")["placed_by"] == "human"
 
+    def test_the_printers_own_routines_ride_only_when_there_are_some(self, monkeypatch):
+        from kiln import sliced_routines
+
+        m = _machine()
+        assert "printer_routines" not in bridge.request_for(m, "bambu_a1", placement="auto", part=None)
+        doc = {"format": "printer_routines/1", "model": "bambu_a1", "slicer": "bambu_studio",
+               "routines": [{"block": "end", "text": "G1 Z10", "sha256": "0" * 64}]}
+        monkeypatch.setattr(sliced_routines, "routines_for_request", lambda adapter: doc)
+        assert bridge.request_for(m, "bambu_a1", placement="auto", part=None)["printer_routines"] == doc
+
     def test_a_clear_or_unrecorded_plate_carries_no_occupant(self):
         req = bridge.request_for(_machine(), "bambu_a1", placement="auto", part=None)
         assert req["plate"] == {"status": "unknown", "job": None, "jobs": [], "fingerprint": "", "since": None}
