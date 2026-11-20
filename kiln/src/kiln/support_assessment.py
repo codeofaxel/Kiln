@@ -873,7 +873,7 @@ def assess_support_feasibility(
     # about which faces counted.
     from kiln.printability import overhang_threshold_deg
 
-    safe_deg = overhang_threshold_deg(material)
+    safe_deg = overhang_threshold_deg(material, nozzle_mm=nozzle_diameter_mm, layer_height_mm=layer_height_mm)
 
     # Load triangles
     tris: list[_Triangle] = []

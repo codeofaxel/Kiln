@@ -506,6 +506,7 @@ def decide_supports(
     *,
     material: str | None = None,
     nozzle_diameter: float | None = None,
+    layer_height: float | None = None,
     on_anyway: bool = False,
 ) -> SliceSupports:
     """Read *input_path* and decide whether its slice gets Kiln's supports.
@@ -515,8 +516,9 @@ def decide_supports(
     even for a part that needs none.
 
     *material* chooses the overhang and bridge thresholds (PLA bridges
-    farther than TPU); *nozzle_diameter* is the size the slice is for, so
-    the check and the slice judge the same part the same way.  Never
+    farther than TPU); *nozzle_diameter* and *layer_height* are the size and
+    layer the slice is for, so the check and the slice judge the same part
+    the same way.  Never
     raises: a part the engine cannot read is ``not_checked``, said.
 
     Nothing is kept between calls: one process serves every customer on
@@ -527,18 +529,21 @@ def decide_supports(
     from kiln.material_limits import assuming
 
     with assuming(material) as plastic:
-        return _decide_supports(input_path, plastic.lower(), nozzle_diameter=nozzle_diameter, on_anyway=on_anyway)
+        return _decide_supports(
+            input_path, plastic.lower(), nozzle_diameter=nozzle_diameter, layer_height=layer_height,
+            on_anyway=on_anyway,
+        )
 
 
 def _decide_supports(
-    input_path: str, plastic: str, *, nozzle_diameter: float | None, on_anyway: bool,
+    input_path: str, plastic: str, *, nozzle_diameter: float | None, layer_height: float | None, on_anyway: bool,
 ) -> SliceSupports:
     """:func:`decide_supports` for one plastic, already read."""
     from kiln.printability import judge_supports, material_overhangs, support_verdict
 
     try:
         judged = judge_supports(
-            input_path, material=plastic, nozzle_diameter=nozzle_diameter,
+            input_path, material=plastic, nozzle_diameter=nozzle_diameter, layer_height=layer_height,
             **({"clear_with_none_held": True} if on_anyway else {}),
         )
     except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
@@ -554,7 +559,11 @@ def _decide_supports(
             settings=support_settings(judged.overhang_threshold_deg),
             kept_off=tuple(judged.support_kept_off_faces),
             under=tuple(getattr(judged, "support_under_faces", ())),
-            own_angle=bool(material_overhangs(plastic)["overhangs"]["material_limits_deg"]),
+            own_angle=bool(
+                material_overhangs(plastic, nozzle_mm=nozzle_diameter, layer_height_mm=layer_height)[
+                    "overhangs"
+                ]["material_limits_deg"]
+            ),
         )
     return SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",
@@ -626,6 +635,7 @@ def ensure_profile_supports(
     nozzle = _first_number(settings.get("nozzle_diameter"))
     decision = decide_supports(
         input_path, material=material, nozzle_diameter=nozzle,
+        layer_height=_first_number(settings.get("layer_height")),
         **({"on_anyway": True} if project and project.get(SUPPORT_KEY) == "1" else {}),
     )
     if project and SUPPORT_KEY in project:

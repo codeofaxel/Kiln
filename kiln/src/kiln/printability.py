@@ -1087,11 +1087,16 @@ def _resolve_overhang_threshold(
     return float(default_limit)
 
 
-def material_overhangs(material: str | None) -> dict[str, Any]:
+def material_overhangs(
+    material: str | None, *, nozzle_mm: float | None = None, layer_height_mm: float | None = None,
+) -> dict[str, Any]:
     """The ``overhangs`` block :func:`_resolve_overhang_threshold` reads for
-    *material*: the plastic's own figure, or its family's, from the one
-    helper every check reads (:func:`kiln.material_limits.limits_for`), over
-    the general figure.  With no figure of its own, the general figure only."""
+    *material* printed at *layer_height_mm* through *nozzle_mm*: the
+    plastic's own figure, or its family's, from the one helper every check
+    reads (:func:`kiln.material_limits.limits_for`), over the general figure.
+    With no figure of its own, the general figure only.  Every door that
+    judges an overhang hands the layer and nozzle the part is printed at, so
+    the report, the support verdict and the slice give one answer."""
     from kiln.material_limits import OVERHANG, limits_for
 
     config: dict[str, Any] = {
@@ -1099,26 +1104,31 @@ def material_overhangs(material: str | None) -> dict[str, Any]:
         "material_limits_deg": {},
     }
     if material:
-        limits = limits_for(material)
+        limits = limits_for(material, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm)
         if limits.is_own(OVERHANG) and limits.value(OVERHANG):
             config["material_limits_deg"] = {material: float(limits.value(OVERHANG))}
     return {"overhangs": config}
 
 
-def overhang_threshold_deg(material: str | None = None) -> float:
+def overhang_threshold_deg(
+    material: str | None = None, *, nozzle_mm: float | None = None, layer_height_mm: float | None = None,
+) -> float:
     """The overhang angle, from vertical, past which a face of *material*
     counts as an overhang here -- the angle :func:`analyze_printability`
     reads its verdict against, and the one a slice's support threshold is
-    written from.  The plastic's own figure where Kiln has one
-    (:func:`material_overhangs`); without one, the general figure."""
-    return _resolve_overhang_threshold(None, material, material_overhangs(material))
+    written from, at the layer and nozzle given.  The plastic's own figure
+    where Kiln has one (:func:`material_overhangs`); without one, the
+    general figure."""
+    return _resolve_overhang_threshold(
+        None, material, material_overhangs(material, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm),
+    )
 
 
 def judge_supports(
     file_path: str,
     *,
     nozzle_diameter: float | None = None,
-    layer_height: float = 0.2,
+    layer_height: float | None = None,
     max_overhang_angle: float | None = None,
     material: str | None = None,
     printer_id: str | None = None,
@@ -1126,6 +1136,8 @@ def judge_supports(
     plate_number: int | None = None,
 ) -> SupportJudgement:
     """The support verdict's inputs for *file_path*, and nothing else.
+    *layer_height* left unsaid is the layer Kiln slices the nozzle at, as
+    :func:`analyze_printability` reads it, so the two judge one part alike.
     *plate_number* names the plate of a several-plate project
     (:func:`_mesh_path_for_analysis`).  *material* left unsaid is read as
     the plastic a check assumes (:func:`kiln.material_limits.assuming`).
@@ -1160,7 +1172,7 @@ def _judge_supports_here(
     file_path: str,
     *,
     nozzle_diameter: float | None = None,
-    layer_height: float = 0.2,
+    layer_height: float | None = None,
     max_overhang_angle: float | None = None,
     material: str = "pla",
     printer_id: str | None = None,
@@ -1171,9 +1183,14 @@ def _judge_supports_here(
     from kiln.assumed_nozzle import assumed_nozzle
 
     nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
+    if layer_height is None:
+        layer_height = _fitted_layer_height(nozzle.diameter_mm)
     mesh_path = _mesh_path_for_analysis(file_path, plate_number)
     triangles, _vertices, bbox, z_min = _load_mesh_for_analysis(mesh_path)
-    threshold = _resolve_overhang_threshold(max_overhang_angle, material, material_overhangs(material))
+    threshold = _resolve_overhang_threshold(
+        max_overhang_angle, material,
+        material_overhangs(material, nozzle_mm=nozzle.diameter_mm, layer_height_mm=layer_height),
+    )
     judged = _judge_supports(
         triangles, z_min, bbox,
         resolved_threshold=threshold, layer_height=layer_height,
@@ -9355,7 +9372,7 @@ def _analyze_printability_here(
     # "TPU at 38° needs_supports=True, but supports.estimated_support_volume_mm3=0"
     # because 38° is below the supports estimator's 45° floor.  Pin
     # them together so the verdict and the volume estimate agree.
-    _overhangs_block = material_overhangs(material)
+    _overhangs_block = material_overhangs(material, nozzle_mm=nozzle_diameter, layer_height_mm=layer_height)
     _resolved_threshold = _resolve_overhang_threshold(
         max_overhang_angle, material, _overhangs_block,
     )
@@ -9720,7 +9737,7 @@ def _analyze_printability_here(
                 enriched = pro_features.printability_overlay.enrich_printability_report(
                     # In process, with the rating, so a lower score the
                     # overlay finds can reach the verdict below.
-                    {**report.to_dict(), "score": report.score, "grade": report.grade},
+                    {**report.to_dict(), "score": report.score, "grade": report.grade, "layer_height_mm": layer_height},
                     material=material,
                     printer_id=printer_id,
                     nozzle_diameter_mm=nozzle_diameter,
@@ -9755,7 +9772,7 @@ def _analyze_printability_here(
                         enriched = pro_features.printability_overlay.enrich_printability_report(
                             # In process, with the rating, so a lower score
                             # the overlay finds can reach the verdict below.
-                            {**report.to_dict(), "score": report.score, "grade": report.grade},
+                            {**report.to_dict(), "score": report.score, "grade": report.grade, "layer_height_mm": layer_height},
                             **kwargs,
                         )
                         break
