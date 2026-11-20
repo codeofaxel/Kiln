@@ -735,7 +735,7 @@ def test_slice_and_print_attaches_a_watchdog_to_the_print_it_starts(
     monkeypatch.setattr(
         slicer_tools,
         "_apply_bed_fit_gate",
-        lambda path, printer_id, auto_center, material_id=None: (path, None, {}),
+        lambda path, printer_id, auto_center, material_id=None, bed=None: (path, None, {}),
     )
     monkeypatch.setattr(
         "kiln.slicer_profiles.start_gcode_override_from_printer",

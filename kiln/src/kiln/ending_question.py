@@ -27,7 +27,7 @@ import logging
 import time
 from typing import Any
 
-from kiln.failure_vocabulary import ending_wants_a_question
+from kiln.failure_vocabulary import ending_verdict, ending_wants_a_question
 
 _logger = logging.getLogger(__name__)
 
@@ -95,9 +95,6 @@ ANSWERS: dict[str, dict[str, str]] = {
     },
 }
 
-#: The endings of an experimental print that are asked about as an experiment.
-_EXPERIMENT_ENDINGS = frozenset({"success", "failed", "partial"})
-
 
 def experiment_owes(row: dict[str, Any] | None) -> bool:
     """Whether *row* is an experimental print whose ending the person has
@@ -109,7 +106,7 @@ def experiment_owes(row: dict[str, Any] | None) -> bool:
 
     return (
         read_recorded(row.get("experiment")) is not None
-        and row.get("outcome") in _EXPERIMENT_ENDINGS
+        and ending_verdict(row.get("outcome")) is not None
         and row.get("determined_by") != "user_reported"
     )
 

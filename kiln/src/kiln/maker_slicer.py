@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.untrusted_zip import open_untrusted_zip
+
 logger = logging.getLogger(__name__)
 
 #: The refusal's code at every door.
@@ -627,7 +629,7 @@ def with_tower_position(input_3mf: str, out_3mf: str, xy: tuple[float, float]) -
     corner at *xy*.  ``False``, and nothing written, when the file cannot be
     read as a 3MF."""
     try:
-        with zipfile.ZipFile(input_3mf) as source, zipfile.ZipFile(out_3mf, "w", zipfile.ZIP_DEFLATED) as out:
+        with open_untrusted_zip(input_3mf) as source, zipfile.ZipFile(out_3mf, "w", zipfile.ZIP_DEFLATED) as out:
             for item in source.infolist():
                 if item.filename != _TOWER_MEMBER:
                     out.writestr(item, source.read(item.filename))
