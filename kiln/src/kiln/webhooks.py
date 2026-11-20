@@ -371,6 +371,16 @@ class WebhookManager:
             endpoints = list(self._endpoints.values())
 
         event_value = event.type.value
+        # A print the person asked not to keep sends nothing, named or not;
+        # a safety event about it still reaches the person, without its name.
+        from kiln.print_keeping import event_about_a_print_not_kept, without_names
+
+        if event_about_a_print_not_kept(event_value, event.data):
+            if not event_value.startswith("safety."):
+                return
+            import dataclasses
+
+            event = dataclasses.replace(event, data=without_names(event.data))
         for endpoint in endpoints:
             if not endpoint.active:
                 continue

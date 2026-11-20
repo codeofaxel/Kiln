@@ -70,6 +70,13 @@ NOT_KEPT_SAID = (
 #: The code a start held for a team's rule answers with.
 TEAM_HOLD_CODE = "TEAM_KEEPS_PRINTS"
 
+#: The one sentence for a print asked not to be kept of a team's design on
+#: the team's printer, when the team's rule could not be read just now.
+TEAM_RULE_UNREAD_SAID = (
+    "Kiln can't check this team's print rule right now; this design belongs to the team. "
+    "Try again when you're online, or print it as kept."
+)
+
 #: The account route the choice and the team rules are read from.
 PREFS_PATH = "/api/cloud/user/prefs"
 TEAM_RULES_PATH = "/api/team/print-rules"
@@ -91,6 +98,10 @@ _TEAM_TOLD_KEY = "team_print_rules_told"
 # record could not be written or was already deleted; cleared by the next
 # start on that printer.
 _ended_not_kept: dict[str, str] = {}
+# Pictures of the plate taken while a printer's print is one not kept (the
+# camera's frames handed to eyes), per printer: deleted when it ends, or
+# when the next print starts on that printer.  In memory only.
+_pictures: dict[str, list[str]] = {}
 _lock = threading.Lock()
 
 
@@ -232,6 +243,16 @@ def _clean_rule(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def team_rules_fresh() -> bool:
+    """Whether this computer's reading of the team rules is current (read
+    from the account within the last ten minutes)."""
+    try:
+        read_at = float(_sharing()._read().get(_TEAM_RULES_READ_KEY) or 0.0)
+    except Exception:  # noqa: BLE001
+        return False
+    return 0.0 <= time.time() - read_at < _TEAM_FRESH_S
+
+
 def team_rule_for(printer_name: str | None, design_id: str | None, *, refresh: bool = True) -> dict[str, Any] | None:
     """The team rule that keeps a print of *design_id* on *printer_name*, or
     ``None``.  A rule applies only to its own team's designs on the printers
@@ -299,6 +320,12 @@ def decide(adapter: Any, file_name: str, kwargs: dict[str, Any], keep_record: bo
             return Decision(KEPT)
         rule = _team_rule_at_start(adapter, file_name, kwargs)
         if rule is not None:
+            if wanted == NONE and not team_rules_fresh():
+                # The design is the team's on the team's printer, by the last
+                # reading of its rule, and the rule cannot be read now: this
+                # one print waits until it can, or is printed as kept.
+                return Decision(NONE, held=True, team=rule.get("name") or rule["org_id"],
+                                said=TEAM_RULE_UNREAD_SAID)
             if wanted == NONE or not _told(rule["org_id"]):
                 _mark_told(rule["org_id"])
                 return Decision(wanted, held=True, team=rule.get("name") or rule["org_id"],
@@ -433,12 +460,69 @@ def _hosted() -> bool:
         return False
 
 
+def note_picture(printer_name: str | None, path: str | None) -> bool:
+    """A picture of *printer_name*'s plate was saved at *path*.  While that
+    printer's print is one not kept, it is remembered so it is deleted when
+    the print ends, and the caller keeps it nowhere and attaches it to
+    nothing: returns ``True``.  ``False`` otherwise.  Never raises."""
+    try:
+        if not printer_name or not path or _hosted() or keeps(printer_name):
+            return False
+        with _lock:
+            _pictures.setdefault(_slug(printer_name), []).append(str(path))
+        return True
+    except Exception:  # noqa: BLE001 -- unreadable: treat it as not kept
+        return True
+
+
+#: The name Kiln gives every plate picture it saves (kiln.plate_state.save_frame).
+PLATE_PICTURE_PREFIX = "kiln_plate_"
+
+
+def remove_kilns_own(path: str | None, roots: list[str] | tuple[str, ...], *, prefix: str = "") -> bool:
+    """Delete *path* only when it is a file Kiln made: it resolves inside one
+    of *roots* (Kiln's own folders) and, with *prefix*, its name starts with
+    the name Kiln gives such files.  A person's own file is never touched.
+    Returns whether it was deleted.  Never raises."""
+    try:
+        if not path:
+            return False
+        real = os.path.realpath(str(path))
+        if prefix and not os.path.basename(real).startswith(prefix):
+            return False
+        for root in roots:
+            base = os.path.realpath(str(root))
+            if root and real.startswith(base.rstrip(os.sep) + os.sep) and os.path.isfile(real):
+                os.unlink(real)
+                return True
+    except OSError:
+        logger.debug("a file Kiln made was not deleted", exc_info=True)
+    return False
+
+
+def picture_roots() -> tuple[str, ...]:
+    """The folders Kiln saves plate pictures in."""
+    from kiln.output_paths import kiln_temp_dir
+
+    import tempfile
+
+    return (kiln_temp_dir(), tempfile.gettempdir())
+
+
+def _drop_pictures(printer_name: str) -> None:
+    with _lock:
+        paths = _pictures.pop(_slug(printer_name), [])
+    for path in paths:
+        remove_kilns_own(path, picture_roots(), prefix=PLATE_PICTURE_PREFIX)
+
+
 def print_started(printer_name: str, file_name: str, decision: Decision) -> None:
     """A print started: this process remembers, in memory, a print the
     person asked not to keep (so no writer records it even when its start
     record could not be written), and forgets any earlier one."""
     if _hosted():
         return
+    _drop_pictures(printer_name)
     with _lock:
         if decision.level == NONE:
             _ended_not_kept[_slug(printer_name)] = os.path.basename(str(file_name or ""))
@@ -472,6 +556,7 @@ def print_ended(printer_name: str | None) -> bool:
             from kiln.monitor_twin import forget_print
 
             forget_print(printer_name)
+        _drop_pictures(printer_name)
         for forget in (_forget_slice_records, _unname_plate):
             try:
                 forget(names)
@@ -565,6 +650,47 @@ def call(fn: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
+def event_about_a_print_not_kept(event_type: str, data: Any) -> bool:
+    """Whether an event is about a print the person asked not to keep, so
+    nothing that carries it (a webhook, the event log) sends or keeps it:
+    an event raised inside such a print's own call; a queued job not kept;
+    a print event naming a printer and file not kept; or a print event about
+    a printer whose current print is not kept.  Never raises."""
+    try:
+        if _not_kept_call.get():
+            return True
+        if not isinstance(data, dict):
+            return False
+        job_id = data.get("job_id")
+        if job_id:
+            try:
+                from kiln import server as _srv
+
+                job = _srv._get_queue().get_job(str(job_id))
+                if (getattr(job, "metadata", None) or {}).get("keep_record") is False:
+                    return True
+            except Exception:  # noqa: BLE001 -- not a queued job
+                pass
+        printer = data.get("printer_name") or data.get("printer")
+        if not printer:
+            return False
+        file_name = data.get("file_name") or data.get("file") or data.get("job_name")
+        if file_name:
+            return level_of(str(printer), str(file_name)) == NONE
+        return str(event_type or "").startswith(("print.", "job.")) and level_of(str(printer)) == NONE
+    except Exception:  # noqa: BLE001 -- unreadable: carried nowhere
+        return True
+
+
+def without_names(data: Any) -> Any:
+    """*data* with every key that names a print taken out: what a safety
+    event about a print not kept still carries (the safety word reaches the
+    person; the print's name does not)."""
+    if not isinstance(data, dict):
+        return data
+    return {k: v for k, v in data.items() if k not in _NAMING_KEYS and k not in ("job_id", "job_name", "file_hash")}
+
+
 def mark_call_not_kept() -> None:
     """For a one-shot process (the ``kiln print --dont-keep`` command): the
     rest of this call is about a print not kept (:func:`audit_details`)."""
@@ -576,6 +702,9 @@ def audit_details(details: dict[str, Any] | None) -> dict[str, Any] | None:
     the print, inside a print door's call for a print not kept."""
     if not details or not _not_kept_call.get():
         return details
-    kept = {k: v for k, v in details.items() if k not in _NAMING_KEYS}
+    kept = {
+        k: ({kk: vv for kk, vv in v.items() if kk not in ("frame", "frame_at")} if isinstance(v, dict) else v)
+        for k, v in details.items() if k not in _NAMING_KEYS
+    }
     kept["print_kept"] = NONE
     return kept

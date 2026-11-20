@@ -7441,21 +7441,28 @@ def _check_billing_auth(scope: str = "print") -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
-def _job_not_kept(data: Any) -> bool:
-    """Whether an event is about a queued print the person asked not to keep
-    (:mod:`kiln.print_keeping`): nothing about it is written down."""
-    try:
-        job_id = data.get("job_id") if isinstance(data, dict) else None
-        if not job_id:
-            return False
-        return (_get_queue().get_job(job_id).metadata or {}).get("keep_record") is False
-    except Exception:  # noqa: BLE001 -- an unknown job is not one of these
-        return False
+def _job_not_kept(event: Event) -> bool:
+    """Whether an event is about a print the person asked not to keep
+    (:func:`kiln.print_keeping.event_about_a_print_not_kept`): nothing about
+    it is written down."""
+    from kiln.print_keeping import event_about_a_print_not_kept
+
+    return event_about_a_print_not_kept(event.type.value, event.data)
 
 
 def _persist_event(event: Event) -> None:
     """EventBus subscriber that writes every event to SQLite."""
-    if _job_not_kept(event.data):
+    if _job_not_kept(event):
+        if not event.type.value.startswith("safety."):
+            return
+        # A safety event about a print not kept is logged without its name.
+        from kiln.print_keeping import without_names
+
+        try:
+            get_db().log_event(event_type=event.type.value, data=without_names(event.data),
+                               source=event.source, timestamp=event.timestamp)
+        except Exception:
+            logger.debug("Failed to persist event %s", event.type.value, exc_info=True)
         return
     try:
         db = get_db()
@@ -7533,7 +7540,7 @@ def _billing_hook(event: Event) -> None:
 
 def _log_print_completion(event: Event) -> None:
     """EventBus subscriber that logs completed/failed jobs to print_history."""
-    if _job_not_kept(event.data):
+    if _job_not_kept(event):
         return
     try:
         job = _get_queue().get_job(event.data["job_id"])
@@ -20678,6 +20685,7 @@ def _queue_fill_rest(
     run: dict[str, Any] | None = None,
     beside_plate: str | None = None,
     asks: dict[str, Any] | None = None,
+    keep_record: bool | None = None,
 ) -> dict[str, Any]:
     """Queue the copies a fill left as one job for the next plate.
 
@@ -20702,7 +20710,14 @@ def _queue_fill_rest(
         from kiln.asset_store import kiln_root, persist_asset
 
         _adapter, target = _resolve_control_target(printer_name)
-        kept = persist_asset(model_path, os.path.join(kiln_root(), "queued_parts"), prefix="part") or model_path
+        queued_dir = os.path.join(kiln_root(), "queued_parts")
+        kept = persist_asset(model_path, queued_dir, prefix="part") or model_path
+        # Kiln's own copy, recorded as made: only a copy written into its
+        # queued-parts folder, never the caller's file or a file elsewhere.
+        owned = (
+            kept if kept != model_path
+            and os.path.realpath(kept).startswith(os.path.realpath(queued_dir) + os.sep) else None
+        )
         job_id = _get_queue().submit(
             file_name=os.path.basename(model_path),
             printer_name=target,
@@ -20715,11 +20730,13 @@ def _queue_fill_rest(
                     "printer_id": printer_id,
                     "overrides": dict(overrides) if overrides else None,
                     "slicer_path": slicer_path,
+                    **({"owned_copy": owned} if owned else {}),
                     **({"beside_plate": beside_plate} if beside_plate else {}),
                     **(dict(asks) if asks else {}),
                 },
                 **({"preview_signoff": signoff} if signoff else {}),
                 **(dict(run) if run else {}),
+                **({"keep_record": keep_record} if isinstance(keep_record, bool) else {}),
             },
         )
         _get_event_bus().publish(
@@ -20737,6 +20754,7 @@ def _queue_fill_rest(
 
 
 @mcp.tool(annotations=destructive("Print multiple copies"))
+@print_keeping_call
 def multi_copy_print(
     model_path: str,
     copies: int,
@@ -20750,6 +20768,7 @@ def multi_copy_print(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    keep_record: bool | None = None,
 ) -> dict:
     """Print multiple copies of a model arranged on one build plate.
 
@@ -20775,6 +20794,10 @@ def multi_copy_print(
     The printer must be idle and connected.
 
     Args:
+        keep_record: ``False`` only when the person asks for these prints not to be
+            kept ("print this privately", "don't keep a record of this"); never
+            suggest it.  Kiln then keeps nothing of them once they end, the copies
+            queued for later plates included.  Omit otherwise.
         model_path: Path to input model (STL, OBJ).
         copies: Number of copies to print (2-20; with ``fill``, at most
             this many, 1-50).
@@ -20851,6 +20874,7 @@ def multi_copy_print(
                 spacing_mm=spacing_mm,
                 signoff=signoff,
                 **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                **({"keep_record": keep_record} if isinstance(keep_record, bool) else {}),
             )
             placed = None
             limited_by = None
@@ -20875,6 +20899,7 @@ def multi_copy_print(
                     model_path, rest, printer_name=printer_name, printer_id=printer_id,
                     overrides=parsed_overrides, slicer_path=slicer_path, spacing_mm=spacing_mm, signoff=signoff,
                     asks=_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                    keep_record=keep_record,
                 )
                 if queued.get("job_id"):
                     summary["queued_job_id"] = queued["job_id"]

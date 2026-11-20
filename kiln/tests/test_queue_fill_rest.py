@@ -522,6 +522,9 @@ class TestQueueFillRest:
         )
         fill = dict(job.metadata["fill"])
         kept = fill.pop("model_path")
+        # Kiln's own copy is recorded as Kiln's, as it is made: the only part
+        # file a run not kept may delete when it ends.
+        assert fill.pop("owned_copy") == kept
         assert fill == {
             "copies": 14, "spacing_mm": 4.0, "printer_id": "bambu_a1", "overrides": {"fill_density": "20%"},
             "slicer_path": "/opt/slicer",

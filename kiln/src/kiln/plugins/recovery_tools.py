@@ -10,6 +10,8 @@ no manual imports needed.
 
 from __future__ import annotations
 
+from kiln import print_keeping  # noqa: E402
+
 import logging
 import threading
 from typing import Any
@@ -468,7 +470,7 @@ def _same_file(a: str, b: str) -> bool:
     return first is not None and first == _file_digest(b)
 
 
-def _submit_fill(file_path: str, plan_id: str, *, asks: dict | None = None) -> dict:
+def _submit_fill(file_path: str, plan_id: str, *, asks: dict | None = None, keep_record: bool | None = None) -> dict:
     """Queue a kept copies plan.  The door took the person's yes for the part
     (the preview gate) before calling this.  *asks* is the owner's word to
     print anyway and the filament-to-nozzle map, carried on every job."""
@@ -502,7 +504,7 @@ def _submit_fill(file_path: str, plan_id: str, *, asks: dict | None = None) -> d
         # each job as a yes for exactly this run's printers, so the queue
         # refuses any other at the start.
         signoff = {**signoff, "scope": names}
-    out = submit_fill_plan(plan_id, signoff, asks=asks)
+    out = submit_fill_plan(plan_id, signoff, asks=asks, keep_record=keep_record)
     if out.get("already"):
         out["message"] = f"This plan was already {out['already']}; nothing was queued again."
         return out
@@ -813,6 +815,7 @@ class _RecoveryToolsPlugin:
             soft_nozzle_confirmed: bool = False,
             mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
+            keep_record: bool | None = None,
         ) -> dict:
             """Plan many copies of one part across your printers, wherever there is safe room.
 
@@ -842,6 +845,10 @@ class _RecoveryToolsPlugin:
             ``cancel_split_plan(plan_id)``.
 
             Args:
+            keep_record: ``False`` only when the person asks for these prints not to be
+                kept ("print this privately", "don't keep a record of this"); never
+                suggest it.  Kiln then keeps nothing of them, or of the plan, once they
+                end.  Read with ``submit``.  Omit otherwise.
                 file_path: The part, as a mesh (STL, 3MF or OBJ).
                 copies: How many copies in all.
                 material: The filament (default ``"pla"``).
@@ -887,7 +894,7 @@ class _RecoveryToolsPlugin:
                 from kiln.slicer import owner_asks
 
                 asks = owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
-                return _submit_fill(file_path, plan_id, asks=asks)
+                return _submit_fill(file_path, plan_id, asks=asks, keep_record=keep_record)
             try:
                 return _plan_fill(file_path, copies, material, quality=quality, priority=priority, share=share)
             except Exception as exc:
