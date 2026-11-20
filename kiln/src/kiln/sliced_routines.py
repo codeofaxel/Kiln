@@ -106,7 +106,7 @@ _SLICER_WORDS = {"bambustudio": "bambu_studio", "orcaslicer": "orca_slicer", "pr
 _lock = threading.Lock()
 
 __all__ = [
-    "BLOCKS", "MAX_ROUTINE_CHARS", "PUSH_PATH", "ROUTINE_FIELDS", "RPC", "any_kept", "said_yes",
+    "BLOCKS", "MAX_ROUTINE_CHARS", "PUSH_PATH", "ROUTINE_FIELDS", "RPC", "kept_printer_name", "said_yes",
     "note_print_started", "read_routines", "routines_for_request", "send_pending", "sending",
 ]
 
@@ -497,13 +497,25 @@ def sending() -> bool:
     return said_yes() and _shares()
 
 
-def any_kept() -> bool:
-    """Whether a print file has left routines on this computer."""
+def kept_printer_name() -> str | None:
+    """The name of the printer whose routines a print file last left on this
+    computer (the catalogue's name for it, else the slicer's), or ``None``."""
     try:
         folder = _store_dir()
-        return folder.is_dir() and any(folder.glob("*.json"))
+        stores = [_load(p.stem) for p in folder.glob("*.json")] if folder.is_dir() else []
     except OSError:
-        return False
+        return None
+    stores = [s for s in stores if isinstance(s.get("routines"), dict) and s.get("model")]
+    if not stores:
+        return None
+    latest = max(stores, key=lambda s: str(s.get("read_at") or ""))
+    try:
+        from kiln.printers.bed_fit import get_printer_display_name
+
+        listed = get_printer_display_name(str(latest["model"]))
+    except Exception:  # noqa: BLE001 -- the slicer's own name still names it
+        listed = None
+    return str(listed or latest.get("printer_model") or latest["model"]).strip()[:80] or None
 
 
 #: The fields of a payload Kiln makes itself (a hash, its own random ids),

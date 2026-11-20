@@ -42,22 +42,36 @@ _NOTE = (
 )
 
 #: The question about printer routines, asked once on its own, after the
-#: first print whose file carried them.
+#: first print whose file carried them, word for word as approved; the
+#: printer's own name goes where ``{printer}`` stands (:func:`routines_question`).
 ROUTINES_KEY = "kiln_printer_routines"
-ROUTINES_QUESTION = (
-    "Kiln can learn your printer's own routines from your print files: how it "
-    "starts and ends a print, pauses and changes filament, exactly as your "
-    "slicer wrote them for your printer. Never the print itself, its name or "
-    "your settings. Share them, so every owner of your printer gets a Kiln "
-    "that knows how it moves? Kiln works the same either way."
+ROUTINES_TITLE = "Help Kiln learn your {printer}?"
+ROUTINES_BODY = (
+    "Your print files carry your printer's own built-in routines: how it starts, "
+    "pauses and finishes. Sharing them teaches Kiln more about the {printer}, so "
+    "every {printer} owner benefits."
 )
+ROUTINES_PRIVACY = "Your prints, designs and file names never leave your computer."
+ROUTINES_SHARE = "Share"
+ROUTINES_DONT = "Don't share"
 _ROUTINES_NOTE = (
-    "Ask the person once, in your own words, at a natural pause. If they want "
-    "it, they turn it on themselves by running person_runs in their own "
-    "terminal, which asks them to confirm; do not run it for them. If they say "
-    "no or do not answer, do nothing: nothing is sent, and Kiln will not ask "
-    "again."
+    "Ask the person once, at a natural pause, showing the title, the body and "
+    "the privacy line as written, with the two answers. On Share, they turn it "
+    "on themselves by running the Share command in their own terminal, which "
+    "asks them to confirm; do not run it for them. On Don't share, run the "
+    "Don't share command: nothing is ever sent and Kiln never asks again. If "
+    "they do not answer, do nothing: nothing is sent."
 )
+
+
+def routines_question(printer: str) -> dict[str, str]:
+    """The approved question for the printer named *printer*."""
+    name = printer.strip() or "printer"
+    return {
+        "title": ROUTINES_TITLE.format(printer=name),
+        "body": ROUTINES_BODY.format(printer=name),
+        "privacy": ROUTINES_PRIVACY,
+    }
 
 _attached = False
 _routines_attached = False
@@ -117,10 +131,13 @@ def _attach_routines(inner: Any, ctx: Any, name: str | None) -> None:
     global _routines_attached
     try:
         from kiln.sharing_consent import mark_routines_asked
-        from kiln.sliced_routines import any_kept
+        from kiln.sliced_routines import kept_printer_name
         from kiln.update_nudge import _hosted_multitenant
 
-        if _routines_attached or _hosted_multitenant() or not _routines_due() or not any_kept():
+        if _routines_attached or _hosted_multitenant() or not _routines_due():
+            return
+        printer = kept_printer_name()
+        if not printer:
             return
         from kiln.cli_command import kiln_command
         from kiln.local_stage import _result_as_dict
@@ -131,8 +148,9 @@ def _attach_routines(inner: Any, ctx: Any, name: str | None) -> None:
         if not sc or _result_seems_failed(inner, sc) or ROUTINES_KEY in sc or RESULT_KEY in sc:
             return
         sc[ROUTINES_KEY] = {
-            "question": ROUTINES_QUESTION,
-            "person_runs": kiln_command("sharing routines on"),
+            **routines_question(printer),
+            "answers": {ROUTINES_SHARE: kiln_command("sharing routines on"),
+                        ROUTINES_DONT: kiln_command("sharing routines off")},
             "note": _ROUTINES_NOTE,
         }
         set_result_structured_content(inner, sc)

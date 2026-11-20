@@ -487,16 +487,32 @@ class TestThePersonsYes:
 
         _one()
         assert results[-1] is None                       # nothing read yet: nothing to ask about
-        monkeypatch.setattr(sr, "any_kept", lambda: True)
+        monkeypatch.setattr(sr, "_declared_model", lambda adapter: sr._model_id(adapter.model))
+        monkeypatch.setattr("kiln.bench.unit_of", lambda adapter: "ab" * 16)
+        assert sr.keep(_Printer("bambu_p1s"), sr.read_routines(_package(tmp_path, _bambu_settings())))
         _one()
         block = results[-1]
-        assert block["question"] == sharing_nudge.ROUTINES_QUESTION
-        assert block["person_runs"].endswith("sharing routines on")
+        assert block["title"] == "Help Kiln learn your Bambu Lab P1S?"
+        assert set(block["answers"]) == {"Share", "Don't share"}
+        assert block["answers"]["Share"].endswith("sharing routines on")
+        assert block["answers"]["Don't share"].endswith("sharing routines off")
         assert sharing_consent.routines_asked()
         sharing_nudge._reset_for_tests()
         _one()
         assert results[-1] is None                       # asked once per computer, never again
         assert sharing_consent.routines_answer() is None  # asking is not a yes
+
+    def test_the_approved_wording_word_for_word(self):
+        from kiln.sharing_nudge import ROUTINES_DONT, ROUTINES_SHARE, routines_question
+
+        assert routines_question("Bambu Lab P1S") == {
+            "title": "Help Kiln learn your Bambu Lab P1S?",
+            "body": ("Your print files carry your printer's own built-in routines: how it starts, pauses and "
+                     "finishes. Sharing them teaches Kiln more about the Bambu Lab P1S, so every Bambu Lab P1S "
+                     "owner benefits."),
+            "privacy": "Your prints, designs and file names never leave your computer.",
+        }
+        assert (ROUTINES_SHARE, ROUTINES_DONT) == ("Share", "Don't share")
 
     def test_a_program_cannot_say_yes_for_the_person(self):
         from click.testing import CliRunner

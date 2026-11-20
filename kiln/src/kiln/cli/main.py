@@ -2094,7 +2094,8 @@ def sharing_routines() -> None:
 def sharing_routines_on() -> None:
     """Share your printer's own routines from your print files (asks you to confirm)."""
     from kiln.sharing_consent import record_routines_answer
-    from kiln.sharing_nudge import ROUTINES_QUESTION
+    from kiln.sharing_nudge import ROUTINES_SHARE, routines_question
+    from kiln.sliced_routines import kept_printer_name
 
     # The person's consent, so it is confirmed at a terminal they are sitting
     # at; a program running Kiln has no one to confirm and is refused.
@@ -2105,8 +2106,11 @@ def sharing_routines_on() -> None:
             err=True,
         )
         raise SystemExit(1)
-    click.echo(ROUTINES_QUESTION)
-    if not click.confirm("Share your printer's routines?", default=False):
+    question = routines_question(kept_printer_name() or "printer")
+    click.echo(question["title"])
+    click.echo(question["body"])
+    click.echo(question["privacy"])
+    if not click.confirm(ROUTINES_SHARE + "?", default=False):
         click.echo("Left as it was.")
         return
     record_routines_answer(True, via="cli-confirmed")
@@ -2119,7 +2123,7 @@ def sharing_routines_off() -> None:
     from kiln.sharing_consent import record_routines_answer
 
     record_routines_answer(False, via="cli")
-    click.echo("Your printer's routines stay on this computer.")
+    click.echo("Your printer's routines stay on this computer, and Kiln won't ask again.")
 
 
 @sharing.command(name="status")
