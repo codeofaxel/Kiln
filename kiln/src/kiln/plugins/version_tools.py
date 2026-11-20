@@ -117,23 +117,32 @@ def _versioned_recipe_path(design_dir: str, version: int) -> str:
     return os.path.join(design_dir, f".kiln_recipe.v{version}.json")
 
 
-def _after_save_here(design_id: str, missing: ImportError) -> dict:
-    """What a version saved on an install without kiln-pro adds to its answer.
+def _after_save_here(result: dict, design_id: str, read: Any, missing: ImportError) -> None:
+    """What a version saved on an install without kiln-pro adds to *result*.
 
-    This computer's history records the version and, when the person turned
+    A version saved from its model file (*read*: its recipe, when the door
+    reads the file it was handed) first joins its goal in the person's Kiln
+    account (:func:`kiln._pro_goal_bridge.join_saved`), so what comes back
+    beside the kept copy is there before anything is pushed.  Then this
+    computer's history records the version and, when the person turned
     automatic saving on in their Kiln account, saves it there too
     (:func:`kiln.history_courier.after_local_save`).  *missing* is the
     ImportError the save's kiln-pro step raised: only one saying kiln-pro
     itself is not installed counts.  kiln-pro records and saves its own
-    versions, so an ImportError from inside its step adds nothing here.
+    versions and reads their files itself, so an ImportError from inside its
+    step adds nothing here and nothing is sent.
     """
     import sys
 
     if (missing.name or "").split(".")[0] != "kiln_pro" or sys.modules.get("kiln_pro") is not None:
-        return {}
+        return
+    if read is not None:
+        from kiln._pro_goal_bridge import join_saved
+
+        join_saved(result, read.brief_id or "", read.stl_path or "")
     from kiln.history_courier import after_local_save
 
-    return after_local_save(design_id)
+    result.update(after_local_save(design_id))
 
 
 #: Said when a version was kept on this computer but its history record did
@@ -163,9 +172,10 @@ def _file_version_here(
 
     With kiln-pro on this computer: its provenance when *enrich* is given,
     then the design's branch record (:func:`_register_on_branch`).  Without
-    it: this computer's history, and the person's account when they turned
-    automatic saving on (:func:`_after_save_here`).  Every door in this
-    module that saves a version files it here.
+    it: the version's goal in the person's Kiln account when *enrich* is
+    given, then this computer's history, and the person's account when they
+    turned automatic saving on (:func:`_after_save_here`).  Every door in
+    this module that saves a version files it here.
     """
     try:
         from kiln_pro.bridge import pro_features
@@ -184,7 +194,7 @@ def _file_version_here(
                 result["warnings"] = [*(result.get("warnings") or []), *registration["warnings"]]
     except ImportError as missing:
         saving.close()
-        result.update(_after_save_here(design_id, missing))
+        _after_save_here(result, design_id, recipe if enrich is not None else None, missing)
 
 
 def _register_on_branch(
@@ -328,6 +338,13 @@ class _VersionToolsPlugin:
                 The saved version record including version number, diff, and
                 parent information.  Pro users also get provenance,
                 mesh_fingerprint, and mesh_diff with regression warnings.
+                A version saved with ``stl_path`` and a goal (named here or
+                inherited) joins that goal in the person's Kiln account:
+                ``saved_goal`` says whether it did, with the goal's
+                ``safety_notes`` when it holds any, and for a model with
+                separate parts ``motion`` says whether a stage plays it.  A
+                version that could not join says why in ``saved_goal``; it
+                is saved here either way.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("cache"):
