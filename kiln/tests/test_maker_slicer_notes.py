@@ -195,11 +195,10 @@ class TestEveryDoorCarriesTheLine:
     def test_register_printer(self, line, monkeypatch, tmp_path):
         import requests
 
-        from kiln import bench, server
+        from kiln import server
 
         monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
         monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
-        monkeypatch.setattr(bench, "offer_after_registration", lambda _adapter, name: None)
         monkeypatch.setattr(requests, "head", lambda *_a, **_k: object())
         monkeypatch.setattr(server, "read_machine_identity_bounded", lambda _read: None)
         monkeypatch.setattr("kiln.camera_check.camera_setup_line", lambda *_a, **_k: (None, ""))
