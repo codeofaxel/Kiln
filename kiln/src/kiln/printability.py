@@ -13,6 +13,7 @@ install rather than requiring an opt-in extra.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import logging
 import math
@@ -26,8 +27,10 @@ import numpy as np
 
 from kiln import _vec, step_import
 from kiln.generation.validation import (
+    _LEAN_RECHECK_DEG,
     _SUPPORTED_MESH_FORMATS,
     _bed_threshold_z,
+    _exact_corner_ids,
     _is_bed_supported_triangle,
     _mesh_bed_z,
     _parse_mesh_file,
@@ -1346,6 +1349,14 @@ def _vertex_distance(
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
+def _triangle_array(triangles: list[tuple[tuple[float, ...], ...]]) -> np.ndarray:
+    """*triangles* as a ``(T, 3, 3)`` float array, each figure as it is."""
+    return np.fromiter(
+        itertools.chain.from_iterable(itertools.chain.from_iterable(triangles)),
+        dtype=np.float64, count=9 * len(triangles),
+    ).reshape(-1, 3, 3)
+
+
 def _signed_volume_total(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> float:
@@ -1356,15 +1367,10 @@ def _signed_volume_total(
     the magnitude shrinks toward zero — that's the signal we use to
     decide whether to trust the winding or fall back to the heuristic.
     """
-    total = 0.0
-    for a, b, c in triangles:
-        # det([a; b; c]) / 6 = signed volume of tetrahedron (origin, a, b, c)
-        total += (
-            a[0] * (b[1] * c[2] - b[2] * c[1])
-            + a[1] * (b[2] * c[0] - b[0] * c[2])
-            + a[2] * (b[0] * c[1] - b[1] * c[0])
-        ) / 6.0
-    return total
+    # det([a; b; c]) / 6 = signed volume of tetrahedron (origin, a, b, c),
+    # added in triangle order from 0.0, as a running sum adds them.
+    terms = _signed_volumes(triangles, None)
+    return float(np.cumsum(np.concatenate(([0.0], terms)))[-1])
 
 
 def _bbox_volume(
@@ -1373,6 +1379,10 @@ def _bbox_volume(
     """Axis-aligned bounding-box volume of a triangle list."""
     if not triangles:
         return 0.0
+    corners = _triangle_array(triangles).reshape(-1, 3)
+    if np.isfinite(corners).all():
+        low, high = corners.min(axis=0).tolist(), corners.max(axis=0).tolist()
+        return (high[0] - low[0]) * (high[1] - low[1]) * (high[2] - low[2])
     xs = [v[0] for tri in triangles for v in tri]
     ys = [v[1] for tri in triangles for v in tri]
     zs = [v[2] for tri in triangles for v in tri]
@@ -1917,18 +1927,102 @@ def _analyze_overhangs(
     return _overhang_analysis(triangles, picked, angles)
 
 
+def _face_leans(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    tris: np.ndarray | None,
+    z_min: float | None,
+    layer_height: float,
+) -> tuple[np.ndarray | None, np.ndarray] | None:
+    """Per face of *triangles*: whether it rests on the plate
+    (:func:`_is_bed_supported_triangle`; ``None`` when *z_min* is) and the z
+    of its unit normal (``_normalize(_triangle_normal(...))[2]``), read from
+    whole arrays by the same arithmetic in the same order as those helpers,
+    so the two agree to the bit.  *tris* is the same triangles as a
+    ``(T, 3, 3)`` array when the caller holds one.  ``None`` for a mesh with
+    a corner or a normal that is not a finite number, which the caller reads
+    one face at a time."""
+    if tris is None or tris.ndim != 3 or tris.shape[1:] != (3, 3) or tris.shape[0] != len(triangles):
+        tris = _triangle_array(triangles)
+    if not np.isfinite(tris).all():
+        return None
+    on_plate = None
+    if z_min is not None:
+        on_plate = (tris[:, :, 2] <= _bed_threshold_z(z_min, layer_height)).all(axis=1)
+    e1 = tris[:, 1, :] - tris[:, 0, :]
+    e2 = tris[:, 2, :] - tris[:, 0, :]
+    nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+    ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+    nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+    length = np.sqrt(nx * nx + ny * ny + nz * nz)
+    if not np.isfinite(length).all():
+        return None
+    too_short = length < 1e-12
+    unit_nz = np.where(too_short, 0.0, nz / np.where(too_short, 1.0, length))
+    return on_plate, unit_nz
+
+
+def _lean_of(down: float) -> float:
+    """How far a face whose unit normal points *down* (``-nz``) leans from
+    vertical, in degrees: the one reading every overhang check here uses."""
+    return max(0.0, 90.0 - math.degrees(math.acos(max(-1.0, min(1.0, down)))))
+
+
+def _leans_array(down: np.ndarray) -> np.ndarray:
+    """:func:`_lean_of` over an array, to within :data:`_LEAN_RECHECK_DEG`."""
+    return np.maximum(0.0, 90.0 - np.degrees(np.arccos(np.clip(down, -1.0, 1.0))))
+
+
+def _leans_at_least(
+    indices: np.ndarray, down: np.ndarray, limit_deg: float,
+) -> list[tuple[int, float]]:
+    """``(index, lean)`` of each face, in the order given, whose lean
+    (:func:`_lean_of` of its *down*) is at the overhang limit *limit_deg* or
+    past it (:func:`_at_overhang_limit`).  Faces the array reading puts far
+    below the limit are left out unread; every other face is read one at a
+    time, so each lean returned is :func:`_lean_of`'s own."""
+    near = _leans_array(down) + _OVERHANG_LIMIT_SLACK_DEG >= limit_deg - _LEAN_RECHECK_DEG
+    out = []
+    for index, value in zip(indices[near].tolist(), down[near].tolist(), strict=True):
+        angle = _lean_of(value)
+        if _at_overhang_limit(angle, limit_deg):
+            out.append((index, angle))
+    return out
+
+
+def _steepest_lean(down: np.ndarray) -> float:
+    """The largest :func:`_lean_of` among faces pointing *down*, or 0.0 for
+    none: read by array, then one face at a time among those near the top."""
+    if not len(down):
+        return 0.0
+    approx = _leans_array(down)
+    top = approx >= approx.max() - _LEAN_RECHECK_DEG
+    return max(0.0, *(_lean_of(value) for value in down[top].tolist()))
+
+
 def _overhang_faces(
     triangles: list[tuple[tuple[float, ...], ...]],
     threshold_deg: float,
     *,
     z_min: float | None,
     layer_height: float,
+    tris: np.ndarray | None = None,
 ) -> tuple[list[int], list[float]]:
     """The overhanging faces of *triangles*, in index order, and each one's
     lean from vertical: facing down at or past *threshold_deg* and, when
-    *z_min* is given, not resting on the plate."""
+    *z_min* is given, not resting on the plate.  *tris* is the same
+    triangles as a ``(T, 3, 3)`` array when the caller holds one."""
     picked: list[int] = []
     angles: list[float] = []
+    reading = _face_leans(triangles, tris, z_min, layer_height)
+    if reading is not None:
+        on_plate, unit_nz = reading
+        down = unit_nz < 0
+        if on_plate is not None:
+            down &= ~on_plate
+        for index, angle in _leans_at_least(np.flatnonzero(down), -unit_nz[down], threshold_deg):
+            picked.append(index)
+            angles.append(angle)
+        return picked, angles
     for index, tri in enumerate(triangles):
         if z_min is not None and _is_bed_supported_triangle(tri, z_min, layer_height):
             continue
@@ -2405,17 +2499,12 @@ def _compute_mesh_genus(
     and ignore the genus value when the mesh isn't a closed manifold.
 
     Pure numpy.  Shares the vertex-dedup + edge-canonicalize scheme
-    with ``_label_mesh_components``.  Measured on a 100 k-tri torus:
-    ``_compute_mesh_genus`` takes ~235 ms, similar to the existing
-    ``_label_mesh_components`` cost (~260 ms) — roughly doubles the
-    topology-pass budget rather than the ~50 ms I initially eyeballed
-    before benchmarking.
+    with ``_label_mesh_components``.
     """
     T = triangles.shape[0]
     if T == 0 or n_components <= 0:
         return 0
-    flat = triangles.reshape(-1, 3)
-    _, vid = np.unique(flat, axis=0, return_inverse=True)
+    vid = _exact_corner_ids(triangles.reshape(-1, 3))
     V = int(vid.max() + 1) if vid.size > 0 else 0
     tri_verts = vid.reshape(T, 3).astype(np.int64)
     edges = np.stack(
@@ -2423,7 +2512,7 @@ def _compute_mesh_genus(
         axis=1,
     ).reshape(-1, 2)
     edges.sort(axis=1)
-    E = int(np.unique(edges, axis=0).shape[0])
+    E = int(np.unique(edges[:, 0] * max(V, 1) + edges[:, 1]).shape[0])
     F = int(T)
     chi = V - E + F
     # g_total = c − χ / 2.  Multiply by 2 first to keep integer
@@ -2448,17 +2537,16 @@ def _label_mesh_components(
     where ``k`` is the component count.  Single-body meshes return
     ``np.zeros(T)``.
 
-    Implementation: ``np.unique``-based vertex dedup + edge sort, then
-    union-find on triangle pairs sharing an edge.  Pure numpy; the
-    Python loop iterates the union list (one entry per shared edge),
-    not per triangle.  ~240 ms on a 100 k-triangle single body.
+    Implementation: vertex dedup (:func:`_exact_corner_ids`) + edge sort,
+    then union-find on triangle pairs sharing an edge.  The Python loop
+    iterates the union list (one entry per shared edge), not per
+    triangle.
     """
     T = triangles.shape[0]
     if T == 0:
         return np.empty(0, dtype=np.int64)
 
-    flat = triangles.reshape(-1, 3)  # (3T, 3) — all vertex coords
-    _, vid = np.unique(flat, axis=0, return_inverse=True)
+    vid = _exact_corner_ids(triangles.reshape(-1, 3))
     tri_verts = vid.reshape(T, 3).astype(np.int64)
 
     # Three edges per triangle, with vertex IDs in canonical (u, v) order.
@@ -2481,7 +2569,11 @@ def _label_mesh_components(
     union_a = tri_of_slot[:-1][same]
     union_b = tri_of_slot[1:][same]
 
-    parent = np.arange(T, dtype=np.int64)
+    # The joins run one at a time, in edge order, each hanging the first
+    # triangle's root under the second's: which triangle ends as a
+    # component's root, and so how the components are numbered, follows
+    # from that order.
+    parent = list(range(T))
 
     def find(x: int) -> int:
         while parent[x] != x:
@@ -2494,9 +2586,16 @@ def _label_mesh_components(
         if ra != rb:
             parent[ra] = rb
 
-    roots = np.fromiter((find(i) for i in range(T)), dtype=np.int64, count=T)
+    # Every triangle's root, by following parents until nothing moves.
+    roots = np.asarray(parent, dtype=np.int64)
+    while True:
+        grand = roots[roots]
+        if np.array_equal(grand, roots):
+            break
+        roots = grand
     _, comp_ids = np.unique(roots, return_inverse=True)
     return comp_ids.astype(np.int64)
+
 
 
 #: How many cavity shells one measurement joins to the shell around them
@@ -4383,22 +4482,13 @@ def _downward_region_members(
     start at the foot of a rod is an overhang, and a region must hold it
     (a centre inside the band is not a face resting on the plate).
 
-    Read from the ``(T, 3, 3)`` array when the caller holds one, by the
-    same arithmetic in the same order as the per-triangle helpers, so the
-    two readings agree to the bit; from the tuples otherwise.
+    Read from whole arrays (:func:`_face_leans`), which agree with the
+    per-triangle helpers to the bit; one face at a time for a mesh those
+    arrays cannot read.
     """
-    bed_threshold = _bed_threshold_z(z_min, layer_height)
-    if tris is not None and tris.ndim == 3 and tris.shape[1:] == (3, 3) and tris.shape[0] == len(triangles):
-        z = tris[:, :, 2]
-        on_plate = (z <= bed_threshold).all(axis=1)
-        e1 = tris[:, 1, :] - tris[:, 0, :]
-        e2 = tris[:, 2, :] - tris[:, 0, :]
-        nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
-        ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
-        nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
-        length = np.sqrt(nx * nx + ny * ny + nz * nz)
-        too_short = length < 1e-12
-        unit_nz = np.where(too_short, 0.0, nz / np.where(too_short, 1.0, length))
+    reading = _face_leans(triangles, tris, z_min, layer_height)
+    if reading is not None:
+        on_plate, unit_nz = reading
         member = ~on_plate & ~(unit_nz > _DOWNWARD_REGION_NZ_LIMIT)
         return np.flatnonzero(member).tolist(), (unit_nz[member] <= _BRIDGE_FLAT_NZ_LIMIT).tolist()
 
@@ -4480,6 +4570,80 @@ def _mesh_edges_among(
             if e in asked:
                 mesh_edges.setdefault(e, []).append(i)
     return mesh_edges
+
+
+#: The probe directions a deck point's chords are read along: the x and y
+#: of a unit step at each of :data:`_BRIDGE_CHORD_DIRECTIONS` even angles
+#: over the half-circle.
+_CHORD_STEPS: tuple[tuple[float, float], ...] = tuple(
+    (math.cos(math.pi * k / _BRIDGE_CHORD_DIRECTIONS), math.sin(math.pi * k / _BRIDGE_CHORD_DIRECTIONS))
+    for k in range(_BRIDGE_CHORD_DIRECTIONS)
+)
+
+#: The most point-direction-segment readings :func:`_supported_chords` holds
+#: at once.
+_CHORD_BLOCK: int = 1 << 18
+
+
+def _supported_chords(
+    points: np.ndarray, pa: np.ndarray, d_seg: np.ndarray, supported: np.ndarray,
+) -> np.ndarray:
+    """For each point of *points* ``(P, 2)``, the shortest chord through it,
+    along the :data:`_CHORD_STEPS` directions, whose nearest crossing of the
+    boundary segments (``pa + s * d_seg``, ``s`` in [0, 1]) on BOTH sides is
+    a *supported* one; ``inf`` for a point with none."""
+    best = np.full(len(points), np.inf)
+    if not len(points) or not len(pa):
+        return best
+    ux = np.array([step[0] for step in _CHORD_STEPS])[:, None]  # (K, 1)
+    uy = np.array([step[1] for step in _CHORD_STEPS])[:, None]
+    along_x = np.abs(ux) > np.abs(uy)  # (K, 1): read t from x, else from y
+    denom = ux * d_seg[None, :, 1] - uy * d_seg[None, :, 0]  # (K, S)
+    crosses = np.abs(denom) > 1e-12
+    per_point = len(_CHORD_STEPS) * len(pa)
+    step = max(1, _CHORD_BLOCK // per_point)
+    for start in range(0, len(points), step):
+        cx = points[start:start + step, 0][:, None, None]  # (P, 1, 1)
+        cy = points[start:start + step, 1][:, None, None]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            w_x = pa[None, None, :, 0] - cx  # (P, 1, S)
+            w_y = pa[None, None, :, 1] - cy
+            s = (w_x * uy - w_y * ux) / denom  # (P, K, S)
+            t = np.where(
+                along_x,
+                (pa[None, None, :, 0] + s * d_seg[None, None, :, 0] - cx) / ux,
+                (pa[None, None, :, 1] + s * d_seg[None, None, :, 1] - cy) / uy,
+            )
+        hit = crosses & (s >= -1e-9) & (s <= 1.0 + 1e-9)
+        fwd = hit & (t > 1e-9)
+        bwd = hit & (t < -1e-9)
+        t_f = np.where(fwd, t, np.inf)
+        t_b = np.where(bwd, -t, np.inf)
+        i_f = np.argmin(t_f, axis=2)[..., None]
+        i_b = np.argmin(t_b, axis=2)[..., None]
+        held = fwd.any(axis=2) & bwd.any(axis=2) & supported[i_f[..., 0]] & supported[i_b[..., 0]]
+        chord = np.take_along_axis(t_f, i_f, axis=2)[..., 0] + np.take_along_axis(t_b, i_b, axis=2)[..., 0]
+        best[start:start + step] = np.where(held, chord, np.inf).min(axis=1)
+    return best
+
+
+def _distances_to_segments(
+    points: np.ndarray, seg_a: np.ndarray, seg_d: np.ndarray, len_sq: np.ndarray,
+) -> np.ndarray:
+    """For each point of *points* ``(P, 2)``, how far it is from the nearest
+    segment ``seg_a + s * seg_d`` (``s`` in [0, 1]); ``inf`` with no segments.
+    *len_sq* is each segment's squared length, floored above zero."""
+    if not len(seg_a):
+        return np.full(len(points), np.inf)
+    out = np.empty(len(points))
+    step = max(1, _CHORD_BLOCK // len(seg_a))
+    for start in range(0, len(points), step):
+        xy = points[start:start + step, None, :]  # (P, 1, 2)
+        rel = xy - seg_a
+        proj = np.clip((rel * seg_d).sum(axis=2) / len_sq, 0.0, 1.0)
+        diff = xy - (seg_a + proj[:, :, None] * seg_d)
+        out[start:start + step] = np.sqrt((diff ** 2).sum(axis=2).min(axis=1))
+    return out
 
 
 def _analyze_downward_regions(
@@ -4659,12 +4823,7 @@ def _analyze_downward_regions(
             x: float, y: float, sup_a: Any = sup_a, sup_d: Any = sup_d, sup_len_sq: Any = sup_len_sq,
         ) -> float:
             """How far (x, y) is from the nearest supported boundary segment."""
-            if not len(sup_a):
-                return float("inf")
-            rel = np.array([x, y]) - sup_a
-            proj = np.clip((rel * sup_d).sum(axis=1) / sup_len_sq, 0.0, 1.0)
-            diff = np.array([x, y]) - (sup_a + proj[:, None] * sup_d)
-            return float(np.sqrt((diff ** 2).sum(axis=1).min()))
+            return float(_distances_to_segments(np.array([[x, y]]), sup_a, sup_d, sup_len_sq)[0])
 
         # Deck points: the flat faces' centres; on a steep slope, every
         # face's centre and the corners of its free edges.
@@ -4683,44 +4842,14 @@ def _analyze_downward_regions(
         # side only (an overhang).  The larger says which the patch is.
         worst_bridged = 0.0
         worst_one_sided = 0.0
-        for cx, cy, _cz in points:
-
-            # Two-sided bridge: shortest chord through the point whose
-            # nearest boundary hit on BOTH sides is a supported edge.
-            best_chord = float("inf")
-            for k in range(_BRIDGE_CHORD_DIRECTIONS):
-                theta = math.pi * k / _BRIDGE_CHORD_DIRECTIONS
-                ux, uy = math.cos(theta), math.sin(theta)
-                # 2D ray/segment intersection, both directions at once:
-                # solve p + t*u = a + s*d for each boundary segment.
-                denom = ux * d_seg[:, 1] - uy * d_seg[:, 0]
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    w_x = pa[:, 0] - cx
-                    w_y = pa[:, 1] - cy
-                    s = (w_x * uy - w_y * ux) / denom
-                    t = np.where(
-                        np.abs(ux) > np.abs(uy),
-                        (pa[:, 0] + s * d_seg[:, 0] - cx) / ux,
-                        (pa[:, 1] + s * d_seg[:, 1] - cy) / uy,
-                    )
-                hit = (np.abs(denom) > 1e-12) & (s >= -1e-9) & (s <= 1.0 + 1e-9)
-                fwd = hit & (t > 1e-9)
-                bwd = hit & (t < -1e-9)
-                if not fwd.any() or not bwd.any():
-                    continue
-                t_f = np.where(fwd, t, np.inf)
-                t_b = np.where(bwd, -t, np.inf)
-                i_f = int(np.argmin(t_f))
-                i_b = int(np.argmin(t_b))
-                if not (supported_arr[i_f] and supported_arr[i_b]):
-                    continue
-                chord = float(t_f[i_f] + t_b[i_b])
-                if chord < best_chord:
-                    best_chord = chord
-
-            # One-sided lateral reach: distance to the nearest
-            # supported boundary segment.
-            d_sup = _to_held(cx, cy)
+        # Two-sided bridge: per point, the shortest chord through it whose
+        # nearest boundary hit on BOTH sides is a supported edge.  One-sided
+        # lateral reach: per point, the distance to the nearest supported
+        # boundary segment.
+        deck_xy = np.array([(cx, cy) for cx, cy, _cz in points], dtype=np.float64)
+        chords = _supported_chords(deck_xy, pa, d_seg, supported_arr).tolist()
+        reaches = _distances_to_segments(deck_xy, sup_a, sup_d, sup_len_sq).tolist()
+        for (cx, cy, _cz), best_chord, d_sup in zip(points, chords, reaches, strict=True):
 
             # Span selection mirrors the print mechanism: a true
             # two-sided bridge reports its chord; a point that only
@@ -5509,6 +5638,49 @@ def _likely_bridge_substituted(
     )
 
 
+def _overhangs_in_order(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    tris: np.ndarray | None,
+    z_min: float,
+    layer_height: float,
+    limit_deg: float,
+) -> Iterable[tuple[tuple[tuple[float, ...], ...], float]]:
+    """``(triangle, lean)`` of each face of *triangles*, in index order, that
+    is off the plate, faces down and leans to *limit_deg* or past it
+    (:func:`_at_overhang_limit`)."""
+    reading = _face_leans(triangles, tris, z_min, layer_height)
+    if reading is not None:
+        on_plate, unit_nz = reading
+        down = (unit_nz < 0) & ~on_plate
+        for index, angle in _leans_at_least(np.flatnonzero(down), -unit_nz[down], limit_deg):
+            yield triangles[index], angle
+        return
+    for tri in triangles:
+        if _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+        nz = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))[2]
+        if nz >= 0:
+            continue
+        angle = _lean_of(-nz)
+        if _at_overhang_limit(angle, limit_deg):
+            yield tri, angle
+
+
+def _signed_volumes(
+    triangles: list[tuple[tuple[float, ...], ...]], tris: np.ndarray | None,
+) -> list[float]:
+    """:func:`_signed_volume_of_triangle` of each face, in order, read from
+    whole arrays by the same arithmetic, so each is the helper's own."""
+    if tris is None or tris.ndim != 3 or tris.shape[1:] != (3, 3) or tris.shape[0] != len(triangles):
+        tris = _triangle_array(triangles)
+    v1, v2, v3 = tris[:, 0], tris[:, 1], tris[:, 2]
+    return ((
+        v1[:, 0] * (v2[:, 1] * v3[:, 2] - v2[:, 2] * v3[:, 1])
+        + v1[:, 1] * (v2[:, 2] * v3[:, 0] - v2[:, 0] * v3[:, 2])
+        + v1[:, 2] * (v2[:, 0] * v3[:, 1] - v2[:, 1] * v3[:, 0])
+    ) / 6.0).tolist()
+
+
 def _analyze_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -5517,6 +5689,7 @@ def _analyze_supports(
     layer_height: float = 0.2,
     normalize_winding: bool = True,
     bbox: dict[str, float] | None = None,
+    tris: np.ndarray | None = None,
 ) -> SupportAnalysis:
     """Estimate support volume.
 
@@ -5532,30 +5705,22 @@ def _analyze_supports(
     When ``bbox`` is supplied, the ``likely_substituted_by_bridge``
     flag is set when the part's horizontal envelope is short enough
     that PrusaSlicer's auto-support will probably bridge instead.
+
+    *tris* is the same triangles as a ``(T, 3, 3)`` array when the caller
+    holds one (read only when the winding is left as it is).
     """
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)
+        tris = None
 
     support_volume = 0.0
     support_regions: list[dict[str, float]] = []
     # The near-horizontal overhang faces: the only ones a slicer bridges.
     ceiling_tris: list[tuple[tuple[float, ...], ...]] = []
 
-    for tri in triangles:
-        if _is_bed_supported_triangle(tri, z_min, layer_height):
-            continue
-
-        n = _triangle_normal(tri[0], tri[1], tri[2])
-        nn = _normalize(n)
-        nz = nn[2]
-
-        if nz >= 0:
-            continue
-
-        angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
-        overhang_angle = max(0.0, 90.0 - angle_from_down)
-        if not _at_overhang_limit(overhang_angle, max_overhang_angle):
-            continue
+    for tri, overhang_angle in _overhangs_in_order(
+        triangles, tris, z_min, layer_height, max_overhang_angle,
+    ):
         if overhang_angle >= _BRIDGEABLE_LEAN_DEG:
             ceiling_tris.append(tri)
 
@@ -5582,7 +5747,7 @@ def _analyze_supports(
     support_regions.sort(key=lambda r: r["volume_mm3"], reverse=True)
 
     # Estimate model volume for percentage calculation.
-    model_volume = abs(sum(_signed_volume_of_triangle(tri[0], tri[1], tri[2]) for tri in triangles))
+    model_volume = abs(sum(_signed_volumes(triangles, tris)))
 
     # Clamp at 100% — the naive support estimate can exceed the model
     # volume on geometries with large horizontal overhangs above small
@@ -5853,6 +6018,34 @@ def _footprint_sharp_corners(
     return _sharp_corners_of_rings(_outline_rings(*_patch_outline(tris, ids)))
 
 
+def _flat_faces(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> Iterable[tuple[tuple[tuple[float, ...], ...], float]]:
+    """``(triangle, area)`` of each face of *triangles*, in order, that lies
+    within about 18 degrees of level (its unit normal's z past 0.95 either
+    way); each area is :func:`_triangle_area`'s own."""
+    reading = _face_leans(triangles, None, None, 0.0)
+    if reading is None:
+        for tri in triangles:
+            if abs(_normalize(_triangle_normal(tri[0], tri[1], tri[2]))[2]) > 0.95:
+                yield tri, _triangle_area(tri[0], tri[1], tri[2])
+        return
+    level = np.flatnonzero(np.abs(reading[1]) > 0.95)
+    if not len(level):
+        return
+    tris = _triangle_array([triangles[i] for i in level.tolist()])
+    e1 = tris[:, 1] - tris[:, 0]
+    e2 = tris[:, 2] - tris[:, 0]
+    # float_power is the C library's pow, as _triangle_area's ``**`` is.
+    areas = 0.5 * np.sqrt(
+        np.float_power(e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1], 2.0)
+        + np.float_power(e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2], 2.0)
+        + np.float_power(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0], 2.0)
+    )
+    for index, area in zip(level.tolist(), areas.tolist(), strict=True):
+        yield triangles[index], area
+
+
 def _analyze_warping(
     triangles: list[tuple[tuple[float, ...], ...]],
     vertices: list[tuple[float, ...]],
@@ -5892,20 +6085,16 @@ def _analyze_warping(
 
     flat_area_total = 0.0
     large_flat_surfaces: list[dict[str, float]] = []
-    for tri in triangles:
-        n = _triangle_normal(tri[0], tri[1], tri[2])
-        nn = _normalize(n)
-        if abs(nn[2]) > 0.95:
-            area = _triangle_area(tri[0], tri[1], tri[2])
-            flat_area_total += area
-            if area > 100.0:
-                centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-                large_flat_surfaces.append({
-                    "area_mm2": round(area, 2),
-                    "centroid_x": round(centroid[0], 2),
-                    "centroid_y": round(centroid[1], 2),
-                    "centroid_z": round(centroid[2], 2),
-                })
+    for tri, area in _flat_faces(triangles):
+        flat_area_total += area
+        if area > 100.0:
+            centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+            large_flat_surfaces.append({
+                "area_mm2": round(area, 2),
+                "centroid_x": round(centroid[0], 2),
+                "centroid_y": round(centroid[1], 2),
+                "centroid_z": round(centroid[2], 2),
+            })
     # The ten largest, whichever triangles of the file they are.
     large_flat_surfaces.sort(
         key=lambda s: (-s["area_mm2"], s["centroid_x"], s["centroid_y"], s["centroid_z"]),
@@ -6088,6 +6277,121 @@ def _suffix_thickness_mm(
     return 4.0 * abs(volume) / wall_area
 
 
+def _wall_area_by_layer(
+    triangles: list[tuple[tuple[float, ...], ...]], z_min: float, layer_height: float, num_layers: int,
+) -> list[float]:
+    """Each layer's wall area for :func:`_analyze_thermal_stress`: every
+    face's area, weighted by how near upright it stands, shared among the
+    layers it spans by its height in each (a face with next to no height
+    goes whole to the layer it sits in).
+
+    Read from whole arrays, each share and each layer's running sum taken
+    by the same arithmetic in the same order as
+    :func:`_wall_area_by_layer_by_face`, so the two agree to the bit; a mesh
+    with a figure that is not a finite number is read by that one.
+    """
+    tris = _triangle_array(triangles)
+    if not np.isfinite(tris).all():
+        return _wall_area_by_layer_by_face(triangles, z_min, layer_height, num_layers)
+    e1 = tris[:, 1] - tris[:, 0]
+    e2 = tris[:, 2] - tris[:, 0]
+    c0 = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+    c1 = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+    c2 = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+    length = np.sqrt(c0 * c0 + c1 * c1 + c2 * c2)
+    too_short = length < 1e-12
+    unit_nz = np.where(too_short, 0.0, c2 / np.where(too_short, 1.0, length))
+    wall_weight = 1.0 - np.abs(unit_nz)
+    kept = ~(wall_weight <= 1e-4)
+    # float_power is the C library's pow, as the area helper's ``**`` is.
+    area = 0.5 * np.sqrt(
+        np.float_power(c0[kept], 2.0) + np.float_power(c1[kept], 2.0) + np.float_power(c2[kept], 2.0)
+    )
+    contribution = wall_weight[kept] * area
+    z = tris[kept][:, :, 2]
+    if not (np.isfinite(contribution).all() and np.isfinite(unit_nz).all()):
+        return _wall_area_by_layer_by_face(triangles, z_min, layer_height, num_layers)
+    # min() and max() over the three heights, first one kept on a tie.
+    z_low = np.where(z[:, 1] < z[:, 0], z[:, 1], z[:, 0])
+    z_low = np.where(z[:, 2] < z_low, z[:, 2], z_low)
+    z_high = np.where(z[:, 1] > z[:, 0], z[:, 1], z[:, 0])
+    z_high = np.where(z[:, 2] > z_high, z[:, 2], z_high)
+    tri_span = z_high - z_low
+    flat = tri_span <= 1e-6
+    # int() of the height in layers; past the last layer every reading is
+    # the last layer, so a height is held only that far.
+    low_bucket = np.clip(np.trunc((z_low - z_min) / layer_height), -1, num_layers).astype(np.int64)
+    high_bucket = np.clip(np.trunc((z_high - z_min) / layer_height), -1, num_layers).astype(np.int64)
+    first = np.where(flat, np.clip(low_bucket, 0, num_layers - 1), np.maximum(0, low_bucket))
+    last = np.where(flat, first, np.minimum(num_layers - 1, high_bucket))
+    count = np.maximum(last - first + 1, 0)
+
+    areas = np.zeros(num_layers)
+    ends = np.cumsum(count)
+    start = 0
+    while start < len(count):
+        # A block of faces whose shares fit the budget, at least one face.
+        before = int(ends[start - 1]) if start else 0
+        stop = max(start + 1, int(np.searchsorted(ends, before + _LAYER_SHARE_BLOCK, side="right")))
+        block = slice(start, stop)
+        face = np.repeat(np.arange(start, stop), count[block])
+        bucket = first[face] + (np.arange(len(face)) - np.repeat(np.cumsum(count[block]) - count[block], count[block]))
+        share = contribution[face]
+        spanning = ~flat[face]
+        layer_low = z_min + bucket * layer_height
+        layer_high = layer_low + layer_height
+        top = np.where(layer_high < z_high[face], layer_high, z_high[face])
+        bottom = np.where(layer_low > z_low[face], layer_low, z_low[face])
+        overlap = top - bottom
+        with np.errstate(divide="ignore", invalid="ignore"):
+            share = np.where(spanning, share * (overlap / tri_span[face]), share)
+        takes = ~spanning | ~(overlap <= 0)
+        np.add.at(areas, bucket[takes], share[takes])
+        start = stop
+    return areas.tolist()
+
+
+#: The most face-layer shares :func:`_wall_area_by_layer` holds at once.
+_LAYER_SHARE_BLOCK: int = 1 << 20
+
+
+def _wall_area_by_layer_by_face(
+    triangles: list[tuple[tuple[float, ...], ...]], z_min: float, layer_height: float, num_layers: int,
+) -> list[float]:
+    """:func:`_wall_area_by_layer` one face at a time."""
+    layer_areas: list[float] = [0.0] * num_layers
+    for tri in triangles:
+        normal = _triangle_normal(tri[0], tri[1], tri[2])
+        nn = _normalize(normal)
+        wall_weight = 1.0 - abs(nn[2])
+        if wall_weight <= 1e-4:
+            continue
+        area = _triangle_area(tri[0], tri[1], tri[2])
+        contribution = wall_weight * area
+
+        zs = (tri[0][2], tri[1][2], tri[2][2])
+        z_low = min(zs)
+        z_high = max(zs)
+        tri_span = z_high - z_low
+        if tri_span <= 1e-6:
+            # Degenerate slim triangle — drop into single bucket by mid-Z.
+            bucket = int((z_low - z_min) / layer_height)
+            bucket = max(0, min(bucket, num_layers - 1))
+            layer_areas[bucket] += contribution
+            continue
+
+        bucket_low = max(0, int((z_low - z_min) / layer_height))
+        bucket_high = min(num_layers - 1, int((z_high - z_min) / layer_height))
+        for b in range(bucket_low, bucket_high + 1):
+            layer_z_low = z_min + b * layer_height
+            layer_z_high = layer_z_low + layer_height
+            overlap = min(z_high, layer_z_high) - max(z_low, layer_z_low)
+            if overlap <= 0:
+                continue
+            layer_areas[b] += contribution * (overlap / tri_span)
+    return layer_areas
+
+
 def _analyze_thermal_stress(
     triangles: list[tuple[tuple[float, ...], ...]],
     bbox: dict[str, float],
@@ -6126,7 +6430,6 @@ def _analyze_thermal_stress(
         )
 
     num_layers = max(2, int(z_span / layer_height))
-    layer_areas: list[float] = [0.0] * num_layers
 
     # Wall-vs-face fix: cross-section change at each Z is proxied by the
     # vertical-wall contribution at that layer, not the horizontal-face
@@ -6139,35 +6442,7 @@ def _analyze_thermal_stress(
     # Horizontal faces (|normal_z| ≈ 1) contribute (1 - |nz|) ≈ 0 and
     # are effectively ignored; vertical walls (|nz| ≈ 0) contribute
     # their full area, distributed along Z.
-    for tri in triangles:
-        normal = _triangle_normal(tri[0], tri[1], tri[2])
-        nn = _normalize(normal)
-        wall_weight = 1.0 - abs(nn[2])
-        if wall_weight <= 1e-4:
-            continue
-        area = _triangle_area(tri[0], tri[1], tri[2])
-        contribution = wall_weight * area
-
-        zs = (tri[0][2], tri[1][2], tri[2][2])
-        z_low = min(zs)
-        z_high = max(zs)
-        tri_span = z_high - z_low
-        if tri_span <= 1e-6:
-            # Degenerate slim triangle — drop into single bucket by mid-Z.
-            bucket = int((z_low - z_min) / layer_height)
-            bucket = max(0, min(bucket, num_layers - 1))
-            layer_areas[bucket] += contribution
-            continue
-
-        bucket_low = max(0, int((z_low - z_min) / layer_height))
-        bucket_high = min(num_layers - 1, int((z_high - z_min) / layer_height))
-        for b in range(bucket_low, bucket_high + 1):
-            layer_z_low = z_min + b * layer_height
-            layer_z_high = layer_z_low + layer_height
-            overlap = min(z_high, layer_z_high) - max(z_low, layer_z_low)
-            if overlap <= 0:
-                continue
-            layer_areas[b] += contribution * (overlap / tri_span)
+    layer_areas = _wall_area_by_layer(triangles, z_min, layer_height, num_layers)
 
     # Median wall-area smooths over single-layer numerical artifacts
     # (one triangle landing alone in a thin layer) while still letting
@@ -7813,12 +8088,12 @@ def _analyze_cost(
     brim or raft the adhesion decision chose.
     """
     from kiln.cost_estimator import CostEstimator
-    from kiln.generation.validation import analyze_mesh
+    from kiln.generation.validation import measure_mesh
 
     estimator = CostEstimator()
     # Read the file once for every estimate below; the PLA and low-infill
     # alternatives are handed this reading too.
-    mesh_analysis = analyze_mesh(file_path)
+    mesh_analysis = measure_mesh(file_path)
 
     estimate = estimator.estimate_from_mesh(
         file_path,
@@ -8234,10 +8509,8 @@ def _summarize_regions(
     centroids = tris.mean(axis=1)
     # Only a face whose box lies under a sample can be below it, so each
     # sample reads those faces alone (the same answer as reading them all).
-    index = XYIndex(tris)
-    in_region = np.zeros(len(tris), dtype=bool)
-
-    out: list[RegionSummary] = []
+    read: list[tuple[_DownwardRegion, np.ndarray, float, np.ndarray, float, float]] = []
+    samples: list[np.ndarray] = []
     for region in regions:
         idx = np.asarray(region.triangle_indices, dtype=np.int64)
         if idx.size == 0:
@@ -8251,18 +8524,12 @@ def _summarize_regions(
         max_angle = float(np.max(np.maximum(0.0, 90.0 - angles)))
         height = max(0.0, float(centroids[idx][:, 2].min()) - z_min)
         stride = max(1, idx.size // _REGION_SAMPLE_CAP)
-        samples = centroids[idx[::stride]]
-        sample_of, face_of = index.at_points(samples[:, :2])
-        bounds = np.searchsorted(sample_of, np.arange(len(samples) + 1))
-        in_region[idx] = True
-        over_model = False
-        for j, point in enumerate(samples):
-            under = face_of[bounds[j]:bounds[j + 1]]
-            gap = _gap_to_faces_below(tris[under[~in_region[under]]], point)
-            if gap is not None and gap > layer_height:
-                over_model = True
-                break
-        in_region[idx] = False
+        samples.append(centroids[idx[::stride]])
+        read.append((region, idx, total, centre, max_angle, height))
+    over = _regions_over_model(tris, [entry[1] for entry in read], samples, layer_height)
+
+    out: list[RegionSummary] = []
+    for (region, idx, total, centre, max_angle, height), over_model in zip(read, over, strict=True):
         out.append(RegionSummary(
             centroid=(float(centre[0]), float(centre[1]), float(centre[2])),
             area_mm2=total,
@@ -8276,6 +8543,57 @@ def _summarize_regions(
         ))
     out.sort(key=lambda r: r.area_mm2, reverse=True)
     return out
+
+
+#: The most region samples :func:`_regions_over_model` reads against the
+#: faces below them at once.
+_OVER_MODEL_SAMPLE_BLOCK: int = 4096
+
+
+def _regions_over_model(
+    tris: np.ndarray, members: list[np.ndarray], samples: list[np.ndarray], layer_height: float,
+) -> list[bool]:
+    """For each region (its faces *members*, its points *samples*), whether
+    a support there stands on the model: some sample has a face of the part
+    straight below it (:func:`_gap_to_faces_below`), outside the region and
+    more than *layer_height* away.  Every sample is read in blocks of
+    :data:`_OVER_MODEL_SAMPLE_BLOCK`, each face by the same arithmetic as
+    :func:`_gap_to_faces_below`."""
+    over = [False] * len(members)
+    if not members:
+        return over
+    region_of_face = np.full(len(tris), -1, dtype=np.int64)
+    for k, idx in enumerate(members):
+        region_of_face[idx] = k
+    points = np.concatenate(samples)
+    owner = np.repeat(np.arange(len(samples)), [len(s) for s in samples])
+    index = XYIndex(tris)
+    for start in range(0, len(points), _OVER_MODEL_SAMPLE_BLOCK):
+        block = points[start:start + _OVER_MODEL_SAMPLE_BLOCK]
+        sample_of, face_of = index.at_points(block[:, :2])
+        sample_of = sample_of + start
+        keep = region_of_face[face_of] != owner[sample_of]
+        sample_of, face_of = sample_of[keep], face_of[keep]
+        sub = tris[face_of]
+        px, py, pz = points[sample_of, 0], points[sample_of, 1], points[sample_of, 2]
+        ax, ay = sub[:, 0, 0], sub[:, 0, 1]
+        bx, by = sub[:, 1, 0], sub[:, 1, 1]
+        cx, cy = sub[:, 2, 0], sub[:, 2, 1]
+        det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+            u = ((px - ax) * (cy - ay) - (cx - ax) * (py - ay)) / det
+            v = ((bx - ax) * (py - ay) - (px - ax) * (by - ay)) / det
+            # Read for every pair, and kept only where the face is below.
+            z_at = sub[:, 0, 2] + u * (sub[:, 1, 2] - sub[:, 0, 2]) + v * (sub[:, 2, 2] - sub[:, 0, 2])
+            inside = (np.abs(det) > 1e-12) & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1.0 + 1e-9)
+        below = inside & (z_at <= pz + 1e-6)
+        nearest = np.full(len(block), -np.inf)
+        np.maximum.at(nearest, sample_of[below] - start, z_at[below])
+        found = np.flatnonzero(np.isfinite(nearest))
+        gap = block[found, 2] - nearest[found]
+        for k in np.unique(owner[start + found[gap > layer_height]]).tolist():
+            over[k] = True
+    return over
 
 
 def _gap_to_faces_below(sub: np.ndarray, point: np.ndarray) -> float | None:
@@ -8496,6 +8814,36 @@ def _faces_under_a_start(
     return sorted(set(under))
 
 
+def _steepest_free_air_lean(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    tris: np.ndarray | None,
+    z_min: float,
+    layer_height: float,
+    exempt: set[int],
+) -> float:
+    """The steepest lean (:func:`_lean_of`) among the faces of *triangles*
+    that hang in free air: off the plate, facing down but not a flat
+    bridge deck, and not in *exempt*; 0.0 for none."""
+    reading = _face_leans(triangles, tris, z_min, layer_height)
+    if reading is not None:
+        on_plate, unit_nz = reading
+        hangs = ~on_plate & (unit_nz < 0) & ~(unit_nz <= _BRIDGE_FLAT_NZ_LIMIT)
+        if exempt:
+            hangs[np.fromiter(exempt, dtype=np.int64, count=len(exempt))] = False
+        return _steepest_lean(-unit_nz[hangs])
+    steepest = 0.0
+    for index, tri in enumerate(triangles):
+        if index in exempt or _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+        nz = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))[2]
+        if nz >= 0 or nz <= _BRIDGE_FLAT_NZ_LIMIT:
+            continue
+        lean = _lean_of(-nz)
+        if lean > steepest:
+            steepest = lean
+    return steepest
+
+
 def _judge_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -8514,7 +8862,7 @@ def _judge_supports(
     ``(T, 3, 3)`` array when the caller holds one, handed to each reading
     below that would otherwise build its own."""
     over_faces, over_angles = _overhang_faces(
-        triangles, resolved_threshold, z_min=z_min, layer_height=layer_height,
+        triangles, resolved_threshold, z_min=z_min, layer_height=layer_height, tris=tris,
     )
     overhangs = _overhang_analysis(triangles, over_faces, over_angles)
     downward_regions = _analyze_downward_regions(
@@ -8534,6 +8882,7 @@ def _judge_supports(
         layer_height=layer_height,
         normalize_winding=False,
         bbox=bbox,
+        tris=tris,
     )
 
     # Bridge-aware overhang verdict.  When _analyze_supports's
@@ -8635,19 +8984,9 @@ def _judge_supports(
     # ceiling anywhere, so per-material angle limits compared against
     # it fired as noise on trivially printable parts; this is the
     # number they should judge.
-    _free_air_max_deg = 0.0
-    for _gi, _tri in enumerate(triangles):
-        if _gi in _exempt_overhang_tris:
-            continue
-        if _is_bed_supported_triangle(_tri, z_min, layer_height):
-            continue
-        _nn = _normalize(_triangle_normal(_tri[0], _tri[1], _tri[2]))
-        if _nn[2] >= 0 or _nn[2] <= _BRIDGE_FLAT_NZ_LIMIT:
-            continue
-        _afd = math.degrees(math.acos(max(-1.0, min(1.0, -_nn[2]))))
-        _oa = max(0.0, 90.0 - _afd)
-        if _oa > _free_air_max_deg:
-            _free_air_max_deg = _oa
+    _free_air_max_deg = _steepest_free_air_lean(
+        triangles, tris, z_min, layer_height, _exempt_overhang_tris,
+    )
     from dataclasses import replace as _dc_replace
     overhangs = _dc_replace(
         overhangs, max_free_air_overhang_deg=round(_free_air_max_deg, 1),

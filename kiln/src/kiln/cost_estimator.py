@@ -710,19 +710,19 @@ class CostEstimator:
         :raises FileNotFoundError: If *file_path* does not exist.
         :raises ValueError: If the mesh has zero or negative volume.
         """
-        from kiln.generation.validation import analyze_mesh
+        from kiln.generation.validation import measure_mesh
 
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"Mesh file not found: {file_path}")
 
         warnings: list[str] = []
 
-        # Analyze mesh geometry (stdlib-based, no external deps) -- unless
-        # the caller already has: a caller estimating twice (once as asked,
-        # once at a cheaper setting) reads a 300k-triangle file once, not
-        # twice.
+        # Measure the mesh -- unless the caller already has: a caller
+        # estimating twice (once as asked, once at a cheaper setting) reads a
+        # 300k-triangle file once, not twice.  The estimate reads the size,
+        # volume, surface and overhang share, all of which measure_mesh gives.
         if analysis is None:
-            analysis = analyze_mesh(file_path)
+            analysis = measure_mesh(file_path)
         if analysis.printability_issues and analysis.volume_mm3 <= 0:
             raise ValueError(
                 f"Mesh has zero or negative volume ({analysis.volume_mm3:.2f} mm³). "
