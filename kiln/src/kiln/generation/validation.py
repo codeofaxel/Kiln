@@ -459,6 +459,66 @@ def read_stl_triangles(path: str | Path) -> numpy.ndarray:
     return corners
 
 
+def _stl_corner_array(path: Path) -> numpy.ndarray | None:
+    """The corners of the binary STL at *path* as a ``(T, 3, 3)`` float
+    array holding exactly what :func:`_parse_stl`'s triangles hold, read in
+    one numpy call; ``None`` for any other file, and for one this reading
+    cannot promise that for: not a whole binary STL, no triangles, or a
+    corner with a figure that is not a finite number or is a negative zero
+    (the parser hands every copy of a corner the first copy's figures, and
+    a negative zero equals a zero there).  Notes the size as the parser
+    does."""
+    import numpy as np
+
+    if path.suffix.lower() in _OTHER_FORMATS or not path.is_file():
+        return None
+    try:
+        if _stl_is_ascii(path):
+            return None
+        with open(path, "rb") as fh:
+            fh.seek(_STL_HEADER_SIZE)
+            count_bytes = fh.read(_STL_COUNT_SIZE)
+        if len(count_bytes) < _STL_COUNT_SIZE:
+            return None
+        tri_count = struct.unpack("<I", count_bytes)[0]
+        expected = _STL_HEADER_SIZE + _STL_COUNT_SIZE + _STL_TRIANGLE_SIZE * tri_count
+        if tri_count == 0 or path.stat().st_size < expected:
+            return None
+        records = np.fromfile(
+            path,
+            dtype=np.dtype(_STL_RECORD_DTYPE),
+            count=tri_count,
+            offset=_STL_HEADER_SIZE + _STL_COUNT_SIZE,
+        )
+    except OSError:
+        return None
+    corners = records["corners"].astype(np.float64)
+    if not np.isfinite(corners).all() or np.signbit(corners[corners == 0.0]).any():
+        return None
+    _note_reading(path, corners)
+    return corners
+
+
+def _exact_corner_ids(corners: numpy.ndarray) -> numpy.ndarray:
+    """One id per row of *corners* ``(n, 3)``: rows with equal coordinates
+    share one, and ids run in the rows' order by x, then y, then z, as
+    ``np.unique(corners, axis=0, return_inverse=True)`` numbers them (-0.0
+    and 0.0 are one value).  A mesh with a corner that is not a finite
+    number is numbered by ``np.unique`` itself."""
+    import numpy as np
+
+    if len(corners) == 0 or not np.isfinite(corners).all():
+        return np.unique(corners, axis=0, return_inverse=True)[1].reshape(-1)
+    order = np.lexsort((corners[:, 2], corners[:, 1], corners[:, 0]))
+    in_order = corners[order]
+    new = np.empty(len(order), dtype=bool)
+    new[0] = True
+    new[1:] = (in_order[1:] != in_order[:-1]).any(axis=1)
+    ids = np.empty(len(order), dtype=np.int64)
+    ids[order] = np.cumsum(new) - 1
+    return ids
+
+
 def _not_an_stl_reason(
     path: Path, tri_count: int, expected_size: int, actual_size: int
 ) -> str:
@@ -759,6 +819,29 @@ def in_geometric_order(
     tris = np.asarray(triangles, dtype=np.float64)
     if tris.ndim != 3 or tris.shape[1:] != (3, 3):
         return triangles
+    first, _turned, order = _geometric_turns(tris)
+    starts = first.tolist()
+    return [
+        (triangles[i][f], triangles[i][(f + 1) % 3], triangles[i][(f + 2) % 3])
+        for i, f in ((i, starts[i]) for i in order.tolist())
+    ]
+
+
+def _corners_in_geometric_order(corners: numpy.ndarray) -> numpy.ndarray:
+    """:func:`in_geometric_order` for a ``(T, 3, 3)`` corner array: the same
+    triangles, turned and ordered the same way, as an array."""
+    if len(corners) < 2:
+        return corners
+    _first, turned, order = _geometric_turns(corners)
+    return turned[order]
+
+
+def _geometric_turns(tris: numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    """For the ``(T, 3, 3)`` triangles *tris*: the corner each starts at
+    (its lowest, by x, then y, then z), each turned to start there, and the
+    order that sorts the turned triangles by their corners."""
+    import numpy as np
+
     rows = np.arange(len(tris))
     first = np.zeros(len(tris), dtype=np.int64)
     for corner in (1, 2):
@@ -770,11 +853,7 @@ def in_geometric_order(
         first = np.where(lower, corner, first)
     turned = np.stack([tris[rows, (first + k) % 3] for k in range(3)], axis=1)
     order = np.lexsort(turned.reshape(len(tris), 9).T[::-1])
-    starts = first.tolist()
-    return [
-        (triangles[i][f], triangles[i][(f + 1) % 3], triangles[i][(f + 2) % 3])
-        for i, f in ((i, starts[i]) for i in order.tolist())
-    ]
+    return first, turned, order
 
 
 def _mesh_bed_z(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
@@ -1495,94 +1574,9 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     Returns:
         :class:`MeshAnalysis` with full metrics.
     """
-    path = Path(file_path)
-
-    if not path.is_file():
-        return MeshAnalysis(
-            printability_issues=["File not found"],
-            unprintable_geometry=f"File not found: {file_path}",
-        )
-
-    errors: list[str] = []
-    triangles, vertices = _parse_mesh_file(path, errors)
-
-    if errors or not triangles:
-        return MeshAnalysis(
-            printability_issues=errors or ["No geometry found"],
-            unprintable_geometry=unprintable_geometry_reason(
-                triangles, vertices, parse_errors=errors,
-            ),
-        )
-
-    bbox = _bounding_box(vertices)
-    dims = {
-        "width_mm": round(bbox["x_max"] - bbox["x_min"], 2),
-        "depth_mm": round(bbox["y_max"] - bbox["y_min"], 2),
-        "height_mm": round(bbox["z_max"] - bbox["z_min"], 2),
-    }
-
-    # Volume via signed tetrahedron method
-    volume = 0.0
-    total_area = 0.0
-    cx, cy, cz = 0.0, 0.0, 0.0
-    overhang_count = 0
-    max_overhang = 0.0
-    degenerate_count = 0
-    bed_z = _mesh_bed_z(triangles)  # the plane the model rests on
-
-    for tri in triangles:
-        v0, v1, v2 = tri
-        # Cross product of edges
-        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
-        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
-        cross = (
-            e1[1] * e2[2] - e1[2] * e2[1],
-            e1[2] * e2[0] - e1[0] * e2[2],
-            e1[0] * e2[1] - e1[1] * e2[0],
-        )
-        area_2 = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
-        tri_area = area_2 / 2.0
-
-        if tri_area < _DEGENERATE_AREA_MM2:
-            degenerate_count += 1
-            continue
-
-        total_area += tri_area
-
-        # Signed volume contribution
-        volume += (
-            v0[0] * (v1[1] * v2[2] - v2[1] * v1[2])
-            - v1[0] * (v0[1] * v2[2] - v2[1] * v0[2])
-            + v2[0] * (v0[1] * v1[2] - v1[1] * v0[2])
-        ) / 6.0
-
-        # Centroid contribution (area-weighted)
-        centroid = (
-            (v0[0] + v1[0] + v2[0]) / 3.0,
-            (v0[1] + v1[1] + v2[1]) / 3.0,
-            (v0[2] + v1[2] + v2[2]) / 3.0,
-        )
-        cx += centroid[0] * tri_area
-        cy += centroid[1] * tri_area
-        cz += centroid[2] * tri_area
-
-        # Overhang detection: angle between face normal and -Z.
-        # A downward face sitting on the plate is held up by the bed, so
-        # it is not an overhang — see _is_bed_supported_triangle.
-        nz = cross[2] / area_2  # normalized Z component of normal
-        if nz < 0 and not _is_bed_supported_triangle(tri, bed_z):
-            angle = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
-            overhang_angle = 90.0 - angle  # angle from vertical
-            if overhang_angle > max_overhang:
-                max_overhang = overhang_angle
-            if overhang_angle > 45:
-                overhang_count += 1
-
-    volume = abs(volume)
-    if total_area > 0:
-        cx /= total_area
-        cy /= total_area
-        cz /= total_area
+    analysis, triangles, vertices, exact = _measure_mesh_file(file_path)
+    if triangles is None:
+        return analysis
 
     # Pieces, and the solids they print as (kiln.mesh_bodies): pieces that
     # share a surface or sink into one another are one solid.
@@ -1595,9 +1589,9 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     # Manifold check
     is_manifold = _check_manifold(triangles, [])
 
-    # Overhang percentage
-    valid_tris = len(triangles) - degenerate_count
-    overhang_pct = (overhang_count / valid_tris * 100) if valid_tris > 0 else 0.0
+    volume, overhang_pct, max_overhang = exact
+    degenerate_count = analysis.degenerate_triangles
+    dims = analysis.dimensions_mm
 
     # Mesh-check score (0-100)
     issues: list[str] = []
@@ -1635,25 +1629,270 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
 
     score = max(0, score)
 
-    return MeshAnalysis(
-        triangle_count=len(triangles),
-        vertex_count=len(vertices),
-        is_manifold=is_manifold,
+    analysis.is_manifold = is_manifold
+    analysis.connected_components = components
+    analysis.solid_count = solids
+    analysis.mesh_check_score = score
+    analysis.printability_issues = issues
+    analysis.unprintable_geometry = unprintable_geometry_reason(triangles, vertices)
+    return analysis
+
+
+def measure_mesh(file_path: str) -> MeshAnalysis:
+    """:func:`analyze_mesh`'s measurements alone: size, volume, surface area,
+    centre of mass and overhangs, each the number :func:`analyze_mesh` gives.
+
+    The pieces, the seal, the mesh-check score and its issues are not read,
+    so ``printability_issues`` holds only why a file could not be read.  For
+    a caller that needs the numbers and nothing else, such as a cost
+    estimate.
+    """
+    import numpy as np
+
+    corners = _stl_corner_array(Path(file_path))
+    if corners is None:
+        return _measure_mesh_file(file_path)[0]
+    flat = corners.reshape(-1, 3)
+    low, high = flat.min(axis=0).tolist(), flat.max(axis=0).tolist()
+    bbox = {
+        "x_min": low[0], "x_max": high[0],
+        "y_min": low[1], "y_max": high[1],
+        "z_min": low[2], "z_max": high[2],
+    }
+    vertex_count = int(_exact_corner_ids(flat).max()) + 1
+    sums = _surface_sums(corners, float(np.min(flat[:, 2])))
+    return _measurements(len(corners), vertex_count, bbox, sums)[0]
+
+
+def _measure_mesh_file(
+    file_path: str,
+) -> tuple[
+    MeshAnalysis,
+    list[tuple[tuple[float, ...], ...]] | None,
+    list[tuple[float, ...]] | None,
+    tuple[float, float, float],
+]:
+    """The measurements :func:`analyze_mesh` and :func:`measure_mesh` share:
+    the record holding them, the parsed triangles and vertices, and the
+    volume, overhang share and steepest overhang before rounding.  The
+    triangles and vertices are ``None`` when the file cannot be read, the
+    record then saying why."""
+    path = Path(file_path)
+
+    if not path.is_file():
+        return MeshAnalysis(
+            printability_issues=["File not found"],
+            unprintable_geometry=f"File not found: {file_path}",
+        ), None, None, (0.0, 0.0, 0.0)
+
+    errors: list[str] = []
+    triangles, vertices = _parse_mesh_file(path, errors)
+
+    if errors or not triangles:
+        return MeshAnalysis(
+            printability_issues=errors or ["No geometry found"],
+            unprintable_geometry=unprintable_geometry_reason(
+                triangles, vertices, parse_errors=errors,
+            ),
+        ), None, None, (0.0, 0.0, 0.0)
+
+    import numpy as np
+
+    corners = np.fromiter(
+        itertools.chain.from_iterable(itertools.chain.from_iterable(triangles)),
+        dtype=np.float64, count=9 * len(triangles),
+    ).reshape(-1, 3, 3)
+    bed_z = _mesh_bed_z(triangles)  # the plane the model rests on
+    analysis, exact = _measurements(
+        len(triangles), len(vertices), _bounding_box(vertices), _surface_sums(corners, bed_z),
+    )
+    return analysis, triangles, vertices, exact
+
+
+def _measurements(
+    triangle_count: int, vertex_count: int, bbox: dict[str, float], sums: _SurfaceSums,
+) -> tuple[MeshAnalysis, tuple[float, float, float]]:
+    """The record :func:`_measure_mesh_file` returns, from what was summed,
+    and the volume, overhang share and steepest overhang before rounding."""
+    dims = {
+        "width_mm": round(bbox["x_max"] - bbox["x_min"], 2),
+        "depth_mm": round(bbox["y_max"] - bbox["y_min"], 2),
+        "height_mm": round(bbox["z_max"] - bbox["z_min"], 2),
+    }
+    volume = abs(sums.volume)
+    cx, cy, cz = sums.cx, sums.cy, sums.cz
+    if sums.area > 0:
+        cx /= sums.area
+        cy /= sums.area
+        cz /= sums.area
+
+    valid_tris = triangle_count - sums.degenerate
+    overhang_pct = (sums.overhang_count / valid_tris * 100) if valid_tris > 0 else 0.0
+
+    measured = MeshAnalysis(
+        triangle_count=triangle_count,
+        vertex_count=vertex_count,
         bounding_box=bbox,
         dimensions_mm=dims,
         volume_mm3=_measured(volume),
-        surface_area_mm2=_measured(total_area),
+        surface_area_mm2=_measured(sums.area),
         center_of_mass={"x": round(cx, 2), "y": round(cy, 2), "z": round(cz, 2)},
-        connected_components=components,
-        solid_count=solids,
-        degenerate_triangles=degenerate_count,
-        overhang_triangle_count=overhang_count,
+        degenerate_triangles=sums.degenerate,
+        overhang_triangle_count=sums.overhang_count,
         overhang_percentage=round(overhang_pct, 1),
-        max_overhang_angle_deg=round(max_overhang, 1),
-        mesh_check_score=score,
-        printability_issues=issues,
-        unprintable_geometry=unprintable_geometry_reason(triangles, vertices),
+        max_overhang_angle_deg=round(sums.max_overhang, 1),
     )
+    return measured, (volume, overhang_pct, sums.max_overhang)
+
+
+@dataclass
+class _SurfaceSums:
+    """What :func:`_surface_sums` adds up over a mesh's faces."""
+
+    volume: float = 0.0
+    area: float = 0.0
+    cx: float = 0.0
+    cy: float = 0.0
+    cz: float = 0.0
+    overhang_count: int = 0
+    max_overhang: float = 0.0
+    degenerate: int = 0
+
+
+#: How near a face's lean, read from whole arrays, may come to a limit or to
+#: the steepest lean before it is read again one face at a time: far wider
+#: than the two ways of reading an angle can differ, so both give one answer.
+_LEAN_RECHECK_DEG = 1e-6
+
+
+def _surface_sums(corners: numpy.ndarray, bed_z: float) -> _SurfaceSums:
+    """Signed volume, surface area, area-weighted centroid sums and overhangs
+    of the triangles *corners* ``(T, 3, 3)``, skipping faces below the
+    degenerate-area floor.
+
+    Each sum is added face by face in file order, as
+    :func:`_surface_sums_by_face` adds it, so the two agree to the bit; this
+    one reads whole arrays, :data:`_SUM_BLOCK` faces at a time.  A face's
+    lean is read by array where it is far from 45 degrees and from the
+    steepest, and one face at a time where it is near either.  A mesh with a
+    corner or a figure that is not a finite number is summed by
+    :func:`_surface_sums_by_face` itself.
+    """
+    import numpy as np
+
+    if not np.isfinite(corners).all():
+        return _surface_sums_by_face(corners.tolist(), bed_z)
+    threshold = _bed_threshold_z(bed_z)
+    running = [0.0] * 5  # volume, area, cx, cy, cz
+    sums = _SurfaceSums()
+
+    def lean(x: float) -> float:
+        return 90.0 - math.degrees(math.acos(max(-1.0, min(1.0, x))))
+
+    for start in range(0, len(corners), _SUM_BLOCK):
+        block = corners[start:start + _SUM_BLOCK]
+        v0, v1, v2 = block[:, 0], block[:, 1], block[:, 2]
+        e1 = v1 - v0
+        e2 = v2 - v0
+        c0 = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+        c1 = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+        c2 = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+        # float_power is the C library's pow, as Python's ``**`` is, so each
+        # square is the one the face-by-face sum takes, to the bit.
+        area_2 = np.sqrt(np.float_power(c0, 2.0) + np.float_power(c1, 2.0) + np.float_power(c2, 2.0))
+        if not np.isfinite(area_2).all():
+            return _surface_sums_by_face(corners.tolist(), bed_z)
+        tri_area = area_2 / 2.0
+        keep = ~(tri_area < _DEGENERATE_AREA_MM2)
+        sums.degenerate += int((~keep).sum())
+        v0, v1, v2 = v0[keep], v1[keep], v2[keep]
+        tri_area, area_2, c2 = tri_area[keep], area_2[keep], c2[keep]
+        volume_terms = (
+            v0[:, 0] * (v1[:, 1] * v2[:, 2] - v2[:, 1] * v1[:, 2])
+            - v1[:, 0] * (v0[:, 1] * v2[:, 2] - v2[:, 1] * v0[:, 2])
+            + v2[:, 0] * (v0[:, 1] * v1[:, 2] - v1[:, 1] * v0[:, 2])
+        ) / 6.0
+        centroid = (v0 + v1 + v2) / 3.0
+        terms = (volume_terms, tri_area, centroid[:, 0] * tri_area,
+                 centroid[:, 1] * tri_area, centroid[:, 2] * tri_area)
+        for k, values in enumerate(terms):
+            # A running sum carried from the faces before adds left to
+            # right, as ``+=`` does.
+            running[k] = float(np.cumsum(np.concatenate(([running[k]], values)))[-1])
+
+        nz = c2 / area_2
+        on_bed = (block[keep][:, :, 2] <= threshold).all(axis=1)
+        lean_of = -nz[(nz < 0) & ~on_bed]
+        if not len(lean_of):
+            continue
+        approx = 90.0 - np.degrees(np.arccos(np.clip(lean_of, -1.0, 1.0)))
+        near = np.abs(approx - 45.0) <= _LEAN_RECHECK_DEG
+        sums.overhang_count += int((approx[~near] > 45.0).sum()) + sum(
+            1 for x in lean_of[near].tolist() if lean(x) > 45
+        )
+        steepest = approx >= approx.max() - _LEAN_RECHECK_DEG
+        sums.max_overhang = max(sums.max_overhang, *(lean(x) for x in lean_of[steepest].tolist()))
+    sums.volume, sums.area, sums.cx, sums.cy, sums.cz = running
+    return sums
+
+
+#: Faces :func:`_surface_sums` reads at once.
+_SUM_BLOCK: int = 1 << 18
+
+
+def _surface_sums_by_face(
+    triangles: list[tuple[tuple[float, ...], ...]], bed_z: float,
+) -> _SurfaceSums:
+    """:func:`_surface_sums` one face at a time."""
+    sums = _SurfaceSums()
+    for tri in triangles:
+        v0, v1, v2 = tri
+        # Cross product of edges
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        cross = (
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
+        )
+        area_2 = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
+        tri_area = area_2 / 2.0
+
+        if tri_area < _DEGENERATE_AREA_MM2:
+            sums.degenerate += 1
+            continue
+
+        sums.area += tri_area
+
+        # Signed volume contribution
+        sums.volume += (
+            v0[0] * (v1[1] * v2[2] - v2[1] * v1[2])
+            - v1[0] * (v0[1] * v2[2] - v2[1] * v0[2])
+            + v2[0] * (v0[1] * v1[2] - v1[1] * v0[2])
+        ) / 6.0
+
+        # Centroid contribution (area-weighted)
+        centroid = (
+            (v0[0] + v1[0] + v2[0]) / 3.0,
+            (v0[1] + v1[1] + v2[1]) / 3.0,
+            (v0[2] + v1[2] + v2[2]) / 3.0,
+        )
+        sums.cx += centroid[0] * tri_area
+        sums.cy += centroid[1] * tri_area
+        sums.cz += centroid[2] * tri_area
+
+        # Overhang detection: angle between face normal and -Z.
+        # A downward face sitting on the plate is held up by the bed, so
+        # it is not an overhang — see _is_bed_supported_triangle.
+        nz = cross[2] / area_2  # normalized Z component of normal
+        if nz < 0 and not _is_bed_supported_triangle(tri, bed_z):
+            angle = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
+            overhang_angle = 90.0 - angle  # angle from vertical
+            if overhang_angle > sums.max_overhang:
+                sums.max_overhang = overhang_angle
+            if overhang_angle > 45:
+                sums.overhang_count += 1
+    return sums
 
 
 def repair_stl(
@@ -6132,23 +6371,25 @@ def detect_holes(
 
     import numpy as np
 
-    errors: list[str] = []
-    triangles, vertices = _parse_stl(path, errors)
-    if errors:
-        raise UnreadableMeshError(f"STL parse errors: {'; '.join(errors)}")
-    if not triangles:
-        return []
     # The clusters and the order holes are listed in follow the geometry,
-    # not the order the file wrote its triangles in.
-    triangles = in_geometric_order(triangles)
-
-    # From here on the mesh is one corner array and what is read from it;
-    # the parser's tuples are let go, so a large mesh stays within the
-    # check's memory allowance.
-    corners = _corner_array(triangles)
-    if corners is None:
-        raise UnreadableMeshError("mesh triangles are not three corners of three coordinates each")
-    del triangles, vertices
+    # not the order the file wrote its triangles in.  From here on the mesh
+    # is one corner array and what is read from it, so a large mesh stays
+    # within the check's memory allowance.
+    corners = _stl_corner_array(path)
+    if corners is not None:
+        corners = _corners_in_geometric_order(corners)
+    else:
+        errors: list[str] = []
+        triangles, vertices = _parse_stl(path, errors)
+        if errors:
+            raise UnreadableMeshError(f"STL parse errors: {'; '.join(errors)}")
+        if not triangles:
+            return []
+        triangles = in_geometric_order(triangles)
+        corners = _corner_array(triangles)
+        if corners is None:
+            raise UnreadableMeshError("mesh triangles are not three corners of three coordinates each")
+        del triangles, vertices
     tri_normals, tri_centroids = _hole_normals_and_centroids(corners)
 
     # Drop degenerate triangles (zero normal) — they'd otherwise match
@@ -6340,10 +6581,10 @@ class _MeshEdges:
         # corners within the tolerance share one number; an edge is then
         # the ordered pair of its corners' numbers, as one integer.
         snapped = np.rint(corners[cand] / _HOLE_EDGE_SNAP_TOL_MM).reshape(-1, 3)
-        distinct, corner_id = np.unique(snapped, axis=0, return_inverse=True)
-        corner_id = corner_id.reshape(-1, 3)
+        corner_id = _exact_corner_ids(snapped).reshape(-1, 3)
+        distinct = int(corner_id.max()) + 1 if corner_id.size else 0
         next_id = np.roll(corner_id, -1, axis=1)
-        key = np.minimum(corner_id, next_id) * len(distinct) + np.maximum(corner_id, next_id)
+        key = np.minimum(corner_id, next_id) * distinct + np.maximum(corner_id, next_id)
 
         # Group the candidates' edge slots by key.  A slot is a (triangle,
         # edge) pair numbered ``3 * triangle + edge`` over the whole mesh.
@@ -6433,27 +6674,12 @@ class _MeshEdges:
             a = np.concatenate(more_a)
             b = np.concatenate(more_b)
 
-        # Connected components by union-find, the root of each set its
-        # lowest triangle, so a cluster's label is its first member.
-        parent = list(range(count))
-
-        def root(x: int) -> int:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        # Each pair is read from its array as it is met: the lists the
-        # arrays would turn into are ten times their size.
-        for x, y in zip(memoryview(np.ascontiguousarray(a)), memoryview(np.ascontiguousarray(b)), strict=True):
-            rx, ry = root(x), root(y)
-            if rx < ry:
-                parent[ry] = rx
-            elif ry < rx:
-                parent[rx] = ry
+        # Connected components, each labelled by its lowest triangle, so a
+        # cluster's label is its first member.
+        from kiln.mesh_bodies import _components
 
         cand = self._candidates
-        labels = np.fromiter((root(i) for i in cand.tolist()), dtype=np.int64, count=len(cand))
+        labels = _components(count, a, b)[cand]
         by_label = np.argsort(labels, kind="stable")
         sorted_labels = labels[by_label]
         starts = np.flatnonzero(np.concatenate([[True], sorted_labels[1:] != sorted_labels[:-1]])).tolist()
@@ -6916,46 +7142,129 @@ def _prismatic_walls(
 
     tried: set[tuple[int, int]] = set()
     walls: list[tuple[tuple[float, float, float], list[int]]] = []
-    for seed in cluster:
-        for i in range(3):
-            o = other[3 * seed + i]
-            if o < 0 or o not in members:
-                continue
-            cos_ab = cos[3 * seed + i]
-            if not (cos_threshold <= cos_ab < flat_cos):
-                continue
-            crease = (seed, o) if seed < o else (o, seed)
-            if crease in tried:
-                continue
-            tried.add(crease)
-            d = 9 * seed + 3 * i
-            axis = (dirs[d], dirs[d + 1], dirs[d + 2])
-            ax, ay, az = axis
-            wall = {seed, o}
-            stack = [seed, o]
-            while stack:
-                at = stack.pop()
-                for j in range(3):
-                    nxt = other[3 * at + j]
-                    if nxt < 0 or nxt not in members:
+    may_grow = _creases_that_may_grow(cluster, across, cos_threshold)
+    starts = (
+        ((seed, i) for seed in cluster for i in range(3))
+        if may_grow is None
+        else (divmod(slot, 3) for slot in may_grow)
+    )
+    for seed, i in starts:
+        o = other[3 * seed + i]
+        if o < 0 or o not in members:
+            continue
+        cos_ab = cos[3 * seed + i]
+        if not (cos_threshold <= cos_ab < flat_cos):
+            continue
+        crease = (seed, o) if seed < o else (o, seed)
+        if crease in tried:
+            continue
+        tried.add(crease)
+        d = 9 * seed + 3 * i
+        axis = (dirs[d], dirs[d + 1], dirs[d + 2])
+        ax, ay, az = axis
+        wall = {seed, o}
+        stack = [seed, o]
+        while stack:
+            at = stack.pop()
+            for j in range(3):
+                nxt = other[3 * at + j]
+                if nxt < 0 or nxt not in members:
+                    continue
+                cos_n = cos[3 * at + j]
+                if cos_threshold <= cos_n < flat_cos:
+                    d = 9 * at + 3 * j
+                    if abs(dirs[d] * ax + dirs[d + 1] * ay + dirs[d + 2] * az) < parallel_cos:
                         continue
-                    cos_n = cos[3 * at + j]
-                    if cos_threshold <= cos_n < flat_cos:
-                        d = 9 * at + 3 * j
-                        if abs(dirs[d] * ax + dirs[d + 1] * ay + dirs[d + 2] * az) < parallel_cos:
-                            continue
-                        tried.add((at, nxt) if at < nxt else (nxt, at))
-                    elif cos_n < flat_cos or not folds_along(nxt, ax, ay, az):
-                        # A box edge, or a flat edge into a facet that does
-                        # not itself fold along the axis: the face beyond a
-                        # mouth, never the other half of a wall facet.
-                        continue
-                    if nxt not in wall:
-                        wall.add(nxt)
-                        stack.append(nxt)
-            if len(wall) >= _MIN_WALL_FACETS:
-                walls.append((axis, sorted(wall)))
+                    tried.add((at, nxt) if at < nxt else (nxt, at))
+                elif cos_n < flat_cos or not folds_along(nxt, ax, ay, az):
+                    # A box edge, or a flat edge into a facet that does
+                    # not itself fold along the axis: the face beyond a
+                    # mouth, never the other half of a wall facet.
+                    continue
+                if nxt not in wall:
+                    wall.add(nxt)
+                    stack.append(nxt)
+        if len(wall) >= _MIN_WALL_FACETS:
+            walls.append((axis, sorted(wall)))
     return walls
+
+
+#: The fewest facets a cluster holds before its creases are checked by
+#: array for whether they can grow (:func:`_creases_that_may_grow`); a
+#: smaller one is walked crease by crease, which costs less.
+_CREASE_CHECK_MIN_FACETS: int = 256
+
+#: A cluster holding at least one in this many of the mesh's triangles reads
+#: membership from one flag per triangle; a smaller one by searching its
+#: own sorted members, so no small cluster pays for the whole mesh.
+_CREASE_MASK_SHARE: int = 64
+
+#: Creases :func:`_creases_that_may_grow` checks at once.
+_CREASE_CHECK_BLOCK: int = 1 << 18
+
+
+def _creases_that_may_grow(
+    cluster: list[int], across: _ClusterEdges, cos_threshold: float,
+) -> list[int] | None:
+    """The edge slots of *cluster*, in the order :func:`_prismatic_walls`
+    meets them, whose crease may grow a wall past its own two facets: one of
+    those facets has another edge the walk would cross.  A crease with no
+    such edge is its two facets alone, too few to be a wall, and is not
+    walked.  Read from whole arrays, with a hair of slack in every test so
+    no crease that grows is left out; ``None`` when the edges are not held
+    as arrays or the cluster is small enough to walk whole, and every crease
+    is walked."""
+    import numpy as np
+
+    if not isinstance(across.other, memoryview) or len(cluster) < _CREASE_CHECK_MIN_FACETS:
+        return None
+    other = np.asarray(across.other)
+    cos = np.asarray(across.cos)
+    dirs = np.asarray(across.dirs).reshape(-1, 3)
+    slack = 1e-12
+    fold = (cos >= cos_threshold - slack) & (cos < _FLAT_COS + slack)
+    flat = ~(cos < _FLAT_COS - slack)  # a cosine that is not a number is walked as flat, as the walk reads it
+    parallel_cos = _PARALLEL_COS - slack
+    seeds = np.asarray(cluster, dtype=np.int64)
+    if len(seeds) * _CREASE_MASK_SHARE >= len(other) // 3:
+        # A cluster that is a good share of the mesh: one flag per triangle.
+        flags = np.zeros(len(other) // 3, dtype=bool)
+        flags[seeds] = True
+
+        def member(at: np.ndarray) -> np.ndarray:
+            return flags[np.maximum(at, 0)] & (at >= 0)
+    else:
+        in_order = np.sort(seeds)
+
+        def member(at: np.ndarray) -> np.ndarray:
+            where = np.minimum(np.searchsorted(in_order, at), len(in_order) - 1)
+            return in_order[where] == at
+
+    slots = (seeds[:, None] * 3 + np.arange(3)).reshape(-1)
+    across_slot = other[slots]
+    slots = slots[(across_slot >= 0) & member(across_slot) & fold[slots]]
+    grows = np.zeros(len(slots), dtype=bool)
+    for start in range(0, len(slots), _CREASE_CHECK_BLOCK):
+        block = slots[start:start + _CREASE_CHECK_BLOCK]
+        seed, o = block // 3, other[block]
+        axis = dirs[block]
+
+        def parallel(at_slots: np.ndarray, axis: np.ndarray = axis) -> np.ndarray:
+            d = dirs[at_slots]
+            return np.abs(d[:, 0] * axis[:, 0] + d[:, 1] * axis[:, 1] + d[:, 2] * axis[:, 2]) >= parallel_cos
+
+        for at in (seed, o):
+            for j in range(3):
+                edge = at * 3 + j
+                nxt = other[edge]
+                on = np.maximum(nxt, 0)
+                crossed = (nxt >= 0) & member(nxt) & (nxt != seed) & (nxt != o)
+                folds_along = np.zeros(len(block), dtype=bool)
+                for k in range(3):
+                    beyond = on * 3 + k
+                    folds_along |= (other[beyond] >= 0) & fold[beyond] & parallel(beyond)
+                grows[start:start + len(block)] |= crossed & ((fold[edge] & parallel(edge)) | (flat[edge] & folds_along))
+    return slots[grows].tolist()
 
 
 def _goes_all_the_way_round(
