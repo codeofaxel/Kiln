@@ -1,6 +1,6 @@
 """The slicer a slice for more than one nozzle is made with.
 
-A printer's nozzle record may name its maker's slicer under ``maker_slicer``:
+A printer's nozzle record names its maker's slicer under ``maker_slicer``:
 the slicer's name, the oldest version of it Kiln accepts for a slice for more
 than one nozzle, and where that slicer's own bundled settings keep the
 printer's start, change and end routines.  This module answers, for one slice:
@@ -22,7 +22,9 @@ printer's start, change and end routines.  This module answers, for one slice:
 
 Every slice door reaches this through :func:`kiln.slicer.slice_file`.  What
 a slicer that cannot make the slice does -- a slice for one nozzle instead,
-or a refusal -- is decided in :func:`_miss` alone.  Kiln never installs a
+or a refusal -- is decided in :func:`_miss` alone.  A record that names no
+slicer Kiln knows is refused (:func:`named_slicer`), never sliced with a
+slicer it does not name.  Kiln never installs a
 slicer: it names the page and, on a Mac with Homebrew, the command.
 """
 
@@ -41,9 +43,6 @@ from typing import Any
 
 #: The refusal's code at every door.
 NEEDS_MAKER_SLICER = "MULTI_NOZZLE_NEEDS_MAKER_SLICER"
-
-#: The slicer a record that names none is sliced with.
-_UNNAMED = "bambu_studio"
 
 
 @dataclass(frozen=True)
@@ -134,12 +133,20 @@ def _older(version: Any, floor: Any) -> bool:
 
 def named_slicer(nozzles: Any) -> dict[str, Any]:
     """What the nozzle record *nozzles* says of its maker's slicer:
-    ``{"name", "min_version", "routines"}``.  A record that names none, or a
-    slicer Kiln does not know, reads as the default with no version floor
-    and no routines."""
+    ``{"name", "min_version", "routines"}``.
+
+    Raises :class:`kiln.slicer.NozzleMapError` (:data:`NEEDS_MAKER_SLICER`)
+    when the record names no slicer, or one Kiln does not know: no slice for
+    more than one nozzle is made with a slicer the record does not name."""
     raw = nozzles.get("maker_slicer") if isinstance(nozzles, Mapping) else None
     if not isinstance(raw, Mapping) or raw.get("name") not in _KNOWN:
-        return {"name": _UNNAMED, "min_version": None, "routines": None}
+        from kiln.slicer import NozzleMapError
+
+        raise NozzleMapError(
+            "This print is for more than one nozzle, and this printer's record does not name "
+            "the slicer that makes such a print, so nothing was sliced.",
+            code=NEEDS_MAKER_SLICER,
+        )
     routines = raw.get("routines")
     return {
         "name": raw["name"],
@@ -222,7 +229,8 @@ def ready_for(nozzles: Any) -> Miss | None:
     """Whether the slicer the nozzle record *nozzles* names is installed on
     this computer and new enough to slice for more than one nozzle:
     ``None`` when it is, else the :class:`Miss`.  Reads no settings bundle
-    and slices nothing."""
+    and slices nothing.  A record that names no slicer raises as
+    :func:`named_slicer` does."""
     named = named_slicer(nozzles)
     slicer_id, floor = named["name"], named["min_version"]
     info = _find(slicer_id)
@@ -286,9 +294,10 @@ def slicer_for_several_nozzles(
     Raises :class:`kiln.slicer.OneNozzleInstead` (:data:`NEEDS_MAKER_SLICER`)
     when the record's slicer is not installed or is older than the record
     accepts, or its settings bundle is; and
-    :class:`kiln.slicer.NozzleMapError` (the same code) when the caller
-    named another slicer while the record's is installed, or the record's
-    slicer does not hold the printer's routines.
+    :class:`kiln.slicer.NozzleMapError` (the same code) when the record
+    names no slicer Kiln knows, the caller named another slicer while the
+    record's is installed, or the record's slicer does not hold the
+    printer's routines.
     """
     named = named_slicer(nozzles)
     slicer_id = named["name"]

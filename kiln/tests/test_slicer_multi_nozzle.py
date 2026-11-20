@@ -61,6 +61,7 @@ _SETTINGS = {
 _NOZZLES = {
     "kind": "fixed_pair",
     "sliced_as": 2,
+    "maker_slicer": {"name": "bambu_studio"},
     "preset_extras": {
         "machine": {"example_machine_key": ["a", "b"], "gcode_flavor": "klipper"},
         "process": {"example_process_key": "p"},
@@ -1119,6 +1120,7 @@ _ADD_ON = {
     ],
     "switch_seconds": 4.0,
     "filament_change_seconds": 40,
+    "maker_slicer": {"name": "bambu_studio"},
 }
 
 

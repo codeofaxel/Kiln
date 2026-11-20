@@ -50,6 +50,7 @@ _SAID_ELSEWHERE = {
 _TWO_SIZES = slicer_profiles.fitted_record(
     {
         "kind": "fixed_pair", "stock": 2, "max": 2, "sliced_as": 2, "bed": "0x0,200x0,200x200,0x200",
+        "maker_slicer": {"name": "bambu_studio"},
         "positions": [
             {"id": 1, "reach": "0x0,180x0,180x200,0x200", "max_height": 200},
             {"id": 2, "reach": "20x0,200x0,200x200,20x200", "max_height": 200},

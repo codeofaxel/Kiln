@@ -28,6 +28,7 @@ from kiln import maker_slicer, maker_slicer_notes, print_lineage, slicer_profile
 from kiln.maker_slicer import (
     NEEDS_MAKER_SLICER,
     named_slicer,
+    ready_for,
     several_nozzle_profile,
     slicer_for_several_nozzles,
     with_tower_position,
@@ -148,8 +149,20 @@ class TestTheNamedSlicer:
         assert named["routines"]["vendor"] == "Invented"
 
     @pytest.mark.parametrize("record", [{}, None, {"maker_slicer": {"name": "nobody's"}}, {"maker_slicer": "x"}])
-    def test_a_record_that_names_none_reads_as_the_default(self, record):
-        assert named_slicer(record) == {"name": "bambu_studio", "min_version": None, "routines": None}
+    def test_a_record_that_names_no_slicer_kiln_knows_is_refused_never_guessed(self, record):
+        with pytest.raises(NozzleMapError) as refused:
+            named_slicer(record)
+        assert not isinstance(refused.value, OneNozzleInstead)
+        assert refused.value.code == NEEDS_MAKER_SLICER
+        said = str(refused.value)
+        # One plain sentence, naming no slicer.
+        assert said.endswith(".") and ". " not in said and "nothing was sliced" in said
+        assert not any(known.said in said for known in maker_slicer._KNOWN.values())
+
+    def test_whether_a_slicer_is_ready_is_never_guessed_either(self):
+        with pytest.raises(NozzleMapError) as refused:
+            ready_for({"kind": "fixed_pair", "sliced_as": 2})
+        assert refused.value.code == NEEDS_MAKER_SLICER
 
 
 class TestWhichSlicerMakesTheSlice:
@@ -186,12 +199,12 @@ class TestWhichSlicerMakesTheSlice:
         assert "PrusaSlicer" in said and "install" in said and "nothing was sliced" in said
         assert "Bambu Studio" not in said
 
-    def test_a_record_that_names_none_asks_for_the_default(self, tmp_path):
+    @pytest.mark.parametrize("current", [_prusa(), _studio()])
+    def test_a_record_that_names_none_is_refused_whatever_slicer_is_in_hand(self, tmp_path, current):
         with pytest.raises(NozzleMapError) as refused:
-            self._choose(tmp_path, _prusa(), record={"kind": "fixed_pair", "sliced_as": 2})
-        assert "Bambu Studio" in str(refused.value)
-        chosen = self._choose(tmp_path, _studio(), record={"kind": "fixed_pair", "sliced_as": 2})
-        assert chosen.sliced_with["slicer"] == "bambu_studio" and chosen.routines == {}
+            self._choose(tmp_path, current, record={"kind": "fixed_pair", "sliced_as": 2}, found=_studio())
+        assert not isinstance(refused.value, OneNozzleInstead)
+        assert refused.value.code == NEEDS_MAKER_SLICER and "Bambu Studio" not in str(refused.value)
 
     def test_a_slicer_older_than_the_record_accepts_is_refused_with_both_versions(self, tmp_path):
         with pytest.raises(NozzleMapError) as refused:
@@ -433,6 +446,13 @@ class TestTheSlice:
             "Update PrusaSlicer to 2.5.0 or newer (free) and Kiln uses both nozzles on its own: "
             "prusa3d.com/p/prusaslicer."
         )
+
+    def test_a_record_that_names_no_slicer_is_refused_and_nothing_runs(self, tmp_path, notes):
+        record = {key: value for key, value in _RECORD.items() if key != "maker_slicer"}
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, _never_runs, slicer=_studio(), found=_studio(), record=record)
+        assert not isinstance(refused.value, OneNozzleInstead)
+        assert refused.value.code == NEEDS_MAKER_SLICER
 
     def test_a_missing_makers_slicer_slices_with_the_slicer_in_hand(self, tmp_path, notes):
         record = {**_RECORD, "maker_slicer": {"name": "bambu_studio"}}
