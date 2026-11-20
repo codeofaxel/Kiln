@@ -538,14 +538,9 @@ def _sharing() -> bool:
 
 
 def _has_pro() -> bool:
-    """True when the caller's plan is Pro or above (see ``kiln.licensing``)."""
-    try:
-        from kiln.licensing import LicenseTier, check_tier
-
-        allowed, _ = check_tier(LicenseTier.PRO)
-        return bool(allowed)
-    except Exception:  # noqa: BLE001 -- an unreadable plan is Free
-        return False
+    """True when the caller's plan is Pro or above (:func:`kiln.bench.has_pro`,
+    the one reading the offers use too)."""
+    return bench.has_pro()
 
 
 def _learned_lines(session: dict[str, Any]) -> list[str]:
