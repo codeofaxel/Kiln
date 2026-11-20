@@ -1,34 +1,8 @@
 """Walk a home or a park on a printer one confirmed step at a time.
 
-A walk is a move Kiln's servers hand out a single step at a time for a
-printer its owner is standing at.  This module is the hands and the floor:
-it checks the machine before it asks, asks for exactly one step, reads the
-step before it sends it, sends it, and says what the person should have
-seen.  The next step is asked for only once the person says the last one
-did what it described.
-
-The floor, checked here on every step, before anything is asked or sent:
-
-* the printer's own report names the model it is set up as;
-* the printer is idle;
-* the plate is empty by Kiln's plate record AND by the person's word;
-* no heater is set, and the nozzle and bed read cold;
-* the printer states its firmware version;
-* the step asked for is the next one, and the person confirmed the last.
-
-A step is sent only when it says a person at Kiln has read its sequence,
-and only when every line in it is one a walk may carry, written exactly as
-it will be sent; any other line is refused here whatever handed it over.
-Nothing in a walk holds the printer: its own stop, pause, cancel and power
-switch are never blocked, and no step waits on Kiln to be stopped.
-
-Three doors, for the offer that sends a person into a walk:
-
-* :func:`walk_offer` -- is a walk on offer for this printer and move;
-* :func:`walk_step`  -- send one step, and describe it;
-* :func:`walk_went_wrong` -- the person says a step did not do what it
-  described.  A fault the printer raises during a step is reported the same
-  way without being asked.
+Each step is sent only to the model it is set up as, idle, cold and with
+an empty plate, carrying only the allowed words, and says what the person
+should see.  The printer's own stop, pause and power switch always work.
 """
 
 from __future__ import annotations
@@ -66,11 +40,9 @@ STEP_WATCH_MAX_S: float = 60.0
 #: A walk nobody has advanced for this long starts again from its first step.
 WALK_IDLE_S: float = 30 * 60
 
-#: The only command words a walk step may carry, each with the only letters
-#: it may carry them with.  Anything not named here is refused: a heater or
-#: extruder word, a tool change, a macro, a second home, a word this list has
-#: never seen.  A letter mapped to ``None`` takes a plain number; a tuple
-#: names the only values it takes; ``""`` in a tuple is the letter alone.
+#: The only words a walk step may carry, each with the only letters it may
+#: carry: ``None`` takes a plain number, a tuple names the only values
+#: (``""`` is the letter alone).  Anything else is refused.
 _NUMBER = re.compile(r"-?(?:\d{1,5}(?:\.\d{1,4})?)")
 #: The largest size a number may have, by word and letter: no desktop
 #: printer travels further, moves faster or drives a motor harder.
@@ -94,13 +66,10 @@ WALK_M221_SHAPES = (("S",), ("R",), ("X0", "Y0", "Z0"))
 
 
 def _line_is_allowed(line: Any) -> bool:
-    """Whether *line* is one a walk step may carry, written the one way it is sent.
-
-    A line is read as it will be sent: capitals, single spaces, nothing else.
-    A line number, a checksum, a comment, a tab, a carriage return, any
-    control or non-ASCII character, words run together, or lowercase makes it
-    a different line from the one that was read, and it is refused.
-    """
+    """Whether *line* is one a walk step may carry, written the one way it is
+    sent: capitals and single spaces only.  Anything that would make the sent
+    line differ from the one read (a number, checksum, comment, control or
+    non-ASCII character, lowercase) is refused."""
     if not isinstance(line, str) or not line or len(line) > 64:
         return False
     if any(ord(ch) < 0x20 or ord(ch) > 0x7E for ch in line):
@@ -336,19 +305,11 @@ def walk_offer(adapter: Any, verb: str) -> dict[str, Any]:
 
 
 def walk_step(adapter: Any, verb: str, step: int, *, plate_clear: Any = None, saw_previous: Any = None) -> dict[str, Any]:
-    """Send step *step* of the walk of *verb* and describe it.
-
-    :param plate_clear: ``True`` only when the person has looked and the
-        plate is empty.  Asked on every step.
-    :param saw_previous: ``True`` only when the person says the step before
-        this one did what it described.  Read from the second step on.
-
-    Returns ``{"success": True, "step_sent", "steps_total", "label",
-    "you_should_see", "stops_when", "confirm", "if_not", "stop", "next_step"}``.
-    Raises :class:`WalkRefused` (nothing was sent) when the floor, or Kiln's
-    servers, say no.  A fault during the step comes back ``success: False``
-    with what was reported; the walk is over.
-    """
+    """Send step *step* of the walk of *verb* and describe it.  *plate_clear*
+    is the person's word that the plate is empty (every step); *saw_previous*
+    that the last step did what it said (from step 2).  Raises
+    :class:`WalkRefused` with nothing sent when the floor or Kiln's servers
+    say no; a fault during the step ends the walk (``success: False``)."""
     from kiln.printers import motion_plan as _exec
 
     if verb not in WALK_VERBS:

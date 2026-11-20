@@ -1253,6 +1253,8 @@ def _gcode_of(path: str) -> str | None:
     a printer's 3MF, written beside the session.  ``None`` when it is neither."""
     import zipfile
 
+    from kiln.untrusted_zip import UntrustedArchiveError, open_untrusted_zip
+
     local = Path(str(path)).expanduser()
     if not local.is_file():
         return None
@@ -1261,7 +1263,7 @@ def _gcode_of(path: str) -> str | None:
     if local.suffix.lower() != ".3mf":
         return None
     try:
-        with zipfile.ZipFile(local) as archive:
+        with open_untrusted_zip(local) as archive:
             inside = sorted(n for n in archive.namelist() if n.lower().endswith(".gcode"))
             if not inside:
                 return None
@@ -1269,7 +1271,7 @@ def _gcode_of(path: str) -> str | None:
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(archive.read(inside[0]))
             return str(out)
-    except (OSError, zipfile.BadZipFile, KeyError):
+    except (OSError, zipfile.BadZipFile, UntrustedArchiveError, KeyError):
         return None
 
 
