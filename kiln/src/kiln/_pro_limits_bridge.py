@@ -8,8 +8,12 @@ person's readings, say back what is on record) is answered by Kiln's servers
 (https://kiln3d.com), one step per ask, and kept in the person's own Kiln
 account.  This module is the courier: it sends the step, sends the sliced
 files up with it, brings the test print's files back to this computer, and
-says why when no answer came.  Nothing here works anything out; a caller
-that finds itself doing so is on the wrong side of this file.
+says why when no answer came.  Every step carries this install's printers
+(their names, models and which is the default: the same ``printer_facts``
+reading every served printer tool sends), so the servers file what is learned
+under the printer's own name and find it again by name or by model.  Nothing
+here works anything out; a caller that finds itself doing so is on the wrong
+side of this file.
 
 The lesson is free with a Kiln account.  What a kept test print changes is
 the servers' answer to give, and their reply says it in the person's words.
@@ -51,6 +55,8 @@ LESSON_CODES = frozenset({
     "OPENSCAD_NOT_FOUND", "COMPILE_TIMEOUT", "COMPILE_FAILED", "TEST_NOT_FOUND", "TEST_MISMATCH",
     "INVALID_READING", "GCODE_NOT_THIS_PRINT", "PATH_NOT_AVAILABLE",
 })
+#: The reading every step carries: this install's printers, as plain facts.
+_READS = [{"kind": "printer_facts"}]
 #: What each step sends beside the step's name, and nothing else.
 _ARGS = (
     "printer_id", "material", "coupon", "test_id", "readings", "nozzle_mm", "layer_height_mm", "fan_percent",
@@ -86,8 +92,16 @@ def ask(step: str, *, gcode_paths: list[str] | None = None, **args: Any) -> tupl
         if not bearer:
             code = served_answer.SESSION_EXPIRED_CODE if expired is not None else "KILN_ACCOUNT_NOT_PAIRED"
             return None, served_answer.Miss("signed_out", code)
+        from kiln import served_steps
+
         kwargs: dict[str, Any] = {"step": step}
         kwargs.update({k: v for k, v in args.items() if k in _ARGS and v is not None})
+        printers, refusal = served_steps.read_first(
+            WIRE_TOOL, _READS, printer_name=str(args.get("printer_id") or ""), call=kwargs,
+        )
+        if refusal is not None:
+            return None, served_answer.classify_answer(refusal) or served_answer.Miss("unanswered")
+        kwargs["step_results"] = printers
         if gcode_paths:
             kwargs[GCODE_PARAM] = list(gcode_paths)
             kwargs, refusal = served_makes.send_inputs(WIRE_TOOL, kwargs, {"files": {GCODE_PARAM: "many"}})

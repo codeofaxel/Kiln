@@ -649,6 +649,8 @@ def printer_bench(
             session = None
         if session is None and wanted == LIMITS:
             session = _limits_session(target_name, adapter, unit, plate_state.declared_model_of(adapter))
+            if session is None:
+                return _srv._error_dict(_NO_OWN_NAME, code="BENCH_NO_PRINTER_NAME")
         if session is None:
             printer_id = plate_state.declared_model_of(adapter)
             if not printer_id:
@@ -686,9 +688,9 @@ def printer_bench(
                 name = bench._display_name(printer_id)
                 lead = (f"Kiln already knows how the {name} moves its head. " if not blanks
                         else f"There is nothing more for a session to teach Kiln about how the {name} moves. ")
-                if limits_may_be_offered(unit):
-                    session = _limits_session(target_name, adapter, unit, printer_id, lead=lead)
-                    return _with_pictures(_advance(session, adapter, answer, gcode_paths))
+                follow = _limits_session(target_name, adapter, unit, printer_id, lead=lead)
+                if follow is not None and limits_may_be_offered(unit):
+                    return _with_pictures(_advance(follow, adapter, answer, gcode_paths))
                 return {"success": True, "step": "done", "printer_name": target_name, "learned": [],
                         "ask": "", "images": [],
                         "message": (f"Kiln already knows how {name} moves its head; there is nothing to teach it." if not blanks
@@ -1040,10 +1042,10 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
                            else "Nothing new was observed this time, so Kiln still assumes the worst for this printer.")),
             "kept_at": str(bench.bench_dir()),
         }
-        if limits_may_be_offered(session["unit"]):
+        follow = _limits_session(name, adapter, session["unit"], session["printer_id"], after_motion=True)
+        if follow is not None and limits_may_be_offered(session["unit"]):
             # The second lesson, offered once the first is done: a new
             # session, so the person's answer to it continues there.
-            follow = _limits_session(name, adapter, session["unit"], session["printer_id"], after_motion=True)
             _save_session(follow)
             done.update(ask=_limits_intro(follow), options=["yes", "later", "no"], lesson_offered=LIMITS,
                         next=("Relay the message, then the ask word for word, and call printer_bench again "
@@ -1079,11 +1081,36 @@ def limits_may_be_offered(unit: str | None) -> bool:
     return bool(unit) and bench.may_offer(_limits_key(str(unit)), "lesson")
 
 
+#: Said when the printer has no name of its own to keep what it learns under.
+_NO_OWN_NAME = ("Kiln keeps what a printer's test print teaches under the printer's own name, and this one is "
+                "only Kiln's default. Give it a name with rename_printer, then call printer_bench again.")
+
+
+def _own_name(name: str) -> str | None:
+    """The name the person gave this printer, which is what its test prints
+    are kept under: never the ``default`` Kiln falls back to."""
+    from kiln.callers_printers import UNNAMED
+
+    if str(name or "").strip().lower() not in UNNAMED:
+        return str(name).strip()
+    try:
+        from kiln.printer_model_resolver import resolve_active_printer_name
+
+        return resolve_active_printer_name()
+    except Exception:  # noqa: BLE001 -- no name read is no name
+        return None
+
+
 def _limits_session(name: str, adapter: Any, unit: str, printer_id: str | None, *,
-                    after_motion: bool = False, lead: str = "") -> dict[str, Any]:
+                    after_motion: bool = False, lead: str = "") -> dict[str, Any] | None:
+    """A new second-lesson session, or ``None`` when the printer has no name
+    of its own to keep what it learns under."""
+    own = _own_name(name)
+    if not own:
+        return None
     bed = bench.bed_of(printer_id) if printer_id else None
     return {
-        "lesson": LIMITS, "printer_name": name, "printer_id": printer_id or "", "unit": unit,
+        "lesson": LIMITS, "printer_name": name, "own_name": own, "printer_id": printer_id or "", "unit": unit,
         "model_name": bench._display_name(printer_id) if printer_id else name,
         "bed_mm": list(bed) if bed else None, "firmware": bench.firmware_of(adapter),
         "step": "limits_intro", "after_motion": after_motion, "lead": lead, "coupon": FIRST_COUPON,
@@ -1242,6 +1269,7 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
 
     step = session["step"]
     name = session["printer_name"]
+    own = session.get("own_name") or _own_name(name) or name
 
     # ---- the offer ---------------------------------------------------------
     if step == "limits_intro":
@@ -1294,7 +1322,7 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
         nozzle = float(session["nozzle_mm"])
         session["layer_height_mm"] = _layer_for(nozzle)
         made, miss = bridge.ask(
-            "make", printer_id=name, material=session["material"], coupon=session["coupon"],
+            "make", printer_id=own, material=session["material"], coupon=session["coupon"],
             nozzle_mm=nozzle, layer_height_mm=session["layer_height_mm"], firmware=session.get("firmware"),
             printer_model=session.get("printer_id") or None, bed_mm=session.get("bed_mm"),
         )
@@ -1334,7 +1362,7 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
             if len(files) != len(plates) or not all(files):
                 return _reply(session, f"Kiln needs the sliced file of each plate, in plate order: {len(plates)}.",
                               options=["skip"], print_files=[p["stl_path"] for p in plates])
-            read, miss = bridge.ask("sliced", printer_id=name, material=session["material"],
+            read, miss = bridge.ask("sliced", printer_id=own, material=session["material"],
                                     test_id=session["test_id"], gcode_paths=files)
             if miss is not None:
                 return _limits_missed(session, miss, "read the sliced files")
@@ -1444,7 +1472,7 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
 
     # ---- the readings, kept in the person's account -----------------------------------
     if step == "limits_report":
-        said, miss = bridge.ask("report", printer_id=name, material=session["material"],
+        said, miss = bridge.ask("report", printer_id=own, material=session["material"],
                                 test_id=session["test_id"], readings=session["readings"],
                                 spool_dried=session.get("spool_dried"))
         if miss is not None:

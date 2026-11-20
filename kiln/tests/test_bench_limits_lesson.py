@@ -335,6 +335,27 @@ class TestWhatThePersonIsToldWhenTheServersCannotAnswer:
         assert server.servers.asked[-1][1]["nozzle_mm"] == 0.6
 
 
+class TestThePrintersOwnName:
+    def test_a_printer_reached_as_the_default_is_taught_under_its_own_name(self, server, monkeypatch):
+        import kiln.printer_model_resolver as resolver
+
+        monkeypatch.setattr(resolver, "resolve_active_printer_name", lambda: "garage")
+        out, _ = _split(server.tool.printer_bench(printer_name="default", lesson="limits"))
+        assert out["step"] == "limits_intro"
+        server.tool.printer_bench(printer_name="default", answer="yes")
+        server.tool.printer_bench(printer_name="default", answer="PLA")
+        step, sent = server.servers.asked[-1]
+        assert step == "make" and sent["printer_id"] == "garage" and sent["printer_model"] == "bambu_a1"
+
+    def test_a_printer_with_no_name_of_its_own_is_told_how_to_give_it_one(self, server, monkeypatch):
+        import kiln.printer_model_resolver as resolver
+
+        monkeypatch.setattr(resolver, "resolve_active_printer_name", lambda: None)
+        out = server.tool.printer_bench(printer_name="default", lesson="limits")
+        assert out["success"] is False and out["error"]["code"] == "BENCH_NO_PRINTER_NAME"
+        assert "rename_printer" in out["error"]["message"] and server.servers.asked == []
+
+
 class TestTheWayIn:
     def test_a_printer_whose_moves_kiln_knows_is_offered_the_second_lesson(self, server):
         out = _step(server)
@@ -371,6 +392,12 @@ class TestTheCourier:
             return json.loads(json.dumps(state["answer"]))
 
         monkeypatch.setattr(srv, "_pro_api_call", call)
+        # This install's printers, as its config names them.
+        monkeypatch.setattr(srv, "_read_config_printers", lambda: {
+            "garage": {"type": "bambu", "printer_model": "bambu_a1"},
+            "shed": {"type": "bambu", "printer_model": "bambu_a1"},
+        })
+        monkeypatch.setattr(srv, "_resolve_effective_printer_name", lambda name=None: "garage")
         uploaded: list[str] = []
 
         def upload(local, *, on_miss=None):
@@ -394,6 +421,17 @@ class TestTheCourier:
         assert sent["file_tokens"] == {"gcode_paths": [{"token": "tok0000000000000001", "name": "plate_1.gcode"},
                                                        {"token": "tok0000000000000002", "name": "plate_2.gcode"}]}
         assert wire.uploaded == ["plate_1.gcode", "plate_2.gcode"]
+
+    def test_every_step_carries_this_installs_printers(self, wire):
+        """So the servers file what is learned under the printer's own name,
+        and a later answer asked by model, or with no printer named, finds
+        the right one of the person's printers."""
+        for step in ("make", "sliced", "report", "kept"):
+            bridge.ask(step, printer_id="garage", material="PLA")
+            facts = wire.calls[-1]["step_results"]["printer_facts"]["data"]
+            assert [(p["name"], p["model"], p["is_default"]) for p in facts["printers"]] == [
+                ("garage", "bambu_a1", True), ("shed", "bambu_a1", False)]
+            assert wire.calls[-1]["printer_id"] == "garage"
 
     def test_signed_out_nothing_is_sent(self, wire, monkeypatch):
         import kiln.server as srv
