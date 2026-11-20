@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-20T19:13:25.930761+00:00",
+  "generated": "2026-11-20T21:50:03.922767+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -26393,7 +26393,7 @@
             "default": "",
             "title": "Printer Id",
             "type": "string",
-            "description": "Optional active-printer identifier.  When supplied, the food-safety check ALSO consults the printer's recorded nozzle.  A brass nozzle hard-refuses the pet bowl regardless of how food-safe the filament is \u2014 lead trace in brass alloys is the single biggest practical risk for anything that touches a mouth.  Omit to skip the nozzle check (material-only gate still applies)."
+            "description": "The printer that will print the bowl.  The food-safety check ALSO reads that printer's recorded nozzle: a brass nozzle refuses the pet bowl however food-safe the filament is (trace lead in brass is the biggest practical risk for anything that touches a mouth).  Omitted, the printer Kiln picks when none is named (the only one it knows of, else the one it is working with or the default; several with none chosen, it asks which), named in the reply.  A nozzle Kiln has no record of is said as unknown, to check."
           },
           "include_step": {
             "default": false,
@@ -26513,7 +26513,7 @@
             "default": "",
             "title": "Printer Id",
             "type": "string",
-            "description": "Optional id of the printer that will print the tag.  When its nozzle is on record and is brass, the result carries a warning to swap it for this mouthed part; omitted, or with no nozzle on record, only the material check applies."
+            "description": "The printer that will print the tag.  Its recorded nozzle is read: brass carries a warning to swap it for this mouthed part, and a worn brass tip refuses it. Omitted, the printer Kiln picks when none is named (the only one it knows of, else the one it is working with or the default; several with none chosen, it asks which), named in the reply.  A nozzle Kiln has no record of is said as unknown, to check."
           },
           "include_step": {
             "default": false,
