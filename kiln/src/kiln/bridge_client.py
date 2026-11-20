@@ -204,7 +204,10 @@ def handle_relay_request(
     call (see :func:`_consent_from_authority`), and only after the bytes
     that arrived hash to the bytes that were approved.  Bytes that differ
     are refused before any tool runs: a consent by file name would let a
-    re-generated model print under the old approval.
+    re-generated model print under the old approval.  The person's own
+    approval of a print may also carry their word to print it anyway or
+    their yes to nozzles of different sizes; those become the slice's
+    keywords here (:func:`owner_words`), and never arrive as arguments.
 
     The list: a tool outside :data:`BRIDGE_ARGUMENTS`, or an argument its
     entry does not name, is refused here before anything else runs (no fetch,
@@ -234,6 +237,8 @@ def handle_relay_request(
                 from kiln.print_consent import set_consent
 
                 reset = set_consent(consent)
+            if tool == "slice_and_print":
+                args.update(owner_words(authority))
         result = call_tool(tool, args)
         # The answer leaves this computer here, whichever tool gave it.
         return {"request_id": request_id, "ok": True, "result": scrub_relayed(result)}
@@ -249,6 +254,27 @@ def handle_relay_request(
             from kiln.print_consent import reset_consent
 
             reset_consent(reset)
+
+
+def owner_words(block: Any) -> dict[str, Any]:
+    """The slice keywords a relayed print's authority block carries for the
+    person who approved it: the word to print anyway an abrasive filament
+    through a nozzle that is not wear-resistant (``soft_nozzle_confirmed``)
+    and the yes to nozzles of different sizes for this print
+    (``mixed_nozzle_experiment``), as :func:`kiln.slicer.owner_asks` passes
+    them.  Only on the person's own approval of this one print, said by that
+    person; an agent printing under it, a delegation, or anything else
+    carries neither, and the slice refuses as it would have."""
+    if not isinstance(block, dict) or str(block.get("kind") or "") != "approval":
+        return {}
+    grantor = str(block.get("grantor") or "")
+    if not grantor or str(block.get("said_go_by") or grantor) != grantor:
+        return {}
+    from kiln.slicer import owner_asks
+
+    return owner_asks(
+        block.get("soft_nozzle_confirmed") is True, None, block.get("mixed_nozzle_experiment") is True,
+    )
 
 
 class NotTheApprovedBytes(RuntimeError):
@@ -1432,6 +1458,11 @@ _CARD_PRINT_TIME_MAX_S = 30 * 24 * 3600
 _CARD_FILAMENT_MAX_G = 10_000.0
 _CARD_PRINTER_STATES = frozenset({"ready", "busy", "offline"})
 _CARD_ASKED_FROM = frozenset({"mac", "windows", "linux"})
+#: The longest row about the print itself the card carries whole.
+_CARD_ROW_MAX = 400
+#: The rows about the print itself a card carries, as
+#: :func:`kiln.print_consent.what_the_print_is` names them.
+CARD_ROWS = ("experimental", "colours")
 
 
 def _card_text(value: Any) -> str:
@@ -1481,6 +1512,9 @@ class AskCard:
     printer_state: str = ""
     #: The hosted stage's link for the print file's own bytes.
     stage_url: str = ""
+    #: The rows the person's approval carries about the print itself, by
+    #: name (:data:`CARD_ROWS`), in the words every door shows them in.
+    rows: Mapping[str, str] | None = None
 
     def fields(self) -> dict[str, Any]:
         """The fields to send: each one present only when it holds a value
@@ -1511,6 +1545,13 @@ class AskCard:
         url = self.stage_url if isinstance(self.stage_url, str) else ""
         if url.startswith(("https://", "http://")) and not any(c.isspace() for c in url):
             out["stage_url"] = url
+        rows = self.rows if isinstance(self.rows, Mapping) else {}
+        for name in CARD_ROWS:
+            # A row is said whole or not at all: half a sentence about
+            # what the print is would say something else.
+            said = _card_text(rows.get(name))
+            if said and len(said) <= _CARD_ROW_MAX:
+                out[name] = said
         return out
 
 

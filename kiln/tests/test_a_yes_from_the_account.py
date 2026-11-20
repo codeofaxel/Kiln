@@ -1415,3 +1415,60 @@ def test_the_card_sends_only_what_fits_the_route():
 )
 def test_the_computer_an_ask_comes_from(platform, word):
     assert bridge_client.asked_from(platform) == word
+
+
+def _mixed_sizes_gcode(path: pathlib.Path) -> pathlib.Path:
+    """A sliced file that states two nozzle sizes: an experimental print."""
+    path.write_text("G28\nG1 X1 Y1 E1\n; CONFIG_BLOCK_START\n; nozzle_diameter = 0.4,0.6\n; CONFIG_BLOCK_END\n")
+    return path
+
+
+def test_every_door_a_person_reads_says_what_the_print_is(signed_in, tmp_path, monkeypatch, observed):
+    """The approval dialog, the screen's banner and the account's card each
+    carry the experimental row, in the words the dialog shows it in."""
+    from kiln.print_consent import what_the_print_is
+
+    model = _mixed_sizes_gcode(tmp_path / "pair.gcode")
+    [(name, row)] = what_the_print_is(model.name, str(model)).items()
+    assert name == "experimental" and row.startswith("This print uses nozzles of different sizes")
+    shown: list[screen_code.Issued] = []
+    monkeypatch.setattr(screen_code, "_show_hook", lambda issued: shown.append(issued) or True)
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
+        mock.add(responses.GET, MAY_I, json={"success": True, "allowed": False, "authority": None, "pending": None})
+        mock.add(responses.POST, PENDING, json={"success": True, "pending": {
+            "id": "pa_1", "expires_at": time.time() + 600, "page": "/monitor", "state": "waiting", "repeat": False,
+        }})
+        mock.add(responses.POST, f"{PENDING}/pa_1/withdraw", json={"success": True})
+        _ask(model)
+        card = json.loads(next(c for c in mock.calls if c.request.url == PENDING).request.body)
+        asked: list[str] = []
+
+        async def no(ctx, message, **kw):
+            asked.append(message)
+            return print_consent.DialogAnswer("decline")
+
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+        monkeypatch.setattr(server, "ask_user_to_confirm", no)
+        with pytest.raises(RuntimeError, match="declined"):
+            _ask(model)
+    assert card["experimental"] == row and "colours" not in card
+    _title, _subtitle, message = screen_code.banner_text(shown[0])
+    assert message.startswith(f"Experimental: {row} Type the code")
+    assert f"  Experimental: {row}" in asked[0]
+
+
+@responses.activate
+def test_a_print_that_is_nothing_special_carries_no_rows(signed_in, model, observed):
+    _may_i()
+    _held()
+    _ask(model)
+    body = _posted()
+    assert "experimental" not in body and "colours" not in body
+
+
+def test_a_row_is_sent_whole_or_not_at_all():
+    said = "This print uses nozzles of different sizes at once (0.4 mm and 0.6 mm)."
+    assert bridge_client.AskCard(rows={"experimental": said}).fields() == {"experimental": said}
+    assert bridge_client.AskCard(rows={"colours": "one\ncolour"}).fields() == {"colours": "one colour"}
+    assert bridge_client.AskCard(rows={"experimental": "x" * 401}).fields() == {}
+    assert bridge_client.AskCard(rows={"experimental": 7, "other": "words"}).fields() == {}
