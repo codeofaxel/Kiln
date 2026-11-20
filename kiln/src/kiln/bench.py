@@ -111,9 +111,9 @@ __all__ = [
     "draw_head_sketch", "draw_zones", "ended_block", "fingerprint_of", "firmware_of", "gain_sentence",
     "head_observation", "hold_kind", "keep_observation", "lesson_for", "logged_block", "logs_positions", "may_offer",
     "note_learned", "note_offer", "observation", "observations_for_request", "observations_of", "offer",
-    "offer_after_registration", "offer_fields", "offer_for", "parse_lift", "parse_zone", "position_of",
-    "position_reading", "print_footprint", "refusal_blanks", "send_after_heartbeat", "send_pending", "sharing",
-    "take_learned", "unit_from_machine", "unit_of", "way_back", "zone_of", "zone_rect",
+    "offer_after_first_print", "offer_after_registration", "offer_fields", "offer_for", "parse_lift", "parse_zone",
+    "position_of", "position_reading", "print_footprint", "refusal_blanks", "send_after_heartbeat", "send_pending",
+    "sharing", "take_news", "unit_from_machine", "unit_of", "way_back", "zone_of", "zone_rect",
 ]
 
 
@@ -712,7 +712,7 @@ def _learned_path() -> Path:
 
 def note_learned(adapter: Any, printer_id: str | None, block: str) -> None:
     """A real print taught Kiln *block* on this printer: counted, and kept
-    to be said once on the person's next reply (:func:`take_learned`).
+    to be said once on the person's next reply (:func:`take_news`).
     Never raises."""
     if block not in _LEARNED_VERBS:
         return
@@ -720,11 +720,7 @@ def note_learned(adapter: Any, printer_id: str | None, block: str) -> None:
     try:
         unit = unit_of(adapter)
         name = _display_name(printer_id) if printer_id else "printer"
-        try:
-            pending = json.loads(_learned_path().read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            pending = []
-        pending = [p for p in pending if isinstance(p, dict) and (p.get("unit"), p.get("block")) != (unit, block)]
+        pending = [p for p in _read_pending() if (p.get("unit"), p.get("block")) != (unit, block)]
         pending.append({"unit": unit, "name": name, "block": block, "at": _now()})
         path = _learned_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -733,21 +729,59 @@ def note_learned(adapter: Any, printer_id: str | None, block: str) -> None:
         _logger.debug("bench: what was learned is not kept to be said", exc_info=True)
 
 
-def take_learned() -> list[str]:
-    """What real prints taught Kiln since it was last said, one sentence
-    each, and forgotten once taken.  Never raises."""
-    path = _learned_path()
+def _read_pending() -> list[dict[str, Any]]:
     try:
-        pending = json.loads(path.read_text(encoding="utf-8"))
+        pending = json.loads(_learned_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
+    return [p for p in pending if isinstance(p, dict)] if isinstance(pending, list) else []
+
+
+def take_news() -> dict[str, list[Any]]:
+    """What is waiting to be said on the person's next reply, forgotten once
+    taken: ``said``, one sentence per thing a real print taught Kiln, and
+    ``offers``, the first lesson waiting to be offered after a printer's
+    first print (unit, printer and the blocks still missing).  Never raises."""
+    pending = _read_pending()
     with contextlib.suppress(OSError):
-        path.unlink()
-    said = []
-    for p in pending if isinstance(pending, list) else []:
-        if isinstance(p, dict) and p.get("block") in _LEARNED_VERBS:
-            said.append(f"Kiln learned how your {p.get('name') or 'printer'} {_LEARNED_VERBS[p['block']]}.")
-    return said
+        _learned_path().unlink()
+    said = [f"Kiln learned how your {p.get('name') or 'printer'} {_LEARNED_VERBS[p['block']]}."
+            for p in pending if p.get("block") in _LEARNED_VERBS]
+    offers = [p for p in pending if isinstance(p.get("missing"), list) and p.get("unit")]
+    return {"said": said, "offers": offers}
+
+
+def offer_after_first_print(adapter: Any, printer_name: str) -> None:
+    """After a printer's first print has taught what it can: when the first
+    lesson still has something to teach, keep its offer for the person's next
+    reply (:func:`take_news`), naming only what is still missing.  Nothing
+    missing is never offered, and is not asked again.  Offline, or a session
+    the service will not start yet, spends nothing: the next print asks again.
+    Once per printer (``first_print``).  Never raises."""
+    try:
+        from kiln.plate_state import declared_model_of
+
+        unit = unit_of(adapter)
+        if not may_offer(unit, "first_print"):
+            return
+        printer_id = declared_model_of(adapter)
+        if not printer_id:
+            return
+        blanks, verdict = blanks_for(adapter, printer_id)
+        if verdict is None or session_hold(verdict) is not None:
+            return
+        missing = [b for b in blanks if b in TEACHABLE]
+        if not missing:
+            note_offer(unit, answer="done")       # nothing a test print could teach: never offered
+            return
+        pending = [p for p in _read_pending() if not (p.get("unit") == unit and "missing" in p)]
+        pending.append({"unit": unit, "printer_id": printer_id, "printer_name": printer_name,
+                        "missing": missing, "at": _now()})
+        path = _learned_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(pending[-20:], indent=2), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        _logger.debug("bench: the offer after a first print was not kept", exc_info=True)
 
 
 def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] | None:

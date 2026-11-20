@@ -78,6 +78,8 @@ END_COMPLETION = 99.0
 END_MAX_S = 1200.0
 #: How often the end log asks the printer whether the print is over.
 END_STATE_EVERY_S = 2.0
+#: How often the decision after a print looks for the last log to be done.
+AFTER_PRINT_WAIT_S = 1.0
 
 #: The blocks this module watches, and what each is in the observation.
 BLOCKS = ("pause", "cancel", "resume", "end")
@@ -91,11 +93,13 @@ _PAUSED: dict[str, dict[str, Any]] = {}
 #: The print whose end is being (or was) logged, by unit, so a print's end
 #: is logged once.
 _ENDS: dict[str, str] = {}
+#: The machines whose first print's offer is being decided, by unit.
+_DECIDING: set[str] = set()
 #: Set while a watched command is being sent, so an adapter that hands the
 #: command on to another adapter (Creality's backend) is not logged twice.
 _HERE = threading.local()
 
-__all__ = ["BLOCKS", "SWITCH_ENV", "TEST_OPT_IN_ENV", "around", "enabled", "on_progress"]
+__all__ = ["BLOCKS", "SWITCH_ENV", "TEST_OPT_IN_ENV", "around", "enabled", "on_progress", "print_ended"]
 
 
 def enabled() -> bool:
@@ -233,13 +237,16 @@ def _finish(watch: dict[str, Any]) -> None:
     log = watch["log"]
     with contextlib.suppress(Exception):
         log.join(timeout=float(watch["max_s"]) + 30.0)
-    with _LOCK:
-        if _RUNNING.get(watch["unit"]) is log:
-            _RUNNING.pop(watch["unit"], None)
     try:
         _keep(watch)
     except Exception:  # noqa: BLE001
         logger.debug("head moves: nothing kept", exc_info=True)
+    finally:
+        # Released only once what the log showed is kept, so whatever waits
+        # for this machine's log reads what it taught.
+        with _LOCK:
+            if _RUNNING.get(watch["unit"]) is log:
+                _RUNNING.pop(watch["unit"], None)
 
 
 def _keep(watch: dict[str, Any]) -> None:
@@ -372,3 +379,47 @@ def _ended_reader(adapter: Any) -> Callable[[], bool]:
         return bool(last["over"])
 
     return over
+
+
+# ---------------------------------------------------------------------------
+# After a printer's first print
+# ---------------------------------------------------------------------------
+
+
+def print_ended(printer_name: str) -> None:
+    """The print-ended hook: once a printer's print is over and whatever it
+    was teaching has been kept, decide whether its first lesson is offered
+    for what is still missing (:func:`kiln.bench.offer_after_first_print`),
+    on its own thread.  Returns at once; never raises."""
+    try:
+        if not enabled() or not printer_name:
+            return
+        from kiln.server import _get_registry
+
+        adapter = _get_registry().get(printer_name)
+        unit = bench.unit_of(adapter)
+        if not unit or not bench.may_offer(unit, "first_print"):
+            return
+        with _LOCK:
+            if unit in _DECIDING:
+                return
+            _DECIDING.add(unit)
+        threading.Thread(target=_decide_after_print, args=(adapter, unit, printer_name),
+                         name="kiln-first-print-offer", daemon=True).start()
+    except Exception:  # noqa: BLE001 -- an ending never turns into a fault
+        logger.debug("head moves: no decision after the print", exc_info=True)
+
+
+def _decide_after_print(adapter: Any, unit: str, printer_name: str) -> None:
+    try:
+        deadline = time.monotonic() + END_MAX_S + 60.0
+        while time.monotonic() < deadline:
+            with _LOCK:
+                busy = unit in _RUNNING
+            if not busy:
+                break
+            time.sleep(AFTER_PRINT_WAIT_S)
+        bench.offer_after_first_print(adapter, printer_name)
+    finally:
+        with _LOCK:
+            _DECIDING.discard(unit)

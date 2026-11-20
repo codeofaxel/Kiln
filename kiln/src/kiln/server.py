@@ -6115,6 +6115,11 @@ def _install_print_lifecycle_hooks() -> None:
     register_print_started_hook(_spawn_print_watchdog)
     register_print_ended_hook(_retire_print_watchdog)
     register_print_ended_hook(_note_plate_after_print_ended_by_name)
+    # What a printer's first print left for its first lesson, offered once
+    # on the next reply (kiln.head_moves.print_ended).
+    from kiln.head_moves import print_ended as _bench_after_print
+
+    register_print_ended_hook(_bench_after_print)
     _print_lifecycle_hooks_installed = True
 
 

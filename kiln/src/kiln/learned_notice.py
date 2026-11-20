@@ -7,6 +7,12 @@ structured block with one sentence per thing learned ("Kiln learned how your
 Creality Ender-3 ends a print."), for the agent to say as written.  It names
 what was learned from this printer, never what Kiln does not know.
 
+After a printer's first print, the first lesson's offer rides the same block
+when that print left something only a lesson can teach
+(:func:`kiln.bench.offer_after_first_print`): worded here, on the reply, so
+it is in the words of the caller's plan, and made through the one offer
+every door makes (:func:`kiln.bench.offer`).
+
 Same attach path as :mod:`kiln.update_nudge`: never on a failure, never on an
 empty result, never on the hosted server, never raises.  Each sentence is said
 once: it is forgotten when it is attached.
@@ -22,6 +28,8 @@ logger = logging.getLogger(__name__)
 RESULT_KEY = "kiln_learned"
 
 _NOTE = "Tell the person in one line, as written. Nothing to ask and nothing to do."
+_NOTE_OFFER = ("Tell the person what Kiln learned in one line, as written, if there is anything. Then say the offer "
+               "once, as written, and take 'later' as an answer.")
 
 
 def _result_seems_failed(inner: Any, payload: dict | None) -> bool:
@@ -52,10 +60,23 @@ def _attach(inner: Any, ctx: Any, name: str | None) -> None:
         # sentence on structured-content hosts; wait for a later result.
         if not sc or _result_seems_failed(inner, sc) or RESULT_KEY in sc:
             return
-        said = bench.take_learned()
-        if not said:
+        news = bench.take_news()
+        offers = []
+        for pending in news["offers"]:
+            made = bench.offer(
+                pending["unit"], pending["missing"], "first_print",
+                model_name=bench._display_name(pending["printer_id"]) if pending.get("printer_id") else "printer",
+                printer_name=pending.get("printer_name"),
+            )
+            if made is not None:
+                offers.append(made)
+        if not news["said"] and not offers:
             return
-        sc[RESULT_KEY] = {"said": said, "note": _NOTE}
+        block: dict[str, Any] = {"said": news["said"]} if news["said"] else {}
+        if offers:
+            block["offers"] = offers
+        block["note"] = _NOTE_OFFER if offers else _NOTE
+        sc[RESULT_KEY] = block
         set_result_structured_content(inner, sc)
     except Exception:  # noqa: BLE001 -- a sentence must never break a result
         logger.debug("what a print taught was not attached", exc_info=True)
