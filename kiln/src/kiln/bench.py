@@ -22,7 +22,7 @@ This module is everything under that tool that is not the conversation:
   because an A1 parks LEFT of its plate over the chute and many printers
   park off the plate -- drawn here, and resolved to the same rectangle on
   the served side (pinned to each other by test);
-* the head-measuring sketch for the two caliper asks;
+* the head-measuring sketch for the two head measurements;
 * the position log a Klipper or Marlin printer gives instead of any ask;
 * what the record still lacks for a printer (``blanks_for``), read from
   the verdict itself so the session asks only about blanks;
@@ -300,7 +300,7 @@ def head_observation(
     model: str, width_mm: float, rod_height_mm: float | None, *, unit: str | None = None,
     firmware: str | None = None, when: str | None = None,
 ) -> dict[str, Any]:
-    """The two caliper figures, in the shape the served door reads."""
+    """The two head figures, in the shape the served door reads."""
     return {
         "format": OBSERVATION_FORMAT, "model": str(model).strip().lower()[:80], "block": "head", "how": "owner_measure",
         "firmware": firmware, "unit": unit, "when": when or _now(),
@@ -535,7 +535,7 @@ def gain_sentence(lesson: str, gaps: Any, model_name: str, *, pro: bool | None =
     verbs = [_OFFER_VERBS[b] for b in ("pause", "cancel", "end") if b in words]
     fits = _FITS_PRO if (has_pro() if pro is None else pro) else _FITS_FREE
     if not verbs:
-        return f"Two caliper measurements teach Kiln how big your {model_name}'s head is, so it can {fits}."
+        return f"Two measurements with calipers or a ruler teach Kiln how big your {model_name}'s head is, so it can {fits}."
     what = f"how your {model_name} {_joined(verbs, 'and')}"
     if "head" in words:
         what += ", and how big its head is"

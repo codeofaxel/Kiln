@@ -304,7 +304,7 @@ class TestWhatTheRecordLacks:
             "finishes, and how big its head is, so it can find where a second part fits beside one already on the plate.")
         # The head alone is two caliper readings: nothing is printed for it.
         assert bench.gain_sentence("motion", ["head"], "Creality K1", pro=False) == (
-            "Two caliper measurements teach Kiln how big your Creality K1's head is, so it can tell you whether a "
+            "Two measurements with calipers or a ruler teach Kiln how big your Creality K1's head is, so it can tell you whether a "
             "second part fits beside one already on the plate.")
         assert bench.gain_sentence("limits", ["limits"], "Creality K1") == (
             "Kiln can learn how steep, how far and how thin your Creality K1 really prints from one small test "
@@ -588,7 +588,8 @@ class TestTheConversation:
         assert out["ask"] == (
             "Help Kiln get to know your Bambu Lab A1 in a few minutes: it prints a coin-sized square, pauses and "
             "resumes it, and lets it finish, then prints a second one and cancels it partway, watching where the head "
-            "goes each time, and you measure the head with calipers. Kiln will ask you where the head stopped, with a "
+            "goes each time, and you measure the head with calipers or a ruler. Kiln will ask you where the head stopped, "
+            "with a "
             "picture. Ready?")
         out, pictures = _step(server, "yes", with_pictures=True)
         assert out["step"] == "plate" and out["ask"] == "Is the plate empty?" and out["images"][0]["kind"] == "camera"
@@ -644,9 +645,11 @@ class TestTheConversation:
         out = _step(server, "40 mm")
         assert "cancel" in out["learned"] and out["step"] == "clear"
         out = _step(server, "yes")
-        assert out["step"] == "head_width" and out["images"][0]["kind"] == "head" and "calipers" in out["ask"]
+        assert out["step"] == "head_width" and out["images"][0]["kind"] == "head" and "calipers or a ruler" in out["ask"]
+        assert out["ask"].endswith("Between two marks, give the bigger one."), "a rough width errs wide"
         out = _step(server, "60")
         assert out["step"] == "head_rod" and "lowest bar" in out["ask"]
+        assert out["ask"].endswith("Between two marks, give the smaller one."), "a rough height errs low"
         out = _step(server, "25 mm")
         assert out["step"] == "done"
         # Free: WHETHER a second part fits, never where -- where is the plan's tier.
@@ -816,7 +819,7 @@ class TestTheConversation:
     def test_a_head_only_session_prints_nothing(self, server, monkeypatch):
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["head"], _verdict(ok=True, blanks=["head"])))
         out = _step(server)
-        assert out["ask"] == "Help Kiln get to know your Bambu Lab A1: two caliper measurements of its print head. Ready?"
+        assert out["ask"] == "Help Kiln get to know your Bambu Lab A1: two measurements of its print head, with calipers or a ruler. Ready?"
         out = _step(server, "yes")
         assert out["step"] == "head_width" and server.log == []
 

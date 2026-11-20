@@ -159,12 +159,12 @@ def _intro(session: dict[str, Any]) -> str:
     if parts:
         what = "it " + ", then ".join(parts) + ", watching where the head goes each time"
         if head:
-            what += ", and you measure the head with calipers"
+            what += ", and you measure the head with calipers or a ruler"
         text = f"{lead}Help Kiln get to know your {model} in a few minutes: {what}."
         text += (" Kiln reads where the head goes from the printer itself." if session["loggable"]
                  else " Kiln will ask you where the head stopped, with a picture.")
     else:
-        text = f"{lead}Help Kiln get to know your {model}: two caliper measurements of its print head."
+        text = f"{lead}Help Kiln get to know your {model}: two measurements of its print head, with calipers or a ruler."
     return text + " Ready?"
 
 
@@ -1004,7 +1004,8 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
     if step == "head_width":
         value = _mm(answer)
         if value is None or value < 1.0:
-            return _reply(session, "With calipers: the widest part of the head, left to right, in mm (A in the picture)?",
+            return _reply(session, "With calipers or a ruler: the widest part of the head, left to right, in mm (A in the picture)? "
+                          "Between two marks, give the bigger one.",
                           pictures=[_picture("head", bench.draw_head_sketch(), "the head from the front: A is the width, B the nozzle-to-bar height")])
         session["answers"]["head_width"] = value
         _next_step(session)
@@ -1015,7 +1016,8 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
         text = _norm(answer)
         value = _mm(answer)
         if not text or (value is None and "none" not in text and "no bar" not in text):
-            return _reply(session, "From the nozzle tip up to the lowest bar that crosses the plate, in mm (B in the picture), or 'none'?",
+            return _reply(session, "From the nozzle tip up to the lowest bar that crosses the plate, in mm (B in the picture), or 'none'? "
+                          "Between two marks, give the smaller one.",
                           pictures=[_picture("head", bench.draw_head_sketch(), "B: nozzle tip up to the lowest bar")])
         rod = None if value is None else value
         doc = bench.head_observation(session["printer_id"], session["answers"]["head_width"], rod,
