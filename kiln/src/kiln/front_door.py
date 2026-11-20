@@ -513,6 +513,10 @@ GOAL_NOTES = {
         "Saved goal {brief_id} is not in this Kiln account, so this make could "
         "not join it; it stands on its own, made as asked."
     ),
+    "version_not_in_account": (
+        "Saved goal {brief_id} is not in this Kiln account, so this version "
+        "could not join it; it is saved on this computer as asked."
+    ),
     "no_file": (
         "This make left no model file to add to saved goal {brief_id}, so it "
         "stands on its own; it was made as asked."
