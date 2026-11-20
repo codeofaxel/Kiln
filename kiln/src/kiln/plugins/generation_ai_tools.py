@@ -754,6 +754,7 @@ class _GenerationAIToolsPlugin:
             placement: str | list[float] | None = None,
             goal_id: str = "",
             soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
@@ -768,6 +769,9 @@ class _GenerationAIToolsPlugin:
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
                 soft_nozzle_confirmed: The owner has said to print anyway a
                     slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
                     abrasive filament through a nozzle on record that is not
@@ -974,12 +978,12 @@ class _GenerationAIToolsPlugin:
                 # declared, else the spool the target reports loaded, else
                 # PLA -- the same reading slice_and_print makes, and the
                 # response's slice.filament says which.
-                from kiln.slicer import owner_asks
                 from kiln.plugins.slicer_tools import (
                     _attach_placement,
                     _loaded_material_for,
                     _placed_slice,
                 )
+                from kiln.slicer import owner_asks
 
                 # The plate may still hold the last print: the shared step
                 # slice_model takes (plate gate, slicer, a skirt or brim past
@@ -990,7 +994,7 @@ class _GenerationAIToolsPlugin:
                     profile_path=effective_profile,
                     material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
-                    **owner_asks(soft_nozzle_confirmed, filament_map),
+                    **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err

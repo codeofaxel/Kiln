@@ -52,6 +52,7 @@ class _SmartPrintToolsPlugin:
             preview_token: str | None = None,
             placement: str | list[float] | None = None,
             soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
@@ -76,6 +77,9 @@ class _SmartPrintToolsPlugin:
                overrides, uploads the result, and starts the print.
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
                 soft_nozzle_confirmed: The owner has said to print anyway a
                     slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
                     abrasive filament through a nozzle on record that is not
@@ -330,7 +334,7 @@ class _SmartPrintToolsPlugin:
                     model_path, effective_printer_id=effective_pid, printer_name=printer_name,
                     placement=placement, profile_path=effective_profile, adapter=adapter,
                     material=material, loaded_material=material_detected,
-                    **owner_asks(soft_nozzle_confirmed, filament_map),
+                    **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(

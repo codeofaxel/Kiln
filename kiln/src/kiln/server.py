@@ -19208,6 +19208,7 @@ def design_to_gcode_pipeline(
     placement: str | list[float] | None = None,
     goal_id: str = "",
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> dict:
     """End-to-end pipeline: description → template → STL → analysis → GCode.
@@ -19222,6 +19223,9 @@ def design_to_gcode_pipeline(
     :param goal_id: The saved goal's id from ``design_session``, so this
         make is recorded against the goal and checked against it. Empty
         when there is no goal.
+    :param mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+        ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only on
+        their yes, each time; ``slice_model`` says what follows.
     :param soft_nozzle_confirmed: The owner has said to print anyway a slice
         refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament through
         a nozzle on record that is not wear-resistant).  Only on their word,
@@ -19257,7 +19261,7 @@ def design_to_gcode_pipeline(
             # ([x, y] in mm, a named region, or "keep"); omitted, an occupied
             # plate refuses the slice step.  Same gate as slice_model.
             placement=placement if placement is not None else "auto",
-            slice_asks=_owner_asks(soft_nozzle_confirmed, filament_map),
+            slice_asks=_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
         )
         result_dict = {"success": result.success, **result.to_dict()}
         if result.success:
@@ -20066,6 +20070,7 @@ def run_quick_print(
     preview_token: str | None = None,
     placement: str | list[float] | None = None,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> dict:
     """Full print pipeline: validate + slice + safety-check + upload + print (recommended one-shot tool).
@@ -20083,6 +20088,9 @@ def run_quick_print(
     7. Start printing
 
     Args:
+        mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+            ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
+            on their yes, each time; ``slice_model`` says what follows.
         soft_nozzle_confirmed: The owner has said to print anyway a slice
             refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
             through a nozzle on record that is not wear-resistant).  Only on
@@ -20169,7 +20177,7 @@ def run_quick_print(
             skip_validation=skip_validation,
             signoff=signoff,
             placement=placement,
-            **_owner_asks(soft_nozzle_confirmed, filament_map),
+            **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
         )
         resp = {"success": result.success, **result.to_dict()}
         # Hoist the AMS selection from the start_print step to the top
@@ -20207,6 +20215,7 @@ def run_reslice_and_print(
     preview_token: str | None = None,
     placement: str | list[float] | None = None,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> dict:
     """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
@@ -20230,6 +20239,9 @@ def run_reslice_and_print(
     The printer must be idle and connected.
 
     Args:
+        mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+            ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
+            on their yes, each time; ``slice_model`` says what follows.
         soft_nozzle_confirmed: The owner has said to print anyway a slice
             refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
             through a nozzle on record that is not wear-resistant).  Only on
@@ -20334,7 +20346,7 @@ def run_reslice_and_print(
             skip_validation=skip_validation,
             signoff=signoff,
             placement=placement,
-            **_owner_asks(soft_nozzle_confirmed, filament_map),
+            **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
         )
         resp = {"success": result.success, **result.to_dict()}
         # Surface the AMS tray selection and the start narrative (parity
@@ -20437,6 +20449,7 @@ def multi_copy_print(
     preview_token: str | None = None,
     fill: bool = False,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> dict:
     """Print multiple copies of a model arranged on one build plate.
@@ -20475,6 +20488,9 @@ def multi_copy_print(
         preview_token: Token from ``issue_preview_token`` proving this model
             was shown to the person before printing.  Required beside their
             go-ahead: a print is shown to its owner before it starts.
+        mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+            ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
+            on their yes, each time; ``slice_model`` says what follows.
         soft_nozzle_confirmed: The owner has said to print anyway a slice
             refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
             through a nozzle on record that is not wear-resistant).  Only on
@@ -20535,7 +20551,7 @@ def multi_copy_print(
                 copies=copies,
                 spacing_mm=spacing_mm,
                 signoff=signoff,
-                **_owner_asks(soft_nozzle_confirmed, filament_map),
+                **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
             )
             placed = None
             limited_by = None
@@ -20559,7 +20575,7 @@ def multi_copy_print(
                 queued = _queue_fill_rest(
                     model_path, rest, printer_name=printer_name, printer_id=printer_id,
                     overrides=parsed_overrides, slicer_path=slicer_path, spacing_mm=spacing_mm, signoff=signoff,
-                    asks=_owner_asks(soft_nozzle_confirmed, filament_map),
+                    asks=_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if queued.get("job_id"):
                     summary["queued_job_id"] = queued["job_id"]
@@ -20600,7 +20616,7 @@ def multi_copy_print(
                 slicer_path=slicer_path,
                 extra_args=extra_args,
                 signoff=signoff,
-                **_owner_asks(soft_nozzle_confirmed, filament_map),
+                **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
             )
         else:
             # Fallback: STL mesh duplication
@@ -20639,7 +20655,7 @@ def multi_copy_print(
                 overrides=parsed_overrides,
                 slicer_path=slicer_path,
                 signoff=signoff,
-                **_owner_asks(soft_nozzle_confirmed, filament_map),
+                **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
             )
 
         summary = {"success": result.success, **result.to_dict()}
@@ -20691,6 +20707,7 @@ def run_benchmark(
     profile_path: str | None = None,
     skip_validation: bool = False,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> dict:
     """Prepare a benchmark print: validate → slice → upload → report stats.
@@ -20708,6 +20725,9 @@ def run_benchmark(
             Defaults to False — user-supplied benchmark meshes are
             pre-tested for printability.  Set to True for known-good
             fixed reference benchmark models.
+        mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+            ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
+            on their yes, each time; ``slice_model`` says what follows.
         soft_nozzle_confirmed: The owner has said to print anyway a slice
             refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
             through a nozzle on record that is not wear-resistant).  Only on
@@ -20726,7 +20746,7 @@ def run_benchmark(
             printer_id=printer_id,
             profile_path=profile_path,
             skip_validation=skip_validation,
-            **_owner_asks(soft_nozzle_confirmed, filament_map),
+            **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
         )
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
@@ -23347,6 +23367,7 @@ def reprint_with_material(
     goal_id: str = "",
     chosen_by: str = "",
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> dict:
     """Reprint a model with a different material — the slice is set for it.
@@ -23376,6 +23397,9 @@ def reprint_with_material(
     Requires PrusaSlicer or OrcaSlicer installed locally.
 
     Args:
+        mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+            ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
+            on their yes, each time; ``slice_model`` says what follows.
         soft_nozzle_confirmed: The owner has said to print anyway a slice
             refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
             through a nozzle on record that is not wear-resistant).  Only on
@@ -23453,6 +23477,7 @@ def reprint_with_material(
                 ams_mapping=ams_mapping,
                 preview_token=preview_token,
                 soft_nozzle_confirmed=soft_nozzle_confirmed is True,
+                mixed_nozzle_experiment=mixed_nozzle_experiment is True,
                 filament_map=filament_map or None,
             )
         goal_said = goal_ask.wait()
@@ -23486,6 +23511,7 @@ def smart_reprint(
     goal_id: str = "",
     chosen_by: str = "",
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> dict:
     """Smart one-shot material-switch reprint — finds the model, detects the
@@ -23548,6 +23574,9 @@ def smart_reprint(
         chosen_by: Who picked this material: ``"person"`` when they named it,
             ``"agent"`` when you proposed it.  Kept with the goal's record;
             omitted, it is left unsaid.
+        mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+            ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
+            on their yes, each time; ``slice_model`` says what follows.
         soft_nozzle_confirmed: The owner has said to print anyway a slice
             refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
             through a nozzle on record that is not wear-resistant).  Only on
@@ -23811,6 +23840,7 @@ def smart_reprint(
             goal_id=resolved_brief_id or "",
             chosen_by=chosen_by,
             soft_nozzle_confirmed=soft_nozzle_confirmed is True,
+            mixed_nozzle_experiment=mixed_nozzle_experiment is True,
             filament_map=filament_map or None,
         )
 
@@ -23847,6 +23877,7 @@ def multi_material_print(
     preview_token: str | None = None,
     filament_map: list[int] | None = None,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
 ) -> dict:
     """Print multiple objects in different materials/colors on one build plate.
 
@@ -23929,6 +23960,9 @@ def multi_material_print(
             ``filament_index`` is that number less one).  Leave unset to let
             the slicer map them.  A map that does not fit is refused before
             slicing, as ``slice_model`` refuses it.
+        mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+            ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
+            on their yes, each time; ``slice_model`` says what follows.
         soft_nozzle_confirmed: The owner has said to print anyway a slice
             refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament
             through a nozzle on record that is not wear-resistant).  Only on
@@ -24342,6 +24376,7 @@ def multi_material_print(
                 ams_mapping=_json.dumps(ams_mapping_list) if ams_mapping_list else None,
                 filament_map=filament_map or None,
                 soft_nozzle_confirmed=soft_nozzle_confirmed is True,
+                mixed_nozzle_experiment=mixed_nozzle_experiment is True,
             )
 
         # Enrich result
@@ -24381,11 +24416,11 @@ def multi_material_print(
         )
 
 
-def _owner_asks(soft_nozzle_confirmed: Any, filament_map: Any) -> dict[str, Any]:
+def _owner_asks(soft_nozzle_confirmed: Any, filament_map: Any, mixed_nozzle_experiment: Any = False) -> dict[str, Any]:
     """:func:`kiln.slicer.owner_asks`, imported when a door slices."""
     from kiln.slicer import owner_asks
 
-    return owner_asks(soft_nozzle_confirmed, filament_map)
+    return owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
 
 
 def _slices_for_several_nozzles(printer_id: str | None, printer_name: str | None) -> bool:
@@ -24487,6 +24522,7 @@ def multi_color_copies(
     slicer_path: str | None = None,
     preview_token: str | None = None,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> dict:
     """Print multiple copies of the same model, each in a different AMS color.
@@ -24537,6 +24573,9 @@ def multi_color_copies(
     :param preview_token: Token from ``issue_preview_token`` proving this
         model was shown to the person before printing.  Required beside their
         go-ahead: a print is shown to its owner before it starts.
+    :param mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+        ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only on
+        their yes, each time; ``slice_model`` says what follows.
     :param soft_nozzle_confirmed: The owner has said to print anyway a slice
         refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive filament through
         a nozzle on record that is not wear-resistant).  Only on their word,
@@ -24761,6 +24800,7 @@ def multi_color_copies(
                 use_ams=True,
                 ams_mapping=_json.dumps(resolved_slots),
                 soft_nozzle_confirmed=soft_nozzle_confirmed is True,
+                mixed_nozzle_experiment=mixed_nozzle_experiment is True,
                 filament_map=filament_map or None,
             )
 

@@ -2441,11 +2441,11 @@ def _auto_wrap_bambu_3mf(
 
         from kiln.printers.bambu_3mf import (
             BambuPrintSettings,
+            MultiNozzlePackageError,
             build_bambu_3mf,
+            multi_nozzle_print_package,
             thumbnail_inputs_for_model,
         )
-
-        from kiln.printers.bambu_3mf import MultiNozzlePackageError, multi_nozzle_print_package
 
         # A file sliced for more than one nozzle travels in the package the
         # slicer made with it, or not at all.
@@ -3035,7 +3035,6 @@ class _SlicerToolsPlugin:
         """Register slicer tools with the MCP server."""
 
         import kiln.server as _srv
-
         from kiln.slicer import owner_asks as _owner_asks
 
         # ------------------------------------------------------------------
@@ -3395,6 +3394,7 @@ class _SlicerToolsPlugin:
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
             soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
         ) -> dict[str, Any]:
             """Reslice a 3D model with custom slicer parameter overrides.
@@ -3421,6 +3421,9 @@ class _SlicerToolsPlugin:
             Use kiln find-slicer or the find_slicer MCP tool to verify.
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
                 soft_nozzle_confirmed: The owner has said to print anyway a
                     slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
                     abrasive filament through a nozzle on record that is not
@@ -3619,7 +3622,7 @@ class _SlicerToolsPlugin:
                     output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
-                    **_owner_asks(soft_nozzle_confirmed, filament_map),
+                    **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3803,6 +3806,7 @@ class _SlicerToolsPlugin:
             branch_id: str | None = None,
             account_sync_id: str | None = None,
             soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
@@ -3853,6 +3857,9 @@ class _SlicerToolsPlugin:
             bypass (e.g. for already-validated meshes or pre-sliced 3MFs).
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
                 soft_nozzle_confirmed: The owner has said to print anyway a
                     slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
                     abrasive filament through a nozzle on record that is not
@@ -4240,7 +4247,7 @@ class _SlicerToolsPlugin:
                     profile_path=effective_profile, auto_center=auto_center,
                     material_id=material, material=declared_material,
                     loaded_material=loaded_material,
-                    **_owner_asks(soft_nozzle_confirmed, filament_map),
+                    **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err

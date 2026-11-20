@@ -1888,12 +1888,72 @@ class TestMultiMaterialPrintHeatsEachNozzleForItsOwn:
             assert overrides[key] == f"{self._own('pla', key)},{self._own('petg', key)}"
         assert handed["filament_map"] == [2, 1] and handed["soft_nozzle_confirmed"] is True
 
+    def test_the_yes_to_two_nozzle_sizes_is_handed_on_only_when_given(self, tmp_path, monkeypatch):
+        handed = self._print(tmp_path, monkeypatch, several=True, mixed_nozzle_experiment=True)
+        assert handed["mixed_nozzle_experiment"] is True
+        handed = self._print(tmp_path, monkeypatch, several=True)
+        assert handed["mixed_nozzle_experiment"] is False
+
     def test_one_nozzle_prints_every_filament_at_the_hottest(self, tmp_path, monkeypatch):
         handed = self._print(tmp_path, monkeypatch, several=False)
         overrides = json.loads(handed["overrides"])
         hottest = max(("pla", "petg"), key=lambda m: float(self._own(m, "temperature")))
         assert overrides["temperature"] == self._own(hottest, "temperature")
         assert handed["filament_map"] is None and handed["soft_nozzle_confirmed"] is False
+
+
+class TestCopiesInSeveralColoursKeepTheOwnersWord:
+    """Copies sliced one filament each and merged into one file: the merged
+    file is the one that prints, so its record keeps the owner's word."""
+
+    _SAID = "On the owner's say-so, PLA-CF, an abrasive filament, prints through the nozzle on record."
+
+    def _merged(self, tmp_path, monkeypatch, **kwargs):
+        from kiln import print_lineage
+        from kiln import slicer as slicer_mod
+
+        def one_copy(path, *, output_dir, soft_nozzle_confirmed=False, **_kw):
+            out = Path(output_dir) / f"{Path(path).stem}.gcode"
+            out.write_text("; header\n;LAYER_CHANGE\nG1 X1 Y1 E1\n")
+            print_lineage.record_slice(path, str(out))
+            result = slicer_mod.SliceResult(success=True, output_path=str(out), slicer="x", message="Sliced")
+            if soft_nozzle_confirmed:
+                result.soft_nozzle = {
+                    "confirmed_by": "owner", "filaments": [{"filament": 1, "material": "PLA-CF"}],
+                    "nozzles": [{"position": None, "material": "brass"}], "said": self._SAID,
+                }
+            return result
+
+        monkeypatch.setattr(slicer_mod, "slice_file", one_copy)
+        return slicer_mod.slice_multicolor_copies(
+            _cube(tmp_path / "part.stl", 0.0), 2, output_dir=str(tmp_path / "out"), **kwargs,
+        )
+
+    def test_the_merged_files_record_keeps_it_and_the_print_row_carries_it(self, tmp_path, monkeypatch):
+        from kiln import outcome_courier, print_lineage
+
+        merged = self._merged(tmp_path, monkeypatch, soft_nozzle_confirmed=True)
+        assert merged.soft_nozzle["filaments"] == [
+            {"filament": 1, "material": "PLA-CF"}, {"filament": 2, "material": "PLA-CF"},
+        ]
+        assert merged.soft_nozzle["nozzles"] == [{"position": None, "material": "brass"}]
+        assert merged.message.endswith(self._SAID)
+        answer = print_lineage.resolve(merged.output_path, local_paths=[merged.output_path])
+        assert answer["part"] == print_lineage.PART_SLICED_HERE
+        assert answer["soft_nozzle"]["confirmed_by"] == "owner"
+        assert answer["soft_nozzle"]["filaments"] == merged.soft_nozzle["filaments"]
+        row = {"version_id": "v1", "outcome": "failed", "determined_by": "observed", "lineage_id": answer["lineage_id"]}
+        assert outcome_courier.account_row(row, "a" * 32)["soft_nozzle"] == {
+            "confirmed_by": "owner", "filaments": ["PLA-CF"], "nozzles": [{"position": None, "material": "brass"}],
+        }
+
+    def test_copies_nobody_said_to_print_anyway_carry_nothing(self, tmp_path, monkeypatch):
+        from kiln import print_lineage
+
+        merged = self._merged(tmp_path, monkeypatch)
+        assert merged.soft_nozzle is None and "say-so" not in merged.message
+        answer = print_lineage.resolve(merged.output_path, local_paths=[merged.output_path])
+        assert answer["part"] == print_lineage.PART_SLICED_HERE and answer["soft_nozzle"] is None
 
 
 class TestTheTerminalTakesTheOwnersWord:
@@ -1942,3 +2002,11 @@ class TestTheTerminalTakesTheOwnersWord:
         out, seen = self._run(tmp_path, monkeypatch, "--soft-nozzle-confirmed")
         assert out.exit_code == 0, out.output
         assert seen["soft_nozzle_confirmed"] is True
+
+    def test_the_flag_for_two_nozzle_sizes_reaches_the_slice(self, tmp_path, monkeypatch):
+        out, seen = self._run(tmp_path, monkeypatch, "--soft-nozzle-confirmed", "--mixed-nozzle-experiment")
+        assert out.exit_code == 0, out.output
+        assert seen["mixed_nozzle_experiment"] is True
+        out, seen = self._run(tmp_path, monkeypatch, "--soft-nozzle-confirmed")
+        assert out.exit_code == 0, out.output
+        assert "mixed_nozzle_experiment" not in seen

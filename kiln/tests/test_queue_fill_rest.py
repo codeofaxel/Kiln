@@ -942,7 +942,7 @@ class TestACancelStopsThePlateBeforeThePrinter:
 
 
 class TestTheRunsAsksRideEveryPlate:
-    _ASKS = {"soft_nozzle_confirmed": True, "filament_map": [2]}
+    _ASKS = {"soft_nozzle_confirmed": True, "filament_map": [2], "mixed_nozzle_experiment": True}
 
     def test_each_plate_is_sliced_with_the_runs_word_and_map_and_the_rest_keeps_them(self, k, fake):
         job = _fill_job(k.queue, 14)
@@ -951,6 +951,7 @@ class TestTheRunsAsksRideEveryPlate:
         k.sched.tick()
 
         assert fake.calls[0]["soft_nozzle_confirmed"] is True and fake.calls[0]["filament_map"] == [2]
+        assert fake.calls[0]["mixed_nozzle_experiment"] is True
         (rest,) = k.queue.queued_for("A")
         assert {key: rest.metadata["fill"].get(key) for key in self._ASKS} == self._ASKS
 
@@ -966,6 +967,19 @@ class TestTheRunsAsksRideEveryPlate:
         error = k.queue.get_job(job).error
         assert "call again" not in error and MAP_ADVICE not in error
         assert "queue the copies again with multi_copy_print and soft_nozzle_confirmed=true" in error
+
+    def test_a_plate_refused_for_two_nozzle_sizes_names_the_door_that_takes_the_yes(self, k, fake):
+        from kiln.slicer_profiles import MIXED_SIZES_CONFIRM
+
+        k.sched._retry_backoff_base = 0.0
+        refusal = f"The nozzles this print would use are different sizes, so nothing was sliced; {MIXED_SIZES_CONFIRM}."
+        fake.answer = lambda kw: _result(False, wanted=kw["copies"], placed=0, message=refusal)
+        job = _fill_job(k.queue, 4)
+        for _ in range(3):
+            k.sched.tick()
+        error = k.queue.get_job(job).error
+        assert "call again" not in error
+        assert "queue the copies again with multi_copy_print and mixed_nozzle_experiment=true" in error
 
     def test_the_queued_rest_keeps_the_runs_asks(self, k, server, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path / "home"))

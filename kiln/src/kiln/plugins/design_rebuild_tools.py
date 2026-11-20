@@ -36,7 +36,7 @@ class _DesignRebuildPlugin:
         @mcp.tool(annotations=destructive("Rebuild a saved design"))
         def rebuild_design(
             recipe_path: str, goal_id: str = "", soft_nozzle_confirmed: bool = False,
-            filament_map: list[int] | None = None,
+            filament_map: list[int] | None = None, mixed_nozzle_experiment: bool = False,
         ) -> dict:
             """Re-execute the full build pipeline from a saved design recipe.
 
@@ -78,6 +78,9 @@ class _DesignRebuildPlugin:
                 carries the goal in its provenance; when omitted the
                 recipe's existing goal is kept, so iterating a
                 goal-attached design keeps it automatically.
+            :param mixed_nozzle_experiment: The person has said yes, for this print, to a slice
+                refused with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                experiment). Only on their yes, each time; ``slice_model`` says what follows.
             :param soft_nozzle_confirmed: The owner has said to print anyway
                 a slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive
                 filament through a nozzle on record that is not
@@ -102,7 +105,8 @@ class _DesignRebuildPlugin:
             apply_brief_to_recipe(recipe_path, goal_id)
             from kiln.slicer import owner_asks
 
-            result = rebuild_design_from_recipe(recipe_path, asks=owner_asks(soft_nozzle_confirmed, filament_map))
+            asks = owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
+            result = rebuild_design_from_recipe(recipe_path, asks=asks)
             # A parameter change can lift a feature off its host; the
             # re-derived mesh gets the compile door's own check.
             from kiln.fusion_check import attach_fusion_report

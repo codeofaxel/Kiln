@@ -908,14 +908,21 @@ def owner_asks(
     return out
 
 
-def said_for(text: str, *, confirm: str, map_with: str) -> str:
-    """*text*, a slicing refusal, with its two asks spelled for a door that
-    takes them another way: *confirm* replaces "call again with
+def said_for(text: str, *, confirm: str, map_with: str, experiment: str) -> str:
+    """*text*, a slicing refusal, with its three asks spelled for a door
+    that takes them another way: *confirm* replaces "call again with
     soft_nozzle_confirmed=true" after "if the owner says to print it
-    anyway, ", and *map_with* replaces "give a filament-to-nozzle map with"
-    before the filament and the nozzle."""
-    return text.replace(SOFT_NOZZLE_CONFIRM, f"if the owner says to print it anyway, {confirm}").replace(
-        MAP_ADVICE, f"{map_with} ",
+    anyway, ", *map_with* replaces "give a filament-to-nozzle map with"
+    before the filament and the nozzle, and *experiment* replaces "call
+    again with mixed_nozzle_experiment=true" after "if they say yes to
+    trying it for this print, "."""
+    from kiln.slicer_profiles import MIXED_SIZES_CONFIRM
+
+    yes = MIXED_SIZES_CONFIRM.split(", call again")[0]
+    return (
+        text.replace(SOFT_NOZZLE_CONFIRM, f"if the owner says to print it anyway, {confirm}")
+        .replace(MAP_ADVICE, f"{map_with} ")
+        .replace(MIXED_SIZES_CONFIRM, f"{yes}, {experiment}")
     )
 
 
@@ -3221,6 +3228,7 @@ def slice_multicolor_copies(
     slicer_name: str | None = None
     filament: SliceFilament | None = None
 
+    said_anyway: list[tuple[int, dict[str, Any]]] = []
     placed = 0
     for row in range(actual_rows):
         for col in range(actual_cols):
@@ -3260,6 +3268,8 @@ def slice_multicolor_copies(
 
             slicer_name = result.slicer
             filament = result.filament
+            if result.soft_nozzle:
+                said_anyway.append((placed + 1, result.soft_nozzle))
 
             # Read the gcode body
             with open(result.output_path, errors="replace", encoding="utf-8") as fh:
@@ -3278,7 +3288,7 @@ def slice_multicolor_copies(
     with open(merged_path, "w", encoding="utf-8") as fh:
         fh.write(_KILN_GCODE_HEADER + merged)
 
-    return SliceResult(
+    merged_result = SliceResult(
         success=True,
         output_path=merged_path,
         slicer=slicer_name,
@@ -3286,6 +3296,42 @@ def slice_multicolor_copies(
         filament=filament,
         supports=supports,
     )
+    # The merged file is the one that prints: it gets its own record, and
+    # the owner's word to print anyway is kept on it.
+    from kiln.print_lineage import note_soft_nozzle, record_slice
+
+    record_slice(input_path, merged_path, profile=profile)
+    block = _soft_nozzle_of_copies(said_anyway)
+    if block is not None:
+        merged_result.soft_nozzle = block
+        merged_result.message = f"{merged_result.message} {block['said']}".strip()
+        note_soft_nozzle(merged_path, block)
+    return merged_result
+
+
+def _soft_nozzle_of_copies(said_anyway: list[tuple[int, dict[str, Any]]]) -> dict[str, Any] | None:
+    """One ``soft_nozzle`` block for a file merged from copies sliced one
+    filament each: *said_anyway* is ``(copy number, that copy's block)`` for
+    each copy the owner said to print anyway.  Each copy's filament is
+    numbered as the copy, and every nozzle named is kept once.  ``None``
+    when no copy carries one."""
+    if not said_anyway:
+        return None
+    nozzles: list[dict[str, Any]] = []
+    for _copy, block in said_anyway:
+        for nozzle in block.get("nozzles") or ():
+            if nozzle not in nozzles:
+                nozzles.append(nozzle)
+    first = said_anyway[0][1]
+    return {
+        "confirmed_by": "owner",
+        "filaments": [
+            {"filament": copy, "material": (block.get("filaments") or [{}])[0].get("material")}
+            for copy, block in said_anyway
+        ],
+        "nozzles": nozzles,
+        "said": first.get("said") or "",
+    }
 
 
 def _merge_multicolor_gcode(gcode_bodies: list[str]) -> str:

@@ -3665,9 +3665,8 @@ class KilnDB:
         experimental print the person has not reported on
         (``kiln.ending_question.experiment_owes``).  Only the person knows
         how the part came out."""
-        from kiln.failure_vocabulary import FAILED_OUTCOMES, ending_wants_a_question
-
         from kiln.ending_question import experiment_owes
+        from kiln.failure_vocabulary import FAILED_OUTCOMES, ending_wants_a_question
 
         words = [*sorted(FAILED_OUTCOMES), "cancelled"]
         marks = ", ".join("?" for _ in words)

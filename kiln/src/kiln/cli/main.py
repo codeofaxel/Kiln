@@ -390,6 +390,7 @@ def _said_at_the_terminal(exc: Exception) -> str:
     return said_for(
         str(exc), confirm="run it again with --soft-nozzle-confirmed",
         map_with="run it again with a --filament-map that puts",
+        experiment="run it again with --mixed-nozzle-experiment",
     )
 
 
@@ -4973,6 +4974,13 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
     ),
 )
 @click.option(
+    "--mixed-nozzle-experiment", "mixed_nozzle_experiment", is_flag=True,
+    help=(
+        "The person says yes, for this print, to slicing for nozzles of different sizes at once, "
+        "an experiment and a slice otherwise refused. Only on their yes, each time."
+    ),
+)
+@click.option(
     "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
     help=(
         "The owner says to print anyway an abrasive filament through a nozzle on record "
@@ -5009,6 +5017,7 @@ def slice(
     placement: str | None,
     plate_number: int | None,
     soft_nozzle_confirmed: bool,
+    mixed_nozzle_experiment: bool,
     filament_map: str | None,
     json_mode: bool,
 ) -> None:
@@ -5166,7 +5175,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
                 **fill_kwargs,
-                **owner_asks(soft_nozzle_confirmed, filament_map),
+                **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,
@@ -10889,6 +10898,13 @@ def generate_download(
     ),
 )
 @click.option(
+    "--mixed-nozzle-experiment", "mixed_nozzle_experiment", is_flag=True,
+    help=(
+        "The person says yes, for this print, to slicing for nozzles of different sizes at once, "
+        "an experiment and a slice otherwise refused. Only on their yes, each time."
+    ),
+)
+@click.option(
     "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
     help=(
         "The owner says to print anyway an abrasive filament through a nozzle on record "
@@ -10918,6 +10934,7 @@ def generate_and_print_cmd(
     preview_enabled: bool,
     placement: str | None,
     soft_nozzle_confirmed: bool,
+    mixed_nozzle_experiment: bool,
     filament_map: str | None,
     json_mode: bool,
 ) -> None:
@@ -11033,7 +11050,7 @@ def generate_and_print_cmd(
 
         slice_result, _placement_info = _cli_placed_slice(
             ctx, model_path, plan=plan, placement=placement, json_mode=json_mode,
-            **owner_asks(soft_nozzle_confirmed, filament_map),
+            **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
             extra_args=plan["extra_args"] or None,
             material=plan.get("declared_material"),
             loaded_material=plan.get("loaded_material"),

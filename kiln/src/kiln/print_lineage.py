@@ -420,7 +420,7 @@ def note_soft_nozzle(gcode_path: str | None, block: dict[str, Any] | None) -> No
         return
     try:
         stamps = read_stamps(gcode_path)
-        gcode_sha = _sha256(gcode_path) if not stamps else None
+        gcode_sha = _sha256(gcode_path) if len(stamps) != 1 else None
         kept = {
             "at": time.time(),
             "confirmed_by": "owner",

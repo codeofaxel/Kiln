@@ -1347,6 +1347,9 @@ def _sizes_said(used: list[dict[str, Any]]) -> str:
 
 #: The slicing argument a person's yes to the experiment is passed as.
 MIXED_SIZES_ARGUMENT = "mixed_nozzle_experiment"
+#: The yes a slice refused for nozzles of different sizes can be sliced
+#: with, as its refusal says it: one clause, the same at every door.
+MIXED_SIZES_CONFIRM = f"if they say yes to trying it for this print, call again with {MIXED_SIZES_ARGUMENT}=true"
 #: What every door calls a print that uses nozzles of different sizes.
 MIXED_SIZES_EXPERIMENT = "mixed_nozzle_sizes"
 
@@ -1361,9 +1364,8 @@ def mixed_size_refusal(nozzles: Any) -> str:
     return (
         f"The nozzles this print would use are different sizes ({_sizes_said(used)}). Printing with "
         "two nozzle sizes at once is an experiment Kiln has not proven on a printer, so nothing was "
-        f"sliced. To try it, ask the person, and if they say yes slice it with slice_model and "
-        f"{MIXED_SIZES_ARGUMENT} set; otherwise slice it with one filament for one nozzle, or fit "
-        "nozzles of one size."
+        f"sliced. To try it, ask the person; {MIXED_SIZES_CONFIRM}. Otherwise slice it with one "
+        "filament for one nozzle, or fit nozzles of one size."
     )
 
 

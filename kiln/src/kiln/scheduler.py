@@ -26,10 +26,12 @@ from kiln.registry import PrinterNotFoundError, PrinterRegistry
 
 logger = logging.getLogger(__name__)
 
-#: How a refused queued plate says the owner's word and a map are given: by
+#: How a refused queued plate says the owner's word, a map and the yes to
+#: nozzles of different sizes are given: by
 #: the door that queues copies (:func:`kiln.slicer.said_for`).
 QUEUED_PLATE_CONFIRM = "queue the copies again with multi_copy_print and soft_nozzle_confirmed=true"
 QUEUED_PLATE_MAP = "queue the copies again with multi_copy_print and a filament_map that puts"
+QUEUED_PLATE_EXPERIMENT = "queue the copies again with multi_copy_print and mixed_nozzle_experiment=true"
 
 
 # ---------------------------------------------------------------------------
@@ -799,7 +801,9 @@ class JobScheduler:
                 signoff=(job.metadata or {}).get("preview_signoff"),
                 still_wanted=lambda: self._cancelled_sentence(job.id),
                 # The owner's word and map the run was asked with.
-                **owner_asks(fill.get("soft_nozzle_confirmed"), fill.get("filament_map")),
+                **owner_asks(
+                    fill.get("soft_nozzle_confirmed"), fill.get("filament_map"), fill.get("mixed_nozzle_experiment"),
+                ),
             )
         except Exception as exc:  # noqa: BLE001 -- said on the job, never lost
             error = exc
@@ -879,7 +883,9 @@ class JobScheduler:
         from kiln.slicer import said_for
 
         # A queued plate takes no word of its own: the run's door does.
-        why = said_for(why, confirm=QUEUED_PLATE_CONFIRM, map_with=QUEUED_PLATE_MAP)
+        why = said_for(
+            why, confirm=QUEUED_PLATE_CONFIRM, map_with=QUEUED_PLATE_MAP, experiment=QUEUED_PLATE_EXPERIMENT,
+        )
         self._requeue_or_fail(job.id, f"The next plate of copies did not start on {printer_name}: {why}", [])
 
     def _settle_fill_plate(self, job_id: str) -> None:

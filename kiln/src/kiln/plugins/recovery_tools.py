@@ -811,6 +811,7 @@ class _RecoveryToolsPlugin:
             priority: str | None = None,
             share: str = "soonest",
             soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
         ) -> dict:
             """Plan many copies of one part across your printers, wherever there is safe room.
@@ -850,6 +851,9 @@ class _RecoveryToolsPlugin:
                 quality: "draft", "standard" or "fine".
                 priority: "low", "normal" or "high".
                 share: "soonest" (the default) or "even".
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
                 soft_nozzle_confirmed: When submitting: the owner has said to
                     print anyway a plate refused with ``ABRASIVE_ON_SOFT_NOZZLE``
                     (an abrasive filament through a nozzle on record that is
@@ -882,7 +886,8 @@ class _RecoveryToolsPlugin:
                     return block
                 from kiln.slicer import owner_asks
 
-                return _submit_fill(file_path, plan_id, asks=owner_asks(soft_nozzle_confirmed, filament_map))
+                asks = owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
+                return _submit_fill(file_path, plan_id, asks=asks)
             try:
                 return _plan_fill(file_path, copies, material, quality=quality, priority=priority, share=share)
             except Exception as exc:

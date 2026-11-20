@@ -99,7 +99,7 @@ class TestTheSlice:
         said = str(refused.value)
         assert "nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm" in said
         assert "experiment" in said and "nothing was sliced" in said
-        assert "slice_model" in said and "mixed_nozzle_experiment" in said
+        assert slicer_profiles.MIXED_SIZES_CONFIRM in said and "mixed_nozzle_experiment=true" in said
         assert asked == []
 
     def test_with_the_yes_the_served_settings_are_laid_over_and_the_result_says_experimental(self, tmp_path, served):

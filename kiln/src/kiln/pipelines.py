@@ -438,11 +438,11 @@ def _loaded_material(adapter: Any, material: str | None) -> str | None:
     return loaded_filament_type(adapter)
 
 
-def _owner_asks(soft_nozzle_confirmed: Any, filament_map: Any) -> dict[str, Any]:
+def _owner_asks(soft_nozzle_confirmed: Any, filament_map: Any, mixed_nozzle_experiment: Any = False) -> dict[str, Any]:
     """:func:`kiln.slicer.owner_asks`, imported when a pipeline slices."""
     from kiln.slicer import owner_asks
 
-    return owner_asks(soft_nozzle_confirmed, filament_map)
+    return owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
 
 
 def _slice_step_data(result: Any) -> dict[str, Any]:
@@ -696,14 +696,17 @@ def quick_print(
     signoff: dict[str, Any] | None = None,
     placement: str | list[float] | None = None,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> PipelineResult:
     """Validate → slice → preflight → upload → start print in one call.
 
     ``soft_nozzle_confirmed`` is the owner's word to print anyway a slice
     refused with ``ABRASIVE_ON_SOFT_NOZZLE``; ``filament_map`` is the nozzle
-    each filament prints from on a printer with more than one nozzle
-    (:func:`kiln.slicer.slice_file`, both).
+    each filament prints from on a printer with more than one nozzle;
+    ``mixed_nozzle_experiment`` is the person's yes, for this print, to a
+    slice refused with ``MULTI_NOZZLE_MIXED_SIZES``
+    (:func:`kiln.slicer.slice_file`, all three).
 
     ``placement`` is where the part goes when the plate still holds the
     last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
@@ -832,7 +835,7 @@ def quick_print(
                 slicer_path=slicer_path,
                 material=material,
                 loaded_material=_loaded_material(ctx.get("adapter"), material),
-                **_owner_asks(soft_nozzle_confirmed, filament_map),
+                **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
@@ -1092,14 +1095,17 @@ def reslice_and_print(
     spacing_mm: float = 10.0,
     still_wanted: Callable[[], str | None] | None = None,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
 
     ``soft_nozzle_confirmed`` is the owner's word to print anyway a slice
     refused with ``ABRASIVE_ON_SOFT_NOZZLE``; ``filament_map`` is the nozzle
-    each filament prints from on a printer with more than one nozzle
-    (:func:`kiln.slicer.slice_file`, both).
+    each filament prints from on a printer with more than one nozzle;
+    ``mixed_nozzle_experiment`` is the person's yes, for this print, to a
+    slice refused with ``MULTI_NOZZLE_MIXED_SIZES``
+    (:func:`kiln.slicer.slice_file`, all three).
 
     ``still_wanted``, when given, is asked right before the upload and again
     right before the start; a sentence back means the print is no longer
@@ -1259,7 +1265,7 @@ def reslice_and_print(
                 extra_args=extra_args,
                 material=material,
                 loaded_material=_loaded_material(adapter, material),
-                **_owner_asks(soft_nozzle_confirmed, filament_map),
+                **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
@@ -1744,6 +1750,7 @@ def benchmark(
     profile_path: str | None = None,
     skip_validation: bool = False,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
 ) -> PipelineResult:
     """Slice a benchmark model, upload, and report estimated stats.
@@ -1770,6 +1777,9 @@ def benchmark(
             Defaults to False — user-supplied benchmark meshes are
             pre-tested for printability before slicing.  Set to True
             for known-good fixed reference models.
+        mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
+            ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
+            on their yes, each time; ``slice_model`` says what follows.
         soft_nozzle_confirmed: The owner's word to print anyway a slice
             refused with ``ABRASIVE_ON_SOFT_NOZZLE``; *filament_map* is the
             nozzle each filament prints from (:func:`kiln.slicer.slice_file`,
@@ -1865,7 +1875,7 @@ def benchmark(
             placement="auto",
             profile=effective_profile,
             step_start=step_start,
-            **_owner_asks(soft_nozzle_confirmed, filament_map),
+            **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
         )
         steps.append(step)
         if not step.success or not gcode_path:
