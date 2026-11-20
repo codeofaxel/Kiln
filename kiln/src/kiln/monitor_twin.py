@@ -354,6 +354,7 @@ def note_print_started(
     machine: str = "",
     sent_sha256: str | None = None,
     continues: tuple[str, str] | None = None,
+    printer_model: str | None = None,
 ) -> None:
     """A print just started: join the printer-side name to the sliced pair
     and retain copies of the toolpath (+ mesh) for the Monitor's twin.
@@ -380,6 +381,13 @@ def note_print_started(
     beside the new one as ``original`` and its model stays, so the Monitor
     can show the whole print.  A print carried on a second time keeps no
     original: the record holds the file being printed alone.
+
+    The record also keeps the printer's model as it is at the start
+    (``printer_model``: the one the caller passes, else the one the
+    printer's setup states; ``None`` when neither says), so
+    "which kind of printer is this print on" is answered by the record
+    itself after the printer is renamed, set up again or removed.  A print
+    carried on keeps the model its record already held.
     """
     try:
         base = os.path.basename(str(file_name or ""))
@@ -391,6 +399,7 @@ def note_print_started(
             "file_name": base,
             "printer_name": printer_name or "default",
             "machine": str(machine or ""),
+            "printer_model": _model_at_start(printer_name, slug, continues, printer_model),
             "started_at": _now_iso(),
             "gcode": None,
             "gcode_sha256": None,
@@ -452,6 +461,30 @@ def note_print_started(
         _write_json(_ACTIVE_FILE, active)
     except Exception:  # noqa: BLE001 — retention never blocks a print
         logger.debug("monitor_twin.note_print_started failed", exc_info=True)
+
+
+def _model_at_start(
+    printer_name: str, slug: str, continues: tuple[str, str] | None, stated: str | None = None,
+) -> str | None:
+    """The model of *printer_name* for a print starting now.  A print that
+    carries on the one already held for this printer keeps that record's
+    model; otherwise it is the model the caller *stated*, else the one the
+    printer's setup states."""
+    if continues and continues[1]:
+        active = _read_json(_ACTIVE_FILE, {})
+        held = active.get(slug) if isinstance(active, dict) else None
+        kept = str(held.get("printer_model") or "").strip() if isinstance(held, dict) else ""
+        if kept:
+            return kept
+    if str(stated or "").strip():
+        return str(stated).strip()
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model_for
+
+        named = None if (printer_name or "default") == "default" else printer_name
+        return str(resolve_printer_model_for(named) or "").strip() or None
+    except Exception:  # noqa: BLE001 — an unreadable setup states no model
+        return None
 
 
 def _carry_original(slug: str, continues: tuple[str, str] | None) -> dict[str, Any] | None:

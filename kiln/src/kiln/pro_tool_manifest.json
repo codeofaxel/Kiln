@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-18T18:11:43.788606+00:00",
+  "generated": "2026-11-20T08:07:08.540104+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -4070,6 +4070,22 @@
             "default": null,
             "title": "Motion",
             "description": "For ``generate`` and ``join``, when the thing has parts that move against each other (a hinge, a gearbox, a slider): how it moves, in your source's own part names, so Kiln plays it and checks it with nobody asking.  ``{\"parts\": {name: [x, y, z]}}`` gives each part a point inside its material (millimetres, as modelled); ``\"joints\"`` lists ``{\"parts\": [stays, moves], \"kind\": \"hinge\" | \"slider\" | \"fixed\", \"axis_point\", \"axis_direction\", and \"range\": [lo, hi] or \"continuous\": true}``; ``\"driver\"`` names the part a hand turns or slides (leave it out when each part moves on its own, like drawers in a case); ``\"gears\"`` (optional) lists ``{\"parts\": [a, b], \"teeth\": [na, nb], \"carrier\": the part holding both axes, \"inside\": true when b is a ring with its teeth inside}``.  State tooth counts, never a ratio.  The reply's ``motion`` says whether it plays and what Kiln found."
+          },
+          "in_use": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "In Use",
+            "description": "What the object will do or live through once made, as a list of Kiln's words for a use: ``\"holds weight\"``, ``\"holds liquid\"``, ``\"touches food\"``, ``\"against skin\"``, ``\"outside in the sun\"``, ``\"near heat\"``.  Name only what applies.  Kept on the goal for every later make; works with every verb (``join`` needs the ``goal_id``).  Any other word is refused with the list."
           }
         },
         "required": [
@@ -16674,6 +16690,12 @@
             "default": null,
             "title": "Days In Service",
             "description": "Days it had been in use when you looked."
+          },
+          "seam": {
+            "default": "",
+            "title": "Seam",
+            "type": "string",
+            "description": "The seam of a part Kiln cut, when this joint is one: its ``seam`` id from the cut's ``joints.held``, with the ``design_id`` and ``version_id`` that were cut.  A joint that failed is then said on that seam, and Kiln weighs it the next time it picks how your parts in that plastic are held.  A seam Kiln has no record of is left off; the report still counts."
           }
         },
         "required": [
@@ -17084,6 +17106,12 @@
             "default": null,
             "title": "Measured Size Mm",
             "description": "The size you measured on the part with calipers (an insert's knurl diameter, a nut across flats), if you did."
+          },
+          "seam": {
+            "default": "",
+            "title": "Seam",
+            "type": "string",
+            "description": "The seam of a part Kiln cut, when this hardware holds one: its ``seam`` id from the cut's ``joints.held``, with the ``design_id`` and ``version_id`` that were cut.  A failure is then said on that seam, and Kiln weighs it the next time it picks how your parts in that plastic are held.  A seam Kiln has no record of is left off; the report still counts."
           }
         },
         "required": [
@@ -17419,6 +17447,12 @@
             "title": "Print Material",
             "type": "string",
             "description": "The filament the part was printed in, e.g. PLA."
+          },
+          "seam": {
+            "default": "",
+            "title": "Seam",
+            "type": "string",
+            "description": "The seam of a part Kiln cut that this magnet holds, as record_hardware_outcome takes it."
           }
         },
         "required": [
@@ -20427,9 +20461,9 @@
     },
     {
       "name": "auto_detect_nozzle",
-      "description": "Parse a raw printer payload into a NozzleState.",
+      "description": "Parse a raw printer payload into a NozzleState.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: How long it lasts on that filament, and when to swap \u00b7 Business: + Every machine\u2019s nozzle checked against its record \u00b7 Enterprise: \u2713.",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -20462,6 +20496,13 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": false
+      },
+      "band": {
+        "domain": "nozzle_intelligence",
+        "free": "Warnings \u2014 always free",
+        "pro": "How long it lasts on that filament, and when to swap",
+        "business": "+ Every machine\u2019s nozzle checked against its record",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -21891,9 +21932,9 @@
     },
     {
       "name": "get_nozzle_state",
-      "description": "Return the recorded nozzle state for a printer.",
+      "description": "Return the recorded nozzle state for a printer.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: How long it lasts on that filament, and when to swap \u00b7 Business: + Every machine\u2019s nozzle checked against its record \u00b7 Enterprise: \u2713.",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -21947,6 +21988,13 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
+      },
+      "band": {
+        "domain": "nozzle_intelligence",
+        "free": "Warnings \u2014 always free",
+        "pro": "How long it lasts on that filament, and when to swap",
+        "business": "+ Every machine\u2019s nozzle checked against its record",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -22346,9 +22394,9 @@
     },
     {
       "name": "list_nozzle_states",
-      "description": "List every printer with a recorded nozzle state.",
+      "description": "List every printer with a recorded nozzle state.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: How long it lasts on that filament, and when to swap \u00b7 Business: + Every machine\u2019s nozzle checked against its record \u00b7 Enterprise: \u2713.",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "print_intelligence",
       "parameters": {
         "properties": {},
@@ -22360,6 +22408,13 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
+      },
+      "band": {
+        "domain": "nozzle_intelligence",
+        "free": "Warnings \u2014 always free",
+        "pro": "How long it lasts on that filament, and when to swap",
+        "business": "+ Every machine\u2019s nozzle checked against its record",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -24415,9 +24470,9 @@
     },
     {
       "name": "set_nozzle_state",
-      "description": "Record a user-entered nozzle state for a printer.",
+      "description": "Record a user-entered nozzle state for a printer.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: How long it lasts on that filament, and when to swap \u00b7 Business: + Every machine\u2019s nozzle checked against its record \u00b7 Enterprise: \u2713.",
       "tier": "free",
-      "access": "free",
+      "access": "free_banded",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -24533,6 +24588,13 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": false
+      },
+      "band": {
+        "domain": "nozzle_intelligence",
+        "free": "Warnings \u2014 always free",
+        "pro": "How long it lasts on that filament, and when to swap",
+        "business": "+ Every machine\u2019s nozzle checked against its record",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -24671,31 +24733,52 @@
             ],
             "title": "Joint Method",
             "type": "string",
-            "description": "\"auto\" (default) \u2014 every seam asks the seam-strategy engine, which weighs the item's own physics (seam section, thinnest engagement, material stiffness) plus your intent flags.  Or say it outright: \"pins\", \"adhesive\", \"screws\", \"magnets\", \"none\" \u2014 an explicit choice always wins, with honest physics warnings when the seam disagrees."
+            "description": "\"auto\" (default) \u2014 every seam asks the seam-strategy engine, which weighs the item's own physics (seam section, thinnest engagement, material stiffness) plus your intent flags.  Or say it outright: \"pins\", \"adhesive\", \"screws\", \"magnets\", \"none\" \u2014 an explicit choice always wins, with honest physics warnings when the seam disagrees.  On a plan that does not cut joinery the choice is not weighed: the part is named the hold that would suit it."
           },
           "serviceable": {
-            "default": false,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Serviceable",
-            "type": "boolean",
-            "description": "The seam will be taken apart again (battery door, maintenance panel, transportable prop). Auto routes to magnet seats (light duty) or heat-set inserts + screws (load / big seams) \u2014 CUT IN PLACE at the seam.  Most people never set this themselves; the agent sets it when the person's intent says \"opens\", \"swappable\", \"take apart\"."
+            "description": "Whether the part comes apart again (battery door, maintenance panel, transportable prop): true, false, or leave it out.  Say it if you know; not saying is read as an assumption and said back: the seams are glued as if the part stays together, and each seam's ``why`` says so and asks to be told otherwise.  True gets a hold that opens (magnet seats, or heat-set inserts and screws), cut in place at the seam.  It applies to every seam this call cuts."
           },
           "structural": {
-            "default": false,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Structural",
-            "type": "boolean",
-            "description": "The seam carries real load (bracket, frame, anything holding weight).  Steers auto away from magnets; with pins it also means: read the per-seam ``shear_rating`` before trusting the joint."
+            "description": "Whether the seams carry real load (bracket, frame, anything holding weight): true, false, or leave it out.  Say it if you know; not saying is read as an assumption and said back.  A seam that comes apart with load not said gets screws into heat-set inserts, which hold either way, and is told magnets would do if it carries none; magnets are picked only when this is false. With pins, true also means: read the per-seam ``shear_rating`` before trusting the joint."
           },
           "hardware_ok": {
-            "default": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Hardware Ok",
-            "type": "boolean",
-            "description": "Outside (non-printed) parts are welcome. False = printed-plastic-only build: no screws, inserts or magnets are ever suggested or cut."
+            "description": "Whether bought parts (screws, inserts, magnets) are welcome: true, false, or leave it out.  Say it if you know; not saying is read as an assumption (welcome) and said back.  False = printed-plastic-only build: no screws, inserts or magnets are ever suggested or cut."
           },
           "fastener_size": {
-            "default": "M3",
+            "default": "",
             "title": "Fastener Size",
             "type": "string",
-            "description": "Screw thread for screw joints (default \"M3\") \u2014 insert bore and clearance come from the fastener tables, not guesses."
+            "description": "Screw thread for screw joints, e.g. \"M3\". Leave it out and Kiln picks M3, or one size every screw seam takes, and says so.  A size you name is kept: a seam it does not fit gets no screw joint, and the reply names that seam and the size that would fit.  Insert bore and clearance come from the fastener tables, not guesses."
           },
           "magnet_d_mm": {
             "default": 6.0,
@@ -24745,6 +24828,34 @@
             "title": "Output Dir",
             "type": "string",
             "description": "Where piece STLs land (default: temp)."
+          },
+          "replay_kit": {
+            "default": "",
+            "title": "Replay Kit",
+            "type": "string",
+            "description": "Change how seams of a cut already on record are held: the kit id of that cut (with ``design_id``; the design must be yours).  The part is cut again on the same planes with the same settings, and only the seams named in ``seam_holds`` change.  Pass the model that cut was made from.  On a plan that cuts no joinery nothing is cut: the change is written on the cut's record as a dated line."
+          },
+          "seam_holds": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seam Holds",
+            "description": "With ``replay_kit``: seam id (from ``joints.held[*].seam``, or the design's kit summary) to the hold you want there: \"glued\", \"threaded\" (screws into heat-set inserts) or \"magnetic\".  An unknown seam id is answered with the cut's seams.  When Kiln has a concern about a hold you chose, the first reply says it beside the hold Kiln would use and changes nothing."
+          },
+          "keep_stated": {
+            "default": false,
+            "title": "Keep Stated",
+            "type": "boolean",
+            "description": "Keep the holds named in ``seam_holds`` after reading Kiln's concern about them.  The choice is recorded as made, with Kiln's own pick beside it."
           }
         },
         "required": [
@@ -24932,6 +25043,12 @@
             "title": "Prime Extruder On Resume",
             "type": "boolean",
             "description": "Default ``True``: refuse to emit a 3MF whose embedded gcode lacks the unconditional extruder prime, which guards against a resume that moves through every layer without depositing filament after a cancel/start cycle.  Set ``False`` only when the extruder is primed out-of-band."
+          },
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string",
+            "description": "Optional. The file is checked against the bed of the printer the print started on, which Kiln reads from its own record of the print. Only when Kiln holds no such record does this name (a printer of yours, or a model such as ``bambu_a1``) say whose bed to check. The answer's ``bed_check`` says which printer was used, or that the file could not be checked."
           }
         },
         "required": [
@@ -24957,7 +25074,8 @@
         },
         "outputs": {
           "output_path": "file"
-        }
+        },
+        "printer": "printer_name"
       }
     },
     {

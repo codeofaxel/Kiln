@@ -580,3 +580,63 @@ class TestAPrintCarriedOn:
         start = body.index(b"\r\n\r\n", body.index(b'name="original_gcode"')) + 4
         packed = body[start: body.index(b"\r\n--", start)]
         assert gzip.GzipFile(fileobj=io.BytesIO(packed)).read().decode() == gcode.read_text()
+
+
+class TestTheRecordKeepsThePrintersModel:
+    """The print-start record says which kind of printer the print is on."""
+
+    @pytest.fixture()
+    def setup(self, monkeypatch):
+        from kiln import printer_model_resolver as pmr
+
+        state = {"printers": {"shop": {"printer_model": "prusa_mini"}}, "active_printer": "other"}
+        monkeypatch.setattr(pmr, "_load_yaml_config", lambda *a, **k: state)
+        return state
+
+    def test_the_model_is_kept_at_the_start(self, twin_dir, tmp_path, setup):
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("shop", gcode.name)
+
+        record = monitor_twin.active_twin("shop")
+        assert record["printer_model"] == "prusa_mini"
+
+    def test_the_record_answers_after_the_printer_is_set_up_differently(self, twin_dir, tmp_path, setup):
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("shop", gcode.name)
+
+        setup["printers"]["shop"]["printer_model"] = "creality_k1_max"
+        assert monitor_twin.active_twin("shop")["printer_model"] == "prusa_mini"
+        del setup["printers"]["shop"]
+        assert monitor_twin.active_twin("shop")["printer_model"] == "prusa_mini"
+
+    def test_a_printer_with_no_model_stated_keeps_none(self, twin_dir, tmp_path, setup):
+        setup["printers"]["bare"] = {}
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("bare", gcode.name)
+
+        assert monitor_twin.active_twin("bare")["printer_model"] is None
+
+    def test_a_print_carried_on_keeps_the_model_it_started_with(self, twin_dir, tmp_path, setup):
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("shop", gcode.name)
+        kept = monitor_twin.active_twin("shop")["gcode"]
+
+        setup["printers"]["shop"]["printer_model"] = "creality_k1_max"
+        made = tmp_path / "carried_on.gcode"
+        made.write_text("G1 X1 Y1\n")
+        monitor_twin.note_print_started(
+            "shop", made.name, continues=(str(made), monitor_twin._sha256(kept)),
+        )
+
+        assert monitor_twin.active_twin("shop")["printer_model"] == "prusa_mini"
+
+    def test_a_model_the_caller_states_is_the_one_kept(self, twin_dir, tmp_path, setup):
+        mesh, gcode = _make_files(tmp_path)
+        monitor_twin.note_sliced(str(mesh), str(gcode))
+        monitor_twin.note_print_started("shop", gcode.name, printer_model="voron_2")
+
+        assert monitor_twin.active_twin("shop")["printer_model"] == "voron_2"
