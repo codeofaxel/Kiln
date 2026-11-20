@@ -42,6 +42,10 @@ _SERVED = sorted(path for path in _BRIDGES if _served_calls(path))
 
 #: Bridges whose served call IS the person's ask, with why.
 _PERSONS_OWN_ASK = {
+    "_pro_limits_bridge": (
+        "runs only when the person runs the design-limits lesson in printer_bench; "
+        "the test print and what they read off it are what they reached for"
+    ),
     "_pro_material_rules_bridge": (
         "runs only when the person names the rules on check_material_environment; "
         "the per-requirement verdict is the feature they reached for"
