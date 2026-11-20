@@ -2311,6 +2311,7 @@ class PrinterAdapter(ABC):
                     self.name, file_name, machine=machine_fingerprint(self),
                     sent_sha256=sent_sha256(self, file_name),
                     continues=continuation_started(self, file_name),
+                    printer_model=self.declared_printer_model() or None,
                 )
             except Exception:  # noqa: BLE001 — the twin never affects a print
                 import logging as _logging
