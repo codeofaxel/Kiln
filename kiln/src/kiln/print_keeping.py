@@ -475,14 +475,45 @@ def note_picture(printer_name: str | None, path: str | None) -> bool:
         return True
 
 
+#: The name Kiln gives every plate picture it saves (kiln.plate_state.save_frame).
+PLATE_PICTURE_PREFIX = "kiln_plate_"
+
+
+def remove_kilns_own(path: str | None, roots: list[str] | tuple[str, ...], *, prefix: str = "") -> bool:
+    """Delete *path* only when it is a file Kiln made: it resolves inside one
+    of *roots* (Kiln's own folders) and, with *prefix*, its name starts with
+    the name Kiln gives such files.  A person's own file is never touched.
+    Returns whether it was deleted.  Never raises."""
+    try:
+        if not path:
+            return False
+        real = os.path.realpath(str(path))
+        if prefix and not os.path.basename(real).startswith(prefix):
+            return False
+        for root in roots:
+            base = os.path.realpath(str(root))
+            if root and real.startswith(base.rstrip(os.sep) + os.sep) and os.path.isfile(real):
+                os.unlink(real)
+                return True
+    except OSError:
+        logger.debug("a file Kiln made was not deleted", exc_info=True)
+    return False
+
+
+def picture_roots() -> tuple[str, ...]:
+    """The folders Kiln saves plate pictures in."""
+    from kiln.output_paths import kiln_temp_dir
+
+    import tempfile
+
+    return (kiln_temp_dir(), tempfile.gettempdir())
+
+
 def _drop_pictures(printer_name: str) -> None:
     with _lock:
         paths = _pictures.pop(_slug(printer_name), [])
     for path in paths:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+        remove_kilns_own(path, picture_roots(), prefix=PLATE_PICTURE_PREFIX)
 
 
 def print_started(printer_name: str, file_name: str, decision: Decision) -> None:

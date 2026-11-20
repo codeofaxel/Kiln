@@ -917,15 +917,15 @@ def forget_file(file_names: set[str] | list[str]) -> int:
                     isinstance(j, dict) and j.get("file") == "" for j in [row.get("job"), *(row.get("jobs") or [])]
                 ):
                     continue
+                from kiln.print_keeping import PLATE_PICTURE_PREFIX, picture_roots, remove_kilns_own
+
                 look = row.get("look")
                 if isinstance(look, dict) and isinstance(look.get("frame"), str):
-                    with contextlib.suppress(OSError):
-                        os.unlink(look["frame"])
+                    remove_kilns_own(look["frame"], (str(_kiln_dir() / _LOOKS_DIR),))
                     row["look"] = {k: v for k, v in look.items() if k not in ("frame", "frame_at")}
                 handed = (store.get("frames") or {}).pop(machine, None) if isinstance(store.get("frames"), dict) else None
                 if isinstance(handed, dict) and isinstance(handed.get("path"), str):
-                    with contextlib.suppress(OSError):
-                        os.unlink(handed["path"])
+                    remove_kilns_own(handed["path"], picture_roots(), prefix=PLATE_PICTURE_PREFIX)
             _write_store(store)
         return unnamed
     except Exception:  # noqa: BLE001

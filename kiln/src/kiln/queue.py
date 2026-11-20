@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 
 import enum
 import json
@@ -756,13 +755,17 @@ class PrintQueue:
                 ]
                 if any(j.status not in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED) for j in run):
                     return False
-                files: set[str] = set()
+                copies: set[str] = set()
+                pictures: set[str] = set()
                 for j in run:
                     fill = dict((j.metadata or {}).get("fill") or {})
-                    for key in ("model_path", "failed_picture"):
-                        if isinstance(fill.get(key), str) and fill[key]:
-                            files.add(fill[key])
-                    for key in ("model_path", "failed_picture", "beside_plate", "moved_from"):
+                    # Only what Kiln itself made for the run, recorded as it
+                    # was made: its own copy of the part, a plate picture.
+                    if isinstance(fill.get("owned_copy"), str) and fill["owned_copy"]:
+                        copies.add(fill["owned_copy"])
+                    if isinstance(fill.get("failed_picture"), str) and fill["failed_picture"]:
+                        pictures.add(fill["failed_picture"])
+                    for key in ("model_path", "owned_copy", "failed_picture", "beside_plate", "moved_from"):
                         fill.pop(key, None)
                     meta_j = {k: v for k, v in (j.metadata or {}).items() if k not in self._NAMING_METADATA}
                     if fill:
@@ -771,12 +774,16 @@ class PrintQueue:
                     j.file_name = ""
                     j.error = None
                 still_used = {
-                    str(((j.metadata or {}).get("fill") or {}).get("model_path") or "")
-                    for j in self._jobs.values() if j not in run
+                    str(((j.metadata or {}).get("fill") or {}).get(key) or "")
+                    for j in self._jobs.values() if j not in run for key in ("model_path", "owned_copy")
                 }
-            for path in files - still_used:
-                with contextlib.suppress(OSError):
-                    os.unlink(path)
+            from kiln.asset_store import kiln_root
+            from kiln.print_keeping import PLATE_PICTURE_PREFIX, picture_roots, remove_kilns_own
+
+            for path in copies - still_used:
+                remove_kilns_own(path, (os.path.join(kiln_root(), "queued_parts"),))
+            for path in pictures:
+                remove_kilns_own(path, picture_roots(), prefix=PLATE_PICTURE_PREFIX)
             if self._db is not None:
                 for j in run:
                     self._db.execute("DELETE FROM jobs WHERE id=?", (j.id,))

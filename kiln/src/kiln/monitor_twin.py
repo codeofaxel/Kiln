@@ -636,10 +636,11 @@ def forget_print(printer_name: str) -> bool:
         if isinstance(record, dict):
             if record.get("file_name"):
                 names.add(os.path.basename(str(record["file_name"])))
+            from kiln.print_keeping import remove_kilns_own
+
             for key in ("gcode", "mesh", "original"):
-                path = record.get(key)
-                if isinstance(path, str) and path:
-                    Path(path).unlink(missing_ok=True)
+                # Only Kiln's own copies beside the record, never a file elsewhere.
+                remove_kilns_own(record.get(key), (str(_TWIN_DIR),))
         for old in _TWIN_DIR.glob(f"{slug}-*"):
             old.unlink(missing_ok=True)
         entries = _read_json(_SLICES_FILE, [])

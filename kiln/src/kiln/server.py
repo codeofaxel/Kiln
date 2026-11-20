@@ -20710,7 +20710,14 @@ def _queue_fill_rest(
         from kiln.asset_store import kiln_root, persist_asset
 
         _adapter, target = _resolve_control_target(printer_name)
-        kept = persist_asset(model_path, os.path.join(kiln_root(), "queued_parts"), prefix="part") or model_path
+        queued_dir = os.path.join(kiln_root(), "queued_parts")
+        kept = persist_asset(model_path, queued_dir, prefix="part") or model_path
+        # Kiln's own copy, recorded as made: only a copy written into its
+        # queued-parts folder, never the caller's file or a file elsewhere.
+        owned = (
+            kept if kept != model_path
+            and os.path.realpath(kept).startswith(os.path.realpath(queued_dir) + os.sep) else None
+        )
         job_id = _get_queue().submit(
             file_name=os.path.basename(model_path),
             printer_name=target,
@@ -20723,6 +20730,7 @@ def _queue_fill_rest(
                     "printer_id": printer_id,
                     "overrides": dict(overrides) if overrides else None,
                     "slicer_path": slicer_path,
+                    **({"owned_copy": owned} if owned else {}),
                     **({"beside_plate": beside_plate} if beside_plate else {}),
                     **(dict(asks) if asks else {}),
                 },

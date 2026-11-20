@@ -654,7 +654,8 @@ class TestARunOfCopiesNotKept:
         part.write_text("solid x")
         self._plan("plan-1")
         queue = PrintQueue(db_path=str(home / "queue.db"))
-        meta = {"keep_record": False, "split_plan_id": "plan-1", "fill": {"model_path": str(part), "copies": 2}}
+        meta = {"keep_record": False, "split_plan_id": "plan-1",
+                "fill": {"model_path": str(part), "owned_copy": str(part), "copies": 2}}
         first = queue.submit("secret_part.stl", metadata=dict(meta))
         second = queue.submit("secret_part.stl", metadata=dict(meta))
         for job_id in (first,):
@@ -692,3 +693,51 @@ class TestARunOfCopiesNotKept:
         tools = srv.mcp._tool_manager._tools
         for name in ("multi_copy_print", "plan_multi_copy_split"):
             assert "keep_record" in (tools[name].parameters.get("properties") or {}), name
+
+
+class TestOnlyWhatKilnMadeIsDeleted:
+    def test_the_persons_own_model_survives_and_kilns_copy_goes(self, home):
+        from kiln.queue import PrintQueue
+
+        own = home / "Desktop" / "secret_part.stl"
+        own.parent.mkdir(parents=True, exist_ok=True)
+        own.write_text("solid mine")
+        copy = home / ".kiln" / "queued_parts" / "part-abc.stl"
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_text("solid mine")
+        queue = PrintQueue(db_path=str(home / "queue.db"))
+        # A job whose part is the person's own file (Kiln made no copy), and
+        # one carrying Kiln's own copy, as recorded when it was made.
+        mine = queue.submit("secret_part.stl", metadata={"keep_record": False,
+                                                          "fill": {"model_path": str(own), "copies": 1}})
+        kilns = queue.submit("secret_part.stl", metadata={"keep_record": False, "fill": {
+            "model_path": str(copy), "owned_copy": str(copy), "copies": 1}})
+        for job_id in (mine, kilns):
+            queue.mark_starting(job_id, printer_name="shop-x1")
+            queue.mark_printing(job_id)
+            queue.mark_completed(job_id)
+        assert own.exists(), "the person's own file is theirs"
+        assert not copy.exists()
+
+    def test_a_copy_named_outside_kilns_folder_is_never_deleted(self, home):
+        from kiln.queue import PrintQueue
+
+        own = home / "Desktop" / "keep_me.stl"
+        own.parent.mkdir(parents=True, exist_ok=True)
+        own.write_text("solid mine")
+        queue = PrintQueue(db_path=str(home / "queue.db"))
+        job_id = queue.submit("keep_me.stl", metadata={"keep_record": False, "fill": {
+            "model_path": str(own), "owned_copy": str(own), "failed_picture": str(own), "copies": 1}})
+        queue.mark_starting(job_id, printer_name="shop-x1")
+        queue.mark_printing(job_id)
+        queue.mark_completed(job_id)
+        assert own.exists()
+
+    def test_the_twin_cleanup_touches_nothing_outside_its_folder(self, home):
+        own = home / "Desktop" / "secret_part.gcode"
+        own.parent.mkdir(parents=True, exist_ok=True)
+        own.write_text("G28")
+        monitor_twin._write_json(monitor_twin._ACTIVE_FILE, {"shop-x1": {
+            "file_name": "secret_part.gcode", "printer_name": "shop-x1", "kept": "none", "gcode": str(own)}})
+        assert monitor_twin.forget_print("shop-x1") is True
+        assert own.exists()
