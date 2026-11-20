@@ -242,11 +242,17 @@ def _same_serial(one: object, other: object) -> bool:
 
 
 def entry_statement(entry: Any) -> dict[str, Any] | None:
-    """The owner's statement on one saved printer's record, when it names that printer's own serial number."""
+    """The owner's statement on one saved printer's record, while it is still about that record.
+
+    It names the printer's own serial number, and the model it names is the
+    model the record is set up as now: a statement about a model the
+    printer has since been set up as something else is not read.
+    """
     said = entry.get(STATEMENT_FIELD) if isinstance(entry, dict) else None
-    if isinstance(said, dict) and _same_serial(said.get("serial"), entry.get("serial")):
-        return said
-    return None
+    if not isinstance(said, dict) or not _same_serial(said.get("serial"), entry.get("serial")):
+        return None
+    stated = _row(said.get("model"))
+    return said if stated is not None and stated == _row(entry.get("printer_model")) else None
 
 
 def owner_statement(serial: object) -> dict[str, Any] | None:

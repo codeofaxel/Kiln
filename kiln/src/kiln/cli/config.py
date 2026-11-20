@@ -818,6 +818,24 @@ def _printer_entry(
     return entry
 
 
+def _drop_statement_it_no_longer_fits(base: dict[str, Any], entry: dict[str, Any]) -> None:
+    """Take the owner's statement off *base* when *entry* rewrites its model or serial number to another.
+
+    A statement is about one model on one machine
+    (:data:`kiln.printer_model_check.STATEMENT_FIELD`); only the door that
+    proved a person said it writes one, so a rewrite never carries it over.
+    """
+    from kiln.printer_model_check import STATEMENT_FIELD
+
+    said = base.get(STATEMENT_FIELD)
+    if not isinstance(said, dict):
+        return
+    for key, stated in (("printer_model", said.get("model")), ("serial", said.get("serial"))):
+        if key in entry and str(entry[key]).strip().lower() != str(stated or "").strip().lower():
+            base.pop(STATEMENT_FIELD, None)
+            return
+
+
 def save_printer(
     name: str,
     printer_type: str,
@@ -929,6 +947,7 @@ def save_printer(
             k for k in base if k not in entry and k not in ("type", "host", *_MACHINE_ID_KEYS)
         )
         outcome, previous_host, dropped = match.outcome, match.previous_host, match.dropped
+        _drop_statement_it_no_longer_fits(base, entry)
         entry = {**base, **entry}
 
     printers[name] = entry

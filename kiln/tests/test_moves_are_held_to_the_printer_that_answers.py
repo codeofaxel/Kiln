@@ -610,6 +610,51 @@ class TestTheOwnerSaysSoWithACode:
         assert "owner_says" not in self._entry(saved)
 
 
+class TestAStatementDoesNotOutliveWhatItWasAbout:
+    """A statement is about one model on one machine; a later change of either leaves it unread."""
+
+    def _entry(self, saved, name="garage"):
+        return yaml.safe_load(saved.read_text(encoding="utf-8"))["printers"][name]
+
+    def _resave(self, saved, **changes):
+        from kiln.cli.config import save_printer
+
+        fields = {"access_code": "12345678", "serial": X2D, "printer_model": "bambu_a1", **changes}
+        save_printer("garage", "bambu", "192.168.1.9", config_path=saved, **fields)
+
+    def test_saving_the_printer_as_another_model_drops_the_statement(self, saved):
+        """The writer register_printer, `kiln add-printer`, the setup wizard and the bridge share."""
+        _owner_said(saved, serial=X2D, model="bambu_a1")
+        self._resave(saved, printer_model="bambu_x1c")
+        assert self._entry(saved)["printer_model"] == "bambu_x1c" and "owner_says" not in self._entry(saved)
+
+    def test_saving_it_again_as_the_same_machine_and_model_keeps_it(self, saved):
+        _owner_said(saved, serial=X2D, model="bambu_a1")
+        self._resave(saved)
+        assert self._entry(saved)["owner_says"]["model"] == "bambu_a1"
+
+    def test_a_statement_left_beside_another_model_is_not_read(self, bambu, monkeypatch, saved):
+        """A hand edit, or a running Kiln that has not reread its settings: the record says
+        X1C, the old statement says A1, and the machine Kiln is driving still says A1."""
+        _an_x2d_set_up_as_an_a1(bambu, monkeypatch)
+        _owner_said(saved, serial=X2D, model="bambu_a1")
+        raw = yaml.safe_load(saved.read_text(encoding="utf-8"))
+        raw["printers"]["garage"]["printer_model"] = "bambu_x1c"
+        saved.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        with pytest.raises(PrinterError, match="reports itself as the Bambu Lab X2D"):
+            bambu.home_axes()
+
+    def test_set_model_does_not_carry_a_statement_to_a_model_edited_in_by_hand(self, saved):
+        from kiln.printer_setup import set_printer_model
+
+        _owner_said(saved, serial=X2D, model="bambu_a1")
+        raw = yaml.safe_load(saved.read_text(encoding="utf-8"))
+        raw["printers"]["garage"]["printer_model"] = "bambu_x1c"
+        saved.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        out = set_printer_model("bambu_a1", printer_name="garage", replace=True, config_path=saved)
+        assert out["code"] == "MODEL_DISAGREES_WITH_PRINTER"
+
+
 def test_the_setup_check_shows_the_owners_word(bambu, monkeypatch, saved):
     from kiln.printer_model_check import statement_line
 
