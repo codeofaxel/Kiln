@@ -404,7 +404,7 @@ def request_for(
     else:
         placement_value = str(placement or "auto")
         who = placed_by or (placement_value if placement_value in ("keep", "auto") else "agent")
-    return {
+    doc: dict[str, Any] = {
         "schema": REQUEST_SCHEMA,
         "printer_id": str(printer_id or "").strip().lower(),
         "serial": _serial_of(adapter),
@@ -426,10 +426,14 @@ def request_for(
         # (:mod:`kiln.bench`), so a blank in the record is judged on the
         # owner's numbers for THIS printer at once.
         "printer_observations": observations_for_request(adapter),
-        # The printer's own routines from a file sliced for it
-        # (:mod:`kiln.sliced_routines`), for THIS printer's verdict.
-        "printer_routines": routines_for_request(adapter),
     }
+    # The printer's own routines from a file sliced for it
+    # (:mod:`kiln.sliced_routines`), for THIS printer's verdict; the key is
+    # sent only when there are some.
+    routines = routines_for_request(adapter)
+    if routines:
+        doc["printer_routines"] = routines
+    return doc
 
 
 # ---------------------------------------------------------------------------
