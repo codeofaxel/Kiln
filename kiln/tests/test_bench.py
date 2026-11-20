@@ -330,9 +330,13 @@ class TestWhatTheRecordLacks:
         for gap in ("pause", "cancel", "end", "head"):
             assert bench.lesson_for([gap]) == "motion"
         assert bench.lesson_for(["limits"]) == "limits"
-        # A home, a park, a wipe or a purge is a sequence for the printer to
-        # run; a colour change is never triggered; no lesson teaches them.
-        for gap in ("home", "park", "wipe", "purge", "load", "unload", "filament_change", "quiet_start"):
+        # A home or a park can be walked with the person, offered only when
+        # one is on offer (tests/test_bench_walk.py).
+        for gap in ("home", "park"):
+            assert bench.lesson_for([gap]) == "walk"
+        # A wipe or a purge is a sequence for the printer to run; a colour
+        # change is never triggered; no lesson teaches them.
+        for gap in ("wipe", "purge", "load", "unload", "filament_change", "quiet_start"):
             assert bench.lesson_for([gap]) is None, gap
         assert bench.lesson_for(["filament_change", "pause"]) == "motion"
         assert bench.lesson_for([]) is None and bench.lesson_for(None) is None
@@ -1011,7 +1015,8 @@ def funnel(tmp_path, monkeypatch):
 
 
 class _X2D(_Adapter):
-    """A printer whose home and park no lesson can teach."""
+    """A printer with no walk on offer for its home or park: it cannot prove
+    its model from its own report."""
 
     serial = "20P00A000000009"
     _printer_model = "bambu_x2d"
@@ -1042,7 +1047,7 @@ class TestOneOfferEveryDoor:
         assert "bench_offer" not in again, "the next refusal the same week is not a second offer"
         assert funnel() == {"offered|motion|print_beside": 1}
 
-    def test_a_home_no_lesson_can_teach_is_refused_with_no_offer(self, funnel, monkeypatch):
+    def test_a_home_with_no_walk_on_offer_is_refused_with_no_offer(self, funnel, monkeypatch):
         import kiln.server as srv
         from kiln.plugins import homing_tools
         from kiln.printers.base import HomingUnsupported
