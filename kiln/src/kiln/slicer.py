@@ -859,6 +859,9 @@ def _abrasive_slots(slot_materials: Sequence[Sequence[str]]) -> list[tuple[int, 
     return found
 
 
+#: The code of a slice refused for an abrasive filament through a nozzle
+#: that is not wear-resistant, until the owner says to print it anyway.
+SOFT_NOZZLE_CODE = "ABRASIVE_ON_SOFT_NOZZLE"
 #: The confirmation a refused abrasive slice can be sliced with, as its
 #: refusal says it: one clause, the same at every door.
 SOFT_NOZZLE_CONFIRM = "if the owner says to print it anyway, call again with soft_nozzle_confirmed=true"
@@ -2303,6 +2306,7 @@ def _slice_file(
         input_abs = taken.path
 
     from kiln.slicer_profiles import (
+        MIXED_SIZES_CODE,
         mixed_size_experiment,
         mixed_size_refusal,
         nozzle_bed,
@@ -2392,7 +2396,7 @@ def _slice_file(
     experimental: dict[str, Any] | None = None
     if several is not None and (mixed := mixed_size_refusal(nozzles)):
         if mixed_nozzle_experiment is not True:
-            raise NozzleMapError(mixed, code="MULTI_NOZZLE_MIXED_SIZES")
+            raise NozzleMapError(mixed, code=MIXED_SIZES_CODE)
         experimental = mixed_size_experiment(nozzles)
         nozzles = mixed_size_nozzles(profile, nozzles, asked_map)
     if ext == ".3mf" and nozzle_bed(nozzles) is not None:
@@ -2494,7 +2498,7 @@ def _slice_file(
         mappable=mappable,
     )
     if soft_run is not None and soft_nozzle_confirmed is not True:
-        raise NozzleMapError(f"{soft_run.refusal[:-1]}; {SOFT_NOZZLE_CONFIRM}.", code="ABRASIVE_ON_SOFT_NOZZLE")
+        raise NozzleMapError(f"{soft_run.refusal[:-1]}; {SOFT_NOZZLE_CONFIRM}.", code=SOFT_NOZZLE_CODE)
     # The layer height the part was designed in, decided here for the same
     # reason: a relief made in whole 0.2 mm layers printed at the profile's
     # 0.3 by every door and lost its levels.  A stated layer height is the

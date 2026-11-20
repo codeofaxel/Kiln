@@ -1356,6 +1356,9 @@ MIXED_SIZES_ARGUMENT = "mixed_nozzle_experiment"
 MIXED_SIZES_CONFIRM = f"if they say yes to trying it for this print, call again with {MIXED_SIZES_ARGUMENT}=true"
 #: What every door calls a print that uses nozzles of different sizes.
 MIXED_SIZES_EXPERIMENT = "mixed_nozzle_sizes"
+#: The code of a slice refused for nozzles of different sizes nobody agreed
+#: to try.
+MIXED_SIZES_CODE = "MULTI_NOZZLE_MIXED_SIZES"
 
 
 def mixed_size_refusal(nozzles: Any) -> str:
