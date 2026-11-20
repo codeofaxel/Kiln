@@ -3057,6 +3057,7 @@ class _SlicerToolsPlugin:
             filament_map: list[int] | None = None,
             time_limit_seconds: int | None = None,
             soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
@@ -3067,6 +3068,23 @@ class _SlicerToolsPlugin:
                     wear-resistant).  Only on their word, never on your own
                     judgement.  The response's ``soft_nozzle`` says which
                     filament goes through which nozzle on their say-so.
+                mixed_nozzle_experiment: Only for a print that would use
+                    nozzles of different sizes at once (say a 0.4 mm and a
+                    0.6 mm nozzle on a two-nozzle printer).  That is an
+                    experiment Kiln has not proven on a printer, so the
+                    slice is refused with ``MULTI_NOZZLE_MIXED_SIZES``
+                    until the person says yes to trying it for THIS print:
+                    ask them, and pass ``true`` only on their yes, each
+                    time.  The slice then needs settings from Kiln's
+                    servers for those sizes (free, signed in); when they
+                    cannot be had it is refused with
+                    ``MULTI_NOZZLE_MIXED_SIZES_UNAVAILABLE`` and ``why``
+                    (``offline``, ``signed_out``, ``unanswered`` or
+                    ``refused``), and nothing is sliced.  A slice made this
+                    way carries an ``experimental`` block: show its
+                    ``note`` to the person as written, and when the print
+                    ends ask them how it came out.  Leave unset for any
+                    other slice.
                 time_limit_seconds: How long the slicer may run, in whole
                     seconds, up to Kiln's own limit (``SLICE_TIME_LIMIT_S``);
                     a longer one is refused.  Leave unset for Kiln's own limit.  A slicer
@@ -3102,7 +3120,8 @@ class _SlicerToolsPlugin:
                     slice uses are the ones the owner recorded as fitted
                     (``set_nozzle_state``), when they did.  Before slicing,
                     nozzles of different sizes are refused with
-                    ``MULTI_NOZZLE_MIXED_SIZES``; on any slice, an
+                    ``MULTI_NOZZLE_MIXED_SIZES`` (see
+                    ``mixed_nozzle_experiment``); on any slice, an
                     abrasive filament that could print through a nozzle on
                     record that is not wear-resistant is refused with
                     ``ABRASIVE_ON_SOFT_NOZZLE``.  The response's
@@ -3216,7 +3235,7 @@ class _SlicerToolsPlugin:
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
                     **({"timeout": time_limit_seconds} if time_limit_seconds is not None else {}),
-                    **_owner_asks(soft_nozzle_confirmed, filament_map),
+                    **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3346,7 +3365,11 @@ class _SlicerToolsPlugin:
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
-                return _srv._error_dict(f"Failed to slice model: {exc}", code=getattr(exc, "code", "SLICER_ERROR"))
+                why = getattr(exc, "why", None)
+                return _srv._error_dict(
+                    f"Failed to slice model: {exc}", code=getattr(exc, "code", "SLICER_ERROR"),
+                    **({"extra": {"why": why}} if why else {}),
+                )
             except FileNotFoundError as exc:
                 return _srv._error_dict(f"Failed to slice model: {exc}", code="FILE_NOT_FOUND")
             except Exception as exc:

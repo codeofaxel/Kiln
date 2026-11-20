@@ -1329,18 +1329,60 @@ def _nozzle_words(ids: list[Any]) -> str:
     return f"nozzles {', '.join(named[:-1])} and {named[-1]}"
 
 
+def mixed_sizes(nozzles: Any) -> list[dict[str, Any]]:
+    """The nozzles a slice with *nozzles* uses, when they were stated at
+    different sizes: ``{"id", "diameter_mm", "material"}`` per nozzle in
+    slice order.  Empty when they are one size, or any has no stated size."""
+    used = used_nozzles(nozzles)
+    sizes = [n["diameter_mm"] for n in used]
+    if len(used) < 2 or any(isinstance(s, bool) or not isinstance(s, (int, float)) for s in sizes):
+        return []
+    return used if max(sizes) - min(sizes) > _NOZZLE_SAME_MM else []
+
+
+def _sizes_said(used: list[dict[str, Any]]) -> str:
+    """``nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm``."""
+    return " and ".join(f"nozzle {n['id']} is {n['diameter_mm']:g} mm" for n in used)
+
+
+#: The slicing argument a person's yes to the experiment is passed as.
+MIXED_SIZES_ARGUMENT = "mixed_nozzle_experiment"
+#: What every door calls a print that uses nozzles of different sizes.
+MIXED_SIZES_EXPERIMENT = "mixed_nozzle_sizes"
+
+
 def mixed_size_refusal(nozzles: Any) -> str:
     """The sentence refusing a slice with *nozzles* when the nozzles it uses
-    were stated at different sizes; ``""`` otherwise."""
-    used = [n for n in used_nozzles(nozzles) if isinstance(n["diameter_mm"], (int, float))]
-    if len(used) < 2 or max(n["diameter_mm"] for n in used) - min(n["diameter_mm"] for n in used) <= _NOZZLE_SAME_MM:
+    were stated at different sizes and nobody agreed to the experiment;
+    ``""`` when they are one size."""
+    used = mixed_sizes(nozzles)
+    if not used:
         return ""
-    sizes = " and ".join(f"nozzle {n['id']} is {n['diameter_mm']:g} mm" for n in used)
     return (
-        f"The nozzles this print would use are different sizes ({sizes}), and Kiln slices for more "
-        "than one nozzle only when they are one size, so nothing was sliced; slice it with one "
-        "filament for one nozzle, or fit nozzles of one size."
+        f"The nozzles this print would use are different sizes ({_sizes_said(used)}). Printing with "
+        "two nozzle sizes at once is an experiment Kiln has not proven on a printer, so nothing was "
+        f"sliced. To try it, ask the person, and if they say yes slice it with slice_model and "
+        f"{MIXED_SIZES_ARGUMENT} set; otherwise slice it with one filament for one nozzle, or fit "
+        "nozzles of one size."
     )
+
+
+def mixed_size_experiment(nozzles: Any) -> dict[str, Any] | None:
+    """What a slice made with *nozzles* of different sizes says about
+    itself: ``{"experiment", "nozzles", "note"}``; ``None`` when they are
+    one size."""
+    used = mixed_sizes(nozzles)
+    if not used:
+        return None
+    return {
+        "experiment": MIXED_SIZES_EXPERIMENT,
+        "nozzles": [{"id": n["id"], "diameter_mm": n["diameter_mm"]} for n in used],
+        "note": (
+            f"Experimental: this print uses nozzles of different sizes at once ({_sizes_said(used)}). "
+            "Kiln has not proven that on a printer. The person agreed to try it for this print; watch "
+            "the first layers, and afterwards tell Kiln how it came out."
+        ),
+    }
 
 
 def unused_fitted_note(nozzles: Any) -> str:

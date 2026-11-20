@@ -321,6 +321,10 @@ class SliceResult:
     #: that is not wear-resistant (:meth:`SoftNozzleRun.confirmed`); ``None``
     #: for every other slice.
     soft_nozzle: dict[str, Any] | None = None
+    #: What an experimental slice says about itself
+    #: (:func:`kiln.slicer_profiles.mixed_size_experiment`); ``None`` for
+    #: any other slice.
+    experimental: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -349,6 +353,8 @@ class SliceResult:
             d["one_nozzle"] = self.one_nozzle
         if self.soft_nozzle is not None:
             d["soft_nozzle"] = self.soft_nozzle
+        if self.experimental is not None:
+            d["experimental"] = self.experimental
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -884,16 +890,21 @@ SOFT_NOZZLE_CONFIRM = "if the owner says to print it anyway, call again with sof
 MAP_ADVICE = "give a filament-to-nozzle map with "
 
 
-def owner_asks(soft_nozzle_confirmed: Any = False, filament_map: Any = None) -> dict[str, Any]:
+def owner_asks(
+    soft_nozzle_confirmed: Any = False, filament_map: Any = None, mixed_nozzle_experiment: Any = False,
+) -> dict[str, Any]:
     """The slice keywords a door hands on for the owner's word to print
-    anyway (``soft_nozzle_confirmed``) and the filament-to-nozzle map
-    (``filament_map``): only what was given, so a door passes both the same
-    way (:func:`slice_file`)."""
+    anyway (``soft_nozzle_confirmed``), the filament-to-nozzle map
+    (``filament_map``) and the person's yes to nozzles of different sizes
+    for this print (``mixed_nozzle_experiment``): only what was given, so
+    a door passes all three the same way (:func:`slice_file`)."""
     out: dict[str, Any] = {}
     if soft_nozzle_confirmed is True:
         out["soft_nozzle_confirmed"] = True
     if filament_map:
         out["filament_map"] = filament_map
+    if mixed_nozzle_experiment is True:
+        out["mixed_nozzle_experiment"] = True
     return out
 
 
@@ -2181,6 +2192,49 @@ def _units_question_for(path: str) -> str:
         return ""
 
 
+#: The code of a slice refused because the settings for nozzles of
+#: different sizes could not be had.
+MIXED_SIZES_UNAVAILABLE = "MULTI_NOZZLE_MIXED_SIZES_UNAVAILABLE"
+
+
+def mixed_size_nozzles(
+    profile: str | None, nozzles: dict[str, Any], filament_map: list[int] | None,
+) -> dict[str, Any]:
+    """*nozzles* for one slice with its nozzles at different sizes: the same
+    record with the preset extras Kiln's servers give for those sizes (and
+    for *filament_map*, when the person chose one).
+
+    Raises :class:`NozzleMapError` (:data:`MIXED_SIZES_UNAVAILABLE`) when
+    they cannot be had -- this computer is offline, Kiln is signed out, the
+    servers did not answer, or they said no -- and its ``why`` names which.
+    Nothing is sliced on a guess.
+    """
+    from kiln import _pro_catalogue_bridge, served_answer
+    from kiln.slicer_profiles import _sizes_said, mixed_sizes, profile_origin
+
+    used = mixed_sizes(nozzles)
+    printer_id = profile_origin(profile).printer_id if profile else None
+    served, miss = _pro_catalogue_bridge.nozzles_for_sizes(
+        printer_id, [n["diameter_mm"] for n in used], filament_map,
+    )
+    if served is None:
+        miss = miss or served_answer.Miss("unanswered")
+        error = NozzleMapError(
+            served_answer.sentence(
+                miss,
+                feature="servers",
+                on_the_line=f"This print would use nozzles of different sizes at once ({_sizes_said(used)})",
+                cannot="get the slicer settings for those sizes",
+                wont="sliced nothing",
+                safe_remedy="Slice it with one filament for one nozzle, or fit nozzles of one size",
+            ),
+            code=MIXED_SIZES_UNAVAILABLE,
+        )
+        error.why = miss.cause  # type: ignore[attr-defined]
+        raise error
+    return {**nozzles, "preset_extras": served["preset_extras"]}
+
+
 def _slice_file(
     input_path: str,
     *,
@@ -2196,6 +2250,7 @@ def _slice_file(
     plate_number: int | None = None,
     filament_map: Sequence[int] | str | None = None,
     soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
 
@@ -2207,6 +2262,13 @@ def _slice_file(
             then runs, and the result's ``soft_nozzle`` and message say
             which filament goes through which nozzle on their say-so; the
             slice's record on this computer keeps it.
+        mixed_nozzle_experiment: The person agreed, for this print, to try
+            printing with nozzles of different sizes at once.  Without it a
+            slice that would use nozzles of different sizes is refused.
+            With it the slice is made only when the settings for those
+            sizes can be had (:func:`mixed_size_nozzles`), and the result's
+            ``experimental`` says so.  It changes nothing for any other
+            slice.
         filament_map: For a printer sliced with more than one nozzle, the
             nozzle (1 for the first) each filament prints from, one entry
             per filament in filament order.  Left out, the slicer maps the
@@ -2269,6 +2331,7 @@ def _slice_file(
         input_abs = taken.path
 
     from kiln.slicer_profiles import (
+        mixed_size_experiment,
         mixed_size_refusal,
         nozzle_bed,
         nozzle_positions,
@@ -2354,8 +2417,12 @@ def _slice_file(
                 ) from miss
             instead = miss
             would_use = nozzle_positions(nozzles)
+    experimental: dict[str, Any] | None = None
     if several is not None and (mixed := mixed_size_refusal(nozzles)):
-        raise NozzleMapError(mixed, code="MULTI_NOZZLE_MIXED_SIZES")
+        if mixed_nozzle_experiment is not True:
+            raise NozzleMapError(mixed, code="MULTI_NOZZLE_MIXED_SIZES")
+        experimental = mixed_size_experiment(nozzles)
+        nozzles = mixed_size_nozzles(profile, nozzles, asked_map)
     if ext == ".3mf" and nozzle_bed(nozzles) is not None:
         wider = nozzle_bed_for_slice(input_abs, profile, asked_map, slots=slots_needed, maker_ready=instead is None)
         if wider is not None:
@@ -2548,6 +2615,9 @@ def _slice_file(
             result.message = f"{result.message} {unused_note}".strip()
         if soft_run is not None:
             _say_soft_nozzle(result, soft_run)
+        if experimental:
+            result.experimental = experimental
+            result.message = f"{result.message} {experimental['note']}".strip()
         from kiln import maker_slicer_notes
 
         return maker_slicer_notes.after_slice(

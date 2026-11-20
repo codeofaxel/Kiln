@@ -2908,7 +2908,12 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     # a part can lift off the bed as it cools, so no standing window answers
     # for it (kiln.plate_state.start_hold holds it without this print's yes).
     on_plate = await asyncio.to_thread(_recovery_plate_line, file_value, printer_name)
-    if standing is not None and not on_plate:
+    # An experimental print is asked about every time too, and the question
+    # says what the experiment is (kiln.experimental_print).
+    from kiln import experimental_print
+
+    experiment = await asyncio.to_thread(experimental_print.approval_line, _local_copy_of(file_value))
+    if standing is not None and not on_plate and not experiment:
         # A person already said yes for this — inside a window they
         # opened, on purpose.  Asking again would be the dialog the
         # window exists to stop.  The gate reads the same record.
@@ -2969,6 +2974,8 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "always allow": _always_allow_dialog_row(aimed),
             # A recovery onto the part still on the plate: what to check.
             "part on the plate": on_plate,
+            # A print Kiln has not proven on a printer: what it is.
+            "experimental": experiment,
         },
         window_printer=person_printer if offer_window else None,
         fleet_offered=offer_fleet,
@@ -4394,6 +4401,16 @@ def _preview_gate_error(
     if granted is None:
         print_signoff.clear()
         return _no_yes_error(tool_name, file_name, preview_token, aimed)
+
+    # THIS PRINT.  An experimental print starts on a yes to that print
+    # itself, never on one that lets prints start without asking.
+    from kiln import experimental_print
+
+    own_yes = experimental_print.needs_its_own_yes(_local_copy_of(file_name), granted.source)
+    if own_yes:
+        print_signoff.clear()
+        _audit(tool_name, "experiment_needs_a_yes", details={"file": file_name, "printer": aimed, "consent": granted.source})
+        return _error_dict(own_yes, code=experimental_print.NEEDS_A_YES_CODE)
 
     # LOOKED.  Always allow means nobody was asked, so where the machine
     # has a camera the plate has to have been seen clear in a fresh frame.

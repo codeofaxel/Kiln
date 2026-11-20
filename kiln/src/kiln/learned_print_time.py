@@ -147,9 +147,10 @@ def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
         made_by = slicer_made_by("\n".join(lines))
         if made_by is not None:
             get_db().set_outcome_slicer(job_id, made_by.name, made_by.version)
-        from kiln.print_evidence import note_start_settings
+        from kiln.print_evidence import note_start_experiment, note_start_settings
 
         note_start_settings(job_id, lines)
+        note_start_experiment(job_id, lines)
     except Exception:  # noqa: BLE001 -- bookkeeping never affects a print
         logger.debug("the sent file's figures were not written for %s", job_id, exc_info=True)
 

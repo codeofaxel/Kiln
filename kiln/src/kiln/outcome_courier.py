@@ -21,10 +21,12 @@ note deleted here goes up as a delete), and what the row holds of
 sliced with, how far the print got (a share and a layer number), the spool
 as a one-way code (:func:`kiln.outbound_guard.spool_code`) and the firmware
 version, only when it is a bare version
-(:func:`kiln.outbound_guard.version_text`), and, when the owner said to print
+(:func:`kiln.outbound_guard.version_text`); when the owner said to print
 an abrasive filament through a nozzle that is not wear-resistant, that word:
 the filaments' type words and each nozzle's position and material
-(:func:`kiln.print_lineage.soft_nozzle_of`).  No printer name, serial, address, file name, settings, spool
+(:func:`kiln.print_lineage.soft_nozzle_of`); and, for a print that was an
+experiment (:mod:`kiln.experimental_print`), the word for which one and the
+nozzle sizes it used.  No printer name, serial, address, file name, settings, spool
 id, spool name or colour; a system string in ``notes`` with no label (a
 hook's "auto-recorded ...") stays here.
 
@@ -223,6 +225,11 @@ def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     soft = _soft_nozzle_word(row.get("lineage_id"))
     if soft:
         out["soft_nozzle"] = soft
+    from kiln.experimental_print import read_recorded
+
+    experiment = read_recorded(row.get("experiment"))
+    if experiment:
+        out["experiment"], out["nozzle_sizes"] = experiment[0], list(experiment[1])
     for key, src in (("started_at", "created_at"), ("ended_at", "ended_at")):
         when = row.get(src)
         if isinstance(when, (int, float)) and not isinstance(when, bool) and when > 0:
