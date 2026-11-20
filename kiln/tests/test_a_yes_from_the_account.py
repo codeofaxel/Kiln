@@ -1472,3 +1472,61 @@ def test_a_row_is_sent_whole_or_not_at_all():
     assert bridge_client.AskCard(rows={"colours": "one\ncolour"}).fields() == {"colours": "one colour"}
     assert bridge_client.AskCard(rows={"experimental": "x" * 401}).fields() == {}
     assert bridge_client.AskCard(rows={"experimental": 7, "other": "words"}).fields() == {}
+
+
+def _said_anyway(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
+    """A sliced file whose record keeps the owner's word to print it anyway."""
+    from tests.test_print_anyway_needs_its_own_yes import said_anyway
+
+    monkeypatch.setenv("HOME", str(tmp_path / "lineage_home"))
+    return pathlib.Path(said_anyway(tmp_path))
+
+
+def test_every_door_a_person_reads_says_print_anyway(signed_in, tmp_path, monkeypatch, observed):
+    """The approval dialog, the screen's banner and the account's card each
+    carry the print-anyway row, under one label, in one wording."""
+    from kiln.print_consent import what_the_print_is
+
+    model = _said_anyway(tmp_path, monkeypatch)
+    [(name, row)] = what_the_print_is(model.name, str(model)).items()
+    assert name == "print_anyway" and row.startswith("PLA-CF through the brass nozzle")
+    shown: list[screen_code.Issued] = []
+    monkeypatch.setattr(screen_code, "_show_hook", lambda issued: shown.append(issued) or True)
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
+        mock.add(responses.GET, MAY_I, json={"success": True, "allowed": False, "authority": None, "pending": None})
+        mock.add(responses.POST, PENDING, json={"success": True, "pending": {
+            "id": "pa_1", "expires_at": time.time() + 600, "page": "/monitor", "state": "waiting", "repeat": False,
+        }})
+        mock.add(responses.POST, f"{PENDING}/pa_1/withdraw", json={"success": True})
+        _ask(model)
+        card = json.loads(next(c for c in mock.calls if c.request.url == PENDING).request.body)
+        asked: list[str] = []
+
+        async def no(ctx, message, **kw):
+            asked.append(message)
+            return print_consent.DialogAnswer("decline")
+
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+        monkeypatch.setattr(server, "ask_user_to_confirm", no)
+        with pytest.raises(RuntimeError, match="declined"):
+            _ask(model)
+    assert card["print_anyway"] == row and "experimental" not in card
+    _title, _subtitle, message = screen_code.banner_text(shown[0])
+    assert message.startswith(f"Print anyway: {row} Type the code")
+    assert f"  Print anyway: {row}" in asked[0]
+
+
+@responses.activate
+def test_a_window_on_the_account_does_not_start_a_print_the_owner_said_to_print_anyway(
+    signed_in, tmp_path, monkeypatch, observed,
+):
+    """The account's window for this machine answers prints in general; a
+    print the owner said to print anyway is put to the person instead."""
+    model = _said_anyway(tmp_path, monkeypatch)
+    until = time.time() + 7200
+    _may_i(True, {"kind": "machine_window", "id": "dl_9", "grantor": "account:acct-1", "expires_at": until, "via": "web_button"})
+    responses.add(responses.POST, RECORD, json={"success": True, "event": {"id": "ev_2"}, "repeat": False})
+    _held()
+    r = _ask(model)
+    assert r.consent is None and _calls(RECORD) == []
+    assert json.loads(_calls(PENDING)[0].request.body)["print_anyway"].startswith("PLA-CF through")

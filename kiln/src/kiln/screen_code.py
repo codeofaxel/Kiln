@@ -241,8 +241,10 @@ def banner_text(issued: Issued) -> tuple[str, str, str]:
         )
     # What the print itself is comes first, in the words the approval
     # dialog and the terminal use, so it is read before the code is typed.
+    from kiln.print_consent import row_label
+
     about = " ".join(
-        f"{name.capitalize()}: {_one_line(said)}" for name, said in issued.rows.items() if _one_line(said)
+        f"{row_label(name)}: {_one_line(said)}" for name, said in issued.rows.items() if _one_line(said)
     )
     return (
         f"Kiln print code {issued.code}",

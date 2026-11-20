@@ -48,6 +48,7 @@ from typing import Any
 
 from kiln.cli_command import kiln_command
 from kiln.outbound_guard import scrub_relayed
+from kiln.print_consent import PRINT_ROW_LABELS as _PRINT_ROW_LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -1462,7 +1463,7 @@ _CARD_ASKED_FROM = frozenset({"mac", "windows", "linux"})
 _CARD_ROW_MAX = 400
 #: The rows about the print itself a card carries, as
 #: :func:`kiln.print_consent.what_the_print_is` names them.
-CARD_ROWS = ("experimental", "colours")
+CARD_ROWS = tuple(_PRINT_ROW_LABELS)
 
 
 def _card_text(value: Any) -> str:

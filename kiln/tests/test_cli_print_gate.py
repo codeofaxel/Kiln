@@ -449,3 +449,51 @@ def test_a_standing_window_asks_the_person_at_the_terminal_about_an_experimental
     assert result.exit_code != 0
     assert "EXPERIMENT_NEEDS_A_YES" in result.output
     assert printer.started == ["mixed.gcode"]
+
+
+# ---------------------------------------------------------------------------
+# A print the owner said to print anyway, at the terminal too
+# ---------------------------------------------------------------------------
+
+
+def _said_anyway(tmp_path, monkeypatch) -> str:
+    """A sliced file whose record keeps the owner's word to print it anyway."""
+    from tests.test_print_anyway_needs_its_own_yes import said_anyway
+
+    monkeypatch.setenv("HOME", str(tmp_path / "lineage_home"))
+    return said_anyway(tmp_path)
+
+
+def test_a_person_at_the_terminal_is_told_to_print_anyway(cli_env, audits, monkeypatch, tmp_path):
+    runner, printer = cli_env
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+    result = runner.invoke(cli, ["print", _said_anyway(tmp_path, monkeypatch)], input="y\n")
+    assert result.exit_code == 0, result.output
+    said = result.output
+    assert "Print anyway: PLA-CF through the brass nozzle, which it wears out quickly." in said
+    assert said.index("Print anyway:") < said.index("Start printing")
+    assert printer.started == ["cf.gcode"]
+
+
+def test_a_standing_window_asks_the_person_at_the_terminal_to_print_anyway(cli_env, audits, monkeypatch, tmp_path):
+    from kiln import consent_windows
+    from kiln.experimental_print import PRINT_ANYWAY_NEEDS_A_YES_CODE
+
+    runner, printer = cli_env
+    path = _said_anyway(tmp_path, monkeypatch)
+    monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda *_a, **_k: "garage")
+    monkeypatch.setattr(consent_windows, "person_at_terminal", lambda: True)
+    consent_windows.open_window(seconds=7200, scope=("garage",))
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+
+    result = runner.invoke(cli, ["print", path], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "Print anyway: PLA-CF" in result.output
+    rec = next(d for _, a, d in audits if a == "consent_granted")
+    assert rec["consent"] == SOURCE_TERMINAL
+
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: False)
+    result = runner.invoke(cli, ["print", path, "--json"])
+    assert result.exit_code != 0
+    assert PRINT_ANYWAY_NEEDS_A_YES_CODE in result.output
+    assert printer.started == ["cf.gcode"]

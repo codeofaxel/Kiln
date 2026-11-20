@@ -2901,15 +2901,17 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     # a part can lift off the bed as it cools, so no standing window answers
     # for it (kiln.plate_state.start_hold holds it without this print's yes).
     on_plate = await asyncio.to_thread(_recovery_plate_line, file_value, printer_name)
-    # What the print itself is, said in the question: an experimental print
-    # is asked about every time too (kiln.experimental_print).
+    # What the print itself is, said in the question: an experimental print,
+    # and one the owner said to print anyway, are asked about every time too
+    # (kiln.experimental_print).
+    from kiln import experimental_print
     from kiln.print_consent import what_the_print_is
 
     about = await asyncio.to_thread(
         what_the_print_is, os.path.basename(file_value) or file_value, _local_copy_of(file_value),
     )
-    experiment = about.get("experimental")
-    if standing is not None and not on_plate and not experiment:
+    own_yes = experimental_print.asks_every_time(about)
+    if standing is not None and not on_plate and not own_yes:
         # A person already said yes for this — inside a window they
         # opened, on purpose.  Asking again would be the dialog the
         # window exists to stop.  The gate reads the same record.
@@ -2924,7 +2926,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         await _withdraw_the_ask(tool_name, file_value, aimed, answered_by="screen_code")
         return token
     # A yes the signed-in account already holds for this print.
-    from_account = await _consent_from_account(tool_name, file_value, printer_name, aimed)
+    from_account = await _consent_from_account(tool_name, file_value, printer_name, aimed, own_yes=own_yes)
     if from_account is not None:
         return from_account
     try:
@@ -2970,8 +2972,10 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "always allow": _always_allow_dialog_row(aimed),
             # A recovery onto the part still on the plate: what to check.
             "part on the plate": on_plate,
+            # The owner's word to print it anyway: what it wears and with what.
+            "print anyway": about.get("print_anyway"),
             # A print Kiln has not proven on a printer: what it is.
-            "experimental": experiment,
+            "experimental": about.get("experimental"),
         },
         window_printer=person_printer if offer_window else None,
         fleet_offered=offer_fleet,
@@ -3725,12 +3729,15 @@ def _read_the_account(file_value: str, aimed: str):
 
 
 async def _consent_from_account(
-    tool_name: str, file_value: str, printer_name: str | None, aimed: str,
+    tool_name: str, file_value: str, printer_name: str | None, aimed: str, *, own_yes: bool = False,
 ):
     """A yes the signed-in account already holds for these bytes on this
     printer — a person's approval of this print, or a window they opened
     for this machine — recorded as the yes for the call now being served.
     Returns the reset token, or ``None`` when the account holds none.
+    *own_yes* is a print that starts only on a yes to that print itself
+    (:func:`kiln.experimental_print.asks_every_time`): only the person's
+    approval of it answers, never a window or always allow.
 
     The start is reported to the account first, and only a report the
     server accepted records a yes: an approval is one print, and one it
@@ -3769,6 +3776,8 @@ async def _consent_from_account(
                 f"{tool_name} was not started: the print was declined in Kiln (kiln3d.com/monitor). "
                 "Nothing was sent to the printer."
             )
+    if own_yes and answer.kind != "approval":
+        return None
     if answer.allowed and answer.kind == bridge_client.KIND_MACHINE_ALWAYS and answer.id:
         return await _consent_from_account_always(tool_name, file_value, printer_name, aimed, file_sha256, answer)
     # The account holds no always allow for this print.  A copy still on
@@ -4406,15 +4415,16 @@ def _preview_gate_error(
         print_signoff.clear()
         return _no_yes_error(tool_name, file_name, preview_token, aimed)
 
-    # THIS PRINT.  An experimental print starts on a yes to that print
-    # itself, never on one that lets prints start without asking.
+    # THIS PRINT.  An experimental print, and one the owner said to print
+    # anyway, start on a yes to that print itself, never on one that lets
+    # prints start without asking.
     from kiln import experimental_print
 
-    own_yes = experimental_print.needs_its_own_yes(_local_copy_of(file_name), granted.source)
-    if own_yes:
+    hold = experimental_print.needs_its_own_yes(_local_copy_of(file_name), granted.source)
+    if hold is not None:
         print_signoff.clear()
-        _audit(tool_name, "experiment_needs_a_yes", details={"file": file_name, "printer": aimed, "consent": granted.source})
-        return _error_dict(own_yes, code=experimental_print.NEEDS_A_YES_CODE)
+        _audit(tool_name, hold.code.lower(), details={"file": file_name, "printer": aimed, "consent": granted.source})
+        return _error_dict(hold.message, code=hold.code)
 
     # LOOKED.  Always allow means nobody was asked, so where the machine
     # has a camera the plate has to have been seen clear in a fresh frame.

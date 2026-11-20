@@ -936,15 +936,41 @@ def display_name(file_name: str) -> str:
     return " ".join(kept.split()) or base
 
 
+#: The rows an approval carries about the print itself
+#: (:func:`what_the_print_is`), in the order they are shown, each with the
+#: label every door shows it under.
+PRINT_ROW_LABELS: dict[str, str] = {
+    "print_anyway": "Print anyway",
+    "experimental": "Experimental",
+    "colours": "Colours",
+}
+
+
+def row_label(name: str) -> str:
+    """The label the row *name* of :func:`what_the_print_is` is shown under."""
+    return PRINT_ROW_LABELS.get(name) or str(name).replace("_", " ").strip().capitalize()
+
+
 def what_the_print_is(file_name: str, local_path: str | None) -> dict[str, str]:
     """The rows a person's approval carries about the print itself, the same
-    at every door that asks: ``experimental`` for a print Kiln has not proven
-    on a printer (:func:`kiln.experimental_print.approval_line`), and
-    ``colours`` for a plate Kiln sliced in fewer colours than it holds
+    at every door that asks, in the order of :data:`PRINT_ROW_LABELS`:
+    ``print_anyway`` for a slice the owner said to print anyway
+    (:func:`kiln.experimental_print.print_anyway_line`), ``experimental`` for
+    a print Kiln has not proven on a printer
+    (:func:`kiln.experimental_print.approval_line`), and ``colours`` for a
+    plate Kiln sliced in fewer colours than it holds
     (:func:`kiln.maker_slicer_notes.approval_row`).  Only the rows that
     apply; *local_path* is the copy of the file on this computer, when there
     is one.  Never raises."""
     rows: dict[str, str] = {}
+    try:
+        from kiln import experimental_print
+
+        anyway = experimental_print.print_anyway_line(local_path)
+        if anyway:
+            rows["print_anyway"] = anyway
+    except Exception:  # noqa: BLE001 -- the approval opens without the row
+        logger.debug("print-anyway row skipped for %s", file_name, exc_info=True)
     try:
         from kiln import experimental_print
 
