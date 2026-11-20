@@ -365,6 +365,7 @@ VERSION_FIELDS: dict[str, frozenset[str]] = {
     "kiln/outcome_courier.py": frozenset({"firmware"}),
     "kiln/served_steps.py": frozenset({"firmware"}),
     "kiln/_pro_printer_checkin_bridge.py": frozenset({"firmware"}),
+    "kiln/printers/motion_walk.py": frozenset({"firmware"}),
 }
 
 
@@ -466,7 +467,11 @@ SENDERS: dict[str, tuple[str, str]] = {
         "sent by kiln/_pro_goal_bridge.py: the tool, the model's fingerprint, the "
         "kept id, the call's naming arguments and the made file's own name, each "
         "cleaned and capped there first; never the model, its source or a folder, "
-        "and nothing at all from a signed-out install)",
+        "and nothing at all from a signed-out install); and a step of a walked "
+        "home or park (kiln/printers/motion_walk.py, cleaned there first: the "
+        "printer's model, the step number, the person's two answers, four "
+        "temperature readings and the firmware version, declared in "
+        "VERSION_FIELDS; never a serial number)",
     ),
     "kiln/terms.py": ("own_schema", "the terms version and when it was accepted"),
     "kiln/community_sync.py": (
