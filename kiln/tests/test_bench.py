@@ -307,8 +307,8 @@ class TestWhatTheRecordLacks:
             "Two measurements with calipers or a ruler teach Kiln how big your Creality K1's head is, so it can tell you whether a "
             "second part fits beside one already on the plate.")
         assert bench.gain_sentence("limits", ["limits"], "Creality K1") == (
-            "Kiln can learn how steep, how far and how thin your Creality K1 really prints from one small test "
-            "print; the printer_bench tool runs it.")
+            "One small test print teaches Kiln how steep, how far and how thin your Creality K1 really prints, so "
+            "it judges your designs by what your printer can do.")
         for gaps in (["pause"], ["end", "head"], ["head"], ["pause", "cancel", "end", "head"]):
             for plan in (False, True):
                 said = bench.gain_sentence("motion", gaps, "Bambu Lab X2D", pro=plan).lower()
@@ -339,12 +339,13 @@ class TestWhatTheRecordLacks:
 
 
 class TestNeverNaggedTwice:
-    def test_registration_offers_once_a_door_once_a_week_and_any_answer_ends_every_offer(self, monkeypatch):
+    def test_the_first_print_offers_once_a_door_once_a_week_and_any_answer_ends_every_offer(self, monkeypatch):
         unit = "ab" * 16
-        assert bench.may_offer(unit, "registration") is True and bench.may_offer(unit, "print_beside") is True
-        bench.note_offer(unit, door="registration")
-        # Registration: once, ever.  A point-of-need door has not offered yet.
-        assert bench.may_offer(unit, "registration") is False and bench.may_offer(unit, "print_beside") is True
+        assert "registration" not in bench.OFFER_DOORS, "adding a printer offers nothing"
+        assert bench.may_offer(unit, "first_print") is True and bench.may_offer(unit, "print_beside") is True
+        bench.note_offer(unit, door="first_print")
+        # After the first print: once, ever.  A point-of-need door has not offered yet.
+        assert bench.may_offer(unit, "first_print") is False and bench.may_offer(unit, "print_beside") is True
         bench.note_offer(unit, door="print_beside")
         assert bench.may_offer(unit, "print_beside") is False, "a second refusal the same week is not offered again"
         assert bench.may_offer(unit, "setup_check") is True, "each door meets the person once"
@@ -358,42 +359,6 @@ class TestNeverNaggedTwice:
             bench.note_offer(other, answer=answer)
             assert not any(bench.may_offer(other, door) for door in bench.OFFER_DOORS), answer
         assert bench.may_offer(None, "print_beside") is False
-
-    def test_registration_never_offers_the_coin_print_and_spends_nothing(self, monkeypatch):
-        # The first print teaches what it can; what it leaves is offered after it.
-        machine = _Adapter()
-        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause", "cancel"], _verdict(ok=True, blanks=["pause", "cancel"])))
-        assert bench.offer_after_registration(machine, "a1") is None
-        assert bench.may_offer(bench.unit_of(machine), "first_print") is True, "nothing was spent"
-        fresh = _Adapter()
-        fresh.serial = "01P00A000000002"
-        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause", "cancel", "end", "filament_change", "head"],
-                                                                        _verdict(ok=False, code="PLACEMENT_UNKNOWN_PRINTER")))
-        assert bench.offer_after_registration(fresh, "new") is None
-        # Blanks no session can fill leave the first lesson unoffered; the
-        # second lesson (what the printer can print) is offered instead, once.
-        other = _Adapter()
-        other.serial = "01P00A000000003"
-        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["filament_change", "quiet_start"], _verdict(ok=True)))
-        second = bench.offer_after_registration(other, "x")
-        assert second["lesson"] == "limits" and "printer_bench" in second["sentence"]
-        assert "how steep, how far and how thin" in second["sentence"] and "filament" not in second["sentence"]
-        assert bench.offer_after_registration(other, "x") is None        # once
-        assert bench.may_offer(bench.unit_of(other), "registration") is True
-
-    def test_registration_stays_quiet_offline_and_offers_only_the_second_lesson_when_moves_are_known(self, monkeypatch):
-        # A printer whose moves Kiln knows still has something to teach it:
-        # the second lesson is offered, once.  Offline offers nothing and
-        # spends nothing.
-        machine = _Adapter()
-        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], None))
-        assert bench.offer_after_registration(machine, "a1") is None
-        assert bench.may_offer(bench.unit_of(machine), "registration") is True    # offline: not spent
-        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _verdict(ok=True)))
-        offer = bench.offer_after_registration(machine, "a1")
-        assert offer["lesson"] == "limits" and "blanks" not in offer
-        assert bench.may_offer(bench.unit_of(machine), "refusal") is False        # the moves: never asked
-        assert bench.offer_after_registration(machine, "a1") is None            # the second lesson: once
 
     def test_the_slice_refusal_offers_the_session_at_the_point_of_need(self):
         from kiln.plate_state import PlateJob, PlateState
@@ -684,7 +649,7 @@ class TestTheConversation:
         out = _step(server, "later")
         assert out["step"] == "later" and "won't bring it up again" in out["message"]
         assert "whenever you have a few minutes" in out["message"]
-        assert bench.may_offer(bench.unit_of(server.machine), "registration") is False
+        assert bench.may_offer(bench.unit_of(server.machine), "first_print") is False
         # "Kiln won't bring it up again on its own": no door offers it again.
         assert not any(bench.may_offer(bench.unit_of(server.machine), door) for door in bench.OFFER_DOORS)
         _step(server, restart=True)
@@ -1022,11 +987,13 @@ class TestAHeldSession:
         unit = bench.unit_of(_Adapter())
         assert bench.may_offer(unit, "refusal") is True, "a held session is not a finished one"
 
-    def test_a_held_session_is_not_offered_at_registration_and_is_not_marked_done(self, monkeypatch):
+    def test_a_held_session_is_not_offered_after_a_first_print_and_is_not_marked_done(self, monkeypatch):
         machine = _Adapter()
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _held()))
-        assert bench.offer_after_registration(machine, "a1") is None
-        assert bench.may_offer(bench.unit_of(machine), "registration") is True
+        bench.offer_after_first_print(machine, "a1")
+        assert bench.take_news()["offers"] == []
+        assert bench.may_offer(bench.unit_of(machine), "first_print") is True
+        assert bench.may_offer(bench._offer_key(bench.unit_of(machine), bench.LIMITS), "first_print") is True
 
 
 # ---------------------------------------------------------------------------
@@ -1112,14 +1079,14 @@ class TestOneOfferEveryDoor:
         assert "learn" not in quiet, "a line that warns about nothing offers nothing"
         assert funnel() == {"offered|motion|setup_check": 1}
 
-    def test_registration_counts_only_the_second_lesson_it_offers(self, funnel, monkeypatch):
-        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause"], _verdict(ok=True, blanks=["pause"])))
-        assert bench.offer_after_registration(_Adapter(), "a1") is None
-        other = _Adapter()
-        other.serial = "01P00A000000005"
+    def test_the_second_lesson_offered_after_a_first_print_is_counted_once(self, funnel, monkeypatch):
+        machine = _Adapter()
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _verdict(ok=True)))
-        assert bench.offer_after_registration(other, "b")["lesson"] == "limits"
-        assert funnel() == {"offered|limits|registration": 1}
+        bench.offer_after_first_print(machine, "a1")
+        [pending] = bench.take_news()["offers"]
+        made = bench.offer(pending["unit"], pending["missing"], "first_print", model_name="Bambu Lab A1")
+        assert made["lesson"] == "limits"
+        assert funnel() == {"offered|limits|first_print": 1}
 
 
 class TestTheFunnelIsCounted:

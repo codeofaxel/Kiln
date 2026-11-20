@@ -725,17 +725,26 @@ class TestTheFirstPrintFirst:
             "and how big its head is, so it can find where a second part fits beside one already on the plate.")
         assert "start it" not in json.dumps(block)
 
-    def test_nothing_missing_is_never_offered_and_offline_spends_nothing(self, first_print, monkeypatch):
+    def test_moves_with_nothing_left_offer_the_second_lesson_once_and_offline_spends_nothing(self, first_print, monkeypatch):
         m = _Closed(serial="FIRSTPRINT0003")
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: _blanks_left_by(adapter, verdict=False))
         bench.offer_after_first_print(m, "x")
         assert _next_reply() is None and bench.may_offer(bench.unit_of(m), "first_print") is True
         from tests.test_bench import _verdict
 
+        # Nothing a test print could teach about the moves: the ONE offer is
+        # the second lesson, never the coin print, and never both.
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["filament_change"], _verdict(ok=True)))
         bench.offer_after_first_print(m, "x")
-        assert _next_reply() is None
+        block = _next_reply()
+        name = bench._display_name("creality_ender3")
+        assert [(o["lesson"], o["sentence"]) for o in block["offers"]] == [(
+            "limits", f"One small test print teaches Kiln how steep, how far and how thin your {name} really prints, "
+            "so it judges your designs by what your printer can do.")]
         assert not any(bench.may_offer(bench.unit_of(m), door) for door in bench.OFFER_DOORS if door != "lesson")
+        # Once, ever: the next print asks nothing.
+        bench.offer_after_first_print(m, "x")
+        assert _next_reply() is None
 
     def test_an_answer_given_before_the_reply_ends_the_offer(self, first_print):
         m = _Closed(serial="FIRSTPRINT0004")

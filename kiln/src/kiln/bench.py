@@ -48,6 +48,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln.daily_stats import BENCH_FUNNEL
+
 _logger = logging.getLogger(__name__)
 
 #: The observation document the served door reads.
@@ -111,7 +113,7 @@ __all__ = [
     "draw_head_sketch", "draw_zones", "ended_block", "fingerprint_of", "firmware_of", "gain_sentence",
     "head_observation", "hold_kind", "keep_observation", "lesson_for", "logged_block", "logs_positions", "may_offer",
     "note_learned", "note_offer", "observation", "observations_for_request", "observations_of", "offer",
-    "offer_after_first_print", "offer_after_registration", "offer_fields", "offer_for", "parse_lift", "parse_zone",
+    "offer_after_first_print", "offer_fields", "offer_for", "parse_lift", "parse_zone",
     "position_of", "position_reading", "print_footprint", "refusal_blanks", "send_after_heartbeat", "send_pending",
     "sharing", "take_news", "unit_from_machine", "unit_of", "way_back", "zone_of", "zone_rect",
 ]
@@ -485,12 +487,14 @@ LIMITS = "limits"
 #: a home, a park, a wipe or a purge is a sequence for the printer to run,
 #: which no test print shows.
 LESSON_TEACHES: dict[str, tuple[str, ...]] = {MOTION: TEACHABLE, LIMITS: ("limits",)}
-#: Every door that may offer a lesson unasked.  ``first_print`` is the moment
-#: after a printer's first print has taught what it can; ``lesson`` is the
-#: session's own offer of the second lesson once the first is done.
-OFFER_DOORS = ("registration", "first_print", "print_beside", "setup_check", "motion_refusal", "lesson")
+#: Every door that may offer a lesson unasked, read from the funnel the
+#: offers are counted under.  ``first_print`` is the moment after a printer's
+#: first print has taught what it can; ``lesson`` is the session's own offer
+#: of the second lesson once the first is done.  Adding a printer offers
+#: nothing: the first thing a new printer does is a print the person wants.
+OFFER_DOORS = BENCH_FUNNEL["offered"]
 #: The doors that offer once, ever.
-_ONCE_DOORS = ("registration", "first_print")
+_ONCE_DOORS = ("first_print",)
 #: A door that meets a gap while the person is trying something offers at
 #: most once in this long; an answer of any kind ends its offers.
 OFFER_QUIET_S = 7 * 24 * 3600
@@ -529,8 +533,8 @@ def gain_sentence(lesson: str, gaps: Any, model_name: str, *, pro: bool | None =
     them buys on the caller's plan (*pro*, read with :func:`has_pro` when not
     given)."""
     if lesson == LIMITS:
-        return (f"Kiln can learn how steep, how far and how thin your {model_name} really prints from one small "
-                "test print; the printer_bench tool runs it.")
+        return (f"One small test print teaches Kiln how steep, how far and how thin your {model_name} really "
+                "prints, so it judges your designs by what your printer can do.")
     words = [g for g in (gaps or []) if isinstance(g, str)]
     verbs = [_OFFER_VERBS[b] for b in ("pause", "cancel", "end") if b in words]
     fits = _FITS_PRO if (has_pro() if pro is None else pro) else _FITS_FREE
@@ -553,8 +557,8 @@ def offer(unit: str | None, gaps: Any, door: str, *, model_name: str,
           printer_name: str | None = None) -> dict[str, Any] | None:
     """The one place a door decides whether to offer a lesson, and words it.
 
-    *gaps* are what stopped the person (or, at registration, what a lesson
-    could teach); a gap no lesson can teach offers nothing.  The ledger
+    *gaps* are what stopped the person (or, after a first print, what a
+    lesson could still teach); a gap no lesson can teach offers nothing.  The ledger
     decides the rest (:func:`may_offer`).  An offer made is written down and
     counted; ``None`` otherwise.  Never raises."""
     try:
@@ -679,7 +683,7 @@ def may_offer(unit: str | None, door: str) -> bool:
 
     Any answer ends every unasked offer: ``later`` and ``declined`` are the
     person's, ``done`` is a lesson run or one with nothing to teach.
-    ``registration`` and ``first_print`` offer once, ever.  ``lesson`` is
+    ``first_print`` offers once, ever.  ``lesson`` is
     the session's own offer of its second lesson to someone already in a
     session.  Every
     other door meets the gap while the person is trying something, and
@@ -752,12 +756,13 @@ def take_news() -> dict[str, list[Any]]:
 
 
 def offer_after_first_print(adapter: Any, printer_name: str) -> None:
-    """After a printer's first print has taught what it can: when the first
-    lesson still has something to teach, keep its offer for the person's next
-    reply (:func:`take_news`), naming only what is still missing.  Nothing
-    missing is never offered, and is not asked again.  Offline, or a session
-    the service will not start yet, spends nothing: the next print asks again.
-    Once per printer (``first_print``).  Never raises."""
+    """After a printer's first print has taught what it can, keep ONE offer
+    for the person's next reply (:func:`take_news`): the first lesson, naming
+    only what is still missing, or, when the moves have nothing left a test
+    print could teach, the second lesson.  Offline, or a session the service
+    will not start yet, spends nothing: the next print asks again.  Once per
+    printer (``first_print``); the first lesson's own end offers the second.
+    Never raises."""
     try:
         from kiln.plate_state import declared_model_of
 
@@ -772,8 +777,10 @@ def offer_after_first_print(adapter: Any, printer_name: str) -> None:
             return
         missing = [b for b in blanks if b in TEACHABLE]
         if not missing:
-            note_offer(unit, answer="done")       # nothing a test print could teach: never offered
-            return
+            note_offer(unit, answer="done")       # nothing a test print could teach about the moves
+            if not may_offer(_offer_key(unit, LIMITS), "first_print"):
+                return
+            missing = [LIMITS]
         pending = [p for p in _read_pending() if not (p.get("unit") == unit and "missing" in p)]
         pending.append({"unit": unit, "printer_id": printer_id, "printer_name": printer_name,
                         "missing": missing, "at": _now()})
@@ -782,39 +789,6 @@ def offer_after_first_print(adapter: Any, printer_name: str) -> None:
         path.write_text(json.dumps(pending[-20:], indent=2), encoding="utf-8")
     except Exception:  # noqa: BLE001
         _logger.debug("bench: the offer after a first print was not kept", exc_info=True)
-
-
-def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] | None:
-    """The one-time offer a registration answers with: the second lesson,
-    for a printer whose moves a test print cannot teach anything more about.
-    A printer with something left to teach about its moves is offered
-    nothing yet: its first print teaches what it can, and what it leaves is
-    offered after it (``first_print``).  ``None`` when it was offered before,
-    nothing can be read right now, or the service will not start a session
-    yet.  Never raises."""
-    try:
-        from kiln.plate_state import declared_model_of
-
-        unit = unit_of(adapter)
-        if not may_offer(unit, "registration"):
-            return None
-        printer_id = declared_model_of(adapter)
-        if not printer_id:
-            return None
-        blanks, verdict = blanks_for(adapter, printer_id)
-        if verdict is None or session_hold(verdict) is not None:
-            return None                           # offline, or not startable yet; nothing is marked
-        if not blanks:
-            note_offer(unit, answer="done")       # nothing to teach about the moves; never ask
-        if any(b in TEACHABLE for b in blanks):
-            return None                           # the first print teaches first; nothing is spent
-        # Blanks no session can fill leave the first lesson unoffered and its
-        # one offer unspent; the second lesson has something for every printer.
-        return offer(unit, ["limits"], "registration", model_name=_display_name(printer_id),
-                     printer_name=printer_name)
-    except Exception:  # noqa: BLE001
-        _logger.debug("bench: registration offer skipped", exc_info=True)
-        return None
 
 
 def _display_name(printer_id: str) -> str:

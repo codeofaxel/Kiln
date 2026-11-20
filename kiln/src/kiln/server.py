@@ -14894,22 +14894,6 @@ def register_printer(
             result["persisted"] = True
             result["config_path"] = persisted_path
 
-        # Once, for a model whose motion record has blanks: the offer of the
-        # short session that fills them (kiln.bench).  Never twice.  Not for
-        # an address that just failed to answer: the offer reads the printer's
-        # own settings, which there means waiting out every retry (3 x 30 s on
-        # Moonraker) to learn nothing, and offline is not a reason to nag --
-        # the offer stays unspent for a registration the printer answers.
-        if url_answered is not False:
-            try:
-                from kiln.bench import offer_after_registration
-
-                _offer = offer_after_registration(adapter, name)
-                if _offer is not None:
-                    result["bench_offer"] = _offer
-            except Exception:
-                logger.debug("bench offer after registration skipped", exc_info=True)
-
         # Does the camera answer?  Asked once, here, without a frame: the
         # printer's own camera only when the printer's address answered (an
         # offline printer is not asked twice), and a camera the user supplied
