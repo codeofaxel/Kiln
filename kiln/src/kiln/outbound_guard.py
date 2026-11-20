@@ -365,6 +365,7 @@ VERSION_FIELDS: dict[str, frozenset[str]] = {
     "kiln/outcome_courier.py": frozenset({"firmware"}),
     "kiln/served_steps.py": frozenset({"firmware"}),
     "kiln/_pro_printer_checkin_bridge.py": frozenset({"firmware"}),
+    "kiln/sliced_routines.py": frozenset({"p_slicer_version"}),
 }
 
 
@@ -545,6 +546,31 @@ SENDERS: dict[str, tuple[str, str]] = {
         "made coming back; machine-read values ride the call through the served door",
     ),
     "kiln/stage_cache.py": ("own_schema", "fetches the 3D stage's own page; sends nothing of the person's"),
+    "kiln/bench.py": (
+        "own_schema",
+        "what a printer was seen to do on a pause, a cancel or an end, built field by field "
+        "(kiln.bench.observation): words from fixed vocabularies, numbers, the one-way hash of "
+        "the printer's serial and the firmware's own version label",
+    ),
+    "kiln/printer_motion_report.py": (
+        "own_schema",
+        "a Klipper-family printer's motion sections as kiln.machine_motion.motion_settings "
+        "builds them (serials, pins, paths and addresses removed there), the model key, the "
+        "board's chip name and the one-way hash of its serial",
+    ),
+    "kiln/printer_bed_report.py": (
+        "own_schema",
+        "for a printer outside the catalogue: the model key, its bed's three numbers, the "
+        "source's class, a maker page's web host, and the heartbeat's own install id",
+    ),
+    "kiln/sliced_routines.py": (
+        "scrubbed",
+        "a printer's own routines read from a print file a slicer made for it: each routine's "
+        "text and SHA-256, its word, the model key, the slicer's name and version (declared in "
+        "VERSION_FIELDS), the one-way hash of the printer's serial and the install id; a payload "
+        "scrub would change is not sent at all, and a routine the file lists as changed from its "
+        "preset is never sent to the database door",
+    ),
     "kiln/served_public.py": (
         "person's_own",
         "a public tool's own call run on Kiln's servers, with the files it names; the "

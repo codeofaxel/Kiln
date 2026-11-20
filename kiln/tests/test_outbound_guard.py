@@ -555,8 +555,9 @@ _SENDS = {
     ("websockets", "connect"), ("websocket", "create_connection"),
 }
 #: How a module names Kiln's servers: the address, its constant, the
-#: override, or one of the modules' own ``*api_base()`` helpers.
-_KILN_API = ("api.kiln3d.com", "_HOSTED_KILN_API_URL", "KILN_API_URL", "api_base(")
+#: override, one of the modules' own ``*api_base()`` helpers, or a call
+#: to one of Kiln's database doors.
+_KILN_API = ("api.kiln3d.com", "_HOSTED_KILN_API_URL", "KILN_API_URL", "api_base(", "/rest/v1/rpc/")
 
 
 def _dotted(node: ast.AST) -> tuple[str, ...]:

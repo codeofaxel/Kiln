@@ -2426,6 +2426,14 @@ class PrinterAdapter(ABC):
             except Exception:  # noqa: BLE001 — never affects a print
                 pass
             try:
+                from kiln.sliced_routines import note_print_started
+
+                # The printer's own routines in the file it prints, read on
+                # a thread of their own (kiln.sliced_routines).
+                note_print_started(self, file_name, kwargs)
+            except Exception:  # noqa: BLE001 — never affects a print
+                pass
+            try:
                 from kiln._pro_goal_material_bridge import note_print_started as _note_goal_filament
 
                 _note_goal_filament(self, file_name, kwargs)
