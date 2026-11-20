@@ -211,10 +211,23 @@ def print_anyway_row(facts: Any) -> str | None:
     return f"{what} through {where}, which {who} out quickly."
 
 
+#: The facts every row falls back to when the facts it has do not check:
+#: the word still holds the print, and is said in its plain form.
+_PLAIN_FACTS: Mapping[str, Mapping[str, Any]] = MappingProxyType({
+    "soft_nozzle_confirmed": MappingProxyType({"filaments": (), "nozzles": ()}),
+    "mixed_nozzle_experiment": MappingProxyType({"sizes": ()}),
+})
+
+
+def _plain(word: str) -> dict[str, Any]:
+    return {key: list(value) for key, value in _PLAIN_FACTS[word].items()}
+
+
 def print_anyway_facts(kept: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    """The print-anyway facts a slice record keeps
-    (:func:`kiln.print_lineage.soft_nozzle_of`), checked; ``None`` for a
-    record that names no filament or no nozzle, or facts that do not check."""
+    """The print-anyway facts of a slice the owner said to print anyway,
+    from what its record keeps (:func:`kiln.print_lineage.soft_nozzle_of`)
+    when they check (:func:`checked_print_anyway`), else the plain facts.  ``None`` only when there is no record: the owner's word on
+    record is never lost to facts that do not check."""
     if not isinstance(kept, Mapping):
         return None
     filaments = sorted({
@@ -225,9 +238,7 @@ def print_anyway_facts(kept: Mapping[str, Any] | None) -> dict[str, Any] | None:
         {"position": n.get("position"), "material": _nozzle_word(n.get("material"))}
         for n in kept.get("nozzles") or () if isinstance(n, Mapping)
     ]
-    if not filaments or not nozzles:
-        return None
-    return checked_print_anyway({"filaments": filaments, "nozzles": nozzles})
+    return checked_print_anyway({"filaments": filaments, "nozzles": nozzles}) or _plain("soft_nozzle_confirmed")
 
 
 def print_anyway_said(kept: Mapping[str, Any] | None) -> str | None:
@@ -300,10 +311,14 @@ def experimental_row(facts: Any) -> str | None:
 
 
 def experiment_facts(job_path: str | None) -> dict[str, Any] | None:
-    """The experimental facts of the sliced file at *job_path*, checked;
-    ``None`` for any other file."""
+    """The experimental facts of the sliced file at *job_path*: its sizes
+    when they check (:func:`checked_experiment`), else the plain facts.
+    ``None`` only for a file that states no sizes that differ: a file sliced
+    for nozzles of different sizes is always an experiment."""
     sizes = mixed_sizes_of_file(job_path)
-    return checked_experiment({"sizes": list(sizes)}) if sizes else None
+    if not sizes:
+        return None
+    return checked_experiment({"sizes": list(sizes)}) or _plain("mixed_nozzle_experiment")
 
 
 def approval_line(job_path: str | None) -> str | None:
@@ -320,20 +335,38 @@ _ROW_OF_WORD = {
 }
 
 
+def word_facts(word: Any, facts: Any) -> dict[str, Any] | None:
+    """*facts* for the owner's word *word*, checked, or its plain facts when
+    they do not check; ``None`` only for a word that is not an owner's word."""
+    checker = {"soft_nozzle_confirmed": checked_print_anyway, "mixed_nozzle_experiment": checked_experiment}
+    found = checker.get(word) if isinstance(word, str) else None
+    if found is None:
+        return None
+    return found(facts) or _plain(word)
+
+
+def word_row(word: Any, facts: Any) -> str | None:
+    """The row for the owner's word *word*, said from *facts* in its one
+    wording, or in its plain form when they do not check; ``None`` only for
+    a word that is not an owner's word."""
+    found = _ROW_OF_WORD.get(word) if isinstance(word, str) else None
+    if found is None:
+        return None
+    return found[1](facts) or found[1](_plain(word))
+
+
 def word_rows(owner_words: Any) -> dict[str, str]:
-    """The rows for *owner_words* (``{word: facts}``), each said from its
-    facts in its one wording: ``{row: text}``.  ``{}`` when any word is not
-    an owner's word or any facts do not check: the rows are said whole, or
-    none of them."""
+    """The rows for *owner_words* (``{word: facts}``), ``{row: text}``, each
+    said by :func:`word_row`: an owner's word always has its row, in its
+    plain form when its facts do not check.  A word that is not an owner's
+    word has none."""
     if not isinstance(owner_words, Mapping):
         return {}
     rows: dict[str, str] = {}
     for word, facts in owner_words.items():
-        found = _ROW_OF_WORD.get(word) if isinstance(word, str) else None
-        said = found[1](facts) if found else None
-        if found is None or said is None:
-            return {}
-        rows[found[0]] = said
+        said = word_row(word, facts)
+        if said is not None:
+            rows[_ROW_OF_WORD[word][0]] = said
     return rows
 
 
@@ -444,6 +477,8 @@ __all__ = [
     "file_owner_words",
     "print_anyway_facts",
     "print_anyway_row",
+    "word_facts",
+    "word_row",
     "word_rows",
     "mixed_sizes_of_file",
     "mixed_sizes_of_lines",

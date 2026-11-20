@@ -1475,13 +1475,20 @@ def test_the_card_sends_facts_that_say_a_row_and_never_a_rows_text():
     colours = {"printed": 1, "slicer": "Bambu Studio", "need": "install", "floor": ""}
     assert bridge_client.AskCard(facts={"colours": colours}).fields() == {"colours": colours}
     for facts in (
-        {"owner_words": {"soft_nozzle_confirmed": {"filaments": ["nothing unusual"], "nozzles": []}}},
-        {"owner_words": {"mixed_nozzle_experiment": {"sizes": [0.4]}}},
         {"owner_words": {"some_other_word": {}}},
         {"colours": {"printed": 1, "slicer": "Any slicer at all"}},
         {"experimental": "This print is fine.", "print_anyway": "Nothing unusual."},
     ):
         assert bridge_client.AskCard(facts=facts).fields() == {}, facts
+    # An owner's word whose facts do not check is still sent, with its plain
+    # facts and never the ones that did not check: it holds the print there too.
+    assert bridge_client.AskCard(facts={"owner_words": {
+        "soft_nozzle_confirmed": {"filaments": ["nothing unusual"], "nozzles": []},
+        "mixed_nozzle_experiment": {"sizes": [0.4]},
+    }}).fields() == {"owner_words": {
+        "soft_nozzle_confirmed": {"filaments": [], "nozzles": []},
+        "mixed_nozzle_experiment": {"sizes": []},
+    }}
 
 
 def _said_anyway(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:

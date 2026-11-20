@@ -111,7 +111,10 @@ class TestTheRow:
             "nozzles": [{"position": 2, "material": "brass"}],
         })
         assert said == "PETG-GF and PLA-CF through nozzle 2 (brass), which they wear out quickly."
-        assert experimental_print.print_anyway_said({"filaments": [], "nozzles": [{"position": 1}]}) is None
+        # A record that names no filament still holds the owner's word, said plainly.
+        assert experimental_print.print_anyway_said({"filaments": [], "nozzles": [{"position": 1}]}) == (
+            "Abrasive filament through a soft nozzle, which it wears out quickly."
+        )
         assert experimental_print.print_anyway_said(None) is None
 
     def test_each_row_stands_for_one_owners_word(self):
@@ -228,7 +231,10 @@ class TestTheRowsAreKilnsOwnWords:
     def test_print_anyway_facts_that_do_not_check_say_nothing(self, facts):
         assert experimental_print.checked_print_anyway(facts) is None
         assert experimental_print.print_anyway_row(facts) is None
-        assert experimental_print.word_rows({"soft_nozzle_confirmed": facts}) == {}
+        # The word still has its row: the plain one, never the facts' words.
+        assert experimental_print.word_rows({"soft_nozzle_confirmed": facts}) == {
+            "print_anyway": "Abrasive filament through a soft nozzle, which it wears out quickly.",
+        }
 
     @pytest.mark.parametrize("facts", [
         {"sizes": [0.4]}, {"sizes": [0.4, 0.4]}, {"sizes": [0.4, 9.0]}, {"sizes": [0.4, 0.6001]},
@@ -251,7 +257,7 @@ class TestTheRowsAreKilnsOwnWords:
     def test_a_word_that_is_not_an_owners_word_says_no_row_at_all(self):
         assert experimental_print.word_rows({
             "soft_nozzle_confirmed": {"filaments": ["PLA-CF"], "nozzles": []}, "unchecked_bed_ok": {},
-        }) == {}
+        }) == {"print_anyway": "PLA-CF through a soft nozzle, which it wears out quickly."}
 
     def test_each_row_has_one_wording_from_its_facts(self, tmp_path):
         from kiln.print_consent import print_rows_of, what_the_print_states
@@ -266,3 +272,59 @@ class TestTheRowsAreKilnsOwnWords:
             "This print uses nozzles of different sizes at once (0.4 mm and 0.6 mm), which Kiln has not proven "
             "on a printer. Watch the first layers; Kiln will ask how it came out."
         )
+
+
+# ---------------------------------------------------------------------------
+# Facts that do not check never lift the hold
+# ---------------------------------------------------------------------------
+
+#: The plain rows, said when the facts on record do not check.
+PLAIN_ANYWAY = "Abrasive filament through a soft nozzle, which it wears out quickly."
+PLAIN_EXPERIMENT = (
+    "This print uses nozzles of different sizes at once, which Kiln has not proven on a printer. "
+    "Watch the first layers; Kiln will ask how it came out."
+)
+
+
+class TestFactsThatDoNotCheckStillHold:
+    @pytest.mark.parametrize("nozzle", [
+        {"position": None, "material": None},
+        {"position": None, "material": "hardened_steel"},
+        {"position": None, "material": "Brass (0.4 mm)"},
+        {"position": 99, "material": "brass"},
+    ])
+    def test_a_print_anyway_record_whose_facts_do_not_check_is_held_and_said_plainly(self, tmp_path, nozzle):
+        path = said_anyway(tmp_path, nozzles=[nozzle])
+        assert what_the_print_is(Path(path).name, path) == {"print_anyway": PLAIN_ANYWAY}
+        for source in (SOURCE_WINDOW, SOURCE_ALWAYS, SOURCE_HOSTED_DELEGATION):
+            hold = experimental_print.needs_its_own_yes(path, source)
+            assert hold is not None and hold.code == experimental_print.PRINT_ANYWAY_NEEDS_A_YES_CODE
+            assert PLAIN_ANYWAY in hold.message
+
+    @pytest.mark.parametrize("sizes", ["0.4,3.5", "0.02,0.4", "0.4,0.6001", "0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0"])
+    def test_a_file_of_mixed_sizes_whose_sizes_do_not_check_is_still_an_experiment(self, tmp_path, sizes):
+        path = tmp_path / "odd.gcode"
+        path.write_text(f"G28\nG1 X1 Y1 E1\n; CONFIG_BLOCK_START\n; nozzle_diameter = {sizes}\n; CONFIG_BLOCK_END\n")
+        assert experimental_print.mixed_sizes_of_file(str(path))
+        assert what_the_print_is(path.name, str(path)) == {"experimental": PLAIN_EXPERIMENT}
+        hold = experimental_print.needs_its_own_yes(str(path), SOURCE_WINDOW)
+        assert hold is not None and hold.code == experimental_print.NEEDS_A_YES_CODE
+
+    def test_the_dialog_asks_and_the_window_holds_a_record_whose_facts_do_not_check(self, tmp_path):
+        plain = _slice(tmp_path, "plain")
+        odd = said_anyway(tmp_path, name="odd", nozzles=[{"position": None, "material": None}])
+        _obtain("start_print", {"file_name": plain, "printer_name": "garage"}, _Host(CHOICE_NEXT_TWO_HOURS))
+        host = _Host(CHOICE_THIS_PRINT)
+        _obtain("start_print", {"file_name": odd, "printer_name": "garage"}, host)
+        [(message, _)] = host.asked
+        assert f"  Print anyway: {PLAIN_ANYWAY}" in message
+        print_signoff.clear()
+        held = server._preview_gate_error("start_print", odd, _token_for(odd), printer_name="garage")
+        assert held["error"]["code"] == experimental_print.PRINT_ANYWAY_NEEDS_A_YES_CODE
+
+    def test_an_owners_word_always_has_its_row(self):
+        assert experimental_print.word_rows({
+            "soft_nozzle_confirmed": {"filaments": ["Nothing unusual"], "nozzles": []},
+            "mixed_nozzle_experiment": "junk",
+        }) == {"print_anyway": PLAIN_ANYWAY, "experimental": PLAIN_EXPERIMENT}
+        assert experimental_print.word_rows({"unchecked_bed_ok": {}}) == {}

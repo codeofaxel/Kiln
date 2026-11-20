@@ -1543,14 +1543,18 @@ class AskCard:
         if url.startswith(("https://", "http://")) and not any(c.isspace() for c in url):
             out["stage_url"] = url
         facts = self.facts if isinstance(self.facts, Mapping) else {}
-        # Only facts that say a row, and all of each: a fact the server
-        # could not say would refuse the ask, and the ask matters more.
-        from kiln.experimental_print import word_rows
+        # Each owner's word is always sent, with its facts when they check
+        # and its plain facts when they do not: the word holds the print on
+        # the card too.  Colours only when its facts check.
+        from kiln.experimental_print import word_facts
         from kiln.maker_slicer_notes import colours_row
 
         words = facts.get("owner_words")
-        if isinstance(words, Mapping) and words and word_rows(words):
-            out["owner_words"] = {word: dict(said) for word, said in words.items()}
+        if isinstance(words, Mapping):
+            sent = {word: word_facts(word, said) for word, said in words.items()}
+            sent = {word: said for word, said in sent.items() if said is not None}
+            if sent:
+                out["owner_words"] = sent
         colours = facts.get("colours")
         if isinstance(colours, Mapping) and colours_row(colours):
             out["colours"] = dict(colours)
