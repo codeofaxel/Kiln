@@ -21,6 +21,8 @@ if TYPE_CHECKING:  # imported lazily everywhere else in this module
     from kiln.queue import PrintQueue
     from kiln.store_scope import LocalRead
 
+from kiln import print_keeping  # noqa: E402
+
 _logger = logging.getLogger(__name__)
 
 # A bulk queue clear must see every queued job, not the default 100-row
@@ -84,6 +86,7 @@ def _is_free_tier() -> bool:
 # ---------------------------------------------------------------------------
 
 
+@print_keeping.call
 def submit_job(
     file_name: str,
     printer_name: str | None = None,
@@ -833,9 +836,7 @@ class _QueueToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register queue/job tools with the MCP server."""
 
-        from kiln import print_keeping as _keeping
-
-        mcp.tool(annotations=destructive("Queue a print"))(_keeping.call(submit_job))
+        mcp.tool(annotations=destructive("Queue a print"))(submit_job)
         mcp.tool(annotations=read_only("Job status"))(job_status)
         mcp.tool(annotations=read_only("Queue summary"))(queue_summary)
         mcp.tool(annotations=destructive("Cancel a queued job"))(cancel_queued_job)
