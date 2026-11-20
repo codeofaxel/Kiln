@@ -132,9 +132,12 @@ _PRESETS = {
     "Invented Two 0.4 nozzle change": {
         "change_filament_gcode": "M620 S[next_filament_id]A\nT[next_filament_id]\nM621 S[next_filament_id]A",
     },
+    "Invented Two 0.4 nozzle layer": {"layer_change_gcode": "LAYER NOTE {layer_num}\nLAYER NOTE TWO"},
     "Invented Two 0.4 nozzle": {
         "inherits": "invented common",
-        "include": ["Invented Two 0.4 nozzle start", "Invented Two 0.4 nozzle change"],
+        "include": [
+            "Invented Two 0.4 nozzle start", "Invented Two 0.4 nozzle change", "Invented Two 0.4 nozzle layer",
+        ],
         "nozzle_diameter": ["0.4", "0.4"],
     },
 }
@@ -148,6 +151,15 @@ _PRESET_ROUTINES = {
 
 #: An invented two-nozzle machine whose maker's slicer keeps its settings that way.
 _PAIR = {**_NOZZLES, "maker_slicer": {"name": "bambu_studio", "routines": _PRESET_ROUTINES}}
+
+#: The same machine, its record also naming the routine its maker runs at every layer.
+_PAIR_WITH_LAYER = {
+    **_NOZZLES,
+    "maker_slicer": {
+        "name": "bambu_studio",
+        "routines": {**_PRESET_ROUTINES, "keys": [*_PRESET_ROUTINES["keys"], "layer_change_gcode"]},
+    },
+}
 
 
 def _preset_bundle(folder: Path, version: str = "01.02.00.00", *, where: dict[str, str] | None = None) -> Path:
@@ -640,6 +652,31 @@ class TestTheSlice:
         assert seen["tower"] is None
 
 
+class TestThePerLayerRoutine:
+    """A printer's own per-layer routine runs after Kiln's own per-layer step
+    in the machine preset, never in its place; every other routine of the
+    printer's takes the place of the preset's own."""
+
+    @staticmethod
+    def _machine(settings: dict[str, str], routines: dict[str, str]) -> dict:
+        from kiln.slicer_orca import settings_to_orca_presets
+
+        return settings_to_orca_presets({**_SETTINGS, **settings}, routines=routines).machine
+
+    def test_the_step_comes_first_then_the_routine_once(self):
+        machine = self._machine(
+            {"layer_gcode": "OWN STEP\\nOWN NOTE", "start_gcode": "OWN START"},
+            {"layer_change_gcode": "MAKER LAYER\nMAKER NOTE", "machine_start_gcode": "MAKER START"},
+        )
+        assert machine["layer_change_gcode"] == "OWN STEP\nOWN NOTE\nMAKER LAYER\nMAKER NOTE"
+        assert machine["machine_start_gcode"] == "MAKER START"
+        # With no step of its own the routine is written as given, and a
+        # routine that already begins with the step is not given it twice.
+        assert self._machine({}, {"layer_change_gcode": "MAKER LAYER"})["layer_change_gcode"] == "MAKER LAYER"
+        again = self._machine({"layer_gcode": "OWN STEP"}, {"layer_change_gcode": "OWN STEP\nMAKER LAYER"})
+        assert again["layer_change_gcode"] == "OWN STEP\nMAKER LAYER"
+
+
 class TestABambuStudioSliceCarriesTheMakersRoutines:
     """A printer whose maker's slicer keeps its routines in preset files is
     sliced for more than one nozzle with those routines in the machine
@@ -647,7 +684,7 @@ class TestABambuStudioSliceCarriesTheMakersRoutines:
     the way its maker's slicer would have it, and the result says which
     copy of the maker's settings they came from."""
 
-    def _slice(self, tmp_path, seen, bundles):
+    def _slice(self, tmp_path, seen, bundles, record=_PAIR):
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
             patch("kiln.maker_slicer._find", return_value=None),
@@ -656,8 +693,17 @@ class TestABambuStudioSliceCarriesTheMakersRoutines:
             patch("kiln.slicer._run_slicer_with_startup_retry", _studio_that_writes("; filament_map = 1,2\n", seen)),
         ):
             return slice_file(
-                _plate(tmp_path), output_dir=str(tmp_path / "out"), profile=_pair_profile(tmp_path, _PAIR),
+                _plate(tmp_path), output_dir=str(tmp_path / "out"), profile=_pair_profile(tmp_path, record),
             )
+
+    def test_the_makers_per_layer_routine_runs_after_kilns_own_per_layer_step(self, tmp_path):
+        seen: dict = {}
+        self._slice(tmp_path, seen, [_preset_bundle(tmp_path / "app")], record=_PAIR_WITH_LAYER)
+        assert seen["machine"]["layer_change_gcode"].split("\n") == [
+            slicer_profiles._E_RESET, "LAYER NOTE {layer_num}", "LAYER NOTE TWO",
+        ]
+        # The routines Kiln writes no step of its own into are the maker's alone.
+        assert seen["machine"]["machine_start_gcode"] == "TWO START\nLINE TWO"
 
     def test_the_machine_preset_carries_the_makers_routines(self, tmp_path):
         seen: dict = {}

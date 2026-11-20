@@ -684,11 +684,21 @@ def _for_nozzle_positions(machine: dict[str, Any], positions: int) -> None:
             machine[key] = value * positions
 
 
-def _routines(routines: Mapping[str, str] | None) -> dict[str, str]:
-    """*routines* checked for the machine preset: each name a routine's
-    (``*_gcode``) and held to the rule every setting name is
+#: The machine setting Kiln writes its own per-layer step into: its
+#: ``layer_gcode``, as this family spells it.
+_PER_LAYER = _MACHINE_GCODE["layer_gcode"]
+
+
+def _routines(routines: Mapping[str, str] | None, machine: Mapping[str, Any]) -> dict[str, str]:
+    """*routines* checked for the machine preset *machine*: each name a
+    routine's (``*_gcode``) and held to the rule every setting name is
     (:func:`refuse_unsafe_settings`), each value text.  A routine's value
-    keeps its real line breaks: it is written as JSON."""
+    keeps its real line breaks: it is written as JSON.
+
+    A per-layer routine runs after Kiln's own per-layer step, never in its
+    place: its value is the step *machine* states, then the routine.  Every
+    other routine takes the place of the preset's own.
+    """
     if not routines:
         return {}
     refuse_unsafe_settings(dict.fromkeys(routines, ""))
@@ -697,7 +707,12 @@ def _routines(routines: Mapping[str, str] | None) -> dict[str, str]:
             raise PresetExtrasError(
                 f"The printer's routine {key!r} is not a routine Kiln writes into a preset, so nothing was sliced."
             )
-    return dict(routines)
+    out = dict(routines)
+    own = str(machine.get(_PER_LAYER) or "").rstrip("\n")
+    theirs = out.get(_PER_LAYER)
+    if theirs is not None and own.strip() and not theirs.startswith(own):
+        out[_PER_LAYER] = f"{own}\n{theirs}"
+    return out
 
 
 def settings_to_orca_presets(
@@ -739,8 +754,9 @@ def settings_to_orca_presets(
             the presets exactly as they are without it.
         routines: The printer's own routines, by machine setting name, as
             its maker's slicer holds them (:mod:`kiln.maker_slicer`): the
-            last word on the machine preset's routines.  Each name is held
-            to the rule every setting name is.
+            last word on the machine preset's routines, except that a
+            per-layer routine runs after Kiln's own per-layer step.  Each
+            name is held to the rule every setting name is.
 
     Returns:
         An :class:`OrcaPresets` with the preset bodies filled in.
@@ -983,7 +999,7 @@ def settings_to_orca_presets(
         for preset in _EXTRAS_PRESETS:
             bodies[preset].update(extras.get(preset, {}))
         served_filament = set(extras.get("filament", {}))
-    machine.update(_routines(routines))
+    machine.update(_routines(routines, machine))
 
     if not multicolor:
         return OrcaPresets(machine=machine, process=process, filament=filament)

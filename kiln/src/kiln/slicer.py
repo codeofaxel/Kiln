@@ -1673,9 +1673,9 @@ def _slice_with_orca(
     (:func:`checked_filament_map`): the slicer is told to use it, and a
     file that states any other map is not kept.  With none, the slicer
     maps the filaments itself.  The result's ``filament_map`` is what the
-    file states.  *routines* are the printer's start, change and end
-    routines its maker's slicer holds (:func:`kiln.maker_slicer.slicer_for_several_nozzles`),
-    written into the machine preset as given.
+    file states.  *routines* are the printer's own routines its maker's
+    slicer holds (:func:`kiln.maker_slicer.slicer_for_several_nozzles`),
+    written into the machine preset (:func:`kiln.slicer_orca.settings_to_orca_presets`).
     """
     with tempfile.TemporaryDirectory(prefix="kiln_orca_") as work_dir:
         cmd: list[str] = [slicer.path, "--slice", "0", "--outputdir", work_dir]
