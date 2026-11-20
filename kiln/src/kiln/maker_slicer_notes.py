@@ -42,6 +42,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
@@ -324,35 +325,116 @@ def _said_one_nozzle(
     return result
 
 
-def approval_row(file_name: str, local_path: str | None = None) -> str | None:
-    """The line a person's print approval shows for a file Kiln sliced in
-    fewer colours than its plate because the printer's maker's slicer was
-    missing or too old (``One colour: <slicer> isn't installed on the
-    computer slicing this print.``), read from the sliced file's record
-    (:func:`kiln.print_lineage.resolve`); ``None`` for any other file.
-    Never raises."""
+#: The words a slice record keeps for the colours a plate was printed in
+#: (:func:`_colours_words`).
+_COLOURS_KEPT = re.compile(r"^(?:one colour|(\d{1,2}) colours of the plate's (\d{1,2}))$")
+#: A slicer version a fact may name.
+_FLOOR = re.compile(r"^\d{1,4}(?:\.\d{1,4}){0,3}$")
+
+
+def checked_colours(facts: Any) -> dict[str, Any] | None:
+    """*facts* for the colours row, checked: ``{"printed": n, "asked": m,
+    "slicer": name, "need": word, "floor": version}`` -- the colours printed
+    (one, or fewer than the plate's ``asked``), the maker's slicer by the
+    name Kiln knows it by (or ``""``), what the person does about it
+    (``install`` or ``update``, or ``""``) and the oldest version Kiln
+    accepts (or ``""``).  ``None`` for anything else."""
+    from kiln.maker_slicer import _KNOWN, INSTALL, UPDATE
+
+    if not isinstance(facts, Mapping) or set(facts) - {"printed", "asked", "slicer", "need", "floor"}:
+        return None
+    printed, asked = facts.get("printed"), facts.get("asked")
+    slicer, need, floor = facts.get("slicer", ""), facts.get("need", ""), facts.get("floor", "")
+    if isinstance(printed, bool) or not isinstance(printed, int) or not 1 <= printed <= 16:
+        return None
+    if printed > 1 and (isinstance(asked, bool) or not isinstance(asked, int) or not printed < asked <= 16):
+        return None
+    if printed == 1 and asked is not None and (isinstance(asked, bool) or not isinstance(asked, int) or not 2 <= asked <= 16):
+        return None
+    if not isinstance(slicer, str) or (slicer and slicer not in {k.said for k in _KNOWN.values()}):
+        return None
+    if need not in ("", INSTALL, UPDATE) or not isinstance(floor, str) or (floor and not _FLOOR.match(floor)):
+        return None
+    out: dict[str, Any] = {"printed": printed, "slicer": slicer, "need": need, "floor": floor}
+    if printed > 1:
+        out["asked"] = asked
+    return out
+
+
+def colours_row(facts: Any) -> str | None:
+    """The one wording of the colours row, from *facts*
+    (:func:`checked_colours`): ``One colour: <slicer> isn't installed on the
+    computer slicing this print.``; ``None`` for facts that do not check."""
+    from kiln.maker_slicer import UPDATE
+
+    checked = checked_colours(facts)
+    if checked is None:
+        return None
+    printed = _colours_words(checked["printed"], checked.get("asked", checked["printed"]))
+    printed = printed[:1].upper() + printed[1:]
+    name, need, floor = checked["slicer"], checked["need"], checked["floor"]
+    if name and need == UPDATE and floor:
+        return f"{printed}: {name} on the computer slicing this print is older than {floor}."
+    if name and need == UPDATE:
+        return f"{printed}: {name} on the computer slicing this print needs updating."
+    if name:
+        return f"{printed}: {name} isn't installed on the computer slicing this print."
+    return f"{printed}."
+
+
+def _needs_of_because(because: Any) -> dict[str, str]:
+    """The slicer a record kept before it named one says it needs, read
+    from the reason it kept (:func:`_colours_because`); ``{}`` for none."""
+    from kiln.maker_slicer import _KNOWN, INSTALL, UPDATE
+
+    names = "|".join(re.escape(k.said) for k in _KNOWN.values())
+    found = re.search(rf"needs ({names})(?: (\d[\d.]*) or newer)?$", str(because or "").strip())
+    if found is None:
+        return {}
+    if found.group(2):
+        return {"name": found.group(1), "need": UPDATE, "floor": found.group(2)}
+    return {"name": found.group(1), "need": INSTALL, "floor": ""}
+
+
+def colours_facts(file_name: str, local_path: str | None = None) -> dict[str, Any] | None:
+    """The colours facts of a file Kiln sliced in fewer colours than its
+    plate because the printer's maker's slicer was missing or too old, read
+    from the sliced file's record (:func:`kiln.print_lineage.resolve`) and
+    checked; ``None`` for any other file.  Never raises."""
     try:
-        from kiln.maker_slicer import UPDATE
         from kiln.print_lineage import resolve
 
         kept = resolve(file_name, local_paths=[local_path] if local_path else []).get("one_nozzle")
         if not isinstance(kept, Mapping) or kept.get("colours_flattened") is not True:
             return None
-        printed = str(kept.get("colours") or "one colour")
-        printed = printed[:1].upper() + printed[1:]
+        counted = _COLOURS_KEPT.match(str(kept.get("colours") or "one colour"))
+        if counted is None:
+            return None
+        printed = int(counted.group(1)) if counted.group(1) else 1
         needs = kept.get("maker_slicer") if isinstance(kept.get("maker_slicer"), Mapping) else {}
-        name = str(needs.get("name") or "").strip()
-        if name and needs.get("need") == UPDATE and needs.get("floor"):
-            return f"{printed}: {name} on the computer slicing this print is older than {needs['floor']}."
-        if name and needs.get("need") == UPDATE:
-            return f"{printed}: {name} on the computer slicing this print needs updating."
-        if name:
-            return f"{printed}: {name} isn't installed on the computer slicing this print."
-        because = str(kept.get("because") or "").strip()
-        return f"{printed}: {because}." if because else f"{printed}."
+        if not needs.get("name"):
+            needs = _needs_of_because(kept.get("because"))
+        facts: dict[str, Any] = {
+            "printed": printed,
+            "slicer": str(needs.get("name") or "").strip(),
+            "need": str(needs.get("need") or "") if needs.get("need") in ("install", "update") else "",
+            "floor": str(needs.get("floor") or ""),
+        }
+        if counted.group(2):
+            facts["asked"] = int(counted.group(2))
+        return checked_colours(facts)
     except Exception:  # noqa: BLE001 -- the approval must still open
-        logger.debug("one colour row skipped for %s", file_name, exc_info=True)
+        logger.debug("one colour facts skipped for %s", file_name, exc_info=True)
         return None
+
+
+def approval_row(file_name: str, local_path: str | None = None) -> str | None:
+    """The line a person's print approval shows for a file Kiln sliced in
+    fewer colours than its plate because the printer's maker's slicer was
+    missing or too old (:func:`colours_row` of :func:`colours_facts`);
+    ``None`` for any other file.  Never raises."""
+    facts = colours_facts(file_name, local_path)
+    return colours_row(facts) if facts is not None else None
 
 
 def _record_for(printer_model: str | None, positions: Sequence[Mapping[str, Any]] | None) -> tuple[str, str, Mapping[str, Any], int] | None:

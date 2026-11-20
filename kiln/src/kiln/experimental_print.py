@@ -120,27 +120,38 @@ def _sizes_said(sizes: tuple[float, ...]) -> str:
     return f"{', '.join(said[:-1])} and {said[-1]}"
 
 
-def approval_line(job_path: str | None) -> str | None:
-    """What a person is told, beside the word "experimental", before an
-    experimental print starts; ``None`` for any other file."""
-    sizes = mixed_sizes_of_file(job_path)
-    if not sizes:
-        return None
-    return (
-        f"This print uses nozzles of different sizes at once ({_sizes_said(sizes)}), which Kiln has "
-        "not proven on a printer. Watch the first layers; Kiln will ask how it came out."
-    )
+# ---------------------------------------------------------------------------
+# The facts each row is said from, and the one wording of each
+# ---------------------------------------------------------------------------
+#
+# A row an approval shows is never taken as text from whoever asks: it is
+# said here, from facts that are checked first.  Every door says it from the
+# same facts in the same words: this computer's approval, its terminal, and
+# the account's card (whose server says it with these functions).
 
-
-#: How a request names its filament for the row an approval shows before
-#: the print is sliced: one short name, nothing else.
+#: A filament type name a fact may carry: one short name, nothing else.
 _NAMED_FILAMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 +._-]{0,39}$")
-#: The filament an approval names when the request names none it knows.
+#: A nozzle material a fact may carry, in the nozzle record's own words.
+_NOZZLE_WORD = re.compile(r"^[a-z][a-z_]{0,23}$")
+#: The most filaments, nozzles or sizes one fact may list, and the highest
+#: nozzle position it may name.
+_MOST_LISTED = 8
+_HIGHEST_POSITION = 16
+#: The nozzle sizes a fact may state: thousandths of a millimetre, within
+#: these bounds.
+_SIZE_RANGE_MM = (0.05, 3.0)
+#: The filament an approval names when the facts name none.
 _SOME_ABRASIVE = "Abrasive filament"
+#: The nozzle an approval names when the facts name none.
+_SOME_SOFT_NOZZLE = "a soft nozzle"
 
 
 def _joined(words: list[str]) -> str:
     return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def _nozzle_word(material: Any) -> str:
+    return str(material or "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
 def _nozzle_said(nozzle: Mapping[str, Any]) -> str:
@@ -151,29 +162,82 @@ def _nozzle_said(nozzle: Mapping[str, Any]) -> str:
     return f"the {made} nozzle" if made else "the nozzle on record"
 
 
-def print_anyway_said(kept: Mapping[str, Any] | None) -> str | None:
-    """The row an approval shows for a slice the owner said to print
-    anyway, from what its record keeps (:func:`kiln.print_lineage.soft_nozzle_of`):
-    ``PLA-CF through the brass nozzle, which it wears out quickly.``;
-    ``None`` for a record that names no filament or no nozzle."""
+def checked_print_anyway(facts: Any) -> dict[str, Any] | None:
+    """*facts* for the print-anyway row, checked: ``{"filaments": [type
+    names], "nozzles": [{"position", "material"}]}``, each filament an
+    abrasive one, each nozzle's material one that is not wear-resistant and
+    its position a whole number or ``None``; either list may be empty when
+    it is not known yet.  ``None`` for anything else."""
+    from kiln.material_safety import is_abrasive_filament, is_wear_resistant_nozzle
+
+    if not isinstance(facts, Mapping) or set(facts) - {"filaments", "nozzles"}:
+        return None
+    filaments, nozzles = facts.get("filaments", []), facts.get("nozzles", [])
+    if not isinstance(filaments, list) or not isinstance(nozzles, list):
+        return None
+    if len(filaments) > _MOST_LISTED or len(nozzles) > _MOST_LISTED:
+        return None
+    for name in filaments:
+        if not isinstance(name, str) or not _NAMED_FILAMENT.match(name) or not is_abrasive_filament(name):
+            return None
+    kept_nozzles = []
+    for nozzle in nozzles:
+        if not isinstance(nozzle, Mapping) or set(nozzle) - {"position", "material"}:
+            return None
+        position, material = nozzle.get("position"), nozzle.get("material")
+        if position is not None and (
+            not isinstance(position, int) or isinstance(position, bool) or not 1 <= position <= _HIGHEST_POSITION
+        ):
+            return None
+        if not isinstance(material, str) or not _NOZZLE_WORD.match(material) or is_wear_resistant_nozzle(material):
+            return None
+        kept_nozzles.append({"position": position, "material": material})
+    return {"filaments": sorted(set(filaments)), "nozzles": kept_nozzles}
+
+
+def print_anyway_row(facts: Any) -> str | None:
+    """The one wording of the print-anyway row, from *facts*
+    (:func:`checked_print_anyway`): ``PLA-CF through the brass nozzle, which
+    it wears out quickly.``, or ``Abrasive filament through a soft nozzle,
+    which it wears out quickly.`` when neither is known yet.  ``None`` for
+    facts that do not check."""
+    checked = checked_print_anyway(facts)
+    if checked is None:
+        return None
+    named, nozzles = checked["filaments"], checked["nozzles"]
+    what = _joined(named) if named else _SOME_ABRASIVE
+    where = _joined([_nozzle_said(n) for n in nozzles]) if nozzles else _SOME_SOFT_NOZZLE
+    who = "they wear" if len(named) > 1 else "it wears"
+    return f"{what} through {where}, which {who} out quickly."
+
+
+def print_anyway_facts(kept: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The print-anyway facts a slice record keeps
+    (:func:`kiln.print_lineage.soft_nozzle_of`), checked; ``None`` for a
+    record that names no filament or no nozzle, or facts that do not check."""
     if not isinstance(kept, Mapping):
         return None
-    named = sorted({
+    filaments = sorted({
         str(f.get("material") or "").strip()
         for f in kept.get("filaments") or () if isinstance(f, Mapping)
     } - {""})
-    nozzles = [n for n in kept.get("nozzles") or () if isinstance(n, Mapping)]
-    if not named or not nozzles:
+    nozzles = [
+        {"position": n.get("position"), "material": _nozzle_word(n.get("material"))}
+        for n in kept.get("nozzles") or () if isinstance(n, Mapping)
+    ]
+    if not filaments or not nozzles:
         return None
-    who = "it wears" if len(named) == 1 else "they wear"
-    return f"{_joined(named)} through {_joined([_nozzle_said(n) for n in nozzles])}, which {who} out quickly."
+    return checked_print_anyway({"filaments": filaments, "nozzles": nozzles})
 
 
-def print_anyway_line(job_path: str | None) -> str | None:
-    """:func:`print_anyway_said` for the sliced file at *job_path*, read from
-    this computer's record of that file's slice (matched by the file itself,
-    never by its name); ``None`` for a file the owner said nothing about or
-    one this computer keeps no record of."""
+def print_anyway_said(kept: Mapping[str, Any] | None) -> str | None:
+    """:func:`print_anyway_row` for what a slice record keeps
+    (:func:`print_anyway_facts`)."""
+    facts = print_anyway_facts(kept)
+    return print_anyway_row(facts) if facts is not None else None
+
+
+def _print_anyway_facts_of_file(job_path: str | None) -> dict[str, Any] | None:
     if not job_path:
         return None
     try:
@@ -185,37 +249,136 @@ def print_anyway_line(job_path: str | None) -> str | None:
         return None
     if found.get("matched_by") not in ("stamp", "content"):
         return None
-    return print_anyway_said(found.get("soft_nozzle"))
+    return print_anyway_facts(found.get("soft_nozzle"))
+
+
+def print_anyway_line(job_path: str | None) -> str | None:
+    """:func:`print_anyway_row` for the sliced file at *job_path*, read from
+    this computer's record of that file's slice (matched by the file itself,
+    never by its name); ``None`` for a file the owner said nothing about or
+    one this computer keeps no record of."""
+    facts = _print_anyway_facts_of_file(job_path)
+    return print_anyway_row(facts) if facts is not None else None
+
+
+def checked_experiment(facts: Any) -> dict[str, Any] | None:
+    """*facts* for the experimental row, checked: ``{"sizes": [mm, ...]}``,
+    two or more nozzle sizes of which at least two differ, each in
+    thousandths of a millimetre within the sizes a nozzle comes in, or an
+    empty list when they are not known yet.  ``None`` for anything else."""
+    if not isinstance(facts, Mapping) or set(facts) - {"sizes"}:
+        return None
+    sizes = facts.get("sizes", [])
+    if not isinstance(sizes, list) or len(sizes) == 1 or len(sizes) > _MOST_LISTED:
+        return None
+    low, high = _SIZE_RANGE_MM
+    kept: list[float] = []
+    for size in sizes:
+        if isinstance(size, bool) or not isinstance(size, (int, float)) or not low <= size <= high:
+            return None
+        if abs(size * 1000 - round(size * 1000)) > 1e-6:
+            return None
+        kept.append(round(float(size), 3))
+    if kept and max(kept) - min(kept) <= _SAME_SIZE_MM:
+        return None
+    return {"sizes": kept}
+
+
+def experimental_row(facts: Any) -> str | None:
+    """The one wording of the experimental row, from *facts*
+    (:func:`checked_experiment`), naming the sizes when they are known;
+    ``None`` for facts that do not check."""
+    checked = checked_experiment(facts)
+    if checked is None:
+        return None
+    sizes = tuple(checked["sizes"])
+    said = f" ({_sizes_said(sizes)})" if sizes else ""
+    return (
+        f"This print uses nozzles of different sizes at once{said}, which Kiln has not proven on a "
+        "printer. Watch the first layers; Kiln will ask how it came out."
+    )
+
+
+def experiment_facts(job_path: str | None) -> dict[str, Any] | None:
+    """The experimental facts of the sliced file at *job_path*, checked;
+    ``None`` for any other file."""
+    sizes = mixed_sizes_of_file(job_path)
+    return checked_experiment({"sizes": list(sizes)}) if sizes else None
+
+
+def approval_line(job_path: str | None) -> str | None:
+    """What a person is told, beside the word "experimental", before an
+    experimental print starts; ``None`` for any other file."""
+    facts = experiment_facts(job_path)
+    return experimental_row(facts) if facts is not None else None
+
+
+#: Each owner's word with the row it is said in and that row's wording.
+_ROW_OF_WORD = {
+    "soft_nozzle_confirmed": ("print_anyway", print_anyway_row),
+    "mixed_nozzle_experiment": ("experimental", experimental_row),
+}
+
+
+def word_rows(owner_words: Any) -> dict[str, str]:
+    """The rows for *owner_words* (``{word: facts}``), each said from its
+    facts in its one wording: ``{row: text}``.  ``{}`` when any word is not
+    an owner's word or any facts do not check: the rows are said whole, or
+    none of them."""
+    if not isinstance(owner_words, Mapping):
+        return {}
+    rows: dict[str, str] = {}
+    for word, facts in owner_words.items():
+        found = _ROW_OF_WORD.get(word) if isinstance(word, str) else None
+        said = found[1](facts) if found else None
+        if found is None or said is None:
+            return {}
+        rows[found[0]] = said
+    return rows
+
+
+def file_owner_words(job_path: str | None) -> dict[str, dict[str, Any]]:
+    """``{word: facts}`` for the owner's words the sliced file at *job_path*
+    stands for: the word to print it anyway, when its slice record keeps
+    one, and the yes to nozzles of different sizes, when it was sliced for
+    them.  ``{}`` for any other file."""
+    words: dict[str, dict[str, Any]] = {}
+    anyway = _print_anyway_facts_of_file(job_path)
+    if anyway is not None:
+        words["soft_nozzle_confirmed"] = anyway
+    experiment = experiment_facts(job_path)
+    if experiment is not None:
+        words["mixed_nozzle_experiment"] = experiment
+    return words
+
+
+def asked_facts(
+    *, soft_nozzle_confirmed: Any = False, mixed_nozzle_experiment: Any = False, material: Any = None,
+) -> dict[str, dict[str, Any]]:
+    """``{word: facts}`` for a print asked for before it is sliced, from the
+    request's own words: the print-anyway facts name the filament only when
+    the request names one that is abrasive, and no nozzle; the experiment's
+    name no sizes.  Only for a word given as ``True`` itself."""
+    words: dict[str, dict[str, Any]] = {}
+    if soft_nozzle_confirmed is True:
+        named = material.strip() if isinstance(material, str) else ""
+        facts = {"filaments": [named], "nozzles": []}
+        words["soft_nozzle_confirmed"] = (
+            facts if checked_print_anyway(facts) is not None else {"filaments": [], "nozzles": []}
+        )
+    if mixed_nozzle_experiment is True:
+        words["mixed_nozzle_experiment"] = {"sizes": []}
+    return words
 
 
 def asked_rows(
     *, soft_nozzle_confirmed: Any = False, mixed_nozzle_experiment: Any = False, material: Any = None,
 ) -> dict[str, str]:
-    """The rows an approval shows for a print asked for before it is sliced,
-    from the request's own words: ``print_anyway`` for the owner's word to
-    print an abrasive filament through a nozzle that is not wear-resistant
-    (naming the filament only when the request names one that is abrasive),
-    and ``experimental`` for the yes to nozzles of different sizes.  Only for
-    a word given as ``True`` itself; ``{}`` for neither."""
-    rows: dict[str, str] = {}
-    if soft_nozzle_confirmed is True:
-        named = str(material or "").strip() if isinstance(material, str) else ""
-        what = _SOME_ABRASIVE
-        if named and _NAMED_FILAMENT.match(named):
-            try:
-                from kiln.material_safety import is_abrasive_filament
-
-                if is_abrasive_filament(named):
-                    what = named
-            except Exception:  # noqa: BLE001 -- unread is unnamed
-                logger.debug("filament not judged", exc_info=True)
-        rows["print_anyway"] = f"{what} through a soft nozzle, which it wears out quickly."
-    if mixed_nozzle_experiment is True:
-        rows["experimental"] = (
-            "This print uses nozzles of different sizes at once, which Kiln has not proven on a printer. "
-            "Watch the first layers; Kiln will ask how it came out."
-        )
-    return rows
+    """:func:`word_rows` for :func:`asked_facts`."""
+    return word_rows(asked_facts(
+        soft_nozzle_confirmed=soft_nozzle_confirmed, mixed_nozzle_experiment=mixed_nozzle_experiment,
+        material=material,
+    ))
 
 
 def asks_every_time(rows: Mapping[str, Any] | None) -> bool:
@@ -271,8 +434,17 @@ __all__ = [
     "ROW_WORDS",
     "OwnYesHold",
     "approval_line",
+    "asked_facts",
     "asked_rows",
     "asks_every_time",
+    "checked_experiment",
+    "checked_print_anyway",
+    "experiment_facts",
+    "experimental_row",
+    "file_owner_words",
+    "print_anyway_facts",
+    "print_anyway_row",
+    "word_rows",
     "mixed_sizes_of_file",
     "mixed_sizes_of_lines",
     "needs_its_own_yes",

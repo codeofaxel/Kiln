@@ -1451,7 +1451,10 @@ def test_every_door_a_person_reads_says_what_the_print_is(signed_in, tmp_path, m
         monkeypatch.setattr(server, "ask_user_to_confirm", no)
         with pytest.raises(RuntimeError, match="declined"):
             _ask(model)
-    assert card["experimental"] == row and "colours" not in card
+    # The card carries the facts the account's server says the row from,
+    # never the row's text.
+    assert card["owner_words"] == {"mixed_nozzle_experiment": {"sizes": [0.4, 0.6]}}
+    assert "experimental" not in card and "colours" not in card
     _title, _subtitle, message = screen_code.banner_text(shown[0])
     assert message.startswith(f"Experimental: {row} Type the code")
     assert f"  Experimental: {row}" in asked[0]
@@ -1463,15 +1466,22 @@ def test_a_print_that_is_nothing_special_carries_no_rows(signed_in, model, obser
     _held()
     _ask(model)
     body = _posted()
-    assert "experimental" not in body and "colours" not in body
+    assert not {"owner_words", "experimental", "colours", "print_anyway"} & set(body)
 
 
-def test_a_row_is_sent_whole_or_not_at_all():
-    said = "This print uses nozzles of different sizes at once (0.4 mm and 0.6 mm)."
-    assert bridge_client.AskCard(rows={"experimental": said}).fields() == {"experimental": said}
-    assert bridge_client.AskCard(rows={"colours": "one\ncolour"}).fields() == {"colours": "one colour"}
-    assert bridge_client.AskCard(rows={"experimental": "x" * 401}).fields() == {}
-    assert bridge_client.AskCard(rows={"experimental": 7, "other": "words"}).fields() == {}
+def test_the_card_sends_facts_that_say_a_row_and_never_a_rows_text():
+    words = {"mixed_nozzle_experiment": {"sizes": [0.4, 0.6]}}
+    assert bridge_client.AskCard(facts={"owner_words": words}).fields() == {"owner_words": words}
+    colours = {"printed": 1, "slicer": "Bambu Studio", "need": "install", "floor": ""}
+    assert bridge_client.AskCard(facts={"colours": colours}).fields() == {"colours": colours}
+    for facts in (
+        {"owner_words": {"soft_nozzle_confirmed": {"filaments": ["nothing unusual"], "nozzles": []}}},
+        {"owner_words": {"mixed_nozzle_experiment": {"sizes": [0.4]}}},
+        {"owner_words": {"some_other_word": {}}},
+        {"colours": {"printed": 1, "slicer": "Any slicer at all"}},
+        {"experimental": "This print is fine.", "print_anyway": "Nothing unusual."},
+    ):
+        assert bridge_client.AskCard(facts=facts).fields() == {}, facts
 
 
 def _said_anyway(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
@@ -1510,7 +1520,10 @@ def test_every_door_a_person_reads_says_print_anyway(signed_in, tmp_path, monkey
         monkeypatch.setattr(server, "ask_user_to_confirm", no)
         with pytest.raises(RuntimeError, match="declined"):
             _ask(model)
-    assert card["print_anyway"] == row and "experimental" not in card
+    assert card["owner_words"] == {"soft_nozzle_confirmed": {
+        "filaments": ["PLA-CF"], "nozzles": [{"position": None, "material": "brass"}],
+    }}
+    assert "print_anyway" not in card and "experimental" not in card
     _title, _subtitle, message = screen_code.banner_text(shown[0])
     assert message.startswith(f"Print anyway: {row} Type the code")
     assert f"  Print anyway: {row}" in asked[0]
@@ -1529,4 +1542,4 @@ def test_a_window_on_the_account_does_not_start_a_print_the_owner_said_to_print_
     _held()
     r = _ask(model)
     assert r.consent is None and _calls(RECORD) == []
-    assert json.loads(_calls(PENDING)[0].request.body)["print_anyway"].startswith("PLA-CF through")
+    assert "soft_nozzle_confirmed" in json.loads(_calls(PENDING)[0].request.body)["owner_words"]

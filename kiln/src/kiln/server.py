@@ -2905,11 +2905,12 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     # and one the owner said to print anyway, are asked about every time too
     # (kiln.experimental_print).
     from kiln import experimental_print
-    from kiln.print_consent import what_the_print_is
+    from kiln.print_consent import print_rows_of, what_the_print_states
 
-    about = await asyncio.to_thread(
-        what_the_print_is, os.path.basename(file_value) or file_value, _local_copy_of(file_value),
+    states = await asyncio.to_thread(
+        what_the_print_states, os.path.basename(file_value) or file_value, _local_copy_of(file_value),
     )
+    about = print_rows_of(states)
     own_yes = experimental_print.asks_every_time(about)
     if standing is not None and not on_plate and not own_yes:
         # A person already said yes for this — inside a window they
@@ -2944,7 +2945,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             can_ask = False
     if not can_ask:
         return await _offer_screen_code(
-            tool_name, file_value, aimed, ctx, hook_path=hook_path, fallback=NOT_ASKED_HOST_CANNOT, about=about,
+            tool_name, file_value, aimed, ctx, hook_path=hook_path, fallback=NOT_ASKED_HOST_CANNOT, states=states,
         )
 
     offer_window, offer_fleet = dialog_offers()
@@ -3001,7 +3002,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     logger.debug("Consent could not be obtained from the dialog (%s); offering the screen's code", answer.detail)
     _audit(tool_name, "consent_dialog_unavailable", details={"file": file_value, "detail": answer.detail})
     return await _offer_screen_code(
-        tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}", about=about,
+        tool_name, file_value, aimed, ctx, hook_path=None, fallback=f"unavailable:{answer.detail}", states=states,
     )
 
 
@@ -3233,7 +3234,7 @@ def _sha256_if_local(file_value: str) -> str:
 
 async def _offer_screen_code(
     tool_name: str, file_value: str, aimed: str, ctx: Any, *, hook_path: str | None, fallback: str,
-    about: dict[str, str] | None = None,
+    states: dict[str, Any] | None = None,
 ):
     """The screen door: show a code for this print on this machine's
     screen and record that nobody has answered yet, so the refusal can
@@ -3244,16 +3245,19 @@ async def _offer_screen_code(
     Beside the code, on a signed-in machine, the print is also put to the
     account (:func:`_ask_the_account`) — shown, cooling down or
     unavailable alike — and the reason carries the ask's id, so the
-    refusal can name the page where a person answers it.  *about* is what
-    the print itself is (:func:`kiln.print_consent.what_the_print_is`),
-    said on the banner and on the account's card alike."""
+    refusal can name the page where a person answers it.  *states* are
+    the facts of what the print itself is
+    (:func:`kiln.print_consent.what_the_print_states`), said on the banner
+    and sent for the account's card, whose server says them the same way."""
     if _hosted_now():
         return note_not_asked(fallback)
+    from kiln.print_consent import print_rows_of
+
     file_sha256 = _sha256_if_local(file_value)
     printer_label = _printer_label_for_a_person(aimed)
     shown = screen_code.issue(
         tool=tool_name, file_name=file_value, file_sha256=file_sha256,
-        printer_name=aimed, host=_host_label(ctx), printer_label=printer_label, rows=about,
+        printer_name=aimed, host=_host_label(ctx), printer_label=printer_label, rows=print_rows_of(states),
     )
     outcome = shown.get("outcome")
     if outcome == screen_code.SHOWN:
@@ -3266,7 +3270,7 @@ async def _offer_screen_code(
         reason = fallback
     return note_not_asked(reason + await _ask_the_account(
         tool_name, file_value, aimed, file_sha256, printer_label=printer_label, asked_by=_asked_by(ctx),
-        about=about,
+        states=states,
     ))
 
 
@@ -3534,7 +3538,7 @@ def _stage_url_for_ask(local: str | None, account: str) -> str:
 
 def _post_the_ask(
     file_value: str, aimed: str, file_sha256: str, *, printer_label: str = "", asked_by: str = "",
-    about: dict[str, str] | None = None,
+    states: dict[str, Any] | None = None,
 ):
     """The blocking half of :func:`_ask_the_account`, run off the loop:
     ``(ask, picture_case)``.  Nothing is painted, read or linked for an
@@ -3571,7 +3575,7 @@ def _post_the_ask(
             material=found.get("material") or "",
             printer_state=standing.answer(min(deadline, started + _ASK_PRINTER_WAIT_S)) or "",
             stage_url=stage.answer(deadline) or "",
-            rows=about,
+            facts=states,
         )
         ask = bridge_client.ask_the_account(
             file_sha256=file_sha256, file_name=file_value, printer_name=aimed,
@@ -3585,7 +3589,7 @@ def _post_the_ask(
 
 async def _ask_the_account(
     tool_name: str, file_value: str, aimed: str, file_sha256: str,
-    *, printer_label: str = "", asked_by: str = "", about: dict[str, str] | None = None,
+    *, printer_label: str = "", asked_by: str = "", states: dict[str, Any] | None = None,
 ) -> str:
     """Put this print to the signed-in account, where any signed-in
     browser at kiln3d.com/monitor can answer it.  Returns the tag the
@@ -3593,14 +3597,14 @@ async def _ask_the_account(
     is held: not signed in, no local copy to hash, the server did not
     answer, or it refused the ask (audited).  *printer_label* and
     *asked_by* are how the person's card names the printer and the app
-    that asked; *about* is what the print itself is, the rows the card
-    shows.  Never raises."""
+    that asked; *states* are the facts of what the print itself is, which
+    the account's server says on the card.  Never raises."""
     if not file_sha256:
         return ""
     try:
         ask, picture_case = await asyncio.to_thread(
             _post_the_ask, file_value, aimed, file_sha256, printer_label=printer_label, asked_by=asked_by,
-            about=about,
+            states=states,
         )
     except Exception:  # noqa: BLE001 — an ask that could not be put is no ask
         logger.debug("consent: account ask failed", exc_info=True)

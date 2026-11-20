@@ -951,43 +951,71 @@ def row_label(name: str) -> str:
     return PRINT_ROW_LABELS.get(name) or str(name).replace("_", " ").strip().capitalize()
 
 
+def print_rows_of(states: Any) -> dict[str, str]:
+    """The rows an approval shows, said from *states*
+    (:func:`what_the_print_states`) in the one wording of each, in the order
+    of :data:`PRINT_ROW_LABELS`: ``print_anyway`` and ``experimental`` for
+    the owner's words (:func:`kiln.experimental_print.word_rows`) and
+    ``colours`` (:func:`kiln.maker_slicer_notes.colours_row`).  Facts that
+    do not check say nothing.  Never raises."""
+    said: dict[str, str] = {}
+    if not isinstance(states, dict):
+        return said
+    try:
+        from kiln import experimental_print
+
+        said.update(experimental_print.word_rows(states.get("owner_words") or {}))
+    except Exception:  # noqa: BLE001 -- the approval opens without the rows
+        logger.debug("owner's word rows skipped", exc_info=True)
+    try:
+        from kiln.maker_slicer_notes import colours_row
+
+        colours = colours_row(states["colours"]) if "colours" in states else None
+        if colours:
+            said["colours"] = colours
+    except Exception:  # noqa: BLE001 -- the approval opens without the row
+        logger.debug("colours row skipped", exc_info=True)
+    return {name: said[name] for name in PRINT_ROW_LABELS if name in said}
+
+
+def what_the_print_states(file_name: str, local_path: str | None) -> dict[str, Any]:
+    """The checked facts every door says a print's approval rows from:
+    ``owner_words`` (``{word: facts}``, :func:`kiln.experimental_print.file_owner_words`)
+    for a slice the owner said to print anyway and a print sliced for
+    nozzles of different sizes, and ``colours``
+    (:func:`kiln.maker_slicer_notes.colours_facts`) for a plate Kiln sliced
+    in fewer colours than it holds.  Only what applies; *local_path* is the
+    copy of the file on this computer, when there is one.  Never raises."""
+    states: dict[str, Any] = {}
+    try:
+        from kiln import experimental_print
+
+        words = experimental_print.file_owner_words(local_path)
+        if words:
+            states["owner_words"] = words
+    except Exception:  # noqa: BLE001 -- the approval opens without the rows
+        logger.debug("owner's word facts skipped for %s", file_name, exc_info=True)
+    try:
+        from kiln.maker_slicer_notes import colours_facts
+
+        colours = colours_facts(file_name, local_path)
+        if colours is not None:
+            states["colours"] = colours
+    except Exception:  # noqa: BLE001 -- the approval opens without the row
+        logger.debug("colours facts skipped for %s", file_name, exc_info=True)
+    return states
+
+
 def what_the_print_is(file_name: str, local_path: str | None) -> dict[str, str]:
     """The rows a person's approval carries about the print itself, the same
     at every door that asks, in the order of :data:`PRINT_ROW_LABELS`:
-    ``print_anyway`` for a slice the owner said to print anyway
-    (:func:`kiln.experimental_print.print_anyway_line`), ``experimental`` for
-    a print Kiln has not proven on a printer
-    (:func:`kiln.experimental_print.approval_line`), and ``colours`` for a
-    plate Kiln sliced in fewer colours than it holds
-    (:func:`kiln.maker_slicer_notes.approval_row`).  Only the rows that
-    apply; *local_path* is the copy of the file on this computer, when there
-    is one.  Never raises."""
-    rows: dict[str, str] = {}
-    try:
-        from kiln import experimental_print
-
-        anyway = experimental_print.print_anyway_line(local_path)
-        if anyway:
-            rows["print_anyway"] = anyway
-    except Exception:  # noqa: BLE001 -- the approval opens without the row
-        logger.debug("print-anyway row skipped for %s", file_name, exc_info=True)
-    try:
-        from kiln import experimental_print
-
-        line = experimental_print.approval_line(local_path)
-        if line:
-            rows["experimental"] = line
-    except Exception:  # noqa: BLE001 -- the approval opens without the row
-        logger.debug("experimental row skipped for %s", file_name, exc_info=True)
-    try:
-        from kiln.maker_slicer_notes import approval_row
-
-        row = approval_row(file_name, local_path)
-        if row:
-            rows["colours"] = row
-    except Exception:  # noqa: BLE001 -- the approval opens without the row
-        logger.debug("colours row skipped for %s", file_name, exc_info=True)
-    return rows
+    ``print_anyway`` for a slice the owner said to print anyway,
+    ``experimental`` for a print Kiln has not proven on a printer, and
+    ``colours`` for a plate Kiln sliced in fewer colours than it holds; each
+    said from its checked facts (:func:`print_rows_of` of
+    :func:`what_the_print_states`).  Only the rows that apply.  Never
+    raises."""
+    return print_rows_of(what_the_print_states(file_name, local_path))
 
 
 def describe_print_request(

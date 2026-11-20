@@ -48,7 +48,6 @@ from typing import Any
 
 from kiln.cli_command import kiln_command
 from kiln.outbound_guard import scrub_relayed
-from kiln.print_consent import PRINT_ROW_LABELS as _PRINT_ROW_LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -1459,11 +1458,6 @@ _CARD_PRINT_TIME_MAX_S = 30 * 24 * 3600
 _CARD_FILAMENT_MAX_G = 10_000.0
 _CARD_PRINTER_STATES = frozenset({"ready", "busy", "offline"})
 _CARD_ASKED_FROM = frozenset({"mac", "windows", "linux"})
-#: The longest row about the print itself the card carries whole.
-_CARD_ROW_MAX = 400
-#: The rows about the print itself a card carries, as
-#: :func:`kiln.print_consent.what_the_print_is` names them.
-CARD_ROWS = tuple(_PRINT_ROW_LABELS)
 
 
 def _card_text(value: Any) -> str:
@@ -1513,9 +1507,11 @@ class AskCard:
     printer_state: str = ""
     #: The hosted stage's link for the print file's own bytes.
     stage_url: str = ""
-    #: The rows the person's approval carries about the print itself, by
-    #: name (:data:`CARD_ROWS`), in the words every door shows them in.
-    rows: Mapping[str, str] | None = None
+    #: The checked facts of what the print itself is
+    #: (:func:`kiln.print_consent.what_the_print_states`): the account's
+    #: server says each row from them in the words every door uses, and
+    #: never takes a row's text from the ask.
+    facts: Mapping[str, Any] | None = None
 
     def fields(self) -> dict[str, Any]:
         """The fields to send: each one present only when it holds a value
@@ -1546,13 +1542,18 @@ class AskCard:
         url = self.stage_url if isinstance(self.stage_url, str) else ""
         if url.startswith(("https://", "http://")) and not any(c.isspace() for c in url):
             out["stage_url"] = url
-        rows = self.rows if isinstance(self.rows, Mapping) else {}
-        for name in CARD_ROWS:
-            # A row is said whole or not at all: half a sentence about
-            # what the print is would say something else.
-            said = _card_text(rows.get(name))
-            if said and len(said) <= _CARD_ROW_MAX:
-                out[name] = said
+        facts = self.facts if isinstance(self.facts, Mapping) else {}
+        # Only facts that say a row, and all of each: a fact the server
+        # could not say would refuse the ask, and the ask matters more.
+        from kiln.experimental_print import word_rows
+        from kiln.maker_slicer_notes import colours_row
+
+        words = facts.get("owner_words")
+        if isinstance(words, Mapping) and words and word_rows(words):
+            out["owner_words"] = {word: dict(said) for word, said in words.items()}
+        colours = facts.get("colours")
+        if isinstance(colours, Mapping) and colours_row(colours):
+            out["colours"] = dict(colours)
         return out
 
 

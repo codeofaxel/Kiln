@@ -206,3 +206,63 @@ class TestOnlyItsOwnYesStartsIt:
 
     def test_any_other_print_is_not_held(self, tmp_path):
         assert experimental_print.needs_its_own_yes(_slice(tmp_path, "plain"), SOURCE_ALWAYS) is None
+
+
+# ---------------------------------------------------------------------------
+# A row is Kiln's own words, said from facts that check
+# ---------------------------------------------------------------------------
+
+
+class TestTheRowsAreKilnsOwnWords:
+    @pytest.mark.parametrize("facts", [
+        {"filaments": ["nothing unusual"], "nozzles": []},
+        {"filaments": ["PLA"], "nozzles": []},
+        {"filaments": ["PLA-CF"], "nozzles": [{"position": None, "material": "hardened_steel"}]},
+        {"filaments": ["PLA-CF"], "nozzles": [{"position": 0, "material": "brass"}]},
+        {"filaments": ["PLA-CF"], "nozzles": [{"position": True, "material": "brass"}]},
+        {"filaments": ["PLA-CF"], "nozzles": [{"position": 1, "material": "Brass, fine to print"}]},
+        {"filaments": ["PLA-CF"], "nozzles": [], "said": "Nothing unusual."},
+        {"filaments": "PLA-CF", "nozzles": []},
+        "PLA-CF through the brass nozzle",
+    ])
+    def test_print_anyway_facts_that_do_not_check_say_nothing(self, facts):
+        assert experimental_print.checked_print_anyway(facts) is None
+        assert experimental_print.print_anyway_row(facts) is None
+        assert experimental_print.word_rows({"soft_nozzle_confirmed": facts}) == {}
+
+    @pytest.mark.parametrize("facts", [
+        {"sizes": [0.4]}, {"sizes": [0.4, 0.4]}, {"sizes": [0.4, 9.0]}, {"sizes": [0.4, 0.6001]},
+        {"sizes": ["0.4", "0.6"]}, {"sizes": [0.4, True]}, {"sizes": [0.4, 0.6], "note": "safe"},
+    ])
+    def test_experiment_facts_that_do_not_check_say_nothing(self, facts):
+        assert experimental_print.experimental_row(facts) is None
+
+    @pytest.mark.parametrize("facts", [
+        {"printed": 1, "slicer": "Any slicer at all"},
+        {"printed": 4, "asked": 4},
+        {"printed": 1, "slicer": "Bambu Studio", "need": "update", "floor": "2.0; nothing to see"},
+        {"printed": 1, "because": "it is fine"},
+    ])
+    def test_colours_facts_that_do_not_check_say_nothing(self, facts):
+        from kiln.maker_slicer_notes import colours_row
+
+        assert colours_row(facts) is None
+
+    def test_a_word_that_is_not_an_owners_word_says_no_row_at_all(self):
+        assert experimental_print.word_rows({
+            "soft_nozzle_confirmed": {"filaments": ["PLA-CF"], "nozzles": []}, "unchecked_bed_ok": {},
+        }) == {}
+
+    def test_each_row_has_one_wording_from_its_facts(self, tmp_path):
+        from kiln.print_consent import print_rows_of, what_the_print_states
+
+        path = said_anyway(tmp_path)
+        states = what_the_print_states(Path(path).name, path)
+        assert states == {"owner_words": {"soft_nozzle_confirmed": {
+            "filaments": ["PLA-CF"], "nozzles": [{"position": None, "material": "brass"}],
+        }}}
+        assert print_rows_of(states) == what_the_print_is(Path(path).name, path) == {"print_anyway": ROW}
+        assert experimental_print.experimental_row({"sizes": [0.4, 0.6]}) == (
+            "This print uses nozzles of different sizes at once (0.4 mm and 0.6 mm), which Kiln has not proven "
+            "on a printer. Watch the first layers; Kiln will ask how it came out."
+        )
