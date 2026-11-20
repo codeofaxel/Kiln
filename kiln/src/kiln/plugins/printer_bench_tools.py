@@ -1085,7 +1085,7 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
         }
         follow = _limits_session(name, adapter, session["unit"], session["printer_id"], after_motion=True)
         if follow is not None and bench.offer(session["unit"], ["limits"], "lesson",
-                                              model_name=follow["model_name"]) is not None:
+                                              model_name=follow["model_name"], printer_name=name) is not None:
             # The second lesson, offered once the first is done: a new
             # session, so the person's answer to it continues there.
             _save_session(follow)
