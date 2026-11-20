@@ -788,33 +788,10 @@ def nozzle_bed_for_slice(
         if slots < 2:
             return None
     if maker_ready is None:
-        try:
-            from kiln.maker_slicer import ready_for
+        from kiln.maker_slicer import is_ready
 
-            maker_ready = ready_for(record) is None
-        except Exception:  # noqa: BLE001 -- a slicer that cannot be judged is not ready
-            maker_ready = False
+        maker_ready = is_ready(record)
     return bed if maker_ready else None
-
-
-def _is_bambu_studio(info: SlicerInfo) -> bool:
-    """Whether *info* is Bambu Studio itself, by name."""
-    return "bambu" in f"{info.name or ''} {os.path.basename(info.path or '')}".lower()
-
-
-def _find_bambu_studio() -> SlicerInfo | None:
-    """The installed Bambu Studio, if any, from the same places
-    :func:`find_slicer` looks; ``None`` quietly."""
-    candidates = [found for name in _SLICER_NAMES if (found := shutil.which(name))]
-    candidates.extend(p for p in _MACOS_PATHS if os.path.isfile(p) and os.access(p, os.X_OK))
-    env_path = os.environ.get("KILN_SLICER_PATH")
-    if env_path and os.path.isfile(env_path) and os.access(env_path, os.X_OK):
-        candidates.append(env_path)
-    for path in candidates:
-        info = SlicerInfo(path=path, name=Path(path).stem.lower())
-        if _is_bambu_studio(info):
-            return info
-    return None
 
 
 def checked_filament_map(filament_map: Any, *, filaments: int, positions: int) -> list[int] | None:
@@ -1786,7 +1763,9 @@ def _slice_with_orca(
         cmd += ["--load-filaments", ";".join(presets.filament_paths)]
         if filament_map:
             cmd += ["--filament-map-mode", "Manual", "--filament-map", ",".join(str(n) for n in filament_map)]
-        if nozzles and _is_bambu_studio(slicer):
+        from kiln.maker_slicer import is_slicer
+
+        if nozzles and is_slicer("bambu_studio", slicer):
             # The slicer writes the print package for this slice beside it.
             cmd += ["--export-3mf", _SLICER_PACKAGE_NAME]
 

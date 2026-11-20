@@ -1469,16 +1469,21 @@ def rect_polygon(rect: Rect) -> str:
 def printer_nozzles(printer_id: str | None) -> dict[str, Any] | None:
     """The nozzle record of *printer_id*'s slicer profile, with the nozzles
     its owner stated fitted on it (:func:`fitted_record`), when a slice uses
-    more than one nozzle; ``None`` otherwise.  Never raises."""
+    more than one nozzle; ``None`` otherwise.  The statement read is that of
+    the machine a slice for the model is for
+    (:func:`kiln.assumed_nozzle.nozzle_for_profile`), as every slice reads
+    it.  Never raises."""
     if not printer_id:
         return None
     try:
-        block = _nozzle_block(get_slicer_profile(str(printer_id)).id)
+        profile_id = get_slicer_profile(str(printer_id)).id
+        block = _nozzle_block(profile_id)
         if block is None:
             return None
-        from kiln.assumed_nozzle import recorded_positions
+        from kiln.assumed_nozzle import nozzle_for_profile, recorded_positions
 
-        record = fitted_record(block, recorded_positions(str(printer_id)))
+        machine = nozzle_for_profile(profile_id).printer_id
+        record = fitted_record(block, recorded_positions(machine))
         return record if nozzle_positions(record) >= 2 else None
     except Exception:  # noqa: BLE001 -- no record reads as one nozzle
         logger.debug("nozzle record of %s unavailable", printer_id, exc_info=True)

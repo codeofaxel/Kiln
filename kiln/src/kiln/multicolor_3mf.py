@@ -779,12 +779,17 @@ def plate_bed(
 ) -> tuple[float, float, float | None, str]:
     """``(width, depth, height, words)`` of the bed a plate is laid out for:
     with *several_filaments*, the bed the printer's nozzles print on when its
-    record states one (:func:`kiln.printers.bed_fit.two_nozzle_bed`)."""
+    record states one (:func:`kiln.printers.bed_fit.two_nozzle_bed`) and the
+    plate is sliced for them here (:func:`kiln.maker_slicer.is_ready`); a
+    plate sliced for one nozzle is laid out on the printer's own bed."""
     if printer_id:
         try:
+            from kiln.maker_slicer import is_ready
             from kiln.printers.bed_fit import get_printer_display_name, printer_bed, two_nozzle_bed
+            from kiln.slicer_profiles import printer_nozzles
 
-            bed = (two_nozzle_bed(printer_id) if several_filaments else None) or printer_bed(printer_id)
+            several = several_filaments and is_ready(printer_nozzles(printer_id))
+            bed = (two_nozzle_bed(printer_id) if several else None) or printer_bed(printer_id)
         except Exception:  # noqa: BLE001 — placement is advisory, never fatal
             bed = None
             logger.debug("build volume lookup failed for %r", printer_id,

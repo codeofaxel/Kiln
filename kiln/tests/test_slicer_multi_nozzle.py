@@ -373,7 +373,7 @@ class TestTheSlice:
     def _slice(self, tmp_path, run, *, slicer=None, studio=None, filaments=2, nozzles=_NOZZLES, **kwargs):
         with (
             patch("kiln.slicer.find_slicer", return_value=slicer or _studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=studio),
+            patch("kiln.maker_slicer._find", return_value=studio),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", run),
         ):
@@ -560,7 +560,7 @@ class TestTheSliceModelDoor:
         with (
             patch("kiln.server._check_auth", return_value=None),
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", run),
         ):
             return _slice_model_tool()(
@@ -793,7 +793,7 @@ class TestTheBedForMoreThanOneNozzle:
         seen: dict = {}
         with (
             patch("kiln.slicer.find_slicer", return_value=slicer or _studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("; filament_map = 1,2\n", seen)),
         ):
@@ -818,7 +818,7 @@ class TestTheBedForMoreThanOneNozzle:
         from kiln.slicer import nozzle_bed_for_slice
 
         profile = _profile(tmp_path, _WIDE)
-        with patch("kiln.slicer._find_bambu_studio", return_value=_studio()):
+        with patch("kiln.maker_slicer._find", return_value=_studio()):
             assert nozzle_bed_for_slice(_plate_at(tmp_path, 100.0, 235.0), profile) == (0.0, 0.0, 260.0, 200.0)
             one = _plate_at(tmp_path, 40.0)
             assert nozzle_bed_for_slice(one, profile) is None
@@ -829,7 +829,7 @@ class TestTheBedForMoreThanOneNozzle:
         from kiln.slicer import nozzle_bed_for_slice
 
         plate = _plate_at(tmp_path, 100.0, 235.0)
-        with patch("kiln.slicer._find_bambu_studio", return_value=None):
+        with patch("kiln.maker_slicer._find", return_value=None):
             # Every door asks the same question, and is answered the printer's own bed.
             assert nozzle_bed_for_slice(plate, _profile(tmp_path, _WIDE)) is None
         with pytest.raises(SlicerError, match="bed"):
@@ -865,11 +865,14 @@ class TestASlicedFileIsHeldToTheBedItWasSlicedFor:
 class TestAPlateIsComposedOnTheBedItPrintsOn:
     @pytest.fixture
     def invented_printer_bed(self, monkeypatch):
+        """The invented printer, its maker's slicer installed here."""
+        from kiln import maker_slicer
         from kiln.printers import bed_fit
 
         own = bed_fit.PrinterBed((200.0, 200.0, 180.0), "invented_two", bed_fit.BED_FROM_CATALOGUE)
         monkeypatch.setattr(bed_fit, "printer_bed", lambda printer_id: own if printer_id else None)
         monkeypatch.setattr(slicer_profiles, "printer_nozzles", lambda printer_id: _WIDE)
+        monkeypatch.setattr(maker_slicer, "_find", lambda _slicer_id: _studio())
 
     def _placed_x(self, tmp_path, parts):
         from kiln.printers.bed_fit import compute_3mf_geometry_bbox
@@ -889,6 +892,20 @@ class TestAPlateIsComposedOnTheBedItPrintsOn:
         parts = [
             ColorPart(_cube(tmp_path / "a.stl", 100.0), extruder=1, name="a"),
             ColorPart(_cube(tmp_path / "b.stl", 235.0), extruder=1, name="b"),
+        ]
+        assert self._placed_x(tmp_path, parts) <= 200.0
+
+    def test_without_the_makers_slicer_two_filaments_are_laid_out_for_one_nozzle(
+        self, tmp_path, invented_printer_bed, monkeypatch,
+    ):
+        # The plate is then sliced for one nozzle on the printer's own bed,
+        # so it is laid out there too, never where only a slice for two fits.
+        from kiln import maker_slicer
+
+        monkeypatch.setattr(maker_slicer, "_find", lambda _slicer_id: None)
+        parts = [
+            ColorPart(_cube(tmp_path / "a.stl", 100.0), extruder=1, name="a"),
+            ColorPart(_cube(tmp_path / "b.stl", 235.0), extruder=2, name="b"),
         ]
         assert self._placed_x(tmp_path, parts) <= 200.0
 
@@ -1352,6 +1369,29 @@ class TestTheProfileIsWrittenForTheFittedNozzles:
         owner_says(_fitted((1, 0.4, "brass"), (2, 0.4, "brass")))
         assert slicer_profiles.nozzle_bed(slicer_profiles.printer_nozzles("invented_two")) == (0.0, 0.0, 260.0, 200.0)
 
+    def test_the_owners_statement_is_read_for_the_machine_a_slice_is_for(self, invented_printer, monkeypatch):
+        # The statement is kept under the machine the owner named, not the
+        # model: the bed a plate is laid out on reads it there, as a slice does.
+        import sys
+
+        from kiln import _pro_nozzle_bridge as bridge
+        from kiln import assumed_nozzle
+
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        invented_printer(_ADD_ON)
+        both = _fitted((1, 0.4, "brass"), (2, 0.4, "brass"))
+        monkeypatch.setattr(assumed_nozzle, "_registered_machines", lambda: ["shop_two"])
+        monkeypatch.setattr(assumed_nozzle, "_model_key_of", lambda name: "invented_two" if name == "shop_two" else None)
+        monkeypatch.setattr(
+            bridge, "consult_recorded_nozzle",
+            lambda printer_id: {
+                "diameter_mm": None, "material": None, "answered": True,
+                "positions": both if printer_id == "shop_two" else None,
+            },
+        )
+        assert nozzle_positions(nozzles_of(resolve_slicer_profile("invented_two"))) == 2
+        assert nozzle_positions(slicer_profiles.printer_nozzles("invented_two")) == 2
+
     def test_the_one_nozzle_fitted_is_the_size_of_a_slice_for_one(self, invented_printer, owner_says):
         from kiln.slicer_orca import ini_to_settings
 
@@ -1367,7 +1407,7 @@ class TestTheSliceUsesTheFittedNozzles:
         record = slicer_profiles.fitted_record(nozzles, positions)
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", run),
         ):
@@ -1465,7 +1505,7 @@ class TestTheSliceUsesTheFittedNozzles:
         record = slicer_profiles.fitted_record(_WIDE, _HARD_AND_BRASS)
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _never_runs),
             pytest.raises(NozzleMapError) as refused,
@@ -1489,7 +1529,7 @@ class TestTheSliceUsesTheFittedNozzles:
         with (
             patch("kiln.server._check_auth", return_value=None),
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _never_runs),
         ):
             reply = _slice_model_tool()(
@@ -1566,7 +1606,7 @@ class TestEverySliceIsCheckedForAnAbrasiveFilament:
     def _slice(self, tmp_path, run, *, filaments=1, **kwargs):
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", run),
         ):
@@ -1653,7 +1693,7 @@ class TestAMultiMaterialPlateCarriesItsFilaments:
         record = slicer_profiles.fitted_record(_WIDE, _HARD_AND_BRASS)
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _never_runs),
             pytest.raises(NozzleMapError) as refused,
@@ -1669,7 +1709,7 @@ class TestTheOwnerMaySayPrintAnyway:
     def _slice(self, tmp_path, run, *, filaments=1, **kwargs):
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", run),
         ):
@@ -1792,7 +1832,7 @@ class TestTheOwnerMaySayPrintAnyway:
         with (
             patch("kiln.server._check_auth", return_value=None),
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("", {})),
         ):
             refused = _slice_model_tool()(**args)
@@ -1836,7 +1876,7 @@ class TestEachFilamentIsLoadedAsItsOwn:
         seen: dict = {}
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("; filament_map = 1,2\n", seen)),
         ):
@@ -1864,7 +1904,7 @@ class TestTheFileStatesShortFilamentTypes:
         plate = TestEachFilamentIsLoadedAsItsOwn()._stated_plate(tmp_path, stated)
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("", seen)),
         ):
@@ -1876,7 +1916,7 @@ class TestTheFileStatesShortFilamentTypes:
         plate = TestEachFilamentIsLoadedAsItsOwn()._stated_plate(tmp_path, ["Mystery Blend", "Carbon Fiber PLA"])
         with (
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("", seen)),
         ):
@@ -1921,6 +1961,17 @@ class TestMultiMaterialPrintHeatsEachNozzleForItsOwn:
         from kiln.slicer_material import material_needs
 
         return str(material_needs(material, printer_id=None).values()[key])
+
+    def test_a_plate_sliced_for_one_nozzle_here_is_heated_as_one(self, invented_printer, monkeypatch):
+        # Without the maker's slicer the plate is sliced for one nozzle, so
+        # it is heated the way a plate for one nozzle is.
+        from kiln import maker_slicer, server
+
+        invented_printer(_WIDE)
+        monkeypatch.setattr(maker_slicer, "_find", lambda _slicer_id: None)
+        assert server._slices_for_several_nozzles("invented_two", None) is False
+        monkeypatch.setattr(maker_slicer, "_find", lambda _slicer_id: _studio())
+        assert server._slices_for_several_nozzles("invented_two", None) is True
 
     def test_each_filament_keeps_its_own_temperatures(self, tmp_path, monkeypatch):
         handed = self._print(tmp_path, monkeypatch, several=True, filament_map=[2, 1], soft_nozzle_confirmed=True)

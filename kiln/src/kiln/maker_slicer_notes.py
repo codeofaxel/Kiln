@@ -132,7 +132,7 @@ def _get_it(miss: Any) -> tuple[str, dict[str, str]]:
 
 
 def _what_to_do(miss: Any) -> str:
-    """``Install Bambu Studio (free)`` / ``Update PrusaSlicer to 2.9.4 or newer (free)``."""
+    """``Install <slicer> (free)`` / ``Update <slicer> to <version> or newer (free)``."""
     from kiln.maker_slicer import UPDATE
 
     if miss.need == UPDATE:

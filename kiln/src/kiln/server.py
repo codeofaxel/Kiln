@@ -296,6 +296,7 @@ from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
 from kiln.safety_profiles import export_profile as _export_profile
 from kiln.scheduler import JobScheduler
+from kiln.slicer import owner_asks as _owner_asks
 from kiln.slicer_profiles import (
     resolve_slicer_profile,
 )
@@ -24416,22 +24417,19 @@ def multi_material_print(
         )
 
 
-def _owner_asks(soft_nozzle_confirmed: Any, filament_map: Any, mixed_nozzle_experiment: Any = False) -> dict[str, Any]:
-    """:func:`kiln.slicer.owner_asks`, imported when a door slices."""
-    from kiln.slicer import owner_asks
-
-    return owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
-
-
 def _slices_for_several_nozzles(printer_id: str | None, printer_name: str | None) -> bool:
     """Whether a plate of several filaments for this printer is sliced with
-    more than one nozzle (:func:`kiln.slicer_profiles.nozzles_of` on the
-    profile a slice for it resolves).  ``False`` when that cannot be told."""
+    more than one nozzle here: the profile a slice for it resolves carries a
+    record for more than one (:func:`kiln.slicer_profiles.nozzles_of`) and
+    the slicer that record names is ready (:func:`kiln.maker_slicer.is_ready`).
+    ``False`` when that cannot be told."""
     try:
+        from kiln.maker_slicer import is_ready
         from kiln.slicer_profiles import nozzles_of
 
         _pid, profile = _resolve_slice_profile_context(None, printer_id, printer_name)
-        return nozzles_of(profile) is not None
+        record = nozzles_of(profile)
+        return record is not None and is_ready(record)
     except Exception:  # noqa: BLE001 -- a record that cannot be read is one nozzle
         logger.debug("nozzle count not read for %s", printer_id or printer_name, exc_info=True)
         return False

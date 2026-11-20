@@ -1,31 +1,19 @@
 """The slicer a slice for more than one nozzle is made with.
 
-A printer's nozzle record names its maker's slicer under ``maker_slicer``:
-the slicer's name, the oldest version of it Kiln accepts for a slice for more
-than one nozzle, and where that slicer's own bundled settings keep the
-printer's start, change and end routines.  This module answers, for one slice:
+A printer's nozzle record names its maker's slicer (``maker_slicer``).  For
+one slice this module answers which installed slicer makes it
+(:func:`slicer_for_several_nozzles`, whose :class:`SeveralNozzleSlicer` names
+the slicer and its version for the slice's record), or why none can, in one
+sentence; whether that slicer is ready on this computer, without slicing
+(:func:`ready_for`); and where a person gets it (:func:`install_words`).  It
+also writes the settings file and the plate a slicer of PrusaSlicer's kind is
+handed (:func:`several_nozzle_profile`, :func:`with_tower_position`).
 
-* which installed slicer makes it (:func:`slicer_for_several_nozzles`), or
-  why none can, in one sentence: when the maker's slicer is missing or too
-  old, the slice is made for one nozzle instead (:class:`Miss`), and a
-  person can be told what to install (:func:`install_words`);
-* whether the maker's slicer is ready on this computer, without slicing
-  (:func:`ready_for`);
-* the routines read from that slicer's own files on this computer, and the
-  name and version they came from (:class:`SeveralNozzleSlicer`);
-* the settings file a slicer that reads PrusaSlicer's settings is handed
-  (:func:`several_nozzle_profile`): the profile's own settings, the record's
-  ``preset_extras`` as given, one nozzle size for each nozzle used, and those
-  routines;
-* a copy of a 3MF that says where the purge tower stands
-  (:func:`with_tower_position`).
-
-Every slice door reaches this through :func:`kiln.slicer.slice_file`.  What
-a slicer that cannot make the slice does -- a slice for one nozzle instead,
-or a refusal -- is decided in :func:`_miss` alone.  A record that names no
-slicer Kiln knows is refused (:func:`named_slicer`), never sliced with a
-slicer it does not name.  Kiln never installs a
-slicer: it names the page and, on a Mac with Homebrew, the command.
+Every slice door reaches this through :func:`kiln.slicer.slice_file`.  What a
+slice does when the maker's slicer cannot make it -- one nozzle instead, or a
+refusal -- is decided in :func:`_miss` alone.  A record that names no slicer
+Kiln knows is refused (:func:`named_slicer`).  Kiln never installs a slicer:
+it names the maker's page and, on a Mac with Homebrew, the command.
 """
 
 from __future__ import annotations
@@ -155,8 +143,9 @@ def named_slicer(nozzles: Any) -> dict[str, Any]:
     }
 
 
-def _is(slicer_id: str, info: Any) -> bool:
-    """Whether the installed slicer *info* is the one called *slicer_id*."""
+def is_slicer(slicer_id: str, info: Any) -> bool:
+    """Whether the installed slicer *info* is the one called *slicer_id*,
+    by its name or its version banner."""
     seen = f"{getattr(info, 'name', '') or ''} {os.path.basename(getattr(info, 'path', '') or '')}".lower()
     banner = str(getattr(info, "version", "") or "").lower()
     return any(mark in seen or mark in banner for mark in _KNOWN[slicer_id].marks)
@@ -164,11 +153,11 @@ def _is(slicer_id: str, info: Any) -> bool:
 
 def _find(slicer_id: str) -> Any | None:
     """The installed slicer called *slicer_id*, from the places
-    :func:`kiln.slicer.find_slicer` looks; ``None`` quietly."""
+    :func:`kiln.slicer.find_slicer` looks; ``None`` quietly.  Its version is
+    read only where one is needed (:func:`_version_miss`), never by starting
+    it here."""
     from kiln import slicer as _slicer
 
-    if slicer_id == "bambu_studio":
-        return _slicer._find_bambu_studio()
     candidates = [found for name in _slicer._SLICER_NAMES if (found := shutil.which(name))]
     candidates.extend(p for p in _slicer._MACOS_PATHS if os.path.isfile(p) and os.access(p, os.X_OK))
     env_path = os.environ.get("KILN_SLICER_PATH")
@@ -176,8 +165,8 @@ def _find(slicer_id: str) -> Any | None:
         candidates.append(env_path)
     for path in candidates:
         info = _slicer.SlicerInfo(path=path, name=Path(path).stem.lower())
-        if _is(slicer_id, info):
-            return _slicer.SlicerInfo(path=path, name=info.name, version=_slicer._get_version(path))
+        if is_slicer(slicer_id, info):
+            return info
     return None
 
 
@@ -237,6 +226,17 @@ def ready_for(nozzles: Any) -> Miss | None:
     if info is None:
         return Miss(slicer=slicer_id, need=INSTALL, floor=floor)
     return _version_miss(slicer_id, info, floor)[1] if floor else None
+
+
+def is_ready(nozzles: Any) -> bool:
+    """Whether a slice for more than one nozzle of the record *nozzles* is
+    made on this computer: :func:`ready_for` finds no miss.  A record that
+    names no slicer Kiln knows, or a slicer that cannot be judged, is not
+    ready.  Never raises."""
+    try:
+        return ready_for(nozzles) is None
+    except Exception:  # noqa: BLE001 -- a slicer that cannot be judged is not ready
+        return False
 
 
 def install_words(miss: Miss) -> dict[str, str]:
@@ -303,7 +303,7 @@ def slicer_for_several_nozzles(
     slicer_id = named["name"]
     said = _KNOWN[slicer_id].said
     in_hand = os.path.basename(getattr(current, "path", "") or "") or "the slicer in use"
-    info = current if _is(slicer_id, current) else _find(slicer_id)
+    info = current if is_slicer(slicer_id, current) else _find(slicer_id)
     if info is None:
         raise _miss(slicer_id, f"{in_hand} cannot slice that through Kiln and {said} is not installed", need=INSTALL)
     if info is not current and chosen:

@@ -8,11 +8,9 @@ sliced for one nozzle instead, and the result says how many filament swaps
 the file makes and, the first time on a printer or for many swaps, what to
 install; a map, a slicer named while the maker's one is installed, or a
 slicer without the printer's routines is refused in one sentence that names
-the slicer; the routines are read from the newest copy of the slicer's own
-bundle through its parents; a slicer of PrusaSlicer's kind is handed the
-record's extras as given, one nozzle size per nozzle and those routines,
-with the purge tower stood clear of the parts; and the result and the sliced
-file's record say which slicer and version made the slice.
+the slicer; a slicer of PrusaSlicer's kind is handed the settings file and
+plate this module writes for it; and the result and the sliced file's record
+say which slicer and version made the slice.
 """
 
 from __future__ import annotations

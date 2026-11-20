@@ -67,7 +67,7 @@ def _slice(tmp_path, run, positions, **kwargs):
     record = slicer_profiles.fitted_record(_WIDE, positions)
     with (
         patch("kiln.slicer.find_slicer", return_value=_studio()),
-        patch("kiln.slicer._find_bambu_studio", return_value=None),
+        patch("kiln.maker_slicer._find", return_value=None),
         patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
         patch("kiln.slicer._run_slicer_with_startup_retry", run),
     ):
@@ -163,7 +163,7 @@ class TestTheSliceModelDoor:
         with (
             patch("kiln.server._check_auth", return_value=None),
             patch("kiln.slicer.find_slicer", return_value=_studio()),
-            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.maker_slicer._find", return_value=None),
             patch("kiln.slicer._run_slicer_with_startup_retry", run),
         ):
             return _slice_model_tool()(
