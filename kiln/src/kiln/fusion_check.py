@@ -279,12 +279,6 @@ def judge_reading(triangles: Any, reading: Any, *, clearances: bool = False) -> 
     return report
 
 
-#: Pairs of standing parts measured for a clearance between them, nearest
-#: boxes first: every part of a print-in-place mechanism sees its
-#: neighbours, and a plate of many parts stays bounded.
-_MAX_CLEARANCE_PAIRS = 128
-
-
 def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int]) -> dict[str, Any]:
     """The separate parts on the plate that stand a clearance apart: closer
     than :data:`NEAR_GAP_MM` to one another without touching, as the gears in
@@ -295,9 +289,15 @@ def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int
     nearest first.  *unheld* are the pieces (from 1) in the air that nothing
     holds up; they and a hollow part's inner walls are left out.  Returns
     ``{"pairs": [{"bodies": [a, b], "gap_mm": g}, ...], "measured": n,
-    "candidates": m}`` with bodies numbered from 1; a pair that could not be
-    measured is counted in neither ``pairs`` nor ``measured``.
+    "candidates": m, "unmeasured": [...]}`` with bodies numbered from 1;
+    ``unmeasured`` are the bodies in a candidate pair past the pair budget,
+    or one that could not be measured, that no measured pair found a
+    clearance for.  The pair table's limits hold here too: past its body or
+    triangle count nothing is measured and the reading is ``skipped``.
     """
+    triangles = sum(len(b.faces) for b in bodies)
+    if len(bodies) > _PAIR_TABLE_MAX_BODIES or triangles > _PAIR_TABLE_MAX_TRIANGLES:
+        return {"pairs": [], "measured": 0, "candidates": 0, "unmeasured": [], "skipped": True}
     volumes = [_signed_volume(b) for b in bodies]
     walls = {i for i, v in enumerate(volumes) if v < 0 and _within_bounds(bodies[i], bodies)}
     standing = [i for i in range(len(bodies)) if i + 1 not in unheld and i not in walls]
@@ -317,7 +317,11 @@ def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int
 
     pairs: list[dict[str, Any]] = []
     measured = 0
-    for a, b in candidates[:_MAX_CLEARANCE_PAIRS]:
+    unread: set[int] = set()
+    for n, (a, b) in enumerate(candidates):
+        if n >= _PAIR_TABLE_MAX_PAIRS:
+            unread |= {a, b}
+            continue
         try:
             # Searched just past the reach: a pair further apart reads as the
             # search distance, which is outside it.
@@ -326,11 +330,18 @@ def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int
             )
         except Exception as exc:  # noqa: BLE001 — unmeasured, never invented
             _logger.debug("clearance between bodies %s and %s not measured: %s", a + 1, b + 1, exc)
+            unread |= {a, b}
             continue
         measured += 1
         if TOUCH_GAP_MM < gap <= NEAR_GAP_MM:
             pairs.append({"bodies": [a + 1, b + 1], "gap_mm": round(gap, 3)})
-    return {"pairs": pairs, "measured": measured, "candidates": len(candidates)}
+    spaced = {body - 1 for pair in pairs for body in pair["bodies"]}
+    return {
+        "pairs": pairs,
+        "measured": measured,
+        "candidates": len(candidates),
+        "unmeasured": sorted(i + 1 for i in unread - spaced),
+    }
 
 
 def _judge(

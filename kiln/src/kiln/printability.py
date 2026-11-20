@@ -8795,21 +8795,40 @@ def _standing_said(
         f"It prints as {len(standing)} separate parts on the plate, not one: the largest is "
         f"{_size_said(largest)} {others}"
     )
+    reading = clearances or {}
+    if reading.get("skipped"):
+        return (
+            f"{parts}. The gaps between them were not measured, as the mesh is past what this check reads; "
+            "any that are meant to be one solid have to overlap."
+        )
     spaced: set[int] = set()
     gaps: list[float] = []
-    for pair in (clearances or {}).get("pairs") or []:
+    for pair in reading.get("pairs") or []:
         spaced |= {solid_of[body - 1] for body in pair["bodies"]}
         gaps.append(float(pair["gap_mm"]))
+    unread = {solid_of[body - 1] for body in reading.get("unmeasured") or []} - spaced
     near = [s for s in standing if s in spaced]
-    if not near:
+    unknown = [s for s in standing if s in unread]
+    if unknown:
+        one = len(unknown) == 1
+        not_measured = (
+            f" {len(unknown)} of them {'stands' if one else 'stand'} close to another part, and "
+            f"{'the gap was' if one else 'the gaps were'} not measured."
+        )
+    else:
+        not_measured = ""
+    if not near and not unknown:
         return f"{parts}, and each comes off the plate on its own. If they belong together, join them so they overlap."
-    who = "They" if len(near) == len(standing) else f"{len(near)} of them"
-    said = (
-        f"{parts}. {who} stand {_gaps_said(gaps)} apart without touching, so they print in place together "
-        "with nothing joining them: fine for a designed clearance. If they were meant to be one solid, "
-        f"sink them at least {embedment_floor_mm():g} mm into each other."
-    )
-    loose = len(standing) - len(near)
+    if near:
+        who = "They" if len(near) == len(standing) else f"{len(near)} of them"
+        said = (
+            f"{parts}. {who} stand {_gaps_said(gaps)} apart without touching, so they print in place together "
+            "with nothing joining them: fine for a designed clearance. If they were meant to be one solid, "
+            f"sink them at least {embedment_floor_mm():g} mm into each other.{not_measured}"
+        )
+    else:
+        said = f"{parts}.{not_measured} Any that are meant to be one solid have to overlap."
+    loose = len(standing) - len(near) - len(unknown)
     if loose == 1:
         return f"{said} The other one comes off the plate on its own; if it belongs with them, join it so they overlap."
     if loose:

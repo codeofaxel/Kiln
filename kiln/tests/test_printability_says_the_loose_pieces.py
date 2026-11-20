@@ -161,6 +161,25 @@ class TestTheVerdictSaysThePieces:
             "The other one comes off the plate on its own; if it belongs with them, join it so they overlap."
         )
 
+    def test_a_mesh_past_the_pair_limits_is_not_called_loose(self, tmp_path, monkeypatch):
+        import kiln.fusion_check as fusion_check
+
+        monkeypatch.setattr(fusion_check, "_PAIR_TABLE_MAX_BODIES", 1)
+        sentence = verdict(analyze_printability(str(_slider_in_its_slot(tmp_path / "slider.stl"))))[1]
+        assert "The gaps between them were not measured" in sentence
+        assert "comes off the plate on its own" not in sentence
+        assert "print in place" not in sentence
+
+    def test_parts_past_the_pair_budget_are_said_unmeasured(self, tmp_path, monkeypatch):
+        import kiln.fusion_check as fusion_check
+
+        monkeypatch.setattr(fusion_check, "_PAIR_TABLE_MAX_PAIRS", 0)
+        path = _slider_in_its_slot(tmp_path / "s.stl", with_a_block_beside=True)
+        sentence = verdict(analyze_printability(str(path)))[1]
+        assert "2 of them stand close to another part, and the gaps were not measured." in sentence
+        assert "The other one comes off the plate on its own" in sentence
+        assert "print in place" not in sentence
+
     def test_pieces_that_print_as_one_solid_say_nothing(self, tmp_path):
         report = analyze_printability(str(_coated(tmp_path / "coated.stl")))
         assert (report.pieces.piece_count, report.pieces.solid_count) == (5, 1)
