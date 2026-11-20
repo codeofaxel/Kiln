@@ -11,8 +11,10 @@ this computer, per printer.
 
 What leaves, and when:
 
-* only while :data:`SENDING_FROM` names a day that has come, and only while
-  this install shares (telemetry and community sharing both on);
+* only after the person has said yes to sharing them, once, themselves
+  (:func:`kiln.sharing_consent.routines_answer`, asked once by
+  :mod:`kiln.sharing_nudge`; no answer is no), and only while this install
+  shares at all (telemetry and community sharing both on);
 * signed in, each printer's routines to Kiln's API as the person
   (:data:`PUSH_PATH`); signed out, each routine through one database door
   (:data:`RPC`) with this install's random id.  Either way: the routine's
@@ -45,16 +47,12 @@ import re
 import struct
 import threading
 import zlib
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-#: The day sending begins, as ``YYYY-MM-DD``; ``None`` sends nothing, not even
-#: on the person's own requests.  Reading and keeping on this computer happen
-#: either way.
-SENDING_FROM: str | None = None
 
 #: The database door a signed-out install's routines go through.
 RPC = "record_printer_sliced_routine"
@@ -108,7 +106,7 @@ _SLICER_WORDS = {"bambustudio": "bambu_studio", "orcaslicer": "orca_slicer", "pr
 _lock = threading.Lock()
 
 __all__ = [
-    "BLOCKS", "MAX_ROUTINE_CHARS", "PUSH_PATH", "ROUTINE_FIELDS", "RPC", "SENDING_FROM",
+    "BLOCKS", "MAX_ROUTINE_CHARS", "PUSH_PATH", "ROUTINE_FIELDS", "RPC", "any_kept", "said_yes",
     "note_print_started", "read_routines", "routines_for_request", "send_pending", "sending",
 ]
 
@@ -482,17 +480,30 @@ def _shares() -> bool:
         return False
 
 
-def sending() -> bool:
-    """Whether anything may leave for the shared table: :data:`SENDING_FROM`
-    has come and this install shares (:func:`_shares`)."""
-    if not SENDING_FROM:
-        return False
+def said_yes() -> bool:
+    """Whether the person said yes to sharing their printer's routines; no
+    answer is no."""
     try:
-        if date.fromisoformat(SENDING_FROM) > datetime.now(timezone.utc).date():
-            return False
-    except ValueError:
+        from kiln.sharing_consent import routines_answer
+
+        return routines_answer() is True
+    except Exception:  # noqa: BLE001 -- unsure is no
         return False
-    return _shares()
+
+
+def sending() -> bool:
+    """Whether anything may leave for the shared table: the person said yes
+    (:func:`said_yes`) and this install shares (:func:`_shares`)."""
+    return said_yes() and _shares()
+
+
+def any_kept() -> bool:
+    """Whether a print file has left routines on this computer."""
+    try:
+        folder = _store_dir()
+        return folder.is_dir() and any(folder.glob("*.json"))
+    except OSError:
+        return False
 
 
 #: The fields of a payload Kiln makes itself (a hash, its own random ids),
@@ -645,10 +656,11 @@ def send_pending(supabase_url: str, anon_key: str) -> int:
 def routines_for_request(adapter: Any) -> dict[str, Any] | None:
     """What a print-beside request for *adapter* carries: this printer's
     routines, with no hash, id or version, so its own verdict can use them
-    at once.  ``None`` while :data:`SENDING_FROM` has not come, when nothing
-    is kept, or when no routine passes the outbound guard."""
+    at once.  ``None`` until the person said yes (:func:`said_yes`: nothing
+    leaves this computer without it), when nothing is kept, or when no
+    routine passes the outbound guard."""
     try:
-        if not SENDING_FROM or date.fromisoformat(SENDING_FROM) > datetime.now(timezone.utc).date():
+        if not said_yes():
             return None
         declared = _declared_model(adapter)
         if not declared:

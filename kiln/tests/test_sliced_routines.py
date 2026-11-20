@@ -201,13 +201,16 @@ class _Printer:
 def printer_here(tmp_path, monkeypatch):
     """A printer of a declared model with a unit hash, an install that
     shares, a send switched on, and every request captured instead of sent."""
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(sr, "_declared_model", lambda adapter: sr._model_id(adapter.model))
     import kiln.bench as bench
 
     monkeypatch.setattr(bench, "unit_of", lambda adapter: "ab" * 16)
     monkeypatch.setattr(sr, "_shares", lambda: True)
-    monkeypatch.setattr(sr, "SENDING_FROM", "2000-01-01")
+    from kiln.sharing_consent import record_routines_answer
+
+    record_routines_answer(True, via="test")
     monkeypatch.setattr("kiln.installation.get_installation_id", lambda *a, **k: "00000000-0000-4000-8000-000000000001")
     sent: list[bytes] = []
 
@@ -273,14 +276,23 @@ class TestWhatLeaves:
         assert sr.send_pending("https://example.invalid", "key") == 0
         assert sr.routines_for_request(_Printer("bambu_x1c")) is None
 
-    def test_nothing_leaves_while_the_send_is_switched_off(self, tmp_path, printer_here, monkeypatch):
+    @pytest.mark.parametrize("answer", [None, False])
+    def test_nothing_leaves_without_the_persons_yes(self, tmp_path, printer_here, monkeypatch, answer):
+        from kiln import sharing_consent
+
         sr.keep(_Printer("bambu_p1s"), sr.read_routines(_package(tmp_path, _bambu_settings())))
-        monkeypatch.setattr(sr, "SENDING_FROM", None)
+        data = sharing_consent._read()
+        data.pop("routines", None)
+        if answer is not None:
+            data["routines"] = answer
+        sharing_consent._write(data)
+        monkeypatch.setattr(sr, "_signed_in", lambda: True)
+        asked: list = []
+        monkeypatch.setattr("kiln.history_courier._request", lambda *a, **k: asked.append(a) or {"success": True, "kept": 1})
         assert sr.send_pending("https://example.invalid", "key") == 0
-        assert sr.routines_for_request(_Printer("bambu_p1s")) is None
-        monkeypatch.setattr(sr, "SENDING_FROM", "2999-01-01")
-        assert sr.send_pending("https://example.invalid", "key") == 0
-        assert printer_here == []
+        assert sr.routines_for_request(_Printer("bambu_p1s")) is None   # not even on the person's own request
+        assert printer_here == [] and asked == []
+        assert sr.read_routines(_package(tmp_path, _bambu_settings())) is not None   # still read and kept here
 
     def test_nothing_leaves_when_this_install_does_not_share(self, tmp_path, printer_here, monkeypatch):
         sr.keep(_Printer("bambu_p1s"), sr.read_routines(_package(tmp_path, _bambu_settings())))
@@ -437,3 +449,62 @@ class TestACraftedFileIsDroppedQuietly:
 
     def test_a_normal_binary_file_still_reads(self, tmp_path):
         assert _read_in_a_fresh_process(_prusa_binary(tmp_path))["read"] is True
+
+
+class TestThePersonsYes:
+    """Asked once, through the one sharing store; the yes is the person's own."""
+
+    @pytest.fixture(autouse=True)
+    def _home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path / "h"))
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "h" / ".kiln"))
+        from kiln import sharing_nudge
+
+        sharing_nudge._reset_for_tests()
+        yield
+        sharing_nudge._reset_for_tests()
+
+    def test_the_answer_lives_in_the_one_sharing_store(self):
+        from kiln import sharing_consent
+
+        assert sharing_consent.routines_answer() is None
+        sharing_consent.record_routines_answer(True, via="test")
+        assert sharing_consent._read()["routines"] is True and sharing_consent.store_path().name == "sharing.json"
+
+    def test_the_question_is_asked_once_after_a_file_carried_routines(self, tmp_path, monkeypatch):
+        from kiln import sharing_consent, sharing_nudge
+
+        results = []
+
+        def _one():
+            box = {"structuredContent": {"success": True, "value": 1}}
+            monkeypatch.setattr("kiln.mcp_compat.result_structured_content", lambda inner: inner["structuredContent"])
+            monkeypatch.setattr("kiln.mcp_compat.set_result_structured_content",
+                                lambda inner, sc: inner.__setitem__("structuredContent", sc))
+            monkeypatch.setattr("kiln.update_nudge._hosted_multitenant", lambda: False)
+            sharing_nudge._attach_routines(box, None, "slice_model")
+            results.append(box["structuredContent"].get(sharing_nudge.ROUTINES_KEY))
+
+        _one()
+        assert results[-1] is None                       # nothing read yet: nothing to ask about
+        monkeypatch.setattr(sr, "any_kept", lambda: True)
+        _one()
+        block = results[-1]
+        assert block["question"] == sharing_nudge.ROUTINES_QUESTION
+        assert block["person_runs"].endswith("sharing routines on")
+        assert sharing_consent.routines_asked()
+        sharing_nudge._reset_for_tests()
+        _one()
+        assert results[-1] is None                       # asked once per computer, never again
+        assert sharing_consent.routines_answer() is None  # asking is not a yes
+
+    def test_a_program_cannot_say_yes_for_the_person(self):
+        from click.testing import CliRunner
+
+        from kiln import sharing_consent
+        from kiln.cli.main import cli
+
+        answer = CliRunner().invoke(cli, ["sharing", "routines", "on"])
+        assert answer.exit_code == 1 and sharing_consent.routines_answer() is None
+        answer = CliRunner().invoke(cli, ["sharing", "routines", "off"])
+        assert answer.exit_code == 0 and sharing_consent.routines_answer() is False
