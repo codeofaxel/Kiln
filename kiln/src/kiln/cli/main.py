@@ -192,16 +192,24 @@ def _resolve_material_for_slice_with_source(
     return inferred, False, source, determined_by
 
 
-def _support_statement(support_mode: str | None, material: str | None = None) -> dict[str, str] | None:
+def _support_statement(
+    support_mode: str | None,
+    material: str | None = None,
+    *,
+    profile: str | None = None,
+    printer_id: str | None = None,
+) -> dict[str, str] | None:
     """The support keys a ``--support-mode`` STATES for the slice.
 
     ``off``, ``minimal`` (build-plate only) and ``aggressive`` (everywhere)
     are the caller speaking, written into the profile as stated keys so
     the slice keeps them; both support the faces Kiln's own verdict counts
-    as overhangs for *material* (``kiln.printability.overhang_threshold_deg``).
-    ``auto`` (the default) states nothing: the slice reads the part and
-    decides at the one place every slicing door shares
-    (:mod:`kiln.slicer_supports`), and the result says what it did.
+    as overhangs for *material* at the slice's own layer height and nozzle
+    (``kiln.printability.overhang_threshold_deg``): the caller's *profile*,
+    else the one Kiln slices *printer_id* with.  ``auto`` (the default)
+    states nothing: the slice reads the part and decides at the one place
+    every slicing door shares (:mod:`kiln.slicer_supports`), and the result
+    says what it did.
     """
     from kiln.printability import overhang_threshold_deg
     from kiln.slicer_supports import SUPPORT_KEY, support_settings
@@ -209,11 +217,29 @@ def _support_statement(support_mode: str | None, material: str | None = None) ->
     mode = (support_mode or "auto").strip().lower()
     if mode == "off":
         return {SUPPORT_KEY: "0"}
-    if mode == "minimal":
-        return support_settings(overhang_threshold_deg(material), build_plate_only=True)
-    if mode == "aggressive":
-        return support_settings(overhang_threshold_deg(material), build_plate_only=False)
-    return None
+    if mode not in ("minimal", "aggressive"):
+        return None
+    layer_height, nozzle = _slice_layer_and_nozzle(profile, printer_id)
+    threshold = overhang_threshold_deg(material, nozzle_mm=nozzle, layer_height_mm=layer_height)
+    return support_settings(threshold, build_plate_only=mode == "minimal")
+
+
+def _slice_layer_and_nozzle(profile: str | None, printer_id: str | None) -> tuple[float | None, float | None]:
+    """``(layer height, nozzle)`` of the slice a support mode is written
+    into: the caller's *profile*, else the profile Kiln slices *printer_id*
+    with; ``(None, None)`` when neither can be read."""
+    from kiln.slicer_supports import _first_number
+
+    try:
+        from kiln.slicer_orca import ini_to_settings
+        from kiln.slicer_profiles import resolve_slicer_profile
+
+        path = profile or (resolve_slicer_profile(printer_id) if printer_id else None)
+        settings = ini_to_settings(path) if path else {}
+    except Exception:  # noqa: BLE001 -- an unread profile is judged at the stated figure
+        logger.debug("support mode: the slice's layer and nozzle were not read", exc_info=True)
+        return None, None
+    return _first_number(settings.get("layer_height")), _first_number(settings.get("nozzle_diameter"))
 
 
 def _supports_said(plan: dict[str, Any], result: Any) -> tuple[str | None, str | None]:
@@ -312,7 +338,9 @@ def _resolve_slice_plan(
     (
         material_key, material_is_explicit, material_source, loaded_determined_by,
     ) = _resolve_material_for_slice_with_source(ctx, material)
-    statement = _support_statement(support_mode, material_key)
+    statement = _support_statement(
+        support_mode, material_key, profile=effective_profile, printer_id=effective_printer_id,
+    )
 
     # The material's temperatures, melt rate and cooling are not set here:
     # the slice writes them from the material it is told (below), the same

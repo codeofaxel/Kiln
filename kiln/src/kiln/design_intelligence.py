@@ -2998,6 +2998,7 @@ def get_design_constraints(
     printer_model: str | None = None,
     material_limits: bool = True,
     nozzle_mm: float | None = None,
+    layer_height_mm: float | None = None,
 ) -> DesignBrief:
     """Decompose functional requirements into a complete design-requirements analysis.
 
@@ -3019,6 +3020,9 @@ def get_design_constraints(
     :param nozzle_mm: The nozzle the part is printed with, when known: the
         walls and pins the limits give follow it.  Unset, the reference
         nozzle.
+    :param layer_height_mm: The layer height the part is printed at, when
+        known: the overhang and the finest thread follow it.  Unset, the
+        figures as stated.
     """
     # 1. Match functional requirements
     constraints = match_requirements(requirements_text)
@@ -3040,7 +3044,7 @@ def get_design_constraints(
         if profile is None and material_limits:
             from kiln.material_limits import limits_for
 
-            unplaced_limits = limits_for(material, nozzle_mm=nozzle_mm)
+            unplaced_limits = limits_for(material, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm)
         if profile:
             warnings: list[str] = []
             if printer_profile:
@@ -3146,7 +3150,9 @@ def get_design_constraints(
             limit_key = f"material_{key}"
             combined_rules[limit_key] = value
         if material_limits:
-            plastic = limits_for(recommendation.material.material_id, nozzle_mm=nozzle_mm)
+            plastic = limits_for(
+                recommendation.material.material_id, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm,
+            )
             for key, value in plastic.design_limits().items():
                 combined_rules[f"material_{key}"] = value
     elif unplaced_limits is not None and unplaced_limits.known:

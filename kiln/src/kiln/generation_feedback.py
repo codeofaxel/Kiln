@@ -1406,6 +1406,7 @@ def enhance_prompt_with_design_intelligence(
     printer_context: PrinterGenerationContext | None = None,
     anti_patterns: list[str] | None = None,
     nozzle_mm: float | None = None,
+    layer_height_mm: float | None = None,
 ) -> ImprovedPrompt:
     """Enhance a generation prompt with design intelligence constraints.
 
@@ -1437,6 +1438,9 @@ def enhance_prompt_with_design_intelligence(
     :param nozzle_mm: The nozzle the part is printed with, when known: the
         walls and pins the constraints state follow it.  Unset, the
         reference nozzle.
+    :param layer_height_mm: The layer height the part is printed at, when
+        known: the overhang and the finest thread the constraints state
+        follow it.  Unset, the figures as stated.
     :returns: An :class:`ImprovedPrompt` with design constraints applied.
     """
     # Merge printer context into explicit parameters when available.
@@ -1459,6 +1463,7 @@ def enhance_prompt_with_design_intelligence(
             material=material,
             printer_model=printer_model,
             nozzle_mm=nozzle_mm,
+            layer_height_mm=layer_height_mm,
         )
         printer_profile = (
             get_printer_design_profile(printer_model)
@@ -1485,11 +1490,11 @@ def enhance_prompt_with_design_intelligence(
 
     # The plastic the design checks read: the recommended one, else the one
     # named, else none (the general figures, with nothing asked).
-    plastic_limits = limits_for(None, nozzle_mm=nozzle_mm)
+    plastic_limits = limits_for(None, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm)
     if mat and mat.material:
         # The curated keys a profile carries, then the plastic's limits from
         # the one helper every check reads.
-        plastic_limits = limits_for(mat.material.material_id, nozzle_mm=nozzle_mm)
+        plastic_limits = limits_for(mat.material.material_id, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm)
         mat_limits = {
             **(getattr(mat.material, "design_limits", None) or {}),
             **plastic_limits.design_limits(),
@@ -1497,7 +1502,7 @@ def enhance_prompt_with_design_intelligence(
     elif material:
         # A name the catalogue cannot place: the plastic's own limits where
         # Kiln's design limits place it (the brief read them already).
-        plastic_limits = limits_for(material, nozzle_mm=nozzle_mm)
+        plastic_limits = limits_for(material, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm)
         if plastic_limits.known:
             mat_limits = plastic_limits.design_limits()
 
@@ -1860,11 +1865,9 @@ def build_parametric_generation_prompt(
         if material:
             mat_profile = get_material_profile(material)
             if mat_profile:
-                from kiln.material_limits import limits_for
-
                 # The curated keys a profile carries, then the plastic's
                 # limits from the one helper every check reads.
-                from kiln.material_limits import WALL_RECOMMENDED
+                from kiln.material_limits import WALL_RECOMMENDED, limits_for
 
                 plastic_limits = limits_for(material)
                 dl = {**(mat_profile.design_limits or {}), **plastic_limits.design_limits()}

@@ -118,7 +118,7 @@ def _install_tuning(monkeypatch) -> None:
     # The plastic's own overhang figure, as the design-limits helper hands it.
     monkeypatch.setattr(
         P, "material_overhangs",
-        lambda material: {"overhangs": {"default_limit_deg": 45.0, "material_limits_deg": {"abs": OVERHANG_LIMIT_DEG}}},
+        lambda material, **_at: {"overhangs": {"default_limit_deg": 45.0, "material_limits_deg": {"abs": OVERHANG_LIMIT_DEG}}},
     )
 
 

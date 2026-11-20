@@ -87,7 +87,10 @@ def print_frame(
     if layer is None:  # a nozzle finer than the default profile's layers
         layer, layer_from = nozzle.diameter_mm / 2.0, "half the nozzle width"
 
-    overhang = _resolve_overhang_threshold(None, material or None, material_overhangs(material or None))
+    overhang = _resolve_overhang_threshold(
+        None, material or None,
+        material_overhangs(material or None, nozzle_mm=nozzle.diameter_mm, layer_height_mm=layer),
+    )
     frame = PrintFrame(nozzle_mm=nozzle.diameter_mm, layer_mm=layer, overhang_deg=overhang)
     said = {
         "nozzle": nozzle.to_dict(),

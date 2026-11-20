@@ -174,8 +174,11 @@ def _check_overhang_angle(
     limit_deg: float,
     *,
     material_name: str = "",
+    layer_height_mm: float | None = None,
 ) -> DesignValidationCheck:
-    """Check overhang angle against the material's unsupported limit.
+    """Check overhang angle against the material's unsupported limit at
+    *layer_height_mm*, which the fix names: a thicker layer holds a
+    shallower overhang.
 
     The printability engine reports ``max_overhang_angle`` in the usual
     FDM convention: degrees from vertical, where 0 is a vertical wall and
@@ -194,6 +197,8 @@ def _check_overhang_angle(
 
     passed = max_overhang_deg <= limit_deg
     material_clause = f" for {material_name}" if material_name else ""
+    if layer_height_mm:
+        material_clause += f" at {layer_height_mm:g} mm layers"
 
     if passed:
         severity = "info"
@@ -359,6 +364,7 @@ def validate_design(
     printer_model: str | None = None,
     build_volume: tuple[float, float, float] | None = None,
     nozzle_diameter: float | None = None,
+    layer_height: float | None = None,
 ) -> DesignValidationReport:
     """Validate a generated model against design intelligence constraints.
 
@@ -371,11 +377,19 @@ def validate_design(
     :param nozzle_diameter: The nozzle the part is printed with, when known:
         the walls are measured and judged for it.  Unset, the reference
         nozzle.
+    :param layer_height: The layer height the part is printed at, when
+        known: the overhangs are judged for it.  Unset, the layer Kiln
+        slices the nozzle at.
     :returns: A :class:`DesignValidationReport`.
     :raises ValueError: If the file cannot be parsed.
     """
     from kiln.design_intelligence import get_design_constraints, material_basic_of
-    from kiln.printability import _parse_mesh, analyze_printability
+    from kiln.generic_limits import stated_nozzle_mm
+    from kiln.printability import _fitted_layer_height, _parse_mesh, analyze_printability
+
+    # One layer for every check below, as the printability check reads it.
+    if layer_height is None:
+        layer_height = _fitted_layer_height(stated_nozzle_mm(nozzle_diameter))
 
     path = Path(file_path)
     if not path.is_file():
@@ -387,6 +401,7 @@ def validate_design(
         material=material,
         printer_model=printer_model,
         nozzle_mm=nozzle_diameter,
+        layer_height_mm=layer_height,
     )
 
     # 2. Run printability analysis, for the plastic the checks judge: one
@@ -395,6 +410,7 @@ def validate_design(
     report = analyze_printability(
         file_path,
         nozzle_diameter=nozzle_diameter,
+        layer_height=layer_height,
         build_volume=build_volume,
         material=picked.material.material_id if picked and picked.material else None,
     )
@@ -428,7 +444,7 @@ def validate_design(
         material_name = rec_material.material.display_name
         resolved_material_id = rec_material.material.material_id
         # One plastic's limits, from the one helper every check reads.
-        plastic_limits = limits_for(resolved_material_id, nozzle_mm=nozzle_diameter)
+        plastic_limits = limits_for(resolved_material_id, nozzle_mm=nozzle_diameter, layer_height_mm=layer_height)
         material_limits = plastic_limits.design_limits()
         limits_notes = plastic_limits.notes()
     else:
@@ -436,7 +452,7 @@ def validate_design(
         # named through the one helper every check reads (which says once
         # when it cannot place the name), else the general figures with
         # nothing asked.
-        plastic_limits = limits_for(material or None, nozzle_mm=nozzle_diameter)
+        plastic_limits = limits_for(material or None, nozzle_mm=nozzle_diameter, layer_height_mm=layer_height)
     # The wall check warns below the recommended wall: the plastic's own
     # where it was read, the general three-line wall otherwise.
     wall_limits = _wall_limits(plastic_limits)
@@ -480,7 +496,9 @@ def validate_design(
     if overhang_limit is not None:
         actual_overhang = overhangs.get("max_overhang_angle", 0)
         checks.append(
-            _check_overhang_angle(actual_overhang, overhang_limit, material_name=material_name)
+            _check_overhang_angle(
+                actual_overhang, overhang_limit, material_name=material_name, layer_height_mm=layer_height,
+            )
         )
 
     # Stability (aspect ratio)
