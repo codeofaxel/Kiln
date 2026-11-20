@@ -25,6 +25,14 @@ request for this unit so its own verdicts use it at once, and sent to
 Kiln under the one telemetry switch so every owner of the model gets it
 once three units agree and a person adopts it.  Runout is never asked.
 
+A second lesson teaches Kiln what THIS printer can really print in one
+plastic: how steep, how far and how thin.  Kiln's servers make a small test
+print for it (:mod:`kiln._pro_limits_bridge`); the person prints it through
+the same approval dialog, and reads a few numbers raised on it.  It is
+offered after the first lesson, or when the first has nothing to teach, and
+``lesson="limits"`` starts it on its own.  It needs a free Kiln account,
+where the test print and the readings are kept.
+
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins`.
 """
 
@@ -275,7 +283,8 @@ def _reply(session: dict[str, Any], ask: str, *, pictures: list[dict[str, Any] |
     out: dict[str, Any] = {
         "success": True, "printer_name": session["printer_name"], "step": session["step"], "ask": ask,
         "options": options or [], "waiting": waiting,
-        "learned": sorted(session["observed"]), "images": shown,
+        "learned": list(session.get("learned") or []) if session.get("lesson") == LIMITS else sorted(session["observed"]),
+        "images": shown,
         "next": (f"Call printer_bench again in about {int(CHECK_AGAIN_S)} seconds.") if waiting
         else "Relay the ask word for word, show the picture, and call printer_bench again with the person's answer.",
     }
@@ -567,6 +576,8 @@ def printer_bench(
     printer_name: str | None = None,
     answer: str | None = None,
     restart: bool = False,
+    lesson: str | None = None,
+    gcode_paths: list[str] | None = None,
 ) -> dict[str, Any] | list[Any]:
     """Help Kiln get to know your printer in a few minutes: a guided session, one ask at a time.
 
@@ -593,10 +604,24 @@ def printer_bench(
     it with ``run_quick_print`` -- the normal approval dialog shows, once.
     ``restart=True`` throws the session away and begins again.
 
+    A second lesson teaches Kiln how steep, how far and how thin this
+    printer prints in one plastic, from a small test print the person reads
+    a few numbers off.  It is offered when the first lesson ends or has
+    nothing to teach; ``lesson="limits"`` starts it on its own.  Kiln makes
+    the test print; slice it as the reply's ``how_to_slice`` says and hand
+    the sliced files back as ``gcode_paths`` (Kiln reads them before it asks
+    anything), then print each plate as ``how_to_start`` says.  It needs a
+    free Kiln account, where the test print and the readings are kept.
+
     Args:
         printer_name: Which printer.  Omit for the default one.
         answer: The person's answer to the previous ask, verbatim.
         restart: Begin again from the first ask.
+        lesson: ``"motion"`` (how the printer moves its head) or
+            ``"limits"`` (what it can really print).  Omit to start or
+            resume whichever is due.
+        gcode_paths: The second lesson's sliced files, one per plate, in
+            plate order, when its reply asks for them.
 
     Returns the next ask, or ``done`` with what Kiln learned and the payoff
     line.
@@ -616,7 +641,14 @@ def printer_bench(
         if not unit:
             return _srv._error_dict("This printer has no durable identity (no serial or address), so a session cannot be kept for it.",
                                     code="BENCH_NO_IDENTITY")
+        wanted = str(lesson or "").strip().lower() or None
+        if wanted not in (None, MOTION, LIMITS):
+            return _srv._error_dict("lesson must be 'motion' or 'limits', or left out.", code="INVALID_ARGS")
         session = None if restart else _load_session(unit)
+        if session is not None and wanted and session.get("lesson", MOTION) != wanted:
+            session = None
+        if session is None and wanted == LIMITS:
+            session = _limits_session(target_name, adapter, unit, plate_state.declared_model_of(adapter))
         if session is None:
             printer_id = plate_state.declared_model_of(adapter)
             if not printer_id:
@@ -647,17 +679,21 @@ def printer_bench(
                 return _srv._error_dict(f"Kiln's catalogue has no plate size for {printer_id}, so the zone drawing cannot be made.",
                                         code="BENCH_NO_BED")
             first = any(isinstance(r, dict) and r.get("code") == "PLACEMENT_UNKNOWN_PRINTER" for r in verdict.get("refusals") or [])
+            asked = [b for b in blanks if b in bench.TEACHABLE]
             if not blanks:
                 bench.note_offer(unit, answer="done")
-                return {"success": True, "step": "done", "printer_name": target_name, "learned": [],
-                        "ask": "", "images": [],
-                        "message": f"Kiln already knows how {bench._display_name(printer_id)} moves its head; there is nothing to teach it."}
-            asked = [b for b in blanks if b in bench.TEACHABLE]
             if not asked:
+                name = bench._display_name(printer_id)
+                lead = (f"Kiln already knows how the {name} moves its head. " if not blanks
+                        else f"There is nothing more for a session to teach Kiln about how the {name} moves. ")
+                if limits_may_be_offered(unit):
+                    session = _limits_session(target_name, adapter, unit, printer_id, lead=lead)
+                    return _with_pictures(_advance(session, adapter, answer, gcode_paths))
                 return {"success": True, "step": "done", "printer_name": target_name, "learned": [],
                         "ask": "", "images": [],
-                        "message": (f"A test print has nothing more to teach Kiln about the "
-                                    f"{bench._display_name(printer_id)}, so there is nothing for a session to do.")}
+                        "message": (f"Kiln already knows how {name} moves its head; there is nothing to teach it." if not blanks
+                                    else f"A test print has nothing more to teach Kiln about the {name}, "
+                                         "so there is nothing for a session to do.")}
             loggable = bench.can_log_positions(adapter)
             session = {
                 "printer_name": target_name, "printer_id": printer_id, "unit": unit,
@@ -669,15 +705,18 @@ def printer_bench(
             for doc in bench.observations_of(adapter):
                 if doc.get("block") in session["blanks"]:
                     session["observed"][doc["block"]] = doc
-        return _with_pictures(_advance(session, adapter, answer))
+        return _with_pictures(_advance(session, adapter, answer, gcode_paths))
     except Exception as exc:  # noqa: BLE001
         _logger.exception("Unexpected error in printer_bench")
         return _srv._error_dict(f"Unexpected error in the bench session: {exc}", code="INTERNAL_ERROR")
 
 
-def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, Any]:  # noqa: C901 -- one step per branch
+def _advance(session: dict[str, Any], adapter: Any, answer: Any,
+             gcode_paths: list[str] | None = None) -> dict[str, Any]:  # noqa: C901 -- one step per branch
     from kiln import plate_state
 
+    if session.get("lesson") == LIMITS:
+        return _advance_limits(session, adapter, answer, gcode_paths)
     step = session["step"]
     name = session["printer_name"]
 
@@ -991,7 +1030,7 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
         _send_in_background()
         learned = _learned_lines(session)
         payoff = _payoff(session) if learned else ""
-        return {
+        done = {
             "success": True, "step": "done", "printer_name": name, "ask": "", "images": [],
             "learned": learned, "notes": session.get("notes", []),
             "payoff": payoff,
@@ -1001,6 +1040,442 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, An
                            else "Nothing new was observed this time, so Kiln still assumes the worst for this printer.")),
             "kept_at": str(bench.bench_dir()),
         }
+        if limits_may_be_offered(session["unit"]):
+            # The second lesson, offered once the first is done: a new
+            # session, so the person's answer to it continues there.
+            follow = _limits_session(name, adapter, session["unit"], session["printer_id"], after_motion=True)
+            _save_session(follow)
+            done.update(ask=_limits_intro(follow), options=["yes", "later", "no"], lesson_offered=LIMITS,
+                        next=("Relay the message, then the ask word for word, and call printer_bench again "
+                              "with the person's answer."))
+        return done
+
+    return _reply(session, f"Kiln lost its place at step {step!r}; call printer_bench with restart=true to begin again.")
+
+
+# ---------------------------------------------------------------------------
+# The second lesson: what this printer can really print
+# ---------------------------------------------------------------------------
+
+#: The two lessons a session can be.
+MOTION = "motion"
+LIMITS = "limits"
+#: The test print the second lesson starts with; Kiln's servers name the other.
+FIRST_COUPON = "angles_and_spans"
+_MATERIAL_OPTIONS = ["PLA", "PETG", "ABS", "ASA", "TPU"]
+_NOZZLE_OPTIONS = ["0.2", "0.4", "0.6", "0.8"]
+_PRINTED = {"printed", "done", "finished", "it's done", "its done", "it finished", "already printed", "printed it"}
+_GCODE_SUFFIXES = (".gcode", ".gco", ".g")
+
+
+def _limits_key(unit: str) -> str:
+    """The second lesson's own line in the offers ledger."""
+    return f"limits:{unit}"
+
+
+def limits_may_be_offered(unit: str | None) -> bool:
+    """Whether the second lesson may be offered to *unit*: not after the
+    person declined it or already ran it."""
+    return bool(unit) and bench.may_offer(_limits_key(str(unit)), "lesson")
+
+
+def _limits_session(name: str, adapter: Any, unit: str, printer_id: str | None, *,
+                    after_motion: bool = False, lead: str = "") -> dict[str, Any]:
+    bed = bench.bed_of(printer_id) if printer_id else None
+    return {
+        "lesson": LIMITS, "printer_name": name, "printer_id": printer_id or "", "unit": unit,
+        "model_name": bench._display_name(printer_id) if printer_id else name,
+        "bed_mm": list(bed) if bed else None, "firmware": bench.firmware_of(adapter),
+        "step": "limits_intro", "after_motion": after_motion, "lead": lead, "coupon": FIRST_COUPON,
+        "observed": {}, "learned": [], "readings": {}, "started_at": bench._now(),
+    }
+
+
+def _limits_intro(session: dict[str, Any]) -> str:
+    also = "also " if session.get("after_motion") else ""
+    return (f"{session.get('lead') or ''}Kiln can {also}learn how steep, how far and how thin your "
+            f"{session['model_name']} really prints: it makes a small test print, you print it, and you read a few "
+            "numbers off it. Ready?")
+
+
+def _limits_held(session: dict[str, Any]) -> dict[str, Any]:
+    """The second lesson waits for a sign-in: nothing is marked, and the
+    session starts where it stopped once the person is signed in."""
+    _save_session(session)
+    return {
+        "success": True, "step": "held", "lesson": LIMITS, "printer_name": session["printer_name"],
+        "hold": "LIMITS_ACCOUNT_REQUIRED", "images": [], "learned": list(session.get("learned") or []),
+        "ask": ("Sign in to Kiln to teach it what your printer can print: the test print and what you read off it "
+                "are kept in your Kiln account, which is free and takes a minute."),
+        "retryable": False,
+        "next": "Relay the ask word for word. Then call `kiln_signin`, and call printer_bench again.",
+    }
+
+
+def _limits_missed(session: dict[str, Any], miss: Any, cannot: str) -> dict[str, Any]:
+    """No answer from Kiln's servers: said once, in the session's words, and
+    the session stays on the same step so it can be asked again."""
+    from kiln import _pro_limits_bridge as bridge
+    from kiln import served_answer
+
+    return _reply(session, bridge.miss_sentence(miss, cannot=cannot), options=["try again"],
+                  retryable=bool(getattr(miss, "no_answer", False)), **served_answer.fields(miss))
+
+
+def _limits_done(session: dict[str, Any], message: str) -> dict[str, Any]:
+    bench.note_offer(_limits_key(session["unit"]), answer="done")
+    _end_session(session)
+    return {"success": True, "step": "done", "lesson": LIMITS, "printer_name": session["printer_name"],
+            "ask": "", "images": [], "learned": list(session.get("learned") or []), "message": message}
+
+
+def _nozzle_of(session: dict[str, Any]) -> float | None:
+    """The nozzle the test print is made for: the one the person said, else
+    the one Kiln finds for the printer; ``None`` when only a default is left,
+    and then the person is asked."""
+    if session.get("nozzle_mm"):
+        return float(session["nozzle_mm"])
+    try:
+        from kiln.assumed_nozzle import assumed_nozzle
+
+        found = assumed_nozzle(session["printer_name"])
+    except Exception:  # noqa: BLE001 -- unread: ask the person
+        return None
+    return None if found.source == "default" else float(found.diameter_mm)
+
+
+def _layer_for(nozzle: float) -> float:
+    """The layer Kiln slices this nozzle at, the one the test print is made for."""
+    from kiln.printability import _fitted_layer_height
+
+    return float(_fitted_layer_height(nozzle))
+
+
+def _slice_overrides(session: dict[str, Any]) -> dict[str, str]:
+    """The slicer settings the test print is sliced and printed with: what
+    the servers' ``slice_with`` asks, as slicer keys."""
+    asked = session.get("slice_with") or {}
+    layer = asked.get("layer_height_mm") or session.get("layer_height_mm")
+    out: dict[str, str] = {}
+    if asked.get("supports", "off") == "off":
+        out["support_material"] = "0"
+    if asked.get("hole_compensation", "off") == "off":
+        out["xy_size_compensation"] = "0"
+    if layer:
+        out["layer_height"] = f"{float(layer):g}"
+    return out
+
+
+def _plate_word(session: dict[str, Any], number: int) -> str:
+    plates = session.get("plates") or []
+    if len(plates) <= 1:
+        return "the test print"
+    code = next((str(p.get("code")) for p in plates if int(p.get("plate") or 0) == number), str(number))
+    return f"plate {code}"
+
+
+def _gcode_of(path: str) -> str | None:
+    """A sliced file Kiln can read: the G-code itself, or the G-code inside
+    a printer's 3MF, written beside the session.  ``None`` when it is neither."""
+    import zipfile
+
+    local = Path(str(path)).expanduser()
+    if not local.is_file():
+        return None
+    if local.suffix.lower() in _GCODE_SUFFIXES:
+        return str(local)
+    if local.suffix.lower() != ".3mf":
+        return None
+    try:
+        with zipfile.ZipFile(local) as archive:
+            inside = sorted(n for n in archive.namelist() if n.lower().endswith(".gcode"))
+            if not inside:
+                return None
+            out = bench.bench_dir() / "limits" / f"{local.stem.replace('.gcode', '')}.gcode"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(archive.read(inside[0]))
+            return str(out)
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return None
+
+
+def _questions_now(session: dict[str, Any]) -> list[dict[str, Any]]:
+    """The questions to ask now: every one when the whole test print is to
+    be read again, else the ones whose last plate has just printed."""
+    questions = session.get("questions") or []
+    if session.get("all_printed"):
+        return questions
+    here = int(session.get("plate_n") or 1)
+    return [q for q in questions if max(int(p) for p in (q.get("plates") or [q.get("plate") or 1])) == here]
+
+
+def _question_ask(session: dict[str, Any], question: dict[str, Any]) -> str:
+    where = f"On the rows headed {question.get('heading')}"
+    if len(session.get("plates") or []) > 1:
+        where += " on " + " and ".join(_plate_word(session, int(p)) for p in (question.get("plates") or [1]))
+    said = str(question.get("question") or "")
+    said = said[:1].lower() + said[1:]
+    return f"{where}, {said} {question.get('good_means')} Answer with the number raised beside it, or none, or all."
+
+
+def _reading_of(answer: Any, steps: list[Any]) -> float | str | None:
+    text = _norm(answer)
+    if text in ("none", "none of them"):
+        return "none"
+    if text in ("all", "all of them"):
+        return "all"
+    value = _mm(answer)
+    if value is None:
+        return None
+    return next((float(step) for step in steps if abs(float(step) - value) < 1e-6), None)
+
+
+def _start_questions(session: dict[str, Any], *, every: bool = False) -> None:
+    session["all_printed"] = every
+    session["q_index"] = 0
+    session["step"] = "limits_question" if _questions_now(session) else "limits_cleared"
+
+
+def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa: C901 -- one step per branch
+                    gcode_paths: list[str] | None) -> dict[str, Any]:
+    from kiln import _pro_limits_bridge as bridge
+
+    step = session["step"]
+    name = session["printer_name"]
+
+    # ---- the offer ---------------------------------------------------------
+    if step == "limits_intro":
+        if answer is None or not (_is_yes(answer) or _is_later(answer) or _is_no(answer)):
+            return _reply(session, _limits_intro(session), options=["yes", "later", "no"])
+        if _is_later(answer):
+            bench.note_offer(_limits_key(session["unit"]), answer="later")
+            _end_session(session)
+            return {"success": True, "step": "later", "lesson": LIMITS, "printer_name": name, "ask": "",
+                    "message": ("No problem. Call printer_bench with lesson=\"limits\" whenever you have time for "
+                                "a test print; Kiln won't bring it up again on its own.")}
+        if _is_no(answer):
+            bench.note_offer(_limits_key(session["unit"]), answer="declined")
+            _end_session(session)
+            return {"success": True, "step": "declined", "lesson": LIMITS, "printer_name": name, "ask": "",
+                    "message": "Understood. Kiln won't ask about a test print for this printer again."}
+        bench.note_offer(_limits_key(session["unit"]))
+        session["step"] = step = "limits_material"
+        answer = None
+
+    if step in ("limits_material", "limits_nozzle", "limits_make") and not bridge.signed_in():
+        return _limits_held(session)
+
+    # ---- the plastic and the nozzle -----------------------------------------
+    if step == "limits_material":
+        text = " ".join(str(answer or "").split())
+        if not text or len(text) > 80:
+            return _reply(session, "Which plastic will you print the test print in? Say it the way the spool does.",
+                          options=_MATERIAL_OPTIONS)
+        session["material"] = text
+        session["step"] = step = "limits_nozzle"
+        answer = None
+
+    if step == "limits_nozzle":
+        if not session.get("nozzle_mm"):
+            said = _mm(answer) if answer is not None else None
+            if said is not None and 0.1 <= said <= 2.0:
+                session["nozzle_mm"] = said
+            else:
+                found = _nozzle_of(session)
+                if found is None:
+                    return _reply(session, "Which nozzle size is on the printer, in mm? 0.4 is the most common.",
+                                  options=_NOZZLE_OPTIONS)
+                session["nozzle_mm"] = found
+        session["step"] = step = "limits_make"
+        answer = None
+
+    # ---- the test print, made on Kiln's servers ------------------------------
+    if step == "limits_make":
+        nozzle = float(session["nozzle_mm"])
+        session["layer_height_mm"] = _layer_for(nozzle)
+        made, miss = bridge.ask(
+            "make", printer_id=name, material=session["material"], coupon=session["coupon"],
+            nozzle_mm=nozzle, layer_height_mm=session["layer_height_mm"], firmware=session.get("firmware"),
+            printer_model=session.get("printer_id") or None, bed_mm=session.get("bed_mm"),
+        )
+        if miss is not None:
+            return _limits_missed(session, miss, "make the test print")
+        if made.get("status") != "ok":
+            code, said = str(made.get("code") or ""), str(made.get("error") or "")
+            if code in ("UNKNOWN_MATERIAL", "INVALID_INPUT"):
+                session["step"] = "limits_material"
+                return _reply(session, f"{said} Which plastic will you print it in?", options=_MATERIAL_OPTIONS)
+            if code == "NOZZLE_NEEDED":
+                session.pop("nozzle_mm", None)
+                session["step"] = "limits_nozzle"
+                return _reply(session, f"{said} Which size is it, in mm?", options=_NOZZLE_OPTIONS)
+            return _reply(session, said or "Kiln's servers could not make the test print.", options=["try again", "later"])
+        plates = [p for p in made.get("plates") or [] if isinstance(p, dict)]
+        if not plates or not all(Path(str(p.get("stl_path") or "")).is_file() for p in plates):
+            from kiln.served_answer import Miss
+
+            return _limits_missed(session, Miss("unanswered", detail="the test print's files did not arrive"),
+                                  "bring the test print to this computer")
+        session.update(
+            test_id=made["test_id"], plates=plates, questions=list(made.get("questions") or []),
+            slice_with=dict(made.get("slice_with") or {}), made_message=str(made.get("message") or ""),
+            readings={}, plate_n=1, all_printed=False, sliced_files=[],
+        )
+        session["step"] = step = "limits_slice"
+        answer = None
+        gcode_paths = None
+
+    # ---- the sliced files, read before anything is asked -----------------------
+    if step == "limits_slice":
+        plates = session["plates"]
+        overrides = _slice_overrides(session)
+        if gcode_paths:
+            files = [_gcode_of(path) for path in gcode_paths]
+            if len(files) != len(plates) or not all(files):
+                return _reply(session, f"Kiln needs the sliced file of each plate, in plate order: {len(plates)}.",
+                              options=["skip"], print_files=[p["stl_path"] for p in plates])
+            read, miss = bridge.ask("sliced", printer_id=name, material=session["material"],
+                                    test_id=session["test_id"], gcode_paths=files)
+            if miss is not None:
+                return _limits_missed(session, miss, "read the sliced files")
+            if read.get("status") != "ok":
+                return _reply(session, f"{read.get('error') or 'Kiln could not read those files.'} "
+                              "Slice each plate as it was made, and send the files again.",
+                              options=["skip"], print_files=[p["stl_path"] for p in plates])
+            session["questions"] = list(read.get("questions") or session["questions"])
+            session["sliced_message"] = str(read.get("message") or "")
+            session["step"] = step = "limits_print"
+            answer = None
+        elif answer is not None and _norm(answer) == "skip":
+            session["step"] = step = "limits_print"
+            answer = None
+        else:
+            return _reply(
+                session, session.get("made_message") or "The test print is ready.",
+                print_files=[p["stl_path"] for p in plates], waiting=False,
+                how_to_slice=(f"Show the person the test print with visualize_model. Then slice each plate in order "
+                              f"with reslice_with_overrides(input_path=<the plate's file>, printer_name={name!r}, "
+                              f"material={session['material']!r}, overrides={overrides!r}) and call printer_bench "
+                              "again with gcode_paths set to each slice's raw_gcode_path (else its output_path), in "
+                              "plate order. If they cannot be sliced here, call it with answer=\"skip\"."),
+            )
+
+    # ---- printing each plate ---------------------------------------------------
+    if step == "limits_print":
+        here = int(session.get("plate_n") or 1)
+        plate = next(p for p in session["plates"] if int(p.get("plate") or 0) == here)
+        path = str(plate["stl_path"])
+        state, _job = _status(adapter)
+        if state == "printing":
+            session["step"] = step = "limits_printing"
+            answer = None
+        elif answer is not None and _norm(answer) in _PRINTED:
+            _start_questions(session)
+            step = session["step"]
+            answer = None
+        elif answer is None or not _is_yes(answer):
+            said = session.pop("sliced_message", "")
+            lead = "" if not said or said.startswith("Every step") else f"{said} "
+            return _reply(
+                session, f"{lead}Kiln will print {_plate_word(session, here)}. Ready to start it?",
+                options=["yes"], print_file=path,
+                how_to_start=(f"Show the file with visualize_model(model_path={path!r}), get a token with "
+                              f"issue_preview_token, then run_reslice_and_print(model_path={path!r}, "
+                              f"printer_name={name!r}, material={session['material']!r}, "
+                              f"overrides={_slice_overrides(session)!r}, skip_validation=True, preview_token=...). "
+                              "The normal approval dialog shows. Then call printer_bench again with "
+                              "answer=\"started\"."),
+            )
+        else:
+            return _reply(session, f"The printer isn't printing yet (it says {state}). Start "
+                          f"{_plate_word(session, here)}, then tell me.", options=["started"], print_file=path,
+                          waiting=True)
+
+    if step == "limits_printing":
+        state, _job = _status(adapter)
+        if state in ("printing", "paused") and not (answer is not None and _norm(answer) in _PRINTED):
+            return _reply(session, f"{_plate_word(session, int(session.get('plate_n') or 1)).capitalize()} is "
+                          "printing; Kiln will ask about it when it finishes.", waiting=True)
+        _start_questions(session)
+        step = session["step"]
+        answer = None
+
+    # ---- the questions, one at a time ------------------------------------------------
+    if step == "limits_question":
+        asked = _questions_now(session)
+        index = int(session.get("q_index") or 0)
+        question = asked[index]
+        options = [f"{float(s):g}" for s in question.get("steps") or []] + ["none", "all"]
+        if answer is None:
+            return _reply(session, _question_ask(session, question), options=options)
+        reading = _reading_of(answer, list(question.get("steps") or []))
+        if reading is None:
+            steps = ", ".join(f"{float(s):g}" for s in question.get("steps") or [])
+            return _reply(session, f"That isn't one of the numbers on the rows headed {question.get('heading')} "
+                          f"({steps}). Which is it, or none, or all?", options=options)
+        session["readings"][str(question["reading"])] = reading
+        if index + 1 < len(asked):
+            session["q_index"] = index + 1
+            return _reply(session, _question_ask(session, asked[index + 1]),
+                          options=[f"{float(s):g}" for s in asked[index + 1].get("steps") or []] + ["none", "all"])
+        session["step"] = step = "limits_cleared"
+        answer = None
+
+    if step == "limits_cleared":
+        here = int(session.get("plate_n") or 1)
+        if not session.get("all_printed") and here < len(session["plates"]):
+            if answer is None or not _is_yes(answer):
+                return _reply(session, f"Take {_plate_word(session, here)} off the plate and tell me when it's empty.",
+                              options=["it's empty"])
+            session["plate_n"] = here + 1
+            session["step"] = "limits_print"
+            return _advance_limits(session, adapter, None, None)
+        session["step"] = step = "limits_dried"
+        answer = None
+
+    if step == "limits_dried":
+        text = _norm(answer)
+        if not text:
+            return _reply(session, "Was the spool dried before this print: yes, no, or not sure?",
+                          options=["yes", "no", "not sure"])
+        session["spool_dried"] = True if _is_yes(text) else (False if _is_no(text) else None)
+        session["step"] = step = "limits_report"
+        answer = None
+
+    # ---- the readings, kept in the person's account -----------------------------------
+    if step == "limits_report":
+        said, miss = bridge.ask("report", printer_id=name, material=session["material"],
+                                test_id=session["test_id"], readings=session["readings"],
+                                spool_dried=session.get("spool_dried"))
+        if miss is not None:
+            return _limits_missed(session, miss, "keep your readings")
+        if said.get("status") != "ok":
+            # The readings disagree with each other: read the print again.
+            session["readings"] = {}
+            session["questions"] = list(said.get("questions") or session["questions"])
+            _start_questions(session, every=True)
+            first = _questions_now(session)[0]
+            return _reply(session, f"{said.get('error') or 'Kiln could not keep those readings.'} "
+                          + _question_ask(session, first),
+                          options=[f"{float(s):g}" for s in first.get("steps") or []] + ["none", "all"])
+        session["learned"] = list(session.get("learned") or []) + [str(h) for h in said.get("heard") or []]
+        session["report_message"] = str(said.get("message") or "")
+        upcoming = said.get("next") if isinstance(said.get("next"), dict) else None
+        if upcoming and upcoming.get("coupon"):
+            session["next_coupon"] = str(upcoming["coupon"])
+            session["step"] = "limits_next"
+            return _reply(session, f"{session['report_message']} {upcoming.get('say') or ''} Make it now?".strip(),
+                          options=["yes", "later"])
+        return _limits_done(session, session["report_message"])
+
+    if step == "limits_next":
+        if answer is None or not (_is_yes(answer) or _is_later(answer) or _is_no(answer)):
+            return _reply(session, "Make the second test print now?", options=["yes", "later"])
+        if not _is_yes(answer):
+            return _limits_done(session, session.get("report_message") or "")
+        session["coupon"] = session.pop("next_coupon")
+        session["step"] = "limits_make"
+        return _advance_limits(session, adapter, None, None)
 
     return _reply(session, f"Kiln lost its place at step {step!r}; call printer_bench with restart=true to begin again.")
 

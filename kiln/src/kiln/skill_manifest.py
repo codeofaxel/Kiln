@@ -293,6 +293,7 @@ class SkillManifest:
             "get_to_know_a_printer": [
                 "printer_bench(printer_name) — " + AGENT_LEARN_LINE + " The reply is the next ask, or what Kiln learned",
                 "printer_bench(printer_name, answer=<the person's answer, verbatim>) — hand each answer back; a test print in the session is a real print and shows the normal approval dialog",
+                "printer_bench(printer_name, gcode_paths=[<each plate's sliced file, in plate order>]) — the second lesson's test print, sliced as its reply's how_to_slice says, handed back before any question is asked",
             ],
             "failure_recovery": [
                 "analyze_print_failure_smart(error_message) — automated root cause analysis",

@@ -332,21 +332,31 @@ class TestNeverNaggedTwice:
         assert first["first"] is True and "blanks" not in first
         assert first["sentence"].startswith("Kiln has no record for the") and "can't check a second part beside the first" in first["sentence"]
         assert "A few minutes with a coin-sized test print teaches it" in first["sentence"]
-        # Blanks no session can fill are no reason to offer one, and the one
-        # offer is not spent on them.
+        # Blanks no session can fill are no reason to offer the first lesson,
+        # and its one offer is not spent on them.  The second lesson (what the
+        # printer can print) has something to teach every printer, so it is
+        # offered instead, once.
         other = _Adapter(); other.serial = "01P00A000000003"
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["filament_change", "quiet_start"], _verdict(ok=True)))
-        assert bench.offer_after_registration(other, "x") is None
+        second = bench.offer_after_registration(other, "x")
+        assert second["lesson"] == "limits" and "printer_bench" in second["sentence"]
+        assert "how steep, how far and how thin" in second["sentence"] and "filament" not in second["sentence"]
+        assert bench.offer_after_registration(other, "x") is None        # once
         assert bench.may_offer(bench.unit_of(other), "registration") is True
 
-    def test_registration_stays_quiet_when_there_is_nothing_to_teach_or_nothing_answers(self, monkeypatch):
+    def test_registration_stays_quiet_offline_and_offers_only_the_second_lesson_when_moves_are_known(self, monkeypatch):
+        # A printer whose moves Kiln knows still has something to teach it:
+        # the second lesson is offered, once.  Offline offers nothing and
+        # spends nothing.
         machine = _Adapter()
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], None))
         assert bench.offer_after_registration(machine, "a1") is None
         assert bench.may_offer(bench.unit_of(machine), "registration") is True    # offline: not spent
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _verdict(ok=True)))
-        assert bench.offer_after_registration(machine, "a1") is None
-        assert bench.may_offer(bench.unit_of(machine), "refusal") is False        # nothing to teach: never asked
+        offer = bench.offer_after_registration(machine, "a1")
+        assert offer["lesson"] == "limits" and "blanks" not in offer
+        assert bench.may_offer(bench.unit_of(machine), "refusal") is False        # the moves: never asked
+        assert bench.offer_after_registration(machine, "a1") is None            # the second lesson: once
 
     def test_the_slice_refusal_offers_the_session_at_the_point_of_need(self):
         from kiln.plate_state import PlateJob, PlateState
@@ -621,8 +631,12 @@ class TestTheConversation:
         assert not any(k in json.dumps(docs) for k in ("image", "photo"))
         # The offer ledger says done: no door will offer this unit again.
         assert bench.may_offer(bench.unit_of(m), "refusal") is False
-        # And the session is gone; a new call starts over.
-        assert server.tool._load_session(bench.unit_of(m)) is None
+        # The first lesson is gone; what is left is the offer of the second,
+        # asked on the same screen, so the person's answer continues it.
+        assert out["lesson_offered"] == "limits" and out["options"] == ["yes", "later", "no"]
+        assert out["ask"].startswith("Kiln can also learn how steep, how far and how thin your Bambu Lab A1")
+        left = server.tool._load_session(bench.unit_of(m))
+        assert left["lesson"] == "limits" and left["step"] == "limits_intro"
 
     def test_later_and_no_end_the_session_and_are_honoured(self, server):
         _step(server)
@@ -735,10 +749,16 @@ class TestTheConversation:
         assert [120.0, 120.0, 1.0] not in doc["points"] and [124.0, 136.0, 1.0] not in doc["points"]
 
     def test_a_model_with_nothing_to_teach_is_told_so_and_never_offered(self, server, monkeypatch):
+        # Nothing to teach about the moves: said, never offered again, and the
+        # second lesson asked in its place.  Once that is declined, the
+        # session ends at once.
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _verdict(ok=True, blanks=[])))
         out = _step(server)
-        assert out["step"] == "done" and "already knows" in out["message"]
+        assert out["step"] == "limits_intro" and out["ask"].startswith("Kiln already knows how the Bambu Lab A1 moves its head.")
         assert bench.may_offer(bench.unit_of(server.machine), "refusal") is False
+        assert _step(server, "no")["step"] == "declined"
+        out = _step(server)
+        assert out["step"] == "done" and "already knows" in out["message"]
 
     def test_no_verdict_is_an_honest_refusal_not_a_session(self, server, monkeypatch):
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], None))
@@ -763,6 +783,10 @@ class TestTheConversation:
 
     def test_nothing_a_test_print_can_teach_ends_at_once_without_naming_what_is_missing(self, server, monkeypatch):
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["filament_change", "quiet_start"], _verdict(ok=True)))
+        out = _step(server)
+        assert out["step"] == "limits_intro" and server.log == []
+        assert "filament" not in out["ask"] and "quiet" not in out["ask"] and "blanks" not in out
+        _step(server, "no")
         out = _step(server)
         assert out["step"] == "done" and "nothing more to teach" in out["message"] and server.log == []
         assert "filament" not in out["message"] and "quiet" not in out["message"] and "blanks" not in out

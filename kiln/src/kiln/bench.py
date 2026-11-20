@@ -73,7 +73,9 @@ LEARN_LINE = (
     "Kiln can get to know a printer: `printer_bench` is a short guided session "
     "that teaches Kiln what it does not yet know about how a printer moves, for "
     "a printer new to Kiln and for one it knows only in part. What it learns is "
-    "used for that printer at once."
+    "used for that printer at once. A second lesson, a small test print the "
+    "person reads a few numbers off, teaches Kiln how steep, how far and how "
+    "thin that printer prints."
 )
 
 #: The agent half: when to reach for it, and how to carry it.
@@ -83,7 +85,8 @@ LEARN_WHEN = (
     "assumes the worst about it, and when the person asks why Kiln cannot do "
     "something on their printer or wants to teach Kiln their printer. "
     "`printer_bench()` with no answer starts or resumes it, or says there is "
-    "nothing to teach. Relay each ask word for word, show its pictures, and "
+    "nothing to teach; `printer_bench(lesson=\"limits\")` starts the second "
+    "lesson on its own. Relay each ask word for word, show its pictures, and "
     "take 'later' as an answer."
 )
 
@@ -526,7 +529,8 @@ def may_offer(unit: str | None, door: str) -> bool:
     """Whether the session may be offered to *unit* through *door*.
 
     ``registration`` offers once, ever: the first time a printer with
-    blanks is registered.  ``refusal`` offers at the point of need, every
+    blanks is registered.  ``lesson`` is the session's own offer of its
+    second lesson, held to the same answers.  ``refusal`` offers at the point of need, every
     time a refusal rests on a blank -- that is the answer to "why", not a
     nag -- unless the person declined or already ran it.  ``later`` is
     honoured by the registration door and never repeated there."""
@@ -557,11 +561,13 @@ def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] 
         blanks, verdict = blanks_for(adapter, printer_id)
         if session_hold(verdict) is not None:
             return None                           # not startable yet; nothing is marked
-        if not blanks:
-            if verdict is not None:
-                note_offer(unit, answer="done")   # nothing to teach; never ask
-            return None
+        if not blanks and verdict is not None:
+            note_offer(unit, answer="done")       # nothing to teach about the moves; never ask
         teachable = [b for b in blanks if b in TEACHABLE]
+        if verdict is not None and not teachable:
+            return _limits_offer(unit, printer_id, printer_name)
+        if not blanks:
+            return None
         if not teachable:
             return None                           # blanks no session can fill; a later one may
         note_offer(unit)
@@ -578,6 +584,19 @@ def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] 
     except Exception:  # noqa: BLE001
         _logger.debug("bench: registration offer skipped", exc_info=True)
         return None
+
+
+def _limits_offer(unit: str | None, printer_id: str, printer_name: str) -> dict[str, Any] | None:
+    """The one-time offer of the second lesson, for a printer whose moves
+    Kiln already knows: ``None`` once it was offered, declined or done."""
+    key = f"limits:{unit}" if unit else None
+    if not may_offer(key, "registration"):
+        return None
+    note_offer(key)
+    name = _display_name(printer_id)
+    return {"tool": "printer_bench", "printer_name": printer_name, "lesson": "limits", "first": False,
+            "sentence": (f"Kiln can learn how steep, how far and how thin your {name} really prints from one small "
+                         "test print; the printer_bench tool runs it.")}
 
 
 def _display_name(printer_id: str) -> str:
