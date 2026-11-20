@@ -427,11 +427,11 @@ class TestAMissFromTheMaterialsOnHand:
     def test_the_food_floor_keeps_what_the_person_owns_off_a_mug(self, doors, filled_shelf):
         """Nothing on the shelf may touch food, so nothing owned is listed and
         the plastics listed are said not to be on hand."""
-        from kiln.material_basics import basic_plastics
+        from kiln.material_basics import basic_list
 
         with plain_install_served(SIGNED_OUT):
             reply = doors["recommend_material"](intent="coffee mug", on_hand_only=True)
-        assert reply["plastics"] == basic_plastics("coffee mug") and reply["on_hand"] == []
+        assert reply["plastics"] == basic_list("coffee mug").plastics and reply["on_hand"] == []
         assert not {"PETG-CF", "TPU"} & set(reply["plastics"]) and reply["on_hand_scope"] == "fleet"
         assert reply["message"].startswith(
             "NOT ON HAND: nothing you have recorded (PETG-CF, TPU) matches this request — "
