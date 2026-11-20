@@ -487,13 +487,6 @@ def _model_at_start(
         return None
 
 
-def printer_model_at_start(record: dict[str, Any] | None) -> str | None:
-    """The printer model a print-start *record* holds, or ``None`` for a
-    record that holds none."""
-    model = str((record or {}).get("printer_model") or "").strip()
-    return model or None
-
-
 def _carry_original(slug: str, continues: tuple[str, str] | None) -> dict[str, Any] | None:
     """Set aside the toolpath of the print the record for *slug* holds, when
     *continues* says the file being started carries that very print on.

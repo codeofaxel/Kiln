@@ -600,7 +600,6 @@ class TestTheRecordKeepsThePrintersModel:
 
         record = monitor_twin.active_twin("shop")
         assert record["printer_model"] == "prusa_mini"
-        assert monitor_twin.printer_model_at_start(record) == "prusa_mini"
 
     def test_the_record_answers_after_the_printer_is_set_up_differently(self, twin_dir, tmp_path, setup):
         mesh, gcode = _make_files(tmp_path)
@@ -608,9 +607,9 @@ class TestTheRecordKeepsThePrintersModel:
         monitor_twin.note_print_started("shop", gcode.name)
 
         setup["printers"]["shop"]["printer_model"] = "creality_k1_max"
-        assert monitor_twin.printer_model_at_start(monitor_twin.active_twin("shop")) == "prusa_mini"
+        assert monitor_twin.active_twin("shop")["printer_model"] == "prusa_mini"
         del setup["printers"]["shop"]
-        assert monitor_twin.printer_model_at_start(monitor_twin.active_twin("shop")) == "prusa_mini"
+        assert monitor_twin.active_twin("shop")["printer_model"] == "prusa_mini"
 
     def test_a_printer_with_no_model_stated_keeps_none(self, twin_dir, tmp_path, setup):
         setup["printers"]["bare"] = {}
@@ -619,10 +618,6 @@ class TestTheRecordKeepsThePrintersModel:
         monitor_twin.note_print_started("bare", gcode.name)
 
         assert monitor_twin.active_twin("bare")["printer_model"] is None
-
-    def test_a_record_without_the_field_reads_as_none(self):
-        assert monitor_twin.printer_model_at_start({"printer_name": "shop"}) is None
-        assert monitor_twin.printer_model_at_start(None) is None
 
     def test_a_print_carried_on_keeps_the_model_it_started_with(self, twin_dir, tmp_path, setup):
         mesh, gcode = _make_files(tmp_path)
