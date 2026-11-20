@@ -961,19 +961,28 @@ def set_printer_model(
     printer_model: str,
     *,
     config_path: Path | None = None,
+    statement: dict[str, Any] | None = None,
 ) -> Path:
     """Record which catalogue model the saved printer *name* is.
 
-    Changes that one field of that one entry.  Raises :class:`ValueError`
+    Changes that one field of that one entry, and its owner's statement
+    (:data:`kiln.printer_model_check.STATEMENT_FIELD`): written when
+    *statement* is given, taken away otherwise.  Raises :class:`ValueError`
     when no printer of that name is saved.  Returns the path to the config
     file.
     """
+    from kiln.printer_model_check import STATEMENT_FIELD
+
     path = config_path or get_config_path()
     raw = _read_config_file(path)
     printers = raw.get("printers")
     if not isinstance(printers, dict) or not isinstance(printers.get(name), dict):
         raise ValueError(f"Printer {name!r} not found.")
     printers[name]["printer_model"] = printer_model
+    if statement is not None:
+        printers[name][STATEMENT_FIELD] = dict(statement)
+    else:
+        printers[name].pop(STATEMENT_FIELD, None)
     _write_config_file(path, raw)
     return path
 

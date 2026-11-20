@@ -69,7 +69,9 @@ Plan document (``schema: "motion_plan/1"``), the contract both sides pin:
 
 Requests name the machine: ``printer_id`` (catalogue model), ``serial``,
 ``verb``, ``axes``, ``on_plate_ok`` (the person's consent was given, so a
-Z home onto the plate may be planned).  Every function here returns
+Z home onto the plate may be planned), and ``upgrade`` only when the
+printer's owner has recorded an upgrade its maker sells for this machine
+(:func:`kiln.printer_model_check.stated_upgrade`).  Every function here returns
 ``None`` when nothing answers, so a caller branches on one value and
 never on an import.
 """
@@ -169,7 +171,12 @@ def _is_plan(doc: Any) -> bool:
 def _machine_request(adapter: Any, verb: str, axes: str, on_plate_ok: bool) -> dict[str, Any]:
     model = str(getattr(adapter, "_printer_model", "") or "").strip().lower()
     serial = str(getattr(adapter, "serial", "") or getattr(adapter, "_serial", "") or "").strip()
-    return {"printer_id": model, "serial": serial, "verb": verb, "axes": axes, "on_plate_ok": bool(on_plate_ok)}
+    request = {"printer_id": model, "serial": serial, "verb": verb, "axes": axes, "on_plate_ok": bool(on_plate_ok)}
+    from kiln.printer_model_check import stated_upgrade
+
+    if upgrade := stated_upgrade(adapter):
+        request["upgrade"] = upgrade
+    return request
 
 
 def _key(request: dict[str, Any]) -> tuple[str, str, str, str, bool]:
@@ -196,7 +203,7 @@ def plan_for(adapter: Any, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = 
     pro = _local_pro()
     if pro is not None and hasattr(pro, "build_plan"):
         try:
-            doc = pro.build_plan(**request)
+            doc = pro.build_plan(**{k: v for k, v in request.items() if k != "upgrade"})
             if _is_plan(doc):
                 return doc
         except Exception:  # noqa: BLE001 -- a local builder fault falls through to the service

@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "description": "Upgrades a printer's maker sells for one of its models, one row each, keyed by upgrade id. Read by kiln.printer_model_check.maker_upgrades.",
+    "fields": {
+      "name": "the upgrade as its maker names it, in a sentence",
+      "fitted_to": "the catalogue model it is fitted to",
+      "becomes": "the catalogue model the printer then is, when the maker's own software treats it as that model",
+      "adds": "what the printer then has, when it stays the same model (instead of becomes)",
+      "reports_itself": "true when the printer then reports the new model on the channel Kiln reads (its serial number or firmware name), false when it does not, null when that is not known",
+      "follows": "for slicing, limits and moves: \"becomes\" when Kiln uses the new model's records for it once the upgrade is fitted, \"fitted_to\" when it keeps the original model's"
+    }
+  },
+  "bambu_p1p_enclosure_kit": {
+    "name": "the Bambu Lab P1P Enclosure Kit",
+    "fitted_to": "bambu_p1p",
+    "becomes": "bambu_p1s",
+    "reports_itself": false,
+    "follows": {"slicing": "becomes", "limits": "becomes", "moves": "becomes"}
+  }
+}
