@@ -115,6 +115,7 @@ def _bg_block(kind: int, payload: bytes, *, deflate: bool) -> bytes:
 
 
 def _prusa_binary(tmp_path: Path) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     data = b"GCDE" + struct.pack("<IH", 1, 0)
     data += _bg_block(0, b"Producer=PrusaSlicer 2.9.4\n", deflate=False)
     settings = "\n".join(line.replace(" = ", "=", 1) for line in _prusa_settings_lines()).encode()
@@ -342,3 +343,78 @@ def test_a_learned_sentence_is_said_once(tmp_path, monkeypatch):
     second = {"record": {"learned": [sentence]}}
     sr.say_once(second)
     assert second["record"]["learned"] == []
+
+
+# ---------------------------------------------------------------------------
+# A crafted file never inflates past the cap
+# ---------------------------------------------------------------------------
+
+#: How much a crafted file inflates to: ten times the cap.
+BOMB_BYTES = 10 * sr._MAX_SETTINGS_BYTES
+
+
+def _read_in_a_fresh_process(path: Path) -> dict:
+    """Read *path* in a process of its own and say what it cost: the result,
+    the seconds and how much the process grew once a normal file had been
+    read first (so imports are not counted).  Bounded by a timeout, so a
+    reader that inflates without a cap fails here instead of hanging."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import json, resource, sys, time\n"
+        "from kiln import sliced_routines as sr\n"
+        "sr.read_routines(sys.argv[2])\n"
+        "before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
+        "t = time.monotonic()\n"
+        "read = sr.read_routines(sys.argv[1])\n"
+        "grew = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before\n"
+        "scale = 1 if sys.platform == 'darwin' else 1024\n"
+        "print(json.dumps({'read': read is not None, 'seconds': time.monotonic() - t, 'grew': grew * scale}))\n"
+    )
+    src = str(Path(sr.__file__).resolve().parents[1])
+    warm = _prusa_binary(path.parent / "warm")
+    done = subprocess.run([sys.executable, "-c", probe, str(path), str(warm)], capture_output=True, text=True,
+                          timeout=60,
+                          env={**__import__("os").environ, "PYTHONPATH": src})
+    assert done.returncode == 0, done.stderr[-2000:]
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+def _bomb_binary(tmp_path: Path, blocks: list[bytes]) -> Path:
+    data = b"GCDE" + struct.pack("<IH", 1, 0)
+    data += _bg_block(0, b"Producer=PrusaSlicer 2.9.4\n", deflate=False)
+    for block in blocks:
+        data += _bg_block(2, block, deflate=True)
+    path = tmp_path / "crafted.bgcode"
+    path.write_bytes(data)
+    return path
+
+
+class TestACraftedFileIsDroppedQuietly:
+    def test_a_settings_block_that_inflates_past_the_cap_is_dropped(self, tmp_path):
+        path = _bomb_binary(tmp_path, [b"end_gcode=" + b"G" * BOMB_BYTES])
+        assert path.stat().st_size < sr._MAX_SETTINGS_BYTES // 10
+        cost = _read_in_a_fresh_process(path)
+        assert cost["read"] is False
+        assert cost["grew"] < 4 * sr._MAX_SETTINGS_BYTES
+        assert cost["seconds"] < 5
+
+    def test_blocks_under_the_cap_one_by_one_stop_at_the_cap_together(self, tmp_path):
+        settings = "\n".join(line.replace(" = ", "=", 1) for line in _prusa_settings_lines()).encode()
+        chunk = b"x" * (sr._MAX_SETTINGS_BYTES // 2)
+        cost = _read_in_a_fresh_process(_bomb_binary(tmp_path, [chunk] * 20 + [settings]))
+        assert cost["read"] is False
+        assert cost["grew"] < 4 * sr._MAX_SETTINGS_BYTES
+
+    def test_a_package_settings_member_past_the_cap_is_dropped(self, tmp_path):
+        path = tmp_path / "crafted.gcode.3mf"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("Metadata/project_settings.config", b" " * BOMB_BYTES)
+            zf.writestr("Metadata/plate_1.gcode", "; BambuStudio 02.08.02.61\n")
+        cost = _read_in_a_fresh_process(path)
+        assert cost["read"] is False
+        assert cost["grew"] < 4 * sr._MAX_SETTINGS_BYTES
+
+    def test_a_normal_binary_file_still_reads(self, tmp_path):
+        assert _read_in_a_fresh_process(_prusa_binary(tmp_path))["read"] is True

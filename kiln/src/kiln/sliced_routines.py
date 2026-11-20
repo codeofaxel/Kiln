@@ -188,7 +188,12 @@ def _read_package(path: Path) -> tuple[str, str, dict[str, Any]] | None:
         info = zf.getinfo("Metadata/project_settings.config")
         if info.file_size > _MAX_SETTINGS_BYTES:
             return None
-        settings = json.loads(zf.read("Metadata/project_settings.config").decode("utf-8", errors="replace"))
+        # Read through a capped stream, whatever the member says its size is.
+        with zf.open(info) as fh:
+            raw = fh.read(_MAX_SETTINGS_BYTES + 1)
+        if len(raw) > _MAX_SETTINGS_BYTES:
+            return None
+        settings = json.loads(raw.decode("utf-8", errors="replace"))
         if not isinstance(settings, dict) or not settings:
             return None
         plate = next((n for n in sorted(names) if re.fullmatch(r"Metadata/plate_\d+\.gcode", n)), None)
@@ -218,6 +223,9 @@ def _read_binary(path: Path) -> tuple[str, str, dict[str, Any]] | None:
     pos = 10
     producer = ""
     settings: dict[str, Any] = {}
+    # Every block's text, inflated, adds up to at most the cap: a small
+    # crafted file must not inflate into gigabytes.
+    budget = _MAX_SETTINGS_BYTES
     while pos + 8 <= len(data):
         kind, compression, size = struct.unpack("<HHI", data[pos:pos + 8])
         pos += 8
@@ -232,7 +240,17 @@ def _read_binary(path: Path) -> tuple[str, str, dict[str, Any]] | None:
             break
         if kind not in (_BG_SLICER_META, _BG_FILE_META) or compression not in (_BG_PLAIN, _BG_DEFLATE):
             continue
-        text = (zlib.decompress(body) if compression == _BG_DEFLATE else body).decode("utf-8", errors="replace")
+        if compression == _BG_DEFLATE:
+            inflater = zlib.decompressobj()
+            raw = inflater.decompress(body, budget + 1)
+            if inflater.unconsumed_tail or len(raw) > budget:
+                return None
+        else:
+            raw = body
+        if len(raw) > budget:
+            return None
+        budget -= len(raw)
+        text = raw.decode("utf-8", errors="replace")
         for line in text.splitlines():
             key, sep, value = line.partition("=")
             if not sep:
