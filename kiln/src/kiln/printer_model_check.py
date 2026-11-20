@@ -293,6 +293,22 @@ def _serial_of(adapter: Any) -> str:
     return str(getattr(adapter, "serial", "") or getattr(adapter, "_serial", "") or "")
 
 
+def reported_row(adapter: Any) -> str | None:
+    """The catalogue model *adapter*'s machine names itself, from the report a move is held to, or ``None``.
+
+    Read the way :func:`move_refusal` reads it: only on a backend whose
+    report comes off the machine's own serial number or firmware name, and
+    only when that report names one catalogue model.  Never raises.
+    """
+    if not getattr(adapter, "_MODEL_REPORT_HOLDS_MOVES", False):
+        return None
+    try:
+        return _row(getattr(adapter.get_printer_info(), "model", None))
+    except Exception:  # noqa: BLE001 -- a report that cannot be read names nothing
+        logger.debug("printer model check: no report read", exc_info=True)
+        return None
+
+
 def stated_upgrade(adapter: Any) -> str:
     """The maker's upgrade the owner recorded for *adapter*'s machine, while it is set up as the model the upgrade makes it; else ``""``."""
     try:
@@ -408,6 +424,7 @@ __all__ = [
     "maker_upgrades",
     "move_refusal",
     "owner_statement",
+    "reported_row",
     "settle",
     "stated_upgrade",
     "statement_covers",

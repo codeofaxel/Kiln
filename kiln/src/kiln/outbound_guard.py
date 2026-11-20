@@ -161,6 +161,30 @@ def redact_text(text: str) -> str:
 #: The one key a link to a model's public listing page travels under.
 LISTING_LINK_KEY = "listing_url"
 
+#: Keys whose value is a name from one of Kiln's own lists, judged by key
+#: AND value like a listing link: it goes as it is only when it is on that
+#: list, and nowhere otherwise.  ``reported_model`` is the catalogue model a
+#: printer names itself, sent beside its serial number's one-way code;
+#: ``upgrade`` is an upgrade from Kiln's list of those a printer's maker
+#: sells.  Neither can carry a serial number, an address or free text.
+_LISTED_VALUE_KEYS = ("reported_model", "upgrade")
+
+
+def _listed_value(key: str, value: Any) -> str | None:
+    """*value* when it is a name on the list *key* is judged against, else ``None``."""
+    if not isinstance(value, str) or not value or len(value) > 80:
+        return None
+    try:
+        if key == "reported_model":
+            from kiln.motion_facts import catalogue_keys
+
+            return value if value in catalogue_keys() else None
+        from kiln.printer_model_check import maker_upgrades
+
+        return value if value in maker_upgrades() else None
+    except Exception:  # noqa: BLE001 -- a list that cannot be read lets nothing through
+        return None
+
 
 def is_listing_link(value: Any) -> bool:
     """Whether *value* is an https link to a public listing page on a site a
@@ -431,6 +455,11 @@ def scrub(value: Any, _depth: int = 0, *, version_keys: frozenset[str] = frozens
                 # as it is, anything else under this key goes nowhere.
                 if is_listing_link(item):
                     out[key] = item.strip()
+                continue
+            if name in _LISTED_VALUE_KEYS:
+                listed = _listed_value(name, item)
+                if listed is not None:
+                    out[key] = listed
                 continue
             if _IDENTITY.match(name):
                 out[key] = machine_code(item) if isinstance(item, (str, int)) and not isinstance(item, bool) else None

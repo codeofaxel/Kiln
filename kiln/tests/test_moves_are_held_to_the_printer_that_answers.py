@@ -696,3 +696,72 @@ def test_the_move_tools_carry_no_new_argument():
             assert not [p for p in params if "model" in p or "confirm" in p or "force" in p], (name, list(params))
 
 
+
+
+class TestWhatAPlanAskSends:
+    """The serial number leaves this computer only as a one-way code, so the ask
+    says which model the machine names itself, as a catalogue model id."""
+
+    @pytest.fixture
+    def wire(self, monkeypatch):
+        import json
+        import urllib.request
+
+        import kiln.server as srv
+        from kiln import _pro_motion_bridge as bridge
+
+        sent: list[dict] = []
+
+        class _Refused:
+            status = 200
+
+            def read(self):
+                return json.dumps({"status": "error", "code": CODE, "error": "no"}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: sent.append(json.loads(req.data)) or _Refused())
+        monkeypatch.setattr(srv, "_served_bearer", lambda: ("token", None))
+        monkeypatch.setattr(bridge, "_local_pro", lambda: None)
+        monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+        monkeypatch.setattr(bridge, "_misses", {})
+        return bridge, sent
+
+    def test_the_ask_names_the_model_and_carries_no_serial_number(self, bambu, wire):
+        bridge, sent = wire
+        bambu._serial, bambu._printer_model = X2D, "bambu_a1"
+        assert bridge.plan_for(bambu, "wipe", axes="XY") is None
+        body = sent[-1]
+        assert body["reported_model"] == "bambu_x2d" and body["printer_id"] == "bambu_a1"
+        assert body["serial"].startswith("id:") and X2D not in str(body)
+
+    def test_the_kit_rides_with_the_ask(self, bambu, wire, saved):
+        bridge, sent = wire
+        bambu._serial, bambu._printer_model = P1P, "bambu_p1s"
+        _owner_said(saved, serial=P1P, model="bambu_p1s", upgrade=KIT)
+        bridge.plan_for(bambu, "wipe", axes="XY")
+        assert (sent[-1]["reported_model"], sent[-1]["upgrade"]) == ("bambu_p1p", KIT)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"reported_model": X2D.lower()},
+            {"reported_model": "printer at 10.0.0.5"},
+            {"upgrade": "a kit nobody listed"},
+            {"upgrade": X2D},
+        ],
+    )
+    def test_the_guard_lets_only_a_listed_name_through_under_those_keys(self, body):
+        from kiln.outbound_guard import scrub
+
+        assert scrub(body) == {}
+
+    def test_listed_names_go_as_they_are(self):
+        from kiln.outbound_guard import scrub
+
+        body = {"reported_model": "bambu_x2d", "upgrade": KIT}
+        assert scrub(body) == body
