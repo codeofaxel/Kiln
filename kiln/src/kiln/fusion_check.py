@@ -241,12 +241,17 @@ def floating_pieces(triangles: Any) -> list[int]:
     )
 
 
-def judge_reading(triangles: Any, reading: Any) -> dict[str, Any]:
+def judge_reading(triangles: Any, reading: Any, *, clearances: bool = False) -> dict[str, Any]:
     """:func:`check_fusion`'s report on a triangle soup that
     :func:`kiln.mesh_bodies.read_triangles` already read as *reading*: bodies
     are numbered as the reading's pieces (from 1), and nothing is read twice.
     A plate of parts sits on the bed, so only the contact and air findings
-    are made (``expect_single_body=None``)."""
+    are made (``expect_single_body=None``).
+
+    With *clearances*, the report also carries ``clearances``: the separate
+    parts standing on the plate that sit a clearance apart
+    (:func:`_standing_clearances`).
+    """
     import trimesh
 
     tri = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
@@ -267,7 +272,76 @@ def judge_reading(triangles: Any, reading: Any) -> dict[str, Any]:
             vertices=own.reshape(-1, 3), faces=np.arange(len(own) * 3).reshape(-1, 3),
             process=True,
         ))
-    return _judge(bodies, list(reading.solid_of), expect_single_body=None, max_pairs=_MAX_PAIRS)
+    solid_of = list(reading.solid_of)
+    report = _judge(bodies, solid_of, expect_single_body=None, max_pairs=_MAX_PAIRS)
+    if clearances and report["solid_count"] >= 2:
+        report["clearances"] = _standing_clearances(bodies, solid_of, set(report["unheld_bodies"]))
+    return report
+
+
+def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int]) -> dict[str, Any]:
+    """The separate parts on the plate that stand a clearance apart: closer
+    than :data:`NEAR_GAP_MM` to one another without touching, as the gears in
+    a ring or a pin in its knuckles stand when printed in place.
+
+    Every piece of a solid that stands on the plate is measured against the
+    pieces of the other standing solids whose boxes come within that reach,
+    nearest first.  *unheld* are the pieces (from 1) in the air that nothing
+    holds up; they and a hollow part's inner walls are left out.  Returns
+    ``{"pairs": [{"bodies": [a, b], "gap_mm": g}, ...], "measured": n,
+    "candidates": m, "unmeasured": [...]}`` with bodies numbered from 1;
+    ``unmeasured`` are the bodies in a candidate pair past the pair budget,
+    or one that could not be measured, that no measured pair found a
+    clearance for.  The pair table's limits hold here too: past its body or
+    triangle count nothing is measured and the reading is ``skipped``.
+    """
+    triangles = sum(len(b.faces) for b in bodies)
+    if len(bodies) > _PAIR_TABLE_MAX_BODIES or triangles > _PAIR_TABLE_MAX_TRIANGLES:
+        return {"pairs": [], "measured": 0, "candidates": 0, "unmeasured": [], "skipped": True}
+    volumes = [_signed_volume(b) for b in bodies]
+    walls = {i for i, v in enumerate(volumes) if v < 0 and _within_bounds(bodies[i], bodies)}
+    standing = [i for i in range(len(bodies)) if i + 1 not in unheld and i not in walls]
+    boxes = {i: np.asarray(bodies[i].bounds, dtype=float) for i in standing}
+    reach = {
+        (a, b): _box_distance(boxes[a], boxes[b])
+        for n, a in enumerate(standing) for b in standing[n + 1:]
+        if solid_of[a] != solid_of[b]
+    }
+    candidates = sorted((pair for pair, d in reach.items() if d <= NEAR_GAP_MM), key=lambda p: (reach[p], p))
+    solids: dict[int, Any] = {}
+
+    def solid(i: int) -> Any:
+        if i not in solids:
+            solids[i] = _as_manifold(bodies[i])
+        return solids[i]
+
+    pairs: list[dict[str, Any]] = []
+    measured = 0
+    unread: set[int] = set()
+    for n, (a, b) in enumerate(candidates):
+        if n >= _PAIR_TABLE_MAX_PAIRS:
+            unread |= {a, b}
+            continue
+        try:
+            # Searched just past the reach: a pair further apart reads as the
+            # search distance, which is outside it.
+            _how, gap, _shared = pair_reading(
+                solid(a), solid(b), bodies[a], bodies[b], search_mm=NEAR_GAP_MM + 0.1,
+            )
+        except Exception as exc:  # noqa: BLE001 — unmeasured, never invented
+            _logger.debug("clearance between bodies %s and %s not measured: %s", a + 1, b + 1, exc)
+            unread |= {a, b}
+            continue
+        measured += 1
+        if TOUCH_GAP_MM < gap <= NEAR_GAP_MM:
+            pairs.append({"bodies": [a + 1, b + 1], "gap_mm": round(gap, 3)})
+    spaced = {body - 1 for pair in pairs for body in pair["bodies"]}
+    return {
+        "pairs": pairs,
+        "measured": measured,
+        "candidates": len(candidates),
+        "unmeasured": sorted(i + 1 for i in unread - spaced),
+    }
 
 
 def _judge(

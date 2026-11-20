@@ -8796,18 +8796,178 @@ def _size_said(size: list[float]) -> str:
     return " x ".join(_mm_said(v) for v in size) + " mm"
 
 
-def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) -> PiecesAnalysis | None:
+#: The share of a separate part's triangles that must carry one label in the
+#: file's motion note for the part to take that label: a part the note covers
+#: only here and there is not read as moving.
+_MOTION_LABEL_SHARE = 0.9
+
+
+@dataclass(frozen=True)
+class _MotionOnRecord:
+    """A file's motion note laid onto its triangles: which of them belong to
+    a part of the motion (*member*), which belong to a part that moves
+    (*moving*), and which the note could be matched to at all (*labelled*),
+    each aligned with the triangles the pieces were read from."""
+
+    member: np.ndarray
+    moving: np.ndarray
+    labelled: np.ndarray
+
+
+def _corner_key(triangle: Any) -> tuple[tuple[float, ...], ...]:
+    """*triangle* starting at its lowest corner (by x, then y, then z) with
+    its winding kept: the same triangle in any file order and from any
+    starting corner gives the same key."""
+    corners = [tuple(float(v) for v in corner) for corner in triangle]
+    start = min(range(len(corners)), key=lambda k: corners[k])
+    return tuple(corners[start:] + corners[:start])
+
+
+def _motion_runs(file_path: str, count: int) -> tuple[np.ndarray, np.ndarray] | None:
+    """``(member, moving)`` over the file's own *count* triangles in the
+    file's order, from the motion notes bound to its bytes
+    (:func:`kiln.mechanism_stage.block_for`, :func:`kiln.joint_stage.stage_block`),
+    or ``None`` when neither note is there or fits the file."""
+    from kiln import joint_stage, mechanism_stage
+
+    member = np.zeros(count, dtype=bool)
+    moving = np.zeros(count, dtype=bool)
+    found = False
+
+    def lay(mask: np.ndarray, spans: Any) -> None:
+        for first, length in spans:
+            first, length = int(first), int(length)
+            if first < 0 or length <= 0 or first + length > count:
+                raise ValueError("a run of triangles past the end of the file")
+            mask[first:first + length] = True
+
+    mechanism = mechanism_stage.block_for(file_path)
+    if mechanism is not None:
+        try:
+            mine_member, mine_moving = member.copy(), moving.copy()
+            moves = {str(name) for name in mechanism.get("moving_parts") or ()}
+            for name, part in (mechanism.get("parts") or {}).items():
+                spans = part.get("spans") or ()
+                lay(mine_member, spans)
+                if str(name) in moves:
+                    lay(mine_moving, spans)
+            member, moving, found = mine_member, mine_moving, True
+        except (AttributeError, TypeError, ValueError):
+            logger.debug("the mechanism note beside %s does not fit the file", file_path, exc_info=True)
+    joints = joint_stage.stage_block(file_path)
+    if joints is not None:
+        try:
+            total = joints.get("total_triangles")
+            if total is not None and int(total) != count:
+                raise ValueError("the joints note counts another number of triangles")
+            mine_moving = moving.copy()
+            for joint in joints.get("joints") or ():
+                lay(mine_moving, (joint.get("moving") or {}).get("spans") or ())
+            # A joints note is written beside a composed assembly: every
+            # part in the file is a part of its motion.
+            member, moving, found = np.ones(count, dtype=bool), mine_moving, True
+        except (AttributeError, TypeError, ValueError):
+            logger.debug("the joints note beside %s does not fit the file", file_path, exc_info=True)
+    return (member, moving) if found else None
+
+
+def _motion_on_record(file_path: str, triangles: list[tuple[tuple[float, ...], ...]]) -> _MotionOnRecord | None:
+    """The motion note beside *file_path*, bound to its bytes, laid onto
+    *triangles*: the file's triangles as the pieces were read from them, in
+    whatever order that reading holds them.  A note names runs of triangles
+    in the file's own order, so each triangle is matched by its corners.
+    ``None`` when the file carries no motion note, the note does not fit
+    the file, or no triangle matches.  Never raises: a note that cannot be
+    read changes nothing that is said."""
+    try:
+        from kiln import joint_stage, mechanism_stage
+
+        if not (Path(joint_stage.note_path_for(file_path)).is_file()
+                or Path(mechanism_stage.note_path_for(file_path)).is_file()):
+            return None
+        written, _vertices = _parse_mesh_file(Path(file_path), [])
+        runs = _motion_runs(file_path, len(written))
+        if runs is None:
+            return None
+        member, moving = runs
+        missing = object()
+        flags: dict[tuple[tuple[float, ...], ...], Any] = {}
+        for triangle, is_member, is_moving in zip(written, member.tolist(), moving.tolist(), strict=True):
+            key = _corner_key(triangle)
+            held = flags.get(key, missing)
+            if held is missing:
+                flags[key] = (is_member, is_moving)
+            elif held != (is_member, is_moving):
+                flags[key] = None  # one triangle named two ways: matched to neither
+        n = len(triangles)
+        on_member = np.zeros(n, dtype=bool)
+        on_moving = np.zeros(n, dtype=bool)
+        labelled = np.zeros(n, dtype=bool)
+        for i, triangle in enumerate(triangles):
+            held = flags.get(_corner_key(triangle))
+            if held:
+                labelled[i] = True
+                on_member[i], on_moving[i] = held
+        if not labelled.any():
+            return None
+        return _MotionOnRecord(member=on_member, moving=on_moving, labelled=labelled)
+    except Exception:  # noqa: BLE001 -- an unreadable note says nothing
+        logger.debug("motion note beside %s not read", file_path, exc_info=True)
+        return None
+
+
+def _moves_apart(reading: Any, solid_of: list[int], motion: _MotionOnRecord | None) -> Callable[[int, int], bool]:
+    """Whether the file's motion note has two separate parts (by solid)
+    moving against each other: both are parts of the motion and at least
+    one of them moves.  A part takes a label only when nearly all of its
+    triangles the note was matched to carry it (:data:`_MOTION_LABEL_SHARE`).
+    Answers no for every pair when there is no note."""
+
+    def never(_a: int, _b: int) -> bool:
+        return False
+
+    if motion is None:
+        return never
+    face_piece = np.asarray(getattr(reading, "face_piece", ()), dtype=np.int64)
+    if len(face_piece) != len(motion.labelled) or not solid_of:
+        return never
+    live = (face_piece >= 0) & motion.labelled
+    if not live.any():
+        return never
+    solids = np.asarray(solid_of, dtype=np.int64)[face_piece[live]]
+    counted = np.bincount(solids, minlength=max(solid_of) + 1).astype(float)
+    shares = np.maximum(counted, 1.0)
+    member_share = np.bincount(solids, weights=motion.member[live].astype(float), minlength=len(counted)) / shares
+    moving_share = np.bincount(solids, weights=motion.moving[live].astype(float), minlength=len(counted)) / shares
+    member = {s for s in range(len(counted)) if counted[s] and member_share[s] >= _MOTION_LABEL_SHARE}
+    moving = {s for s in member if moving_share[s] >= _MOTION_LABEL_SHARE}
+
+    def moves_apart(a: int, b: int) -> bool:
+        return a != b and a in member and b in member and (a in moving or b in moving)
+
+    return moves_apart
+
+
+def _judge_pieces(
+    triangles: list[tuple[tuple[float, ...], ...]], reading: Any, *, motion: Any = None,
+) -> PiecesAnalysis | None:
     """Whether *reading*'s pieces print as one solid, which separate parts
     they make and which of them float (:class:`PiecesAnalysis`).
 
     Pieces in the air are judged as :mod:`kiln.fusion_check` judges them,
     and said in its words, so the make doors that refuse a floating piece
-    and this report name the same pieces.  ``None`` when the mesh has no
-    pieces to read.
+    and this report name the same pieces.  Separate parts on the plate that
+    stand a clearance apart print in place together, and are said so, never
+    told to be joined.  Where the file's motion note (*motion*, from
+    :func:`_motion_on_record`) has two parts a clearance apart moving against
+    each other, the gap between them is said as the gap moving parts need,
+    with no suggestion that they were meant to be one solid.  ``None`` when
+    the mesh has no pieces to read.
     """
     if reading is None or reading.piece_count == 0:
         return None
     solid_of = list(reading.solid_of) or list(range(reading.piece_count))
+    moves_apart = _moves_apart(reading, solid_of, motion)
     lows: dict[int, np.ndarray] = {}
     highs: dict[int, np.ndarray] = {}
     for piece, solid in zip(reading.pieces, solid_of, strict=True):
@@ -8827,7 +8987,7 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     from kiln.fusion_check import judge_reading
 
     try:
-        fusion = judge_reading(triangles, reading)
+        fusion = judge_reading(triangles, reading, clearances=True)
     except Exception:  # noqa: BLE001 -- the parts are still counted; the air goes unjudged
         logger.debug("pieces in the air unjudged", exc_info=True)
         block.note = f"It prints as {block.solid_count} separate parts, not one."
@@ -8844,34 +9004,31 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     standing = [s for s in largest_first if s not in in_air]
     said: list[str] = []
     if len(standing) >= 2:
-        largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
-        across = [max(size[0], size[1]) for size in rest]
-        if len(rest) == 1:
-            others = f"and one {_size_said(rest[0])}"
-        elif max(across) - min(across) < 0.05:
-            others = f"and {len(rest)} more, each {_mm_said(min(across))} mm across"
-        else:
-            others = f"and {len(rest)} more, {_mm_said(min(across))} to {_mm_said(max(across))} mm across"
-        said.append(
-            f"It prints as {len(standing)} separate parts on the plate, not one: the largest is "
-            f"{_size_said(largest)} {others}, and each comes off the plate on its own. "
-            "If they belong together, join them so they overlap."
-        )
+        said.append(_standing_said(standing, size_of, fusion.get("clearances"), solid_of, moves_apart))
     # The pieces in the air that do print, by how the fusion check found
     # them: resting on the part, a clearance away from it, held inside it.
     resting: set[int] = set()
     close: set[int] = set()
+    close_moving: set[int] = set()
     for finding in findings:
-        named = unheld & set(finding.get("bodies") or [])
+        bodies = list(finding.get("bodies") or [])
+        named = unheld & set(bodies)
         if finding.get("relation") == "touching":
             resting |= named
         elif finding.get("relation") == "near":
-            close |= named
+            pair = [solid_of[body - 1] for body in bodies if 0 < body <= len(solid_of)]
+            if len(pair) == 2 and moves_apart(pair[0], pair[1]):
+                close_moving |= named
+            else:
+                close |= named
     close -= resting
+    close_moving -= resting | close
     if resting:
         said.append(_in_the_air_said(len(resting), resting=True))
     if close:
         said.append(_in_the_air_said(len(close), resting=False))
+    if close_moving:
+        said.append(_in_the_air_said(len(close_moving), resting=False, moving=True))
     captive = next((f for f in findings if f.get("relation") == "captive"), None)
     if captive is not None:
         said.append(str(captive["message"]))
@@ -8879,9 +9036,120 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     return block
 
 
-def _in_the_air_said(count: int, *, resting: bool) -> str:
+def _standing_said(
+    standing: list[int],
+    size_of: dict[int, list[float]],
+    clearances: dict[str, Any] | None,
+    solid_of: list[int],
+    moves_apart: Callable[[int, int], bool] = lambda _a, _b: False,
+) -> str:
+    """What is said of the separate parts standing on the plate (*standing*,
+    largest first): their sizes, then that the ones a clearance apart
+    (:func:`kiln.fusion_check.judge_reading`'s *clearances*) print in place
+    together, and that the rest each come off the plate on their own.  A
+    pair *moves_apart* says moves against each other is said as moving
+    parts, and only the others are asked whether they were meant to be one
+    solid."""
+    from kiln.fusion_check import embedment_floor_mm
+
+    largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
+    across = [max(size[0], size[1]) for size in rest]
+    if len(rest) == 1:
+        others = f"and one {_size_said(rest[0])}"
+    elif max(across) - min(across) < 0.05:
+        others = f"and {len(rest)} more, each {_mm_said(min(across))} mm across"
+    else:
+        others = f"and {len(rest)} more, {_mm_said(min(across))} to {_mm_said(max(across))} mm across"
+    parts = (
+        f"It prints as {len(standing)} separate parts on the plate, not one: the largest is "
+        f"{_size_said(largest)} {others}"
+    )
+    reading = clearances or {}
+    if reading.get("skipped"):
+        return (
+            f"{parts}. The gaps between them were not measured, as the mesh is past what this check reads; "
+            "any that are meant to be one solid have to overlap."
+        )
+    moving: set[int] = set()
+    still: set[int] = set()
+    moving_gaps: list[float] = []
+    still_gaps: list[float] = []
+    for pair in reading.get("pairs") or []:
+        a, b = (solid_of[body - 1] for body in pair["bodies"])
+        if moves_apart(a, b):
+            moving |= {a, b}
+            moving_gaps.append(float(pair["gap_mm"]))
+        else:
+            still |= {a, b}
+            still_gaps.append(float(pair["gap_mm"]))
+    still -= moving
+    spaced = moving | still
+    unread = {solid_of[body - 1] for body in reading.get("unmeasured") or []} - spaced
+    near = [s for s in standing if s in spaced]
+    unknown = [s for s in standing if s in unread]
+    if unknown:
+        one = len(unknown) == 1
+        not_measured = (
+            f" {len(unknown)} of them {'stands' if one else 'stand'} close to another part, and "
+            f"{'the gap was' if one else 'the gaps were'} not measured."
+        )
+    else:
+        not_measured = ""
+    if not near and not unknown:
+        return f"{parts}, and each comes off the plate on its own. If they belong together, join them so they overlap."
+    if near:
+        floor = embedment_floor_mm()
+        sentences = []
+        moving_near = [s for s in standing if s in moving]
+        still_near = [s for s in standing if s in still]
+        if moving_near:
+            who = "They" if len(moving_near) == len(standing) else f"{len(moving_near)} of them"
+            sentences.append(
+                f"{who} stand {_gaps_said(moving_gaps)} apart without touching, so they print in place "
+                "together with nothing joining them, the way parts that move have to."
+            )
+            if still_gaps:
+                # Said by the gap, not by the part: a part that moves against
+                # one neighbour can stand still beside another.
+                sentences.append(
+                    f"Other parts stand {_gaps_said(still_gaps)} apart with nothing joining them: fine for a "
+                    "designed clearance. If they were meant to be one solid, sink them at least "
+                    f"{floor:g} mm into each other."
+                )
+        else:
+            who = "They" if len(still_near) == len(standing) else f"{len(still_near)} of them"
+            sentences.append(
+                f"{who} stand {_gaps_said(still_gaps)} apart without touching, so they print in place together "
+                "with nothing joining them: fine for a designed clearance. If they were meant to be one solid, "
+                f"sink them at least {floor:g} mm into each other."
+            )
+        said = f"{parts}. {' '.join(sentences)}{not_measured}"
+    else:
+        said = f"{parts}.{not_measured} Any that are meant to be one solid have to overlap."
+    loose = len(standing) - len(near) - len(unknown)
+    if loose == 1:
+        return f"{said} The other one comes off the plate on its own; if it belongs with them, join it so they overlap."
+    if loose:
+        return (
+            f"{said} The other {loose} each come off the plate on their own; "
+            "if they belong together, join them so they overlap."
+        )
+    return said
+
+
+def _gaps_said(gaps: list[float]) -> str:
+    def said(value: float) -> str:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    low, high = said(min(gaps)), said(max(gaps))
+    return f"{low} mm" if low == high else f"{low} to {high} mm"
+
+
+def _in_the_air_said(count: int, *, resting: bool, moving: bool = False) -> str:
     """What is said of *count* pieces off the plate that rest on the part
-    without being joined to it (*resting*), or sit a clearance away from it."""
+    without being joined to it (*resting*), or sit a clearance away from it,
+    as parts that move against it (*moving*) or as pieces that may have been
+    meant to be one solid with it."""
     from kiln.fusion_check import NEAR_GAP_MM, embedment_floor_mm
 
     one = count == 1
@@ -8897,10 +9165,19 @@ def _in_the_air_said(count: int, *, resting: bool) -> str:
             f"most. {sink}"
         )
     sit = "sits" if one else "sit"
+    if moving:
+        return (
+            f"{pieces} {sit} less than {NEAR_GAP_MM:g} mm from the part, joined to nothing, "
+            f"so {they} {'prints' if one else 'print'} loose on it, the way parts that move have to."
+        )
+    meant = (
+        f"If {they} {'was' if one else 'were'} meant to be one solid with the part, "
+        f"sink {them} at least {embedment_floor_mm():g} mm into it."
+    )
     return (
         f"{pieces} {sit} less than {NEAR_GAP_MM:g} mm from the part, joined to nothing, "
         f"so {they} {'prints' if one else 'print'} loose on it: fine for a designed "
-        f"clearance. {sink}"
+        f"clearance. {meant}"
     )
 
 
@@ -9059,7 +9336,8 @@ def _analyze_printability_here(
     else:
         repeated = None
     # Which separate parts those pieces print as, and which float.
-    parts = _judge_pieces(parsed, pieces)
+    motion = _motion_on_record(file_path, once) if pieces is not None else None
+    parts = _judge_pieces(parsed, pieces, motion=motion)
     triangles, vertices, bbox, z_min = _prepare_parsed(parsed, parsed_vertices, repeated=repeated)
     del parsed, parsed_vertices
 
