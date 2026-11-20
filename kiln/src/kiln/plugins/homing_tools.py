@@ -105,8 +105,9 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
 
 def _learn(adapter: Any, action: str) -> dict[str, Any]:
     """The one offer of a lesson that can teach what refused *action*
-    (:func:`kiln.bench.offer_fields`), or ``{}``: a home or a park is a
-    sequence for the printer to run, which no lesson teaches."""
+    (:func:`kiln.bench.offer_fields`), or ``{}``: a home or a park is
+    offered as a walk only when Kiln has one on offer for this printer and
+    move; otherwise the refusal stands as it is."""
     from kiln import bench
 
     return bench.offer_fields(adapter, [action], "motion_refusal")

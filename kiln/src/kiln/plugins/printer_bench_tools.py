@@ -33,6 +33,12 @@ offered after the first lesson, or when the first has nothing to teach, and
 ``lesson="limits"`` starts it on its own.  It needs a free Kiln account,
 where the test print and the readings are kept.
 
+A third lesson learns a home or a park with the person, on a printer Kiln
+cannot yet home or park itself (:mod:`kiln.printers.motion_walk`): one small
+step at a time, each sent only after the person says the one before did what
+Kiln said it would.  The refusal that offers it does so only when Kiln has a
+walk on offer for that printer and move; ``lesson="walk"`` starts it.
+
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins`.
 """
 
@@ -283,7 +289,8 @@ def _reply(session: dict[str, Any], ask: str, *, pictures: list[dict[str, Any] |
     out: dict[str, Any] = {
         "success": True, "printer_name": session["printer_name"], "step": session["step"], "ask": ask,
         "options": options or [], "waiting": waiting,
-        "learned": list(session.get("learned") or []) if session.get("lesson") == LIMITS else sorted(session["observed"]),
+        "learned": (list(session.get("learned") or []) if session.get("lesson") in (LIMITS, WALK)
+                    else sorted(session["observed"])),
         "images": shown,
         "next": (f"Call printer_bench again in about {int(CHECK_AGAIN_S)} seconds.") if waiting
         else "Relay the ask word for word, show the picture, and call printer_bench again with the person's answer.",
@@ -574,6 +581,7 @@ def printer_bench(
     restart: bool = False,
     lesson: str | None = None,
     gcode_paths: list[str] | None = None,
+    move: str | None = None,
 ) -> dict[str, Any] | list[Any]:
     """Help Kiln get to know your printer in a few minutes: a guided session, one ask at a time.
 
@@ -609,15 +617,26 @@ def printer_bench(
     anything), then print each plate as ``how_to_start`` says.  It needs a
     free Kiln account, where the test print and the readings are kept.
 
+    A third lesson learns a home or a park with the person, one small step
+    at a time, on a printer Kiln cannot yet home or park itself.  A refusal
+    from ``home_axes`` or ``park_head`` offers it only when Kiln has one on
+    offer for that printer; ``lesson="walk"`` with ``move`` starts it.  Kiln
+    sends one step, says what the person should see, and sends the next only
+    after the person says the printer did exactly that.  The printer stays
+    cold, and its own stop, pause and power switch work at every moment.  It
+    needs a free Kiln account, and is the same on every plan.
+
     Args:
         printer_name: Which printer.  Omit for the default one.
         answer: The person's answer to the previous ask, verbatim.
         restart: Begin again from the first ask.
-        lesson: ``"motion"`` (how the printer moves its head) or
-            ``"limits"`` (what it can really print).  Omit to start or
-            resume whichever is due.
+        lesson: ``"motion"`` (how the printer moves its head),
+            ``"limits"`` (what it can really print) or ``"walk"`` (a home
+            or a park learned with the person, one step at a time).  Omit
+            to start or resume whichever is due.
         gcode_paths: The second lesson's sliced files, one per plate, in
             plate order, when its reply asks for them.
+        move: ``"home"`` or ``"park"``: the move a walk learns.
 
     Returns the next ask, or ``done`` with what Kiln learned and the payoff
     line.
@@ -638,11 +657,26 @@ def printer_bench(
             return _srv._error_dict("This printer has no durable identity (no serial or address), so a session cannot be kept for it.",
                                     code="BENCH_NO_IDENTITY")
         wanted = str(lesson or "").strip().lower() or None
-        if wanted not in (None, MOTION, LIMITS):
-            return _srv._error_dict("lesson must be 'motion' or 'limits', or left out.", code="INVALID_ARGS")
+        moving = str(move or "").strip().lower() or None
+        if wanted is None and moving is not None:
+            wanted = WALK
+        if wanted not in (None, MOTION, LIMITS, WALK):
+            return _srv._error_dict("lesson must be 'motion', 'limits' or 'walk', or left out.", code="INVALID_ARGS")
+        if wanted == WALK and moving is not None and moving not in _walk_verbs():
+            return _srv._error_dict("A walk is for a home or a park: move must be 'home' or 'park'.",
+                                    code="INVALID_ARGS")
         session = None if restart else _load_session(unit)
         if session is not None and wanted and session.get("lesson", MOTION) != wanted:
             session = None
+        if session is not None and wanted == WALK and moving is not None and session.get("move") != moving:
+            session = None
+        if session is None and wanted == WALK:
+            if moving is None:
+                return _srv._error_dict("A walk is for a home or a park: say which with move='home' or move='park'.",
+                                        code="INVALID_ARGS")
+            session = _walk_session(target_name, adapter, unit, moving)
+            if session is None:
+                return _walk_not_on_offer(target_name, adapter, moving)
         if session is None and wanted == LIMITS:
             session = _limits_session(target_name, adapter, unit, plate_state.declared_model_of(adapter))
             if session is None:
@@ -716,6 +750,8 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
 
     if session.get("lesson") == LIMITS:
         return _advance_limits(session, adapter, answer, gcode_paths)
+    if session.get("lesson") == WALK:
+        return _advance_walk(session, adapter, answer)
     step = session["step"]
     name = session["printer_name"]
 
@@ -1065,9 +1101,10 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
 # The second lesson: what this printer can really print
 # ---------------------------------------------------------------------------
 
-#: The two lessons a session can be.
+#: The lessons a session can be.
 MOTION = bench.MOTION
 LIMITS = bench.LIMITS
+WALK = bench.WALK
 #: The test print the second lesson starts with; Kiln's servers name the other.
 FIRST_COUPON = "angles_and_spans"
 _MATERIAL_OPTIONS = ["PLA", "PETG", "ABS", "ASA", "TPU"]
@@ -1517,6 +1554,214 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
         session["coupon"] = session.pop("next_coupon")
         session["step"] = "limits_make"
         return _advance_limits(session, adapter, None, None)
+
+    return _reply(session, f"Kiln lost its place at step {step!r}; call printer_bench with restart=true to begin again.")
+
+
+# ---------------------------------------------------------------------------
+# The third lesson: a home or a park, learned with the person one step at a time
+# ---------------------------------------------------------------------------
+
+#: What the printer does in each move, as the end of "how your <printer> ...".
+_WALK_DOES = {"home": "homes", "park": "parks its head"}
+_TRY_AGAIN = {"try again", "again", "retry"}
+
+
+def _walk_verbs() -> tuple[str, ...]:
+    from kiln.printers.motion_walk import WALK_VERBS
+
+    return WALK_VERBS
+
+
+def _said(text: Any) -> str:
+    """*text* as a sentence: trimmed, ending in a full stop."""
+    said = " ".join(str(text or "").split())
+    return said if not said or said[-1] in ".!?" else f"{said}."
+
+
+def _walk_model(adapter: Any, name: str) -> str:
+    from kiln import plate_state
+
+    printer_id = plate_state.declared_model_of(adapter)
+    return bench._display_name(printer_id) if printer_id else name
+
+
+def _walk_session(name: str, adapter: Any, unit: str, move: str) -> dict[str, Any] | None:
+    """A new walk of *move*, or ``None`` when Kiln has none on offer for this
+    printer and move."""
+    from kiln import plate_state
+    from kiln.printers.motion_walk import walk_offer
+
+    offered = walk_offer(adapter, move)
+    if offered.get("offered") is not True:
+        return None
+    return {
+        "lesson": WALK, "move": move, "printer_name": name, "unit": unit,
+        "printer_id": plate_state.declared_model_of(adapter) or "", "model_name": _walk_model(adapter, name),
+        "steps_total": int(offered.get("steps_total") or 0), "step": "walk_intro", "next_n": 1,
+        "observed": {}, "learned": [], "started_at": bench._now(),
+    }
+
+
+def _walk_not_on_offer(name: str, adapter: Any, move: str) -> dict[str, Any]:
+    """Nothing to start: said as a plain answer, never as an error."""
+    return {
+        "success": True, "step": "not_on_offer", "lesson": WALK, "move": move, "printer_name": name,
+        "ask": "", "images": [], "learned": [],
+        "message": (f"Kiln has no step-by-step {bench.WALK_MOVE_WORDS[move]} on offer for your "
+                    f"{_walk_model(adapter, name)} right now, so there is nothing to start. Printing is not affected."),
+    }
+
+
+def _walk_intro(session: dict[str, Any]) -> str:
+    total = int(session.get("steps_total") or 0)
+    steps = f" It takes {total} small steps." if total > 1 else ""
+    return (f"Kiln can learn how your {session['model_name']} {_WALK_DOES[session['move']]} with you, one small step "
+            "at a time: it sends one small move, tells you what you should see, and sends the next only after you say "
+            "the printer did exactly that. The printer stays cold the whole time, nothing heats or extrudes, and its "
+            f"own stop, pause and power switch work at every moment.{steps} Ready?")
+
+
+def _walk_again(session: dict[str, Any]) -> str:
+    return (f"Call printer_bench with lesson=\"walk\" and move=\"{session['move']}\" to start again from the first "
+            "step whenever you are at the printer.")
+
+
+def _walk_ended(session: dict[str, Any], step: str, message: str, **extra: Any) -> dict[str, Any]:
+    _end_session(session)
+    return {"success": True, "step": step, "lesson": WALK, "move": session["move"],
+            "printer_name": session["printer_name"], "ask": "", "images": [],
+            "learned": list(session.get("learned") or []), "message": message, **extra}
+
+
+def _walk_confirm_ask(session: dict[str, Any]) -> str:
+    shown = session["shown"]
+    n, total = int(session["sent_n"]), int(session["steps_total"])
+    text = f"Step {n} of {total}, {shown['label']}: {_said(shown['you_should_see'])}"
+    if shown.get("stops_when"):
+        stops = _said(shown["stops_when"])
+        text += f" It stops when {stops[:1].lower() + stops[1:]}"
+    text += f" {_said(shown['confirm'])}"
+    if n < total:
+        upcoming = f", {shown['next_label']}" if shown.get("next_label") else ""
+        return text + f" Say yes and Kiln sends step {n + 1}{upcoming}; say no and the walk stops here."
+    return text + " That was the last step: say yes if it did, or no if it did not."
+
+
+def _walk_send(session: dict[str, Any], adapter: Any, number: int) -> dict[str, Any]:
+    """Send step *number* on the person's word, and ask whether it did what
+    Kiln said.  Nothing is sent while the printer's emergency stop is latched."""
+    import kiln.server as _srv
+    from kiln.printers.base import PrinterError
+    from kiln.printers.motion_walk import WalkRefused, walk_step
+
+    name, move = session["printer_name"], session["move"]
+    if block := _srv._emergency_latch_error("printer_bench", name):
+        _save_session(session)
+        return block
+    try:
+        sent = walk_step(adapter, move, number, plate_clear=True, saw_previous=number > 1)
+    except WalkRefused as refused:
+        if refused.code == "STEP_OUT_OF_ORDER":
+            session.update(step="walk_plate", next_n=1)
+            return _reply(session, f"{_said(refused)} Is the plate still empty? When you say yes, Kiln sends the "
+                          "first step again.", options=["yes", "later"], refused=refused.code)
+        session.update(step="walk_retry", next_n=number, refusal=_said(refused))
+        return _reply(session, f"{_said(refused)} Say try again when that is sorted, or later.",
+                      options=["try again", "later"], refused=refused.code)
+    except PrinterError as exc:
+        session.update(step="walk_retry", next_n=number, refusal=f"Kiln could not finish step {number}: {_said(exc)}")
+        return _reply(session, f"{session['refusal']} Say try again when that is sorted, or later.",
+                      options=["try again", "later"])
+    if not sent.get("success"):
+        code = str(sent.get("error_code") or "")
+        what = (f"The printer refused step {number}" if code == "rejected"
+                else f"The printer reported a fault ({code}) during step {number}")
+        told = " Kiln was told what happened." if sent.get("reported") else " Kiln could not tell its servers just now."
+        return _walk_ended(session, "stopped", f"{what}, so the walk stops here and Kiln sends nothing more. Use the "
+                           f"printer's own controls from here.{told}", fault=code, reported=bool(sent.get("reported")))
+    upcoming = sent.get("next_step") if isinstance(sent.get("next_step"), dict) else {}
+    session.update(step="walk_confirm", sent_n=number, steps_total=int(sent["steps_total"]), shown={
+        "label": sent["label"], "you_should_see": sent["you_should_see"], "stops_when": sent["stops_when"],
+        "confirm": sent["confirm"] or "Did it do that?", "next_label": str(upcoming.get("label") or ""),
+    })
+    return _reply(session, _walk_confirm_ask(session), options=["yes", "no"], stop=sent["stop"], if_not=sent["if_not"])
+
+
+def _advance_walk(session: dict[str, Any], adapter: Any, answer: Any) -> dict[str, Any]:  # noqa: C901 -- one step per branch
+    from kiln import plate_state
+    from kiln.printers.motion_walk import walk_went_wrong
+
+    step = session["step"]
+    move = session["move"]
+    word = bench.WALK_MOVE_WORDS[move]
+
+    # ---- the offer -------------------------------------------------------------
+    if step == "walk_intro":
+        if answer is None or not (_is_yes(answer) or _is_later(answer) or _is_no(answer)):
+            return _reply(session, _walk_intro(session), options=["yes", "later", "no"])
+        if _is_later(answer):
+            bench.note_offer(bench.walk_key(session["unit"], move), answer="later")
+            bench.count("later", WALK)
+            return _walk_ended(session, "later", f"No problem. Call printer_bench with lesson=\"walk\" and "
+                               f"move=\"{move}\" whenever you are at the printer; Kiln won't bring it up again on "
+                               "its own.")
+        if _is_no(answer):
+            bench.note_offer(bench.walk_key(session["unit"], move), answer="declined")
+            bench.count("declined", WALK)
+            return _walk_ended(session, "declined", f"Understood. Kiln won't offer to learn the {word} on this printer "
+                               "again.")
+        bench.note_offer(bench.walk_key(session["unit"], move))
+        bench.count("started", WALK)
+        session["step"] = step = "walk_plate"
+        answer = None
+
+    # ---- the plate, before the first step ----------------------------------------
+    if step == "walk_plate":
+        if answer is not None and _is_later(answer):
+            return _walk_ended(session, "later", "No problem; nothing was sent. " + _walk_again(session))
+        if answer is None:
+            return _reply(session, "Is the plate completely empty? Take everything off it first. When you say yes, "
+                          "Kiln sends the first step.", pictures=[_camera_frame(adapter)], options=["yes", "no"])
+        if not _is_yes(answer):
+            return _reply(session, "Take everything off the plate and tell me when it's empty. When you do, Kiln "
+                          "sends the first step.", options=["it's empty"])
+        plate_state.mark_clear(adapter, "human", note="walk: the owner says the plate is empty")
+        return _walk_send(session, adapter, int(session.get("next_n") or 1))
+
+    # ---- after a step: did it do what Kiln said? ----------------------------------
+    if step == "walk_confirm":
+        number, total = int(session["sent_n"]), int(session["steps_total"])
+        if answer is not None and _is_later(answer):
+            return _walk_ended(session, "later", f"Stopped after step {number} of {total}; Kiln sends nothing more. "
+                               + _walk_again(session))
+        if answer is not None and _is_no(answer):
+            went = walk_went_wrong(adapter, move, number)
+            told = " Kiln was told what happened." if went.get("reported") else " Kiln could not tell its servers just now."
+            return _walk_ended(session, "stopped", f"Thank you for saying so. The walk stops at step {number} and "
+                               f"Kiln sends nothing more. Use the printer's own controls from here.{told}",
+                               reported=bool(went.get("reported")))
+        if answer is None or not _is_yes(answer):
+            return _reply(session, _walk_confirm_ask(session), options=["yes", "no"])
+        if number < total:
+            return _walk_send(session, adapter, number + 1)
+        bench.note_offer(bench.walk_key(session["unit"], move), answer="done")
+        bench.count("finished", WALK)
+        bench.count("learned", WALK, "session")
+        session["learned"] = [f"{word}: all {total} steps did what Kiln said they would"]
+        return _walk_ended(session, "done", f"That was the last step. Kiln learned the {word} on your "
+                           f"{session['model_name']} with you: all {total} steps did what Kiln said they would, and "
+                           "nothing else. Thank you.")
+
+    # ---- a step Kiln could not send ------------------------------------------------
+    if step == "walk_retry":
+        number = int(session.get("next_n") or 1)
+        if answer is not None and (_is_later(answer) or _is_no(answer)):
+            return _walk_ended(session, "later", "No problem; Kiln sends nothing more. " + _walk_again(session))
+        if answer is None or not (_norm(answer) in _TRY_AGAIN or _is_yes(answer)):
+            return _reply(session, f"{session.get('refusal') or ''} Say try again when that is sorted, or later.".strip(),
+                          options=["try again", "later"])
+        return _walk_send(session, adapter, number)
 
     return _reply(session, f"Kiln lost its place at step {step!r}; call printer_bench with restart=true to begin again.")
 

@@ -44,11 +44,13 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from kiln.daily_stats import BENCH_FUNNEL
+from kiln.printers.motion_walk import WALK_VERBS
 
 _logger = logging.getLogger(__name__)
 
@@ -81,7 +83,9 @@ LEARN_LINE = (
     "a printer new to Kiln and for one it knows only in part. What it learns is "
     "used for that printer at once. A second lesson, a small test print the "
     "person reads a few numbers off, teaches Kiln how steep, how far and how "
-    "thin that printer prints."
+    "thin that printer prints. Where Kiln cannot yet home or park a printer, "
+    "a reply may offer to learn that move with the person, one small step at "
+    "a time."
 )
 
 #: The agent half: when to reach for it, and how to carry it.
@@ -92,8 +96,9 @@ LEARN_WHEN = (
     "wants to teach Kiln their printer. "
     "`printer_bench()` with no answer starts or resumes it, or says there is "
     "nothing to teach; `printer_bench(lesson=\"limits\")` starts the second "
-    "lesson on its own. Relay each ask word for word, show its pictures, and "
-    "take 'later' as an answer."
+    "lesson on its own, and `printer_bench(lesson=\"walk\", move=...)` starts "
+    "a walk a reply offered. Relay each ask word for word, show its pictures, "
+    "and take 'later' as an answer."
 )
 
 AGENT_LEARN_LINE = LEARN_LINE + " " + LEARN_WHEN
@@ -107,7 +112,8 @@ LOG_SETTLE_S = 4.0
 LOG_MAX_S = 120.0
 
 __all__ = [
-    "BLOCKS", "FOOTPRINT_MARGIN_MM", "HOWS", "LESSON_TEACHES", "LIFT_WORDS_MM", "LIMITS", "MOTION",
+    "BLOCKS", "FOOTPRINT_MARGIN_MM", "HOWS", "LESSON_TEACHES", "LIFT_WORDS_MM", "LIMITS", "MOTION", "WALK",
+    "WALK_MOVE_WORDS",
     "OBSERVATION_FORMAT", "OFFER_DOORS", "OFFER_QUIET_S", "PUSH_MM", "PositionLog", "RECORD_BLOCKS", "RISE_MM",
     "TEACHABLE", "bed_of", "bench_dir", "blanks_for", "block_start", "can_log_positions", "count",
     "draw_head_sketch", "draw_zones", "ended_block", "fingerprint_of", "firmware_of", "gain_sentence",
@@ -115,7 +121,7 @@ __all__ = [
     "note_learned", "note_offer", "observation", "observations_for_request", "observations_of", "offer",
     "offer_after_first_print", "offer_fields", "offer_for", "parse_lift", "parse_zone",
     "position_of", "position_reading", "print_footprint", "refusal_blanks", "send_after_heartbeat", "send_pending",
-    "sharing", "take_news", "unit_from_machine", "unit_of", "way_back", "zone_of", "zone_rect",
+    "sharing", "take_news", "unit_from_machine", "unit_of", "walk_key", "way_back", "zone_of", "zone_rect",
 ]
 
 
@@ -479,14 +485,16 @@ def _joined(words: list[str], last: str = "or") -> str:
     return ", ".join(words[:-1]) + f" {last} " + words[-1]
 
 
-#: The two lessons, as the session and the counters name them.
+#: The lessons, as the session and the counters name them.
 MOTION = "motion"
 LIMITS = "limits"
+WALK = "walk"
 #: The gaps each lesson can teach, in the words a door names a gap with.  A
 #: gap no lesson can teach is absent, so a door that meets it offers nothing:
-#: a home, a park, a wipe or a purge is a sequence for the printer to run,
-#: which no test print shows.
-LESSON_TEACHES: dict[str, tuple[str, ...]] = {MOTION: TEACHABLE, LIMITS: ("limits",)}
+#: a wipe or a purge is a sequence for the printer to run, which no test print
+#: shows.  A home or a park is offered as a walk only when Kiln's servers have
+#: one on offer for that printer and move (:func:`offer_for`).
+LESSON_TEACHES: dict[str, tuple[str, ...]] = {MOTION: TEACHABLE, LIMITS: ("limits",), WALK: WALK_VERBS}
 #: Every door that may offer a lesson unasked, read from the funnel the
 #: offers are counted under.  ``first_print`` is the moment after a printer's
 #: first print has taught what it can; ``lesson`` is the session's own offer
@@ -527,14 +535,22 @@ def has_pro() -> bool:
         return False
 
 
+#: Each move a walk is offered for, as its offer names it.
+WALK_MOVE_WORDS = {"home": "homing", "park": "park"}
+
+
 def gain_sentence(lesson: str, gaps: Any, model_name: str, *, pro: bool | None = None) -> str:
     """The offer, as what the person gains for this printer: the blocks still
     missing that the lesson teaches, named and nothing else, and what knowing
     them buys on the caller's plan (*pro*, read with :func:`has_pro` when not
-    given)."""
+    given).  A walk is a safety move, worded the same on every plan."""
     if lesson == LIMITS:
         return (f"One small test print teaches Kiln how steep, how far and how thin your {model_name} really "
                 "prints, so it judges your designs by what your printer can do.")
+    if lesson == WALK:
+        move = next((g for g in (gaps or []) if g in WALK_MOVE_WORDS), "park")
+        return (f"Printing is not affected. Kiln can learn this {WALK_MOVE_WORDS[move]} on your {model_name} with "
+                "you, one small step at a time, while you watch.")
     words = [g for g in (gaps or []) if isinstance(g, str)]
     verbs = [_OFFER_VERBS[b] for b in ("pause", "cancel", "end") if b in words]
     fits = _FITS_PRO if (has_pro() if pro is None else pro) else _FITS_FREE
@@ -553,26 +569,44 @@ def _offer_key(unit: str | None, lesson: str) -> str | None:
     return unit if lesson == MOTION else f"{lesson}:{unit}"
 
 
+def walk_key(unit: str | None, move: str) -> str | None:
+    """The offers ledger's line for a walk of *move* on *unit*: one per move,
+    so an answer about one move says nothing about the other."""
+    return f"{WALK}_{move}:{unit}" if unit and move in WALK_VERBS else None
+
+
 def offer(unit: str | None, gaps: Any, door: str, *, model_name: str,
-          printer_name: str | None = None) -> dict[str, Any] | None:
+          printer_name: str | None = None,
+          walk_on_offer: Callable[[str], bool] | None = None) -> dict[str, Any] | None:
     """The one place a door decides whether to offer a lesson, and words it.
 
     *gaps* are what stopped the person (or, after a first print, what a
     lesson could still teach); a gap no lesson can teach offers nothing.  The ledger
-    decides the rest (:func:`may_offer`).  An offer made is written down and
-    counted; ``None`` otherwise.  Never raises."""
+    decides the rest (:func:`may_offer`).  A walk is offered only for a move
+    *walk_on_offer* confirms, asked after the ledger allows it; with no way
+    to ask, none is offered.  An offer made is written down and counted;
+    ``None`` otherwise.  Never raises."""
     try:
         lesson = lesson_for(gaps)
         if lesson is None or door not in OFFER_DOORS:
             return None
-        key = _offer_key(unit, lesson)
-        if not may_offer(key, door):
-            return None
+        taught = [g for g in gaps if isinstance(g, str) and g in LESSON_TEACHES[lesson]]
+        if lesson == WALK:
+            move = next((m for m in taught if may_offer(walk_key(unit, m), door)
+                         and walk_on_offer is not None and walk_on_offer(m)), None)
+            if move is None:
+                return None
+            key, taught = walk_key(unit, move), [move]
+        else:
+            key = _offer_key(unit, lesson)
+            if not may_offer(key, door):
+                return None
         note_offer(key, door=door)
         count("offered", lesson, door)
-        taught = [g for g in gaps if isinstance(g, str) and g in LESSON_TEACHES[lesson]]
         out: dict[str, Any] = {"tool": "printer_bench", "lesson": lesson,
                                "sentence": gain_sentence(lesson, taught, model_name)}
+        if lesson == WALK:
+            out["move"] = taught[0]
         if printer_name:
             out["printer_name"] = printer_name
         return out
@@ -582,15 +616,19 @@ def offer(unit: str | None, gaps: Any, door: str, *, model_name: str,
 
 
 def offer_for(adapter: Any, gaps: Any, door: str, *, printer_name: str | None = None) -> dict[str, Any] | None:
-    """:func:`offer` for the printer behind *adapter*, named the catalogue's way."""
+    """:func:`offer` for the printer behind *adapter*, named the catalogue's way.
+    A walk is offered only for a move Kiln's servers have one on offer for,
+    for this printer (:func:`kiln.printers.motion_walk.walk_offer`)."""
     try:
         if lesson_for(gaps) is None:
             return None
         from kiln.plate_state import declared_model_of
+        from kiln.printers.motion_walk import walk_offer
 
         printer_id = declared_model_of(adapter)
         name = _display_name(printer_id) if printer_id else "printer"
-        return offer(unit_of(adapter), gaps, door, model_name=name, printer_name=printer_name)
+        return offer(unit_of(adapter), gaps, door, model_name=name, printer_name=printer_name,
+                     walk_on_offer=lambda move: walk_offer(adapter, move).get("offered") is True)
     except Exception:  # noqa: BLE001
         _logger.debug("bench: offer skipped", exc_info=True)
         return None

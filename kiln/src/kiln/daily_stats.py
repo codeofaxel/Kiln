@@ -1636,7 +1636,7 @@ def record_motion_fault(model: object, verb: str, code: object) -> None:
 # ---------------------------------------------------------------------------
 
 #: The lessons (:mod:`kiln.bench`).
-BENCH_LESSONS: tuple[str, ...] = ("motion", "limits")
+BENCH_LESSONS: tuple[str, ...] = ("motion", "limits", "walk")
 #: Each stage, and the details it may carry (an empty tuple: none).  The
 #: dashboard reads this rather than keeping a copy.
 BENCH_FUNNEL: dict[str, tuple[str, ...]] = {
