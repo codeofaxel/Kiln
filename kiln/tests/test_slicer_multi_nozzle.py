@@ -1577,13 +1577,13 @@ class TestEverySliceIsCheckedForAnAbrasiveFilament:
         assert self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA").success
 
     def test_a_printer_kiln_cannot_map_names_the_nozzle_that_can_take_it(self):
-        from kiln.slicer import abrasive_nozzle_refusal
+        from kiln.slicer import soft_nozzle_run
 
-        said = abrasive_nozzle_refusal([["PLA-CF"]], fitted=_HARD_AND_BRASS, mappable=False)
+        said = soft_nozzle_run([["PLA-CF"]], fitted=_HARD_AND_BRASS, mappable=False).refusal
         assert said.endswith("only nozzle 1 can take it, so fit wear-resistant nozzles in place of the others for it.")
-        assert abrasive_nozzle_refusal([["PLA-CF"]], fitted=_TWO_HARD) == ""
-        assert abrasive_nozzle_refusal([["PLA"]], on_record="brass") == ""
-        assert abrasive_nozzle_refusal([["PLA-CF"]]) == ""
+        assert soft_nozzle_run([["PLA-CF"]], fitted=_TWO_HARD) is None
+        assert soft_nozzle_run([["PLA"]], on_record="brass") is None
+        assert soft_nozzle_run([["PLA-CF"]]) is None
 
 
 class TestAMultiMaterialPlateCarriesItsFilaments:

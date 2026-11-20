@@ -975,24 +975,6 @@ class SoftNozzleRun:
         }
 
 
-def abrasive_nozzle_refusal(
-    slot_materials: Sequence[Sequence[str]],
-    filament_map: Sequence[int] | None = None,
-    *,
-    nozzles: Any = None,
-    fitted: Sequence[dict[str, Any]] | None = None,
-    on_record: str | None = None,
-    mappable: bool = False,
-) -> str:
-    """The sentence refusing a slice that would print an abrasive filament
-    through a nozzle that is not wear-resistant, or ``""``
-    (:func:`soft_nozzle_run`, which takes the same arguments)."""
-    run = soft_nozzle_run(
-        slot_materials, filament_map, nozzles=nozzles, fitted=fitted, on_record=on_record, mappable=mappable,
-    )
-    return run.refusal if run is not None else ""
-
-
 def soft_nozzle_run(
     slot_materials: Sequence[Sequence[str]],
     filament_map: Sequence[int] | None = None,
