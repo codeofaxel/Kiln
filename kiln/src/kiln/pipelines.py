@@ -698,6 +698,7 @@ def quick_print(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    keep_record: bool | None = None,
 ) -> PipelineResult:
     """Validate → slice → preflight → upload → start print in one call.
 
@@ -744,6 +745,7 @@ def quick_print(
     # auto-scaled mesh.
     ctx: dict[str, Any] = {
         "signoff": signoff,
+        "keep_record": keep_record if isinstance(keep_record, bool) else None,
         "effective_profile": profile_path,
         "gcode_path": None,
         "adapter": None,
@@ -998,6 +1000,8 @@ def quick_print(
             grant_from_record(
                 ctx.get("signoff"), tool="pipeline", file_name=remote_name, printer_name=printer_name,
             )
+            if isinstance(ctx.get("keep_record"), bool):
+                start_kwargs["keep_record"] = ctx["keep_record"]
             sent_at = time.monotonic()
             print_result = adapter.start_print(remote_name, **start_kwargs)
             verdict = resolve_print_start(

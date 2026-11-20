@@ -1727,6 +1727,8 @@ class JobScheduler:
                     if next_job.metadata and isinstance(next_job.metadata.get(k), str)
                     and next_job.metadata[k].strip()
                 }
+                if isinstance((next_job.metadata or {}).get("keep_record"), bool):
+                    _ids["keep_record"] = next_job.metadata["keep_record"]
                 result = adapter.start_print(next_job.file_name, **_ids)
                 if getattr(result, "code", "") in _TURN_CODES:
                     # Another printer's turn

@@ -23,6 +23,7 @@ import threading
 import time
 from typing import Any
 
+from kiln import print_keeping
 from kiln.auto_record_hook import note_cancel_requested
 from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
@@ -400,6 +401,8 @@ class _PrintWatcher:
                 printer_model = community_autofire.resolve_adapter_model(self._adapter)
             except Exception:
                 _logger.debug("watch auto-contribute: printer model skipped", exc_info=True)
+            from kiln.printers.base import outcome_printer_name
+
             community_autofire.auto_contribute_completion(
                 outcome=result.get("outcome", ""),
                 printer_file_name=file_name,
@@ -407,6 +410,7 @@ class _PrintWatcher:
                 printer_model=printer_model,
                 material=material,
                 print_time_seconds=print_time,
+                printer_name=outcome_printer_name(self._adapter),
             )
         except Exception:
             _logger.debug("watch auto-contribute skipped (best-effort)", exc_info=True)
@@ -719,8 +723,15 @@ class _PrintWatcher:
                                     f"Progress data may be unreliable."
                                 )
 
-                            # Persist to disk + DB when save_to_disk is enabled
-                            if self._save_to_disk and self._save_dir is not None:
+                            # Persist to disk + DB when save_to_disk is enabled,
+                            # never for a print the person asked not to keep.
+                            from kiln.print_keeping import keeps as _print_kept
+
+                            if (
+                                self._save_to_disk
+                                and self._save_dir is not None
+                                and _print_kept(self._printer_name)
+                            ):
                                 try:
                                     from kiln.persistence import get_db
 
@@ -1489,6 +1500,7 @@ class _MonitoringToolsPlugin:
             return {"success": True, **result}
 
         @mcp.tool(annotations=destructive("Start a monitored print"))
+        @print_keeping.call
         def start_monitored_print(
             file_name: str,
             printer_name: str | None = None,
@@ -1497,6 +1509,7 @@ class _MonitoringToolsPlugin:
             first_layer_interval: int = 60,
             auto_pause: bool = True,
             preview_token: str | None = None,
+            keep_record: bool | None = None,
         ) -> dict:
             """Start a print and automatically monitor the first layer.
 
@@ -1523,6 +1536,14 @@ class _MonitoringToolsPlugin:
                     file was shown to the person before printing.  Required
                     beside their go-ahead: a print is shown to its owner
                     before it starts.
+                keep_record: ``False`` only when the person asks for this
+                    print not to be kept ("print this privately", "don't keep
+                    a record of this"); never suggest it.  Kiln then keeps
+                    nothing of the print once it ends, and the answer carries
+                    one line saying so (``kept_note``).  ``True`` keeps the
+                    print, for a start a team's rule held
+                    (``TEAM_KEEPS_PRINTS``) after the person agreed.  Omit
+                    otherwise: the print is kept the way the account says.
             """
             from kiln.printers import PrinterError
             from kiln.registry import PrinterNotFoundError
@@ -1585,7 +1606,9 @@ class _MonitoringToolsPlugin:
                 # so the verdict below can tell a reading about THIS job from
                 # the printer's last word about the previous one.
                 sent_at = time.monotonic()
-                print_result = adapter.start_print(file_name)
+                print_result = adapter.start_print(
+                    file_name, **({"keep_record": keep_record} if isinstance(keep_record, bool) else {}),
+                )
                 _srv._note_print_started(adapter, print_result)
                 _srv._audit(
                     "start_monitored_print", "print_started", details={"file": file_name}
@@ -1620,6 +1643,7 @@ class _MonitoringToolsPlugin:
                     "success": True,
                     "print_start": verdict.state,
                     "print_result": verdict.to_dict(),
+                    **print_keeping.reply_fields(print_result),
                 }
                 # Top-level beside the message, as every start door carries
                 # it: the person who asked for a watched start is the one

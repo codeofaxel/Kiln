@@ -45,6 +45,9 @@ def sent(monkeypatch):
     calls: list[dict] = []
 
     def fake_request(tool, method, path, body=None, **kw):
+        if path == "/api/cloud/user/prefs":
+            # The account keeps print history (the default), read before a push.
+            return {"status": "success", "print_history": "account"}
         calls.append({"tool": tool, "method": method, "path": path, "body": body})
         rows = (body or {}).get("rows") or []
         return {"status": "success", "success": True,
@@ -151,8 +154,12 @@ def test_a_signed_out_computer_sends_nothing(db, sent, monkeypatch):
 def test_a_refused_push_stays_owed(db, signed_in, monkeypatch):
     import kiln.history_courier as hc
 
-    monkeypatch.setattr(hc, "_request", lambda *a, **k: {"status": "error", "success": False,
-                                                          "code": "STORE_UNAVAILABLE"})
+    def _refused(tool, method, path, *a, **k):
+        if path == "/api/cloud/user/prefs":
+            return {"status": "success", "print_history": "account"}
+        return {"status": "error", "success": False, "code": "STORE_UNAVAILABLE"}
+
+    monkeypatch.setattr(hc, "_request", _refused)
     monkeypatch.setattr(outcome_courier, "_kept_here", lambda rows: set())
     _print(db)
     assert outcome_courier.push_owed(db=db)["why"] == "not_taken"
@@ -338,3 +345,24 @@ db.save_print_outcome({{"job_id": "start:a1:1", "printer_name": "Shop A1", "outc
     assert marker.is_file(), "the process exited and its ending never left"
     rows = json.loads(marker.read_text())["rows"]
     assert [r["version_id"] for r in rows] == ["v-1"] and rows[0]["ending"] == "success"
+
+
+def test_an_account_choice_that_cannot_be_read_sends_nothing(db, signed_in, monkeypatch, tmp_path):
+    """Fail closed: with the account's choice unread, nothing goes up and the
+    row stays owed for a push that can read it."""
+    import kiln.history_courier as hc
+
+    monkeypatch.setenv("HOME", str(tmp_path))  # no reading of the choice kept here yet
+
+    sent: list[str] = []
+
+    def _down(tool, method, path, *a, **k):
+        sent.append(path)
+        return {"status": "error", "success": False, "code": "OFFLINE"}
+
+    monkeypatch.setattr(hc, "_request", _down)
+    monkeypatch.setattr(outcome_courier, "_kept_here", lambda rows: set())
+    _print(db)
+    assert outcome_courier.push_owed(db=db)["why"] == "choice_unread"
+    assert outcome_courier.PUSH_PATH not in sent
+    assert len(db.outcomes_owed_to_account()) == 1

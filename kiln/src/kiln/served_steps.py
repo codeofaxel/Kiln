@@ -988,13 +988,24 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             target = str(server._resolve_effective_printer_name(None) or "")
         except Exception:  # noqa: BLE001 — an install with no printer set up
             target = ""
+    from kiln import print_keeping
+
+    if print_keeping.account_choice() == print_keeping.COMPUTER:
+        return None, _refusal(
+            tool, "PRINT_HISTORY_KEPT_HERE",
+            f"{tool} learns from your print history, and you keep that history on "
+            "this computer only. Nothing was sent.",
+        )
     try:
         # Every ending with a verdict, whatever its cause, and who settled it:
         # the servers apply the ending rule per question, as this store does.
         db = get_db()
         # A job known only from the printer's own log carries no verdict and
         # is not sent.
-        rows = db.list_print_outcomes(limit=_HISTORY_RECORDS + 1, include_stops=True, witnessed_only=True)
+        rows = [
+            r for r in db.list_print_outcomes(limit=_HISTORY_RECORDS + 1, include_stops=True, witnessed_only=True)
+            if r.get("kept") != print_keeping.LOCAL
+        ]
         repair_windows = db.repair_windows()
     except Exception:  # noqa: BLE001 — said, never guessed
         return None, _refusal(

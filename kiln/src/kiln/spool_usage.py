@@ -712,6 +712,16 @@ def _same_job(charged: Any, running: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def forget_charge(printer: str) -> None:
+    """Drop the open charge of the print on *printer*: what it took from the
+    spools stays taken.  For a print the person asked not to keep, once it
+    ends (:func:`kiln.print_keeping.print_ended`).  Never raises."""
+    try:
+        _forget(printer)
+    except Exception:  # noqa: BLE001
+        logger.debug("spool charge not forgotten", exc_info=True)
+
+
 def _forget(printer: str) -> None:
     db = _db()
     if db.get_spool_charge(printer) is not None:

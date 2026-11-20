@@ -193,6 +193,11 @@ class CloudSyncManager:
             return {"error": "Sync not configured"}
 
         result: dict[str, Any] = {"jobs_pushed": 0, "events_pushed": 0}
+        from kiln import print_keeping
+
+        # Print history kept on this computer only (kiln.print_keeping): jobs
+        # and events stay here.
+        keep_here = not print_keeping.may_leave()
 
         # Get sync cursor (last sync timestamp)
         cursor_str = self._db.get_setting("sync_cursor", "0")
@@ -200,7 +205,7 @@ class CloudSyncManager:
 
         try:
             # Push jobs
-            if self._config.sync_jobs:
+            if self._config.sync_jobs and not keep_here:
                 jobs = self._db.get_unsynced_jobs(cursor)
                 if jobs:
                     self._push("jobs", jobs)
@@ -210,7 +215,7 @@ class CloudSyncManager:
                         self._jobs_synced += len(jobs)
 
             # Push events
-            if self._config.sync_events:
+            if self._config.sync_events and not keep_here:
                 events = self._db.get_unsynced_events(cursor)
                 if events:
                     self._push("events", events)

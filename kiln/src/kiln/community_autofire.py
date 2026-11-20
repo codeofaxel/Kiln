@@ -147,8 +147,12 @@ def auto_contribute_completion(
     printer_model: str | None = None,
     material: str | None = None,
     print_time_seconds: int | None = None,
+    printer_name: str | None = None,
 ) -> dict[str, Any]:
     """Contribute a monitored terminal outcome to the community pool.
+
+    *printer_name* is the printer the print ran on, so a print kept on this
+    computer only or not kept is never pooled (:mod:`kiln.print_keeping`).
 
     Silent, non-blocking, never raises.  Returns a small status dict for
     tests/maintainers (never surfaced to the user).  Skips non-quality
@@ -161,8 +165,10 @@ def auto_contribute_completion(
     watched and then recorded lands ONE outbox row.
     """
     try:
-        from kiln import community_outbox
+        from kiln import community_outbox, print_keeping
 
+        if not print_keeping.may_leave(printer_name=printer_name, file_name=printer_file_name or job_id):
+            return {"contributed": False, "reason": "not_kept"}
         if community_outbox.translate_outcome(outcome) is None:
             return {"contributed": False, "reason": "non_quality_outcome"}
         return community_outbox.contribute_print_outcome(
@@ -347,8 +353,10 @@ def contribute_resolved_outcome(
     called the printer, not which printer it is.
     """
     try:
-        from kiln import community_outbox
+        from kiln import community_outbox, print_keeping
 
+        if not print_keeping.may_leave(printer_name=printer_name, file_name=printer_file_name or job_id):
+            return {"contributed": False, "reason": "not_kept"}
         if community_outbox.translate_outcome(outcome) is None:
             return {"contributed": False, "reason": "non_quality_outcome"}
         printer_model: str | None = None

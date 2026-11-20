@@ -26,6 +26,7 @@ from typing import Any
 from kiln import plate_state as _plate_state
 from kiln.plate_state import pretty_job_name as _pretty_job_name
 from kiln.preview_evidence import name_stage_file
+from kiln import print_keeping
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_annotations import creates, destructive, read_only
 from kiln.tool_args import parse_json_object
@@ -3798,6 +3799,7 @@ class _SlicerToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool(annotations=destructive("Slice and print"))
+        @print_keeping.call
         def slice_and_print(
             input_path: str,
             printer_name: str | None = None,
@@ -3818,6 +3820,7 @@ class _SlicerToolsPlugin:
             soft_nozzle_confirmed: bool = False,
             mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
+            keep_record: bool | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -3956,6 +3959,14 @@ class _SlicerToolsPlugin:
                 account_sync_id: The id the print's record already has on the
                     person's Kiln account, when the door that sent the print
                     opened it there first.  Agents leave it unset.
+                keep_record: ``False`` only when the person asks for this
+                    print not to be kept ("print this privately", "don't keep
+                    a record of this"); never suggest it.  Kiln then keeps
+                    nothing of the print once it ends, and the answer carries
+                    one line saying so (``kept_note``).  ``True`` keeps the
+                    print, for a start a team's rule held
+                    (``TEAM_KEEPS_PRINTS``) after the person agreed.  Omit
+                    otherwise: the print is kept the way the account says.
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
@@ -4404,6 +4415,8 @@ class _SlicerToolsPlugin:
                 ):
                     if isinstance(_id_val, str) and _id_val.strip():
                         print_kwargs[_id_key] = _id_val.strip()
+                if isinstance(keep_record, bool):
+                    print_kwargs["keep_record"] = keep_record
                 ams_routing: dict[str, Any] | None = None
                 ams_routing_warnings: list[str] = []
                 # Ask the adapter that will receive the job, whatever it is.
@@ -4533,6 +4546,7 @@ class _SlicerToolsPlugin:
                     "printer_id": effective_printer_id,
                     "profile_path": effective_profile,
                     "message": outer_message,
+                    **print_keeping.reply_fields(print_result),
                 }
                 gate_code = str(getattr(print_result, "code", "") or "")
                 if not verdict.ok and gate_code and getattr(print_result, "refused_before_send", False):

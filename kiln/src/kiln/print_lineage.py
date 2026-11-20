@@ -271,6 +271,32 @@ def _stamps_of_print_file(path: str) -> list[str] | None:
 # ---------------------------------------------------------------------------
 
 
+def forget_files(file_names: set[str] | list[str]) -> int:
+    """Delete the slice records of the sliced files named in *file_names*
+    (base names), and every print start that names one.  For a print the
+    person asked not to keep, once it ends (:mod:`kiln.print_keeping`): the
+    names are the ones its start record joined to it.  Returns how many
+    records went.  Never raises."""
+    names = {os.path.basename(str(n)) for n in file_names if n}
+    if not names:
+        return 0
+    try:
+        with _lock:
+            data = _load()
+            kept = [
+                r for r in data["records"]
+                if not ({str(f.get("name")) for f in r.get("files") or [] if isinstance(f, dict)} & names)
+            ]
+            gone = len(data["records"]) - len(kept)
+            starts = [s for s in data["starts"] if s.get("name") not in names]
+            if gone or len(starts) != len(data["starts"]):
+                _save({"records": kept, "starts": starts})
+        return gone
+    except Exception:  # noqa: BLE001
+        logger.debug("slice records not forgotten", exc_info=True)
+        return 0
+
+
 def record_slice(
     model_path: str | None,
     output_path: str | None,

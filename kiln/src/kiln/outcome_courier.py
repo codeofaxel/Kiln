@@ -63,6 +63,8 @@ TOOL = "outcome_courier"
 #: This module's name in :data:`kiln.outbound_guard.VERSION_FIELDS`.
 SENDER = "kiln/outcome_courier.py"
 PUSH_PATH = "/api/cloud/outcomes/push"
+#: Where a forgotten print is forgotten on the account too.
+FORGET_PATH = "/api/cloud/outcomes/forget"
 SWITCH_ENV = "KILN_OUTCOME_COURIER"
 TEST_OPT_IN_ENV = "KILN_OUTCOME_COURIER_IN_TESTS"
 #: The most rows one push carries, matching what the server takes.
@@ -129,6 +131,9 @@ def _push_quietly(wait: float = _WAIT_S) -> None:
     global _timer
     _pushing.set()
     try:
+        # A forgotten print is forgotten on the account whatever the
+        # account's choice: forgetting is always the person's to ask.
+        forget_owed(wait=wait)
         push_owed(wait=wait)
     except Exception:  # noqa: BLE001 -- the next ending tries again
         logger.debug("outcome courier push failed", exc_info=True)
@@ -335,6 +340,32 @@ def _kept_here(rows: list[dict[str, Any]]) -> set[int]:
         vault.close()
 
 
+def forget_owed(*, db: Any = None, wait: float = _WAIT_S) -> dict[str, Any]:
+    """Ask the account to forget the prints forgotten on this computer:
+    their account ids (random, minted here) and the designs whose every
+    print was forgotten.  Kept owed until the account takes them; never
+    raises for the network."""
+    from kiln.auth_session import resolve_api_bearer
+
+    if not resolve_api_bearer().token:
+        return {"forgotten": 0, "why": "signed_out"}
+    if db is None:
+        from kiln.persistence import get_db
+
+        db = get_db()
+    owed = db.forget_owed()
+    if not owed["ids"] and not owed["designs"]:
+        return {"forgotten": 0, "why": "nothing_owed"}
+    from kiln.history_courier import _request
+
+    answer = _request(TOOL, "POST", FORGET_PATH, {"ids": owed["ids"], "design_ids": owed["designs"]},
+                      timeout=wait)
+    if answer.get("success") is False or answer.get("status") == "error":
+        return {"forgotten": 0, "why": "not_taken", "code": answer.get("code")}
+    db.forget_taken(owed["ids"], owed["designs"])
+    return {"forgotten": int(answer.get("forgotten") or 0)}
+
+
 def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -> dict[str, Any]:
     """Send every settled row the account has not taken yet.  Returns what
     happened, in words a caller can show; never raises for the network.
@@ -343,6 +374,13 @@ def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -
 
     if not resolve_api_bearer().token:
         return {"sent": 0, "why": "signed_out"}
+    from kiln import print_keeping
+
+    # This computer only: nothing goes up, and an unread choice sends nothing
+    # until it is read (kiln.print_keeping).
+    choice = print_keeping.refresh_account_choice()
+    if choice != print_keeping.ACCOUNT:
+        return {"sent": 0, "why": "kept_on_this_computer" if choice else "choice_unread"}
     if db is None:
         from kiln.persistence import get_db
 
