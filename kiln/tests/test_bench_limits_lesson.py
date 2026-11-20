@@ -433,6 +433,42 @@ class TestTheCourier:
                 ("garage", "bambu_a1", True), ("shed", "bambu_a1", False)]
             assert wire.calls[-1]["printer_id"] == "garage"
 
+    def test_the_test_prints_plates_arrive_on_this_computer(self, wire, monkeypatch, tmp_path):
+        """The servers hand the first plate over as the make's own file and
+        the others as the answer's files; both end up here, where the
+        session hands them to the agent, and no path on the servers is left."""
+        import httpx
+
+        from kiln import served_makes
+
+        there = "/tmp/kiln-callers/abc123/kiln_limit_test_angles_and_spans_x_{}.stl"
+        wire.state["answer"] = {
+            "status": "ok", "success": True, "step": "make", "test_id": "lt-x", "stl_path": there.format(1),
+            "plates": [{"plate": 1, "code": "1234-1", "stl_path": there.format(1)},
+                       {"plate": 2, "code": "1234-2", "stl_path": there.format(2)}],
+            "artifact": {"artifact_token": "a" * 32, "format": "stl", "at": ["stl_path"]},
+            "files": [{"at": ["plates", 1, "stl_path"], "filename": "plate_2.stl", "format": "stl",
+                       "artifact_token": "b" * 32}],
+        }
+        monkeypatch.setattr(httpx, "get", lambda url, **kw: SimpleNamespace(status_code=200, content=b"solid two\n"))
+        monkeypatch.setattr(served_makes, "_fetch_look", lambda token, kind: None)
+        monkeypatch.setattr(served_makes, "_bearer", lambda: "token")
+        kept_at = tmp_path / "kept_plate_1.stl"
+        kept_at.write_text("solid one\n")
+        keeps: list[str] = []
+
+        def keep(token):
+            keeps.append(token)
+            return {"success": True, "status": "success", "mesh_path": str(kept_at)}
+
+        monkeypatch.setattr(served_makes, "keep", keep)
+        answer, miss = bridge.ask("make", printer_id="garage", material="PLA", coupon="angles_and_spans")
+        assert miss is None and keeps == ["a" * 32]
+        paths = [p["stl_path"] for p in answer["plates"]]
+        assert paths[0] == str(kept_at) and Path(paths[1]).read_bytes() == b"solid two\n"
+        assert answer["stl_path"] == str(kept_at)
+        assert "kiln-callers" not in json.dumps(answer), "no path on the servers is handed to the session"
+
     def test_signed_out_nothing_is_sent(self, wire, monkeypatch):
         import kiln.server as srv
 

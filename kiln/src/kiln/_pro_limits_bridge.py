@@ -116,6 +116,7 @@ def ask(step: str, *, gcode_paths: list[str] | None = None, **args: Any) -> tupl
     if not isinstance(answer, dict):
         return None, served_answer.Miss("unanswered", detail="not an answer")
     if answer.get("status") == "ok" and answer.get("success") is not False:
+        first = answer.get("stl_path")
         try:
             from kiln import served_makes
 
@@ -123,11 +124,34 @@ def ask(step: str, *, gcode_paths: list[str] | None = None, **args: Any) -> tupl
         except Exception:  # noqa: BLE001
             logger.debug("%s files not brought home", WIRE_TOOL, exc_info=True)
         if isinstance(answer, dict) and answer.get("status") == "ok":
-            return answer, None
+            return _first_plate_home(answer, first)
         return None, served_answer.classify_answer(answer) or served_answer.Miss("unanswered")
     if str(answer.get("code") or "") in LESSON_CODES:
         return answer, None
     return None, served_answer.classify_answer(answer) or served_answer.Miss("unanswered")
+
+
+def _first_plate_home(answer: dict[str, Any], first: Any) -> tuple[dict[str, Any] | None, Any]:
+    """The test print's first plate comes over as the make's own file, kept
+    the way any make from Kiln's servers is kept (the lesson spends no
+    allowance); every other plate came with the answer's files.  The kept
+    file is put where the first plate's path was."""
+    made = answer.get("made_on_kiln_servers")
+    token = str(made.get("artifact_token") or "") if isinstance(made, dict) else ""
+    if not token:
+        return answer, None
+    from kiln import served_makes
+
+    kept = served_makes.keep(token)
+    path = kept.get("mesh_path") if isinstance(kept, dict) and kept.get("success") else None
+    if not path:
+        return None, served_answer.classify_answer(kept) or served_answer.Miss("unanswered", detail="not kept")
+    answer["stl_path"] = path
+    plates = [p for p in answer.get("plates") or [] if isinstance(p, dict)]
+    for plate in plates:
+        if plate.get("stl_path") == first or (plate is plates[0] and not plate.get("stl_path")):
+            plate["stl_path"] = path
+    return answer, None
 
 
 def miss_sentence(miss: Any, *, cannot: str) -> str:
