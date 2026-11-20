@@ -204,6 +204,84 @@ class TestTheStamp:
         assert (by_name["matched_by"], by_name["lineage_id"]) == ("name", stamp[0])
 
 
+def _slice_copies_here(home) -> tuple[str, str]:
+    """Two coloured copies of one part, sliced and merged into one file the
+    way the multi-colour copies flow does, with the slicer stood in for."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from kiln import print_lineage
+    from kiln.slicer import SlicerInfo, slice_multicolor_copies
+
+    model = _cube_stl(home / "part.stl")
+
+    def _run(cmd, **_kw):
+        out = cmd[cmd.index("--output") + 1]
+        pathlib.Path(out).write_text(GCODE, encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with patch("kiln.slicer.find_slicer", return_value=SlicerInfo(path="/fake/prusa-slicer", name="prusa-slicer", version="PrusaSlicer-2.9.4")), \
+         patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None), \
+         patch("kiln.slicer._gcode_output_is_complete", return_value=True), \
+         patch("kiln.slicer._run_slicer_with_startup_retry", _run):
+        result = slice_multicolor_copies(model, 2, output_dir=str(home / "sliced"))
+    assert result.success, result.message
+    print_lineage.flush()
+    return model, result.output_path
+
+
+def _wrap_here(home, gcode: str) -> str:
+    """The package every Bambu wrap door builds, and the wrap note they share."""
+    from unittest.mock import patch
+
+    from kiln.monitor_twin import note_wrapped
+    from kiln.printers.bambu_3mf import build_bambu_3mf
+
+    wrap = str(home / "sliced" / (pathlib.Path(gcode).stem + ".gcode.3mf"))
+    with patch("kiln.printers.bambu_3mf._load_a1_start_gcode", return_value="; start\nG28\n"), \
+         patch("kiln.printers.bambu_3mf._select_end_gcode", return_value=("; end\nM84\n", "bambu_a1")):
+        build_bambu_3mf(_text(gcode), wrap)
+    note_wrapped(gcode, wrap)
+    return wrap
+
+
+class TestAFileOfSeveralSlices:
+    def test_its_package_is_a_print_of_the_merged_slice_and_the_part(self, home):
+        """Mutation pin: with ``_find`` skipping content for a file of
+        several stamps, the package resolves as unknown and this fails."""
+        from kiln import print_lineage
+
+        model, merged = _slice_copies_here(home)
+        records = print_lineage._load()["records"]
+        whole = next(r for r in records if r["files"][0]["name"] == os.path.basename(merged))
+        assert len(print_lineage.read_stamps(merged)) > 1, "the merged file carries the copies' stamps"
+        assert print_lineage.resolve(os.path.basename(merged), local_paths=[merged])["lineage_id"] == whole["id"]
+
+        wrap = _wrap_here(home, merged)
+        by_content = print_lineage.resolve(os.path.basename(wrap), local_paths=[wrap])
+        assert (by_content["matched_by"], by_content["lineage_id"]) == ("content", whole["id"])
+        assert by_content["model_sha256"] == print_lineage._sha256(model)
+        os.remove(wrap)
+        assert _fake_adapter().start_print(os.path.basename(wrap)).success
+        assert _open_row()["lineage_id"] == whole["id"]
+
+    def test_a_file_two_records_claim_is_still_unknown(self, home):
+        from kiln import print_lineage
+
+        _model, merged = _slice_copies_here(home)
+        with print_lineage._lock:
+            data = print_lineage._load()
+            whole = next(r for r in data["records"] if r["files"][0]["name"] == os.path.basename(merged))
+            data["records"].append({**json.loads(json.dumps(whole)), "id": "another0000claim"})
+            print_lineage._save(data)
+
+        wrap = _wrap_here(home, merged)
+        names = [f.get("name") for r in print_lineage._load()["records"] for f in r["files"]]
+        assert os.path.basename(wrap) not in names, "the package joins neither claim"
+        assert print_lineage.resolve(os.path.basename(wrap), local_paths=[wrap])["part"] == print_lineage.PART_UNKNOWN
+        assert print_lineage.resolve(os.path.basename(merged), local_paths=[merged])["part"] == print_lineage.PART_UNKNOWN
+
+
 class TestSliceThenPrintThenFinish:
     def test_the_row_knows_its_slice_and_the_ending_its_part(self, home, monkeypatch):
         """Mutation pins: without ``record_slice`` at the slice tail, or

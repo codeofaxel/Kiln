@@ -396,7 +396,7 @@ def note_wrapped(gcode_path: str | None, wrapped_path: str | None) -> None:
         return
     try:
         stamps = read_stamps(gcode_path)
-        gcode_sha = _sha256(gcode_path) if not stamps else None
+        gcode_sha = _sha256(gcode_path) if len(stamps) != 1 else None
         entry = {"name": os.path.basename(wrapped_path), "sha256": _sha256(wrapped_path), "kind": "wrap"}
         with _lock:
             data = _load()
@@ -450,11 +450,21 @@ def note_soft_nozzle(gcode_path: str | None, block: dict[str, Any] | None) -> No
 
 
 def _find(data: dict[str, Any], *, stamps: list[str], sha: str | None, name: str | None) -> dict[str, Any] | None:
+    """The record a print file is, by its one stamp, else its content, else
+    its name.  A file carrying several stamps (slices merged into one file)
+    is the record that names that whole file by content, and only when
+    exactly one record does: never a record of one of the slices inside it."""
     records = data["records"]
     if len(stamps) == 1:
         for record in reversed(records):
             if record.get("id") == stamps[0]:
                 return record
+    if sha and len(stamps) > 1:
+        claims = [
+            record for record in records
+            if any(isinstance(f, dict) and f.get("sha256") == sha for f in record.get("files", []))
+        ]
+        return claims[0] if len(claims) == 1 else None
     if sha:
         for record in reversed(records):
             if any(isinstance(f, dict) and f.get("sha256") == sha for f in record.get("files", [])):
@@ -502,7 +512,8 @@ def resolve(
     the file states) or :data:`PART_UNKNOWN`.  ``matched_by`` says how:
     ``stamp``, ``content``, ``name`` or ``start`` (the record pinned when
     this name last started).  A file carrying the stamps of several slices
-    is not one part and is answered by content or name only.  *keep_foreign*
+    is answered by the one record that names that whole file by content,
+    else by name only.  *keep_foreign*
     ``False`` answers a file Kiln did not slice without keeping a record of
     it, for a reader that only looks.  Never raises.
     """
@@ -522,7 +533,7 @@ def resolve(
                 record = _find(data, stamps=stamps, sha=None, name=None)
                 if record is not None:
                     return _answer(record, "stamp")
-            record = _find(data, stamps=[], sha=_sha256(path), name=None)
+            record = _find(data, stamps=stamps, sha=_sha256(path), name=None)
             if record is not None:
                 return _answer(record, "content")
             stamped_elsewhere = stamped_elsewhere or bool(stamps)
