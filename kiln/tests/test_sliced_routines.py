@@ -206,7 +206,7 @@ def printer_here(tmp_path, monkeypatch):
     import kiln.bench as bench
 
     monkeypatch.setattr(bench, "unit_of", lambda adapter: "ab" * 16)
-    monkeypatch.setattr(bench, "sharing", lambda: True)
+    monkeypatch.setattr(sr, "_shares", lambda: True)
     monkeypatch.setattr(sr, "SENDING_FROM", "2000-01-01")
     monkeypatch.setattr("kiln.installation.get_installation_id", lambda *a, **k: "00000000-0000-4000-8000-000000000001")
     sent: list[bytes] = []
@@ -284,7 +284,7 @@ class TestWhatLeaves:
 
     def test_nothing_leaves_when_this_install_does_not_share(self, tmp_path, printer_here, monkeypatch):
         sr.keep(_Printer("bambu_p1s"), sr.read_routines(_package(tmp_path, _bambu_settings())))
-        monkeypatch.setattr("kiln.bench.sharing", lambda: False)
+        monkeypatch.setattr(sr, "_shares", lambda: False)
         assert sr.send_pending("https://example.invalid", "key") == 0
         assert printer_here == []
 

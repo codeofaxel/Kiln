@@ -12,7 +12,7 @@ this computer, per printer.
 What leaves, and when:
 
 * only while :data:`SENDING_FROM` names a day that has come, and only while
-  this install shares (:func:`kiln.bench.sharing`);
+  this install shares (telemetry and community sharing both on);
 * each routine through one database door (:data:`RPC`): the routine's text,
   its SHA-256, its one word (:data:`BLOCKS`), the printer model, the
   slicer's name and version, the one-way hash of the printer's serial
@@ -468,19 +468,29 @@ def note_print_started(adapter: Any, file_name: str | None, kwargs: dict[str, An
 # ---------------------------------------------------------------------------
 
 
+def _shares() -> bool:
+    """Whether this install shares what it learns: telemetry on AND community
+    sharing on, the same two switches as :func:`kiln.bench.sharing`."""
+    try:
+        from kiln.community_sync import community_sharing_enabled
+        from kiln.heartbeat import _telemetry_enabled
+
+        return bool(_telemetry_enabled()) and bool(community_sharing_enabled())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def sending() -> bool:
-    """Whether anything may leave: :data:`SENDING_FROM` has come and this
-    install shares (:func:`kiln.bench.sharing`)."""
+    """Whether anything may leave for the shared table: :data:`SENDING_FROM`
+    has come and this install shares (:func:`_shares`)."""
     if not SENDING_FROM:
         return False
     try:
         if date.fromisoformat(SENDING_FROM) > datetime.now(timezone.utc).date():
             return False
-        from kiln.bench import sharing
-
-        return bool(sharing())
-    except Exception:  # noqa: BLE001
+    except ValueError:
         return False
+    return _shares()
 
 
 #: The fields of a payload Kiln makes itself (a hash, its own random ids),
