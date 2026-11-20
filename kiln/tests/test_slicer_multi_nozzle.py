@@ -1418,6 +1418,33 @@ class TestTheProfileIsWrittenForTheFittedNozzles:
         assert nozzle_positions(nozzles_of(resolve_slicer_profile("invented_two"))) == 2
         assert nozzle_positions(slicer_profiles.printer_nozzles("invented_two")) == 2
 
+    def test_a_machine_named_among_two_of_its_model_reads_its_own_statement(self, invented_printer, monkeypatch):
+        # Two machines of one model: the plate for the one named reads what
+        # its owner stated on it, never neither machine's.
+        import sys
+
+        from kiln import _pro_nozzle_bridge as bridge
+        from kiln import assumed_nozzle
+
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        invented_printer(_ADD_ON)
+        both = _fitted((1, 0.4, "brass"), (2, 0.4, "brass"))
+        machines = ["invented_two_left", "invented_two_right"]
+        monkeypatch.setattr(assumed_nozzle, "_registered_machines", lambda: machines)
+        monkeypatch.setattr(assumed_nozzle, "_model_key_of", lambda name: "invented_two" if name in machines else None)
+        monkeypatch.setattr(slicer_profiles, "_catalogue_here", lambda: False)
+        monkeypatch.setattr(slicer_profiles, "_fetch_profile", lambda spelling: None)
+        monkeypatch.setattr(
+            bridge, "consult_recorded_nozzle",
+            lambda printer_id: {
+                "diameter_mm": None, "material": None, "answered": True,
+                "positions": both if printer_id == "invented_two_right" else None,
+            },
+        )
+        assert slicer_profiles.get_slicer_profile("invented_two_right").id == "invented_two"
+        assert nozzle_positions(slicer_profiles.printer_nozzles("invented_two_right")) == 2
+        assert slicer_profiles.printer_nozzles("invented_two_left") is None
+
     def test_the_one_nozzle_fitted_is_the_size_of_a_slice_for_one(self, invented_printer, owner_says):
         from kiln.slicer_orca import ini_to_settings
 

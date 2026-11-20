@@ -1523,7 +1523,11 @@ def printer_nozzles(printer_id: str | None) -> dict[str, Any] | None:
             return None
         from kiln.assumed_nozzle import nozzle_for_profile, recorded_positions
 
-        machine = nozzle_for_profile(profile_id).printer_id
+        # A machine's own name is read for that machine; the model's own id
+        # names none, and the slice for it reads the machine set up as it.
+        named = str(printer_id).strip()
+        printer_name = None if named.lower().replace("-", "_") == profile_id else named
+        machine = nozzle_for_profile(profile_id, printer_name=printer_name).printer_id
         record = fitted_record(block, recorded_positions(machine))
         return record if nozzle_positions(record) >= 2 else None
     except Exception:  # noqa: BLE001 -- no record reads as one nozzle

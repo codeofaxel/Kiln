@@ -358,6 +358,7 @@ def validate_design(
     material: str | None = None,
     printer_model: str | None = None,
     build_volume: tuple[float, float, float] | None = None,
+    nozzle_diameter: float | None = None,
 ) -> DesignValidationReport:
     """Validate a generated model against design intelligence constraints.
 
@@ -367,6 +368,9 @@ def validate_design(
     :param material: Optional material override (e.g. ``"petg"``).
     :param printer_model: Optional printer model for capability lookup.
     :param build_volume: Optional (X, Y, Z) build volume in mm.
+    :param nozzle_diameter: The nozzle the part is printed with, when known:
+        the walls are measured and judged for it.  Unset, the reference
+        nozzle.
     :returns: A :class:`DesignValidationReport`.
     :raises ValueError: If the file cannot be parsed.
     """
@@ -382,6 +386,7 @@ def validate_design(
         requirements_text,
         material=material,
         printer_model=printer_model,
+        nozzle_mm=nozzle_diameter,
     )
 
     # 2. Run printability analysis, for the plastic the checks judge: one
@@ -389,6 +394,7 @@ def validate_design(
     picked = brief.recommended_material
     report = analyze_printability(
         file_path,
+        nozzle_diameter=nozzle_diameter,
         build_volume=build_volume,
         material=picked.material.material_id if picked and picked.material else None,
     )
@@ -422,7 +428,7 @@ def validate_design(
         material_name = rec_material.material.display_name
         resolved_material_id = rec_material.material.material_id
         # One plastic's limits, from the one helper every check reads.
-        plastic_limits = limits_for(resolved_material_id)
+        plastic_limits = limits_for(resolved_material_id, nozzle_mm=nozzle_diameter)
         material_limits = plastic_limits.design_limits()
         limits_notes = plastic_limits.notes()
     else:
@@ -430,7 +436,7 @@ def validate_design(
         # named through the one helper every check reads (which says once
         # when it cannot place the name), else the general figures with
         # nothing asked.
-        plastic_limits = limits_for(material or None)
+        plastic_limits = limits_for(material or None, nozzle_mm=nozzle_diameter)
     # The wall check warns below the recommended wall: the plastic's own
     # where it was read, the general three-line wall otherwise.
     wall_limits = _wall_limits(plastic_limits)

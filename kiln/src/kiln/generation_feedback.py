@@ -1405,6 +1405,7 @@ def enhance_prompt_with_design_intelligence(
     max_length: int | None = None,
     printer_context: PrinterGenerationContext | None = None,
     anti_patterns: list[str] | None = None,
+    nozzle_mm: float | None = None,
 ) -> ImprovedPrompt:
     """Enhance a generation prompt with design intelligence constraints.
 
@@ -1433,6 +1434,9 @@ def enhance_prompt_with_design_intelligence(
         omitted, anti-patterns are derived from
         ``printer_context.common_failures`` via
         :func:`kiln.failure_vocabulary.anti_pattern_for`.
+    :param nozzle_mm: The nozzle the part is printed with, when known: the
+        walls and pins the constraints state follow it.  Unset, the
+        reference nozzle.
     :returns: An :class:`ImprovedPrompt` with design constraints applied.
     """
     # Merge printer context into explicit parameters when available.
@@ -1454,6 +1458,7 @@ def enhance_prompt_with_design_intelligence(
             prompt,
             material=material,
             printer_model=printer_model,
+            nozzle_mm=nozzle_mm,
         )
         printer_profile = (
             get_printer_design_profile(printer_model)
@@ -1480,11 +1485,11 @@ def enhance_prompt_with_design_intelligence(
 
     # The plastic the design checks read: the recommended one, else the one
     # named, else none (the general figures, with nothing asked).
-    plastic_limits = limits_for(None)
+    plastic_limits = limits_for(None, nozzle_mm=nozzle_mm)
     if mat and mat.material:
         # The curated keys a profile carries, then the plastic's limits from
         # the one helper every check reads.
-        plastic_limits = limits_for(mat.material.material_id)
+        plastic_limits = limits_for(mat.material.material_id, nozzle_mm=nozzle_mm)
         mat_limits = {
             **(getattr(mat.material, "design_limits", None) or {}),
             **plastic_limits.design_limits(),
@@ -1492,7 +1497,7 @@ def enhance_prompt_with_design_intelligence(
     elif material:
         # A name the catalogue cannot place: the plastic's own limits where
         # Kiln's design limits place it (the brief read them already).
-        plastic_limits = limits_for(material)
+        plastic_limits = limits_for(material, nozzle_mm=nozzle_mm)
         if plastic_limits.known:
             mat_limits = plastic_limits.design_limits()
 

@@ -24487,7 +24487,11 @@ def multi_material_print(
             )
 
         output_3mf = _multi_material_plate()
-        recipe = _multi_material_recipe(part_specs, [o["material_id"] for o in objects], printer_id)
+        # The model the plate is laid out for: the one named, else the model
+        # of the machine the call is aimed at -- the one the slice is made
+        # for, so the plate is arranged on the bed it prints on.
+        plate_printer = _resolve_printer_profile_id(printer_id, printer_name)
+        recipe = _multi_material_recipe(part_specs, [o["material_id"] for o in objects], plate_printer)
         recipe_path = output_3mf + ".built_from"
         # The thing printed is the PLATE, which does not exist until this
         # call builds it — so the first call builds it and hands it back
@@ -24528,9 +24532,9 @@ def multi_material_print(
             plate_cleared = True
         try:
             try:
-                positioned = auto_arrange_parts(part_specs, printer_id=printer_id)
+                positioned = auto_arrange_parts(part_specs, printer_id=plate_printer)
             except ValueError:
-                # printer_id not in the supported-model catalog — arrange on
+                # A model not in the supported-model catalog — arrange on
                 # the default plate size instead of refusing the print.
                 positioned = auto_arrange_parts(part_specs)
             if plate_cleared:
@@ -24548,7 +24552,7 @@ def multi_material_print(
                 with contextlib.suppress(OSError):
                     _os.remove(recipe_path)
                 compose_result = compose_multicolor_3mf(
-                    positioned, output_path=output_3mf, printer_id=printer_id or None,
+                    positioned, output_path=output_3mf, printer_id=plate_printer or None,
                 )
                 if compose_result.get("success"):
                     # What this plate was built from, for the call that prints it.
@@ -24579,8 +24583,7 @@ def multi_material_print(
         # From the one resolver every slice uses (kiln.slicer_material).
         from kiln.slicer_material import material_needs as _material_needs
 
-        _plate_pid = _resolve_printer_profile_id(printer_id, printer_name)
-        per_material = {m: _material_needs(m, printer_id=_plate_pid) for m in unique_mat_ids}
+        per_material = {m: _material_needs(m, printer_id=plate_printer) for m in unique_mat_ids}
         for needs in per_material.values():
             if needs is not None and needs.refusal is not None:
                 return _error_dict(str(needs.refusal.get("reason")), code=str(needs.refusal.get("code")))

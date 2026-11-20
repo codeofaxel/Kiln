@@ -496,22 +496,27 @@ def audit_original_design(
     # Resolve printer context for audit prompt enrichment.
     audit_printer_ctx = resolve_printer_generation_context(material=material)
 
+    from kiln.assumed_nozzle import assumed_nozzle
+
+    # One nozzle for every check below: the brief, the prompt, the
+    # printability check and the design check all judge the same walls.
+    nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
+
     brief = get_design_constraints(
         requirements_text,
         material=material or audit_printer_ctx.material,
         printer_model=printer_model or audit_printer_ctx.printer_model,
+        nozzle_mm=nozzle.diameter_mm,
     )
     prompt = enhance_prompt_with_design_intelligence(
         requirements_text,
         material=material or audit_printer_ctx.material,
         printer_model=printer_model or audit_printer_ctx.printer_model,
         printer_context=audit_printer_ctx,
+        nozzle_mm=nozzle.diameter_mm,
     )
     mesh_validation = validate_mesh(file_path)
 
-    from kiln.assumed_nozzle import assumed_nozzle
-
-    nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
     printability = analyze_printability(
         file_path,
         nozzle_diameter=nozzle.diameter_mm,
@@ -529,6 +534,7 @@ def audit_original_design(
         material=material,
         printer_model=printer_model,
         build_volume=build_volume_tuple,
+        nozzle_diameter=nozzle.diameter_mm,
     )
 
     orientation = None
@@ -1102,16 +1108,24 @@ def generate_original_design(
     # Use printer-resolved material if the user didn't specify one.
     effective_material = material or printer_ctx.material
 
+    from kiln.assumed_nozzle import assumed_nozzle
+
+    # The nozzle each attempt's audit judges with, so the brief and the
+    # prompt ask for the walls the audit will hold the result to.
+    seed_nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
+
     brief = get_design_constraints(
         requirements_text,
         material=effective_material,
         printer_model=printer_model or printer_ctx.printer_model,
+        nozzle_mm=seed_nozzle.diameter_mm,
     )
     seed_prompt = enhance_prompt_with_design_intelligence(
         requirements_text,
         material=effective_material,
         printer_model=printer_model or printer_ctx.printer_model,
         printer_context=printer_ctx,
+        nozzle_mm=seed_nozzle.diameter_mm,
     )
     provider_used, generation_provider, selection_reason = _resolve_original_design_provider(
         provider,
