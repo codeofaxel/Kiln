@@ -189,7 +189,8 @@ def test_a_saved_version_joins_its_goal_and_plays_beside_the_kept_copy(plain_ins
     assert sent["goal_id"] == "goal-1" and sent["_asked_by_user"] is True
     assert s.uploads == [kept]
     assert sent["source_artifact_token"] == _TOKEN and sent["motion"] == _WORK_IT_OUT
-    assert sent["made_with"] == {"file_name": Path(kept).name}
+    # It says it is a saved version, so the goal words its answer for one.
+    assert sent["made_with"] == {"file_name": Path(kept).name, "joins_as": "saved_version"}
     assert str(tmp_path) not in json.dumps(sent["made_with"])
 
     # What the servers recorded and the goal's notes are in the reply.

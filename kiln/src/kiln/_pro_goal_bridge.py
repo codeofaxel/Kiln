@@ -76,6 +76,10 @@ SAFETY_NOTES_KEY = "safety_notes"
 OWNER_NOTES_KEY = "owner_safety_notes"
 #: The one question the goal is waiting on the person to answer.
 QUESTION_KEY = "open_question"
+#: Said in ``made_with`` by a design version saved on this computer, so the
+#: goal's answer is worded for a version.  A join without it is a make.
+JOINS_AS_KEY = "joins_as"
+SAVED_VERSION = "saved_version"
 #: Where a make's envelope keeps its file, when the door did not hand it.
 _MESH_KEYS = ("local_path", "stl_path", "output_path", "path", "best_result_path", "produced_file")
 
@@ -159,8 +163,9 @@ def join(
     *send_file* false the model stays on this computer and only its
     fingerprint goes (a goal Kiln opened on its own holds no pictures to
     compare it with).  *saved* is a design version saved on this computer
-    rather than a make: a miss is worded for the version, and a signed-out
-    miss is said once per session with what signing in adds.
+    rather than a make: the ask says so (:data:`JOINS_AS_KEY`), so the goal
+    words its answer for a version; a miss is worded for the version, and a
+    signed-out miss is said once per session with what signing in adds.
 
     Sets ``envelope["saved_goal"]`` -- what the servers recorded, or why
     nothing was -- and, when the goal holds a picture, the comparison under
@@ -179,8 +184,10 @@ def join(
         }
         return
     send_file, motion, tell = _for_motion(mesh, send_file)
-    answer, miss = _ask(brief_id, mesh, _made_with(envelope, mesh, fingerprint=not send_file), asked_by_user,
-                        send_file=send_file, motion=motion)
+    made_with = _made_with(envelope, mesh, fingerprint=not send_file)
+    if saved:
+        made_with[JOINS_AS_KEY] = SAVED_VERSION
+    answer, miss = _ask(brief_id, mesh, made_with, asked_by_user, send_file=send_file, motion=motion)
     if miss is not None:
         _say_miss(brief_id, envelope, miss, saved=saved)
         return
