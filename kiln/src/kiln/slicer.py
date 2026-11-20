@@ -842,6 +842,33 @@ def _abrasive_slots(slot_materials: Sequence[Sequence[str]]) -> list[tuple[int, 
 #: The confirmation a refused abrasive slice can be sliced with, as its
 #: refusal says it: one clause, the same at every door.
 SOFT_NOZZLE_CONFIRM = "if the owner says to print it anyway, call again with soft_nozzle_confirmed=true"
+#: The start of the refusal's advice to choose each filament's nozzle; the
+#: filament and the nozzle follow.
+MAP_ADVICE = "give a filament-to-nozzle map with "
+
+
+def owner_asks(soft_nozzle_confirmed: Any = False, filament_map: Any = None) -> dict[str, Any]:
+    """The slice keywords a door hands on for the owner's word to print
+    anyway (``soft_nozzle_confirmed``) and the filament-to-nozzle map
+    (``filament_map``): only what was given, so a door passes both the same
+    way (:func:`slice_file`)."""
+    out: dict[str, Any] = {}
+    if soft_nozzle_confirmed is True:
+        out["soft_nozzle_confirmed"] = True
+    if filament_map:
+        out["filament_map"] = filament_map
+    return out
+
+
+def said_for(text: str, *, confirm: str, map_with: str) -> str:
+    """*text*, a slicing refusal, with its two asks spelled for a door that
+    takes them another way: *confirm* replaces "call again with
+    soft_nozzle_confirmed=true" after "if the owner says to print it
+    anyway, ", and *map_with* replaces "give a filament-to-nozzle map with"
+    before the filament and the nozzle."""
+    return text.replace(SOFT_NOZZLE_CONFIRM, f"if the owner says to print it anyway, {confirm}").replace(
+        MAP_ADVICE, f"{map_with} ",
+    )
 
 
 @dataclass(frozen=True)
@@ -991,7 +1018,7 @@ def soft_nozzle_run(
         fix = f"put {it} on {on}" if hard else hardened
     elif known:
         where = f"the slicer chooses each filament's nozzle and {said} {verb} not wear-resistant"
-        fix = f"give a filament-to-nozzle map with {it} on {on}" if hard else hardened
+        fix = f"{MAP_ADVICE}{it} on {on}" if hard else hardened
     elif len(candidates) == 1:
         where = f"the one nozzle fitted, {said}, is not wear-resistant"
         fix = hardened
@@ -1000,7 +1027,7 @@ def soft_nozzle_run(
             f"a slice for one nozzle may print through any nozzle fitted, and {said} {verb} not wear-resistant"
         )
         if hard and mappable:
-            fix = f"give a filament-to-nozzle map with {it} on {on}"
+            fix = f"{MAP_ADVICE}{it} on {on}"
         elif hard:
             fix = f"only {on} can take {it}, so fit wear-resistant nozzles in place of the others for {it}"
         else:
@@ -1656,12 +1683,13 @@ def _slice_with_orca(
         preset_name = Path(profile).stem[:48] or "kiln"
         slots = int((multicolor or {}).get("filament_slots_needed", 0))
         if slots >= 2 and any(stated := _file_slot_types(input_abs, slots)):
-            # Each filament is loaded as the type the file states for it.
-            from kiln.slicer_filament import safe_filament_type
+            # Each filament is loaded as the type the file states for it, in
+            # the short form a printer reads.
+            from kiln.slicer_filament import slicer_type_name
 
             own = str(settings.get("filament_type") or "").split(";")[0].split(",")[0].strip()
             settings["filament_type"] = ";".join(
-                safe_filament_type(word) if word else (own or safe_filament_type("")) for word in stated
+                (slicer_type_name(word) if word else "") or own or "PLA" for word in stated
             )
 
         # A multicolor 3MF needs one filament preset PER SLOT, or Orca

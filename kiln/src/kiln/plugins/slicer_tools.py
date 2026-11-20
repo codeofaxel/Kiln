@@ -3053,6 +3053,8 @@ class _SlicerToolsPlugin:
 
         import kiln.server as _srv
 
+        from kiln.slicer import owner_asks as _owner_asks
+
         # ------------------------------------------------------------------
         # slice_model
         # ------------------------------------------------------------------
@@ -3215,9 +3217,8 @@ class _SlicerToolsPlugin:
                     output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
-                    **({"filament_map": filament_map} if filament_map else {}),
                     **({"timeout": time_limit_seconds} if time_limit_seconds is not None else {}),
-                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
+                    **_owner_asks(soft_nozzle_confirmed, filament_map),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3373,6 +3374,7 @@ class _SlicerToolsPlugin:
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
             soft_nozzle_confirmed: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict[str, Any]:
             """Reslice a 3D model with custom slicer parameter overrides.
 
@@ -3404,6 +3406,11 @@ class _SlicerToolsPlugin:
                     wear-resistant).  Only on their word, never on your own
                     judgement.  The response's ``soft_nozzle`` says which
                     filament goes through which nozzle on their say-so.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 plate_number: Which plate to slice of a slicer project that
                     holds several plates (1 for the first).  Leave unset for
                     any other file.  A several-plate project with none named
@@ -3591,7 +3598,7 @@ class _SlicerToolsPlugin:
                     output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
-                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
+                    **_owner_asks(soft_nozzle_confirmed, filament_map),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3775,6 +3782,7 @@ class _SlicerToolsPlugin:
             branch_id: str | None = None,
             account_sync_id: str | None = None,
             soft_nozzle_confirmed: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -3830,6 +3838,11 @@ class _SlicerToolsPlugin:
                     wear-resistant).  Only on their word, never on your own
                     judgement.  The response's ``soft_nozzle`` says which
                     filament goes through which nozzle on their say-so.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 input_path: Path to the 3D model file (STL, 3MF, STEP, etc.).
                 printer_name: Target printer name.  Omit for the default printer.
                 profile: Path to a slicer profile/config file.
@@ -4206,7 +4219,7 @@ class _SlicerToolsPlugin:
                     profile_path=effective_profile, auto_center=auto_center,
                     material_id=material, material=declared_material,
                     loaded_material=loaded_material,
-                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
+                    **_owner_asks(soft_nozzle_confirmed, filament_map),
                 )
                 if slice_err is not None:
                     return slice_err

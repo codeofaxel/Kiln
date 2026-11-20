@@ -163,6 +163,7 @@ class _EstimateToolsPlugin:
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
             soft_nozzle_confirmed: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Primary estimation tool — slice a 3D model and return time, filament, cost, and printability analysis.
 
@@ -186,6 +187,11 @@ class _EstimateToolsPlugin:
                     abrasive filament through a nozzle on record that is not
                     wear-resistant).  Only on their word, never on your own
                     judgement.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 plate_number: Which plate to estimate of a slicer project that
                     holds several plates (1 for the first).  Leave unset for
                     any other file.  A several-plate project with none named
@@ -225,7 +231,7 @@ class _EstimateToolsPlugin:
             from kiln.gcode_metadata import extract_metadata
             from kiln.plugins.slicer_tools import plate_choice_refusal
             from kiln.printability import analyze_printability
-            from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError
+            from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError, owner_asks
 
             try:
                 # 1. Resolve the slicer profile
@@ -252,7 +258,7 @@ class _EstimateToolsPlugin:
                     printer_name=printer_name, placement=placement,
                     profile_path=effective_profile, auto_center=True,
                     material=material or None, plate_number=plate_number,
-                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
+                    **owner_asks(soft_nozzle_confirmed, filament_map),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -563,6 +569,7 @@ class _EstimateToolsPlugin:
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
             soft_nozzle_confirmed: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Estimate print time and filament usage for a model.
 
@@ -607,6 +614,11 @@ class _EstimateToolsPlugin:
                 filament through a nozzle on record that is not
                 wear-resistant).  Only on their word, never on your own
                 judgement.
+            :param filament_map: Only for a printer with more than one nozzle:
+                the nozzle (1 for the first) each filament prints from, one
+                number per filament in filament order.  Leave unset to let the
+                slicer choose; a map that does not fit is refused before
+                slicing, as ``slice_model`` refuses it.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("slicer"):
@@ -628,7 +640,7 @@ class _EstimateToolsPlugin:
                 # the same shared step as every slice door, never refusing
                 # because of the plate (_estimate_slice).
                 from kiln.plugins.slicer_tools import _attach_placement
-                from kiln.slicer import estimates_for_result
+                from kiln.slicer import estimates_for_result, owner_asks
 
                 resolved_profile = profile or None
                 if not resolved_profile and printer_id:
@@ -643,7 +655,7 @@ class _EstimateToolsPlugin:
                     placement=placement, profile_path=resolved_profile,
                     slicer_path=slicer_path or None, material=material or None,
                     plate_number=plate_number,
-                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
+                    **owner_asks(soft_nozzle_confirmed, filament_map),
                 )
                 if slice_err is not None:
                     return slice_err

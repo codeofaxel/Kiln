@@ -52,6 +52,7 @@ class _SmartPrintToolsPlugin:
             preview_token: str | None = None,
             placement: str | list[float] | None = None,
             soft_nozzle_confirmed: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
 
@@ -80,6 +81,11 @@ class _SmartPrintToolsPlugin:
                     abrasive filament through a nozzle on record that is not
                     wear-resistant).  Only on their word, never on your own
                     judgement.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 model_path: Path to the model that failed (STL, OBJ, 3MF,
                     STEP, ...).  One the diagnosis cannot read is said in
                     ``printability_note``.
@@ -315,6 +321,7 @@ class _SmartPrintToolsPlugin:
             # sliced file).  A retry is where a diagnosis adds a wide brim
             # to a part that already failed.
             from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
+            from kiln.slicer import owner_asks
 
             try:
                 # The density the slicer weighs the print with: what was
@@ -323,7 +330,7 @@ class _SmartPrintToolsPlugin:
                     model_path, effective_printer_id=effective_pid, printer_name=printer_name,
                     placement=placement, profile_path=effective_profile, adapter=adapter,
                     material=material, loaded_material=material_detected,
-                    **({"soft_nozzle_confirmed": True} if soft_nozzle_confirmed is True else {}),
+                    **owner_asks(soft_nozzle_confirmed, filament_map),
                 )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(

@@ -1685,6 +1685,22 @@ class TestTheOwnerMaySayPrintAnyway:
         bridge._served_odometer_report("invented_two", 5.0, "start:2", file_name=plain.output_path)
         assert "abrasive_run" not in sent[1]
 
+    def test_the_print_row_carries_the_word_to_the_account(self, tmp_path, invented_printer, owner_says):
+        from kiln import outcome_courier, print_lineage
+
+        invented_printer(None)
+        owner_says(None, "brass")
+        result = self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA-CF", soft_nozzle_confirmed=True)
+        lineage_id = print_lineage.resolve(result.output_path, local_paths=[result.output_path])["lineage_id"]
+        row = {"version_id": "v1", "outcome": "failed", "determined_by": "observed", "lineage_id": lineage_id}
+        assert outcome_courier.account_row(row, "a" * 32)["soft_nozzle"] == {
+            "confirmed_by": "owner", "filaments": ["PLA-CF"], "nozzles": [{"position": None, "material": "brass"}],
+        }
+        (tmp_path / "p").mkdir()
+        plain = self._slice(tmp_path / "p", _slicer_that_writes("", {}), material="PLA")
+        other = print_lineage.resolve(plain.output_path, local_paths=[plain.output_path])["lineage_id"]
+        assert "soft_nozzle" not in outcome_courier.account_row({**row, "lineage_id": other}, "b" * 32)
+
     def test_the_slice_model_door_takes_the_owners_word(self, tmp_path, invented_printer, owner_says, monkeypatch):
         from kiln import monitor_twin
 
@@ -1754,6 +1770,52 @@ class TestEachFilamentIsLoadedAsItsOwn:
             )
         assert result.success
         assert [f["filament_type"] for f in seen["filaments"]] == [["PLA"], ["PETG-CF"]]
+
+
+class TestTheFileStatesShortFilamentTypes:
+    """A filament's type reaches the sliced file in the short form a printer
+    reads, never a long name."""
+
+    @pytest.mark.parametrize(
+        ("stated", "loaded"),
+        [
+            (["PLA (Polylactic Acid)", "Carbon Fiber PLA"], [["PLA"], ["PLA-CF"]]),
+            (["PETG (Polyethylene Terephthalate Glycol)", "Carbon Fiber Nylon (PA-CF)"], [["PETG"], ["PA-CF"]]),
+        ],
+    )
+    def test_a_plates_long_names_load_as_short_types(self, tmp_path, stated, loaded):
+        seen: dict = {}
+        plate = TestEachFilamentIsLoadedAsItsOwn()._stated_plate(tmp_path, stated)
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("", seen)),
+        ):
+            assert slice_file(plate, output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, None)).success
+        assert [f["filament_type"] for f in seen["filaments"]] == loaded
+
+    def test_a_name_kiln_cannot_read_keeps_the_profiles_type(self, tmp_path):
+        seen: dict = {}
+        plate = TestEachFilamentIsLoadedAsItsOwn()._stated_plate(tmp_path, ["Mystery Blend", "Carbon Fiber PLA"])
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.slicer._find_bambu_studio", return_value=None),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _slicer_that_writes("", seen)),
+        ):
+            assert slice_file(
+                plate, output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, None), material="PETG",
+            ).success
+        assert [f["filament_type"] for f in seen["filaments"]] == [["PETG"], ["PLA-CF"]]
+
+    @pytest.mark.parametrize(
+        ("declared", "written"), [("Carbon Fiber PLA", "PLA-CF"), ("cf_pla", "PLA-CF"), ("PETG-HF", "PETG-HF")],
+    )
+    def test_a_declared_long_name_is_written_short(self, declared, written):
+        from kiln.slicer_filament import resolve_slice_filament
+
+        assert resolve_slice_filament(declared).filament_type == written
 
 
 class TestMultiMaterialPrintHeatsEachNozzleForItsOwn:

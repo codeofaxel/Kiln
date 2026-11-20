@@ -526,6 +526,22 @@ def _keep_foreign(path: str, name: str) -> dict[str, Any]:
     return _answer(record, "content")
 
 
+def soft_nozzle_of(lineage_id: str | None) -> dict[str, Any] | None:
+    """What the owner said to print anyway in the slice record *lineage_id*
+    names (:func:`note_soft_nozzle`), or ``None``.  Never raises."""
+    if not isinstance(lineage_id, str) or not _ID.match(lineage_id) or _hosted():
+        return None
+    try:
+        with _lock:
+            data = _load()
+        record = next((r for r in reversed(data["records"]) if r.get("id") == lineage_id), None)
+    except Exception:  # noqa: BLE001 -- an unread record says nothing
+        logger.debug("slice record %s not read", lineage_id, exc_info=True)
+        return None
+    kept = (record or {}).get("soft_nozzle")
+    return kept if isinstance(kept, dict) else None
+
+
 def note_print_started(file_name: str | None, lineage_id: str | None) -> None:
     """Pin the record a print of *file_name* just started with, so its
     ending is answered by this record whatever is sliced to that name
@@ -595,6 +611,7 @@ __all__ = [
     "note_soft_nozzle",
     "note_wrapped",
     "read_stamps",
+    "soft_nozzle_of",
     "record_slice",
     "resolve",
     "signatures_for",

@@ -543,14 +543,17 @@ def _fill_record(plan_id: str) -> tuple[str, dict[str, Any], str] | None:
     return str(row.get("original_file") or ""), record if isinstance(record, dict) else {}, str(row.get("status") or "")
 
 
-def submit_fill_plan(plan_id: str, signoff: dict[str, Any] | None) -> dict[str, Any]:
+def submit_fill_plan(
+    plan_id: str, signoff: dict[str, Any] | None, *, asks: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Queue a kept fill plan: one copies job per printer, pinned to it.
 
     Each job asks for the copies that printer prints now and later; it is
     laid out for its plate when its turn comes, and what that plate cannot
     take is queued again on the same printer (the queue's own copies path),
     so later plates follow as plates are cleared.  *signoff* is the person's
-    yes, carried on every job.  The caller takes the gate first.  Queues
+    yes, carried on every job, and so are *asks*, the owner's word to print
+    anyway and the filament-to-nozzle map (:func:`kiln.slicer.owner_asks`).  The caller takes the gate first.  Queues
     nothing a second time: a plan already queued answers what it queued.
     """
     import kiln.server as _srv
@@ -572,7 +575,7 @@ def submit_fill_plan(plan_id: str, signoff: dict[str, Any] | None) -> dict[str, 
         out = _srv._queue_fill_rest(
             model_path, copies, printer_name=str(row["printer"]), printer_id=None, overrides=None,
             slicer_path=None, spacing_mm=10.0, signoff=signoff, run={"split_plan_id": plan_id},
-            beside_plate=beside or None,
+            beside_plate=beside or None, asks=asks,
         )
         if out.get("job_id"):
             queued.append({"printer": out.get("printer_name") or row["printer"], "job_id": out["job_id"], "copies": copies})

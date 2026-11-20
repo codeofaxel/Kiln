@@ -128,7 +128,9 @@ def part_stl_path(part: Any, design_dir: str) -> str:
     return stl_path
 
 
-def slice_stl(stl_path: str, profile: str | None, *, placement: Any = "auto") -> str:
+def slice_stl(
+    stl_path: str, profile: str | None, *, placement: Any = "auto", asks: dict[str, Any] | None = None,
+) -> str:
     """Slice one STL through the real slicing engine; return the gcode path.
 
     The plate may still hold the last print, so the slice runs through the
@@ -136,6 +138,9 @@ def slice_stl(stl_path: str, profile: str | None, *, placement: Any = "auto") ->
     for ``"auto"``, which refuses on an occupied plate -- the parts of a
     multi-part recipe keep their layout against each other, and Kiln does
     not move that layout without being told where.
+
+    *asks* is the owner's word to print anyway and the filament-to-nozzle
+    map (:func:`kiln.slicer.owner_asks`), handed to the slice as given.
 
     :raises RuntimeError: When the plate gate refuses (its sentence is the
         message), or the slicer fails or emits nothing — callers convert
@@ -145,6 +150,7 @@ def slice_stl(stl_path: str, profile: str | None, *, placement: Any = "auto") ->
 
     result, err, _info = _placed_slice(
         stl_path, effective_printer_id=None, printer_name=None, placement=placement, profile_path=profile or None,
+        **(asks or {}),
     )
     if err is not None:
         raise RuntimeError(str(err["error"]["message"]))
@@ -330,7 +336,7 @@ def _apply_parameters_to_scad(
     return scad_code, applied, not_in_source, skipped
 
 
-def _rebuild_parametric(recipe: Any, design_dir: str) -> dict[str, Any]:
+def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | None = None) -> dict[str, Any]:
     """Re-derive geometry from the recipe's OpenSCAD source, then rebuild.
 
     Apply the recipe's numeric parameters to the source, recompile, keep
@@ -362,7 +368,7 @@ def _rebuild_parametric(recipe: Any, design_dir: str) -> dict[str, Any]:
         }
 
     try:
-        gcode_path = slice_stl(compiled_stl, None)
+        gcode_path = slice_stl(compiled_stl, None, asks=asks)
     except Exception as exc:
         return {
             "status": "error",
@@ -401,7 +407,7 @@ def _rebuild_parametric(recipe: Any, design_dir: str) -> dict[str, Any]:
     }
 
 
-def _rebuild_mesh(recipe: Any, design_dir: str) -> dict[str, Any]:
+def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = None) -> dict[str, Any]:
     """Re-slice the recipe's recorded meshes exactly as they are.
 
     No parametric source, so the geometry on disk IS the design.  Slices
@@ -421,7 +427,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str) -> dict[str, Any]:
                     "code": "FILE_NOT_FOUND",
                 }
             try:
-                part.gcode_path = slice_stl(stl_path, part.slicer_profile)
+                part.gcode_path = slice_stl(stl_path, part.slicer_profile, asks=asks)
             except Exception as exc:
                 return {
                     "status": "error",
@@ -458,7 +464,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str) -> dict[str, Any]:
                 "code": "REBUILD_EMPTY",
             }
         try:
-            merged_gcode = slice_stl(stl_path, None)
+            merged_gcode = slice_stl(stl_path, None, asks=asks)
         except Exception as exc:
             return {
                 "status": "error",
@@ -543,7 +549,7 @@ def apply_brief_to_recipe(recipe_path: str, brief_id: str) -> None:
         )
 
 
-def rebuild_design_from_recipe(recipe_path: str) -> dict[str, Any]:
+def rebuild_design_from_recipe(recipe_path: str, *, asks: dict[str, Any] | None = None) -> dict[str, Any]:
     """Re-execute the full build pipeline from a saved recipe.
 
     Parametric recipes (those carrying OpenSCAD source and no split parts)
@@ -551,6 +557,8 @@ def rebuild_design_from_recipe(recipe_path: str) -> dict[str, Any]:
     re-slices its recorded meshes.  The result names which mode ran.
 
     :param recipe_path: The design directory, or the recipe file itself.
+    :param asks: The owner's word to print anyway and the filament-to-nozzle
+        map, handed to every slice (:func:`slice_stl`).
     :returns: Dict with the print artifact, the mode used, and per-part or
         per-parameter detail.
     """
@@ -560,5 +568,5 @@ def rebuild_design_from_recipe(recipe_path: str) -> dict[str, Any]:
     recipe, design_dir = loaded
 
     if recipe.source_scad and not recipe.parts:
-        return _rebuild_parametric(recipe, design_dir)
-    return _rebuild_mesh(recipe, design_dir)
+        return _rebuild_parametric(recipe, design_dir, asks)
+    return _rebuild_mesh(recipe, design_dir, asks)
