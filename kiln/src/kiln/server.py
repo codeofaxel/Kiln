@@ -85,6 +85,8 @@ from kiln.mcp_compat import (
     set_instructions,
     stamp_restart,
 )
+from kiln.print_keeping import call as print_keeping_call
+from kiln.print_keeping import reply_fields as print_keeping_reply
 from kiln.print_consent import (
     NOT_ASKED_CODE_COOLDOWN,
     NOT_ASKED_CODE_SHOWN,
@@ -5349,13 +5351,15 @@ def _audit(
     This is non-blocking and will not raise if the DB write fails.
     """
     try:
+        from kiln.print_keeping import audit_details
+
         db = get_db()
         db.log_audit(
             tool_name=tool_name,
             safety_level=_get_safety_level(tool_name),
             action=action,
             printer_name=_PRINTER_MODEL or None,
-            details=details,
+            details=audit_details(details),
             session_id=_SESSION_ID,
         )
     except Exception:
@@ -6137,8 +6141,13 @@ def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
             "PrintWatchdog anomaly on %s: %s", printer_name, flag,
         )
         # Auto-capture incident envelope (Layer 6) — local only, no upload.
+        # Never for a print the person asked not to keep.
         try:
             from kiln import incident_recorder
+            from kiln.print_keeping import keeps as _print_kept
+
+            if not _print_kept(printer_name, file_name):
+                return
             incident_recorder.record_incident(
                 incident_type="watchdog_red_flag",
                 printer_status={"printer_name": printer_name, "file": file_name},
@@ -10017,6 +10026,7 @@ def _resolve_bed_type(bed_type: str) -> tuple[str, dict | None]:
 
 
 @mcp.tool(annotations=destructive("Start a print"))
+@print_keeping_call
 def start_print(
     file_name: str,
     use_ams: str = "auto",
@@ -10036,6 +10046,7 @@ def start_print(
     version_id: str | None = None,
     design_id: str | None = None,
     branch_id: str | None = None,
+    keep_record: bool | None = None,
     printer_name: str | None = None,
 ) -> dict:
     """Start printing a file already uploaded to the printer (file must exist on printer).
@@ -10142,6 +10153,13 @@ def start_print(
         design_id: The design that version belongs to; passed with
             ``version_id``.
         branch_id: The branch that version is on; passed with ``version_id``.
+        keep_record: ``False`` only when the person asks for this print not
+            to be kept ("print this privately", "don't keep a record of
+            this"); never suggest it.  Kiln then keeps nothing of the print
+            once it ends, and the answer carries one line saying so.
+            ``True`` keeps the print, for a start a team's rule held
+            (``TEAM_KEEPS_PRINTS``) after the person agreed.  Omit otherwise:
+            the print is kept the way the person's account says.
 
     Branch on ``print_start`` — one field, three values:
 
@@ -10187,6 +10205,7 @@ def start_print(
             "version_id": version_id,
             "design_id": design_id,
             "branch_id": branch_id,
+            "keep_record": keep_record,
         },
     ):
         return conf
@@ -10361,6 +10380,8 @@ def start_print(
         ):
             if isinstance(_id_val, str) and _id_val.strip():
                 print_kwargs[_id_key] = _id_val.strip()
+        if isinstance(keep_record, bool):
+            print_kwargs["keep_record"] = keep_record
 
         # Resolve tri-state use_ams: "auto" | "true"/"false" | bool.  The
         # local copy (when this session uploaded the file) says which
@@ -10593,9 +10614,12 @@ def start_print(
                     pre_start_targets, exc,
                 )
 
+        _not_kept = getattr(result, "print_kept", None) == "none"
         _audit(
             "start_print", "executed",
-            details={
+            # A print the person asked not to keep: the action is logged,
+            # nothing that names the print (kiln.print_keeping).
+            details={"printer": target_name, "print_kept": "none"} if _not_kept else {
                 "file": file_name,
                 "printer": target_name,
                 "resume_from_paused": resume_from_paused,
@@ -10614,6 +10638,7 @@ def start_print(
         # Say which machine took the job.  With more than one printer on the
         # bench, "started" on its own does not tell the caller where to look.
         out["printer_name"] = target_name
+        out.update(print_keeping_reply(result))
         # Say how the filaments were routed, in words, every time: a
         # print that silently fed the wrong slot is the failure this exists
         # to end, so the routing is part of the answer rather than a log.
@@ -10737,7 +10762,9 @@ def _cancel_print_on(
         _layer_at_cancel = getattr(
             getattr(_state_at_cancel, "job", None), "current_layer", 0,
         ) or 0
-        if _layer_at_cancel < 5:
+        from kiln.print_keeping import keeps as _print_kept
+
+        if _layer_at_cancel < 5 and _print_kept(target_name):
             from kiln import incident_recorder
             incident_recorder.record_incident(
                 incident_type="user_cancel_pre_layer_5",
@@ -17524,6 +17551,8 @@ def await_print_completion(
             from kiln import community_autofire
 
             jd = result.get("job") or {}
+            from kiln.printers.base import outcome_printer_name
+
             community_autofire.auto_contribute_completion(
                 outcome=result.get("outcome", ""),
                 printer_file_name=file_name_at_entry,
@@ -17531,6 +17560,7 @@ def await_print_completion(
                 printer_model=printer_model_at_entry,
                 material=material_at_entry or jd.get("material"),
                 print_time_seconds=jd.get("print_time_seconds"),
+                printer_name=outcome_printer_name(adapter),
             )
         except Exception:
             logger.debug(

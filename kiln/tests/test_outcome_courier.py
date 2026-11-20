@@ -45,6 +45,9 @@ def sent(monkeypatch):
     calls: list[dict] = []
 
     def fake_request(tool, method, path, body=None, **kw):
+        if path == "/api/cloud/user/prefs":
+            # The account keeps print history (the default), read before a push.
+            return {"status": "success", "print_history": "account"}
         calls.append({"tool": tool, "method": method, "path": path, "body": body})
         rows = (body or {}).get("rows") or []
         return {"status": "success", "success": True,

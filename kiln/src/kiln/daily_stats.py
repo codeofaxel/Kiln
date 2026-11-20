@@ -730,8 +730,12 @@ def _take_pending_start(
     return claimed
 
 
-def record_print_start(printer_name: str, file_name: str | None = None) -> None:
+def record_print_start(printer_name: str, file_name: str | None = None, *, token: bool = True) -> None:
     """Count a print at the moment it starts.  Never raises.
+
+    *token* ``False`` (a print the person asked not to keep) counts it and
+    leaves no pending token naming its file: no outcome will ever consume
+    one, so a token would outlive the print.
 
     This is the only print signal every adapter emits.  Counting outcomes
     instead undercounted by construction: ``record_print_outcome`` is an
@@ -746,6 +750,9 @@ def record_print_start(printer_name: str, file_name: str | None = None) -> None:
         with _lock:
             data = _read()
             data["prints"] = data.get("prints", 0) + 1
+            if not token:
+                _write(data)
+                return
 
             pending = data.get("pending_starts")
             if not isinstance(pending, list):

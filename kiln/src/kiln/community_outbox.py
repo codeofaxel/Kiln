@@ -771,6 +771,11 @@ def contribute_print_outcome(
         with the outbox result (``queued`` False there means an identical
         print was already queued — the double-ship, collapsed).
     """
+    from kiln import print_keeping
+
+    # Print history kept on this computer only is never pooled.
+    if print_keeping.account_choice() == print_keeping.COMPUTER:
+        return {"contributed": False, "reason": "kept_on_this_computer"}
     from kiln.community_sync import shared_print_record
 
     mapped = translate_outcome(outcome)

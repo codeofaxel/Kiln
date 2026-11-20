@@ -182,10 +182,24 @@ def spawn_ending_watch(adapter: Any, file_name: str) -> int | None:
 
 
 def _pending_rows(printer_name: str) -> list[dict[str, Any]]:
+    """The prints still open on *printer_name*: its pending rows and, for a
+    print the person asked not to keep (which has no row), its start record,
+    so its ending is still seen and the record deleted
+    (:func:`kiln.print_keeping.print_ended`)."""
     from kiln.persistence import get_db
 
     rows = get_db().list_unresolved_outcomes(printer_name=printer_name, limit=50)
-    return [r for r in rows if r.get("outcome") == "pending"]
+    open_rows = [r for r in rows if r.get("outcome") == "pending"]
+    try:
+        from kiln.monitor_twin import _epoch, active_twin
+        from kiln.print_keeping import NONE
+
+        record = active_twin(printer_name)
+        if isinstance(record, dict) and record.get("kept") == NONE:
+            open_rows.append({"outcome": "pending", "created_at": _epoch(record.get("started_at"))})
+    except Exception:  # noqa: BLE001 -- a record that cannot be read holds nothing
+        logger.debug("ending watch: start record unreadable", exc_info=True)
+    return open_rows
 
 
 def _resolve(printer_name: str) -> Any:

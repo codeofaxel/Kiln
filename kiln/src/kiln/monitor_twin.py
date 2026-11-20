@@ -355,6 +355,7 @@ def note_print_started(
     sent_sha256: str | None = None,
     continues: tuple[str, str] | None = None,
     printer_model: str | None = None,
+    kept: str | None = None,
 ) -> None:
     """A print just started: join the printer-side name to the sliced pair
     and retain copies of the toolpath (+ mesh) for the Monitor's twin.
@@ -388,6 +389,10 @@ def note_print_started(
     "which kind of printer is this print on" is answered by the record
     itself after the printer is renamed, set up again or removed.  A print
     carried on keeps the model its record already held.
+
+    *kept* is ``"none"`` for a print the person asked not to keep
+    (:mod:`kiln.print_keeping`): the record is the running print's safety
+    record and is deleted when the print ends (:func:`forget_print`).
     """
     try:
         base = os.path.basename(str(file_name or ""))
@@ -405,6 +410,8 @@ def note_print_started(
             "gcode_sha256": None,
             "mesh": None,
         }
+        if kept:
+            record["kept"] = str(kept)
 
         if match is not None:
             src_gcode = str(match.get("output") or "")
@@ -610,6 +617,52 @@ def rename_printer(old_name: str, new_name: str) -> bool:
     return True
 
 
+def forget_print(printer_name: str) -> bool:
+    """Delete the start record held for *printer_name*, the toolpath, model
+    and original kept beside it, and every slice-ledger row that names one
+    of the print's files.  ``True`` when a record was deleted.  Never raises.
+
+    For a print the person asked not to keep, once it ends: nothing of it
+    stays on this computer (:func:`kiln.print_keeping.print_ended`).
+    """
+    try:
+        slug = _slug(printer_name)
+        active = _read_json(_ACTIVE_FILE, {})
+        if not isinstance(active, dict) or slug not in active:
+            return False
+        record = active.pop(slug)
+        _write_json(_ACTIVE_FILE, active)
+        names: set[str] = set()
+        if isinstance(record, dict):
+            if record.get("file_name"):
+                names.add(os.path.basename(str(record["file_name"])))
+            for key in ("gcode", "mesh", "original"):
+                path = record.get(key)
+                if isinstance(path, str) and path:
+                    Path(path).unlink(missing_ok=True)
+        for old in _TWIN_DIR.glob(f"{slug}-*"):
+            old.unlink(missing_ok=True)
+        entries = _read_json(_SLICES_FILE, [])
+        if isinstance(entries, list) and names:
+            def _names(entry: dict[str, Any]) -> set[str]:
+                return {
+                    os.path.basename(str(entry.get(k)))
+                    for k in ("output", "wrapped")
+                    if entry.get(k)
+                }
+
+            kept_entries = [
+                e for e in entries
+                if not (isinstance(e, dict) and _names(e) & names)
+            ]
+            if len(kept_entries) != len(entries):
+                _write_json(_SLICES_FILE, kept_entries)
+        return True
+    except Exception:  # noqa: BLE001 -- a cleanup never raises into a status read
+        logger.debug("monitor_twin.forget_print failed", exc_info=True)
+        return False
+
+
 def active_twin(printer_name: str | None = None) -> dict[str, Any] | None:
     """The retained record for ``printer_name``, or — unnamed — the record
     of the print that started most recently.  ``None`` when nothing is
@@ -673,6 +726,15 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
     nothing here runs ambiently.
     """
     rec = active_twin(printer_name)
+    if rec is not None:
+        from kiln import print_keeping
+
+        if not print_keeping.may_leave(printer_name=rec.get("printer_name"), file_name=rec.get("file_name")):
+            return {
+                "success": False,
+                "code": "PRINT_NOT_SENT",
+                "message": "This print is not kept in your Kiln account, so its toolpath stays on this computer.",
+            }
     if rec is None:
         return {
             "success": False,

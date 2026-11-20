@@ -317,6 +317,39 @@ def _clear_print_note(job_id: str, outcome: str, notes: str | None) -> dict:
     return {"success": True, "job_id": job_id, "outcome": outcome, "note_cleared": True}
 
 
+def _forget_prints(job_id: str, design_id: str | None) -> dict:
+    """``record_print_outcome(forget=True)``: delete one print, or with
+    ``job_id="all"`` every print of *design_id*, from this computer's history,
+    and ask the person's Kiln account to forget it too."""
+    import kiln.server as _srv
+    from kiln.persistence import get_db
+
+    every = (job_id or "").strip().lower() == "all"
+    if every and not (design_id or "").strip():
+        return _srv._error_dict(
+            'To forget every print of a design, send job_id="all" with its design_id.',
+            code="VALIDATION_ERROR",
+        )
+    db = get_db()
+    gone = db.forget_prints(design_id=design_id.strip()) if every else db.forget_prints(job_id=job_id)
+    if not gone and not every:
+        return _srv._error_dict(f"No print {job_id!r} is recorded on this computer.", code="NOT_FOUND")
+    try:
+        from kiln import outcome_courier
+
+        outcome_courier.push_soon()
+    except Exception:  # noqa: BLE001 -- the next push carries it
+        _logger.debug("outcome courier not offered the forget", exc_info=True)
+    return {
+        "success": True,
+        "forgotten": gone,
+        "message": (
+            f"Forgot {gone} print{'s' if gone != 1 else ''} on this computer; your Kiln account "
+            "forgets them the next time this computer reaches it."
+        ),
+    }
+
+
 def _ending_asked(job_id: str, outcome: str) -> dict:
     """The person was asked about *job_id*'s ending and had nothing to add:
     remember that they were asked, and change nothing else.  A cancel Kiln
@@ -465,6 +498,7 @@ def record_print_outcome(
     note_by: str | None = None,
     clear_note: bool = False,
     ending_asked: bool = False,
+    forget: bool = False,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -519,6 +553,11 @@ def record_print_outcome(
             ending the person reported, ``"agent"`` for one you observed
             or saw; a hook's auto-recorded string carries no label.
         clear_note: Delete the note on this print, when the person asks.
+        forget: Delete this print from the person's history, on this
+            computer and in their Kiln account, when they ask ("forget this
+            print").  With ``job_id="all"`` and ``design_id``, every print
+            of that design is forgotten.  ``outcome`` is not checked.  It
+            cannot be undone.
             Send the print's ``job_id`` and the ``outcome`` it is recorded
             with (the call is refused if that is not its ending, so the
             wrong print is never changed); nothing else is recorded and the
@@ -593,6 +632,8 @@ def record_print_outcome(
 
     if err := _srv._check_auth("learning"):
         return err
+    if forget:
+        return _forget_prints(job_id, design_id)
 
     # --- Validate enums ---
     if outcome not in _VALID_OUTCOMES:
@@ -704,6 +745,19 @@ def record_print_outcome(
     if not printer_name:
         printer_name = "unknown"
 
+    # A print the person asked not to keep has no record, while it prints or
+    # as it ends (kiln.print_keeping).
+    from kiln import print_keeping
+
+    if not print_keeping.keeps(printer_name, file_name or job_id):
+        return {
+            "success": True,
+            "recorded": False,
+            "print_kept": print_keeping.NONE,
+            "job_id": job_id,
+            "message": "This print is not kept, so its ending is not recorded.",
+        }
+
     # --- Backfill the material the same way, from honest sources only ---
     # Callers that know the material pass it; the terminal-state hook cannot,
     # so without this every auto-recorded row was material-blind.  Resolved
@@ -809,6 +863,7 @@ def record_print_outcome(
 
             if (
                 community_opt_in_enabled()
+                and print_keeping.may_leave(printer_name=printer_name, file_name=file_name or job_id)
                 and community_outbox.translate_outcome(outcome) is not None
             ):
                 resolved_model: str | None = None
