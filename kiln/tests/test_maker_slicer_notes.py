@@ -319,10 +319,16 @@ class TestEveryDoorCarriesTheLine:
 
         monkeypatch.setattr("kiln.print_lineage.resolve", resolve)
         _ask(monkeypatch, "accept")
-        assert "  Colours: one colour: Invented Two's two-nozzle and multi-colour slicing needs Bambu Studio" in (
+        # A record kept before it named the slicer says its reason as kept.
+        assert "  Colours: One colour: Invented Two's two-nozzle and multi-colour slicing needs Bambu Studio." in (
             _ask.last_message.splitlines()
         )
         assert asked == ["benchy.3mf"]
+        kept["maker_slicer"] = {"name": "Bambu Studio", "need": "install", "floor": ""}
+        _ask(monkeypatch, "accept")
+        assert "  Colours: One colour: Bambu Studio isn't installed on the computer slicing this print." in (
+            _ask.last_message.splitlines()
+        )
         monkeypatch.setattr("kiln.print_lineage.resolve", lambda file_name, *, local_paths=(): {"part": "unknown"})
         _ask(monkeypatch, "accept")
         assert "Colours:" not in _ask.last_message

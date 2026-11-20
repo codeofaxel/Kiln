@@ -303,6 +303,7 @@ def _said_one_nozzle(
     if flattened:
         block["colours_flattened"] = kept["colours_flattened"] = True
         kept["colours"] = _colours_words(printed, colours)
+        kept["maker_slicer"] = {"name": miss.said, "need": miss.need, "floor": miss.floor or ""}
         lead = f"This will print in {kept['colours']}"
         if not _hosted():
             kept["because"] = _colours_because(printer, nozzles, miss)
@@ -326,18 +327,29 @@ def _said_one_nozzle(
 def approval_row(file_name: str, local_path: str | None = None) -> str | None:
     """The line a person's print approval shows for a file Kiln sliced in
     fewer colours than its plate because the printer's maker's slicer was
-    missing or too old (``one colour: ...``), read from the sliced file's record
+    missing or too old (``One colour: <slicer> isn't installed on the
+    computer slicing this print.``), read from the sliced file's record
     (:func:`kiln.print_lineage.resolve`); ``None`` for any other file.
     Never raises."""
     try:
+        from kiln.maker_slicer import UPDATE
         from kiln.print_lineage import resolve
 
         kept = resolve(file_name, local_paths=[local_path] if local_path else []).get("one_nozzle")
         if not isinstance(kept, Mapping) or kept.get("colours_flattened") is not True:
             return None
         printed = str(kept.get("colours") or "one colour")
+        printed = printed[:1].upper() + printed[1:]
+        needs = kept.get("maker_slicer") if isinstance(kept.get("maker_slicer"), Mapping) else {}
+        name = str(needs.get("name") or "").strip()
+        if name and needs.get("need") == UPDATE and needs.get("floor"):
+            return f"{printed}: {name} on the computer slicing this print is older than {needs['floor']}."
+        if name and needs.get("need") == UPDATE:
+            return f"{printed}: {name} on the computer slicing this print needs updating."
+        if name:
+            return f"{printed}: {name} isn't installed on the computer slicing this print."
         because = str(kept.get("because") or "").strip()
-        return f"{printed}: {because}" if because else printed
+        return f"{printed}: {because}." if because else f"{printed}."
     except Exception:  # noqa: BLE001 -- the approval must still open
         logger.debug("one colour row skipped for %s", file_name, exc_info=True)
         return None

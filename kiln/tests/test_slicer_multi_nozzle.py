@@ -27,6 +27,7 @@ from kiln import slicer_profiles
 from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
 from kiln.slicer import (
     REFUSED_NOZZLE_REACH,
+    SOFT_NOZZLE_CONFIRM,
     NozzleMapError,
     SlicerError,
     SlicerInfo,
@@ -1338,7 +1339,7 @@ class TestHowManyNozzlesASliceUses:
         mixed = slicer_profiles._with_fitted(_WIDE, _fitted((1, 0.4, "brass"), (2, 0.6, "brass")))
         assert slicer_profiles.fitted_size_mm(mixed) is None
         said = slicer_profiles.mixed_size_refusal(mixed)
-        assert "nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm" in said and "nothing was sliced" in said
+        assert "Nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm" in said and "Nothing was sliced" in said
         assert slicer_profiles.mixed_size_refusal(slicer_profiles._with_fitted(_WIDE, _TWO_HARD)) == ""
 
 
@@ -1479,23 +1480,30 @@ class TestTheSliceUsesTheFittedNozzles:
         with pytest.raises(NozzleMapError) as refused:
             self._slice(tmp_path, _never_runs, _fitted((1, 0.4, "brass"), (2, 0.6, "brass")))
         assert refused.value.code == "MULTI_NOZZLE_MIXED_SIZES"
-        assert "different sizes" in str(refused.value) and "nothing was sliced" in str(refused.value)
+        assert "a pairing Kiln has not proven" in str(refused.value) and "Nothing was sliced" in str(refused.value)
+        parts = refused.value.parts
+        assert parts.headline == "Two nozzle sizes at once is an experiment"
+        assert parts.reason.startswith("Nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm")
+        assert parts.ask == slicer_profiles.MIXED_SIZES_CONFIRM
 
     def test_an_abrasive_filament_mapped_to_a_soft_nozzle_is_refused(self, tmp_path):
         with pytest.raises(NozzleMapError) as refused:
             self._slice(tmp_path, _never_runs, _HARD_AND_BRASS, material="PLA-CF", filament_map=[1, 2])
         assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
         said = str(refused.value)
-        assert said.startswith("Filament 2 is PLA-CF, an abrasive filament")
-        assert "nozzle 2 (brass)" in said and "put it on nozzle 1" in said and "nothing was sliced" in said
+        assert said.startswith("PLA-CF (filament 2) is an abrasive filament")
+        assert "nozzle 2 (brass)" in said and "Put it on nozzle 1 in the map" in said and "Nothing was sliced" in said
 
     def test_the_slicers_own_map_is_refused_while_a_soft_nozzle_is_fitted(self, tmp_path):
         with pytest.raises(NozzleMapError) as refused:
             self._slice(tmp_path, _never_runs, _HARD_AND_BRASS, material="PLA-CF")
         assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
         said = str(refused.value)
-        assert "the slicer chooses each filament's nozzle" in said
-        assert "give a filament-to-nozzle map with them on nozzle 1" in said
+        assert "the slicer may print them through nozzle 2 (brass)" in said
+        assert "Give a filament-to-nozzle map with them on nozzle 1" in said
+        parts = refused.value.parts
+        assert parts.headline == "PLA-CF would wear out the nozzle"
+        assert parts.fix == "Give a filament-to-nozzle map with them on nozzle 1."
 
     def test_a_soft_nozzle_of_unknown_material_is_not_wear_resistant(self, tmp_path):
         unknown = _fitted((1, 0.4, "hardened_steel"), (2, 0.4, None))
@@ -1503,7 +1511,7 @@ class TestTheSliceUsesTheFittedNozzles:
             self._slice(tmp_path, _never_runs, unknown, material="PLA-CF")
 
     def test_no_wear_resistant_nozzle_says_to_fit_one(self, tmp_path):
-        with pytest.raises(NozzleMapError, match="fit a hardened one for them"):
+        with pytest.raises(NozzleMapError, match="No nozzle this print uses is wear-resistant: fit a hardened nozzle for them"):
             self._slice(
                 tmp_path, _never_runs, _fitted((1, 0.4, "brass"), (2, 0.4, "stainless_steel")), material="PLA-CF",
             )
@@ -1540,8 +1548,8 @@ class TestTheSliceUsesTheFittedNozzles:
                 filament_map=[1, 2],
             )
         said = str(refused.value)
-        assert said.startswith("Filament 2 is PETG-CF, an abrasive filament")
-        assert "nozzle 1 (hardened steel)" not in said and "put it on nozzle 1" in said
+        assert said.startswith("PETG-CF (filament 2) is an abrasive filament")
+        assert "nozzle 1 (hardened steel)" not in said and "Put it on nozzle 1 in the map" in said
 
     def test_the_slice_model_door_answers_with_the_refusal(self, tmp_path, monkeypatch):
         from kiln import monitor_twin
@@ -1563,6 +1571,34 @@ class TestTheSliceUsesTheFittedNozzles:
             )
         assert reply["success"] is False
         assert reply.get("code") == "ABRASIVE_ON_SOFT_NOZZLE" or "ABRASIVE_ON_SOFT_NOZZLE" in json.dumps(reply)
+        # The refusal laid out beside the whole message, for a door that shows it in parts.
+        parts = reply["error"]["parts"]
+        assert parts["headline"] == "PLA-CF would wear out the nozzle"
+        assert parts["reason"] in reply["error"]["message"] and parts["ask"] == SOFT_NOZZLE_CONFIRM
+
+
+def test_every_door_that_answers_a_refusal_lays_it_out():
+    """The server's one error builder carries the parts of the refusal in
+    flight, whichever door wrapped it, and nothing for any other error."""
+    from kiln import server
+
+    run = soft_nozzle_run_for_test()
+    try:
+        raise NozzleMapError(run.parts.message(), code="ABRASIVE_ON_SOFT_NOZZLE", parts=run.parts)
+    except NozzleMapError as exc:
+        reply = server._error_dict(f"Failed to slice and print: {exc}", code=exc.code)
+    assert reply["error"]["parts"] == run.parts.to_dict()
+    assert reply["error"]["message"].startswith("Failed to slice and print: PLA-CF is an abrasive filament")
+    try:
+        raise SlicerError("the slicer crashed")
+    except SlicerError:
+        assert "parts" not in server._error_dict("Failed to slice and print: the slicer crashed")["error"]
+
+
+def soft_nozzle_run_for_test():
+    from kiln.slicer import soft_nozzle_run
+
+    return soft_nozzle_run([["PLA-CF"]], on_record="brass")
 
 
 class TestTheEstimateCountsTheFittedNozzles:
@@ -1649,8 +1685,8 @@ class TestEverySliceIsCheckedForAnAbrasiveFilament:
             self._slice(tmp_path, _never_runs, material="PLA-CF")
         assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
         said = str(refused.value)
-        assert "may print through any nozzle fitted" in said and "nozzle 2 (brass)" in said
-        assert "give a filament-to-nozzle map with it on nozzle 1" in said
+        assert "can print through any nozzle fitted, including nozzle 2 (brass)" in said
+        assert "Give a filament-to-nozzle map with it on nozzle 1" in said
 
     def test_with_every_fitted_nozzle_wear_resistant_it_slices(self, tmp_path, invented_printer, owner_says):
         invented_printer(_WIDE)
@@ -1660,7 +1696,7 @@ class TestEverySliceIsCheckedForAnAbrasiveFilament:
     def test_the_one_nozzle_fitted_on_a_two_nozzle_printer_is_judged(self, tmp_path, invented_printer, owner_says):
         invented_printer(_WIDE)
         owner_says(_fitted((1, 0.4, "brass")))
-        with pytest.raises(NozzleMapError, match=r"the one nozzle fitted, nozzle 1 \(brass\), is not wear-resistant"):
+        with pytest.raises(NozzleMapError, match=r"the only nozzle fitted is nozzle 1 \(brass\), which it wears out quickly"):
             self._slice(tmp_path, _never_runs, material="PLA-CF")
 
     def test_a_printer_with_one_nozzle_on_record_is_judged_the_same_way(self, tmp_path, invented_printer, owner_says):
@@ -1669,7 +1705,7 @@ class TestEverySliceIsCheckedForAnAbrasiveFilament:
         with pytest.raises(NozzleMapError) as refused:
             self._slice(tmp_path, _never_runs, material="PLA-CF")
         assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
-        assert "the nozzle on record for this printer is brass" in str(refused.value)
+        assert "this printer's nozzle is recorded as brass" in str(refused.value)
         owner_says(None, "hardened_steel")
         assert self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA-CF").success
 
@@ -1681,8 +1717,8 @@ class TestEverySliceIsCheckedForAnAbrasiveFilament:
     def test_a_printer_kiln_cannot_map_names_the_nozzle_that_can_take_it(self):
         from kiln.slicer import soft_nozzle_run
 
-        said = soft_nozzle_run([["PLA-CF"]], fitted=_HARD_AND_BRASS, mappable=False).refusal
-        assert said.endswith("only nozzle 1 can take it, so fit wear-resistant nozzles in place of the others for it.")
+        said = soft_nozzle_run([["PLA-CF"]], fitted=_HARD_AND_BRASS, mappable=False).parts.fix
+        assert said == "Only nozzle 1 can take it: fit wear-resistant nozzles in place of the others."
         assert soft_nozzle_run([["PLA-CF"]], fitted=_TWO_HARD) is None
         assert soft_nozzle_run([["PLA"]], on_record="brass") is None
         assert soft_nozzle_run([["PLA-CF"]]) is None
@@ -1724,7 +1760,7 @@ class TestAMultiMaterialPlateCarriesItsFilaments:
             pytest.raises(NozzleMapError) as refused,
         ):
             slice_file(plate, output_dir=str(tmp_path / "out"), profile=_profile(tmp_path, record), filament_map=[1, 2])
-        assert str(refused.value).startswith("Filament 2 is Carbon Fiber PLA, an abrasive filament")
+        assert str(refused.value).startswith("Carbon Fiber PLA (filament 2) is an abrasive filament")
 
 
 class TestTheOwnerMaySayPrintAnyway:
@@ -1743,7 +1779,7 @@ class TestTheOwnerMaySayPrintAnyway:
                 profile=resolve_slicer_profile("invented_two"), **kwargs,
             )
 
-    def test_the_refusal_says_how_to_print_anyway_in_one_sentence(self, tmp_path, invented_printer, owner_says):
+    def test_the_refusal_says_why_what_fixes_it_and_how_to_print_anyway(self, tmp_path, invented_printer, owner_says):
         invented_printer(None)
         owner_says(None, "brass")
         with pytest.raises(NozzleMapError) as refused:
@@ -1751,7 +1787,14 @@ class TestTheOwnerMaySayPrintAnyway:
         said = str(refused.value)
         assert refused.value.code == "ABRASIVE_ON_SOFT_NOZZLE"
         assert said.endswith("; if the owner says to print it anyway, call again with soft_nozzle_confirmed=true.")
-        assert said.count(". ") == 0 and "\n" not in said
+        assert "\n" not in said
+        parts = refused.value.parts
+        assert (parts.headline, parts.reason, parts.fix) == (
+            "PLA-CF would wear out the nozzle",
+            "PLA-CF is an abrasive filament, and this printer's nozzle is recorded as brass, which it wears out quickly.",
+            "Fit a hardened nozzle, or tell Kiln which nozzle is fitted.",
+        )
+        assert parts.ask == SOFT_NOZZLE_CONFIRM and said == parts.message()
 
     def test_with_the_owners_word_it_slices_and_says_so(self, tmp_path, invented_printer, owner_says):
         invented_printer(None)

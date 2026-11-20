@@ -621,7 +621,7 @@ class TestTheSlice:
             assert result.one_nozzle["colours_flattened"] is True and "maker_slicer" in result.one_nozzle
         # The person approving the print is told too, from the sliced file's own record.
         row = maker_slicer_notes.approval_row(Path(result.output_path).name, result.output_path)
-        assert row == "one colour: This printer's two-nozzle and multi-colour slicing needs PrusaSlicer 2.5.0 or newer"
+        assert row == "One colour: PrusaSlicer on the computer slicing this print is older than 2.5.0."
 
     def test_a_plate_that_keeps_its_colours_is_not_said_to_lose_them(self, tmp_path, notes, monkeypatch):
         monkeypatch.setattr(print_lineage, "store_path", lambda: tmp_path / "lineage.json")

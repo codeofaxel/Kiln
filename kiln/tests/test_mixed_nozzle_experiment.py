@@ -97,8 +97,9 @@ class TestTheSlice:
             _slice(tmp_path, _never_runs, _MIXED)
         assert refused.value.code == "MULTI_NOZZLE_MIXED_SIZES"
         said = str(refused.value)
-        assert "nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm" in said
-        assert "experiment" in said and "nothing was sliced" in said
+        assert "Nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm" in said
+        assert "not proven on a printer" in said and "Nothing was sliced" in said
+        assert refused.value.parts.headline == "Two nozzle sizes at once is an experiment"
         assert slicer_profiles.MIXED_SIZES_CONFIRM in said and "mixed_nozzle_experiment=true" in said
         assert asked == []
 

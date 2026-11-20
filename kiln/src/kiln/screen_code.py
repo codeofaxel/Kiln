@@ -55,8 +55,8 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -143,6 +143,9 @@ class Issued:
     ticket: str = ""
     #: The line beneath the subject, as the servers wrote it (a name).
     detail: str = ""
+    #: For a print: what the print itself is, as every door says it
+    #: (:func:`kiln.print_consent.what_the_print_is`), by row name.
+    rows: dict[str, str] = field(default_factory=dict)
 
     def live(self, now: float | None = None) -> bool:
         return (now if now is not None else time.time()) < self.expires_at
@@ -236,10 +239,16 @@ def banner_text(issued: Issued) -> tuple[str, str, str]:
             f"Temperature limits for {printer}",
             "Type the code in your chat to let Kiln hold this printer to the limits proposed.",
         )
+    # What the print itself is comes first, in the words the approval
+    # dialog and the terminal use, so it is read before the code is typed.
+    about = " ".join(
+        f"{name.capitalize()}: {_one_line(said)}" for name, said in issued.rows.items() if _one_line(said)
+    )
     return (
         f"Kiln print code {issued.code}",
         f"{display_name(issued.file_name)} on {printer}",
-        "Type the code in your chat to print it. "
+        (f"{about} " if about else "")
+        + "Type the code in your chat to print it. "
         "Add 2h or today to keep printing without asking.",
     )
 
@@ -565,6 +574,7 @@ def _prune(now: float) -> None:
 def issue(
     *, tool: str, file_name: str, file_sha256: str, printer_name: str | None, host: str = "",
     printer_label: str = "", subject: str = "", ticket: str = "", detail: str = "", whole: bool = False,
+    rows: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Show a code for this print, or say why not.  The result NEVER
     carries the code.  Outcomes: ``shown`` (``again`` when it was already
@@ -574,7 +584,9 @@ def issue(
     still live for the same question takes the newest *ticket*, because the
     servers' request it answers is remade on every ask.  The words on the
     banner never change under a live code: the caller names a changed
-    question differently (*file_name*), which is a new code."""
+    question differently (*file_name*), which is a new code.  *rows* is
+    what a print itself is (:func:`kiln.print_consent.what_the_print_is`),
+    said on its banner."""
     if not screen_available():
         return {"outcome": UNAVAILABLE, "reason": "no_screen"}
     if tool in ACTION_TOOLS and not subject_fits(subject, detail, whole=whole):
@@ -612,6 +624,7 @@ def issue(
             issued_at=now, issued_mono=time.monotonic(), expires_at=now + CODE_TTL_S, shown_at=now,
             printer_label=str(printer_label or ""), subject=str(subject or ""), ticket=str(ticket or ""),
             detail=str(detail or ""),
+            rows={str(k): str(v) for k, v in (rows or {}).items() if isinstance(v, str) and v.strip()},
         )
         if not _show(issued):
             return {"outcome": UNAVAILABLE, "reason": "banner_failed"}
