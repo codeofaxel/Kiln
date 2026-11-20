@@ -18,7 +18,7 @@ What follows, each with its one reader here:
   (:func:`needs_its_own_yes`, :func:`asks_every_time`);
 * the approval they are shown says what the print is (:func:`approval_line`,
   :func:`print_anyway_line`), and an approval asked for before the print is
-  sliced says it from the request's own words (:func:`asked_rows`); each
+  sliced says it from the request's own words (:func:`asked_facts`); each
   row stands for one owner's word (:data:`ROW_WORDS`);
 * an experiment's record carries the word (:func:`recorded_word`), and when
   it ends the person is asked how it came out (:mod:`kiln.ending_question`).
@@ -241,13 +241,6 @@ def print_anyway_facts(kept: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return checked_print_anyway({"filaments": filaments, "nozzles": nozzles}) or _plain("soft_nozzle_confirmed")
 
 
-def print_anyway_said(kept: Mapping[str, Any] | None) -> str | None:
-    """:func:`print_anyway_row` for what a slice record keeps
-    (:func:`print_anyway_facts`)."""
-    facts = print_anyway_facts(kept)
-    return print_anyway_row(facts) if facts is not None else None
-
-
 def _print_anyway_facts_of_file(job_path: str | None) -> dict[str, Any] | None:
     if not job_path:
         return None
@@ -404,16 +397,6 @@ def asked_facts(
     return words
 
 
-def asked_rows(
-    *, soft_nozzle_confirmed: Any = False, mixed_nozzle_experiment: Any = False, material: Any = None,
-) -> dict[str, str]:
-    """:func:`word_rows` for :func:`asked_facts`."""
-    return word_rows(asked_facts(
-        soft_nozzle_confirmed=soft_nozzle_confirmed, mixed_nozzle_experiment=mixed_nozzle_experiment,
-        material=material,
-    ))
-
-
 def asks_every_time(rows: Mapping[str, Any] | None) -> bool:
     """Whether the rows an approval shows (:func:`kiln.print_consent.what_the_print_is`)
     are those of a print that starts only on a yes to that print itself."""
@@ -468,7 +451,6 @@ __all__ = [
     "OwnYesHold",
     "approval_line",
     "asked_facts",
-    "asked_rows",
     "asks_every_time",
     "checked_experiment",
     "checked_print_anyway",
@@ -484,7 +466,6 @@ __all__ = [
     "mixed_sizes_of_lines",
     "needs_its_own_yes",
     "print_anyway_line",
-    "print_anyway_said",
     "read_recorded",
     "recorded_word",
 ]

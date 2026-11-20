@@ -1338,9 +1338,9 @@ class TestHowManyNozzlesASliceUses:
         assert slicer_profiles.fitted_size_mm(slicer_profiles._with_fitted(_WIDE, _fitted((1, 0.6, "brass"), (2, 0.6, "brass")))) == 0.6
         mixed = slicer_profiles._with_fitted(_WIDE, _fitted((1, 0.4, "brass"), (2, 0.6, "brass")))
         assert slicer_profiles.fitted_size_mm(mixed) is None
-        said = slicer_profiles.mixed_size_refusal(mixed)
+        said = slicer_profiles.mixed_size_parts(mixed).message()
         assert "Nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm" in said and "Nothing was sliced" in said
-        assert slicer_profiles.mixed_size_refusal(slicer_profiles._with_fitted(_WIDE, _TWO_HARD)) == ""
+        assert slicer_profiles.mixed_size_parts(slicer_profiles._with_fitted(_WIDE, _TWO_HARD)) is None
 
 
 @pytest.fixture

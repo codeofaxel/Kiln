@@ -14,9 +14,9 @@ how often they are said, so every door says the same thing:
   several colours in one leads with that, and names the slicer every time.
   The first slice for more than one nozzle after a slice for one says
   "Using both nozzles now." once.
-* **The print approval** (:func:`approval_row`): a print of a file sliced
-  that way in fewer colours than its plate says so ("one colour") in the
-  person's approval.
+* **The print approval** (:func:`colours_row` of :func:`colours_facts`):
+  a print of a file sliced that way in fewer colours than its plate says so
+  ("one colour") in the person's approval.
 * **Setting up** (:func:`setup_line`): when a printer is added, or its owner
   records a second nozzle as fitted, one line, once per printer.
 * **The checkup** (:func:`doctor_row`): a status row, every run.
@@ -426,15 +426,6 @@ def colours_facts(file_name: str, local_path: str | None = None) -> dict[str, An
     except Exception:  # noqa: BLE001 -- the approval must still open
         logger.debug("one colour facts skipped for %s", file_name, exc_info=True)
         return None
-
-
-def approval_row(file_name: str, local_path: str | None = None) -> str | None:
-    """The line a person's print approval shows for a file Kiln sliced in
-    fewer colours than its plate because the printer's maker's slicer was
-    missing or too old (:func:`colours_row` of :func:`colours_facts`);
-    ``None`` for any other file.  Never raises."""
-    facts = colours_facts(file_name, local_path)
-    return colours_row(facts) if facts is not None else None
 
 
 def _record_for(printer_model: str | None, positions: Sequence[Mapping[str, Any]] | None) -> tuple[str, str, Mapping[str, Any], int] | None:

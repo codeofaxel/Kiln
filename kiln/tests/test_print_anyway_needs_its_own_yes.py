@@ -31,6 +31,7 @@ from kiln.print_consent import (
     SOURCE_TERMINAL,
     SOURCE_WINDOW,
     consent_for,
+    print_rows_of,
     row_label,
     what_the_print_is,
 )
@@ -78,6 +79,19 @@ def said_anyway(tmp_path: Path, name: str = "cf", nozzles=None) -> str:
     return path
 
 
+def _said_from_record(kept):
+    """The rows an approval shows for what a slice record keeps of the
+    owner's word to print it anyway, said as every door says them."""
+    facts = experimental_print.print_anyway_facts(kept)
+    return print_rows_of({"owner_words": {"soft_nozzle_confirmed": facts}})
+
+
+def _asked(**words):
+    """The rows an approval asked for before the slice shows, from the
+    request's own words, said as every door says them."""
+    return print_rows_of({"owner_words": experimental_print.asked_facts(**words)})
+
+
 # ---------------------------------------------------------------------------
 # The row, from the one source
 # ---------------------------------------------------------------------------
@@ -106,16 +120,16 @@ class TestTheRow:
         assert experimental_print.print_anyway_line(str(twin)) is None
 
     def test_nozzles_by_position_and_several_filaments_are_named(self):
-        said = experimental_print.print_anyway_said({
+        said = _said_from_record({
             "filaments": [{"filament": 1, "material": "PLA-CF"}, {"filament": 2, "material": "PETG-GF"}],
             "nozzles": [{"position": 2, "material": "brass"}],
         })
-        assert said == "PETG-GF and PLA-CF through nozzle 2 (brass), which they wear out quickly."
+        assert said == {"print_anyway": "PETG-GF and PLA-CF through nozzle 2 (brass), which they wear out quickly."}
         # A record that names no filament still holds the owner's word, said plainly.
-        assert experimental_print.print_anyway_said({"filaments": [], "nozzles": [{"position": 1}]}) == (
-            "Abrasive filament through a soft nozzle, which it wears out quickly."
-        )
-        assert experimental_print.print_anyway_said(None) is None
+        assert _said_from_record({"filaments": [], "nozzles": [{"position": 1}]}) == {
+            "print_anyway": "Abrasive filament through a soft nozzle, which it wears out quickly.",
+        }
+        assert experimental_print.print_anyway_facts(None) is None
 
     def test_each_row_stands_for_one_owners_word(self):
         assert set(experimental_print.ROW_WORDS) <= set(PRINT_ROW_LABELS)
@@ -127,25 +141,25 @@ class TestBeforeTheSlice:
     """An approval asked for before the print is sliced: the request's words."""
 
     def test_the_word_alone_names_no_filament(self):
-        rows = experimental_print.asked_rows(soft_nozzle_confirmed=True)
+        rows = _asked(soft_nozzle_confirmed=True)
         assert rows == {"print_anyway": "Abrasive filament through a soft nozzle, which it wears out quickly."}
 
     def test_an_abrasive_filament_the_request_names_is_named(self):
-        rows = experimental_print.asked_rows(soft_nozzle_confirmed=True, material="PLA-CF")
+        rows = _asked(soft_nozzle_confirmed=True, material="PLA-CF")
         assert rows["print_anyway"] == "PLA-CF through a soft nozzle, which it wears out quickly."
 
     @pytest.mark.parametrize("material", ["PLA", "", None, 7, "PLA-CF; rm -rf /", "x" * 41 + "-CF"])
     def test_anything_else_it_names_is_not(self, material):
-        rows = experimental_print.asked_rows(soft_nozzle_confirmed=True, material=material)
+        rows = _asked(soft_nozzle_confirmed=True, material=material)
         assert rows["print_anyway"].startswith("Abrasive filament through")
 
     def test_the_yes_to_two_sizes_is_the_experimental_row(self):
-        rows = experimental_print.asked_rows(mixed_nozzle_experiment=True)
+        rows = _asked(mixed_nozzle_experiment=True)
         assert set(rows) == {"experimental"} and "not proven on a printer" in rows["experimental"]
 
     @pytest.mark.parametrize("said", [{"soft_nozzle_confirmed": "true"}, {"mixed_nozzle_experiment": 1}, {}])
     def test_only_true_itself_is_a_word(self, said):
-        assert experimental_print.asked_rows(**said) == {}
+        assert _asked(**said) == {}
 
 
 # ---------------------------------------------------------------------------
