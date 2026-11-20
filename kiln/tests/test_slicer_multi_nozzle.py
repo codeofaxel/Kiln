@@ -978,6 +978,10 @@ class TestASlicerThatRunsTooLong:
     def _gone(self, pid_file: Path) -> bool:
         import os
 
+        if not pid_file.exists():
+            # Stopped before its first line ran (a busy computer is slow to
+            # start it); the runner waits on what it stops, so nothing is left.
+            return True
         try:
             os.kill(int(pid_file.read_text()), 0)
         except ProcessLookupError:
@@ -1106,7 +1110,8 @@ class TestTheTimeLimitOnlyShortens(TestTheSliceModelDoor):
 # ---------------------------------------------------------------------------
 
 #: An invented machine that ships with one nozzle and takes up to three,
-#: each position stating where it reaches (invented numbers).
+#: each position stating where it reaches (invented numbers), served with
+#: the settings for slicing the nozzles fitted (placeholders).
 _ADD_ON = {
     "kind": "rack",
     "stock": 1,
@@ -1121,6 +1126,7 @@ _ADD_ON = {
     "switch_seconds": 4.0,
     "filament_change_seconds": 40,
     "maker_slicer": {"name": "bambu_studio"},
+    "preset_extras": _NOZZLES["preset_extras"],
 }
 
 
@@ -1270,6 +1276,21 @@ class TestHowManyNozzlesASliceUses:
         assert slicer_profiles.unused_fitted_note(slicer_profiles.fitted_record(_WIDE, _TWO_HARD)) == ""
         assert slicer_profiles.unused_fitted_note(_WIDE) == ""
 
+    def test_more_than_the_record_is_sliced_for_needs_the_settings_for_them(self):
+        # A printer whose record is sliced for one nozzle and carries no
+        # settings for slicing more stays at one however many the owner
+        # fitted, and the slice says so; the same record carrying them
+        # slices every fitted nozzle.
+        bare = {key: value for key, value in _ADD_ON.items() if key != "preset_extras"}
+        both = _fitted((1, 0.4, "brass"), (2, 0.4, "brass"))
+        record = slicer_profiles.fitted_record({**bare, "stock": 2, "max": 2}, both)
+        assert nozzle_positions(record) == 1
+        assert slicer_profiles.nozzle_bed(record) is None and slicer_profiles.nozzle_reaches(record) is None
+        assert slicer_profiles.unused_fitted_note(record) == (
+            "This slice is for one nozzle of the 2 fitted; the others are not used."
+        )
+        assert nozzle_positions(slicer_profiles.fitted_record(_ADD_ON, both)) == 2
+
     def test_one_size_is_the_size_and_two_sizes_are_refused(self):
         assert slicer_profiles.fitted_size_mm(slicer_profiles._with_fitted(_WIDE, _fitted((1, 0.6, "brass"), (2, 0.6, "brass")))) == 0.6
         mixed = slicer_profiles._with_fitted(_WIDE, _fitted((1, 0.4, "brass"), (2, 0.6, "brass")))
@@ -1366,6 +1387,20 @@ class TestTheSliceUsesTheFittedNozzles:
             "This slice uses 2 of the 3 nozzles fitted (nozzles 1 and 2); the others are not used."
         )
         assert not re.search(r"\b(230|260|30)\b", result.message)
+
+    def test_a_printer_kiln_slices_for_one_slices_one_however_many_are_fitted(self, tmp_path):
+        # Its record carries no settings for slicing more: the plate is
+        # sliced for one nozzle as before, never for two half-described ones.
+        bare = {key: value for key, value in _ADD_ON.items() if key != "preset_extras"}
+        seen: dict = {}
+        result = self._slice(
+            tmp_path, _slicer_that_writes("", seen), _fitted((1, 0.4, "brass"), (2, 0.4, "brass")),
+            nozzles={**bare, "stock": 2, "max": 2},
+        )
+        assert seen["machine"]["nozzle_diameter"] == ["0.4"]
+        assert "--filament-map" not in seen["cmd"] and "--export-3mf" not in seen["cmd"]
+        assert result.filament_map is None and result.sliced_with is None
+        assert result.message.endswith("This slice is for one nozzle of the 2 fitted; the others are not used.")
 
     def test_one_fitted_on_a_two_nozzle_printer_slices_for_one(self, tmp_path):
         seen: dict = {}

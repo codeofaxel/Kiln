@@ -25,11 +25,13 @@ from kiln.maker_slicer import Miss, install_words
 from kiln.slicer import SlicerInfo
 
 _TWO = {"kind": "fixed_pair", "stock": 2, "max": 2, "sliced_as": 2, "maker_slicer": {"name": "bambu_studio"}}
-#: An invented machine that ships with one nozzle and takes three.
+#: An invented machine that ships with one nozzle and takes three, served
+#: with the settings for slicing the tools fitted (none needed here).
 _ADD_ON = {
     "kind": "toolchanger", "stock": 1, "max": 3, "sliced_as": 1,
     "positions": [{"id": i, "reach": "0x0,300x0,300x300,0x300"} for i in (1, 2, 3)],
     "maker_slicer": {"name": "prusaslicer", "min_version": "2.5.0"},
+    "preset_extras": {"machine": {}, "process": {}, "filament": {}},
 }
 _RECORDS = {
     "invented_two": {"display_name": "Invented Two", "nozzles": _TWO},

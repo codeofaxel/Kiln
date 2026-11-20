@@ -1198,18 +1198,22 @@ def nozzle_positions(nozzles: Any) -> int:
     The one answer every door reads.  With the owner's fitted positions on
     the record (:func:`fitted_record`): the record's positions in order from
     the first, while each is fitted and states a reach Kiln can read, and at
-    most the record's ``max``; never fewer than 1.  Without them, the
-    record's ``sliced_as``: 1 for no record, a record that does not say, or
-    one that says fewer than two.
+    most the record's ``max``; never fewer than 1.  More than the record's
+    ``sliced_as`` only when the record carries the settings for slicing them
+    (``preset_extras``); without them a slice uses ``sliced_as``.  Without
+    an owner statement, ``sliced_as``: 1 for no record, a record that does
+    not say, or one that says fewer than two.
     """
     if not isinstance(nozzles, Mapping):
         return 1
-    if _owner_positions(nozzles) is not None:
-        return max(1, len(_used_positions(nozzles)))
     raw = nozzles.get("sliced_as")
-    if isinstance(raw, bool) or not isinstance(raw, int):
-        return 1
-    return raw if raw >= 2 else 1
+    sliced_as = raw if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 2 else 1
+    if _owner_positions(nozzles) is None:
+        return sliced_as
+    used = max(1, len(_used_positions(nozzles)))
+    if used > sliced_as and not isinstance(nozzles.get("preset_extras"), Mapping):
+        return sliced_as
+    return used
 
 
 def _owner_positions(nozzles: Any) -> list[Mapping[str, Any]] | None:
