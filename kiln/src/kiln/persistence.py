@@ -1181,7 +1181,8 @@ class KilnDB:
                     progress_at_end     REAL DEFAULT NULL,
                     layer_at_end        INTEGER DEFAULT NULL,
                     spool_id            TEXT DEFAULT NULL,
-                    firmware_version    TEXT DEFAULT NULL
+                    firmware_version    TEXT DEFAULT NULL,
+                    experiment          TEXT DEFAULT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
                     ON print_outcomes(printer_name);
@@ -2994,9 +2995,12 @@ class KilnDB:
         "layer_at_end": "INTEGER",
         "spool_id": "TEXT",
         "firmware_version": "TEXT",
+        "experiment": "TEXT",
     }
     #: The evidence a start writes, by the job id the start opened.
-    START_EVIDENCE_COLUMNS = ("settings_code", "spool_id", "firmware_version")
+    #: ``experiment`` is the word for a sent file that is an experiment
+    #: (:func:`kiln.experimental_print.recorded_word`); empty for any other.
+    START_EVIDENCE_COLUMNS = ("settings_code", "spool_id", "firmware_version", "experiment")
     #: How long after an ending a row with no open start still takes that
     #: ending's progress reading (seconds).
     PROGRESS_JUST_ENDED_S = 60.0
@@ -3657,13 +3661,17 @@ class KilnDB:
     ) -> list[dict[str, Any]]:
         """Recent prints whose ending owes the person a question nobody has
         asked yet (``kiln.failure_vocabulary.ending_wants_a_question``): the
-        printer stopped it and named no cause, or someone stopped it.  Only
-        the person knows whether the part was coming out bad."""
+        printer stopped it and named no cause, or someone stopped it; and an
+        experimental print the person has not reported on
+        (``kiln.ending_question.experiment_owes``).  Only the person knows
+        how the part came out."""
+        from kiln.ending_question import experiment_owes
         from kiln.failure_vocabulary import FAILED_OUTCOMES, ending_wants_a_question
 
         words = [*sorted(FAILED_OUTCOMES), "cancelled"]
         marks = ", ".join("?" for _ in words)
-        clauses = [f"outcome IN ({marks})", "stop_reason_asked IS NULL",
+        # An experimental print is asked about however it ended.
+        clauses = [f"(outcome IN ({marks}) OR experiment IS NOT NULL)", "stop_reason_asked IS NULL",
                    "COALESCE(ended_at, created_at) >= ?"]
         params: list[Any] = [*words, time.time() - self.STOP_ASK_WINDOW_S]
         if printer_name:
@@ -3677,7 +3685,10 @@ class KilnDB:
         out = []
         for raw in rows:
             row = self._outcome_row_to_dict(raw)
-            if ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+            if (
+                ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by"))
+                or experiment_owes(row)
+            ):
                 out.append(row)
                 if len(out) >= limit:
                     break
@@ -3706,7 +3717,12 @@ class KilnDB:
             if raw is None:
                 return None
             row = self._outcome_row_to_dict(raw)
-            if not ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+            from kiln.ending_question import experiment_owes
+
+            if not (
+                ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by"))
+                or experiment_owes(row)
+            ):
                 return None
             self._conn.execute(
                 "UPDATE print_outcomes SET stop_reason_asked = COALESCE(stop_reason_asked, ?), "

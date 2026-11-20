@@ -2176,6 +2176,34 @@ def extruded_mm_per_tool(gcode: str | Iterable[str]) -> list[float]:
     return out
 
 
+def tool_changes(gcode: str | Iterable[str]) -> tuple[int, int]:
+    """``(changes, tools)``: how many times the file changes tool, and how
+    many different tools it selects.
+
+    A ``T<n>`` command selects a tool; the first selection arms it, and each
+    later one naming a different tool is a change.  A pseudo-tool
+    (``T255``, ``T1000``) neither changes nor counts, as in
+    :func:`extruded_mm_per_tool`.  Never raises.
+    """
+    lines = gcode.splitlines() if isinstance(gcode, str) else gcode
+    tools: set[int] = set()
+    changes = 0
+    active: int | None = None
+    for raw in lines:
+        code = raw.split(";", 1)[0].strip()
+        head = _COMMAND_WORD_RE.match(code) if code else None
+        if head is None or head.group(3) or head.group(1).upper() != "T":
+            continue
+        number = int(head.group(2))
+        if number >= FIRST_PSEUDO_TOOL:
+            continue
+        tools.add(number)
+        if active is not None and number != active:
+            changes += 1
+        active = number
+    return changes, len(tools)
+
+
 @dataclass(frozen=True)
 class SlicerFilamentTotals:
     """What a slicer wrote about the filament a file uses, per extruder.
@@ -2408,6 +2436,63 @@ def slicer_nozzle_diameters(text: str) -> tuple[tuple[float, ...], ...]:
         if sizes:
             statements.append(tuple(sizes))
     return tuple(statements)
+
+
+# ---------------------------------------------------------------------------
+# The filament-to-nozzle map a file states
+# ---------------------------------------------------------------------------
+
+_FILAMENT_MAP_LINE = re.compile(r"^;\s*filament_map\s*=\s*(.+?)\s*$")
+_FILAMENT_MAP_MODE_LINE = re.compile(r"^;\s*filament_map_mode\s*=\s*(.+?)\s*$")
+
+
+def stated_filament_map(lines: Iterable[str]) -> tuple[list[int] | None, str | None]:
+    """``(map, mode)`` as the sliced file whose *lines* are given states it.
+
+    ``map`` lists, per filament in order, the nozzle (1 for the first) that
+    prints it, or is ``None`` when the file states none in whole numbers;
+    ``mode`` is who chose it, in the slicer's own word, or ``None``.  The
+    first statement of each counts.  Never raises.
+    """
+    stated: list[int] | None = None
+    mode: str | None = None
+    for line in lines:
+        if not line.startswith(";"):
+            continue
+        found = _FILAMENT_MAP_LINE.match(line)
+        if found:
+            if stated is None:
+                parts = [part.strip() for part in found.group(1).split(",")]
+                if parts and all(part.isdigit() for part in parts):
+                    stated = [int(part) for part in parts]
+            continue
+        found = _FILAMENT_MAP_MODE_LINE.match(line)
+        if found and mode is None:
+            mode = found.group(1)
+    return stated, mode
+
+
+_FILAMENT_MAP_STATEMENT = re.compile(r"^;\s*filament_map\s*=.*$", re.MULTILINE)
+
+
+def states_several_nozzles(text: str) -> bool:
+    """Whether the sliced file *text* puts a filament on a nozzle beyond
+    the first, by its own stated filament-to-nozzle map
+    (:func:`stated_filament_map`, read from its statement lines only)."""
+    stated, _mode = stated_filament_map(m.group(0) for m in _FILAMENT_MAP_STATEMENT.finditer(text))
+    return bool(stated) and max(stated) > 1
+
+
+def file_states_several_nozzles(path: str | None) -> bool:
+    """:func:`states_several_nozzles` for the sliced file at *path*, read
+    where a slicer writes its own figures
+    (:func:`kiln.file_metadata.sliced_gcode_lines`); ``False`` for a file
+    that cannot be read.  Never raises."""
+    if not path:
+        return False
+    from kiln.file_metadata import sliced_gcode_lines
+
+    return states_several_nozzles("\n".join(sliced_gcode_lines(path) or ()))
 
 
 # ---------------------------------------------------------------------------

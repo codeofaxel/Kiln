@@ -51,6 +51,9 @@ class _SmartPrintToolsPlugin:
             skip_validation: bool = False,
             preview_token: str | None = None,
             placement: str | list[float] | None = None,
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
 
@@ -74,6 +77,19 @@ class _SmartPrintToolsPlugin:
                overrides, uploads the result, and starts the print.
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 model_path: Path to the model that failed (STL, OBJ, 3MF,
                     STEP, ...).  One the diagnosis cannot read is said in
                     ``printability_note``.
@@ -313,6 +329,7 @@ class _SmartPrintToolsPlugin:
             # sliced file).  A retry is where a diagnosis adds a wide brim
             # to a part that already failed.
             from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
+            from kiln.slicer import owner_asks
 
             try:
                 # The density the slicer weighs the print with: what was
@@ -321,6 +338,7 @@ class _SmartPrintToolsPlugin:
                     model_path, effective_printer_id=effective_pid, printer_name=printer_name,
                     placement=placement, profile_path=effective_profile, adapter=adapter,
                     material=material, loaded_material=material_detected,
+                    **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
@@ -381,6 +399,10 @@ class _SmartPrintToolsPlugin:
                     )
                     _logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
                 except Exception as exc:
+                    if getattr(exc, "code", None) == "MULTI_NOZZLE_NOT_PACKAGED":
+                        # Sliced for more than one nozzle: no raw form of it
+                        # starts either, so nothing is handed on.
+                        return _srv._error_dict(str(exc), code=exc.code)
                     if quiet_plan is not None or lift_floor is not None:
                         # A raw file, or one without the plan, would carry
                         # the vendor's start onto the occupied plate.

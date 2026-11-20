@@ -283,6 +283,36 @@ def assumed_nozzle(
     return AssumedNozzle(DEFAULT_MM, "default", pid, record_unreachable, inferred, not_read, chosen_as)
 
 
+def recorded_statement(printer_id: str | None) -> dict[str, Any]:
+    """What the owner stated on *printer_id*'s nozzle record: ``positions``
+    (each nozzle position, :func:`kiln._pro_nozzle_bridge.recorded_positions_of`)
+    and ``material`` (the nozzle's material), each ``None`` when the record
+    states none or could not be asked.  Never raises."""
+    pid = (printer_id or "").strip()
+    nothing: dict[str, Any] = {"positions": None, "material": None}
+    if not pid:
+        return nothing
+    try:
+        from kiln import _pro_nozzle_bridge
+
+        recorded = _pro_nozzle_bridge.consult_recorded_nozzle(pid)
+    except Exception:  # noqa: BLE001 -- the record is one reading, never the check
+        logger.debug("assumed nozzle: record statement lookup failed", exc_info=True)
+        return nothing
+    positions = recorded.get("positions")
+    material = recorded.get("material")
+    return {
+        "positions": positions if isinstance(positions, list) and positions else None,
+        "material": material if isinstance(material, str) and material else None,
+    }
+
+
+def recorded_positions(printer_id: str | None) -> list[dict[str, Any]] | None:
+    """The nozzle positions the owner stated for *printer_id*
+    (:func:`recorded_statement`), or ``None``.  Never raises."""
+    return recorded_statement(printer_id)["positions"]
+
+
 def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> AssumedNozzle:
     """The nozzle a slice for the model *profile_id* is for.
 
@@ -314,4 +344,7 @@ def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> Assu
     return assumed_nozzle(key)
 
 
-__all__ = ["DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile", "stock_setting"]
+__all__ = [
+    "DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile", "recorded_positions", "recorded_statement",
+    "stock_setting",
+]

@@ -21,7 +21,12 @@ note deleted here goes up as a delete), and what the row holds of
 sliced with, how far the print got (a share and a layer number), the spool
 as a one-way code (:func:`kiln.outbound_guard.spool_code`) and the firmware
 version, only when it is a bare version
-(:func:`kiln.outbound_guard.version_text`).  No printer name, serial, address, file name, settings, spool
+(:func:`kiln.outbound_guard.version_text`); when the owner said to print
+an abrasive filament through a nozzle that is not wear-resistant, that word:
+the filaments' type words and each nozzle's position and material
+(:func:`kiln.print_lineage.soft_nozzle_of`); and, for a print that was an
+experiment (:mod:`kiln.experimental_print`), the word for which one and the
+nozzle sizes it used.  No printer name, serial, address, file name, settings, spool
 id, spool name or colour; a system string in ``notes`` with no label (a
 hook's "auto-recorded ...") stays here.
 
@@ -217,11 +222,53 @@ def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     firmware = wire_firmware(row.get("firmware_version"))
     if firmware:
         out["firmware"] = firmware
+    soft = _soft_nozzle_word(row.get("lineage_id"))
+    if soft:
+        out["soft_nozzle"] = soft
+    from kiln.experimental_print import read_recorded
+
+    experiment = read_recorded(row.get("experiment"))
+    if experiment:
+        out["experiment"], out["nozzle_sizes"] = experiment[0], list(experiment[1])
     for key, src in (("started_at", "created_at"), ("ended_at", "ended_at")):
         when = row.get(src)
         if isinstance(when, (int, float)) and not isinstance(when, bool) and when > 0:
             out[key] = float(when)
     return out
+
+
+_RUN_WORD = re.compile(r"^[A-Za-z0-9 +._-]{1,40}$")
+_NOZZLE_WORD = re.compile(r"^[a-z_]{1,40}$")
+
+
+def _soft_nozzle_word(lineage_id: Any) -> dict[str, Any] | None:
+    """The owner's word to print an abrasive filament through a nozzle that
+    is not wear-resistant, as the account keeps it: ``{"confirmed_by":
+    "owner", "filaments": [type words], "nozzles": [{"position", "material"}]}``,
+    each in its own shape, or ``None``."""
+    from kiln.print_lineage import soft_nozzle_of
+
+    kept = soft_nozzle_of(lineage_id if isinstance(lineage_id, str) else None)
+    if not kept or kept.get("confirmed_by") != "owner":
+        return None
+    words = [
+        str(f.get("material") or "").strip() for f in kept.get("filaments") or () if isinstance(f, dict)
+    ]
+    words = list(dict.fromkeys(w for w in words if _RUN_WORD.match(w)))[:5]
+    nozzles = []
+    for n in kept.get("nozzles") or ():
+        if not isinstance(n, dict):
+            continue
+        position = n.get("position")
+        material = str(n.get("material") or "").strip().lower()
+        if position is not None and (isinstance(position, bool) or not isinstance(position, int) or not 1 <= position <= 16):
+            continue
+        if not _NOZZLE_WORD.match(material):
+            continue
+        nozzles.append({"position": position, "material": material})
+    if not words or not nozzles:
+        return None
+    return {"confirmed_by": "owner", "filaments": words, "nozzles": nozzles[:16]}
 
 
 def _note_part(state: str | None) -> str:

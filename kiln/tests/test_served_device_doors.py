@@ -175,7 +175,7 @@ class TestTheNozzleSummary:
         summary = nozzle.consult_nozzle_summary("shop_a1")
         assert summary == {"material": "brass", "diameter_mm": 0.4, "provenance": "user_override",
                            "grams_through": 120.0, "trusted_for_verdicts": True}
-        assert nozzle.consult_recorded_nozzle("shop_a1") == {"diameter_mm": 0.4, "answered": True}
+        assert nozzle.consult_recorded_nozzle("shop_a1") == {"diameter_mm": 0.4, "material": "brass", "answered": True, "positions": None}
         assert len(_asked(servers, "get_nozzle_state")) == 1
 
 

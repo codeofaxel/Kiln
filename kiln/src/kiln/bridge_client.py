@@ -208,7 +208,10 @@ def handle_relay_request(
     call (see :func:`_consent_from_authority`), and only after the bytes
     that arrived hash to the bytes that were approved.  Bytes that differ
     are refused before any tool runs: a consent by file name would let a
-    re-generated model print under the old approval.
+    re-generated model print under the old approval.  The person's own
+    approval of a print may also carry their word to print it anyway or
+    their yes to nozzles of different sizes; those become the slice's
+    keywords here (:func:`owner_words`), and never arrive as arguments.
 
     The list: a tool outside :data:`BRIDGE_ARGUMENTS`, or an argument its
     entry does not name, is refused here before anything else runs (no fetch,
@@ -238,6 +241,8 @@ def handle_relay_request(
                 from kiln.print_consent import set_consent
 
                 reset = set_consent(consent)
+            if tool == "slice_and_print":
+                args.update(owner_words(authority))
         result = call_tool(tool, args)
         # The answer leaves this computer here, whichever tool gave it.
         return {"request_id": request_id, "ok": True, "result": scrub_relayed(result)}
@@ -253,6 +258,27 @@ def handle_relay_request(
             from kiln.print_consent import reset_consent
 
             reset_consent(reset)
+
+
+def owner_words(block: Any) -> dict[str, Any]:
+    """The slice keywords a relayed print's authority block carries for the
+    person who approved it: the word to print anyway an abrasive filament
+    through a nozzle that is not wear-resistant (``soft_nozzle_confirmed``)
+    and the yes to nozzles of different sizes for this print
+    (``mixed_nozzle_experiment``), as :func:`kiln.slicer.owner_asks` passes
+    them.  Only on the person's own approval of this one print, said by that
+    person; an agent printing under it, a delegation, or anything else
+    carries neither, and the slice refuses as it would have."""
+    if not isinstance(block, dict) or str(block.get("kind") or "") != "approval":
+        return {}
+    grantor = str(block.get("grantor") or "")
+    if not grantor or str(block.get("said_go_by") or grantor) != grantor:
+        return {}
+    from kiln.slicer import owner_asks
+
+    return owner_asks(
+        block.get("soft_nozzle_confirmed") is True, None, block.get("mixed_nozzle_experiment") is True,
+    )
 
 
 class NotTheApprovedBytes(RuntimeError):
@@ -1563,6 +1589,11 @@ class AskCard:
     printer_state: str = ""
     #: The hosted stage's link for the print file's own bytes.
     stage_url: str = ""
+    #: The checked facts of what the print itself is
+    #: (:func:`kiln.print_consent.what_the_print_states`): the account's
+    #: server says each row from them in the words every door uses, and
+    #: never takes a row's text from the ask.
+    facts: Mapping[str, Any] | None = None
 
     def fields(self) -> dict[str, Any]:
         """The fields to send: each one present only when it holds a value
@@ -1593,6 +1624,22 @@ class AskCard:
         url = self.stage_url if isinstance(self.stage_url, str) else ""
         if url.startswith(("https://", "http://")) and not any(c.isspace() for c in url):
             out["stage_url"] = url
+        facts = self.facts if isinstance(self.facts, Mapping) else {}
+        # Each owner's word is always sent, with its facts when they check
+        # and its plain facts when they do not: the word holds the print on
+        # the card too.  Colours only when its facts check.
+        from kiln.experimental_print import word_facts
+        from kiln.maker_slicer_notes import colours_row
+
+        words = facts.get("owner_words")
+        if isinstance(words, Mapping):
+            sent = {word: word_facts(word, said) for word, said in words.items()}
+            sent = {word: said for word, said in sent.items() if said is not None}
+            if sent:
+                out["owner_words"] = sent
+        colours = facts.get("colours")
+        if isinstance(colours, Mapping) and colours_row(colours):
+            out["colours"] = dict(colours)
         return out
 
 

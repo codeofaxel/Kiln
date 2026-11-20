@@ -922,6 +922,22 @@ def hardened_nozzle_line(material: str) -> str:
     return f"{material} requires a hardened/wear-resistant nozzle (not standard brass)."
 
 
+#: The nozzle materials an abrasive filament may print through, in the words
+#: Kiln's nozzle record uses.  Any other material, or none on record, is not
+#: one of them.
+WEAR_RESISTANT_NOZZLE_MATERIALS: frozenset[str] = frozenset(
+    {"hardened_steel", "cht_hardened", "ruby_tip", "tungsten_carbide"}
+)
+
+
+def is_wear_resistant_nozzle(material: Any) -> bool:
+    """True when the nozzle material *material* is in
+    :data:`WEAR_RESISTANT_NOZZLE_MATERIALS`, in any case or with spaces or
+    hyphens for underscores.  ``None`` or an unknown word is ``False``."""
+    word = str(material or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return word in WEAR_RESISTANT_NOZZLE_MATERIALS
+
+
 def abrasive_nozzle_floor(material: str) -> str:
     """The always-free nozzle-wear caution for a filled filament.
 

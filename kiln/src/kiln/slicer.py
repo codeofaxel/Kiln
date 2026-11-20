@@ -37,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -181,6 +181,49 @@ class ProjectPlateError(SlicerError):
 REFUSED_OFF_THE_BED = "off_the_bed"
 #: The print paths of two objects on the plate collide.
 REFUSED_PATHS_COLLIDE = "paths_collide"
+#: A filament was put on a nozzle that cannot reach a part it prints.
+REFUSED_NOZZLE_REACH = "nozzle_cannot_reach"
+
+
+#: How long, in seconds, a slicer may run before it is stopped, unless a
+#: caller asks for less.
+SLICE_TIME_LIMIT_S = 300
+
+
+class SliceTimeLimitError(SlicerError):
+    """The slicer ran past the time limit and was stopped; nothing was
+    sliced.  ``code`` is the door's error code."""
+
+    code = "SLICE_TOOK_TOO_LONG"
+
+
+class NozzleMapError(SlicerError):
+    """A slice for more than one nozzle that cannot be run as asked: the
+    filament-to-nozzle map does not fit the print or the printer, the
+    nozzles it would use are fitted at different sizes, an abrasive
+    filament would print through a nozzle that is not wear-resistant, or
+    the slicer in hand cannot slice for more than one nozzle.  Raised before
+    any slicer is launched; ``code`` is the door's error code, and
+    ``parts`` the refusal laid out (:class:`kiln.slicer_profiles.RefusalParts`)
+    when one answer from the person lets it through."""
+
+    def __init__(self, message: str, *, code: str, parts: Any = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.parts = parts
+
+
+class OneNozzleInstead(NozzleMapError):
+    """A slice for more than one nozzle that the printer's maker's slicer
+    would make, when that slicer is missing or older than Kiln needs on this
+    computer (:func:`kiln.maker_slicer._miss`).  :func:`slice_file` slices
+    it for one nozzle instead; anywhere else it is the refusal its message
+    says.  ``miss`` is the :class:`kiln.maker_slicer.Miss` that names the
+    slicer and whether it is to be installed or updated."""
+
+    def __init__(self, message: str, *, code: str, miss: Any) -> None:
+        super().__init__(message, code=code)
+        self.miss = miss
 
 
 class SlicerRefusal(SlicerError):
@@ -262,6 +305,37 @@ class SliceResult:
     #: say it; the key's name is what the stage looks for
     #: (:func:`kiln.stage_link.find_mesh_path`).
     stage_mesh_path: str | None = None
+    #: Which nozzle printed each filament, as the sliced file states it
+    #: (:func:`filament_map_of`); ``None`` for a slice made for one nozzle.
+    filament_map: dict[str, Any] | None = None
+    #: The printer's maker's slicer a slice for more than one nozzle, or a
+    #: slice for one nozzle carrying the printer's own routines, was made
+    #: with: its name and version, the settings bundle its routines were
+    #: read from and that bundle's version when they were, and for a printer
+    #: whose filaments print from the nozzle of the same number,
+    #: ``filament_to_nozzle`` (:mod:`kiln.maker_slicer`).  ``None`` for any
+    #: other slice.
+    sliced_with: dict[str, Any] | None = None
+    #: A slice for one nozzle of a printer whose record names its maker's
+    #: own routines for such a print, made without them:
+    #: ``{"in_file": False}``, and, when the reply says what adds them,
+    #: ``maker_slicer`` (:func:`kiln.maker_slicer_notes.after_layer_routines`).
+    #: ``None`` for any other slice.
+    time_lapse: dict[str, Any] | None = None
+    #: A print Kiln would slice for more than one nozzle, sliced for one
+    #: because the printer's maker's slicer is missing or too old here:
+    #: ``filament_swaps``, read from the sliced file, and when the reply names
+    #: the slicer that would use every nozzle, ``maker_slicer``
+    #: (:mod:`kiln.maker_slicer_notes`).  ``None`` for any other slice.
+    one_nozzle: dict[str, Any] | None = None
+    #: The abrasive filament the owner said to print anyway through a nozzle
+    #: that is not wear-resistant (:meth:`SoftNozzleRun.confirmed`); ``None``
+    #: for every other slice.
+    soft_nozzle: dict[str, Any] | None = None
+    #: What an experimental slice says about itself
+    #: (:func:`kiln.slicer_profiles.mixed_size_experiment`); ``None`` for
+    #: any other slice.
+    experimental: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -282,6 +356,18 @@ class SliceResult:
             d["layer"] = self.layer.to_dict()
         if self.project_plate is not None:
             d["project_plate"] = self.project_plate
+        if self.filament_map is not None:
+            d["filament_map"] = self.filament_map
+        if self.sliced_with is not None:
+            d["sliced_with"] = self.sliced_with
+        if self.one_nozzle is not None:
+            d["one_nozzle"] = self.one_nozzle
+        if self.time_lapse is not None:
+            d["time_lapse"] = self.time_lapse
+        if self.soft_nozzle is not None:
+            d["soft_nozzle"] = self.soft_nozzle
+        if self.experimental is not None:
+            d["experimental"] = self.experimental
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -600,9 +686,12 @@ _ORCA_SIGSEGV_RETURNCODES = frozenset({-11, 139})
 _ORCA_REFUSAL_WORDS = (
     (REFUSED_OFF_THE_BED, re.compile(r"found gcode (?:in )?unprintable|g-code outside of the printable area", re.IGNORECASE)),
     (REFUSED_PATHS_COLLIDE, re.compile(r"path conflicts? found", re.IGNORECASE)),
+    (REFUSED_NOZZLE_REACH, re.compile(r"cannot be mapped to correct extruders", re.IGNORECASE)),
 )
 #: Return codes read as a refusal, by kind.
-_ORCA_REFUSAL_STATUSES = {152: REFUSED_OFF_THE_BED, 154: REFUSED_OFF_THE_BED, 155: REFUSED_PATHS_COLLIDE}
+_ORCA_REFUSAL_STATUSES = {
+    152: REFUSED_OFF_THE_BED, 154: REFUSED_OFF_THE_BED, 155: REFUSED_PATHS_COLLIDE, 190: REFUSED_NOZZLE_REACH,
+}
 #: The two objects the slicer names in a path conflict.
 _PATH_CONFLICT_OBJECTS = re.compile(r"path conflicts? found between (.+?) and (.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
@@ -648,7 +737,418 @@ def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal
             f"slice again.",
             kind=kind, code="OBJECTS_COLLIDE", slicer=slicer_name, objects=objects,
         )
+    if kind == REFUSED_NOZZLE_REACH:
+        return SlicerRefusal(
+            f"{slicer_name} refused to slice: that nozzle cannot reach this part; move it toward "
+            f"the middle or use the other nozzle.",
+            kind=kind, code="NOZZLE_CANNOT_REACH", slicer=slicer_name,
+        )
     return None
+
+
+# ---------------------------------------------------------------------------
+# More than one nozzle
+# ---------------------------------------------------------------------------
+
+#: The name Bambu Studio is given for the print package it writes with a
+#: slice for more than one nozzle, inside the run's output folder.
+_SLICER_PACKAGE_NAME = "kiln_print_package.3mf"
+
+
+def _keep_print_package(made_path: str, out_file: str) -> None:
+    """Keep the print package the slicer wrote with the slice at *out_file*
+    beside it, holding that file as it now stands
+    (:func:`kiln.printers.bambu_3mf.keep_slicer_package`).  A package that
+    cannot be kept is logged and left out: the door that sends the file
+    then says no package was made.  Never raises."""
+    try:
+        from kiln.printers.bambu_3mf import keep_slicer_package
+
+        keep_slicer_package(made_path, out_file)
+    except Exception:  # noqa: BLE001 -- a package that cannot be kept costs the package, never the slice
+        logger.warning("The slicer's print package for %s was not kept", out_file, exc_info=True)
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(made_path)
+
+
+def nozzle_bed_for_slice(
+    input_path: str, profile: str | None, filament_map: Any = None, *, slots: int | None = None,
+    maker_ready: bool | None = None,
+) -> tuple[float, float, float, float] | None:
+    """The bed a slice of the 3MF at *input_path* with *profile* is laid out
+    and checked on when it is for more than one nozzle: the bed the
+    profile's nozzle record states, for a plate of two or more filaments
+    (*slots*, else read from the file) or one given a filament-to-nozzle
+    map.  ``None`` for anything else, and while the slicer the record names
+    is missing or too old here (:func:`kiln.maker_slicer.ready_for`), since
+    the plate is then sliced for one nozzle; *maker_ready* answers that for
+    a caller that already knows.  Never raises."""
+    from kiln.slicer_profiles import nozzle_bed, nozzles_of
+
+    record = nozzles_of(profile)
+    bed = nozzle_bed(record)
+    if bed is None or not str(input_path).lower().endswith(".3mf"):
+        return None
+    if filament_map in (None, "", []):
+        if slots is None:
+            try:
+                from kiln.multicolor_3mf import detect_3mf_multicolor
+
+                slots = int((detect_3mf_multicolor(input_path) or {}).get("filament_slots_needed", 0))
+            except Exception:  # noqa: BLE001 -- an unreadable plate reads as one filament
+                slots = 0
+        if slots < 2:
+            return None
+    if maker_ready is None:
+        from kiln.maker_slicer import is_ready
+
+        maker_ready = is_ready(record)
+    return bed if maker_ready else None
+
+
+def checked_filament_map(filament_map: Any, *, filaments: int, positions: int) -> list[int] | None:
+    """*filament_map* as a list of nozzle numbers, one per filament, or
+    ``None`` when none was given.
+
+    Entry ``i`` is the nozzle (1 for the first) that prints filament
+    ``i + 1``.  Accepts a list of whole numbers or the same as
+    comma-separated text.
+
+    Raises:
+        NozzleMapError: The printer is sliced for one nozzle
+            (``NOZZLE_MAP_NOT_USED``), an entry is not a whole number or
+            names a nozzle the printer does not have (``NO_SUCH_NOZZLE``),
+            or the map does not have one entry per filament
+            (``NOZZLE_MAP_WRONG_LENGTH``).
+    """
+    if filament_map is None or filament_map == "" or filament_map == []:
+        return None
+    if positions < 2:
+        raise NozzleMapError(
+            "A filament-to-nozzle map was given, and this printer is sliced with one nozzle, so "
+            "there is nothing to map. Leave the map out and slice again.",
+            code="NOZZLE_MAP_NOT_USED",
+        )
+    entries = filament_map.split(",") if isinstance(filament_map, str) else list(filament_map)
+    asked: list[int] = []
+    for entry in entries:
+        text = str(entry).strip()
+        if isinstance(entry, bool) or not text.isdigit() or not 1 <= int(text) <= positions:
+            raise NozzleMapError(
+                f"The filament-to-nozzle map names nozzle {text or entry!r}, and this printer has "
+                f"nozzles 1 to {positions}. Give one of those numbers for each filament and slice again.",
+                code="NO_SUCH_NOZZLE",
+            )
+        asked.append(int(text))
+    if len(asked) != filaments:
+        raise NozzleMapError(
+            f"The filament-to-nozzle map has {len(asked)} "
+            f"{'entry' if len(asked) == 1 else 'entries'}, and this print uses {filaments} "
+            f"{'filament' if filaments == 1 else 'filaments'}. Give one nozzle number for each "
+            f"filament, in filament order, and slice again.",
+            code="NOZZLE_MAP_WRONG_LENGTH",
+        )
+    return asked
+
+
+def _nozzle_said(nozzle: dict[str, Any]) -> str:
+    """``nozzle 2 (brass)`` / ``nozzle 2 (material not on record)``."""
+    material = str(nozzle.get("material") or "").strip().lower()
+    if not material or material == "unknown":
+        return f"nozzle {nozzle['id']} (material not on record)"
+    return f"nozzle {nozzle['id']} ({material.replace('_', ' ')})"
+
+
+def _abrasive_slots(slot_materials: Sequence[Sequence[str]]) -> list[tuple[int, str]]:
+    """``(slot, word)`` for each filament slot a word names abrasive."""
+    from kiln.material_safety import is_abrasive_filament
+
+    found: list[tuple[int, str]] = []
+    for slot, words in enumerate(slot_materials, start=1):
+        word = next((w for w in words if w and is_abrasive_filament(w)), None)
+        if word is not None:
+            found.append((slot, word.strip()))
+    return found
+
+
+#: The code of a slice refused for an abrasive filament through a nozzle
+#: that is not wear-resistant, until the owner says to print it anyway.
+SOFT_NOZZLE_CODE = "ABRASIVE_ON_SOFT_NOZZLE"
+#: The confirmation a refused abrasive slice can be sliced with, as its
+#: refusal says it: one clause, the same at every door.
+SOFT_NOZZLE_CONFIRM = "if the owner says to print it anyway, call again with soft_nozzle_confirmed=true"
+#: The start of the refusal's advice to choose each filament's nozzle; the
+#: filament and the nozzle follow.
+MAP_ADVICE = "give a filament-to-nozzle map with "
+
+
+def owner_asks(
+    soft_nozzle_confirmed: Any = False, filament_map: Any = None, mixed_nozzle_experiment: Any = False,
+) -> dict[str, Any]:
+    """The slice keywords a door hands on for the owner's word to print
+    anyway (``soft_nozzle_confirmed``), the filament-to-nozzle map
+    (``filament_map``) and the person's yes to nozzles of different sizes
+    for this print (``mixed_nozzle_experiment``): only what was given, so
+    a door passes all three the same way (:func:`slice_file`)."""
+    out: dict[str, Any] = {}
+    if soft_nozzle_confirmed is True:
+        out["soft_nozzle_confirmed"] = True
+    if filament_map:
+        out["filament_map"] = filament_map
+    if mixed_nozzle_experiment is True:
+        out["mixed_nozzle_experiment"] = True
+    return out
+
+
+def said_for(text: str, *, confirm: str, map_with: str, experiment: str) -> str:
+    """*text*, a slicing refusal or one of its parts, with its three asks
+    spelled for a door that takes them another way: *confirm* replaces "call
+    again with soft_nozzle_confirmed=true" after "if the owner says to print
+    it anyway, ", *map_with* replaces "give a filament-to-nozzle map with"
+    (or its capitalised form) before the filament and the nozzle, and
+    *experiment* replaces "call
+    again with mixed_nozzle_experiment=true" after "if they say yes to
+    trying it for this print, "."""
+    from kiln.slicer_profiles import MIXED_SIZES_CONFIRM
+
+    yes = MIXED_SIZES_CONFIRM.split(", call again")[0]
+    return (
+        text.replace(SOFT_NOZZLE_CONFIRM, f"if the owner says to print it anyway, {confirm}")
+        .replace(MAP_ADVICE, f"{map_with} ")
+        .replace(MAP_ADVICE[0].upper() + MAP_ADVICE[1:], f"{map_with[:1].upper()}{map_with[1:]} ")
+        .replace(MIXED_SIZES_CONFIRM, f"{yes}, {experiment}")
+    )
+
+
+@dataclass(frozen=True)
+class SoftNozzleRun:
+    """An abrasive filament a slice would print through a nozzle that is
+    not wear-resistant (:func:`soft_nozzle_run`)."""
+
+    #: ``(slot, word)`` for each abrasive filament, 1 for the first slot.
+    filaments: tuple[tuple[int, str], ...]
+    #: The nozzles that are not wear-resistant, each ``{"id", "material"}``;
+    #: ``id`` is ``None`` for the one nozzle on record.
+    nozzles: tuple[dict[str, Any], ...]
+    #: The refusal, laid out (:class:`kiln.slicer_profiles.RefusalParts`).
+    parts: Any
+
+    @property
+    def refusal(self) -> str:
+        """The refusal as one text, its answer named."""
+        return self.parts.message()
+
+    def confirmed(self, stated_map: Sequence[int] | None = None) -> dict[str, Any] | None:
+        """The block a slice the owner said to print anyway carries, or
+        ``None`` when the sliced file puts no abrasive filament on a nozzle
+        that is not wear-resistant.
+
+        *stated_map* is the filament-to-nozzle map the sliced file states:
+        given, the nozzles are narrowed to the ones it puts an abrasive
+        filament on.  ``{"confirmed_by": "owner", "filaments": [{"filament",
+        "material"}], "nozzles": [{"position", "material"}], "said": str}``.
+        """
+        nozzles = list(self.nozzles)
+        if stated_map and all(isinstance(n.get("id"), int) for n in nozzles):
+            printed_on = {stated_map[slot - 1] for slot, _word in self.filaments if slot - 1 < len(stated_map)}
+            nozzles = [n for n in nozzles if n["id"] in printed_on]
+        if not nozzles:
+            return None
+        named = sorted({word for _slot, word in self.filaments})
+        what = (
+            f"{named[0]}, an abrasive filament," if len(named) == 1
+            else f"{', '.join(named[:-1])} and {named[-1]}, abrasive filaments,"
+        )
+        if nozzles[0].get("id") is None:
+            material = str(nozzles[0].get("material") or "").replace("_", " ")
+            where = f"the nozzle on record ({material}), which is not wear-resistant and wears"
+        else:
+            verb = "is" if len(nozzles) == 1 else "are"
+            where = f"{' and '.join(_nozzle_said(n) for n in nozzles)}, which {verb} not wear-resistant and wear"
+            where += "s" if len(nozzles) == 1 else ""
+        return {
+            "confirmed_by": "owner",
+            "filaments": [{"filament": slot, "material": word} for slot, word in self.filaments],
+            "nozzles": [{"position": n.get("id"), "material": n.get("material")} for n in nozzles],
+            "said": f"On the owner's say-so, {what} prints through {where} quickly on it.",
+        }
+
+
+def soft_nozzle_run(
+    slot_materials: Sequence[Sequence[str]],
+    filament_map: Sequence[int] | None = None,
+    *,
+    nozzles: Any = None,
+    fitted: Sequence[dict[str, Any]] | None = None,
+    on_record: str | None = None,
+    mappable: bool = False,
+) -> SoftNozzleRun | None:
+    """The abrasive filaments a slice would print through a nozzle that is
+    not wear-resistant, and the sentence refusing it; ``None`` when there
+    are none.
+
+    *slot_materials* lists, per filament slot in order, every word naming
+    that filament's material; a slot is abrasive when any word is
+    (:func:`kiln.material_safety.is_abrasive_filament`), and a nozzle is
+    judged by :func:`kiln.material_safety.is_wear_resistant_nozzle`.  The
+    nozzles judged, the first that applies:
+
+    * *nozzles*, the record a slice for more than one nozzle carries with
+      its owner's statement (:func:`kiln.slicer_profiles.used_nozzles`):
+      with *filament_map*, an abrasive filament mapped to a nozzle that is
+      not wear-resistant is refused; with none, the slicer's own choice is
+      refused while any nozzle the slice uses is not wear-resistant;
+    * *fitted*, the nozzles the owner stated fitted, for a slice for one
+      nozzle: refused unless every one is wear-resistant;
+    * *on_record*, the material of the one nozzle on record.
+
+    *mappable* is whether a filament-to-nozzle map can choose the nozzle on
+    this printer.  The sentence names the filament and the nozzle that can
+    take it.
+    """
+    from kiln.material_safety import is_wear_resistant_nozzle
+    from kiln.slicer_profiles import used_nozzles
+
+    abrasive = _abrasive_slots(slot_materials)
+    used = used_nozzles(nozzles) if nozzles is not None else []
+    if used:
+        candidates, known = used, True
+    elif fitted:
+        candidates, known = [dict(n) for n in fitted], False
+    elif on_record:
+        candidates, known = [{"id": None, "material": on_record}], False
+    else:
+        return None
+    soft = [n for n in candidates if not is_wear_resistant_nozzle(n.get("material"))]
+    if used and filament_map:
+        mapped = {slot: filament_map[slot - 1] for slot, _word in abrasive if slot - 1 < len(filament_map)}
+        on_soft = {
+            slot for slot, nozzle in mapped.items()
+            if 1 <= nozzle <= len(used) and not is_wear_resistant_nozzle(used[nozzle - 1].get("material"))
+        }
+        abrasive = [(slot, word) for slot, word in abrasive if slot in on_soft]
+        soft = [used[k - 1] for k in sorted({mapped[slot] for slot in on_soft})]
+    if not abrasive or not soft:
+        return None
+    from kiln.slicer_profiles import RefusalParts
+
+    named = sorted({word for _slot, word in abrasive})
+    one = len(abrasive) == 1
+    it, they = ("it", "it wears") if one else ("them", "they wear")
+    joined = " and ".join(named) if len(named) <= 2 else f"{', '.join(named[:-1])} and {named[-1]}"
+    if len(slot_materials) > 1:
+        slots = " and ".join(str(slot) for slot, _word in abrasive)
+        what = f"{joined} (filament{'' if one else 's'} {slots}) {'is an abrasive filament' if one else 'are abrasive'}"
+    else:
+        what = f"{joined} {'is an abrasive filament' if len(named) == 1 else 'are abrasive filaments'}"
+    hard = [str(n["id"]) for n in candidates if is_wear_resistant_nozzle(n.get("material"))]
+    on = f"nozzle {' or '.join(hard)}"
+    hardened = f"Fit a hardened nozzle for {it}."
+    said = " and ".join(_nozzle_said(n) for n in soft)
+    if not known and candidates[0]["id"] is None:
+        material = str(on_record).replace("_", " ")
+        reason = f"{what}, and this printer's nozzle is recorded as {material}, which {they} out quickly."
+        fix = "Fit a hardened nozzle, or tell Kiln which nozzle is fitted."
+    else:
+        if known and filament_map:
+            where = f"the filament-to-nozzle map puts {it} on {said}"
+            fix = f"Put {it} on {on} in the map." if hard else hardened
+        elif known:
+            where = f"the slicer may print {it} through {said}"
+            fix = f"{MAP_ADVICE[0].upper()}{MAP_ADVICE[1:]}{it} on {on}." if hard else hardened
+        elif len(candidates) == 1:
+            where = f"the only nozzle fitted is {said}"
+            fix = hardened
+        else:
+            where = f"a slice for one nozzle can print through any nozzle fitted, including {said}"
+            if hard and mappable:
+                fix = f"{MAP_ADVICE[0].upper()}{MAP_ADVICE[1:]}{it} on {on}."
+            elif hard:
+                fix = f"Only {on} can take {it}: fit wear-resistant nozzles in place of the others."
+            else:
+                fix = hardened
+        if not hard:
+            fix = f"No nozzle {'this print uses' if known else 'fitted'} is wear-resistant: {hardened[0].lower()}{hardened[1:]}"
+        reason = f"{what}, and {where}, which {they} out quickly."
+    worn = "the nozzle" if len(soft) == 1 else "these nozzles"
+    parts = RefusalParts(
+        headline=f"{joined} would wear out {worn}",
+        reason=reason[0].upper() + reason[1:],
+        fix=fix,
+        ask=SOFT_NOZZLE_CONFIRM,
+    )
+    return SoftNozzleRun(tuple(abrasive), tuple(soft), parts)
+
+
+def filament_map_of(gcode_path: str | None) -> dict[str, Any] | None:
+    """The filament-to-nozzle map the sliced file at *gcode_path* states,
+    or ``None`` when it states none or cannot be read.  Never raises.
+
+    ``filament_to_nozzle`` lists, per filament in order, the nozzle (1 for
+    the first) that printed it; ``nozzle_filaments`` is the same read the
+    other way, nozzle number to the filaments (1 for the first) on it;
+    ``mode`` is who chose the map, in the slicer's own word, when the file
+    says.
+    """
+    if not gcode_path:
+        return None
+    from kiln.gcode import stated_filament_map
+
+    try:
+        with open(gcode_path, errors="replace", encoding="utf-8") as fh:
+            stated, mode = stated_filament_map(fh)
+    except OSError:
+        return None
+    if stated is None:
+        return None
+    by_nozzle: dict[str, list[int]] = {}
+    for filament, nozzle in enumerate(stated, start=1):
+        by_nozzle.setdefault(str(nozzle), []).append(filament)
+    read: dict[str, Any] = {"filament_to_nozzle": stated, "nozzle_filaments": by_nozzle}
+    if mode:
+        read["mode"] = mode
+    return read
+
+
+def _slot_materials(input_path: str, materials: Sequence[str | None], slots: int) -> list[list[str]]:
+    """Per filament slot, every word naming its material: each of
+    *materials* (the words the slice names every slot by) and, for a 3MF
+    that states one per slot, the file's own.  Never raises."""
+    named = [str(word).strip() for word in materials if word and str(word).strip()]
+    words = [list(named) for _ in range(slots)]
+    for slot, word in enumerate(_file_slot_types(input_path, slots)):
+        if word:
+            words[slot].append(word)
+    return words
+
+
+def _file_slot_types(input_path: str, slots: int) -> list[str]:
+    """The filament type a 3MF states for each of its first *slots* slots,
+    ``""`` for a slot it states none for; every slot ``""`` for any other
+    file or one that cannot be read.  Never raises."""
+    types = [""] * slots
+    if not str(input_path).lower().endswith(".3mf"):
+        return types
+    try:
+        from kiln.file_metadata import slicer_settings
+
+        stated = re.split(r"[;,]", str(slicer_settings(input_path).get("filament_type") or ""))
+    except Exception:  # noqa: BLE001 -- a file that cannot be read states no type
+        logger.debug("filament types of %s not read", input_path, exc_info=True)
+        return types
+    for slot, word in enumerate(stated[:slots]):
+        types[slot] = word.strip()
+    return types
+
+
+def _printer_id_of(profile: str | None) -> str | None:
+    """The id of the printer whose bundled profile Kiln built *profile*
+    from, or ``None`` for a profile that is the caller's own."""
+    from kiln.slicer_profiles import profile_origin
+
+    origin = profile_origin(profile)
+    return origin.printer_id or origin.standing_in_for
 
 
 def _printer_name_of(profile: str | None) -> str | None:
@@ -736,6 +1236,15 @@ def profile_filament_slots(profile: str | None) -> int:
     except OSError:
         return 1
     return max(1, len([v for v in str(value).split(",") if v.strip()]))
+
+
+def colours_expressed(profile: str | None, counted: tuple[int, int] | None) -> int:
+    """How many filaments a slice with *profile* can print: the profile's
+    own slots (:func:`profile_filament_slots`) or the tools the sliced file
+    selects (*counted*, :func:`kiln.gcode.tool_changes`), whichever is more.
+    A plate asking for more filaments than this prints them folded
+    together, in one colour when this is 1."""
+    return max(profile_filament_slots(profile), counted[1] if counted is not None else 0)
 
 
 def _bed_xy_bounds_from_profile(
@@ -1134,9 +1643,9 @@ def _run_slicer_with_startup_retry(
             )
         except subprocess.TimeoutExpired:
             remove_partial_output()
-            raise SlicerError(
-                f"Slicing timed out after {timeout}s. The model may be too complex "
-                f"or the slicer is hanging."
+            raise SliceTimeLimitError(
+                f"The slicer took too long: it was stopped after {timeout} seconds and nothing was "
+                f"sliced. Slice again with a longer time limit, or a simpler plate."
             ) from None
         except OSError as exc:
             raise SlicerError(f"Failed to run slicer: {exc}") from exc
@@ -1169,6 +1678,9 @@ def _slice_with_orca(
     timeout: int,
     multicolor: dict[str, Any] | None = None,
     drawn_as: str | None = None,
+    nozzles: dict[str, Any] | None = None,
+    filament_map: list[int] | None = None,
+    routines: Mapping[str, str] | None = None,
 ) -> SliceResult:
     """Slice through the BambuStudio/OrcaSlicer command line.
 
@@ -1182,6 +1694,17 @@ def _slice_with_orca(
     Orca names its own output (``plate_1.gcode``) inside ``--outputdir``
     rather than taking an output path, so it writes to a private directory
     and the result is moved to where the caller asked for it.
+
+    *nozzles* is the printer's nozzle record when the slice is for more
+    than one nozzle (:func:`kiln.slicer_orca.settings_to_orca_presets`).
+    *filament_map* is the caller's filament-to-nozzle map, already checked
+    (:func:`checked_filament_map`): the slicer is told to use it, and a
+    file that states any other map is not kept.  With none, the slicer
+    maps the filaments itself.  The result's ``filament_map`` is what the
+    file states.  *routines* are the printer's own routines its maker's
+    slicer holds (:func:`kiln.maker_slicer.slicer_for_several_nozzles`,
+    :func:`kiln.maker_slicer.slicer_for_layer_routines`), written into the
+    machine preset (:func:`kiln.slicer_orca.settings_to_orca_presets`).
     """
     with tempfile.TemporaryDirectory(prefix="kiln_orca_") as work_dir:
         cmd: list[str] = [slicer.path, "--slice", "0", "--outputdir", work_dir]
@@ -1222,6 +1745,16 @@ def _slice_with_orca(
 
         settings = ini_to_settings(profile)
         preset_name = Path(profile).stem[:48] or "kiln"
+        slots = int((multicolor or {}).get("filament_slots_needed", 0))
+        if slots >= 2 and any(stated := _file_slot_types(input_abs, slots)):
+            # Each filament is loaded as the type the file states for it, in
+            # the short form a printer reads.
+            from kiln.slicer_filament import slicer_type_name
+
+            own = str(settings.get("filament_type") or "").split(";")[0].split(",")[0].strip()
+            settings["filament_type"] = ";".join(
+                (slicer_type_name(word) if word else "") or own or "PLA" for word in stated
+            )
 
         # A multicolor 3MF needs one filament preset PER SLOT, or Orca
         # slices every color with T0 — the exact flatten the advisory
@@ -1233,12 +1766,16 @@ def _slice_with_orca(
         filament_colors: list[str] | None = None
         wipe_xy: tuple[float, float] | None = None
         tower: tuple[float, float, float] | None = None
-        slots = int((multicolor or {}).get("filament_slots_needed", 0))
         if slots >= 2:
             from kiln.multicolor_3mf import multicolor_filament_colors
 
             filament_colors = multicolor_filament_colors(multicolor, slots)
-            tower = _wipe_tower_placement(settings, input_abs, slots)
+            from kiln.slicer_profiles import rect_polygon, shared_reach
+
+            # Every nozzle prints the tower, so it stands where all reach.
+            shared = shared_reach(nozzles) if nozzles else None
+            tower_settings = settings if shared is None else {**settings, "bed_shape": rect_polygon(shared)}
+            tower = _wipe_tower_placement(tower_settings, input_abs, slots)
             wipe_xy = None if tower is None else tower[:2]
             logger.info(
                 "Multicolor 3MF: emitting %d filament presets "
@@ -1252,9 +1789,18 @@ def _slice_with_orca(
             filament_colors=filament_colors,
             wipe_tower_xy=wipe_xy,
             wipe_tower_width_mm=None if tower is None else tower[2],
+            nozzles=nozzles,
+            routines=routines,
         )
         cmd += ["--load-settings", f"{presets.machine_path};{presets.process_path}"]
         cmd += ["--load-filaments", ";".join(presets.filament_paths)]
+        if filament_map:
+            cmd += ["--filament-map-mode", "Manual", "--filament-map", ",".join(str(n) for n in filament_map)]
+        from kiln.maker_slicer import is_slicer
+
+        if nozzles and is_slicer("bambu_studio", slicer):
+            # The slicer writes the print package for this slice beside it.
+            cmd += ["--export-3mf", _SLICER_PACKAGE_NAME]
 
         if extra_args:
             cmd.extend(extra_args)
@@ -1300,6 +1846,13 @@ def _slice_with_orca(
         if result.returncode in _ORCA_SIGSEGV_RETURNCODES and not crashed_after_finishing:
             slicer_name = os.path.basename(slicer.path)
             printer_name = _printer_name_of(profile)
+            if nozzles:
+                raise SlicerError(
+                    f"{slicer_name} crashed while slicing this print for more than one nozzle "
+                    f"(it was stopped by signal {_signal_of(result.returncode)}): the slicer "
+                    f"failed, not the print. Slice again; if it crashes the same way, check that "
+                    f"{slicer_name} is up to date."
+                )
             if printer_name and printer_name.startswith("Bambu Lab"):
                 raise SlicerError(
                     f"{slicer_name} crashed while slicing. The crash is inside "
@@ -1362,11 +1915,26 @@ def _slice_with_orca(
                 f"or scale it down so it fits one plate."
             )
 
+        used_map = filament_map_of(str(produced[0])) if nozzles else None
+        if filament_map and (used_map or {}).get("filament_to_nozzle") != filament_map:
+            raise SlicerError(
+                f"{os.path.basename(slicer.path)} did not slice with the filament-to-nozzle map "
+                f"that was asked for, so the file was not kept. Slice again without a map to let "
+                f"the slicer choose, or check that this slicer is up to date."
+            )
+
         if str(settings.get("machine_limits_usage", "")).strip() != "emit_to_gcode":
             _drop_unasked_machine_limits(str(produced[0]))
         shutil.move(str(produced[0]), out_file)
+        made_package: str | None = None
+        written = Path(work_dir, _SLICER_PACKAGE_NAME)
+        if nozzles and written.is_file():
+            made_package = out_file + ".made.3mf"
+            shutil.move(str(written), made_package)
 
     _record_slice(profile, input_abs, out_file, drawn_as=drawn_as)
+    if made_package is not None:
+        _keep_print_package(made_package, out_file)
     message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
     if crashed_after_finishing:
         message += (
@@ -1390,6 +1958,7 @@ def _slice_with_orca(
         message=message,
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
+        filament_map=used_map,
     )
 
 
@@ -1448,7 +2017,10 @@ def slice_file(input_path: str, **kwargs: Any) -> SliceResult:
     """
     try:
         return _slice_file(input_path, **kwargs)
-    except (SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal, ProjectPlateError):
+    except (
+        SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal, ProjectPlateError, NozzleMapError,
+        SliceTimeLimitError,
+    ):
         # A refusal is about where the print lands, never its unit, and a
         # door answers it by its kind: rewrapped, it would lose both.
         raise
@@ -1545,6 +2117,68 @@ def _say_left_out(result: SliceResult, left_out: dict[str, int]) -> SliceResult:
 _NO_LAYERS = re.compile(r"no layers were detected", re.IGNORECASE)
 
 
+def _several_nozzle_ini(
+    profile: str | None, nozzles: dict[str, Any], several: Any, *, slots: int, asked_map: list[int] | None,
+) -> str | None:
+    """The settings file for a slice for more than one nozzle by a slicer
+    of PrusaSlicer's kind (:func:`kiln.maker_slicer.several_nozzle_profile`).
+
+    Such a slicer prints each filament from the nozzle of the same number,
+    so a print with more filaments than nozzles used
+    (``MORE_FILAMENTS_THAN_NOZZLES``) and a map that says otherwise
+    (``NOZZLE_MAP_FIXED``) are refused before slicing.
+    """
+    from kiln.maker_slicer import several_nozzle_profile
+    from kiln.slicer_profiles import nozzle_positions
+
+    used = nozzle_positions(nozzles)
+    if slots > used:
+        raise NozzleMapError(
+            f"This print uses {slots} filaments, and this printer prints each filament from a nozzle of its "
+            f"own with {used} fitted, so nothing was sliced. Use {used} filaments or fewer, or record the "
+            "other nozzles as fitted, and slice again.",
+            code="MORE_FILAMENTS_THAN_NOZZLES",
+        )
+    if asked_map and asked_map != list(range(1, len(asked_map) + 1)):
+        raise NozzleMapError(
+            "On this printer filament 1 prints from nozzle 1, filament 2 from nozzle 2 and so on, and a "
+            "different map cannot be sliced, so nothing was sliced. Load each filament on the nozzle of "
+            "its number, or leave the map out, and slice again.",
+            code="NOZZLE_MAP_FIXED",
+        )
+    return several_nozzle_profile(profile, nozzles, used, several.routines)
+
+
+def _stand_the_tower(
+    slic3r_input: str, slicer_profile: str | None, input_abs: str, scratch: str,
+) -> tuple[str, str | None]:
+    """*slic3r_input* and *slicer_profile* with the purge tower stood clear
+    of the parts, for a slice whose settings ask for one: a copy of the 3MF
+    naming the place (:func:`kiln.maker_slicer.with_tower_position`).  With
+    no clear place on the bed, or a file that cannot carry one, the slice is
+    made without a tower.  Anything else is returned as it was."""
+    if not slicer_profile or not slic3r_input.lower().endswith(".3mf"):
+        return slic3r_input, slicer_profile
+    settings = ini_to_settings(slicer_profile)
+    if str(settings.get("wipe_tower", "0")).strip() != "1":
+        return slic3r_input, slicer_profile
+    from kiln.maker_slicer import TOWER_SQUARE_MM, with_tower_position
+    from kiln.slicer_profiles import profile_with_overrides
+
+    try:
+        width = float(settings.get("wipe_tower_width") or TOWER_SQUARE_MM)
+    except ValueError:
+        width = TOWER_SQUARE_MM
+    xy = _wipe_tower_position(settings, input_abs, width)
+    placed = os.path.join(scratch, f"tower_{Path(slic3r_input).name}")
+    if xy is not None and with_tower_position(slic3r_input, placed, xy):
+        return placed, slicer_profile
+    logger.info("No clear place for a purge tower; slicing for more than one nozzle without one.")
+    return slic3r_input, profile_with_overrides(
+        slicer_profile, {"wipe_tower": "0"}, prefix=f"{Path(slicer_profile).stem}_", stated=False,
+    )
+
+
 def _units_question_for(path: str) -> str:
     """The units question *path*'s size raises (``kiln.printability``), or
     ``""`` when it raises none or cannot be measured."""
@@ -1579,6 +2213,49 @@ def _supports_plastic(
     return None
 
 
+#: The code of a slice refused because the settings for nozzles of
+#: different sizes could not be had.
+MIXED_SIZES_UNAVAILABLE = "MULTI_NOZZLE_MIXED_SIZES_UNAVAILABLE"
+
+
+def mixed_size_nozzles(
+    profile: str | None, nozzles: dict[str, Any], filament_map: list[int] | None,
+) -> dict[str, Any]:
+    """*nozzles* for one slice with its nozzles at different sizes: the same
+    record with the preset extras Kiln's servers give for those sizes (and
+    for *filament_map*, when the person chose one).
+
+    Raises :class:`NozzleMapError` (:data:`MIXED_SIZES_UNAVAILABLE`) when
+    they cannot be had -- this computer is offline, Kiln is signed out, the
+    servers did not answer, or they said no -- and its ``why`` names which.
+    Nothing is sliced on a guess.
+    """
+    from kiln import _pro_catalogue_bridge, served_answer
+    from kiln.slicer_profiles import _sizes_said, mixed_sizes, profile_origin
+
+    used = mixed_sizes(nozzles)
+    printer_id = profile_origin(profile).printer_id if profile else None
+    served, miss = _pro_catalogue_bridge.nozzles_for_sizes(
+        printer_id, [n["diameter_mm"] for n in used], filament_map,
+    )
+    if served is None:
+        miss = miss or served_answer.Miss("unanswered")
+        error = NozzleMapError(
+            served_answer.sentence(
+                miss,
+                feature="servers",
+                on_the_line=f"This print would use nozzles of different sizes at once ({_sizes_said(used)})",
+                cannot="get the slicer settings for those sizes",
+                wont="sliced nothing",
+                safe_remedy="Slice it with one filament for one nozzle, or fit nozzles of one size",
+            ),
+            code=MIXED_SIZES_UNAVAILABLE,
+        )
+        error.why = miss.cause  # type: ignore[attr-defined]
+        raise error
+    return {**nozzles, "preset_extras": served["preset_extras"]}
+
+
 def _slice_file(
     input_path: str,
     *,
@@ -1587,15 +2264,39 @@ def _slice_file(
     profile: str | None = None,
     slicer_path: str | None = None,
     extra_args: list[str] | None = None,
-    timeout: int = 300,
+    timeout: int = SLICE_TIME_LIMIT_S,
     material: str | None = None,
     loaded_material: str | None = None,
     loaded_determined_by: str = LOADED_OBSERVED,
     plate_number: int | None = None,
+    filament_map: Sequence[int] | str | None = None,
+    soft_nozzle_confirmed: bool = False,
+    mixed_nozzle_experiment: bool = False,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
 
     Args:
+        soft_nozzle_confirmed: The owner has said to print anyway a slice
+            refused because an abrasive filament would print through a
+            nozzle on record that is not wear-resistant
+            (``ABRASIVE_ON_SOFT_NOZZLE``).  Only on their word.  The slice
+            then runs, and the result's ``soft_nozzle`` and message say
+            which filament goes through which nozzle on their say-so; the
+            slice's record on this computer keeps it.
+        mixed_nozzle_experiment: The person agreed, for this print, to try
+            printing with nozzles of different sizes at once.  Without it a
+            slice that would use nozzles of different sizes is refused.
+            With it the slice is made only when the settings for those
+            sizes can be had (:func:`mixed_size_nozzles`), and the result's
+            ``experimental`` says so.  It changes nothing for any other
+            slice.
+        filament_map: For a printer sliced with more than one nozzle, the
+            nozzle (1 for the first) each filament prints from, one entry
+            per filament in filament order.  Left out, the slicer maps the
+            filaments itself.  A map that does not fit the print or the
+            printer, or one given for a printer sliced with one nozzle, is
+            refused before slicing (:class:`NozzleMapError`).  The result's
+            ``filament_map`` says which nozzle printed each filament.
         plate_number: Which plate to slice of a project that holds several
             (1 for the first).  Such a project is never sliced on a guess:
             with none named the slice is refused and the refusal lists the
@@ -1650,7 +2351,22 @@ def _slice_file(
     if taken is not None:
         input_abs = taken.path
 
-    if ext == ".3mf":
+    from kiln.slicer_profiles import (
+        MIXED_SIZES_CODE,
+        mixed_size_experiment,
+        mixed_size_parts,
+        nozzle_bed,
+        nozzle_positions,
+        nozzle_record_of,
+        nozzles_of,
+        profile_with_overrides,
+        rect_polygon,
+        unused_fitted_note,
+    )
+
+    # A printer with a bed of its own for more than one nozzle has its 3MF
+    # judged once the slice is known to be for one nozzle or more.
+    if ext == ".3mf" and nozzle_bed(nozzles_of(profile)) is None:
         _check_3mf_on_bed(input_abs, profile)
 
     # Find slicer
@@ -1692,7 +2408,66 @@ def _slice_file(
     # the slicer was AUTO-detected, prefer an installed Orca/BambuStudio for
     # this input — the user asked for their colors, not for a binary.  An
     # explicit slicer_path is an explicit choice and is honoured as given.
+    # A slice for more than one nozzle: a printer whose record is sliced
+    # that way, and a plate of two or more filaments or a map the caller
+    # gave.  It is made by the slicer the record names.  With that slicer
+    # missing or too old here, the plate is sliced for one nozzle, exactly as
+    # a printer sliced with one nozzle is, and the result says so; a map
+    # cannot be kept on one nozzle, so with a map it is refused.  One
+    # filament with no map slices for one nozzle, as it does without the
+    # record.
+    nozzles = nozzles_of(profile)
+    asked_map = checked_filament_map(
+        filament_map, filaments=max(slots_needed, 1), positions=nozzle_positions(nozzles),
+    )
+    several_filaments = bool(asked_map) or slots_needed >= 2
+    several = None
+    instead: OneNozzleInstead | None = None
+    would_use = 1
+    printer = _printer_id_of(profile) if nozzles is not None and several_filaments else None
+    if nozzles is not None and several_filaments:
+        from kiln.maker_slicer import slicer_for_several_nozzles
+
+        try:
+            several = slicer_for_several_nozzles(nozzles, slicer, chosen=slicer_path is not None, profile=profile)
+        except OneNozzleInstead as miss:
+            if asked_map:
+                raise NozzleMapError(
+                    f"{miss} A filament-to-nozzle map needs it too: leave the map out and Kiln slices this "
+                    "print for one nozzle, with filament swaps.",
+                    code=miss.code,
+                ) from miss
+            instead = miss
+            would_use = nozzle_positions(nozzles)
+    experimental: dict[str, Any] | None = None
+    if several is not None and (mixed := mixed_size_parts(nozzles)):
+        if mixed_nozzle_experiment is not True:
+            raise NozzleMapError(mixed.message(), code=MIXED_SIZES_CODE, parts=mixed)
+        experimental = mixed_size_experiment(nozzles)
+        nozzles = mixed_size_nozzles(profile, nozzles, asked_map)
+    if ext == ".3mf" and nozzle_bed(nozzles) is not None:
+        wider = nozzle_bed_for_slice(input_abs, profile, asked_map, slots=slots_needed, maker_ready=instead is None)
+        if wider is not None:
+            # Checked and sliced on the bed the nozzles print on.
+            profile = profile_with_overrides(
+                profile, {"bed_shape": rect_polygon(wider)}, prefix=f"{Path(profile).stem}_", stated=False,
+            )
+        _check_3mf_on_bed(input_abs, profile)
+    mappable = nozzles is not None and instead is None
+    if nozzles is not None and (not several_filaments or instead is not None):
+        nozzles = None
+    # The owner fitted more nozzles than this slice uses: said once, with
+    # the slice, when it prints more than one filament.
+    unused_note = unused_fitted_note(nozzle_record_of(profile)) if several_filaments and instead is None else ""
     multicolor_switched = False
+    if several is not None:
+        if several.info.path != slicer.path:
+            slicer = several.info
+            multicolor_switched = slots_needed >= 2
+        if slicer_cli_family(slicer) == _CLI_PRUSA:
+            profile = _several_nozzle_ini(profile, nozzles, several, slots=slots_needed, asked_map=asked_map)
+            if printed_only is None:
+                printed_only = _printed_parts_for_prusa(input_abs)
     if (
         slicer_path is None
         and slots_needed >= 2
@@ -1708,6 +2483,21 @@ def _slice_file(
             )
             slicer = alt
             multicolor_switched = True
+
+    # A slice for one nozzle carries the printer's own routines the record
+    # names for it when the slicer making it is the printer's maker's; made
+    # by any other slicer it carries none, and the reply says what adds them.
+    maker = None
+    without_routines = None
+    routines_printer = None
+    if several is None and instead is None:
+        from kiln.maker_slicer import Miss, slicer_for_layer_routines
+
+        found = slicer_for_layer_routines(nozzle_record_of(profile), slicer, profile=profile)
+        if isinstance(found, Miss):
+            without_routines, routines_printer = found, _printer_id_of(profile)
+        elif found is not None and slicer_cli_family(found.info) == _CLI_BAMBU:
+            maker = found
 
     left_out: dict[str, int] = {}
     if printed_only is not None and slicer_cli_family(slicer) == _CLI_PRUSA:
@@ -1758,6 +2548,19 @@ def _slice_file(
     from kiln.slicer_profiles import nozzle_fit_of
 
     nozzle = nozzle_fit_of(slicer_profile)
+    # Every slice for a printer whose nozzle record states a material: an
+    # abrasive filament on a nozzle that is not wear-resistant is refused.
+    # The owner may say to print it anyway; the slice then carries it.
+    soft_run = soft_nozzle_run(
+        _slot_materials(input_abs, [material, filament.filament_type, filament.material], max(slots_needed, 1)),
+        asked_map,
+        nozzles=nozzles,
+        fitted=[p for p in (nozzle or {}).get("positions") or () if p.get("fitted") is True],
+        on_record=(nozzle or {}).get("nozzle_material"),
+        mappable=mappable,
+    )
+    if soft_run is not None and soft_nozzle_confirmed is not True:
+        raise NozzleMapError(soft_run.parts.message(), code=SOFT_NOZZLE_CODE, parts=soft_run.parts)
     # The layer height the part was designed in, decided here for the same
     # reason: a relief made in whole 0.2 mm layers printed at the profile's
     # 0.3 by every door and lost its levels.  A stated layer height is the
@@ -1839,16 +2642,69 @@ def _slice_file(
                     sliced_input, faces = painted
                     supports = replace(supports, kept_off_painted=faces)
     try:
-        return _say_left_out(say_project_plate(_slice_decided(
+        result = _say_left_out(say_project_plate(_slice_decided(
             slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,
             profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
+            nozzles=nozzles, filament_map=asked_map, several=several, maker=maker,
         ), taken), left_out)
+        if unused_note:
+            result.message = f"{result.message} {unused_note}".strip()
+        if soft_run is not None:
+            _say_soft_nozzle(result, soft_run)
+        if experimental:
+            result.experimental = experimental
+            result.message = f"{result.message} {experimental['note']}".strip()
+        from kiln import maker_slicer_notes
+
+        if without_routines is not None:
+            maker_slicer_notes.after_layer_routines(
+                result, printer=routines_printer, miss=without_routines, made_with=slicer,
+            )
+        return maker_slicer_notes.after_slice(
+            result, printer=printer, miss=instead.miss if instead else None, nozzles=would_use,
+            colours=slots_needed, profile=profile,
+        )
     finally:
         for scratch in (layer_scratch, kept_off_scratch):
             if scratch is not None:
                 shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _say_sliced_with(result: SliceResult, several: Any) -> SliceResult:
+    """*result* naming the maker's slicer a slice was made with (*several*),
+    and the sliced file's record keeping it
+    (:func:`kiln.print_lineage.note_sliced_with`).  With none, *result* is
+    returned as it was."""
+    if several is None:
+        return result
+    result.sliced_with = dict(several.sliced_with)
+    try:
+        from kiln.print_lineage import note_sliced_with
+
+        note_sliced_with(result.output_path, result.sliced_with)
+    except Exception:  # noqa: BLE001 -- a record never costs a slice
+        logger.debug("slicer not noted for %s", result.output_path, exc_info=True)
+    return result
+
+
+def _say_soft_nozzle(result: SliceResult, run: SoftNozzleRun) -> None:
+    """*result*, sliced on the owner's say-so though *run* refused it: its
+    ``soft_nozzle`` block and message say so, and the slice's record keeps
+    it (:func:`kiln.print_lineage.note_soft_nozzle`)."""
+    stated = (result.filament_map or {}).get("filament_to_nozzle")
+    block = run.confirmed(stated if isinstance(stated, list) else None)
+    if block is None:
+        return
+    result.soft_nozzle = block
+    result.message = f"{result.message} {block['said']}".strip()
+    try:
+        from kiln.print_lineage import note_soft_nozzle
+
+        note_soft_nozzle(result.output_path, block)
+    except Exception:  # noqa: BLE001 -- a record never costs a slice
+        logger.debug("soft-nozzle confirmation not kept with the slice", exc_info=True)
 
 
 def _slice_decided(
@@ -1870,9 +2726,19 @@ def _slice_decided(
     nozzle: dict[str, Any] | None,
     supports: Any,
     layer: SliceLayer | None,
+    nozzles: dict[str, Any] | None = None,
+    filament_map: list[int] | None = None,
+    several: Any = None,
+    maker: Any = None,
 ) -> SliceResult:
     """Run the slicer on *sliced_input* with everything :func:`_slice_file`
-    decided; *input_abs* is the part as the caller named it."""
+    decided; *input_abs* is the part as the caller named it.  *several* is
+    the slicer chosen for a slice for more than one nozzle, and *maker* the
+    printer's maker's slicer making a slice for one nozzle with the
+    printer's own routines (:class:`kiln.maker_slicer.SeveralNozzleSlicer`
+    either way): its routines go into the machine preset, and the result
+    and the sliced file's record say which slicer it was."""
+    chosen = several if several is not None else maker
     # Two command lines, one function.  Everything below this point is the
     # Slic3r dialect; an Orca/BambuStudio binary needs a different argv AND a
     # different preset format, so it gets its own runner rather than a flag
@@ -1888,6 +2754,10 @@ def _slice_decided(
             timeout=timeout,
             multicolor=multicolor,
             drawn_as=drawn,
+            # Named only for a slice for more than one nozzle, and for one
+            # carrying the printer's own routines read from its maker's slicer.
+            **({"nozzles": nozzles, "filament_map": filament_map} if nozzles else {}),
+            **({"routines": chosen.routines} if chosen is not None else {}),
         )
         result.filament = filament
         result.nozzle = nozzle
@@ -1899,7 +2769,7 @@ def _slice_decided(
                 f" (multicolor 3MF: auto-selected "
                 f"{os.path.basename(slicer.path)} to keep the colors)"
             )
-        return result
+        return _say_sliced_with(result, chosen)
 
     # PrusaSlicer reads each component of a joined object as an object of
     # its own, so a 3MF whose objects hold several parts is handed over in
@@ -1913,6 +2783,8 @@ def _slice_decided(
         joined_copy = os.path.join(parts_dir, Path(input_abs).name)
         if prusa_multipart_copy(sliced_input, joined_copy):
             slic3r_input = joined_copy
+        if several is not None:
+            slic3r_input, slicer_profile = _stand_the_tower(slic3r_input, slicer_profile, input_abs, parts_dir)
     try:
         result = _slice_with_slic3r(
             slicer,
@@ -1930,7 +2802,13 @@ def _slice_decided(
             input_path=input_path,
         )
         result.layer = layer_witnessed(layer, result.output_path)
-        return result
+        if several is not None:
+            # Each filament printed from the nozzle of its own number.
+            slots = max(int((multicolor or {}).get("filament_slots_needed", 0)), 1)
+            several = replace(
+                several, sliced_with={**several.sliced_with, "filament_to_nozzle": list(range(1, slots + 1))},
+            )
+        return _say_sliced_with(result, several)
     finally:
         if parts_dir is not None:
             shutil.rmtree(parts_dir, ignore_errors=True)
@@ -2274,6 +3152,7 @@ def slice_multicolor_copies(
     material: str | None = None,
     loaded_material: str | None = None,
     loaded_determined_by: str = LOADED_OBSERVED,
+    soft_nozzle_confirmed: bool = False,
 ) -> SliceResult:
     """Slice an STL into *count* copies, each assigned a different tool (T0, T1, ...).
 
@@ -2303,6 +3182,8 @@ def slice_multicolor_copies(
     :param loaded_material: The spool loaded on the printer, likewise.
     :param loaded_determined_by: Who decided it (``observed`` / ``user_reported``),
         likewise.
+    :param soft_nozzle_confirmed: The owner's word to print anyway, handed
+        to every copy's slice (see :func:`slice_file`).
     :returns: A :class:`SliceResult` with the merged gcode path.
     :raises SlicerError: If slicing any copy fails.
     :raises ValueError: If copies don't fit on the bed.
@@ -2388,6 +3269,7 @@ def slice_multicolor_copies(
     slicer_name: str | None = None
     filament: SliceFilament | None = None
 
+    said_anyway: list[tuple[int, dict[str, Any]]] = []
     placed = 0
     for row in range(actual_rows):
         for col in range(actual_cols):
@@ -2420,12 +3302,15 @@ def slice_multicolor_copies(
                 material=material,
                 loaded_material=loaded_material,
                 loaded_determined_by=loaded_determined_by,
+                soft_nozzle_confirmed=soft_nozzle_confirmed,
             )
             if not result.success or not result.output_path:
                 raise SlicerError(f"Slicing copy {placed} failed: {result.message}")
 
             slicer_name = result.slicer
             filament = result.filament
+            if result.soft_nozzle:
+                said_anyway.append((placed + 1, result.soft_nozzle))
 
             # Read the gcode body
             with open(result.output_path, errors="replace", encoding="utf-8") as fh:
@@ -2444,7 +3329,7 @@ def slice_multicolor_copies(
     with open(merged_path, "w", encoding="utf-8") as fh:
         fh.write(_KILN_GCODE_HEADER + merged)
 
-    return SliceResult(
+    merged_result = SliceResult(
         success=True,
         output_path=merged_path,
         slicer=slicer_name,
@@ -2452,6 +3337,42 @@ def slice_multicolor_copies(
         filament=filament,
         supports=supports,
     )
+    # The merged file is the one that prints: it gets its own record, and
+    # the owner's word to print anyway is kept on it.
+    from kiln.print_lineage import note_soft_nozzle, record_slice
+
+    record_slice(input_path, merged_path, profile=profile)
+    block = _soft_nozzle_of_copies(said_anyway)
+    if block is not None:
+        merged_result.soft_nozzle = block
+        merged_result.message = f"{merged_result.message} {block['said']}".strip()
+        note_soft_nozzle(merged_path, block)
+    return merged_result
+
+
+def _soft_nozzle_of_copies(said_anyway: list[tuple[int, dict[str, Any]]]) -> dict[str, Any] | None:
+    """One ``soft_nozzle`` block for a file merged from copies sliced one
+    filament each: *said_anyway* is ``(copy number, that copy's block)`` for
+    each copy the owner said to print anyway.  Each copy's filament is
+    numbered as the copy, and every nozzle named is kept once.  ``None``
+    when no copy carries one."""
+    if not said_anyway:
+        return None
+    nozzles: list[dict[str, Any]] = []
+    for _copy, block in said_anyway:
+        for nozzle in block.get("nozzles") or ():
+            if nozzle not in nozzles:
+                nozzles.append(nozzle)
+    first = said_anyway[0][1]
+    return {
+        "confirmed_by": "owner",
+        "filaments": [
+            {"filament": copy, "material": (block.get("filaments") or [{}])[0].get("material")}
+            for copy, block in said_anyway
+        ],
+        "nozzles": nozzles,
+        "said": first.get("said") or "",
+    }
 
 
 def _merge_multicolor_gcode(gcode_bodies: list[str]) -> str:

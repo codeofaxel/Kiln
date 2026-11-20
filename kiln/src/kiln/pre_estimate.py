@@ -534,11 +534,78 @@ class PreEstimate:
     confidence: str  # "high", "medium", "low"
     confidence_notes: list[str]
     warnings: list[str] = field(default_factory=list)
+    #: On a printer with more than one nozzle and a filament-to-nozzle map:
+    #: how many of the tool changes move between nozzles, and how many swap
+    #: the filament in a nozzle.  ``None`` otherwise.
+    nozzle_switches: int | None = None
+    filament_swaps: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["filaments"] = [f.to_dict() for f in self.filaments]
+        for key in ("nozzle_switches", "filament_swaps"):
+            if d[key] is None:
+                del d[key]
         return d
+
+
+def _nozzle_timing(
+    printer_id: str | None, fitted_positions: list[dict[str, Any]] | None = None,
+) -> tuple[float, float, int] | None:
+    """``(switch_seconds, filament_change_seconds, positions)`` from the
+    printer's nozzle record, with the nozzles its owner stated fitted on it
+    (:func:`kiln.slicer_profiles.fitted_record`), when a slice uses more
+    than one nozzle and the record states both times; ``None`` otherwise."""
+    if not printer_id:
+        return None
+    from kiln.slicer_profiles import fitted_record, nozzle_positions
+
+    nozzles = fitted_record(_profile_row(printer_id).get("nozzles"), fitted_positions)
+    positions = nozzle_positions(nozzles)
+    if positions < 2:
+        return None
+    try:
+        return float(nozzles["switch_seconds"]), float(nozzles["filament_change_seconds"]), positions
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _changes_by_kind(filament_map: list[int], layers: int) -> tuple[int, int]:
+    """``(nozzle switches, filament swaps)`` for *layers* layers that each
+    print every filament once, in filament order and back again on the next
+    layer, with filament ``i + 1`` on nozzle ``filament_map[i]``.  A nozzle
+    starts holding the first filament mapped to it.
+
+    Counted in closed form: a layer there and back ends where it began, so
+    every such pair counts the same, and an odd layer left over counts as
+    the first layer did.  Nothing here grows with the layer count."""
+    layers = max(0, int(layers))
+    one = _walk_layers(filament_map, 1)
+    pair = _walk_layers(filament_map, 2)
+    pairs, odd = divmod(layers, 2)
+    return pairs * pair[0] + odd * one[0], pairs * pair[1] + odd * one[1]
+
+
+def _walk_layers(filament_map: list[int], layers: int) -> tuple[int, int]:
+    """:func:`_changes_by_kind` for one or two layers, walked change by change."""
+    loaded: dict[int, int] = {}
+    for filament, nozzle in enumerate(filament_map):
+        loaded.setdefault(nozzle, filament)
+    current = 0
+    switches = swaps = 0
+    order = list(range(len(filament_map)))
+    for layer in range(layers):
+        for filament in order if layer % 2 == 0 else order[::-1]:
+            if filament == current:
+                continue
+            nozzle = filament_map[filament]
+            if nozzle != filament_map[current]:
+                switches += 1
+            if loaded[nozzle] != filament:
+                swaps += 1
+                loaded[nozzle] = filament
+            current = filament
+    return switches, swaps
 
 
 def estimate_from_dimensions(
@@ -557,6 +624,8 @@ def estimate_from_dimensions(
     tool_changer_addon: str | None = None,
     electricity_rate: float = 0.12,
     printer_wattage: float = 200.0,
+    filament_map: list[int] | None = None,
+    fitted_positions: list[dict[str, Any]] | None = None,
 ) -> PreEstimate:
     """Estimate print time, cost, and material usage from dimensions alone.
 
@@ -595,12 +664,26 @@ def estimate_from_dimensions(
             See :func:`list_addons` for the full catalog.
         electricity_rate: Cost per kWh in USD (default 0.12).
         printer_wattage: Printer power draw in watts (default 200).
+        filament_map: On a printer with more than one nozzle, the nozzle
+            (1 for the first) each material prints from, in material order.
+            A move between nozzles is charged at the printer record's switch
+            time and a filament swap in one nozzle at its filament-change
+            time, and the result counts each.  Left out on such a printer,
+            every change is charged at the record's tool-change time and the
+            confidence notes say the slice decides the split.
+        fitted_positions: The nozzle positions the printer's owner stated
+            (:func:`kiln.assumed_nozzle.recorded_positions`).  The estimate
+            counts the nozzles a slice for them uses
+            (:func:`kiln.slicer_profiles.nozzle_positions`); ``None`` counts
+            the printer record's own.
 
     Returns:
         :class:`PreEstimate` with full breakdown.
 
     Raises:
-        ValueError: If dimensions are non-positive or fractions invalid.
+        ValueError: If dimensions are non-positive, fractions invalid, or
+            the filament-to-nozzle map does not fit the materials or the
+            printer.
     """
     # --- Validate inputs ---
     if width_mm <= 0 or depth_mm <= 0 or height_mm <= 0:
@@ -613,6 +696,26 @@ def estimate_from_dimensions(
         materials = ["PLA"]
 
     num_materials = len(materials)
+    if layer_height_mm:
+        from kiln.slicer_profiles import _layer_window_mm
+
+        low, high = _layer_window_mm(nozzle_mm)
+        if not low <= layer_height_mm <= high:
+            raise ValueError(
+                f"A {nozzle_mm:g} mm nozzle lays layers from {low:g} to {high:g} mm, so a "
+                f"{layer_height_mm:g} mm layer height cannot be estimated. Give one in that range, "
+                "or leave it out for the printer's own."
+            )
+    timing = None if tool_changer_addon else _nozzle_timing(printer_id, fitted_positions)
+    if filament_map:
+        from kiln.slicer import NozzleMapError, checked_filament_map
+
+        try:
+            filament_map = checked_filament_map(
+                filament_map, filaments=num_materials, positions=timing[2] if timing else 1,
+            )
+        except NozzleMapError as exc:
+            raise ValueError(str(exc)) from exc
 
     # Default fractions: body gets 85%, rest split equally
     if material_fractions is None:
@@ -758,6 +861,8 @@ def estimate_from_dimensions(
     # --- Tool change overhead ---
     tool_changes = 0
     tool_change_time_s = 0
+    nozzle_switches: int | None = None
+    filament_swaps: int | None = None
     tool_change_type = "none"
     addon_id: str | None = None
     addon_display: str | None = None
@@ -796,8 +901,20 @@ def estimate_from_dimensions(
         max_colors = tc_info.get("max_colors")
         warnings.extend(str(warning) for warning in tc_info.get("warnings", []))
 
-        if tc_info["has_auto_tool_change"]:
+        if tc_info["has_auto_tool_change"] and timing and filament_map:
+            nozzle_switches, filament_swaps = _changes_by_kind(filament_map, multicolor_layers)
+            tool_changes = nozzle_switches + filament_swaps
+            tool_change_time_s = round(nozzle_switches * timing[0] + filament_swaps * timing[1])
+        elif tc_info["has_auto_tool_change"]:
             tool_change_time_s = tool_changes * tc_seconds
+            if timing:
+                confidence_notes.append(
+                    "This printer has more than one nozzle: which tool changes move between nozzles "
+                    "and which swap a nozzle's filament is decided when the part is sliced, so every "
+                    "change is counted at the full tool-change time. Give a filament-to-nozzle map, "
+                    "or slice the part, for the time it takes."
+                )
+        if tc_info["has_auto_tool_change"]:
             if tc_info.get("hardware_unverified") and not any(
                 "unverified" in str(w).lower() for w in tc_info.get("warnings", [])
             ):
@@ -889,6 +1006,8 @@ def estimate_from_dimensions(
         confidence=confidence,
         confidence_notes=confidence_notes,
         warnings=warnings,
+        nozzle_switches=nozzle_switches,
+        filament_swaps=filament_swaps,
     )
 
 
@@ -907,6 +1026,8 @@ def estimate_from_template(
     tool_changer_addon: str | None = None,
     electricity_rate: float = 0.12,
     printer_wattage: float = 200.0,
+    filament_map: list[int] | None = None,
+    fitted_positions: list[dict[str, Any]] | None = None,
 ) -> PreEstimate:
     """Estimate from a named design template.
 
@@ -929,6 +1050,9 @@ def estimate_from_template(
         tool_changer_addon: Optional multi-material add-on ID.
         electricity_rate: USD per kWh.
         printer_wattage: Printer watts.
+        filament_map: Filament-to-nozzle map (:func:`estimate_from_dimensions`).
+        fitted_positions: The owner's stated nozzle positions
+            (:func:`estimate_from_dimensions`).
 
     Returns:
         :class:`PreEstimate` with full breakdown.
@@ -950,6 +1074,8 @@ def estimate_from_template(
         tool_changer_addon=tool_changer_addon,
         electricity_rate=electricity_rate,
         printer_wattage=printer_wattage,
+        filament_map=filament_map,
+        fitted_positions=fitted_positions,
     )
 
 

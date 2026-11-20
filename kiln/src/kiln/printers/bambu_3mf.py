@@ -29,7 +29,9 @@ from kiln.gcode import (
     slicer_filament_types,
     slicer_nozzle_diameters,
     slicer_print_time,
+    states_several_nozzles,
 )
+from kiln.slicer import SlicerError
 from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
@@ -499,6 +501,13 @@ def bambu_filament_type(word: str | None) -> str:
         return _FALLBACK_FILAMENT_TYPE
     if text in BAMBU_FILAMENT_TYPES:
         return text
+    # A fibre-filled filament named in words keeps its fill when Bambu has a
+    # type for it ("Carbon Fiber Nylon" is PA-CF, "Nylon CF" too).
+    fill = "CF" if re.search(r"\bCARBON\b|\bCF\b", text) else "GF" if re.search(r"\bGLASS\b|\bGF\b", text) else ""
+    if fill:
+        for token in re.findall(r"[A-Z0-9]+", text.replace("NYLON", "PA")):
+            if f"{token}-{fill}" in BAMBU_FILAMENT_TYPES:
+                return f"{token}-{fill}"
     try:
         from kiln.slicer_filament import material_density
 
@@ -1316,13 +1325,27 @@ def _find_max_z(gcode_body: str) -> float:
     return max(float(z) for z in z_heights) if z_heights else 10.0
 
 
+#: The firmware's layer notice, as a slicer writes it from a printer's own
+#: per-layer routine: ``M991 S0 P<n>``, the layer counted from 0.
+_LAYER_NOTICE = re.compile(r"^M991 S0 P\d+\b")
+#: The layer the printer's screen shows: ``M73 L<n>``, counted from 1.
+_SCREEN_LAYER = re.compile(r"^M73 L\d+\b")
+
+
 def _postprocess_prusa_body(
     gcode_body: str,
     *,
     total_layers: int,
     est_time_sec: int,
 ) -> str:
-    """Post-process PrusaSlicer gcode body for Bambu firmware compatibility."""
+    """Post-process a sliced gcode body for Bambu firmware compatibility.
+
+    Every layer tells the printer which layer it is: the layer its screen
+    shows (``M73 L``, counted from 1) and the firmware's layer notice
+    (``M991 S0 P``, counted from 0).  A body whose slicer wrote them from
+    the printer's own routine keeps its lines and gets none of these.  The
+    progress lines (``M73 P R``) are Kiln's, at every layer.
+    """
     body_lines = gcode_body.split("\n")
 
     _skip_prefixes = (
@@ -1347,6 +1370,7 @@ def _postprocess_prusa_body(
         else:
             cleaned.append(line)
 
+    own_notice = any(_LAYER_NOTICE.match(line.strip()) for line in cleaned)
     layer_num = 0
     processed: list[str] = []
     for line in cleaned:
@@ -1354,12 +1378,13 @@ def _postprocess_prusa_body(
         if LAYER_CHANGE_LINE.match(stripped):
             layer_num += 1
             processed.append(line)
-            processed.append(
-                f"; layer num/total_layer_count: {layer_num}/{total_layers}"
-            )
-            processed.append("; update layer progress")
-            processed.append(f"M73 L{layer_num}")
-            processed.append("M991 S0 P0 ;notify layer change")
+            if not own_notice:
+                processed.append(
+                    f"; layer num/total_layer_count: {layer_num}/{total_layers}"
+                )
+                processed.append("; update layer progress")
+                processed.append(f"M73 L{layer_num}")
+                processed.append(f"M991 S0 P{layer_num - 1} ;notify layer change")
             pct = min(int(layer_num * 100 / total_layers), 99)
             remaining_sec = max(
                 60, int((total_layers - layer_num) * est_time_sec / total_layers)
@@ -1368,6 +1393,8 @@ def _postprocess_prusa_body(
             processed.append(f"M73 P{pct} R{remaining_min}")
             continue
         if stripped.startswith("M73 ") or stripped == "M73":
+            if own_notice and _SCREEN_LAYER.match(stripped):
+                processed.append(line)
             continue
         processed.append(line)
 
@@ -2181,7 +2208,16 @@ def build_bambu_3mf(
     quiet_start: dict[str, Any] | None = None,
     lift_floor_mm: float | None = None,
 ) -> Bambu3MFResult:
-    """Build a Bambu-compatible 3MF from PrusaSlicer gcode body."""
+    """Build a Bambu-compatible 3MF from PrusaSlicer gcode body.
+
+    Raises :class:`MultiNozzlePackageError` for a body that puts a filament
+    on a nozzle beyond the first (:func:`multi_nozzle_print_package`).
+    """
+    if states_several_nozzles(gcode_body):
+        raise MultiNozzlePackageError(
+            f"{MULTI_NOZZLE_NOT_PACKAGED}: Kiln packages a file sliced for one nozzle only; send the "
+            "print package made with the slice."
+        )
     if settings is None:
         settings = BambuPrintSettings()
     if quiet_start is not None:
@@ -2481,6 +2517,167 @@ def build_bambu_3mf(
         levelling_source=levelling_source,
         bed_type=str(settings.bed_type).strip().lower(),
     )
+
+
+# ---------------------------------------------------------------------------
+# A slice for more than one nozzle travels in the slicer's own print package
+# ---------------------------------------------------------------------------
+
+
+class MultiNozzlePackageError(SlicerError, ValueError):
+    """A file sliced for more than one nozzle that Kiln will not send to a
+    Bambu printer: Kiln packages only a file sliced for one nozzle, and the
+    print package the slicer made with this one is missing or is not one the
+    printer can start.  ``code`` is the door's error code."""
+
+    code = "MULTI_NOZZLE_NOT_PACKAGED"
+
+
+#: How every :class:`MultiNozzlePackageError` begins.
+MULTI_NOZZLE_NOT_PACKAGED = (
+    "This file was sliced for more than one nozzle and Kiln has not packaged it for the printer, "
+    "so it is not ready to upload or start"
+)
+
+_PLATE_GCODE = "Metadata/plate_1.gcode"
+_PLATE_GCODE_MD5 = "Metadata/plate_1.gcode.md5"
+_FILAMENT_CHANGE_LINE = re.compile(r"^T(\d+)(?:\s|$)")
+_CHANGE_ROUTINE_OPENS = re.compile(r"^M620 S\d")
+_CHANGE_ROUTINE_CLOSES = re.compile(r"^M621 S\d")
+
+
+def print_package_path_for(gcode_path: str | os.PathLike[str]) -> str:
+    """Where the print package made with the slice at *gcode_path* is kept:
+    beside it, as ``<name>.gcode.3mf``."""
+    return str(gcode_path).rsplit(".", 1)[0] + ".gcode.3mf"
+
+
+def _package_plate(package_path: str) -> tuple[bytes | None, str | None]:
+    """The plate G-code a package holds and the checksum it states for it;
+    ``None`` for what it does not hold or cannot be read."""
+    try:
+        with UntrustedZipFile(package_path) as zf:
+            names = set(zf.namelist())
+            plate = zf.read(_PLATE_GCODE) if _PLATE_GCODE in names else None
+            digest = (
+                zf.read(_PLATE_GCODE_MD5).decode("ascii", errors="replace").strip()
+                if _PLATE_GCODE_MD5 in names else None
+            )
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return None, None
+    return plate, digest
+
+
+def keep_slicer_package(made_path: str, gcode_path: str) -> str:
+    """Keep the slicer's package *made_path* at :func:`print_package_path_for`
+    with the file at *gcode_path* as its plate and a matching checksum; every
+    other entry as the slicer wrote it.  Returns where it was kept.
+
+    Raises :class:`MultiNozzlePackageError` when it holds no sliced plate.
+    """
+    gcode = Path(gcode_path).read_bytes()
+    plate, stated = _package_plate(made_path)
+    if plate is None:
+        raise MultiNozzlePackageError(f"{MULTI_NOZZLE_NOT_PACKAGED}: the slicer's package holds no sliced plate.")
+    digest = hashlib.md5(gcode).hexdigest()  # noqa: S324 -- the printer's own checksum
+    if stated and stated.isupper():
+        digest = digest.upper()
+    kept = print_package_path_for(gcode_path)
+    tmp = kept + ".keeping"
+    with UntrustedZipFile(made_path) as src, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            if item.filename == _PLATE_GCODE:
+                dst.writestr(item, gcode)
+            elif item.filename == _PLATE_GCODE_MD5:
+                dst.writestr(item, digest)
+            else:
+                dst.writestr(item, src.read(item.filename))
+    os.replace(tmp, kept)
+    return kept
+
+
+def _changes_outside_routine(gcode: str) -> bool:
+    """Whether *gcode* changes filament anywhere outside the printer's
+    filament-change routine."""
+    inside = False
+    for raw in gcode.splitlines():
+        code = raw.split(";", 1)[0].strip()
+        if _CHANGE_ROUTINE_OPENS.match(code):
+            inside = True
+        elif _CHANGE_ROUTINE_CLOSES.match(code):
+            inside = False
+        else:
+            found = _FILAMENT_CHANGE_LINE.match(code)
+            if found and int(found.group(1)) < FIRST_PSEUDO_TOOL and not inside:
+                return True
+    return False
+
+
+def print_package_problems(package_path: str, gcode_path: str) -> list[str]:
+    """Why the package at *package_path* must not go to the printer as the
+    print of the file at *gcode_path*; empty when it may.  It must hold that
+    file byte for byte with a matching checksum, home before its first print
+    move, and change filament only inside the filament-change routine.
+    """
+    plate, stated = _package_plate(package_path)
+    if plate is None:
+        return ["the slicer's package holds no sliced plate"]
+    try:
+        gcode = Path(gcode_path).read_bytes()
+    except OSError:
+        return ["the sliced file it was made with cannot be read"]
+    if plate != gcode:
+        return ["the slicer's package holds a different slice from this file"]
+    problems: list[str] = []
+    if (stated or "").lower() != hashlib.md5(plate).hexdigest():  # noqa: S324
+        problems.append("the package's checksum does not match its plate")
+    from kiln.printers.bed_fit import check_gcode_has_homing
+
+    homing = check_gcode_has_homing(package_path, source="3mf")
+    if not homing.get("ok") or homing.get("error_code") == "UNKNOWN_FILE":
+        problems.append("the slicer's file would start printing without homing the printer first")
+    if _changes_outside_routine(plate.decode("utf-8", errors="replace")):
+        problems.append("the slicer's file changes filament outside the printer's filament-change routine")
+    return problems
+
+
+def multi_nozzle_print_package(
+    gcode_path: str,
+    *,
+    quiet_start: dict[str, Any] | None = None,
+    lift_floor_mm: float | None = None,
+    resume_mode: bool = False,
+) -> str | None:
+    """The package to send for a file sliced for more than one nozzle
+    (:func:`keep_slicer_package`); ``None`` for one sliced for one nozzle.
+
+    Raises :class:`MultiNozzlePackageError` when a start of Kiln's own is
+    asked for, no package was made with the file, or it has a problem.
+    """
+    from kiln.gcode import file_states_several_nozzles
+
+    package = print_package_path_for(gcode_path)
+    several = file_states_several_nozzles(gcode_path)
+    if not several and not os.path.isfile(package):
+        return None
+    gcode = Path(gcode_path).read_bytes()
+    made_with_it = os.path.isfile(package) and _package_plate(package)[0] == gcode
+    if not (made_with_it or several):
+        return None
+    if quiet_start is not None or lift_floor_mm is not None or resume_mode:
+        raise MultiNozzlePackageError(
+            f"{MULTI_NOZZLE_NOT_PACKAGED}: it starts the way the slicer wrote it, and this print "
+            "needs a start of Kiln's own (a part already on the plate, or a resume)."
+        )
+    if not made_with_it:
+        raise MultiNozzlePackageError(
+            f"{MULTI_NOZZLE_NOT_PACKAGED}: no print package was made with this slice. Slice it again "
+            "with Bambu Studio and send the package the slice makes."
+        )
+    problems = print_package_problems(package, gcode_path)
+    if problems:
+        raise MultiNozzlePackageError(f"{MULTI_NOZZLE_NOT_PACKAGED}: {problems[0]}.")
+    return package
 
 
 def repackage_gcode_as_bambu_3mf(

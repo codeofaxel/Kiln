@@ -382,6 +382,18 @@ def _cli_print_gate(
     return gate.path
 
 
+def _said_at_the_terminal(exc: Exception) -> str:
+    """A slicing refusal with its asks spelled as this terminal's flags
+    (:func:`kiln.slicer.said_for`)."""
+    from kiln.slicer import said_for
+
+    return said_for(
+        str(exc), confirm="run it again with --soft-nozzle-confirmed",
+        map_with="run it again with a --filament-map that puts",
+        experiment="run it again with --mixed-nozzle-experiment",
+    )
+
+
 def _cli_placed_slice(
     ctx: click.Context,
     input_file: str,
@@ -825,13 +837,18 @@ def cli_gate(
     refusal = block.get("error") if isinstance(block.get("error"), dict) else {}
     code = str(refusal.get("code") or CODE_NOT_CONFIRMED)
     message = str(refusal.get("message") or block)
-    if code in (CODE_NOT_CONFIRMED, "ALWAYS_ALLOW_LOOK_FIRST"):
+    from kiln.experimental_print import NEEDS_A_YES_CODES
+
+    if code in (CODE_NOT_CONFIRMED, "ALWAYS_ALLOW_LOOK_FIRST", *NEEDS_A_YES_CODES):
         # A person typing at their own terminal can be shown the print
         # (or, with a token, reminded what is on record) and asked.
         # Nobody at the terminal gets the refusal below.  See
         # kiln.cli.print_gate.  The same when always allow is on and the
         # bed has not been looked at: the person starting this print is
-        # here to ask, which is better than a frame for them to judge.
+        # here to ask, which is better than a frame for them to judge.  And
+        # an experimental print, or one the owner said to print anyway,
+        # which a window never starts: the person typing the command is
+        # here to say yes to this one.
         from kiln.cli.print_gate import confirm_print_at_terminal
 
         if confirm_print_at_terminal(
@@ -2463,6 +2480,11 @@ def auth(
             data["diagnostics"] = creality_diagnostics
         if camera_handshake is not None:
             data["camera_check"] = {**camera_handshake.to_dict(), "line": camera_line}
+        from kiln.maker_slicer_notes import setup_line as _nozzles_setup_line
+
+        nozzles_line = _nozzles_setup_line(printer_model or (prusa_diagnostics or {}).get("profile_id"))
+        if nozzles_line:
+            data["two_nozzles"] = nozzles_line
 
         if printer_type == "prusalink" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
             checks = prusa_diagnostics.get("checks", [])
@@ -2517,6 +2539,8 @@ def auth(
         click.echo(format_response("success", data=data, json_mode=json_mode))
         if not json_mode and camera_line:
             click.echo(camera_line)
+        if not json_mode and nozzles_line:
+            click.echo(nozzles_line)
         if not json_mode and prusa_diagnostics is not None:
             profile_id = prusa_diagnostics.get("profile_id")
             file_count = prusa_diagnostics.get("file_count")
@@ -5030,6 +5054,27 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
         "Such a project with no plate named is refused, and the refusal lists its plates."
     ),
 )
+@click.option(
+    "--mixed-nozzle-experiment", "mixed_nozzle_experiment", is_flag=True,
+    help=(
+        "The person says yes, for this print, to slicing for nozzles of different sizes at once, "
+        "an experiment and a slice otherwise refused. Only on their yes, each time."
+    ),
+)
+@click.option(
+    "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
+    help=(
+        "The owner says to print anyway an abrasive filament through a nozzle on record "
+        "that is not wear-resistant, a slice otherwise refused. Only on their word."
+    ),
+)
+@click.option(
+    "--filament-map", "filament_map", default=None,
+    help=(
+        "For a printer with more than one nozzle: the nozzle (1 for the first) each filament "
+        "prints from, comma-separated in filament order (e.g. '2,1')."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def slice(
@@ -5052,6 +5097,9 @@ def slice(
     ams_mapping: str | None,
     placement: str | None,
     plate_number: int | None,
+    soft_nozzle_confirmed: bool,
+    mixed_nozzle_experiment: bool,
+    filament_map: str | None,
     json_mode: bool,
 ) -> None:
     """Slice a 3D model (STL/3MF/STEP) to G-code.
@@ -5107,7 +5155,7 @@ def slice(
         )
     else:
         window = None
-    from kiln.slicer import SlicerError, SlicerNotFoundError
+    from kiln.slicer import SlicerError, SlicerNotFoundError, owner_asks
 
     try:
         plan = _resolve_slice_plan(
@@ -5167,6 +5215,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, input_file, plan=plan, placement=placement, json_mode=json_mode,
                 slicer=lambda path, **kw: slice_multicolor_copies(path, copies, spacing_mm=spacing, **kw),
+                **owner_asks(soft_nozzle_confirmed),
                 slicer_path=slicer,
                 extra_args=extra_args or None,
                 output_dir=output_dir,
@@ -5207,6 +5256,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
                 **fill_kwargs,
+                **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,
@@ -5336,6 +5386,10 @@ def slice(
                 if not json_mode:
                     click.echo(f"Bambu 3MF: {upload_path}")
             except Exception as exc:
+                if getattr(exc, "code", None) == "MULTI_NOZZLE_NOT_PACKAGED":
+                    # Sliced for more than one nozzle: no raw form of it starts.
+                    click.echo(format_error(str(exc), code=exc.code, json_mode=json_mode))
+                    sys.exit(1)
                 if wrap_kwargs.get("quiet_start") is not None or wrap_kwargs.get("lift_floor_mm") is not None:
                     # A raw file would carry no plan and no floor onto the
                     # occupied plate.  Why there was no plan is the verdict's
@@ -5432,7 +5486,7 @@ def slice(
         click.echo(format_error(str(exc), code="SLICER_NOT_FOUND", json_mode=json_mode))
         sys.exit(1)
     except SlicerError as exc:
-        click.echo(format_error(str(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
+        click.echo(format_error(_said_at_the_terminal(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
         sys.exit(1)
     except click.ClickException:
         raise
@@ -9944,6 +9998,11 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         click.echo(f"  Saved printer '{name}' to {saved.path}")
         if saved.notice:
             click.echo(click.style(f"  {saved.notice}", fg="yellow"))
+        from kiln.maker_slicer_notes import setup_line as _nozzles_setup_line
+
+        nozzles_line = _nozzles_setup_line(printer_model)
+        if nozzles_line:
+            click.echo(f"  {nozzles_line}")
     except OSError as exc:
         click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
         sys.exit(1)
@@ -10919,6 +10978,27 @@ def generate_download(
         "a region such as front-left or centre, or 'keep'. Omitted, an occupied plate refuses."
     ),
 )
+@click.option(
+    "--mixed-nozzle-experiment", "mixed_nozzle_experiment", is_flag=True,
+    help=(
+        "The person says yes, for this print, to slicing for nozzles of different sizes at once, "
+        "an experiment and a slice otherwise refused. Only on their yes, each time."
+    ),
+)
+@click.option(
+    "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
+    help=(
+        "The owner says to print anyway an abrasive filament through a nozzle on record "
+        "that is not wear-resistant, a slice otherwise refused. Only on their word."
+    ),
+)
+@click.option(
+    "--filament-map", "filament_map", default=None,
+    help=(
+        "For a printer with more than one nozzle: the nozzle (1 for the first) each filament "
+        "prints from, comma-separated in filament order (e.g. '2,1')."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def generate_and_print_cmd(
@@ -10934,6 +11014,9 @@ def generate_and_print_cmd(
     auto_print: bool,
     preview_enabled: bool,
     placement: str | None,
+    soft_nozzle_confirmed: bool,
+    mixed_nozzle_experiment: bool,
+    filament_map: str | None,
     json_mode: bool,
 ) -> None:
     """Generate a 3D model from text or image, slice it, and upload to the printer.
@@ -11044,8 +11127,11 @@ def generate_and_print_cmd(
             click.echo("Slicing...")
         # The plate may still hold the last print: same shared step as
         # kiln slice (plate gate, slice, second verdict).
+        from kiln.slicer import owner_asks
+
         slice_result, _placement_info = _cli_placed_slice(
             ctx, model_path, plan=plan, placement=placement, json_mode=json_mode,
+            **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
             extra_args=plan["extra_args"] or None,
             material=plan.get("declared_material"),
             loaded_material=plan.get("loaded_material"),
@@ -11154,7 +11240,7 @@ def generate_and_print_cmd(
         click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
         sys.exit(1)
     except (SlicerNotFoundError, SlicerError) as exc:
-        click.echo(format_error(str(exc), code="SLICER_ERROR", json_mode=json_mode))
+        click.echo(format_error(_said_at_the_terminal(exc), code="SLICER_ERROR", json_mode=json_mode))
         sys.exit(1)
     except PrinterError as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
@@ -12401,6 +12487,20 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                 checks.append({"name": "printer_name", "ok": True, "warn": True, "detail": note["sentence"]})
     except Exception as exc:  # noqa: BLE001 -- a name is never worth failing a checkup
         logger.debug("printer name check skipped: %s", exc)
+
+    # 5c. A printer sliced for more than one nozzle: is its maker's slicer
+    #     here, new enough to use them all?  Said every run, reachable or not.
+    if printer_cfg and printer_cfg.get("printer_model"):
+        try:
+            from kiln._pro_nozzle_bridge import consult_recorded_nozzle
+            from kiln.maker_slicer_notes import doctor_row
+
+            _fitted = consult_recorded_nozzle(str(name_label)).get("positions")
+            _nozzles_row = doctor_row(printer_cfg.get("printer_model"), positions=_fitted)
+            if _nozzles_row is not None:
+                checks.append(_nozzles_row)
+        except Exception as exc:  # noqa: BLE001 -- a row is never worth failing a checkup
+            logger.debug("nozzle slicer check skipped: %s", exc)
 
     # 6. Printer reachable (use adapter with auth, not raw HTTP)
     verify_adapter = None

@@ -14,6 +14,10 @@ written from a reading Kiln can vouch for and left empty otherwise:
 * ``firmware_version``: the version the printer reports for itself
   (:func:`note_start_firmware`).
 
+A fifth is written only for a sent file that is an experiment
+(:mod:`kiln.experimental_print`): ``experiment``, the word for which one
+(:func:`note_start_experiment`).
+
 Nothing here changes a verdict or a count, and nothing here raises into a
 print.  On Kiln's servers no print is the caller's, and nothing is written.
 """
@@ -31,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "note_progress_at_end",
+    "note_start_experiment",
     "note_start_firmware",
     "note_start_settings",
     "note_start_spool",
@@ -184,6 +189,22 @@ def note_start_settings(job_id: str | None, lines: Iterable[str] | None) -> None
             _db().set_outcome_evidence(job_id, "settings_code", code)
     except Exception:  # noqa: BLE001 -- bookkeeping never affects a print
         logger.debug("settings code not written for %s", job_id, exc_info=True)
+
+
+def note_start_experiment(job_id: str | None, lines: Iterable[str] | None) -> None:
+    """Write, onto the row a start opened, the word for a sent file that is
+    an experiment (:func:`kiln.experimental_print.recorded_word`); nothing
+    for any other file.  Never raises."""
+    if not job_id or _hosted():
+        return
+    try:
+        from kiln.experimental_print import recorded_word
+
+        word = recorded_word(lines)
+        if word:
+            _db().set_outcome_evidence(job_id, "experiment", word)
+    except Exception:  # noqa: BLE001 -- bookkeeping never affects a print
+        logger.debug("experiment not written for %s", job_id, exc_info=True)
 
 
 def note_start_firmware(job_id: str | None, adapter: Any) -> None:

@@ -757,6 +757,9 @@ class _GenerationAIToolsPlugin:
             material: str | None = None,
             placement: str | list[float] | None = None,
             goal_id: str = "",
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
@@ -770,6 +773,19 @@ class _GenerationAIToolsPlugin:
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
@@ -971,6 +987,7 @@ class _GenerationAIToolsPlugin:
                     _loaded_material_for,
                     _placed_slice,
                 )
+                from kiln.slicer import owner_asks
 
                 # The plate may still hold the last print: the shared step
                 # slice_model takes (plate gate, slicer, a skirt or brim past
@@ -981,6 +998,7 @@ class _GenerationAIToolsPlugin:
                     profile_path=effective_profile,
                     material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
+                    **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -1003,9 +1021,10 @@ class _GenerationAIToolsPlugin:
                         quiet_start=quiet_plan, lift_floor_mm=sinfo["lift_floor_mm"],
                     )
                 except ValueError as exc:
-                    # No printer file for an occupied plate without the plan;
-                    # the slice and its verdict ride the refusal.
-                    block = _srv._error_dict(str(exc), code="PLACEMENT_START_NOT_YET")
+                    # No printer file for an occupied plate without the plan,
+                    # or for a slice made for more than one nozzle without
+                    # its package; the slice and its verdict ride the refusal.
+                    block = _srv._error_dict(str(exc), code=getattr(exc, "code", None) or "PLACEMENT_START_NOT_YET")
                     block["slice"] = slice_result.to_dict()
                     _attach_placement(block, place_info)
                     return block

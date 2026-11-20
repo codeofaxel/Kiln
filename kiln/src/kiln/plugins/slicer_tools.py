@@ -308,6 +308,7 @@ def _apply_bed_fit_gate(
     effective_printer_id: str | None,
     auto_center: bool,
     material_id: str | None = None,
+    bed: Any | None = None,
 ) -> tuple[str, dict | None, dict]:
     """Pre-slice safety gate: verify the mesh fits within the printer's
     build volume and hasn't been placed off-bed (origin-centered
@@ -349,7 +350,7 @@ def _apply_bed_fit_gate(
         # rewriter, so those are measured and never fixed.  A STEP the
         # slicer places itself, with one exception -- a part that fits only
         # lying on another face is turned as Kiln's mesh of it.
-        fit = validate_mesh_for_printer(input_path, effective_printer_id)
+        fit = validate_mesh_for_printer(input_path, effective_printer_id, bed=bed)
         fit["approval_carries"] = True  # nothing below moves the mesh but the turn
         if fit.get("fits_on_another_face") and auto_center:
             laid = _lay_step_down_to_fit(input_path, effective_printer_id, fit.get("bbox"))
@@ -1977,9 +1978,17 @@ def _placed_slice(
         # spool.  Every door passes it, or a door slices a material its
         # printer cannot melt and says nothing.
         material_id = material_id or slice_kwargs.get("material") or slice_kwargs.get("loaded_material")
+        # A plate for more than one nozzle is held to the bed they print on.
+        from kiln.printers.bed_fit import two_nozzle_bed
+        from kiln.slicer import nozzle_bed_for_slice
+
+        wider = (
+            two_nozzle_bed(effective_printer_id)
+            if nozzle_bed_for_slice(placed, profile_path, slice_kwargs.get("filament_map")) else None
+        )
         effective_input, gate_err, bed_fit = _apply_bed_fit_gate(
             placed, effective_printer_id, auto_center and place_info.get("plate") != "occupied",
-            material_id=material_id,
+            material_id=material_id, bed=wider,
         )
         info["bed_fit"] = bed_fit
         if gate_err is not None:
@@ -2171,9 +2180,10 @@ def _keep_the_print_on_the_bed(
     prints past the edge (the bed-fit block's note says so) pass through
     untouched.
     """
-    from kiln.printers.bed_fit import _FIT_EPSILON_MM, print_past_the_bed, printer_bed_volume
+    from kiln.printers.bed_fit import _FIT_EPSILON_MM, print_past_the_bed, sliced_file_bed
 
-    volume = printer_bed_volume(printer_id) if printer_id else None
+    bed = sliced_file_bed(getattr(result, "output_path", None), printer_id) if printer_id else None
+    volume = bed.volume if bed is not None else None
     edge = print_past_the_bed(getattr(result, "output_path", None), volume)
     if edge and edge["on_bed"]:
         return result, _brim_without_room(result, volume, _brim_and_skirts(profile_path)[0]), None
@@ -2266,7 +2276,6 @@ def _answer_a_refusal_at_the_edge(
     way, with no second slice.  Returns what :func:`_keep_the_print_on_the_bed`
     returns.
     """
-    from kiln.printers.bed_fit import printer_bed_volume
     from kiln.slicer import REFUSED_OFF_THE_BED, SlicerRefusal
     from kiln.slicer_profiles import profile_with_overrides
 
@@ -2279,7 +2288,10 @@ def _answer_a_refusal_at_the_edge(
         if still.kind != REFUSED_OFF_THE_BED:
             raise
         return None, _refused_off_the_bed(still, brim, resliced=True), None
-    volume = printer_bed_volume(printer_id) if printer_id else None
+    from kiln.printers.bed_fit import sliced_file_bed
+
+    bed = sliced_file_bed(getattr(again, "output_path", None), printer_id) if printer_id else None
+    volume = bed.volume if bed is not None else None
     return _judge_the_slice_without_its_skirt(again, volume, brim, past_mm=None)
 
 
@@ -2396,6 +2408,7 @@ def _auto_wrap_bambu_3mf(
     *,
     quiet_start: dict[str, Any] | None = None,
     lift_floor_mm: float | None = None,
+    several_nozzles: bool = False,
 ) -> tuple[str | None, str | None]:
     """If the effective printer is a Bambu Lab, repackage the sliced
     G-code into a 3MF so it can actually start (Bambu firmware ignores
@@ -2411,8 +2424,13 @@ def _auto_wrap_bambu_3mf(
     Returns ``(threemf_path, warning)``.  When no wrap happens, both
     are ``None``.  Failure is non-fatal — the original gcode_path is
     still usable for non-Bambu printers or manual wrapping.
+
+    A slice made for more than one nozzle (*several_nozzles*, or a file
+    that says so) is never wrapped here: the print package the slicer made
+    with it is returned, or ``(None, why it cannot go to the printer)``.
     """
-    if not effective_printer_id or not effective_printer_id.startswith("bambu"):
+    is_bambu = bool(effective_printer_id) and effective_printer_id.startswith("bambu")
+    if not (is_bambu or several_nozzles):
         return (None, None)
     try:
         # CRITICAL: use build_bambu_3mf (adds BambuStudio start-gcode —
@@ -2427,9 +2445,28 @@ def _auto_wrap_bambu_3mf(
 
         from kiln.printers.bambu_3mf import (
             BambuPrintSettings,
+            MultiNozzlePackageError,
             build_bambu_3mf,
+            multi_nozzle_print_package,
             thumbnail_inputs_for_model,
         )
+
+        # A file sliced for more than one nozzle travels in the package the
+        # slicer made with it, or not at all.
+        try:
+            package = multi_nozzle_print_package(gcode_path, quiet_start=quiet_start, lift_floor_mm=lift_floor_mm)
+        except MultiNozzlePackageError as exc:
+            return (None, str(exc))
+        if package is not None:
+            try:
+                from kiln.monitor_twin import note_wrapped
+
+                note_wrapped(gcode_path, package)
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
+                _logger.debug("monitor-twin wrap note failed", exc_info=True)
+            return (package, None)
+        if not is_bambu:
+            return (None, None)
 
         stem = gcode_path.rsplit(".", 1)[0]
         if quiet_start is not None and not stem.endswith("_quiet"):
@@ -2834,13 +2871,6 @@ def _maybe_overlay_calibration(
 # kind reads as "not multicolor".
 # ---------------------------------------------------------------------------
 
-# A tool-select command at line start in G-code (``T0``, ``T1`` ...).
-# Word boundary so ``T1`` matches but a hypothetical ``T1x`` doesn't;
-# mid-line forms like ``M104 T0 S200`` are heater targeting, not tool
-# changes, and correctly don't match.
-_GCODE_TOOL_RE = re.compile(r"T(\d+)\b")
-
-
 def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
     """Does this 3MF ask for more than one filament?
 
@@ -2871,31 +2901,19 @@ def _profile_filament_slots(profile_path: str | None) -> int:
 
 
 def _count_gcode_tools(gcode_path: str | None) -> tuple[int, int] | None:
-    """``(tool_changes, distinct_tools)`` from one pass over the G-code.
-
-    Counts line-start ``T<n>`` commands — the form PrusaSlicer emits at
-    every filament change.  A tool CHANGE is a T command selecting a
-    different tool than the active one (the first selection arms, it
-    doesn't change).  Returns ``None`` when the file can't be read, so
-    the caller treats "couldn't measure" as no evidence either way.
+    """``(tool_changes, distinct_tools)`` from one pass over the G-code, by
+    the one rule every reply that counts them uses
+    (:func:`kiln.gcode.tool_changes`).  Returns ``None`` when the file
+    can't be read, so the caller treats "couldn't measure" as no evidence
+    either way.
     """
     if not gcode_path:
         return None
+    from kiln.gcode import tool_changes
+
     try:
-        tools: set[int] = set()
-        changes = 0
-        active: int | None = None
         with open(gcode_path, errors="replace", encoding="utf-8") as fh:
-            for line in fh:
-                m = _GCODE_TOOL_RE.match(line)
-                if not m:
-                    continue
-                n = int(m.group(1))
-                tools.add(n)
-                if active is not None and n != active:
-                    changes += 1
-                active = n
-        return changes, len(tools)
+            return tool_changes(fh)
     except OSError:
         return None
 
@@ -2942,9 +2960,11 @@ def _multicolor_flatten_advisory(
                 int(evidence.get("palette_colors") or 0),
             )
         )
+        from kiln.slicer import colours_expressed
+
         slots = _profile_filament_slots(profile_path)
         counted = _count_gcode_tools(gcode_path)
-        expressed = max(slots, counted[1] if counted is not None else 0)
+        expressed = colours_expressed(profile_path, counted)
         if expressed >= colors_needed:
             return None, None
 
@@ -3019,6 +3039,7 @@ class _SlicerToolsPlugin:
         """Register slicer tools with the MCP server."""
 
         import kiln.server as _srv
+        from kiln.slicer import owner_asks as _owner_asks
 
         # ------------------------------------------------------------------
         # slice_model
@@ -3036,10 +3057,79 @@ class _SlicerToolsPlugin:
             material: str | None = None,
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
+            filament_map: list[int] | None = None,
+            time_limit_seconds: int | None = None,
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
             Args:
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.  The response's ``soft_nozzle`` says which
+                    filament goes through which nozzle on their say-so.
+                mixed_nozzle_experiment: Only for a print that would use
+                    nozzles of different sizes at once (say a 0.4 mm and a
+                    0.6 mm nozzle on a two-nozzle printer).  That is an
+                    experiment Kiln has not proven on a printer, so the
+                    slice is refused with ``MULTI_NOZZLE_MIXED_SIZES``
+                    until the person says yes to trying it for THIS print:
+                    ask them, and pass ``true`` only on their yes, each
+                    time.  The slice then needs settings from Kiln's
+                    servers for those sizes (free, signed in); when they
+                    cannot be had it is refused with
+                    ``MULTI_NOZZLE_MIXED_SIZES_UNAVAILABLE`` and ``why``
+                    (``offline``, ``signed_out``, ``unanswered`` or
+                    ``refused``), and nothing is sliced.  A slice made this
+                    way carries an ``experimental`` block: show its
+                    ``note`` to the person as written, and when the print
+                    ends ask them how it came out.  Leave unset for any
+                    other slice.
+                time_limit_seconds: How long the slicer may run, in whole
+                    seconds, up to Kiln's own limit (``SLICE_TIME_LIMIT_S``);
+                    a longer one is refused.  Leave unset for Kiln's own limit.  A slicer
+                    still running at the limit is stopped and the slice is
+                    refused (``SLICE_TOOK_TOO_LONG``); nothing is sliced.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order (``[2, 1]``
+                    puts filament 1 on nozzle 2).  Leave unset to let the
+                    slicer map the filaments itself.  A map that does not
+                    fit the print or the printer is refused before slicing
+                    (``NOZZLE_MAP_WRONG_LENGTH``, ``NO_SUCH_NOZZLE``,
+                    ``NOZZLE_MAP_NOT_USED``); a filament put on a nozzle
+                    that cannot reach its part is refused with
+                    ``NOZZLE_CANNOT_REACH``.  When the slicer the printer's
+                    maker publishes is missing or too old on this computer,
+                    the print is sliced for one nozzle with filament swaps
+                    and the result's ``one_nozzle`` says so: the swaps read
+                    from the sliced file, and, the first time on a printer
+                    or for a print of many swaps, ``maker_slicer`` with the
+                    page to get it and, on a Mac with Homebrew, the command.
+                    Kiln installs nothing: offer that command and run it only
+                    when the person says yes.  A map cannot be kept on one
+                    nozzle, so with a map, when a slicer other than the
+                    installed maker's one is named, or when the maker's slicer
+                    holds no settings for this printer, the slice is refused
+                    with ``MULTI_NOZZLE_NEEDS_MAKER_SLICER``; on a printer that
+                    prints each filament from the nozzle of its own number,
+                    a different map with ``NOZZLE_MAP_FIXED`` and more
+                    filaments than nozzles fitted with
+                    ``MORE_FILAMENTS_THAN_NOZZLES``.  The result's
+                    ``sliced_with`` names the slicer and version used.  The nozzles a
+                    slice uses are the ones the owner recorded as fitted
+                    (``set_nozzle_state``), when they did.  Before slicing,
+                    nozzles of different sizes are refused with
+                    ``MULTI_NOZZLE_MIXED_SIZES`` (see
+                    ``mixed_nozzle_experiment``); on any slice, an
+                    abrasive filament that could print through a nozzle on
+                    record that is not wear-resistant is refused with
+                    ``ABRASIVE_ON_SOFT_NOZZLE``.  The response's
+                    ``filament_map`` block says which nozzle printed each
+                    filament.
                 plate_number: Which plate to slice of a slicer project that
                     holds several plates (1 for the first).  Leave unset for
                     any other file.  A several-plate project with none named
@@ -3052,7 +3142,13 @@ class _SlicerToolsPlugin:
                 printer_id: Optional printer model ID for bundled profile
                     auto-selection (e.g. ``"prusa_mini"``).
                 slicer_path: Explicit path to the slicer binary.  Auto-detected
-                    if omitted.
+                    if omitted.  A print for a printer whose maker's slicer
+                    runs its own routines within a print carries them only
+                    when that slicer makes it; made by another, the result's
+                    ``time_lapse`` says the file has no time-lapse step, and
+                    the first time on a printer ``time_lapse.maker_slicer``
+                    says what adds one: install or update it, or, with
+                    ``need: "use"``, slice with it at ``path``.
                 material: Filament material for this slice (``"PLA"``,
                     ``"PETG"``, ``"TPU"``, …, or a product such as
                     ``"bambu_tpu_95a"``).  It sets the slice's temperatures,
@@ -3108,6 +3204,19 @@ class _SlicerToolsPlugin:
                 return err
             if err := _srv._refuse_unknown_printer(printer_name, "slice for"):
                 return err
+            from kiln.slicer import SLICE_TIME_LIMIT_S
+
+            if time_limit_seconds is not None and (
+                isinstance(time_limit_seconds, bool)
+                or not isinstance(time_limit_seconds, int)
+                or not 1 <= time_limit_seconds <= SLICE_TIME_LIMIT_S
+            ):
+                return _srv._error_dict(
+                    f"time_limit_seconds is how long the slicer may run, in whole seconds from 1 to "
+                    f"{SLICE_TIME_LIMIT_S}; it can shorten Kiln's own limit, never lengthen it. Give one in "
+                    "that range, or leave it out for Kiln's own limit.",
+                    code="INVALID_INPUT",
+                )
 
             try:
                 from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError
@@ -3134,6 +3243,8 @@ class _SlicerToolsPlugin:
                     output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
+                    **({"timeout": time_limit_seconds} if time_limit_seconds is not None else {}),
+                    **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3156,10 +3267,12 @@ class _SlicerToolsPlugin:
                 # Use the (possibly centered) STL for thumbnail generation
                 # so the LCD preview matches the sliced geometry.
                 _gcode_path = result.to_dict().get("output_path")
+                multi_nozzle = isinstance(result.filament_map, dict)
                 if _gcode_path:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
                         _gcode_path, effective_printer_id, effective_input,
                         quiet_start=sinfo.get("quiet_start"), lift_floor_mm=sinfo.get("lift_floor_mm"),
+                        several_nozzles=multi_nozzle,
                     )
                     if threemf_path:
                         response["output_3mf_path"] = threemf_path
@@ -3200,7 +3313,7 @@ class _SlicerToolsPlugin:
                     _steer_to_wrapped_upload(
                         response, threemf_path, effective_printer_id,
                     )
-                elif _gcode_path:
+                elif _gcode_path and not multi_nozzle:
                     # Every other printer prints this G-code as it stands,
                     # so it leaves here carrying its preview and its weight.
                     _steer_to_complete_gcode(
@@ -3261,7 +3374,11 @@ class _SlicerToolsPlugin:
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
-                return _srv._error_dict(f"Failed to slice model: {exc}", code=getattr(exc, "code", "SLICER_ERROR"))
+                why = getattr(exc, "why", None)
+                return _srv._error_dict(
+                    f"Failed to slice model: {exc}", code=getattr(exc, "code", "SLICER_ERROR"),
+                    **({"extra": {"why": why}} if why else {}),
+                )
             except FileNotFoundError as exc:
                 return _srv._error_dict(f"Failed to slice model: {exc}", code="FILE_NOT_FOUND")
             except Exception as exc:
@@ -3286,6 +3403,9 @@ class _SlicerToolsPlugin:
             material: str | None = None,
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict[str, Any]:
             """Reslice a 3D model with custom slicer parameter overrides.
 
@@ -3311,6 +3431,20 @@ class _SlicerToolsPlugin:
             Use kiln find-slicer or the find_slicer MCP tool to verify.
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.  The response's ``soft_nozzle`` says which
+                    filament goes through which nozzle on their say-so.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 plate_number: Which plate to slice of a slicer project that
                     holds several plates (1 for the first).  Leave unset for
                     any other file.  A several-plate project with none named
@@ -3498,6 +3632,7 @@ class _SlicerToolsPlugin:
                     output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
+                    **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3539,6 +3674,7 @@ class _SlicerToolsPlugin:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
                         _gcode_path, effective_printer_id, effective_input,
                         quiet_start=sinfo.get("quiet_start"), lift_floor_mm=sinfo.get("lift_floor_mm"),
+                        several_nozzles=isinstance(result.filament_map, dict),
                     )
                     _wrap_path = threemf_path
                     if threemf_path:
@@ -3566,7 +3702,7 @@ class _SlicerToolsPlugin:
                             _logger.warning(
                                 "Post-wrap safety verification skipped: %s", _exc,
                             )
-                    else:
+                    elif not isinstance(result.filament_map, dict):
                         # Not a Bambu: the G-code itself is the file that
                         # goes to the printer, so it leaves this door
                         # carrying its preview and its weight, the same as
@@ -3679,6 +3815,9 @@ class _SlicerToolsPlugin:
             design_id: str | None = None,
             branch_id: str | None = None,
             account_sync_id: str | None = None,
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -3728,6 +3867,20 @@ class _SlicerToolsPlugin:
             bypass (e.g. for already-validated meshes or pre-sliced 3MFs).
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.  The response's ``soft_nozzle`` says which
+                    filament goes through which nozzle on their say-so.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 input_path: Path to the 3D model file (STL, 3MF, STEP, etc.).
                 printer_name: Target printer name.  Omit for the default printer.
                 profile: Path to a slicer profile/config file.
@@ -4104,6 +4257,7 @@ class _SlicerToolsPlugin:
                     profile_path=effective_profile, auto_center=auto_center,
                     material_id=material, material=declared_material,
                     loaded_material=loaded_material,
+                    **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err
