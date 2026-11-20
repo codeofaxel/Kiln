@@ -34,6 +34,7 @@ from kiln.maker_slicer import (
     with_tower_position,
 )
 from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+from kiln.print_consent import what_the_print_is
 from kiln.slicer import NozzleMapError, OneNozzleInstead, SlicerInfo, ini_to_settings, slice_file
 from kiln.slicer_orca import PresetExtrasError
 
@@ -620,14 +621,14 @@ class TestTheSlice:
             assert "Update PrusaSlicer to 2.5.0 or newer (free)" in result.message
             assert result.one_nozzle["colours_flattened"] is True and "maker_slicer" in result.one_nozzle
         # The person approving the print is told too, from the sliced file's own record.
-        row = maker_slicer_notes.approval_row(Path(result.output_path).name, result.output_path)
-        assert row == "One colour: PrusaSlicer on the computer slicing this print is older than 2.5.0."
+        rows = what_the_print_is(Path(result.output_path).name, result.output_path)
+        assert rows.get("colours") == "One colour: PrusaSlicer on the computer slicing this print is older than 2.5.0."
 
     def test_a_plate_that_keeps_its_colours_is_not_said_to_lose_them(self, tmp_path, notes, monkeypatch):
         monkeypatch.setattr(print_lineage, "store_path", lambda: tmp_path / "lineage.json")
         result = self._slice(tmp_path, _slicer_swapping({}, 4), slicer=_prusa("2.4.0"))
         assert "colours_flattened" not in result.one_nozzle and "one colour" not in result.message
-        assert maker_slicer_notes.approval_row(Path(result.output_path).name, result.output_path) is None
+        assert "colours" not in what_the_print_is(Path(result.output_path).name, result.output_path)
 
     def test_on_the_shared_server_nothing_is_kept_and_no_slicer_is_named(self, tmp_path, notes, monkeypatch):
         monkeypatch.setattr(maker_slicer_notes, "_hosted", lambda: True)

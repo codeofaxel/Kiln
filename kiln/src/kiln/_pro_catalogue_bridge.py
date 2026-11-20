@@ -282,7 +282,9 @@ def nozzles_for_sizes(
         try:
             from kiln.server import _pro_api_call
 
-            answer = _pro_api_call(WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, printer_model=key, **asked)
+            answer = _pro_api_call(
+                WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, printer_model=key, **asked,
+            )
         except Exception as exc:  # noqa: BLE001 -- the network is a miss, said by the caller
             logger.debug("nozzle record for sizes not served", exc_info=True)
             return None, classify_transport_error(exc)

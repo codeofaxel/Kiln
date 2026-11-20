@@ -1414,13 +1414,6 @@ def mixed_size_parts(nozzles: Any) -> RefusalParts | None:
     )
 
 
-def mixed_size_refusal(nozzles: Any) -> str:
-    """:func:`mixed_size_parts` as one text; ``""`` when the nozzles are one
-    size."""
-    parts = mixed_size_parts(nozzles)
-    return parts.message() if parts else ""
-
-
 def mixed_size_experiment(nozzles: Any) -> dict[str, Any] | None:
     """What a slice made with *nozzles* of different sizes says about
     itself: ``{"experiment", "nozzles", "note"}``; ``None`` when they are

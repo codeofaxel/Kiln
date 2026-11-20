@@ -129,7 +129,7 @@ def test_the_refusal_asks_for_exactly_these():
     assert re.findall(r"\b([a-z_]+)=true\b", slicer.SOFT_NOZZLE_CONFIRM) == ["soft_nozzle_confirmed"]
     assert "filament-to-nozzle map" in slicer.MAP_ADVICE
     assert re.findall(r"\b([a-z_]+)=true\b", slicer_profiles.MIXED_SIZES_CONFIRM) == ["mixed_nozzle_experiment"]
-    assert slicer_profiles.MIXED_SIZES_CONFIRM in slicer_profiles.mixed_size_refusal(_TWO_SIZES)
+    assert slicer_profiles.MIXED_SIZES_CONFIRM in slicer_profiles.mixed_size_parts(_TWO_SIZES).message()
 
 
 def test_the_shared_keywords_carry_each_ask_only_when_given():
@@ -178,7 +178,8 @@ def test_a_refusal_said_elsewhere_names_a_door_that_takes_every_ask(slice_doors,
     assert "call again" not in said and slicer.MAP_ADVICE not in said, said
     assert said.count(". ") == 0, said
     mixed = slicer.said_for(
-        slicer_profiles.mixed_size_refusal(_TWO_SIZES), confirm=confirm, map_with=map_with, experiment=experiment,
+        slicer_profiles.mixed_size_parts(_TWO_SIZES).message(),
+        confirm=confirm, map_with=map_with, experiment=experiment,
     )
     assert "call again" not in mixed and experiment in mixed, mixed
 
@@ -194,5 +195,5 @@ def test_the_terminal_commands_that_slice_take_both_flags(command):
 def test_the_terminal_says_each_ask_as_its_flag():
     from kiln.cli.main import _said_at_the_terminal
 
-    said = _said_at_the_terminal(Exception(slicer_profiles.mixed_size_refusal(_TWO_SIZES)))
+    said = _said_at_the_terminal(Exception(slicer_profiles.mixed_size_parts(_TWO_SIZES).message()))
     assert "run it again with --mixed-nozzle-experiment" in said and "call again" not in said, said
