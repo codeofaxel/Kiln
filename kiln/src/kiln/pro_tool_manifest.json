@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-18T18:11:43.788606+00:00",
+  "generated": "2026-11-19T22:30:33.604196+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -4070,6 +4070,22 @@
             "default": null,
             "title": "Motion",
             "description": "For ``generate`` and ``join``, when the thing has parts that move against each other (a hinge, a gearbox, a slider): how it moves, in your source's own part names, so Kiln plays it and checks it with nobody asking.  ``{\"parts\": {name: [x, y, z]}}`` gives each part a point inside its material (millimetres, as modelled); ``\"joints\"`` lists ``{\"parts\": [stays, moves], \"kind\": \"hinge\" | \"slider\" | \"fixed\", \"axis_point\", \"axis_direction\", and \"range\": [lo, hi] or \"continuous\": true}``; ``\"driver\"`` names the part a hand turns or slides (leave it out when each part moves on its own, like drawers in a case); ``\"gears\"`` (optional) lists ``{\"parts\": [a, b], \"teeth\": [na, nb], \"carrier\": the part holding both axes, \"inside\": true when b is a ring with its teeth inside}``.  State tooth counts, never a ratio.  The reply's ``motion`` says whether it plays and what Kiln found."
+          },
+          "in_use": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "In Use",
+            "description": "What the object will do or live through once made, as a list of Kiln's words for a use: ``\"holds weight\"``, ``\"holds liquid\"``, ``\"touches food\"``, ``\"against skin\"``, ``\"outside in the sun\"``, ``\"near heat\"``.  Name only what applies.  Kept on the goal for every later make; works with every verb (``join`` needs the ``goal_id``).  Any other word is refused with the list."
           }
         },
         "required": [
