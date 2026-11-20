@@ -23,7 +23,6 @@ __all__ = [
     "BasicList",
     "basic_list",
     "basic_pick_line",
-    "basic_plastics",
     "pick_then",
     "plastics_printer_can_melt",
     "pro_pick_missed_line",
@@ -76,11 +75,6 @@ def basic_list(use_text: Any, max_hotend_temp_c: float | None = None) -> BasicLi
         plastics = filter_food_safe_materials(plastics, require="yes_or_conditional")
     kept, line = requirement_floor(text, plastics)
     return BasicList(kept, line)
-
-
-def basic_plastics(use_text: Any, max_hotend_temp_c: float | None = None) -> list[str]:
-    """The plastics :func:`basic_list` lists, without its line."""
-    return basic_list(use_text, max_hotend_temp_c).plastics
 
 
 def requirement_floor(use_text: Any, names: list[str]) -> tuple[list[str], str]:

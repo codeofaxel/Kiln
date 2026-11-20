@@ -28,7 +28,7 @@ import pytest
 
 from kiln import _pro_material_pick_bridge as bridge
 from kiln import design_intelligence as di
-from kiln.material_basics import basic_plastics, plastics_printer_can_melt
+from kiln.material_basics import basic_list, plastics_printer_can_melt
 from tests._plan_callers import free_caller  # noqa: F401 -- a fixture
 
 #: A pick as ``material_floor_pick`` sends it.
@@ -442,7 +442,7 @@ class TestAMissPicksNothing:
         for text in ("shelf bracket that holds 10 lbs, worn on the wrist",
                      "shelf bracket that holds 10 lbs, food safe, worn on the wrist"):
             out = _door()(text, max_hotend_temp_c=240)
-            assert out["basic"] is True and out["plastics"] == basic_plastics(text, 240)
+            assert out["basic"] is True and out["plastics"] == basic_list(text, 240).plastics
         # A bracket: the public rule for load-bearing parts leaves out PLA and TPU.
         bracket = _door()("shelf bracket", max_hotend_temp_c=240)["plastics"]
         assert bracket == [p for p in plastics_printer_can_melt(240) if p not in ("PLA", "TPU")]
@@ -510,7 +510,7 @@ class TestTheDesignAnalysis:
         basic = brief["material_basic"]
         assert basic["basic"] is True and basic["why"] == "signed_out"
         # A part that touches food lists only what the food-contact floor allows.
-        assert basic["plastics"] == basic_plastics("a cereal bowl to eat from", None)
+        assert basic["plastics"] == basic_list("a cereal bowl to eat from", None).plastics
         assert "ABS" not in basic["plastics"] and basic["plastics"]
         assert basic["food_contact_use_case_detected"] is True
 
