@@ -96,7 +96,13 @@ def run_filament_op(
     """
     import kiln.server as _srv
     from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING
-    from kiln.printers.base import FilamentHandlingUnsupported, PlateClearRequired, PrinterError
+    from kiln.printer_model_check import MISMATCH_CODE
+    from kiln.printers.base import (
+        FilamentHandlingUnsupported,
+        PlateClearRequired,
+        PrinterError,
+        PrinterModelDisagrees,
+    )
     from kiln.registry import PrinterNotFoundError
 
     verb = {
@@ -217,6 +223,8 @@ def run_filament_op(
             str(exc), code="PLATE_CLEAR_REQUIRED",
             extra={"outcome": "failed", "snapshot_path": exc.snapshot_path, "plate_clear_required": True},
         )
+    except PrinterModelDisagrees as exc:
+        return _srv._error_dict(str(exc), code=MISMATCH_CODE, extra={"outcome": "failed"})
     except (PrinterError, RuntimeError) as exc:
         # The gate refused (or the transport did) before anything moved.
         return _srv._error_dict(

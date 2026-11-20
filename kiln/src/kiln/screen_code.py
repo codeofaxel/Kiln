@@ -83,9 +83,13 @@ RESHOW_EVERY_S = 30.0
 _WORD_TO_CHOICE = {"2h": "next_two_hours", "today": "rest_of_today"}
 _EVERY_PRINTER_WORDS = {"all", "every", "everywhere", "fleet"}
 
-#: The one non-print door that shows a code: limits a person must confirm
-#: for a printer Kiln has no number for.  The banner names it as such.
+#: The non-print doors that show a code on this machine.  Limits a person
+#: must confirm for a printer Kiln has no number for:
 LIMITS_TOOL = "add_safety_profile"
+#: and a printer's owner saying what it is, against what its serial number
+#: says (:func:`kiln.printer_setup.set_printer_model`).  Each banner names
+#: its own question; a code shown for one never answers another.
+MODEL_TOOL = "set_printer_model"
 
 #: The doors that show a code for a yes Kiln's servers wait for: the tool,
 #: and what typing the code does, as the banner says it.
@@ -235,6 +239,12 @@ def banner_text(issued: Issued) -> tuple[str, str, str]:
             f"Kiln code {issued.code}",
             f"Temperature limits for {printer}",
             "Type the code in your chat to let Kiln hold this printer to the limits proposed.",
+        )
+    if issued.tool == MODEL_TOOL:
+        return (
+            f"Kiln code {issued.code}",
+            _one_line(issued.subject),
+            "Only if that is true: type the code in your chat to record that you say so.",
         )
     return (
         f"Kiln print code {issued.code}",
@@ -702,7 +712,7 @@ def answer(words: str, *, host: str = "") -> dict[str, Any]:
 def _door(tool: str | None) -> str:
     """Which door a code belongs to: the limits door, one action's, or a
     print's (every tool that starts one is the same door)."""
-    return tool if tool == LIMITS_TOOL or tool in ACTION_TOOLS else "print"
+    return tool if tool in (LIMITS_TOOL, MODEL_TOOL) or tool in ACTION_TOOLS else "print"
 
 
 def take_answer(file_name: str, printer_name: str | None, *, tool: str | None = None) -> Answered | None:

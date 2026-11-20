@@ -85,7 +85,7 @@ def _all_adapter_classes() -> dict[str, type[PrinterAdapter]]:
 def _build(name: str) -> PrinterAdapter:
     cls = _all_adapter_classes()[name]
     if name == "bambu":
-        return cls(host="192.168.1.5", access_code="12345678", serial="01P00A000000001", timeout=2)
+        return cls(host="192.168.1.5", access_code="12345678", serial="03900A000000001", timeout=2)
     if name == "octoprint":
         return cls(host="http://octopi.local", api_key="KEY")
     if name == "serial":
@@ -1737,6 +1737,7 @@ class TestBambuWithoutAPlan:
         doc = {**_fake_purge_doc("bambu_x1c"), "ok": False, "refusal": {"code": "UNSUPPORTED", "message": "the chute is a firmware macro"}}
         _serve_plans(monkeypatch, {"purge": doc})
         bambu._printer_model = "bambu_x1c"
+        bambu._serial = "00M00A000000001"
         bambu._last_status["ams"]["tray_now"] = "0"
         _hot(bambu, monkeypatch)
         result = bambu.purge_filament(length_mm=10)

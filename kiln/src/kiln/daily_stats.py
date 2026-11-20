@@ -1417,24 +1417,28 @@ _MOTION_REFUSALS_MAX_DISTINCT = 100
 #: The closed vocabularies of the last two slots.  The dashboard reads them
 #: from here rather than keeping a copy, so a refusal added later is read,
 #: never dropped as junk.
-MOTION_REFUSAL_CODES: tuple[str, ...] = ("PRINTER_MODEL_REQUIRED", "PLATE_CLEAR_REQUIRED")
-MOTION_REFUSAL_REASONS: tuple[str, ...] = ("undeclared", "unknown_key", "unknown_method", "on_plate", "plate_occupied")
+MOTION_REFUSAL_CODES: tuple[str, ...] = ("PRINTER_MODEL_REQUIRED", "PLATE_CLEAR_REQUIRED", "PRINTER_MODEL_DISAGREES")
+MOTION_REFUSAL_REASONS: tuple[str, ...] = (
+    "undeclared", "unknown_key", "unknown_method", "on_plate", "plate_occupied", "another_model",
+)
 
 
 def record_motion_refusal(model: object, code: str, reason: str) -> None:
     """Count one refusal of a head move today, by model, code and cause.
 
-    Written only by the home/park gate in :mod:`kiln.printers.base`, the
+    Written only by the move gates in :mod:`kiln.printers.base`, the
     one seam every door reaches.  ``code`` is the tool error code the
-    person saw (``PRINTER_MODEL_REQUIRED``, ``PLATE_CLEAR_REQUIRED``);
+    person saw (``PRINTER_MODEL_REQUIRED``, ``PLATE_CLEAR_REQUIRED``,
+    ``PRINTER_MODEL_DISAGREES``);
     ``reason`` says why -- ``undeclared`` (no model set), ``unknown_key``
     (a model the catalogue does not know), ``unknown_method`` (a blank
-    Z-home cell decided it), ``on_plate`` (the vendor's own descent) or
+    Z-home cell decided it), ``on_plate`` (the vendor's own descent),
     ``plate_occupied`` (a sideways move over a part the plate record
-    holds).  The first three are the only evidence that a machine people
-    own is missing from the catalogue, or that a blank cell is what
-    stopped them; the last two are the gate doing its job.  Silent by
-    contract.
+    holds) or ``another_model`` (the printer reports itself as another
+    model than it was set up as).  The first three are the only evidence
+    that a machine people own is missing from the catalogue, or that a
+    blank cell is what stopped them; the others are the gate doing its
+    job.  Silent by contract.
     """
     if code not in MOTION_REFUSAL_CODES or reason not in MOTION_REFUSAL_REASONS:
         return

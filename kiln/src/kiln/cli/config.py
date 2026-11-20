@@ -818,6 +818,24 @@ def _printer_entry(
     return entry
 
 
+def _drop_statement_it_no_longer_fits(base: dict[str, Any], entry: dict[str, Any]) -> None:
+    """Take the owner's statement off *base* when *entry* rewrites its model or serial number to another.
+
+    A statement is about one model on one machine
+    (:data:`kiln.printer_model_check.STATEMENT_FIELD`); only the door that
+    proved a person said it writes one, so a rewrite never carries it over.
+    """
+    from kiln.printer_model_check import STATEMENT_FIELD
+
+    said = base.get(STATEMENT_FIELD)
+    if not isinstance(said, dict):
+        return
+    for key, stated in (("printer_model", said.get("model")), ("serial", said.get("serial"))):
+        if key in entry and str(entry[key]).strip().lower() != str(stated or "").strip().lower():
+            base.pop(STATEMENT_FIELD, None)
+            return
+
+
 def save_printer(
     name: str,
     printer_type: str,
@@ -929,6 +947,7 @@ def save_printer(
             k for k in base if k not in entry and k not in ("type", "host", *_MACHINE_ID_KEYS)
         )
         outcome, previous_host, dropped = match.outcome, match.previous_host, match.dropped
+        _drop_statement_it_no_longer_fits(base, entry)
         entry = {**base, **entry}
 
     printers[name] = entry
@@ -961,19 +980,28 @@ def set_printer_model(
     printer_model: str,
     *,
     config_path: Path | None = None,
+    statement: dict[str, Any] | None = None,
 ) -> Path:
     """Record which catalogue model the saved printer *name* is.
 
-    Changes that one field of that one entry.  Raises :class:`ValueError`
+    Changes that one field of that one entry, and its owner's statement
+    (:data:`kiln.printer_model_check.STATEMENT_FIELD`): written when
+    *statement* is given, taken away otherwise.  Raises :class:`ValueError`
     when no printer of that name is saved.  Returns the path to the config
     file.
     """
+    from kiln.printer_model_check import STATEMENT_FIELD
+
     path = config_path or get_config_path()
     raw = _read_config_file(path)
     printers = raw.get("printers")
     if not isinstance(printers, dict) or not isinstance(printers.get(name), dict):
         raise ValueError(f"Printer {name!r} not found.")
     printers[name]["printer_model"] = printer_model
+    if statement is not None:
+        printers[name][STATEMENT_FIELD] = dict(statement)
+    else:
+        printers[name].pop(STATEMENT_FIELD, None)
     _write_config_file(path, raw)
     return path
 
