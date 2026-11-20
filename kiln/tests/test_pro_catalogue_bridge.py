@@ -535,11 +535,10 @@ class TestSetupChokepoint:
 
     def test_register_printer_speaks_the_note_once(self, monkeypatch, tmp_path):
         pytest.importorskip("kiln.server")
-        from kiln import bench, server
+        from kiln import server
 
         monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
         monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
-        monkeypatch.setattr(bench, "offer_after_registration", lambda _adapter, name: None)
         result = server.register_printer(
             name="bench", printer_type="moonraker", host="192.0.2.21",
             printer_model=SERVED_ID, persist=False, verify_connection=False,

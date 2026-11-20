@@ -434,12 +434,11 @@ class TestTheLine:
 
 @pytest.fixture
 def register(monkeypatch, tmp_path):
-    from kiln import bench, server
+    from kiln import server
     from kiln.printers.moonraker import MoonrakerAdapter
 
     monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
     monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
-    monkeypatch.setattr(bench, "offer_after_registration", lambda _adapter, name: None)
     calls: list[str] = []
 
     def call(*, answers: bool, handshake: CameraHandshake, **kwargs) -> dict:
