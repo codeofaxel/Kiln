@@ -1636,7 +1636,7 @@ BENCH_LESSONS: tuple[str, ...] = ("motion", "limits")
 #: Each stage, and the details it may carry (an empty tuple: none).  The
 #: dashboard reads this rather than keeping a copy.
 BENCH_FUNNEL: dict[str, tuple[str, ...]] = {
-    "offered": ("registration", "print_beside", "setup_check", "motion_refusal", "lesson"),
+    "offered": ("registration", "first_print", "print_beside", "setup_check", "motion_refusal", "lesson"),
     "started": (),
     "finished": (),
     "learned": ("session", "real_print"),

@@ -84,10 +84,10 @@ LEARN_LINE = (
 
 #: The agent half: when to reach for it, and how to carry it.
 LEARN_WHEN = (
-    "Offer it in one sentence, once per printer, without being asked: after a "
-    "printer is set up, when a reply says Kiln has no record for the printer or "
-    "assumes the worst about it, and when the person asks why Kiln cannot do "
-    "something on their printer or wants to teach Kiln their printer. "
+    "Offer it once per printer, and never before the printer's first print: "
+    "when a reply carries an offer of it, say that offer as written, and offer "
+    "it when the person asks why Kiln cannot do something on their printer or "
+    "wants to teach Kiln their printer. "
     "`printer_bench()` with no answer starts or resumes it, or says there is "
     "nothing to teach; `printer_bench(lesson=\"limits\")` starts the second "
     "lesson on its own. Relay each ask word for word, show its pictures, and "
@@ -485,19 +485,21 @@ LIMITS = "limits"
 #: a home, a park, a wipe or a purge is a sequence for the printer to run,
 #: which no test print shows.
 LESSON_TEACHES: dict[str, tuple[str, ...]] = {MOTION: TEACHABLE, LIMITS: ("limits",)}
-#: Every door that may offer a lesson unasked.  ``lesson`` is the session's
-#: own offer of the second lesson once the first is done.
-OFFER_DOORS = ("registration", "print_beside", "setup_check", "motion_refusal", "lesson")
+#: Every door that may offer a lesson unasked.  ``first_print`` is the moment
+#: after a printer's first print has taught what it can; ``lesson`` is the
+#: session's own offer of the second lesson once the first is done.
+OFFER_DOORS = ("registration", "first_print", "print_beside", "setup_check", "motion_refusal", "lesson")
+#: The doors that offer once, ever.
+_ONCE_DOORS = ("registration", "first_print")
 #: A door that meets a gap while the person is trying something offers at
 #: most once in this long; an answer of any kind ends its offers.
 OFFER_QUIET_S = 7 * 24 * 3600
-#: What a lesson gives back, by the door it is offered at; ``None`` is the
-#: words for every other door.
-_MOTION_GAINS = {
-    "registration": "keep the head clear of what's on the plate and check a second part beside the first",
-    "print_beside": "check a part beside this one",
-    None: "check a second part beside the first",
-}
+#: How each block the first lesson teaches is named in its offer.
+_OFFER_VERBS = {"pause": "pauses", "cancel": "cancels", "end": "finishes"}
+#: What the first lesson buys, by the caller's plan: whether a second part
+#: fits on every plan, where it fits on Pro and up.
+_FITS_FREE = "tell you whether a second part fits beside one already on the plate"
+_FITS_PRO = "find where a second part fits beside one already on the plate"
 
 
 def lesson_for(gaps: Any) -> str | None:
@@ -509,15 +511,35 @@ def lesson_for(gaps: Any) -> str | None:
     return None
 
 
-def gain_sentence(lesson: str, door: str, model_name: str) -> str:
-    """The offer, as what the person gains for this printer: never what
-    Kiln lacks about it."""
+def has_pro() -> bool:
+    """Whether the caller's plan is Pro or above, read the caller-aware way
+    (:func:`kiln.licensing.check_tier`); an unreadable plan is Free."""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        allowed, _ = check_tier(LicenseTier.PRO)
+        return bool(allowed)
+    except Exception:  # noqa: BLE001 -- an unreadable plan is Free
+        return False
+
+
+def gain_sentence(lesson: str, gaps: Any, model_name: str, *, pro: bool | None = None) -> str:
+    """The offer, as what the person gains for this printer: the blocks still
+    missing that the lesson teaches, named and nothing else, and what knowing
+    them buys on the caller's plan (*pro*, read with :func:`has_pro` when not
+    given)."""
     if lesson == LIMITS:
         return (f"Kiln can learn how steep, how far and how thin your {model_name} really prints from one small "
                 "test print; the printer_bench tool runs it.")
-    gain = _MOTION_GAINS.get(door) or _MOTION_GAINS[None]
-    return (f"A few minutes with a coin-sized test print teaches Kiln how your {model_name} moves its head, so it "
-            f"can {gain}; the printer_bench tool runs it.")
+    words = [g for g in (gaps or []) if isinstance(g, str)]
+    verbs = [_OFFER_VERBS[b] for b in ("pause", "cancel", "end") if b in words]
+    fits = _FITS_PRO if (has_pro() if pro is None else pro) else _FITS_FREE
+    if not verbs:
+        return f"Two caliper measurements teach Kiln how big your {model_name}'s head is, so it can {fits}."
+    what = f"how your {model_name} {_joined(verbs, 'and')}"
+    if "head" in words:
+        what += ", and how big its head is"
+    return f"A few minutes with a coin-sized test print teaches Kiln {what}, so it can {fits}."
 
 
 def _offer_key(unit: str | None, lesson: str) -> str | None:
@@ -544,8 +566,9 @@ def offer(unit: str | None, gaps: Any, door: str, *, model_name: str,
             return None
         note_offer(key, door=door)
         count("offered", lesson, door)
+        taught = [g for g in gaps if isinstance(g, str) and g in LESSON_TEACHES[lesson]]
         out: dict[str, Any] = {"tool": "printer_bench", "lesson": lesson,
-                               "sentence": gain_sentence(lesson, door, model_name)}
+                               "sentence": gain_sentence(lesson, taught, model_name)}
         if printer_name:
             out["printer_name"] = printer_name
         return out
@@ -656,8 +679,9 @@ def may_offer(unit: str | None, door: str) -> bool:
 
     Any answer ends every unasked offer: ``later`` and ``declined`` are the
     person's, ``done`` is a lesson run or one with nothing to teach.
-    ``registration`` offers once, ever.  ``lesson`` is the session's own
-    offer of its second lesson to someone already in a session.  Every
+    ``registration`` and ``first_print`` offer once, ever.  ``lesson`` is
+    the session's own offer of its second lesson to someone already in a
+    session.  Every
     other door meets the gap while the person is trying something, and
     offers there at most once in :data:`OFFER_QUIET_S`."""
     if not unit:
@@ -665,7 +689,7 @@ def may_offer(unit: str | None, door: str) -> bool:
     entry = _load_offers().get(unit) or {}
     if entry.get("answer") in ("later", "declined", "done"):
         return False
-    if door == "registration":
+    if door in _ONCE_DOORS:
         return not entry
     if door == "lesson":
         return True
@@ -727,10 +751,13 @@ def take_learned() -> list[str]:
 
 
 def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] | None:
-    """The one-time offer a registration answers with: the first lesson
-    when it has something to teach this printer, else the second.  ``None``
-    when it was offered before, nothing can be read right now, or the
-    service will not start a session yet.  Never raises."""
+    """The one-time offer a registration answers with: the second lesson,
+    for a printer whose moves a test print cannot teach anything more about.
+    A printer with something left to teach about its moves is offered
+    nothing yet: its first print teaches what it can, and what it leaves is
+    offered after it (``first_print``).  ``None`` when it was offered before,
+    nothing can be read right now, or the service will not start a session
+    yet.  Never raises."""
     try:
         from kiln.plate_state import declared_model_of
 
@@ -743,15 +770,14 @@ def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] 
         blanks, verdict = blanks_for(adapter, printer_id)
         if verdict is None or session_hold(verdict) is not None:
             return None                           # offline, or not startable yet; nothing is marked
-        teachable = [b for b in blanks if b in TEACHABLE]
         if not blanks:
             note_offer(unit, answer="done")       # nothing to teach about the moves; never ask
-        name = _display_name(printer_id)
-        if teachable:
-            return offer(unit, teachable, "registration", model_name=name, printer_name=printer_name)
+        if any(b in TEACHABLE for b in blanks):
+            return None                           # the first print teaches first; nothing is spent
         # Blanks no session can fill leave the first lesson unoffered and its
         # one offer unspent; the second lesson has something for every printer.
-        return offer(unit, ["limits"], "registration", model_name=name, printer_name=printer_name)
+        return offer(unit, ["limits"], "registration", model_name=_display_name(printer_id),
+                     printer_name=printer_name)
     except Exception:  # noqa: BLE001
         _logger.debug("bench: registration offer skipped", exc_info=True)
         return None
