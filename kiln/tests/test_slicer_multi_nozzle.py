@@ -1480,7 +1480,7 @@ class TestTheSliceUsesTheFittedNozzles:
         with pytest.raises(NozzleMapError) as refused:
             self._slice(tmp_path, _never_runs, _fitted((1, 0.4, "brass"), (2, 0.6, "brass")))
         assert refused.value.code == "MULTI_NOZZLE_MIXED_SIZES"
-        assert "two nozzle sizes" in str(refused.value) and "Nothing was sliced" in str(refused.value)
+        assert "a pairing Kiln has not proven" in str(refused.value) and "Nothing was sliced" in str(refused.value)
         parts = refused.value.parts
         assert parts.headline == "Two nozzle sizes at once is an experiment"
         assert parts.reason.startswith("Nozzle 1 is 0.4 mm and nozzle 2 is 0.6 mm")

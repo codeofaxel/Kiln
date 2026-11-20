@@ -1396,10 +1396,7 @@ def mixed_size_parts(nozzles: Any) -> RefusalParts | None:
     said = _sizes_said(used)
     return RefusalParts(
         headline="Two nozzle sizes at once is an experiment",
-        reason=(
-            f"{said[0].upper()}{said[1:]}, and printing with two nozzle sizes at once is something "
-            "Kiln has not proven on a printer."
-        ),
+        reason=f"{said[0].upper()}{said[1:]}, a pairing Kiln has not proven on a printer.",
         fix="Slice it with one filament for one nozzle, or fit nozzles of one size.",
         ask=MIXED_SIZES_CONFIRM,
         ask_lead="to try it, ask the person: ",
