@@ -305,12 +305,20 @@ class SliceResult:
     #: Which nozzle printed each filament, as the sliced file states it
     #: (:func:`filament_map_of`); ``None`` for a slice made for one nozzle.
     filament_map: dict[str, Any] | None = None
-    #: The slicer a slice for more than one nozzle was made with: its name
-    #: and version, the settings bundle its routines were read from and that
-    #: bundle's version when they were, and for a printer whose filaments
-    #: print from the nozzle of the same number, ``filament_to_nozzle``
-    #: (:mod:`kiln.maker_slicer`).  ``None`` for a slice made for one nozzle.
+    #: The printer's maker's slicer a slice for more than one nozzle, or a
+    #: slice for one nozzle carrying the printer's own routines, was made
+    #: with: its name and version, the settings bundle its routines were
+    #: read from and that bundle's version when they were, and for a printer
+    #: whose filaments print from the nozzle of the same number,
+    #: ``filament_to_nozzle`` (:mod:`kiln.maker_slicer`).  ``None`` for any
+    #: other slice.
     sliced_with: dict[str, Any] | None = None
+    #: A slice for one nozzle of a printer whose record names its maker's
+    #: own routines for such a print, made without them:
+    #: ``{"in_file": False}``, and, when the reply says what adds them,
+    #: ``maker_slicer`` (:func:`kiln.maker_slicer_notes.after_layer_routines`).
+    #: ``None`` for any other slice.
+    time_lapse: dict[str, Any] | None = None
     #: A print Kiln would slice for more than one nozzle, sliced for one
     #: because the printer's maker's slicer is missing or too old here:
     #: ``filament_swaps``, read from the sliced file, and when the reply names
@@ -351,6 +359,8 @@ class SliceResult:
             d["sliced_with"] = self.sliced_with
         if self.one_nozzle is not None:
             d["one_nozzle"] = self.one_nozzle
+        if self.time_lapse is not None:
+            d["time_lapse"] = self.time_lapse
         if self.soft_nozzle is not None:
             d["soft_nozzle"] = self.soft_nozzle
         if self.experimental is not None:
@@ -1674,8 +1684,9 @@ def _slice_with_orca(
     file that states any other map is not kept.  With none, the slicer
     maps the filaments itself.  The result's ``filament_map`` is what the
     file states.  *routines* are the printer's own routines its maker's
-    slicer holds (:func:`kiln.maker_slicer.slicer_for_several_nozzles`),
-    written into the machine preset (:func:`kiln.slicer_orca.settings_to_orca_presets`).
+    slicer holds (:func:`kiln.maker_slicer.slicer_for_several_nozzles`,
+    :func:`kiln.maker_slicer.slicer_for_layer_routines`), written into the
+    machine preset (:func:`kiln.slicer_orca.settings_to_orca_presets`).
     """
     with tempfile.TemporaryDirectory(prefix="kiln_orca_") as work_dir:
         cmd: list[str] = [slicer.path, "--slice", "0", "--outputdir", work_dir]
@@ -2434,6 +2445,21 @@ def _slice_file(
             slicer = alt
             multicolor_switched = True
 
+    # A slice for one nozzle carries the printer's own routines the record
+    # names for it when the slicer making it is the printer's maker's; made
+    # by any other slicer it carries none, and the reply says what adds them.
+    maker = None
+    without_routines = None
+    routines_printer = None
+    if several is None and instead is None:
+        from kiln.maker_slicer import Miss, slicer_for_layer_routines
+
+        found = slicer_for_layer_routines(nozzle_record_of(profile), slicer, profile=profile)
+        if isinstance(found, Miss):
+            without_routines, routines_printer = found, _printer_id_of(profile)
+        elif found is not None and slicer_cli_family(found.info) == _CLI_BAMBU:
+            maker = found
+
     left_out: dict[str, int] = {}
     if printed_only is not None and slicer_cli_family(slicer) == _CLI_PRUSA:
         left_out = printed_only[1]
@@ -2581,7 +2607,7 @@ def _slice_file(
             profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
-            nozzles=nozzles, filament_map=asked_map, several=several,
+            nozzles=nozzles, filament_map=asked_map, several=several, maker=maker,
         ), taken), left_out)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
@@ -2592,6 +2618,10 @@ def _slice_file(
             result.message = f"{result.message} {experimental['note']}".strip()
         from kiln import maker_slicer_notes
 
+        if without_routines is not None:
+            maker_slicer_notes.after_layer_routines(
+                result, printer=routines_printer, miss=without_routines, made_with=slicer,
+            )
         return maker_slicer_notes.after_slice(
             result, printer=printer, miss=instead.miss if instead else None, nozzles=would_use,
             colours=slots_needed, profile=profile,
@@ -2603,10 +2633,10 @@ def _slice_file(
 
 
 def _say_sliced_with(result: SliceResult, several: Any) -> SliceResult:
-    """*result* naming the slicer a slice for more than one nozzle was made
-    with, and the sliced file's record keeping it
-    (:func:`kiln.print_lineage.note_sliced_with`).  A slice for one nozzle
-    is returned as it was."""
+    """*result* naming the maker's slicer a slice was made with (*several*),
+    and the sliced file's record keeping it
+    (:func:`kiln.print_lineage.note_sliced_with`).  With none, *result* is
+    returned as it was."""
     if several is None:
         return result
     result.sliced_with = dict(several.sliced_with)
@@ -2659,12 +2689,16 @@ def _slice_decided(
     nozzles: dict[str, Any] | None = None,
     filament_map: list[int] | None = None,
     several: Any = None,
+    maker: Any = None,
 ) -> SliceResult:
     """Run the slicer on *sliced_input* with everything :func:`_slice_file`
     decided; *input_abs* is the part as the caller named it.  *several* is
-    the slicer chosen for a slice for more than one nozzle
-    (:class:`kiln.maker_slicer.SeveralNozzleSlicer`): the result and the
-    sliced file's record say which it was."""
+    the slicer chosen for a slice for more than one nozzle, and *maker* the
+    printer's maker's slicer making a slice for one nozzle with the
+    printer's own routines (:class:`kiln.maker_slicer.SeveralNozzleSlicer`
+    either way): its routines go into the machine preset, and the result
+    and the sliced file's record say which slicer it was."""
+    chosen = several if several is not None else maker
     # Two command lines, one function.  Everything below this point is the
     # Slic3r dialect; an Orca/BambuStudio binary needs a different argv AND a
     # different preset format, so it gets its own runner rather than a flag
@@ -2680,15 +2714,10 @@ def _slice_decided(
             timeout=timeout,
             multicolor=multicolor,
             drawn_as=drawn,
-            # Named only for a slice for more than one nozzle, with the
-            # printer's own routines read from its maker's slicer.
-            **(
-                {
-                    "nozzles": nozzles, "filament_map": filament_map,
-                    "routines": several.routines if several is not None else None,
-                }
-                if nozzles else {}
-            ),
+            # Named only for a slice for more than one nozzle, and for one
+            # carrying the printer's own routines read from its maker's slicer.
+            **({"nozzles": nozzles, "filament_map": filament_map} if nozzles else {}),
+            **({"routines": chosen.routines} if chosen is not None else {}),
         )
         result.filament = filament
         result.nozzle = nozzle
@@ -2700,7 +2729,7 @@ def _slice_decided(
                 f" (multicolor 3MF: auto-selected "
                 f"{os.path.basename(slicer.path)} to keep the colors)"
             )
-        return _say_sliced_with(result, several)
+        return _say_sliced_with(result, chosen)
 
     # PrusaSlicer reads each component of a joined object as an object of
     # its own, so a 3MF whose objects hold several parts is handed over in

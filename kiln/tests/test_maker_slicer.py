@@ -38,6 +38,7 @@ from kiln.slicer import NozzleMapError, OneNozzleInstead, SlicerInfo, ini_to_set
 from kiln.slicer_orca import PresetExtrasError
 
 from .test_slicer_multi_nozzle import _NOZZLES, _cube
+from .test_slicer_multi_nozzle import _SETTINGS as _PAIR_SETTINGS
 from .test_slicer_multi_nozzle import _profile as _pair_profile
 from .test_slicer_multi_nozzle import _slicer_that_writes as _studio_that_writes
 
@@ -133,10 +134,12 @@ _PRESETS = {
         "change_filament_gcode": "M620 S[next_filament_id]A\nT[next_filament_id]\nM621 S[next_filament_id]A",
     },
     "Invented Two 0.4 nozzle layer": {"layer_change_gcode": "LAYER NOTE {layer_num}\nLAYER NOTE TWO"},
+    "Invented Two 0.4 nozzle frame": {"invented_frame_gcode": "FRAME {layer_num}"},
     "Invented Two 0.4 nozzle": {
         "inherits": "invented common",
         "include": [
             "Invented Two 0.4 nozzle start", "Invented Two 0.4 nozzle change", "Invented Two 0.4 nozzle layer",
+            "Invented Two 0.4 nozzle frame",
         ],
         "nozzle_diameter": ["0.4", "0.4"],
     },
@@ -739,3 +742,118 @@ class TestTheFilesRecord:
         gcode = tmp_path / "loose.gcode"
         gcode.write_text("G28\n")
         assert print_lineage.note_sliced_with(str(gcode), {"slicer": "x"}) is False
+
+
+#: An invented one-nozzle machine whose record names the routines its maker's
+#: slicer runs within a print.
+_ONE = {
+    "kind": "single",
+    "stock": 1,
+    "max": 1,
+    "sliced_as": 1,
+    "maker_slicer": {
+        "name": "bambu_studio",
+        "routines": {
+            "vendor": "Invented",
+            "min_profile_version": "01.02.00.00",
+            "preset": "Invented Two {nozzle} nozzle",
+            "layer_keys": ["layer_change_gcode", "invented_frame_gcode"],
+        },
+    },
+}
+
+
+def _one_profile(tmp_path: Path, record: dict = _ONE) -> str:
+    """The invented one-nozzle machine's profile, as Kiln writes one for a printer."""
+    ini = tmp_path / "invented_one.ini"
+    body = slicer_profiles._settings_to_ini(dict(_PAIR_SETTINGS), "Invented One", printer_id="invented_one")
+    ini.write_text(slicer_profiles._with_nozzles(body, record))
+    return str(ini)
+
+
+class TestASliceForOneNozzleCarriesThePrintersOwnRoutines:
+    """A slice for one nozzle carries the routines its printer's record names
+    for a print in Kiln's own package, read by the same reader, when the
+    printer's maker's slicer is the one making it; Kiln's own per-layer step
+    runs first.  Made by any other slicer it carries none of them, and the
+    reply says the print has no time-lapse step and what adds it: the first
+    time on a printer, and again when what adds it changes."""
+
+    def _slice(self, tmp_path, *, slicer, found=None, bundles=None, record=_ONE, seen=None):
+        seen = {} if seen is None else seen
+        run = _studio_that_writes("", seen) if slicer.name == "bambustudio" else _slicer_that_writes(seen)
+        with (
+            patch("kiln.slicer.find_slicer", return_value=slicer),
+            patch("kiln.maker_slicer._find", return_value=found),
+            patch(
+                "kiln.maker_slicer._vendor_files",
+                return_value=[_preset_bundle(tmp_path / "app")] if bundles is None else bundles,
+            ),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._gcode_output_is_complete", return_value=True),
+            patch("kiln.slicer._run_slicer_with_startup_retry", run),
+        ):
+            return slice_file(
+                _plate(tmp_path, 1), output_dir=str(tmp_path / "out"), profile=_one_profile(tmp_path, record),
+            )
+
+    def test_the_makers_slicer_making_it_carries_them_after_kilns_own_step(self, tmp_path, notes):
+        seen: dict = {}
+        result = self._slice(tmp_path, slicer=_studio(), seen=seen)
+        machine = seen["machine"]
+        assert machine["layer_change_gcode"].split("\n") == [
+            slicer_profiles._E_RESET, "LAYER NOTE {layer_num}", "LAYER NOTE TWO",
+        ]
+        assert machine["invented_frame_gcode"] == "FRAME {layer_num}"
+        # Kiln's own package writes the start and the filament changes.
+        assert "TWO START" not in str(machine.get("machine_start_gcode"))
+        assert "M620" not in str(machine.get("change_filament_gcode"))
+        assert (result.sliced_with["profile"], result.sliced_with["profile_version"]) == ("Invented", "1.2.0.0")
+        assert result.time_lapse is None and "time-lapse" not in result.message
+
+    def test_another_slicer_making_it_carries_none_and_the_reply_names_the_makers(self, tmp_path, notes):
+        seen: dict = {}
+        result = self._slice(tmp_path, slicer=_prusa(), found=_studio(), seen=seen)
+        assert not any("LAYER NOTE" in str(v) or "FRAME" in str(v) for v in seen["settings"].values())
+        assert result.sliced_with is None
+        assert result.time_lapse == {
+            "in_file": False,
+            "maker_slicer": {"name": "Bambu Studio", "need": "use", "path": "/fake/BambuStudio"},
+        }
+        assert (
+            "This print has no time-lapse step: it was sliced with PrusaSlicer. Bambu Studio is installed: "
+            "slice with it and Kiln adds the printer's own." in result.message
+        )
+
+    def test_it_is_said_once_on_a_printer_and_again_when_what_adds_it_changes(self, tmp_path, notes):
+        first = self._slice(tmp_path / "a", slicer=_prusa())
+        assert "Install Bambu Studio (free) and slice with it, and Kiln adds the printer's own: " in first.message
+        assert first.time_lapse["maker_slicer"]["download"] == "bambulab.com/download/studio"
+        again = self._slice(tmp_path / "b", slicer=_prusa())
+        assert again.time_lapse == {"in_file": False} and "time-lapse" not in again.message
+        installed = self._slice(tmp_path / "c", slicer=_prusa(), found=_studio())
+        assert installed.time_lapse["maker_slicer"]["need"] == "use" and "Bambu Studio is installed" in installed.message
+
+    def test_settings_older_than_the_record_accepts_carry_none_and_say_to_update(self, tmp_path, notes):
+        seen: dict = {}
+        result = self._slice(
+            tmp_path, slicer=_studio(), bundles=[_preset_bundle(tmp_path / "old", version="01.01.00.00")], seen=seen,
+        )
+        assert "invented_frame_gcode" not in seen["machine"] and result.sliced_with is None
+        assert result.time_lapse["maker_slicer"]["need"] == "update"
+        assert (
+            "This print has no time-lapse step: the printer settings in the Bambu Studio installed are version "
+            "1.1.0.0, older than the 01.02.00.00 Kiln needs. Update Bambu Studio (free) and Kiln adds the "
+            "printer's own: bambulab.com/download/studio." in result.message
+        )
+
+    def test_a_record_naming_no_such_routines_changes_nothing(self, tmp_path, notes):
+        record = {**_ONE, "maker_slicer": {"name": "bambu_studio"}}
+        result = self._slice(tmp_path, slicer=_prusa(), record=record)
+        assert result.time_lapse is None and "time-lapse" not in result.message
+
+    def test_on_the_shared_server_the_file_says_it_and_nothing_is_said_or_kept(self, tmp_path, notes, monkeypatch):
+        monkeypatch.setattr(maker_slicer_notes, "_hosted", lambda: True)
+        result = self._slice(tmp_path, slicer=_prusa())
+        assert result.time_lapse == {"in_file": False} and "time-lapse" not in result.message
+        assert not notes.exists()

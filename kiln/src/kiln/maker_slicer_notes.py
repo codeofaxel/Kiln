@@ -1,5 +1,6 @@
 """What Kiln tells a person whose printer it slices for more than one nozzle
-while that printer's maker's slicer is missing or too old on this computer.
+while that printer's maker's slicer is missing or too old on this computer,
+and a person whose print is made without the printer's own routines.
 
 Such a print is never refused for it: it is sliced for one nozzle, with
 filament swaps (:mod:`kiln.maker_slicer`).  This module owns the words and
@@ -19,6 +20,10 @@ how often they are said, so every door says the same thing:
 * **Setting up** (:func:`setup_line`): when a printer is added, or its owner
   records a second nozzle as fitted, one line, once per printer.
 * **The checkup** (:func:`doctor_row`): a status row, every run.
+* **A print without the printer's own routines** (:func:`after_layer_routines`):
+  a slice for one nozzle made by a slicer other than the printer's maker's
+  has no time-lapse step.  It says so, with what adds it, the first time on
+  a printer and again when what adds it changes.
 
 Kiln never installs a slicer.  It names the maker's page and, on a Mac with
 Homebrew, the command (:func:`kiln.maker_slicer.install_words`); an agent may
@@ -218,6 +223,66 @@ def after_slice(
     except Exception:  # noqa: BLE001 -- a note never costs a slice
         logger.debug("maker slicer note not said", exc_info=True)
     return result
+
+
+#: What a print made without the printer's own routines lacks, as said.
+NO_TIME_LAPSE = "This print has no time-lapse step"
+
+
+def after_layer_routines(result: Any, *, printer: str | None, miss: Any, made_with: Any = None) -> Any:
+    """*result*, a slice for one nozzle made without the printer's own
+    routines for the reason *miss* names
+    (:func:`kiln.maker_slicer.slicer_for_layer_routines`); *made_with* is
+    the slicer that made it.
+
+    ``time_lapse`` says the file has no time-lapse step.  The message says
+    so, with what adds it, the first time on a printer (*printer*, its id;
+    ``None`` says it every time) and again when what adds it changes;
+    ``time_lapse.maker_slicer`` then carries the same.  On Kiln's shared
+    server nothing is kept and nothing is said: a server's slicer is not the
+    person's to change.  Never raises.
+    """
+    try:
+        if miss is None:
+            return result
+        block: dict[str, Any] = {"in_file": False}
+        result.time_lapse = block
+        if _hosted():
+            return result
+        said_for = str(miss.need or "none")
+        if printer is not None and _note(printer).get("time_lapse") == said_for:
+            return result
+        sentence, fields = _time_lapse_words(miss, made_with)
+        block["maker_slicer"] = fields
+        result.message = f"{result.message} {sentence}".strip()
+        if printer is not None:
+            _note(printer, time_lapse=said_for)
+    except Exception:  # noqa: BLE001 -- a note never costs a slice
+        logger.debug("time-lapse note not said", exc_info=True)
+    return result
+
+
+def _time_lapse_words(miss: Any, made_with: Any) -> tuple[str, dict[str, Any]]:
+    """The sentence for a print made without the printer's own routines
+    because of *miss*, and the fields an answer carries."""
+    from kiln.maker_slicer import INSTALL, UPDATE, USE, said_name
+
+    fields: dict[str, Any] = {"name": miss.said, "need": miss.need}
+    if miss.need == USE:
+        if miss.path:
+            fields["path"] = miss.path
+        return (
+            f"{NO_TIME_LAPSE}: it was sliced with {said_name(made_with)}. {miss.said} is installed: "
+            "slice with it and Kiln adds the printer's own.",
+            fields,
+        )
+    if miss.need in (INSTALL, UPDATE):
+        where, words = _get_it(miss)
+        fields.update(words)
+        lead = f"{NO_TIME_LAPSE}: {miss.why}." if miss.why else f"{NO_TIME_LAPSE}."
+        then = " and slice with it," if miss.need == INSTALL else ""
+        return f"{lead} {_what_to_do(miss)}{then} and Kiln adds the printer's own: {where}.", fields
+    return f"{NO_TIME_LAPSE}: {miss.why or 'the printer settings Kiln reads it from are missing'}.", fields
 
 
 def _said_one_nozzle(

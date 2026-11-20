@@ -1,4 +1,5 @@
-"""The slicer a slice for more than one nozzle is made with.
+"""The slicer a slice for more than one nozzle is made with, and the
+printer's own routines a slice carries.
 
 A printer's nozzle record names its maker's slicer (``maker_slicer``).  For
 one slice this module answers which installed slicer makes it
@@ -8,6 +9,11 @@ sentence; whether that slicer is ready on this computer, without slicing
 (:func:`ready_for`); and where a person gets it (:func:`install_words`).  It
 also writes the settings file and the plate a slicer of PrusaSlicer's kind is
 handed (:func:`several_nozzle_profile`, :func:`with_tower_position`).
+
+A slice for one nozzle is printed in Kiln's own print package.  It carries
+the routines the record names for such a print when the maker's slicer is
+the one making it, read by the same reader (:func:`slicer_for_layer_routines`);
+Kiln never changes slicer for them.
 
 Every slice door reaches this through :func:`kiln.slicer.slice_file`.  What a
 slice does when the maker's slicer cannot make it -- one nozzle instead, or a
@@ -20,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -29,6 +36,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: The refusal's code at every door.
 NEEDS_MAKER_SLICER = "MULTI_NOZZLE_NEEDS_MAKER_SLICER"
@@ -64,20 +73,25 @@ _KNOWN: dict[str, _Known] = {
 #: What a person does about a :class:`Miss`.
 INSTALL = "install"
 UPDATE = "update"
+#: The maker's slicer is installed and another slicer made the slice.
+USE = "use"
 
 
 @dataclass(frozen=True)
 class Miss:
-    """Why the maker's slicer cannot make a slice for more than one nozzle
-    on this computer, when installing or updating it is the fix: ``slicer``
-    is the record's word for it, ``need`` :data:`INSTALL` or :data:`UPDATE`,
-    ``have`` the version installed and ``floor`` the oldest Kiln accepts,
-    when known."""
+    """Why the maker's slicer cannot make a slice on this computer, or did
+    not: ``slicer`` is the record's word for it, ``need`` :data:`INSTALL`,
+    :data:`UPDATE` or :data:`USE` (slicing with it, at ``path``, is the
+    fix), or ``None`` when nothing the person does fixes it; ``have`` the
+    version installed and ``floor`` the oldest Kiln accepts, when known;
+    ``why`` the clause saying what is wrong, when there is one."""
 
     slicer: str
-    need: str
+    need: str | None
     have: str | None = None
     floor: str | None = None
+    why: str | None = None
+    path: str | None = None
 
     @property
     def said(self) -> str:
@@ -98,7 +112,8 @@ TOWER_SQUARE_MM = 60.0
 
 @dataclass(frozen=True)
 class SeveralNozzleSlicer:
-    """The slicer chosen for a slice for more than one nozzle.
+    """The maker's slicer chosen for a slice for more than one nozzle, or
+    making a slice for one nozzle with the printer's own routines.
 
     ``sliced_with`` names it for the slice's result and the sliced file's
     record: ``slicer`` (the record's own word for it), ``name``, ``version``,
@@ -159,6 +174,15 @@ def is_slicer(slicer_id: str, info: Any) -> bool:
     seen = f"{getattr(info, 'name', '') or ''} {os.path.basename(getattr(info, 'path', '') or '')}".lower()
     banner = str(getattr(info, "version", "") or "").lower()
     return any(mark in seen or mark in banner for mark in _KNOWN[slicer_id].marks)
+
+
+def said_name(info: Any) -> str:
+    """The installed slicer *info* as people call it: a slicer Kiln knows
+    by its name, any other by its program's file name."""
+    for slicer_id, known in _KNOWN.items():
+        if is_slicer(slicer_id, info):
+            return known.said
+    return os.path.basename(getattr(info, "path", "") or "") or "the slicer in use"
 
 
 def _find(slicer_id: str) -> Any | None:
@@ -330,11 +354,65 @@ def slicer_for_several_nozzles(
     sliced_with: dict[str, Any] = {"slicer": slicer_id, "name": said, "version": shown}
     routines: dict[str, str] = {}
     if named["routines"] is not None:
-        routines, bundle, bundle_version = _maker_routines(
-            info.path, named["routines"], slicer_id, _nozzle_size(profile),
-        )
+        try:
+            routines, bundle, bundle_version = _maker_routines(
+                info.path, named["routines"], slicer_id, _nozzle_size(profile), "keys",
+            )
+        except _Unready as unready:
+            raise _miss(slicer_id, unready.why, need=unready.need) from None
         sliced_with.update({"profile": bundle, "profile_version": bundle_version})
     return SeveralNozzleSlicer(info=info, sliced_with=sliced_with, routines=routines)
+
+
+def slicer_for_layer_routines(
+    nozzles: Any, current: Any, *, profile: str | None = None,
+) -> SeveralNozzleSlicer | Miss | None:
+    """The routines a slice for one nozzle of the printer whose record is
+    *nozzles* carries, read from its maker's slicer.
+
+    Such a slice is printed in Kiln's own print package, which writes its
+    start, end and filament changes; the record's ``layer_keys`` name the
+    maker's routines that run within the print.  They are read only when
+    *current*, the slicer making the slice, is the maker's: Kiln never
+    changes slicer for them.  *profile* is the slice's settings file, whose
+    nozzle size picks the maker's preset.
+
+    Returns the :class:`SeveralNozzleSlicer` carrying them; a :class:`Miss`
+    when the slice is made without them (``need`` :data:`USE` when the
+    maker's slicer is installed and another made the slice, :data:`INSTALL`
+    when it is not installed, :data:`UPDATE` when it is older than the
+    record accepts, else ``None`` with ``why``); ``None`` when the record
+    names no such routines.  Never raises.
+    """
+    try:
+        raw = nozzles.get("maker_slicer") if isinstance(nozzles, Mapping) else None
+        asked = raw.get("routines") if isinstance(raw, Mapping) else None
+        if not isinstance(asked, Mapping) or asked.get("layer_keys") is None or raw.get("name") not in _KNOWN:
+            return None
+        slicer_id = raw["name"]
+        if not is_slicer(slicer_id, current):
+            installed = _find(slicer_id)
+            if installed is None:
+                return Miss(slicer=slicer_id, need=INSTALL)
+            return Miss(slicer=slicer_id, need=USE, path=getattr(installed, "path", None))
+        floor = raw.get("min_version") if isinstance(raw.get("min_version"), str) else None
+        shown, old = _version_miss(slicer_id, current, floor)
+        if old is not None:
+            return old
+        try:
+            routines, bundle, bundle_version = _maker_routines(
+                current.path, asked, slicer_id, _nozzle_size(profile), "layer_keys",
+            )
+        except _Unready as unready:
+            return Miss(slicer=slicer_id, need=unready.need, why=unready.why)
+        sliced_with = {
+            "slicer": slicer_id, "name": _KNOWN[slicer_id].said, "version": shown,
+            "profile": bundle, "profile_version": bundle_version,
+        }
+        return SeveralNozzleSlicer(info=current, sliced_with=sliced_with, routines=routines)
+    except Exception:  # noqa: BLE001 -- a routine that cannot be judged is never worth a slice
+        logger.debug("printer's per-layer routines not judged", exc_info=True)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -452,20 +530,33 @@ def _resolved(bundle: _Bundle, name: str, depth: int = 0) -> dict[str, Any]:
     return out
 
 
+class _Unready(Exception):
+    """Why the routines a record asks for cannot be read here: ``why``, a
+    clause, and ``need``, :data:`UPDATE` when updating the slicer is the fix."""
+
+    def __init__(self, why: str, *, need: str | None = None) -> None:
+        super().__init__(why)
+        self.why = why
+        self.need = need
+
+
 def _maker_routines(
-    slicer_path: str, asked: Mapping[str, Any], slicer_id: str, nozzle_size: str,
+    slicer_path: str, asked: Mapping[str, Any], slicer_id: str, nozzle_size: str, which: str,
 ) -> tuple[dict[str, str], str, str | None]:
     """The routines the record asks for, read from the installed slicer's
     newest copy of its maker's settings: ``(routines, profile, version)``.
 
     *asked* names the bundle (``vendor``), the printer preset in it
-    (``preset``, where ``{nozzle}`` stands for the nozzle size), the
-    routines to read (``keys``) and the lowest bundle version accepted
+    (``preset``, where ``{nozzle}`` stands for the nozzle size), the lists
+    of routines to read (*which* names the list: ``keys`` for a slice for
+    more than one nozzle, ``layer_keys`` for one printed in Kiln's own
+    package) and the lowest bundle version accepted
     (``min_profile_version``).  Each routine is its text as the bundle
-    writes it, ready for a settings file of the same kind.
+    writes it, ready for a settings file of the same kind.  Raises
+    :class:`_Unready`.
     """
     said = _KNOWN[slicer_id].said
-    vendor, preset, keys = asked.get("vendor"), asked.get("preset"), asked.get("keys")
+    vendor, preset, keys = asked.get("vendor"), asked.get("preset"), asked.get(which)
     usable = (
         isinstance(vendor, str) and re.fullmatch(r"[A-Za-z0-9_]+", vendor)
         and isinstance(preset, str) and preset
@@ -473,7 +564,7 @@ def _maker_routines(
         and all(isinstance(key, str) and _ROUTINE_KEY.fullmatch(key) for key in keys)
     )
     if not usable:
-        raise _miss(slicer_id, "this printer's record does not say where its routines are kept")
+        raise _Unready("this printer's record does not say where its routines are kept")
     wanted = preset.replace("{nozzle}", nozzle_size)
     read = _BUNDLE_READERS[_KNOWN[slicer_id].bundle]
     newest: _Bundle | None = None
@@ -483,21 +574,21 @@ def _maker_routines(
             if newest is None or bundle.version > newest.version:
                 newest = bundle
     if newest is None:
-        raise _miss(slicer_id, f"the {said} installed does not hold its maker's printer settings where Kiln can read them")
+        raise _Unready(f"the {said} installed does not hold its maker's printer settings where Kiln can read them")
     shown = ".".join(str(part) for part in newest.version) or None
     floor = asked.get("min_profile_version")
     if isinstance(floor, str) and _older(shown, floor):
-        raise _miss(
-            slicer_id, f"the printer settings in the {said} installed are version {shown}, older than the {floor} Kiln needs",
+        raise _Unready(
+            f"the printer settings in the {said} installed are version {shown}, older than the {floor} Kiln needs",
             need=UPDATE,
         )
     try:
         resolved = _resolved(newest, wanted)
     except (KeyError, OSError, ValueError):
-        raise _miss(slicer_id, f"the {said} installed has no settings for this printer with that nozzle") from None
+        raise _Unready(f"the {said} installed has no settings for this printer with that nozzle") from None
     routines = {key: resolved[key] for key in keys if isinstance(resolved.get(key), str)}
     if len(routines) != len(keys):
-        raise _miss(slicer_id, f"the {said} installed does not state every routine this printer needs")
+        raise _Unready(f"the {said} installed does not state every routine this printer needs")
     return routines, vendor, shown
 
 

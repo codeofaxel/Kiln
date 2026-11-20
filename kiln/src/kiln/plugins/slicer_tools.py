@@ -3138,7 +3138,13 @@ class _SlicerToolsPlugin:
                 printer_id: Optional printer model ID for bundled profile
                     auto-selection (e.g. ``"prusa_mini"``).
                 slicer_path: Explicit path to the slicer binary.  Auto-detected
-                    if omitted.
+                    if omitted.  A print for a printer whose maker's slicer
+                    runs its own routines within a print carries them only
+                    when that slicer makes it; made by another, the result's
+                    ``time_lapse`` says the file has no time-lapse step, and
+                    the first time on a printer ``time_lapse.maker_slicer``
+                    says what adds one: install or update it, or, with
+                    ``need: "use"``, slice with it at ``path``.
                 material: Filament material for this slice (``"PLA"``,
                     ``"PETG"``, ``"TPU"``, …, or a product such as
                     ``"bambu_tpu_95a"``).  It sets the slice's temperatures,

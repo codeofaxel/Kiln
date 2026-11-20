@@ -1325,13 +1325,27 @@ def _find_max_z(gcode_body: str) -> float:
     return max(float(z) for z in z_heights) if z_heights else 10.0
 
 
+#: The firmware's layer notice, as a slicer writes it from a printer's own
+#: per-layer routine: ``M991 S0 P<n>``, the layer counted from 0.
+_LAYER_NOTICE = re.compile(r"^M991 S0 P\d+\b")
+#: The layer the printer's screen shows: ``M73 L<n>``, counted from 1.
+_SCREEN_LAYER = re.compile(r"^M73 L\d+\b")
+
+
 def _postprocess_prusa_body(
     gcode_body: str,
     *,
     total_layers: int,
     est_time_sec: int,
 ) -> str:
-    """Post-process PrusaSlicer gcode body for Bambu firmware compatibility."""
+    """Post-process a sliced gcode body for Bambu firmware compatibility.
+
+    Every layer tells the printer which layer it is: the layer its screen
+    shows (``M73 L``, counted from 1) and the firmware's layer notice
+    (``M991 S0 P``, counted from 0).  A body whose slicer wrote them from
+    the printer's own routine keeps its lines and gets none of these.  The
+    progress lines (``M73 P R``) are Kiln's, at every layer.
+    """
     body_lines = gcode_body.split("\n")
 
     _skip_prefixes = (
@@ -1356,6 +1370,7 @@ def _postprocess_prusa_body(
         else:
             cleaned.append(line)
 
+    own_notice = any(_LAYER_NOTICE.match(line.strip()) for line in cleaned)
     layer_num = 0
     processed: list[str] = []
     for line in cleaned:
@@ -1363,12 +1378,13 @@ def _postprocess_prusa_body(
         if LAYER_CHANGE_LINE.match(stripped):
             layer_num += 1
             processed.append(line)
-            processed.append(
-                f"; layer num/total_layer_count: {layer_num}/{total_layers}"
-            )
-            processed.append("; update layer progress")
-            processed.append(f"M73 L{layer_num}")
-            processed.append("M991 S0 P0 ;notify layer change")
+            if not own_notice:
+                processed.append(
+                    f"; layer num/total_layer_count: {layer_num}/{total_layers}"
+                )
+                processed.append("; update layer progress")
+                processed.append(f"M73 L{layer_num}")
+                processed.append(f"M991 S0 P{layer_num - 1} ;notify layer change")
             pct = min(int(layer_num * 100 / total_layers), 99)
             remaining_sec = max(
                 60, int((total_layers - layer_num) * est_time_sec / total_layers)
@@ -1377,6 +1393,8 @@ def _postprocess_prusa_body(
             processed.append(f"M73 P{pct} R{remaining_min}")
             continue
         if stripped.startswith("M73 ") or stripped == "M73":
+            if own_notice and _SCREEN_LAYER.match(stripped):
+                processed.append(line)
             continue
         processed.append(line)
 

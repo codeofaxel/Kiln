@@ -1300,15 +1300,26 @@ def fitted_record(nozzles: Any, positions: Any) -> dict[str, Any] | None:
 
     ``None`` when a slice with it uses one nozzle and the owner fitted no
     more than that -- so a printer sliced with one nozzle carries nothing,
-    exactly as with no statement.  *positions* is the shape
-    :func:`kiln._pro_nozzle_bridge.recorded_positions_of` reads; ``None`` or
-    no fitted entry is no statement.
+    exactly as with no statement -- unless the record names its maker's
+    routines for a print for one nozzle (:func:`kiln.maker_slicer.slicer_for_layer_routines`).
+    *positions* is the shape :func:`kiln._pro_nozzle_bridge.recorded_positions_of`
+    reads; ``None`` or no fitted entry is no statement.
     """
     record = _with_fitted(nozzles, positions)
     if record is None:
         return None
     used = nozzle_positions(record)
-    return record if used >= 2 or fitted_count(record) > used else None
+    if used >= 2 or fitted_count(record) > used or _names_layer_routines(record):
+        return record
+    return None
+
+
+def _names_layer_routines(record: Mapping[str, Any]) -> bool:
+    """Whether the nozzle record *record* names routines of its maker's
+    slicer for a print for one nozzle (``maker_slicer.routines.layer_keys``)."""
+    maker = record.get("maker_slicer")
+    routines = maker.get("routines") if isinstance(maker, Mapping) else None
+    return isinstance(routines, Mapping) and isinstance(routines.get("layer_keys"), list)
 
 
 def fitted_size_mm(nozzles: Any) -> float | None:
