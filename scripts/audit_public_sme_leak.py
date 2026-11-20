@@ -96,6 +96,16 @@ is a per-material recipe, which, like a number or a note per printer, is
 judged without the field count, because a cell per material per printer is
 the matrix itself.
 
+Python source is also read by SHAPE, beside the field-name scan above: any
+mapping literal, at any depth of any public module, whose keys name at least
+three catalogued printer ids (the public roster) from at least two makers,
+with numbers in at least two of those rows, is a per-printer table and FAILS
+unless ``_PY_TABLE_ALLOWLIST`` names it with a reason.  It is read whatever
+the mapping and its fields are called and whether or not the module also
+loads an overlay.  Bounds: a table built at runtime, keyed by something
+other than a roster id (an alias, a tuple), or split into per-printer
+variables is not seen.
+
     python3 scripts/audit_public_sme_leak.py          # exit 0 clean, 2 leak
     python3 scripts/audit_public_sme_leak.py --json   # CI / machine format
     python3 scripts/audit_public_sme_leak.py --data-root <dir>  # judge another data tree
@@ -250,6 +260,120 @@ def scan() -> list[dict]:
 
 def _is_leak(finding: dict) -> bool:
     return not finding["overlay_loader"] and not finding["allowlisted"]
+
+
+# ---------------------------------------------------------------------------
+# Python source, judged by shape
+# ---------------------------------------------------------------------------
+
+#: A mapping in public source is a per-printer table when its keys name at
+#: least this many catalogued printers, from at least ``_PY_MAKERS_MIN``
+#: makers, and at least ``_PY_NUMBER_ROWS_MIN`` of those printers' rows
+#: carry a number.  Read from the syntax tree, whatever the mapping and its
+#: fields are called and whether or not the module also loads an overlay.
+_PY_PRINTER_KEYS_MIN = 3
+_PY_MAKERS_MIN = 2
+_PY_NUMBER_ROWS_MIN = 2
+
+#: Reviewed public-safe mappings: ``"<path>::<NAME>"`` -> reason.  A mapping
+#: here is a free floor that a public door cannot work without.  Default to
+#: moving the table to kiln-pro instead.
+_PY_TABLE_ALLOWLIST: dict[str, str] = {}
+
+
+def _catalogue_roster(data: Path) -> dict[str, dict]:
+    """The public roster rows (id -> row), the generic row left out."""
+    try:
+        doc = json.loads((data / "printer_intelligence.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return {
+        str(k): v
+        for k, v in doc.items()
+        if isinstance(v, dict) and not str(k).startswith("_") and k != "default"
+    }
+
+
+def _roster_maker(pid: str, row: dict) -> str:
+    """The maker a roster row names: a known vendor word in its id or
+    display name, else the first word of its display name."""
+    named = _row_vendors(pid, row)
+    if named:
+        return min(named)
+    words = re.findall(r"[a-z0-9]+", str(row.get("display_name") or pid).lower())
+    return words[0] if words else pid
+
+
+def _carries_number(node: ast.AST) -> bool:
+    return any(
+        isinstance(n, ast.Constant)
+        and isinstance(n.value, (int, float))
+        and not isinstance(n.value, bool)
+        for n in ast.walk(node)
+    )
+
+
+def _mapping_name(tree: ast.Module, target: ast.Dict) -> str:
+    """The name a mapping is bound to at module level, else its line."""
+    for stmt in tree.body:
+        value = getattr(stmt, "value", None)
+        if value is target:
+            if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+                name = stmt.targets[0]
+                if isinstance(name, ast.Name):
+                    return name.id
+            if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                return stmt.target.id
+    return f"<mapping at line {target.lineno}>"
+
+
+def scan_python_tables(src: Path = _SRC, data: Path | None = None) -> list[dict]:
+    """Every mapping literal in public Python, at any depth, that is a
+    per-printer table of numbers: keyed by several catalogued printer ids
+    from more than one maker, with numbers in their rows.  One record each,
+    ``allowlisted`` set when ``_PY_TABLE_ALLOWLIST`` names it."""
+    roster = _catalogue_roster(data if data is not None else src / "data")
+    if not roster:
+        return []
+    findings: list[dict] = []
+    for path in sorted(src.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
+            continue
+        rel = path.relative_to(src.parent.parent.parent).as_posix()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            printers: list[str] = []
+            numbered = 0
+            for key, value in zip(node.keys, node.values):
+                if (
+                    isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and key.value in roster
+                ):
+                    printers.append(key.value)
+                    if _carries_number(value):
+                        numbered += 1
+            if len(printers) < _PY_PRINTER_KEYS_MIN or numbered < _PY_NUMBER_ROWS_MIN:
+                continue
+            makers = {_roster_maker(p, roster[p]) for p in printers}
+            if len(makers) < _PY_MAKERS_MIN:
+                continue
+            name = _mapping_name(tree, node)
+            findings.append(
+                {
+                    "file": rel,
+                    "name": name,
+                    "line": node.lineno,
+                    "printers": len(printers),
+                    "rows_with_numbers": numbered,
+                    "makers": sorted(makers),
+                    "allowlisted": f"{rel}::{name}" in _PY_TABLE_ALLOWLIST,
+                }
+            )
+    return findings
 
 
 # ---------------------------------------------------------------------------
@@ -1283,6 +1407,28 @@ def _print_data_report(result: dict) -> None:
         )
 
 
+def _print_python_tables(tables: list[dict]) -> None:
+    leaks = [t for t in tables if not t["allowlisted"]]
+    if not leaks:
+        print(
+            "per-printer tables in Python source: none "
+            f"({len(tables) - len(leaks)} allowlisted)."
+        )
+        return
+    print("\nPER-PRINTER TABLE IN PUBLIC PYTHON SOURCE:\n")
+    for t in leaks:
+        print(f"  {t['file']}:{t['line']}  {t['name']}")
+        print(
+            f"      {t['printers']} catalogued printers from {len(t['makers'])} makers "
+            f"({', '.join(t['makers'])}); {t['rows_with_numbers']} rows carry numbers"
+        )
+    print(
+        "\nFix: move the table to kiln-pro and serve it, leaving public a plain "
+        "fallback that names no model.  A free floor a public door cannot work "
+        "without goes in _PY_TABLE_ALLOWLIST with its reason."
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--json", action="store_true", help="machine output")
@@ -1300,11 +1446,18 @@ def main(argv: list[str] | None = None) -> int:
     findings = scan()
     leaks = [f for f in findings if _is_leak(f)]
     exonerated = [f for f in findings if not _is_leak(f)]
+    tables = scan_python_tables()
+    table_leaks = [t for t in tables if not t["allowlisted"]]
     data = judge_data(args.data_root, ledger_path=args.ledger)
-    failing = bool(leaks) or bool(data["failures"])
+    failing = bool(leaks) or bool(table_leaks) or bool(data["failures"])
 
     if args.json:
-        print(json.dumps({"leaks": leaks, "all": findings, "data": data}, indent=2))
+        print(
+            json.dumps(
+                {"leaks": leaks, "all": findings, "python_tables": tables, "data": data},
+                indent=2,
+            )
+        )
         return 2 if failing else 0
 
     if not leaks:
@@ -1329,6 +1482,7 @@ def main(argv: list[str] | None = None) -> int:
             "genuinely a public floor (datasheet, schema, manifest mirror), add "
             "a reviewed (path, reason) entry to _ALLOWLIST."
         )
+    _print_python_tables(tables)
     _print_data_report(data)
     return 2 if failing else 0
 

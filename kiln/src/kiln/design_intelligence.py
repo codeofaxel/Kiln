@@ -2702,7 +2702,7 @@ def _derive_manufacturer(printer_id: str, display_name: str) -> str:
 # Fallback estimates for printers without a curated printer_profiles.json
 # record. Input-shaping machines (CoreXY / modern fast bedslingers) get a
 # tighter tolerance and higher default speed than open-loop bedslingers.
-# Curated records override all of these where a hand-tuned value exists.
+# A printer's own catalogue record overrides all of these.
 _DERIVED_SPEED_WITH_IS_MM_S = 250
 _DERIVED_SPEED_DEFAULT_MM_S = 150
 _DERIVED_TOLERANCE_WITH_IS_MM = 0.15
@@ -2717,10 +2717,9 @@ def _design_profile_from_intel(
     entry, for printers without a hand-curated ``printer_profiles.json``
     record.  Fields the spec sheet doesn't carry (tolerance, layer-height
     ladder) use standard 0.4mm-nozzle FDM defaults; max speed is read from
-    the curated speed table when present, else estimated from input-shaping.
+    the row's own ``max_speed_mm_s`` when it states one, else estimated from
+    input shaping.
     """
-    from kiln.printer_intelligence import _SPEED_CAPABILITIES
-
     bv = raw.get("build_volume_mm") or [0, 0, 0]
     if isinstance(bv, dict):
         build = {"x": int(bv.get("x", 0)), "y": int(bv.get("y", 0)), "z": int(bv.get("z", 0))}
@@ -2728,9 +2727,9 @@ def _design_profile_from_intel(
         build = {"x": int(bv[0]), "y": int(bv[1]), "z": int(bv[2])} if len(bv) >= 3 else {"x": 0, "y": 0, "z": 0}
 
     has_is = bool(raw.get("has_input_shaping"))
-    caps = _SPEED_CAPABILITIES.get(printer_id)
+    stated = raw.get("max_speed_mm_s")
     max_speed = (
-        int(caps["max_speed"]) if caps and caps.get("max_speed")
+        int(stated) if isinstance(stated, (int, float)) and not isinstance(stated, bool) and stated > 0
         else (_DERIVED_SPEED_WITH_IS_MM_S if has_is else _DERIVED_SPEED_DEFAULT_MM_S)
     )
     materials = sorted({str(m).lower() for m in (raw.get("materials") or {})})
