@@ -43,7 +43,10 @@ from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["COLD_MAX_C", "SENDER", "WALK_VERBS", "WalkRefused", "walk_offer", "walk_step", "walk_went_wrong"]
+__all__ = [
+    "COLD_MAX_C", "SENDER", "WALK_LARGEST", "WALK_LARGEST_MOTOR", "WALK_M221_SHAPES", "WALK_NEEDS_ONE_OF", "WALK_VERBS", "WALK_WORDS", "WalkRefused",
+    "walk_offer", "walk_step", "walk_went_wrong",
+]
 
 #: This module's name in :data:`kiln.outbound_guard.VERSION_FIELDS`.
 SENDER = "kiln/printers/motion_walk.py"
@@ -71,10 +74,10 @@ WALK_IDLE_S: float = 30 * 60
 _NUMBER = re.compile(r"-?(?:\d{1,5}(?:\.\d{1,4})?)")
 #: The largest size a number may have, by word and letter: no desktop
 #: printer travels further, moves faster or drives a motor harder.
-_LARGEST: dict[str, float] = {"X": 400.0, "Y": 400.0, "Z": 400.0, "F": 30000.0}
-_LARGEST_MOTOR: float = 2.0
+WALK_LARGEST: dict[str, float] = {"X": 400.0, "Y": 400.0, "Z": 400.0, "F": 30000.0}
+WALK_LARGEST_MOTOR: float = 2.0
 _WORD = re.compile(r"[A-Z](?:-?\d+(?:\.\d+)?)?")
-_ALLOWED: dict[str, dict[str, tuple[str, ...] | None]] = {
+WALK_WORDS: dict[str, dict[str, tuple[str, ...] | None]] = {
     "G90": {},
     "G91": {},
     "G0": {"X": None, "Y": None, "Z": None, "F": None},
@@ -85,9 +88,9 @@ _ALLOWED: dict[str, dict[str, tuple[str, ...] | None]] = {
     "M221": {"S": ("",), "R": ("",), "X": ("0",), "Y": ("0",), "Z": ("0",)},
 }
 #: Words that must carry at least one of these letters to mean anything here.
-_NEEDS_ONE_OF: dict[str, str] = {"G0": "XYZ", "G1": "XYZ", "G28": "XY", "G380": "Z", "M221": "SRXYZ"}
+WALK_NEEDS_ONE_OF: dict[str, str] = {"G0": "XYZ", "G1": "XYZ", "G28": "XY", "G380": "Z", "M221": "SRXYZ"}
 #: ``M221`` in exactly these shapes; with a number after ``S`` it is another command.
-_M221_SHAPES = (("S",), ("R",), ("X0", "Y0", "Z0"))
+WALK_M221_SHAPES = (("S",), ("R",), ("X0", "Y0", "Z0"))
 
 
 def _line_is_allowed(line: Any) -> bool:
@@ -105,7 +108,7 @@ def _line_is_allowed(line: Any) -> bool:
     words = line.split(" ")
     if any(_WORD.fullmatch(word) is None for word in words):
         return False
-    letters = _ALLOWED.get(words[0])
+    letters = WALK_WORDS.get(words[0])
     if letters is None:
         return False
     seen: set[str] = set()
@@ -118,15 +121,15 @@ def _line_is_allowed(line: Any) -> bool:
         if takes is None:
             if _NUMBER.fullmatch(value) is None:
                 return False
-            largest = _LARGEST_MOTOR if words[0] == "M17" else _LARGEST[letter]
+            largest = WALK_LARGEST_MOTOR if words[0] == "M17" else WALK_LARGEST[letter]
             if abs(float(value)) > largest or (letter == "F" and float(value) <= 0):
                 return False
         elif value not in takes:
             return False
-    needed = _NEEDS_ONE_OF.get(words[0])
+    needed = WALK_NEEDS_ONE_OF.get(words[0])
     if needed is not None and not seen & set(needed):
         return False
-    return not (words[0] == "M221" and tuple(words[1:]) not in _M221_SHAPES)
+    return not (words[0] == "M221" and tuple(words[1:]) not in WALK_M221_SHAPES)
 
 
 #: Where each walk stands in this process: ``{(machine, verb): (next step, when)}``.
