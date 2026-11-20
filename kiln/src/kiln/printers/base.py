@@ -2343,7 +2343,7 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "engagement not recorded", exc_info=True
                 )
-            print_keeping.print_started(outcome_printer_name(self), keeping)
+            print_keeping.print_started(outcome_printer_name(self), file_name, keeping)
             result.print_kept = keeping.level
             result.print_kept_said = keeping.said
             try:

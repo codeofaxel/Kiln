@@ -350,3 +350,58 @@ class TestTheRunningPrintsRecord:
         assert monitor_twin.active_twin("shop-x1") is not None
         _start(adapter)  # the next print replaces it
         assert monitor_twin.active_twin("shop-x1").get("kept") is None
+
+
+class TestWhenSomethingGoesWrongTheAskStands:
+    """A failure while deciding never turns a print the person asked not to
+    keep into a kept one, and never sends what they keep on this computer."""
+
+    def test_a_decision_that_raises_keeps_nothing_of_a_print_asked_not_to_be_kept(self, home, monkeypatch):
+        def _boom(*a, **k):
+            raise RuntimeError("the team rules could not be read")
+
+        monkeypatch.setattr(print_keeping, "_team_rule_at_start", _boom)
+        adapter = _printer()
+        out = _start(adapter, keep_record=False, design_id="team-design")
+        assert out["success"] is True and out["print_kept"] == "none"
+        assert out.get("kept_note") == print_keeping.NOT_KEPT_SAID
+        _end(adapter)
+        assert _rows() == []
+        from kiln.persistence import get_db
+
+        assert get_db().outcomes_owed_to_account() == []
+        assert monitor_twin.active_twin("shop-x1") is None
+        assert "secret_part" not in _everything_on_disk(home)
+
+    def test_this_computer_only_never_becomes_the_account_on_a_failure(self, home, monkeypatch):
+        print_keeping.remember_account_choice(print_keeping.COMPUTER)
+
+        def _boom(*a, **k):
+            raise RuntimeError("the team rules could not be read")
+
+        monkeypatch.setattr(print_keeping, "_team_rule_at_start", _boom)
+        out = _start(_printer())
+        assert out["print_kept"] == "local"
+
+    def test_an_unreadable_choice_keeps_history_on_this_computer(self, home):
+        from kiln import sharing_consent
+
+        path = sharing_consent.store_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json", encoding="utf-8")
+        assert print_keeping.account_choice() == print_keeping.COMPUTER
+        assert print_keeping.may_leave() is False
+
+    def test_an_unreadable_running_record_writes_nothing(self, home, monkeypatch):
+        def _boom(*a, **k):
+            raise OSError("the start record could not be read")
+
+        monkeypatch.setattr(print_keeping, "_running", _boom)
+        assert print_keeping.level_of("shop-x1", "secret_part.gcode") == print_keeping.NONE
+
+    def test_a_lost_start_record_still_keeps_nothing_in_this_process(self, home, monkeypatch):
+        adapter = _printer()
+        monkeypatch.setattr(monitor_twin, "note_print_started", lambda *a, **k: None)
+        _start(adapter, keep_record=False)
+        _end(adapter)
+        assert _rows() == []

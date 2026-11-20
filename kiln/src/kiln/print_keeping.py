@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import contextvars
 import functools
+import json
 import logging
 import os
 import threading
@@ -85,9 +86,10 @@ _TEAM_RULES_KEY = "team_print_rules"
 _TEAM_RULES_READ_KEY = "team_print_rules_read_at"
 _TEAM_TOLD_KEY = "team_print_rules_told"
 
-# A print not kept that this process saw end, per printer: the file's base
-# name.  In memory only, so a writer that runs after the start record was
-# deleted still knows; cleared by the next start on that printer.
+# A print not kept that this process started or saw end, per printer: the
+# file's base name.  In memory only, so a writer still knows when the start
+# record could not be written or was already deleted; cleared by the next
+# start on that printer.
 _ended_not_kept: dict[str, str] = {}
 _lock = threading.Lock()
 
@@ -120,11 +122,21 @@ def _sharing() -> Any:
 
 def account_choice() -> str:
     """The account's choice as this computer last read it: ``account`` (the
-    default, and the answer before any reading) or ``computer``."""
+    default, and the answer before any reading) or ``computer``.  A stored
+    answer that cannot be read reads as ``computer``: nothing leaves on a
+    choice nobody can see."""
     try:
-        value = _sharing()._read().get(_CHOICE_KEY)
-    except Exception:  # noqa: BLE001 -- an unreadable answer is no answer
-        value = None
+        path = _sharing().store_path()
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return ACCOUNT
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return COMPUTER
+        value = data.get(_CHOICE_KEY)
+    except Exception:  # noqa: BLE001 -- unreadable: keep it here
+        return COMPUTER
     return COMPUTER if value == COMPUTER else ACCOUNT
 
 
@@ -293,8 +305,12 @@ def decide(adapter: Any, file_name: str, kwargs: dict[str, Any], keep_record: bo
                                 said=team_sentence(rule, held=True))
             return Decision(KEPT, team=rule.get("name") or rule["org_id"], said=team_sentence(rule, held=False))
         return Decision(wanted, said=NOT_KEPT_SAID if wanted == NONE else None)
-    except Exception:  # noqa: BLE001 -- the account's way, never a refusal
+    except Exception:  # noqa: BLE001 -- the most private way asked for, never a refusal
         logger.debug("print keeping decision failed", exc_info=True)
+        if keep_record is False:
+            return Decision(NONE, said=NOT_KEPT_SAID)
+        if keep_record is True:
+            return Decision(KEPT)
         return Decision(LOCAL if account_choice() == COMPUTER else KEPT)
 
 
@@ -376,8 +392,9 @@ def level_of(printer_name: str | None, file_name: str | None = None) -> str:
             ended = _ended_not_kept.get(_slug(printer_name)) if printer_name else None
         if ended is not None and (not wanted or _stem(ended) == wanted):
             return NONE
-    except Exception:  # noqa: BLE001 -- unreadable reads as the account's way
+    except Exception:  # noqa: BLE001 -- unreadable: nothing is written
         logger.debug("print keeping level unreadable", exc_info=True)
+        return NONE
     return LOCAL if account_choice() == COMPUTER else KEPT
 
 
@@ -405,23 +422,28 @@ def may_leave(row: dict[str, Any] | None = None, *, printer_name: str | None = N
 
 
 def _hosted() -> bool:
-    """Kiln's shared server runs no printer: nothing here is kept there.  An
-    unknown posture counts as the shared server."""
+    """Kiln's shared server runs no printer: nothing here is kept there.  A
+    posture that cannot be read counts as a person's own computer, so a
+    print not kept is never recorded for want of an answer."""
     try:
         from kiln.runtime_env import is_hosted_multitenant
 
         return bool(is_hosted_multitenant())
     except Exception:  # noqa: BLE001
-        return True
+        return False
 
 
-def print_started(printer_name: str, decision: Decision) -> None:
-    """A print started: a new print on this printer is no longer the one that
-    ended, so the memory of a print not kept is cleared."""
+def print_started(printer_name: str, file_name: str, decision: Decision) -> None:
+    """A print started: this process remembers, in memory, a print the
+    person asked not to keep (so no writer records it even when its start
+    record could not be written), and forgets any earlier one."""
     if _hosted():
         return
     with _lock:
-        _ended_not_kept.pop(_slug(printer_name), None)
+        if decision.level == NONE:
+            _ended_not_kept[_slug(printer_name)] = os.path.basename(str(file_name or ""))
+        else:
+            _ended_not_kept.pop(_slug(printer_name), None)
 
 
 def print_ended(printer_name: str | None) -> bool:
@@ -433,18 +455,26 @@ def print_ended(printer_name: str | None) -> bool:
     if not printer_name or _hosted():
         return False
     try:
-        record = _running(printer_name)
-        if not isinstance(record, dict) or record.get("kept") != NONE:
-            return False
+        try:
+            record = _running(printer_name)
+        except Exception:  # noqa: BLE001 -- the memory below still answers
+            record = None
+        recorded = isinstance(record, dict) and record.get("kept") == NONE
         with _lock:
-            _ended_not_kept[_slug(printer_name)] = str(record.get("file_name") or "")
-        from kiln.monitor_twin import forget_print
+            remembered = _ended_not_kept.get(_slug(printer_name))
+        if not recorded and remembered is None:
+            return False
+        file_name = str(record.get("file_name") or "") if recorded else remembered
+        with _lock:
+            _ended_not_kept[_slug(printer_name)] = file_name or ""
+        if recorded:
+            from kiln.monitor_twin import forget_print
 
-        forget_print(printer_name)
+            forget_print(printer_name)
         try:
             from kiln.hardware_stops import forget_plans_for_file
 
-            forget_plans_for_file(record.get("file_name"))
+            forget_plans_for_file(file_name)
         except Exception:  # noqa: BLE001
             logger.debug("hardware plan of a print not kept not deleted", exc_info=True)
         from kiln.spool_usage import forget_charge
