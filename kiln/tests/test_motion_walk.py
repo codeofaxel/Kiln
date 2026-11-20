@@ -95,6 +95,7 @@ class _Servers:
         self.refuse: dict | None = None
         self.lines = {1: ["G91", "G0 Z1 F100", "G90"], 2: ["G0 X1 F100"], 3: ["G0 Y1 F100"]}
         self.reported: list[dict] = []
+        self.review: object = "reviewed"
 
     def __call__(self, tool: str, *, _asked_by_user: bool = True, **request):
         assert tool == "motion_plan"
@@ -111,6 +112,7 @@ class _Servers:
         return {"walk": {
             "schema": walk.SCHEMA, "printer_id": request["printer_id"], "verb": request["verb"],
             "steps_total": TOTAL, "firmware": asked.get("firmware"),
+            "review": self.review, "sequence": "0" * 32,
             "step": {"number": number, "label": f"made-up step {number}", "you_will_see": "something small",
                      "stops_when": "it ends", "gcode": list(self.lines[number]), "confirm": "Did it?",
                      "if_not": "Stop."},
@@ -281,11 +283,97 @@ class TestCold:
                                       "G1 E-0.5 F300", "m109 s140"])
     def test_a_handed_over_step_that_heats_or_extrudes_is_not_sent(self, printer, servers, line):
         servers.lines[1] = ["G91", line]
-        _refused("WARM_LINE_REFUSED", printer, servers, "park", 1, plate_clear=True)
+        _refused("LINE_REFUSED", printer, servers, "park", 1, plate_clear=True)
 
     def test_the_ceiling_itself_is_cold(self, printer, servers):
         printer.state.tool_temp_actual = printer.state.bed_temp_actual = walk.COLD_MAX_C
         assert _step(printer, 1)["success"]
+
+
+class TestOnlyTheLinesAWalkCarries:
+    """A step's lines are read against the short list of words a walk may
+    carry, written the one way they are sent.  Each shape below is a way a
+    line could say more than it appears to; each is refused, and nothing of
+    the step is sent."""
+
+    def _sent(self, printer, servers, line) -> None:
+        servers.lines[1] = ["G91", line, "G90"]
+        _refused("LINE_REFUSED", printer, servers, "park", 1, plate_clear=True)
+
+    @pytest.mark.parametrize("line", ["N10 M104 S200", "N10 G1 X5 F100", "N1 G28 X"])
+    def test_a_line_number_in_front(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["G1 X5 F100*71", "M104 S200*12", "G28 X*5"])
+    def test_a_checksum_behind(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["G1E5", "G1X10E2", "G1 X10E2", "M104S200", "G1X5F100", "G28X"])
+    def test_words_run_together(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["g1 x5 f100", "G1 x5 F100", "m104 s200", "g28 x"])
+    def test_lowercase(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["G1  X5 F100", " G1 X5 F100", "G1 X5 F100 ", "G1\tX5 F100", "G1 X5\u00a0F100"])
+    def test_odd_whitespace(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["G1 X5 F100\rM104 S200", "G1 X5 F100\nM104 S200", "G1 X5\x00 F100",
+                                      "G1 X5 F100\x1b", "G1 X5 F100\x7f", "G1 X5 F100\r"])
+    def test_a_carriage_return_or_control_character(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["G1 X5 F100 ; M104 S200", "G1 X5 F100 (heat)", ";G1 X5", "G1 X5 ;"])
+    def test_a_comment(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["G150", "G150.1", "G150.3", "M620 S0A", "M621 S0A", "M620.1 E F299 T240",
+                                      "PRINT_START", "CLEAN_NOZZLE", "M1002 gcode_claim_action : 14", "M98 P1"])
+    def test_a_makers_macro_or_routine(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["T0", "T1", "T255", "M104 T1 S200", "G1 X5 T1"])
+    def test_a_tool_change(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["M109", "M109 R200", "M109 S200 T0", "M190 R60", "M141 S50", "M191 S50",
+                                      "M104", "M140", "M106 S255", "M303 E0 S200 C8", "M1002 set_heater"])
+    def test_a_heater_word_in_any_spelling(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["G1 E5", "G0 E5 F300", "G1 X5 E0", "G1 X5 E-1 F100", "G92 E0", "M83", "M82",
+                                      "G10", "G11", "G2 I1 J0 E1", "M221 S100", "M221 S0", "M220 S200"])
+    def test_anything_that_extrudes_or_changes_how_much(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", ["G28", "G28 Z", "G28 X Z", "G28 X0", "G29", "G1 X5 A1", "G1 F100", "G0",
+                                      "G380 S1 Z5 F300", "G380 S2 X5 F300", "M17 E1.0", "M221 X1 Y0 Z0", "M221",
+                                      "G1 X5 X6", "G1 X99999", "G1 X401", "G1 X5 F30001", "G1 X5 F0", "G1 X5 F-100", "M17 Z2.1", "G4 S9999", "M18", "M84", "M112", "M500", "M502"])
+    def test_any_other_word_letter_or_value(self, printer, servers, line):
+        self._sent(printer, servers, line)
+
+    @pytest.mark.parametrize("line", [None, 7, "", ["G90"], "G1 X5 F100" + " " * 80])
+    def test_a_line_that_is_not_a_line(self, printer, servers, line):
+        assert walk._line_is_allowed(line) is False
+
+    @pytest.mark.parametrize("line", [
+        "G91", "G90", "G0 Z7 F900", "G1 Z3 F100", "G1 X11 F9000", "G1 Y12", "G1 Y13 F2000", "G1 Z-2.5 F100",
+        "G28 X", "G28 X Y", "G380 S2 Z7 F100", "G380 S3 Z-6 F100", "M17 Z0.3", "M17 X1 Y1 Z0.5",
+        "M221 S", "M221 X0 Y0 Z0", "M221 R",
+    ])
+    def test_the_words_a_walk_does_carry_pass(self, line):
+        assert walk._line_is_allowed(line) is True
+
+    def test_one_refused_line_and_none_of_the_step_is_sent(self, printer, servers):
+        servers.lines[1] = ["G91", "G0 Z1 F100", "M104 S200", "G90"]
+        _refused("LINE_REFUSED", printer, servers, "park", 1, plate_clear=True)
+
+    @pytest.mark.parametrize("review", [None, "drafted", "", True, "Reviewed"])
+    def test_a_step_that_does_not_say_a_person_read_it_is_not_sent(self, printer, servers, review):
+        servers.review = review
+        _refused("MALFORMED_STEP", printer, servers, "park", 1, plate_clear=True)
 
 
 class TestOneConfirmedStep:

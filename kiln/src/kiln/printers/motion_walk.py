@@ -16,7 +16,9 @@ The floor, checked here on every step, before anything is asked or sent:
 * the printer states its firmware version;
 * the step asked for is the next one, and the person confirmed the last.
 
-A step that would heat or extrude is refused here whatever handed it over.
+A step is sent only when it says a person at Kiln has read its sequence,
+and only when every line in it is one a walk may carry, written exactly as
+it will be sent; any other line is refused here whatever handed it over.
 Nothing in a walk holds the printer: its own stop, pause, cancel and power
 switch are never blocked, and no step waits on Kiln to be stopped.
 
@@ -61,9 +63,71 @@ STEP_WATCH_MAX_S: float = 60.0
 #: A walk nobody has advanced for this long starts again from its first step.
 WALK_IDLE_S: float = 30 * 60
 
-_HEATER_LINE = re.compile(r"^\s*M(?:104|109|140|190|141|191)\b", re.IGNORECASE)
-_MOVE_LINE = re.compile(r"^\s*G(?:0|1|2|3)\b", re.IGNORECASE)
-_EXTRUDER_WORD = re.compile(r"\bE-?\.?\d", re.IGNORECASE)
+#: The only command words a walk step may carry, each with the only letters
+#: it may carry them with.  Anything not named here is refused: a heater or
+#: extruder word, a tool change, a macro, a second home, a word this list has
+#: never seen.  A letter mapped to ``None`` takes a plain number; a tuple
+#: names the only values it takes; ``""`` in a tuple is the letter alone.
+_NUMBER = re.compile(r"-?(?:\d{1,5}(?:\.\d{1,4})?)")
+#: The largest size a number may have, by word and letter: no desktop
+#: printer travels further, moves faster or drives a motor harder.
+_LARGEST: dict[str, float] = {"X": 400.0, "Y": 400.0, "Z": 400.0, "F": 30000.0}
+_LARGEST_MOTOR: float = 2.0
+_WORD = re.compile(r"[A-Z](?:-?\d+(?:\.\d+)?)?")
+_ALLOWED: dict[str, dict[str, tuple[str, ...] | None]] = {
+    "G90": {},
+    "G91": {},
+    "G0": {"X": None, "Y": None, "Z": None, "F": None},
+    "G1": {"X": None, "Y": None, "Z": None, "F": None},
+    "G28": {"X": ("",), "Y": ("",)},
+    "G380": {"S": ("2", "3"), "Z": None, "F": None},
+    "M17": {"X": None, "Y": None, "Z": None},
+    "M221": {"S": ("",), "R": ("",), "X": ("0",), "Y": ("0",), "Z": ("0",)},
+}
+#: Words that must carry at least one of these letters to mean anything here.
+_NEEDS_ONE_OF: dict[str, str] = {"G0": "XYZ", "G1": "XYZ", "G28": "XY", "G380": "Z", "M221": "SRXYZ"}
+#: ``M221`` in exactly these shapes; with a number after ``S`` it is another command.
+_M221_SHAPES = (("S",), ("R",), ("X0", "Y0", "Z0"))
+
+
+def _line_is_allowed(line: Any) -> bool:
+    """Whether *line* is one a walk step may carry, written the one way it is sent.
+
+    A line is read as it will be sent: capitals, single spaces, nothing else.
+    A line number, a checksum, a comment, a tab, a carriage return, any
+    control or non-ASCII character, words run together, or lowercase makes it
+    a different line from the one that was read, and it is refused.
+    """
+    if not isinstance(line, str) or not line or len(line) > 64:
+        return False
+    if any(ord(ch) < 0x20 or ord(ch) > 0x7E for ch in line):
+        return False
+    words = line.split(" ")
+    if any(_WORD.fullmatch(word) is None for word in words):
+        return False
+    letters = _ALLOWED.get(words[0])
+    if letters is None:
+        return False
+    seen: set[str] = set()
+    for word in words[1:]:
+        letter, value = word[0], word[1:]
+        if letter not in letters or letter in seen:
+            return False
+        seen.add(letter)
+        takes = letters[letter]
+        if takes is None:
+            if _NUMBER.fullmatch(value) is None:
+                return False
+            largest = _LARGEST_MOTOR if words[0] == "M17" else _LARGEST[letter]
+            if abs(float(value)) > largest or (letter == "F" and float(value) <= 0):
+                return False
+        elif value not in takes:
+            return False
+    needed = _NEEDS_ONE_OF.get(words[0])
+    if needed is not None and not seen & set(needed):
+        return False
+    return not (words[0] == "M221" and tuple(words[1:]) not in _M221_SHAPES)
+
 
 #: Where each walk stands in this process: ``{(machine, verb): (next step, when)}``.
 _progress: dict[tuple[str, str], tuple[int, float]] = {}
@@ -199,13 +263,13 @@ def _in_order(adapter: Any, verb: str, step: int, saw_previous: Any) -> None:
         )
 
 
-def _refuse_a_warm_line(lines: list[str]) -> None:
+def _refuse_a_line_not_allowed(lines: list[str]) -> None:
     for line in lines:
-        code = line.split(";", 1)[0]
-        if _HEATER_LINE.match(code) or (_MOVE_LINE.match(code) and _EXTRUDER_WORD.search(code)):
+        if not _line_is_allowed(line):
             raise WalkRefused(
-                "WARM_LINE_REFUSED",
-                "Nothing was sent. The step handed over would heat or extrude, and a walk does neither.",
+                "LINE_REFUSED",
+                "Nothing was sent. The step handed over carried a line a walk does not send: a walk moves "
+                "the head and the bed, and never heats, extrudes or runs anything else.",
             )
 
 
@@ -306,12 +370,13 @@ def walk_step(adapter: Any, verb: str, step: int, *, plate_clear: Any = None, sa
     total = walk.get("steps_total")
     well_formed = (
         walk.get("schema") == SCHEMA and walk.get("verb") == verb and served.get("number") == step
+        and walk.get("review") == "reviewed" and isinstance(walk.get("sequence"), str) and walk["sequence"]
         and isinstance(lines, list) and lines and all(isinstance(line, str) and line.strip() for line in lines)
         and isinstance(total, int) and not isinstance(total, bool) and step <= total
     )
     if not well_formed:
         raise WalkRefused("MALFORMED_STEP", "Nothing was sent. The step handed over was not one step of this walk.")
-    _refuse_a_warm_line(lines)
+    _refuse_a_line_not_allowed(lines)
     key = (_machine(adapter), verb)
     _progress.pop(key, None)
     snapshot = getattr(adapter, "_snapshot_faults", None)
