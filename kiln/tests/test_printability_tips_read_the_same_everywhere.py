@@ -178,6 +178,7 @@ def _needle_on_a_block():
     return _union(_box((0, 0, 0), (10, 10, 5)), needle)
 
 
+@pytest.mark.usefixtures("kilns_slice_lines")
 class TestAWallIsStillAWall:
     def test_a_needle_thin_for_longer_than_a_tip_stops_the_print(self):
         stops, _ = _stops(_needle_on_a_block())

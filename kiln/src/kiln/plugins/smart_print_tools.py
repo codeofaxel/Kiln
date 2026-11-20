@@ -105,7 +105,11 @@ class _SmartPrintToolsPlugin:
                 preview_token: Token from ``issue_preview_token`` proving this
                     model was shown to the person before printing.  Required
                     beside their go-ahead: a print is shown to its owner
-                    before it starts.
+                    before it starts.  Placed beside a part on the plate,
+                    the model is the same part, so the token and the yes
+                    for ``model_path`` cover it; a mesh the check repairs
+                    or rescales is another part, and the refusal names the
+                    file to show and ask about once.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("print"):
@@ -191,7 +195,7 @@ class _SmartPrintToolsPlugin:
                         try:
                             report = analyze_printability(
                                 model_path,
-                                material=material or "pla",
+                                material=material or None,
                                 printer_id=printer_id or None,
                             )
                         except Exception as exc:
@@ -390,14 +394,12 @@ class _SmartPrintToolsPlugin:
                         exc_info=True,
                     )
 
-            # A retry that changes the object needs a yes of its own (the same
-            # rule the gate applies before the start): asked before the file is
-            # sent, so a refused retry leaves nothing on the printer.
-            if _srv._retry_changes_the_object(
-                merged_overrides, bool((validation_summary or {}).get("repaired"))
-            ) and (block := _srv._no_yes_before_sending(
+            # A retry is a print like any other: nobody said go, nothing is
+            # sent, so a refused retry leaves nothing on the printer.  The
+            # full gate judges it again right before the start.
+            if block := _srv._no_yes_before_sending(
                 "retry_print_with_fix", model_path, preview_token, printer_name=printer_name,
-            )):
+            ):
                 return block
 
             try:
@@ -423,39 +425,22 @@ class _SmartPrintToolsPlugin:
                 )
 
             try:
-                # Captured before the command: it is what lets the verdict
-                # below tell a reading about THIS job from the printer's last
-                # word about the previous one.
-                # A reprint of the same object with a hotter nozzle is the
-                # print already approved.  One whose mesh was repaired, or
-                # whose overrides move supports/orientation/scale, is a
-                # different object leaning on the old approval.
-                _mesh_repaired = bool(
-                    (validation_summary or {}).get("repaired")
-                )
-                if _srv._retry_changes_the_object(
-                    merged_overrides, _mesh_repaired
+                # The person's yes and the preview of this model, both; under
+                # always allow, the bed seen clear as well.
+                if block := _srv._preview_gate_error(
+                    "retry_print_with_fix", model_path, preview_token,
+                    printer_name=printer_name,
                 ):
-                    if block := _srv._preview_gate_error(
-                        "retry_print_with_fix", model_path, preview_token,
-                        printer_name=printer_name,
-                    ):
-                        return block
-                else:
-                    from kiln import print_signoff
-
-                    # Same object, new settings: the yes the first print got
-                    # still stands, and the adapter template is told so.
-                    print_signoff.grant(
-                        "retry_print_with_fix", file_name, printer_name,
-                        source=print_signoff.SOURCE_PRIOR_APPROVAL,
-                    )
+                    return block
                 if quiet_plan is not None and (
                     block := start_refusal(adapter, file_name=file_name, local_path=upload_path)
                 ):
                     block["slice"] = slice_result.to_dict()
                     _attach_placement(block, place_info)
                     return block
+                # Captured before the command: it is what lets the verdict
+                # below tell a reading about THIS job from the printer's last
+                # word about the previous one.
                 sent_at = time.monotonic()
                 start_kwargs: dict[str, Any] = {}
                 if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):

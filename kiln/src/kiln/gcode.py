@@ -215,6 +215,71 @@ _PRINT_START_COMMANDS: dict[str, str] = {
     "M32": "Starting a print from a file (M32) is blocked -- use the start_print tool, which shows the print first",
 }
 
+# Raw G-code that runs a file on the printer by its path.  A print file run
+# that way starts around the door that shows it, so only the printer's own
+# macros may be run: RepRapFirmware's system folder (where a name with no
+# folder is looked for), its macros folder and its filaments folder (whose
+# files the filament load and unload words run), read exactly or not at
+# all.  Writing or moving a file into any of them, or pointing the system
+# folder somewhere else, would make any file one.
+_MACRO_FOLDERS: tuple[str, ...] = ("/sys/", "/macros/", "/filaments/")
+#: The macro folders as a sentence names them.
+_MACRO_FOLDER_NAMES = (
+    ", ".join(f.rstrip("/") for f in _MACRO_FOLDERS[:-1]) + f" or {_MACRO_FOLDERS[-1].rstrip('/')}"
+)
+#: Files the firmware keeps in its system folder to start the print a power
+#: failure or a pause cut off again.  Run by path they restart that print.
+_RESUME_FILES: frozenset[str] = frozenset({"/sys/resurrect.g", "/sys/resurrect-prologue.g"})
+_RESUMES_A_PRINT = (
+    "Restarting an interrupted print from the printer's resume file is blocked -- it starts the print's "
+    "file again with nobody asked; resume a paused print with resume_print, or one a power failure "
+    "stopped from the printer's own screen"
+)
+_RUNS_A_FILE: dict[str, str] = {
+    "M98": (
+        "Running a file by path (M98) is blocked unless it names, in quotes, one of the printer's own "
+        f"macros in {_MACRO_FOLDER_NAMES} -- a print file starts through start_print, which shows the print first"
+    ),
+    "M471": (
+        "Moving a file (M471) is blocked unless it names, in quotes, a place outside the printer's "
+        f"{_MACRO_FOLDER_NAMES} folders -- a file there runs as a macro, which no one is shown first"
+    ),
+    "M505": (
+        "Changing the printer's system folder (M505) is blocked -- the files there run as macros, which "
+        "no one is shown first"
+    ),
+    # RepRapFirmware's and Marlin's own word for the same restart.
+    "M916": _RESUMES_A_PRINT.replace("from the printer's resume file", "after a power failure (M916)"),
+    "M1000": _RESUMES_A_PRINT.replace("from the printer's resume file", "after a power failure (M1000)"),
+}
+#: Words that write a file on the printer, and the folder a bare name lands in.
+_WRITES_A_FILE: dict[str, str] = {"M28": "/gcodes", "M559": "/sys", "M560": "/www"}
+#: Where each of those writes when no file is named.
+_WRITES_BY_DEFAULT: dict[str, str] = {"M559": "/sys/config.g", "M560": "/www/index.html"}
+#: Words that run the files of the filament named in ``S`` (load, unload, its
+#: settings) from the filaments folder.
+_FILAMENT_WORDS = frozenset({"M701", "M702", "M703"})
+_RUNS_A_FILAMENT_FILE = (
+    "{word} is blocked unless the filament it names (S) is one plain name in quotes -- no folder, no step up, "
+    "no expression -- because a name that reaches outside the printer's filaments folder runs a file no one "
+    "is shown first"
+)
+_MAKES_A_FOLDER = (
+    "Making a folder (M470) is blocked unless it names, in quotes, a place outside the printer's "
+    f"{_MACRO_FOLDER_NAMES} folders -- the files there run as macros, which no one is shown first"
+)
+_WRITES_INTO_A_MACRO_FOLDER = (
+    "Writing a file into the printer's " + _MACRO_FOLDER_NAMES + " folder ({word}) is blocked unless it names, "
+    "readably, a place outside them -- a file there runs as a macro, which no one is shown first"
+)
+#: Macro words, in a print file, that start another file on the printer.
+_MACRO_STARTS: dict[str, str] = {
+    "SDCARD_PRINT_FILE": (
+        "Starting a print from a file (SDCARD_PRINT_FILE) is blocked -- use the start_print tool, which "
+        "shows the print first"
+    ),
+}
+
 # Commands that are unconditionally blocked.
 _BLOCKED_COMMANDS: dict[str, str] = {
     **_PRINT_START_COMMANDS,
@@ -410,8 +475,9 @@ def _parse_command_word(line: str) -> str | None:
 
 #: Commands whose whole line, after the command word, is text a person
 #: wrote: a display message, or a file name on the card.  Nothing in it is
-#: run.  A command that takes its text in quotes is not here: only what is
-#: inside the quotes is text, and a command may follow them.
+#: run.  When that text is quoted, only what is inside the quotes is text,
+#: and a command may follow them; a command that always takes its text in
+#: quotes is not here.
 _TEXT_COMMANDS: frozenset[str] = frozenset({"M28", "M30", "M36", "M38", "M117"})
 
 #: A quoted run, opened and closed: text, never commands.  A quote left
@@ -425,15 +491,189 @@ def _later_commands(cmd: str, cleaned: str) -> list[str]:
     """Each command word on *cleaned* after its first, with what follows it
     up to the next: what a firmware that runs several commands a line would
     run after *cmd*.  None for a line that is text after its command word,
-    and nothing inside quotes is a command."""
-    if cmd in _TEXT_COMMANDS:
-        return []
+    and nothing inside quotes is a command.  A text command whose text is
+    quoted is text only inside the quotes."""
     text = _QUOTED_RE.sub(lambda quoted: " " * len(quoted.group()), cleaned)
     first = _CMD_RE.match(text)
     if first is None:
         return []
+    if cmd in _TEXT_COMMANDS and not cleaned[first.end():].lstrip().startswith('"'):
+        return []
     starts = [m.start() for m in _COMMAND_WORD_START_RE.finditer(text, first.end())]
     return [cleaned[a:b].strip() for a, b in itertools.pairwise([*starts, len(cleaned)])]
+
+
+def _closing_quote(text: str, opening: int) -> int | None:
+    """Where the quote opened at *opening* closes, ``""`` being one quote
+    inside it, or ``None`` when it never does."""
+    at = opening + 1
+    while (close := text.find('"', at)) != -1:
+        if text.startswith('""', close):
+            at = close + 2
+            continue
+        return close
+    return None
+
+
+def _quoted_params(cleaned: str, letter: str) -> list[str | None] | None:
+    """Each value the *letter* parameter takes on *cleaned* after its command
+    word, read the way RepRapFirmware reads parameters: every letter outside
+    quotes starts one, with or without a space before it, in either case.  A
+    quoted value is its text (``""`` read as one quote); an unquoted one is
+    ``None``.  ``None`` for the whole line when it cannot be read one way
+    only: braces (an expression) or a quote that never closes."""
+    first = _CMD_RE.match(cleaned)
+    at, values = (first.end() if first else 0), []
+    while at < len(cleaned):
+        char = cleaned[at]
+        if char in "{}":
+            return None
+        if char == '"':
+            close = _closing_quote(cleaned, at)
+            if close is None:
+                return None
+            at = close + 1
+            continue
+        at += 1
+        if not char.isalpha():
+            continue
+        while at < len(cleaned) and cleaned[at] in " \t":
+            at += 1
+        value = None
+        if cleaned.startswith('"', at):
+            close = _closing_quote(cleaned, at)
+            if close is None:
+                return None
+            value, at = cleaned[at + 1 : close].replace('""', '"'), close + 1
+        if char.upper() == letter:
+            values.append(value)
+    return values
+
+
+#: The card a RepRapFirmware path names, before its first ``/``.
+_DRIVE_RE = re.compile(r"(\d+):")
+
+
+def _card_path(value: str | None, folder: str | None) -> str | None:
+    """*value* as a lower-case absolute path on the printer's main card, a
+    bare name read inside *folder*, or ``None`` when it cannot be read as
+    one: an expression, another card, an unclosed quote, a step above the
+    card's top, a bare name with no folder to read it in, or a part the
+    card's file system reads as another name (one ending in a dot or a
+    space, or a short alias such as ``NAME~1``)."""
+    if not value or any(char in value for char in "{}\\") or any(ord(char) < 32 for char in value):
+        return None
+    text = value.strip()
+    if (drive := _DRIVE_RE.match(text)) is not None:
+        if drive.group(1) != "0" or not text[drive.end() :].startswith("/"):
+            return None
+        text = text[drive.end() :]
+    if not text.startswith("/"):
+        if folder is None:
+            return None
+        text = f"{folder}/{text}"
+    parts: list[str] = []
+    for part in text.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not parts:
+                return None
+            parts.pop()
+            continue
+        if part.endswith((".", " ")) or _SHORT_ALIAS_RE.search(part):
+            return None
+        parts.append(part)
+    return "/" + "/".join(parts).lower()
+
+
+#: A card's short alias for a long name (``FILAME~1``): another spelling of it.
+_SHORT_ALIAS_RE = re.compile(r"~\d")
+
+
+def _plain_name(value: str | None) -> bool:
+    """Whether *value* (a quoted parameter's text; ``None`` when unquoted) is
+    one plain name the card reads only as itself: no folder, no step up, no
+    expression, nothing the card reads as another name."""
+    if not value or ".." in value or value == "." or any(char in value for char in "/\\{}:"):
+        return False
+    if any(ord(char) < 32 for char in value) or value != value.strip():
+        return False
+    return not value.endswith((".", " ")) and _SHORT_ALIAS_RE.search(value) is None
+
+
+def _in_a_macro_folder(path: str | None) -> bool:
+    """Whether *path* (from :func:`_card_path`) is a macro folder or inside one."""
+    return path is not None and f"{path.rstrip('/')}/".startswith(_MACRO_FOLDERS)
+
+
+def _paths_named(cleaned: str, letter: str, folder: str | None) -> list[str | None] | None:
+    """The card paths the *letter* parameter names on *cleaned* (``None`` for
+    one that cannot be read as a path), or ``None`` when the line names none
+    or cannot be read one way only."""
+    values = _quoted_params(cleaned, letter)
+    if not values:
+        return None
+    return [None if value is None else _card_path(value, folder) for value in values]
+
+
+def _runs_a_file_unseen(cmd: str, cleaned: str) -> str | None:
+    """The refusal for a line that would run a file on the printer nobody
+    was shown, or ``None``.  Only a macro in :data:`_MACRO_FOLDERS`, named
+    in quotes, may be run by path, and never a resume file; nothing may be
+    moved there; the system folder stays put.  A word with a subcode
+    (``M24.1``) is judged as the word."""
+    word = cmd.split(".", 1)[0]
+    if word != cmd and word in _PRINT_START_COMMANDS:
+        return _PRINT_START_COMMANDS[word]
+    if word == "M98":
+        paths = _paths_named(cleaned, "P", "/sys")
+        if paths is not None and any(path in _RESUME_FILES for path in paths):
+            return _RESUMES_A_PRINT
+        unseen = paths is None or not all(_in_a_macro_folder(path) for path in paths)
+    elif word == "M471":
+        paths = _paths_named(cleaned, "T", None)
+        unseen = paths is None or any(path is None or _in_a_macro_folder(path) for path in paths)
+    elif word in _WRITES_A_FILE:
+        paths = _paths_written(word, cleaned)
+        if paths is None or any(path is None or _in_a_macro_folder(path) for path in paths):
+            return _WRITES_INTO_A_MACRO_FOLDER.format(word=word)
+        return None
+    elif word == "M470":
+        paths = _paths_named(cleaned, "P", None)
+        unseen = paths is None or any(path is None or _in_a_macro_folder(path) for path in paths)
+        return _MAKES_A_FOLDER if unseen else None
+    elif word in _FILAMENT_WORDS:
+        names = _quoted_params(cleaned, "S")
+        if names is None or len(names) > 1 or (names and not _plain_name(names[0])):
+            return _RUNS_A_FILAMENT_FILE.format(word=word)
+        return None
+    else:
+        unseen = word in _RUNS_A_FILE
+    return _RUNS_A_FILE[word] if unseen else None
+
+
+def _paths_written(word: str, cleaned: str) -> list[str | None] | None:
+    """The card paths a file-writing *word* on *cleaned* writes to (``None``
+    for one that cannot be read as a path), or ``None`` when the line cannot
+    be read one way only.  ``M28`` takes its name as the rest of the line,
+    quoted or not; the others take it as ``P``."""
+    folder = _WRITES_A_FILE[word]
+    if word == "M28":
+        first = _CMD_RE.match(cleaned)
+        rest = cleaned[first.end() if first else 0 :].strip()
+        if rest.startswith('"'):
+            close = _closing_quote(rest, 0)
+            if close is None:
+                return None
+            rest = rest[1:close].replace('""', '"')
+        return [_card_path(rest, folder)]
+    values = _quoted_params(cleaned, "P")
+    if values is None:
+        return None
+    if not values:
+        return [_WRITES_BY_DEFAULT[word]]
+    return [None if value is None else _card_path(value, folder) for value in values]
 
 
 def _extract_param(line: str, letter: str) -> float | None:
@@ -452,12 +692,39 @@ def _extract_param(line: str, letter: str) -> float | None:
     return None
 
 
-def _strip_comment(line: str) -> str:
-    """Remove inline comments (everything from ``;`` onward) and strip whitespace."""
-    idx = line.find(";")
-    if idx != -1:
-        line = line[:idx]
-    return line.strip()
+def _strip_comment(line: str) -> str | None:
+    """Remove an inline comment and strip whitespace.  A comment starts at
+    the first ``;`` outside a quoted string: inside ``"..."`` (``""`` being
+    one quote) a ``;`` is text, as RepRapFirmware reads it.  ``None`` when a
+    quote is still open where a ``;`` stands: the line cannot be read one
+    way only, and every check refuses it (:data:`UNREADABLE_QUOTE`)."""
+    semi = line.find(";")
+    if semi == -1:
+        return line.strip()
+    quote = line.find('"')
+    while quote != -1 and quote < semi:
+        close = _closing_quote(line, quote)
+        if close is None:
+            return None
+        semi = line.find(";", close + 1)
+        if semi == -1:
+            return line.strip()
+        quote = line.find('"', close + 1)
+    return line[:semi].strip()
+
+
+#: The refusal for a line :func:`_strip_comment` cannot read one way only.
+UNREADABLE_QUOTE = (
+    "Line refused: a quote is still open where a ';' stands, so where the comment starts cannot be "
+    "told: {line!r}. Close the quote, or leave the ';' out."
+)
+
+
+def _refuse_unreadable(raw_line: str, errors: list[str], blocked: list[str]) -> None:
+    """Record the refusal of a line whose comment cannot be told apart."""
+    line = raw_line.strip()
+    errors.append(UNREADABLE_QUOTE.format(line=line[:200]))
+    blocked.append(line)
 
 
 def _heat_targets(cmd: str, cleaned: str) -> list[tuple[str, float]] | None:
@@ -670,6 +937,10 @@ def _judge_macro_line(
     number (``EXTRUDER=extruder1``) names no heat."""
     if _MACRO_LINE_RE.match(cleaned) is None:
         return None
+    if (said := _MACRO_STARTS.get(cleaned.split(None, 1)[0].upper())) is not None:
+        errors.append(said)
+        blocked.append(cleaned)
+        return True
     params = _MACRO_PARAM_RE.findall(cleaned)
     if cleaned.split(None, 1)[0].upper() == "SET_HEATER_TEMPERATURE":
         named = dict((key.upper(), value) for key, value in params)
@@ -718,6 +989,7 @@ def _later_command_refused(
         if word is None:
             continue
         said = None if word in allowed else _BLOCKED_COMMANDS.get(word)
+        said = said or _runs_a_file_unseen(word, part)
         said = said or _DIALECT_BLOCKED.get(dialect, {}).get(word)
         verdict = rules.judge(word, part) if said is None and rules is not None else None
         if verdict is not None and verdict[0] == "refused":
@@ -786,6 +1058,9 @@ def _validate_single(
     if ceilings is None:
         ceilings = _GENERIC_CEILINGS
     cleaned = _strip_comment(raw_line)
+    if cleaned is None:
+        _refuse_unreadable(raw_line, errors, blocked)
+        return None
     if not cleaned:
         return None  # blank / comment-only line -- skip silently
     cleaned = _strip_line_number(cleaned)
@@ -816,6 +1091,12 @@ def _validate_single(
     # --- Blocked commands ------------------------------------------------
     if cmd in _BLOCKED_COMMANDS and cmd not in dialect_allows:
         errors.append(_BLOCKED_COMMANDS[cmd])
+        blocked.append(cleaned)
+        return None
+
+    # --- A file run by path that nobody was shown --------------------------
+    if (said := _runs_a_file_unseen(cmd, cleaned)) is not None:
+        errors.append(said)
         blocked.append(cleaned)
         return None
 
@@ -1193,6 +1474,9 @@ def _validate_single_with_profile(
     from kiln.safety_profiles import limit_provenance_suffix  # noqa: E402
 
     cleaned = _strip_comment(raw_line)
+    if cleaned is None:
+        _refuse_unreadable(raw_line, errors, blocked)
+        return None
     if not cleaned:
         return None
     cleaned = _strip_line_number(cleaned)
@@ -1225,6 +1509,12 @@ def _validate_single_with_profile(
     # --- Blocked commands (same regardless of printer) ---
     if cmd in _BLOCKED_COMMANDS and cmd not in dialect_allows:
         errors.append(_BLOCKED_COMMANDS[cmd])
+        blocked.append(cleaned)
+        return None
+
+    # --- A file run by path that nobody was shown --------------------------
+    if (said := _runs_a_file_unseen(cmd, cleaned)) is not None:
+        errors.append(said)
         blocked.append(cleaned)
         return None
 

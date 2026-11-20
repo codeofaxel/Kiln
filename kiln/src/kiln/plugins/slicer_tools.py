@@ -701,6 +701,9 @@ def _place_copy(input_path: str, bbox: dict[str, float], target_min: list[float]
         from kiln.threemf_placement import translate_3mf
 
         translate_3mf(input_path, dx, dy, dst)
+    from kiln.print_signoff import COPY_MOVED, note_copy
+
+    note_copy(input_path, dst, how=COPY_MOVED)
     return dst, None
 
 
@@ -852,7 +855,9 @@ def _apply_plate_placement(
     * ok: the part is moved to the verdict's spot in a temp copy (an STL by
       its vertices, a 3MF by its build items, anything else refused) and
       that copy is the effective input, with ``info["placement"]`` the
-      verdict and ``approval_carries`` false;
+      verdict and ``approval_carries`` true: the copy is recorded as the
+      same part moved (:func:`kiln.print_signoff.note_copy`), so a yes for
+      the part covers it;
     * no verdict at all (offline, signed out, nothing answered): REFUSE.
       The plate holds a part and Kiln cannot check clearance, so nothing is
       sliced onto it; the sentence says why and what to do.
@@ -1020,10 +1025,13 @@ def _apply_plate_placement(
         "plate": "occupied",
         "placement": verdict,
         "placed_input_path": placed,
-        "approval_carries": False,
+        # The same part, only moved on the plate (print_signoff.note_copy):
+        # a yes for the part covers this file, and the plate is checked
+        # again at the start.
+        "approval_carries": True,
         "approval_note": (
-            f"placed beside {job_name}, which is still on the plate, so a yes given on the design "
-            "mesh does not carry; the stage on this result shows the plate as it will print — approve from here"
+            f"placed beside {job_name}, which is still on the plate; it is the same part, so a yes given "
+            "for it carries to this file, and the plate is checked again before it starts"
         ),
         "_verify": {"request": request, "state": state, "bed": bed},
         "_state": state,
@@ -1343,7 +1351,7 @@ def _attach_placement(response: dict, info: dict | None) -> None:
     info.pop("_machine", None)
     state = info.pop("_state", None)
     response["placement"] = info.get("placement")
-    response["approval_carries"] = False
+    response["approval_carries"] = bool(info.get("approval_carries"))
     response["approval_note"] = info.get("approval_note")
     # How this file starts beside the occupant, said on the slice result so
     # an agent knows before it reaches for a start: the quiet way when the
@@ -3970,7 +3978,7 @@ class _SlicerToolsPlugin:
                     try:
                         report = _analyze_printability(
                             input_path,
-                            material=material or "pla",
+                            material=material or None,
                             printer_id=effective_printer_id or None,
                         )
                     except Exception as exc:  # noqa: BLE001 -- the print stands without it, and says so

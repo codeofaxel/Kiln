@@ -229,12 +229,14 @@ class TestEachPrinterGoesAsItsModel:
 
 
 class TestWhatComesBack:
-    def test_the_servers_own_rulings_are_relayed_as_they_are(self, plain_install, tmp_path):
+    def test_the_servers_own_rulings_are_relayed_as_they_are(self, plain_install, tmp_path, monkeypatch):
         no_room = {"success": False, "error": {"code": "NO_ROOM", "message": "No printer ... Nothing was routed."},
                    "per_machine": {"a": ["no room for this part on the plate as it stands"]}, "plates": {"a": {"has_room": False}}}
         door, _ = plain_install({"a": _machine("a")}, no_room)
         assert door(_cube(tmp_path / "cube.stl"), material="PLA") == no_room
         gate = {"status": "error", "error": "Fleet routing needs Kiln Business.", "code": "TIER_REQUIRED", "required_tier": "business"}
+        # The plan wall reaches a caller this computer counts as below the plan.
+        monkeypatch.setattr("kiln.licensing.check_tier", lambda *_a, **_k: (False, "needs Kiln Business"))
         door, _ = plain_install({"a": _machine("a")}, gate)
         assert door(_cube(tmp_path / "cube.stl"), material="PLA") == gate
 

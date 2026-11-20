@@ -20,6 +20,16 @@ from typing import Any
 
 import pytest
 
+def _forget() -> None:
+    """Drop every kept answer, said miss and service backoff."""
+    from kiln import _pro_material_limits_bridge as bridge
+    from kiln import material_limits as helper
+
+    helper._answers.clear()
+    helper._said.clear()
+    bridge._service_down_until, bridge._service_down_miss = 0.0, None
+
+
 #: What a fault on the server could carry: a path, a query, a tenant.
 SECRET = "/srv/kiln/tenant-7f3a/private.sqlite: SELECT api_key FROM kilntest_tenants"
 MARKERS = ("tenant-7f3a", "kilntest_tenants", "api_key", "private.sqlite")
@@ -156,6 +166,75 @@ def test_the_material_rule_check(monkeypatch, caplog):
     _stub(monkeypatch, bridge.LOCAL_MODULE, rule_check=_raise)
     out = bridge.rule_checks("pla", ["food_safe"])
     assert out["checked"] is False
+    _assert_kept_local(out, caplog)
+
+
+def test_the_substitution_ranking(monkeypatch, caplog):
+    import kiln.server as srv
+    from kiln import _pro_substitution_bridge as bridge
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, substitutes_for_the_wire=_raise)
+    out = {"list": srv.find_material_substitute("pla"), "best": srv.get_best_material_substitute("pla")}
+    assert out["list"]["basic"] is True and out["best"]["basic"] is True
+    assert out["list"]["why"] == "unanswered"
+    _assert_kept_local(out, caplog)
+
+
+def test_the_material_recommendation(monkeypatch, caplog):
+    from kiln import _pro_routing_bridge as bridge
+    from kiln.material_routing import material_list, recommend_material
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, for_the_wire=_raise)
+    out = {"pick": recommend_material("strong").to_dict(), "list": material_list()}
+    assert out["pick"]["basic"] is True and out["list"]["basic"] is True
+    # Read on a person's computer and on Kiln's servers alike: no "this computer".
+    assert out["pick"]["why_detail"] == out["list"]["why_detail"] == "Kiln's material recommender stopped"
+    _assert_kept_local(out, caplog)
+
+
+def test_the_adaptive_slicing_settings(monkeypatch, caplog):
+    from kiln import _pro_adaptive_bridge as bridge
+    from kiln.plugins.adaptive_slicing_tools import quick_adaptive_plan
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, answer=_raise)
+    out = quick_adaptive_plan("petg", 12.0, nozzle_diameter_mm=0.4)
+    assert out["success"] is True and out["basic"] is True
+    _assert_kept_local(out, caplog)
+
+
+def test_the_pairing_check(monkeypatch, caplog):
+    from kiln import _pro_material_pairing_bridge as bridge
+    from kiln.design_intelligence import check_multi_material_compatibility
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, co_print_with_notes=_raise)
+    out = check_multi_material_compatibility("pla", "petg").to_dict()
+    assert out["basic"] is True and out["compatible"] is None
+    _assert_kept_local(out, caplog)
+
+
+def test_the_design_limits(monkeypatch, caplog):
+    from kiln import _pro_material_limits_bridge as bridge
+    from kiln import material_limits
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, for_the_wire=_raise)
+    _forget()
+    try:
+        limits = material_limits.limits_for("pla")
+        assert limits.basic and limits.miss is not None
+        out = {"limits": limits.to_dict(), "notes": limits.notes()}
+        assert out["notes"]
+        _assert_kept_local(out, caplog)
+    finally:
+        _forget()
+
+
+def test_the_multi_material_check(monkeypatch, caplog):
+    from kiln import _pro_material_pairing_bridge as bridge
+    from kiln.material_safety import check_material_compatibility
+
+    _stub(monkeypatch, bridge.MIX_LOCAL_MODULE, pair_entries=_raise)
+    out = check_material_compatibility(["PLA", "ABS"])
+    assert out["basic"] is True and out["safe"] is False
     _assert_kept_local(out, caplog)
 
 

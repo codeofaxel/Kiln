@@ -820,15 +820,17 @@ def consent_for(
     terminal.  ``None`` is the honest answer for "nobody said go" and for
     "somebody said go to a different print" alike.
 
-    *aimed_at* is the printer an unnamed call resolves to, for matching a
-    window; the consent recorded for the call is matched on the name the
-    call used, as before.
+    *aimed_at* is the printer an unnamed call resolves to.  A window, and
+    the consent recorded for the call, are both matched on the printer the
+    start is aimed at: a yes that names its printers covers an unnamed
+    start only when it names the one that start goes to.
     """
     consent = _current.get()
     if consent is not None:
         # A yes was given for THIS call.  If it is about another print,
         # that is a mismatch to refuse, not a gap to fill from elsewhere.
-        return consent if consent.matches(file_name=file_name, printer_name=printer_name) else None
+        aimed = printer_name or aimed_at
+        return consent if consent.matches(file_name=file_name, printer_name=aimed) else None
     hosted = _ask_hosted_hook(file_name=file_name, printer_name=printer_name)
     if hosted is not None:
         return hosted if hosted.matches(file_name=file_name, printer_name=printer_name) else None
@@ -850,23 +852,31 @@ def consent_for(
         window = None
     if window is None:
         return None
-    if window.always:
-        # Nobody is being asked, so the plate is looked at.  A camera that
-        # gives nothing usable cannot vouch for the plate: always allow is
-        # not used for this print.  A window with an end that covers the
-        # printer is still the person's yes for that while -- it never
-        # rested on a look -- and with none, they are asked the ordinary
-        # way.  (A frame not yet judged does not withdraw the yes -- the
-        # gate holds the start until eyes have judged it.)
-        from kiln.plate_state import LOOK_BLIND
+    from kiln.plate_state import unvouched
 
-        if unasked_look(aimed_at or printer_name).verdict == LOOK_BLIND:
-            try:
-                window = consent_windows.covering(aimed_at or printer_name, for_a_start=True, timed_only=True)
-            except Exception:  # noqa: BLE001 — an unreadable store is no window
-                window = None
-            if window is None:
-                return None
+    target = aimed_at or printer_name
+    # Nobody is being asked, so under always allow the plate is looked at.
+    # A look no eyes vouch for (a camera that gives nothing usable, a bed
+    # seen holding more than the record names) is no yes from always allow
+    # for this print; a window with an end may still cover it, below, and
+    # with none the person is asked the ordinary way.  (A frame not yet
+    # judged does not withdraw the yes -- the gate holds the start until
+    # eyes have judged it.)
+    if window.always and unvouched(unasked_look(target)):
+        try:
+            window = consent_windows.covering(target, for_a_start=True, timed_only=True)
+        except Exception:  # noqa: BLE001 — an unreadable store is no window
+            window = None
+        if window is None:
+            return None
+    # A window with an end never rested on a look, except for a start
+    # beside a part still on the plate: that bed is looked at first.
+    if (
+        not window.always
+        and consent_windows.plate_holds_a_part(target)
+        and unvouched(unasked_look(target))
+    ):
+        return None
     if window.always:
         # Always allow is for a machine, and ``covering`` has just matched
         # the machine this print is aimed at.  The consent is therefore

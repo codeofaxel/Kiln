@@ -23,6 +23,16 @@ from kiln.material_routing import (
     _format_nozzle_context_line,
     recommend_material,
 )
+from tests._routing_served import plain_install_served, served_pick
+
+
+@pytest.fixture(autouse=True)
+def _served_pick():
+    """Kiln's material pick, stood in: these tests pin what the nozzle wires
+    add around it, never the pick."""
+    answer = served_pick("petg", "PETG", sentence="PETG is the best fit for a strong part.")
+    with plain_install_served(answer):
+        yield
 
 
 # ---------------------------------------------------------------------------

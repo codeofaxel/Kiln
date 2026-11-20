@@ -70,6 +70,7 @@ def test_the_same_cone_on_its_base_stays_printable(tmp_path):
     assert verdict(report)[0] == "ready"
 
 
+@pytest.mark.usefixtures("kilns_slice_lines")
 def test_walls_the_slicer_drops_are_never_printable(tmp_path):
     """0.1 mm walls: thinner than Kiln's slice lays a line with a 0.4 mm
     nozzle.  Thicker sub-nozzle walls print as one thin line

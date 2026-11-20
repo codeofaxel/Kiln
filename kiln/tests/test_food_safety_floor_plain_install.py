@@ -38,18 +38,23 @@ def _names(rec) -> list[str]:
 
 
 class TestRecommendMaterial:
+    """With no answer from Kiln's servers there is no pick: the plastics the
+    printer can melt are listed, and a food brief lists only what the food
+    floor keeps.  The served pick's own floor is pinned beside the recommender."""
+
     def test_cereal_container_is_never_offered_a_not_food_safe_material(self):
         from kiln.material_routing import recommend_material
 
-        offered = _names(recommend_material(CEREAL))
-        assert offered, "the recommender offered nothing at all"
-        assert not set(offered) & NOT_FOOD_SAFE, offered
+        reply = recommend_material(CEREAL).to_dict()
+        assert reply["basic"] is True and reply["plastics"], reply
+        assert not {p.lower() for p in reply["plastics"]} & NOT_FOOD_SAFE, reply["plastics"]
+        assert not _names(reply), "a basic answer never picks a material"
 
-    def test_a_brief_with_no_food_still_sees_the_whole_catalog(self):
+    def test_a_brief_with_no_food_still_sees_every_plastic(self):
         from kiln.material_routing import recommend_material
 
-        offered = _names(recommend_material("outdoor bracket for a garden fence, sun all day"))
-        assert set(offered) & {"asa", "abs", "petg"}, offered
+        reply = recommend_material("outdoor bracket for a garden fence, sun all day").to_dict()
+        assert {p.lower() for p in reply["plastics"]} & {"asa", "abs", "petg"}, reply
 
 
 def _design_tools():
@@ -86,7 +91,7 @@ class TestRecommendDesignMaterial:
     def tool(self, monkeypatch):
         import kiln.design_intelligence as di
 
-        monkeypatch.setattr(di, "recommend_material_for_design", lambda *a, **k: _AbsFirst())
+        monkeypatch.setattr(di, "material_pick_for_design", lambda *a, **k: (_AbsFirst(), None))
         return _design_tools()["recommend_design_material"]
 
     def test_a_top_pick_rated_not_food_safe_is_overridden(self, tool):
@@ -112,9 +117,22 @@ class TestRecommendDesignMaterial:
 
 
 class TestFindMaterialSubstitute:
-    def test_swapping_food_safe_petg_flags_every_substitute_that_is_not(self):
+    """The substitutes are Kiln's servers' answer (stood in here with made-up
+    figures); the food-safety check over them is this package's own."""
+
+    def test_swapping_food_safe_petg_flags_every_substitute_that_is_not(self, monkeypatch):
+        import kiln.server as srv
         from kiln.server import find_material_substitute
 
+        def served(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+            return {"success": True, "status": "ok", "substitutes": [
+                {"original_material": "petg", "substitute_material": name, "device_type": "fdm",
+                 "compatibility_score": 0.1, "reasons": ["unavailable"], "trade_offs": "stand-in",
+                 "cost_delta_pct": 0.0}
+                for name in ("pla", "abs", "nylon")
+            ]}
+
+        monkeypatch.setattr(srv, "_pro_api_call", served)
         result = find_material_substitute("PETG")
         assert result["success"] is True, result
         check = result.get("food_safety")
@@ -125,6 +143,7 @@ class TestFindMaterialSubstitute:
             name = str(sub.get("substitute_material") or sub.get("substitute") or sub.get("material") or "")
             if sub.get("food_safe") != "yes":
                 assert name.lower() in flagged, (name, check)
+        assert flagged == {"pla", "abs", "nylon"}
 
 
 class TestTheDetector:

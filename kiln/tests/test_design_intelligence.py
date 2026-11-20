@@ -60,7 +60,6 @@ from kiln.design_intelligence import (
     get_public_material_profile,
     get_public_post_processing,
     get_public_design_template,
-    get_support_material_options,
     list_compatibility_printers,
     list_design_templates,
     list_material_profiles,
@@ -77,7 +76,6 @@ from kiln.design_intelligence import (
 
 from .conftest import (
     requires_engineering_overlay,
-    requires_multi_material_overlay,
     requires_post_processing_overlay,
     requires_printer_profiles_overlay,
     requires_troubleshooting_overlay,
@@ -395,7 +393,9 @@ class TestPerCallerEntitlement:
         assert pla.thermal["print_temp_range_c"] == public["pla"]["thermal"]["print_temp_range_c"]
         assert pla.thermal["max_service_temp_c"] == 50
         assert pla.chemical["food_safe"] == "conditional"
-        assert pla.design_limits["min_wall_thickness_mm"] == 0.8
+        from kiln.material_limits import limits_for
+
+        assert limits_for("pla").design_limits()["min_wall_thickness_mm"] == 0.8
 
     def test_entitlement_is_re_asked_but_the_same_payload_is_merged_once(
         self, tiered_overlay
@@ -591,19 +591,17 @@ class TestMaterialProfiles:
             assert len(p.agent_guidance) > 0, f"{p.material_id} missing guidance"
 
     def test_every_material_has_design_limits(self):
-        # Safety-floor: every material has the process-floor design limits
-        # in public materials.json (min_wall_thickness_mm,
-        # max_unsupported_overhang_deg).  The engineering-grade limits
-        # (snap_fit_tolerance_mm, max_cantilever_length_mm,
-        # living_hinge_viable, etc.) live in the kiln-pro overlay and are
-        # asserted in kiln-pro's overlay sanity test.
+        # Every material's limits are read from the one helper every check
+        # reads (kiln.material_limits); a public profile carries the
+        # general block, never a plastic's own figures.
+        from kiln.design_intelligence import get_public_material_profile
+        from kiln.material_limits import limits_for
+
         for p in list_material_profiles():
-            assert "min_wall_thickness_mm" in p.design_limits, (
-                f"{p.material_id} missing min_wall_thickness_mm"
-            )
-            assert "max_unsupported_overhang_deg" in p.design_limits, (
-                f"{p.material_id} missing max_unsupported_overhang_deg"
-            )
+            limits = limits_for(p.material_id).design_limits()
+            assert "min_wall_thickness_mm" in limits, p.material_id
+            assert "max_unsupported_overhang_deg" in limits, p.material_id
+            assert get_public_material_profile(p.material_id).design_limits["basis"] == "general"
 
 
 # ---------------------------------------------------------------------------
@@ -612,73 +610,12 @@ class TestMaterialProfiles:
 
 
 class TestMaterialRecommendation:
-    def test_load_bearing_excludes_pla(self):
-        rec = recommend_material_for_design("shelf bracket that holds 10 lbs")
-        assert rec.material.material_id != "pla"
-        assert rec.material.material_id != "tpu"
+    """The pick is Kiln's servers' (tests/test_material_pick_served.py);
+    this install answers for it only by handing it back."""
 
-    def test_outdoor_prefers_asa(self):
-        rec = recommend_material_for_design(
-            "garden sign that lives outside in the sun",
-            printer_has_enclosure=True,
-        )
-        assert rec.material.material_id == "asa"
-
-    def test_flexible_requires_tpu(self):
-        rec = recommend_material_for_design("flexible phone case that absorbs drops")
-        assert rec.material.material_id == "tpu"
-
-    def test_food_contact_prefers_petg(self):
-        rec = recommend_material_for_design("cookie cutter, food safe")
-        assert rec.material.material_id == "petg"
-
-    def test_no_enclosure_excludes_abs(self):
-        rec = recommend_material_for_design(
-            "strong bracket",
-            printer_has_enclosure=False,
-        )
-        # ABS/ASA should be penalized without enclosure
-        assert rec.material.material_id not in ("abs", "asa")
-
-    def test_hotend_limit_penalizes_high_temp(self):
-        rec = recommend_material_for_design(
-            "strong durable part",
-            max_hotend_temp_c=230,
-        )
-        # Should not recommend PC (needs 270+)
-        assert rec.material.material_id != "polycarbonate"
-
-    def test_no_direct_drive_penalizes_tpu(self):
-        rec = recommend_material_for_design(
-            "flexible gasket",
-            printer_has_direct_drive=False,
-        )
-        # TPU should be heavily penalized
-        for w in rec.warnings:
-            if "tpu" in rec.material.material_id:
-                assert "direct drive" in w.lower()
-
-    def test_recommendation_has_alternatives(self):
-        rec = recommend_material_for_design("strong functional part")
-        assert len(rec.alternatives) > 0
-
-    def test_recommendation_to_dict(self):
-        rec = recommend_material_for_design("simple prototype")
-        d = rec.to_dict()
-        assert "material" in d
-        assert "score" in d
-        assert "alternatives" in d
-
-    def test_aesthetic_prefers_pla(self):
-        rec = recommend_material_for_design("beautiful decorative figurine for display")
-        assert rec.material.material_id == "pla"
-
-    def test_heat_resistant_excludes_pla(self):
-        rec = recommend_material_for_design(
-            "mount near a heat source in a car",
-            printer_has_enclosure=True,
-        )
-        assert rec.material.material_id != "pla"
+    def test_no_pick_is_none_and_never_a_guess(self):
+        # Signed out: nothing on this computer picks.
+        assert recommend_material_for_design("shelf bracket that holds 10 lbs") is None
 
 
 # ---------------------------------------------------------------------------
@@ -830,10 +767,13 @@ class TestDesignBrief:
         assert brief.recommended_material is not None
         assert len(brief.combined_guidance) > 0
 
-    def test_load_bearing_brief_excludes_pla(self):
+    def test_load_bearing_brief_with_no_pick_lists_plastics(self):
+        # Signed out: no pick, the plastics this printer can melt instead, and
+        # the requirements are still matched.
         brief = get_design_constraints("wall shelf bracket that holds 10 lbs")
-        assert brief.recommended_material is not None
-        assert brief.recommended_material.material.material_id != "pla"
+        assert brief.recommended_material is None
+        assert brief.material_basic["basic"] is True and brief.material_basic["plastics"]
+        assert any("load-bearing" in w for w in brief.material_basic["warnings"])
         assert len(brief.functional_constraints) > 0
 
     def test_material_override(self):
@@ -870,7 +810,7 @@ class TestDesignBrief:
     def test_empty_requirements_still_works(self):
         brief = get_design_constraints("")
         assert isinstance(brief, DesignBrief)
-        assert brief.recommended_material is not None
+        assert brief.recommended_material is not None or brief.material_basic["basic"] is True
 
     @requires_printer_profiles_overlay
     def test_printer_model_influences_brief(self):
@@ -1468,67 +1408,51 @@ class TestPostProcessing:
 
 
 class TestMultiMaterialCompatibility:
-    def test_pla_tpu_compatible(self):
+    """The pairing verdict is kiln-pro's, asked of Kiln's servers (see
+    test_material_pairing_served.py); these pin the report around it."""
+
+    @staticmethod
+    def _serve(monkeypatch, **answer):
+        import kiln.server as srv
+
+        reply = {
+            "success": True, "material_a": "pla", "material_b": "tpu", "found": "pair", "compatible": True,
+            "interface_adhesion": "moderate", "notes": "", "support_pair": None, "general_rules": [],
+        }
+        reply.update(answer)
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **_kw: dict(reply))
+
+    def test_a_served_verdict_is_the_report(self, monkeypatch):
+        self._serve(monkeypatch)
         report = check_multi_material_compatibility("pla", "tpu")
         assert isinstance(report, MultiMaterialReport)
         assert report.compatible is True
-        assert report.interface_adhesion in ("moderate", "good", "excellent")
+        assert report.interface_adhesion == "moderate"
+        assert report.basic is False
 
-    def test_pla_abs_incompatible(self):
-        report = check_multi_material_compatibility("pla", "abs")
-        assert report.compatible is False
+    def test_served_rules_and_notes_ride_through(self, monkeypatch):
+        self._serve(monkeypatch, notes="a note", general_rules=["a rule"])
+        report = check_multi_material_compatibility("pla", "tpu")
+        assert report.general_rules == ["a rule"] and report.notes == "a note"
+        assert report.caution == ""
 
-    def test_abs_asa_compatible(self):
-        """ABS and ASA are co-printable (same material family)."""
-        report = check_multi_material_compatibility("abs", "asa")
-        assert report.compatible is True
+    def test_without_a_verdict_the_report_is_basic_and_never_a_yes(self, monkeypatch):
+        import kiln.server as srv
 
-    def test_pla_pva_support_pair(self):
-        report = check_multi_material_compatibility("pla", "pva")
-        assert report.compatible is True
-        assert report.support_pair is not None
-
-    def test_bidirectional_lookup(self):
-        ab = check_multi_material_compatibility("pla", "tpu")
-        ba = check_multi_material_compatibility("tpu", "pla")
-        assert ab.compatible == ba.compatible
-
-    def test_unknown_pair(self):
+        monkeypatch.setattr(
+            srv, "_pro_api_call",
+            lambda tool, **_kw: {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"},
+        )
         report = check_multi_material_compatibility("unobtainium", "pla")
-        assert report.compatible is False
+        assert report.basic is True and report.compatible is None
         assert report.interface_adhesion == "unknown"
 
-    @requires_multi_material_overlay
-    def test_general_rules_included(self):
-        # ``general_rules`` comes from the overlay; the public file
-        # carries an empty list at that key so the field is always
-        # present.
-        report = check_multi_material_compatibility("pla", "petg")
-        assert len(report.general_rules) > 0
-
-    def test_to_dict(self):
-        report = check_multi_material_compatibility("pla", "tpu")
-        d = report.to_dict()
-        assert "material_a" in d
-        assert "material_b" in d
-        assert "compatible" in d
-        assert "general_rules" in d
-
-    def test_support_material_options_pla(self):
-        options = get_support_material_options("pla")
-        assert len(options) > 0
-        assert any(
-            o.get("support_material", "").lower() == "pva" for o in options
-        )
-
-    def test_support_material_options_abs(self):
-        """ABS may or may not have support material options after HIPS removal."""
-        options = get_support_material_options("abs")
-        assert isinstance(options, list)
-
-    def test_support_material_options_unknown(self):
-        options = get_support_material_options("unobtainium")
-        assert options == []
+    def test_to_dict(self, monkeypatch):
+        self._serve(monkeypatch, interface_adhesion="excellent")
+        d = check_multi_material_compatibility("pla", "tpu").to_dict()
+        assert d["interface_adhesion"] == "excellent", "the served verdict is the report"
+        assert {"material_a", "material_b", "compatible", "general_rules", "caution"} <= set(d)
+        assert "basic" not in d
 
 
 # ---------------------------------------------------------------------------
@@ -1849,6 +1773,19 @@ class TestFreePathCautions:
         monkeypatch.setitem(sys.modules, "kiln_pro", package)
         monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", overlays)
 
+    @staticmethod
+    def _serve_pair(monkeypatch, a: str, b: str, **answer: Any) -> None:
+        """Kiln's servers answer the pairing for *a* and *b* (the verdict and
+        any notes or rules are theirs; this file holds no pairing table)."""
+        import kiln.server as srv
+
+        reply = {
+            "success": True, "material_a": a, "material_b": b, "found": "pair", "compatible": True,
+            "interface_adhesion": "good", "notes": "", "support_pair": None, "general_rules": [],
+        }
+        reply.update(answer)
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **_kw: dict(reply))
+
     # --- the shared helper itself -----------------------------------------
 
     @pytest.mark.usefixtures("free_caller")
@@ -1922,6 +1859,7 @@ class TestFreePathCautions:
         """
         notes = {"co_print_compatibility": {"pla": {"petg": {"notes": "Written reasons."}}}}
         self._overlay(monkeypatch, {"multi_material_pairing": notes})
+        self._serve_pair(monkeypatch, "pla", "pp", compatible=False, interface_adhesion="poor")
         report = check_multi_material_compatibility("pla", "pp")
         assert report.notes == ""
         assert "No curated note has been established" in report.caution
@@ -1930,6 +1868,7 @@ class TestFreePathCautions:
     def test_a_pair_with_written_reasons_gets_no_caution(self, monkeypatch):
         notes = {"co_print_compatibility": {"pla": {"petg": {"notes": "Written reasons."}}}}
         self._overlay(monkeypatch, {"multi_material_pairing": notes})
+        self._serve_pair(monkeypatch, "pla", "petg", notes="Written reasons.")
         report = check_multi_material_compatibility("pla", "petg")
         assert report.notes == "Written reasons."
         assert report.caution == ""
@@ -1937,6 +1876,7 @@ class TestFreePathCautions:
     @pytest.mark.usefixtures("free_caller")
     def test_a_bare_verdict_still_points_a_free_caller_at_the_plan(self, monkeypatch):
         self._overlay(monkeypatch, None)
+        self._serve_pair(monkeypatch, "pla", "pp", compatible=False, interface_adhesion="poor")
         report = check_multi_material_compatibility("pla", "pp")
         assert "kiln3d.com/pricing" in report.caution
 
@@ -2068,6 +2008,7 @@ class TestFreePathCautions:
         self, monkeypatch
     ):
         self._overlay(monkeypatch, None)
+        self._serve_pair(monkeypatch, "pla", "abs", compatible=False, interface_adhesion="poor")
         report = check_multi_material_compatibility("pla", "abs")
         assert report.compatible is False  # the verdict survives
         assert report.notes == ""
@@ -2075,9 +2016,13 @@ class TestFreePathCautions:
         assert "kiln3d.com/pricing" in report.caution
 
     def test_multi_material_never_points_at_an_empty_rule_list(self, monkeypatch):
-        # The no-data branch told the caller to "Check general rules." while
-        # general_rules is empty by construction on the public floor.
+        # The no-data answer must not send the caller to general rules while
+        # it carries none.
         self._overlay(monkeypatch, None)
+        self._serve_pair(
+            monkeypatch, "pla", "peek", found="none", compatible=False, interface_adhesion="unknown",
+            notes="No compatibility data for pla + peek.",
+        )
         report = check_multi_material_compatibility("pla", "peek")
         assert report.general_rules == []
         assert "general rules" not in report.notes.lower()
@@ -2087,6 +2032,10 @@ class TestFreePathCautions:
         self._overlay(
             monkeypatch,
             {"multi_material_pairing": {"general_rules": ["a real rule"]}},
+        )
+        self._serve_pair(
+            monkeypatch, "pla", "peek", found="none", compatible=False, interface_adhesion="unknown",
+            notes="No compatibility data for pla + peek. Check general rules.", general_rules=["a real rule"],
         )
         report = check_multi_material_compatibility("pla", "peek")
         assert report.general_rules == ["a real rule"]
@@ -2101,6 +2050,7 @@ class TestFreePathCautions:
                 }
             },
         )
+        self._serve_pair(monkeypatch, "pla", "abs", compatible=False, interface_adhesion="poor", notes="paid note")
         report = check_multi_material_compatibility("pla", "abs")
         assert report.notes == "paid note"
         assert report.caution == ""
@@ -2228,13 +2178,17 @@ class TestFreePathCautions:
             what_is_unknown: str,
             *,
             curated_entry_exists: bool | None = None,
+            table_read: bool | None = None,
         ) -> str:
             # The entity-level answer is OPTIONAL by design: the pairing site
             # is keyed by two materials, which one entity id cannot address.
+            # Whether the table was read is optional too: an answer from
+            # Kiln's servers says so, and without one this computer is asked.
             seen.append(overlay_kind)
             return "spy"
 
         self._overlay(monkeypatch, None)
+        self._serve_pair(monkeypatch, "pla", "abs", compatible=False, interface_adhesion="poor")
         monkeypatch.setattr(di, "unestablished_caution", spy)
 
         assert get_design_template("living_hinge").caution == "spy"

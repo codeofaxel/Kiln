@@ -5,7 +5,7 @@
 # baseline:  present when the gate was added; listed, not judged.  The list
 #            only shrinks: a table leaves it when it is served instead, or
 #            when it earns a keep row.  A new table may not join it.
-baseline_count: 30
+baseline_count: 23
 keep:
   'gcode.py::_MATERIAL_TEMPS':
     door: the live-printer filament load, unload, purge and wipe commands
@@ -13,8 +13,10 @@ keep:
   'catalog_keys.py::_MATERIAL_ABBREVIATIONS':
     door: every material lookup
     why: a spelling map from short names to catalogue ids; it carries no figure or judgement
+  'material_safety.py::_REFUSED_PAIRS':
+    door: the multi-colour composer and the print doors that load several materials into one print
+    why: with no server they must still refuse loading two plastics whose nozzle temperatures cannot share one print, a clog and failed-print floor
 baseline:
-  - 'adaptive_slicer.py::_MATERIAL_PROFILES'
   - 'ambient_safety.py::_ALIASES'
   - 'ambient_safety.py::_MATERIAL_THERMAL_PROFILES'
   - 'cli/main.py::_MATERIAL_ALIASES'
@@ -24,8 +26,6 @@ baseline:
   - 'data/design_knowledge/load_tables.json::(top)'
   - 'data/design_knowledge/material_troubleshooting.json::(top)'
   - 'data/design_knowledge/materials.json::(top)'
-  - 'data/design_knowledge/multi_material_pairing.json::co_print_compatibility'
-  - 'data/design_knowledge/multi_material_pairing.json::support_pairs[]'
   - 'data/design_knowledge/post_processing.json::(top)'
   - 'data/design_knowledge/printer_material_compatibility.json::default'
   - 'data/design_knowledge/skin_contact.json::(top)'
@@ -33,10 +33,6 @@ baseline:
   - 'data/support_profiles.json::(top)'
   - 'design_reasoning.py::_MATERIAL_DEFAULTS'
   - 'emboss_generator.py::MATERIAL_DEPTHS'
-  - 'material_routing.py::_CATALOG_ALIASES'
-  - 'material_routing.py::_MATERIALS'
-  - 'material_safety.py::MATERIAL_PROCESS'
-  - 'material_substitution.py::_build_builtin_rules:self._add_bidirectional()'
   - 'materials.py::MATERIAL_TEMPS'
   - 'materials.py::_MATERIAL_ALIASES'
   - 'printability.py::_UNVOUCHED_ON_A_STANDARD_BED'
@@ -50,9 +46,8 @@ baseline:
 # keep: stays, with a reason.  baseline: present when the check was added;
 # listed, not judged; it only shrinks and a new tool may not join it.
 whole_record_doors:
-  baseline_count: 3
+  baseline_count: 2
   keep: {}
   baseline:
-    - 'check_multi_material_pairing::data/design_knowledge/multi_material_pairing.json::co_print_compatibility'
     - 'get_material_design_profile::data/design_knowledge/materials.json::(top)'
     - 'get_material_properties::data/design_knowledge/materials.json::(top)'

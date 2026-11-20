@@ -748,9 +748,21 @@ class _IntelligenceToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln._pro_routing_bridge import refusal_for
+                from kiln.material_routing import (
+                    BasicMaterials,
+                    RequestRefused,
+                )
                 from kiln.material_routing import (
                     recommend_material as _recommend,
                 )
+
+                # A request Kiln's servers could not read, or a printer name
+                # too long to say back, is refused here, before anything is
+                # asked or scanned.
+                refused = refusal_for(intent, printer_id)
+                if refused is not None:
+                    return _srv._error_dict(refused, code="VALIDATION_ERROR")
 
                 caps = {
                     "has_enclosure": has_enclosure,
@@ -788,13 +800,27 @@ class _IntelligenceToolsPlugin:
                                 )
                             return refused
 
-                rec = _recommend(
-                    intent,
-                    printer_capabilities=caps,
-                    budget_usd=budget_usd,
-                    printer_id=printer_id,
-                    on_hand=on_hand,
-                )
+                try:
+                    rec = _recommend(
+                        intent,
+                        printer_capabilities=caps,
+                        budget_usd=budget_usd,
+                        printer_id=printer_id,
+                        on_hand=on_hand,
+                    )
+                except RequestRefused as refusal:
+                    # Kiln's material recommendation could not read the
+                    # request: its ruling on the input, said as one.
+                    return _srv._error_dict(str(refusal), code="VALIDATION_ERROR")
+                if isinstance(rec, BasicMaterials):
+                    # No pick: the plastics this printer can melt (or the
+                    # materials on hand, when asked), and why.
+                    basic = rec.to_dict()
+                    if printer_id:
+                        basic["answered_for_printer"] = printer_id
+                    if on_hand_only:
+                        basic["on_hand_scope"] = f"printer:{printer_id}" if printer_id else "fleet"
+                    return basic
 
                 response = {"success": True, "recommendation": rec.to_dict()}
                 # Say which machine the answer was computed for — an
@@ -821,14 +847,11 @@ class _IntelligenceToolsPlugin:
             import kiln.server as _srv
 
             try:
-                from kiln.material_routing import list_materials
+                # With no answer from Kiln's servers the list is basic: each
+                # material's name and category, and a message saying why.
+                from kiln.material_routing import material_list
 
-                materials = list_materials()
-                return {
-                    "success": True,
-                    "materials": [m.to_dict() for m in materials],
-                    "count": len(materials),
-                }
+                return material_list()
             except Exception as exc:
                 _logger.exception("Unexpected error in list_available_materials")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")

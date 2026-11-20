@@ -263,6 +263,10 @@ class _GenerationAIToolsPlugin:
                                 "constraints": improved.constraints_added,
                             }
                             prompt = improved.improved_prompt
+                        if improved.material_basic is not None:
+                            # No material was picked for the part: say why,
+                            # beside the constraints that were applied.
+                            enrichment_info = {**(enrichment_info or {}), "material_basic": improved.material_basic}
                     except Exception:
                         _logger.debug("Design intelligence enrichment unavailable", exc_info=True)
 

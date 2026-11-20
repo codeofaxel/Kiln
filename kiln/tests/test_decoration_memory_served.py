@@ -144,8 +144,10 @@ def test_a_miss_changes_nothing_and_the_tool_says_so(servers):
     assert (folder / "manifest.json").read_bytes() == before
 
 
-def test_a_plan_without_decoration_memory_gets_the_servers_own_answer(servers):
+def test_a_plan_without_decoration_memory_gets_the_servers_own_answer(servers, monkeypatch):
     _saved_qr()
+    # A caller this computer counts as below the plan, as the servers do.
+    monkeypatch.setattr("kiln.licensing.check_tier", lambda *_a, **_k: (False, "needs Kiln Pro"))
     servers.answer = {"status": "error", "success": False, "code": "TIER_REQUIRED",
                       "error": "Decoration memory needs Kiln Pro.", "required_tier": "pro",
                       "upgrade_url": "https://kiln3d.com/pricing"}

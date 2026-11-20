@@ -530,7 +530,7 @@ class _MaterialToolsPlugin:
 
                     report = _analyze(
                         model_path,
-                        material=material or "pla",
+                        material=material or None,
                         printer_id=printer_id or None,
                     )
                     if report.bed_adhesion is not None:

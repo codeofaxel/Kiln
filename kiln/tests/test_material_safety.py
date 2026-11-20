@@ -1,313 +1,297 @@
-"""Tests for kiln.material_safety — material compatibility and process settings."""
+"""Tests for kiln.material_safety: the multi-material check and the
+abrasive-filament floor.
+
+The check is Kiln's (kiln-pro, https://kiln3d.com), asked through
+``kiln._pro_material_pairing_bridge``.  These pin, on an install without kiln-pro:
+the served check is relayed as it is; with no answer the check is basic --
+the pairs that must never share a print are still refused, word for word,
+every other pair is a caution with the conservative purge, and one sentence
+says why; the flush matrix reads each pair's purge from the check.
+"""
 
 from __future__ import annotations
 
+import socket
+import urllib.error
+from typing import Any
+
 import pytest
 
+from kiln import material_safety as ms
 from kiln.material_safety import (
-    MATERIAL_PROCESS,
     abrasive_nozzle_floor,
     build_bambu_flush_matrix,
     check_material_compatibility,
-    get_process_settings,
     is_abrasive_filament,
 )
 
-# ---------------------------------------------------------------------------
-# check_material_compatibility — basic cases
-# ---------------------------------------------------------------------------
+#: The pairs that must never share a print, and the refusal each gives.
+_REFUSED = {
+    ("PLA", "ABS"): "⛔ INCOMPATIBLE MATERIALS: PLA + ABS. Do not print — see warnings for details.",
+    ("PLA", "ASA"): "⛔ INCOMPATIBLE MATERIALS: PLA + ASA. Do not print — see warnings for details.",
+    ("PLA", "NYLON"): "⛔ INCOMPATIBLE MATERIALS: PLA + NYLON. Do not print — see warnings for details.",
+    ("PLA", "PC"): "⛔ INCOMPATIBLE MATERIALS: PLA + PC. Do not print — see warnings for details.",
+    ("ABS", "TPU"): "⛔ INCOMPATIBLE MATERIALS: ABS + TPU. Do not print — see warnings for details.",
+}
+_SIGNED_OUT = {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "Sign in.", "why": "signed_out"}
 
 
-class TestCheckMaterialCompatibility:
-    def test_empty_list_returns_ok(self):
-        result = check_material_compatibility([])
-        assert result["safe"] is True
-        assert result["level"] == "ok"
-        assert result["pairs"] == []
-        assert result["message"] == "No materials specified."
+def _served(monkeypatch, reply: Any) -> list[dict[str, Any]]:
+    import kiln.server as srv
 
-    def test_single_material_no_pairs(self):
-        """One material → no cross-material pairs, just hardware checks."""
-        result = check_material_compatibility(["PLA"])
-        assert result["safe"] is True
-        assert result["level"] == "ok"
-        assert result["pairs"] == []
+    asks: list[dict[str, Any]] = []
 
-    def test_pla_pla_ok(self):
-        result = check_material_compatibility(["PLA", "PLA"])
-        assert result["safe"] is True
-        assert result["level"] == "ok"
-        assert "✅" in result["message"]
+    def call(tool_name, _timeout=None, _asked_by_user=None, _feature=None, **kwargs):
+        asks.append({"tool": tool_name, "asked_by_user": _asked_by_user, **kwargs})
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
 
-    def test_pla_pvs_ok(self):
-        """PLA + PVA is a classic soluble support pairing — should be OK."""
-        result = check_material_compatibility(["PLA", "PVA"])
-        assert result["safe"] is True
-        assert result["level"] == "ok"
+    monkeypatch.setattr(srv, "_pro_api_call", call)
+    return asks
 
-    def test_pla_abs_incompatible(self):
-        result = check_material_compatibility(["PLA", "ABS"])
-        assert result["safe"] is False
-        assert result["level"] == "incompatible"
-        assert "⛔" in result["message"]
-        assert "ABS" in result["message"]
 
-    def test_pla_asa_incompatible(self):
-        result = check_material_compatibility(["PLA", "ASA"])
-        assert result["safe"] is False
-        assert result["level"] == "incompatible"
+#: Kiln's answer for PLA and PETG: each pair's entry by index, PETG on its own
+#: not in the table, and PETG needing an enclosure.
+_ENTRIES = {
+    "success": True,
+    "names": ["PLA", "PETG"],
+    "pairs": [
+        [0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 30}],
+        [0, 1, {"known": True, "level": "conditional", "warning": "w", "mitigations": ["m"], "purge_volume_mm3": 70}],
+        [1, 1, {"known": False, "level": "caution", "purge_volume_mm3": 80}],
+    ],
+    "hardware": [{"hardened_nozzle": False, "enclosure": False}, {"hardened_nozzle": False, "enclosure": True}],
+}
 
-    def test_pla_nylon_incompatible(self):
-        result = check_material_compatibility(["PLA", "NYLON"])
-        assert result["safe"] is False
-        assert result["level"] == "incompatible"
 
-    def test_pla_pc_incompatible(self):
-        result = check_material_compatibility(["PLA", "PC"])
-        assert result["safe"] is False
-        assert result["level"] == "incompatible"
+def _check() -> dict[str, Any]:
+    """The check the composer builds from :data:`_ENTRIES`."""
+    return {"pairs": [{"material_a": "PLA", "material_b": "PETG", "purge_volume_mm3": 70}]}
 
-    def test_abs_tpu_incompatible(self):
-        result = check_material_compatibility(["ABS", "TPU"])
-        assert result["safe"] is False
-        assert result["level"] == "incompatible"
 
-    def test_pla_petg_conditional(self):
-        result = check_material_compatibility(["PLA", "PETG"])
-        assert result["safe"] is True  # conditional is still safe (printable w/ mitigations)
-        assert result["level"] == "conditional"
-        assert "⚠️" in result["message"]
+class TestTheServedCheck:
+    def test_the_check_is_built_from_kilns_answer_for_each_pair(self, monkeypatch):
+        asks = _served(monkeypatch, _ENTRIES)
+        check = check_material_compatibility([" pla ", "PETG", "", None, "PETG"])  # type: ignore[list-item]
+        assert asks == [{"tool": "material_mix_check", "asked_by_user": False, "materials": ["PLA", "PETG"]}]
+        assert check_material_compatibility(["", None])["message"] == "No materials specified."  # type: ignore[list-item]
+        assert len(asks) == 1, "a check with no materials asks nothing"
+        assert check == {
+            "safe": True,
+            "level": "conditional",
+            "pairs": [
+                {"material_a": "PLA", "material_b": "PETG", "level": "conditional", "warning": "w",
+                 "mitigations": ["m"], "purge_volume_mm3": 70},
+                {"material_a": "PETG", "material_b": "PETG", "level": "caution",
+                 "warning": "Compatibility between PETG and PETG is unknown. Verify temperature ranges are "
+                            "compatible before printing.",
+                 "mitigations": ["Check nozzle temp range for both PETG and PETG.",
+                                 "Test with a small print before committing to a full job."],
+                 "purge_volume_mm3": 80},
+            ],
+            "hardware_warnings": ["PETG requires an enclosure to prevent warping and fume issues."],
+            "purge_matrix": [[0.0, 70.0, 70.0], [70.0, 0.0, 80.0], [70.0, 80.0, 0.0]],
+            "message": "\u26a0\ufe0f  Conditional compatibility. Review mitigations before printing: w; "
+                       "Compatibility between PETG and PETG is unknown. Verify temperature ranges are "
+                       "compatible before printing.",
+        }
 
-    def test_pla_tpu_caution(self):
-        result = check_material_compatibility(["PLA", "TPU"])
-        assert result["safe"] is True
+    def test_a_filled_filament_gets_the_hardened_nozzle_line_from_its_name(self, monkeypatch):
+        """Kiln's answer marks no hardened nozzle for PETG-CF; the line comes
+        from the name, the same words a check with no answer gives."""
+        served = {"success": True, "names": ["PLA", "PETG-CF"],
+                  "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 30}],
+                            [0, 1, {"known": False, "level": "caution", "purge_volume_mm3": 80}],
+                            [1, 1, {"known": False, "level": "caution", "purge_volume_mm3": 80}]],
+                  "hardware": [{"hardened_nozzle": False, "enclosure": False},
+                               {"hardened_nozzle": False, "enclosure": False}]}
+        _served(monkeypatch, served)
+        online = check_material_compatibility(["PLA", "PETG-CF"])
+        assert "basic" not in online and online["level"] == "caution"
+        assert online["hardware_warnings"] == [
+            "PETG-CF requires a hardened/wear-resistant nozzle (not standard brass)."
+        ]
+        _served(monkeypatch, _SIGNED_OUT)
+        assert check_material_compatibility(["PLA", "PETG-CF"])["hardware_warnings"] == online["hardware_warnings"]
+
+    def test_a_marked_filament_is_warned_once(self, monkeypatch):
+        served = {**_ENTRIES, "names": ["PLA", "PLA-CF"],
+                  "hardware": [{"hardened_nozzle": False, "enclosure": False},
+                               {"hardened_nozzle": True, "enclosure": False}]}
+        _served(monkeypatch, served)
+        assert check_material_compatibility(["PLA", "PLA-CF"])["hardware_warnings"] == [
+            "PLA-CF requires a hardened/wear-resistant nozzle (not standard brass)."
+        ]
+
+    def test_an_answer_missing_a_pair_is_a_basic_check(self, monkeypatch):
+        _served(monkeypatch, {**_ENTRIES, "pairs": _ENTRIES["pairs"][:1]})
+        check = check_material_compatibility(["PLA", "PETG"])
+        assert check["basic"] is True and check["why"] == "unanswered"
+
+
+class TestABasicCheck:
+    @pytest.mark.parametrize("pair,message", sorted(_REFUSED.items()))
+    def test_a_pair_that_must_never_share_a_print_is_refused_offline(self, monkeypatch, pair, message):
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(list(pair))
+        assert result["safe"] is False and result["level"] == "incompatible"
+        assert result["message"] == message
+        assert result["pairs"][0]["level"] == "incompatible"
+        assert result["pairs"][0]["warning"].startswith("INCOMPATIBLE:")
+        assert result["basic"] is True
+
+    @pytest.mark.parametrize(
+        "reply,cause,fix",
+        [
+            (_SIGNED_OUT, "signed_out", "sign in and compose again"),
+            (urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided")), "offline",
+             "reconnect to the internet"),
+            ({"status": "error", "code": "SERVER_UNREACHABLE", "error": "timed out"}, "unanswered", "wait a minute"),
+            ({"success": True, "check": {"safe": True}}, "unanswered", "wait a minute"),
+        ],
+    )
+    def test_every_other_pair_is_a_caution_with_the_conservative_purge(self, monkeypatch, reply, cause, fix):
+        _served(monkeypatch, reply)
+        result = check_material_compatibility(["PLA", "PETG", "TPU"])
+        assert result["safe"] is True and result["level"] == "caution" and result["basic"] is True
+        assert result["why"] == cause and fix in result["caution"]
+        assert "Kiln can't check how these materials pair right now because" in result["caution"]
+        assert {p["level"] for p in result["pairs"]} == {"caution"}
+        assert {p["purge_volume_mm3"] for p in result["pairs"]} == {800}
+        assert all(p["mitigations"] == [] for p in result["pairs"])
+        assert result["purge_matrix"] == [[0.0, 800.0, 800.0], [800.0, 0.0, 800.0], [800.0, 800.0, 0.0]]
+
+    def test_a_basic_pair_says_only_what_the_nozzle_ranges_show(self, monkeypatch):
+        _served(monkeypatch, _SIGNED_OUT)
+        pairs = {(p["material_a"], p["material_b"]): p["warning"]
+                 for p in check_material_compatibility(["TPU", "PC", "PLA GREY"])["pairs"]}
+        assert pairs[("TPU", "PC")].startswith("These two can't share one nozzle temperature")
+        assert pairs[("TPU", "PLA GREY")].startswith("Kiln's nozzle temperature table has no range for PLA GREY,")
+
+    def test_one_material_in_every_slot_is_not_a_precaution(self, monkeypatch):
+        """Four slots of PLA: one material shares its own temperature and
+        bonds to itself, so the check is ok; the purge between colours is a
+        slicer's default for a change of filament."""
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(["PLA", "PLA", "PLA", "PLA"])
+        assert result["safe"] is True and result["level"] == "ok" and result["basic"] is True
+        assert "precaution" not in result["message"].lower() and "⚠" not in result["message"]
+        (pair,) = result["pairs"]
+        assert pair["level"] == "ok" and pair["purge_volume_mm3"] == 280
+        assert pair["warning"] == (
+            "Both are PLA: one material shares its own nozzle temperature and bonds to itself. "
+            "The purge between its colours was not judged."
+        )
+        assert {v for row in result["purge_matrix"] for v in row} == {0.0, 280.0}
+
+    def test_a_same_material_pair_beside_a_different_one_keeps_the_caution(self, monkeypatch):
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(["PLA", "PLA", "PETG"])
+        levels = {(p["material_a"], p["material_b"]): p["level"] for p in result["pairs"]}
+        assert levels == {("PLA", "PLA"): "ok", ("PLA", "PETG"): "caution"}
         assert result["level"] == "caution"
+        assert "Kiln can't check how these materials pair right now because" in result["caution"]
 
-    def test_abs_hips_ok(self):
-        """Classic ABS + HIPS (limonene-soluble support) should be OK."""
-        result = check_material_compatibility(["ABS", "HIPS"])
-        assert result["safe"] is True
-        assert result["level"] == "ok"
+    def test_the_filled_filament_floor_still_warns(self, monkeypatch):
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(["PLA", "PETG-CF"])
+        assert result["hardware_warnings"] == [
+            "PETG-CF requires a hardened/wear-resistant nozzle (not standard brass)."
+        ]
 
-    def test_abs_asa_ok(self):
-        result = check_material_compatibility(["ABS", "ASA"])
-        assert result["safe"] is True
-        assert result["level"] == "ok"
+    def test_a_catalogue_id_gets_the_hardened_nozzle_line_like_its_name(self, monkeypatch):
+        """The composer is handed catalogue ids as well as names: ``wood_pla``
+        is warned about exactly as ``WOOD-PLA`` is, signed in or not."""
+        served = {"success": True, "names": ["WOOD_PLA", "PLA"],
+                  "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 30}],
+                            [0, 1, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 30}],
+                            [1, 1, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 30}]],
+                  "hardware": [{"hardened_nozzle": False, "enclosure": False},
+                               {"hardened_nozzle": False, "enclosure": False}]}
+        line = "WOOD_PLA requires a hardened/wear-resistant nozzle (not standard brass)."
+        _served(monkeypatch, served)
+        assert check_material_compatibility(["wood_pla", "pla"])["hardware_warnings"] == [line]
+        _served(monkeypatch, _SIGNED_OUT)
+        assert check_material_compatibility(["wood_pla", "pla"])["hardware_warnings"] == [line]
 
-    def test_case_insensitive(self):
-        """Material names should be normalised before lookup."""
-        lower = check_material_compatibility(["pla", "abs"])
-        upper = check_material_compatibility(["PLA", "ABS"])
-        assert lower["level"] == upper["level"]
-        assert lower["safe"] == upper["safe"]
+    @pytest.mark.parametrize(
+        "materials,warned",
+        [
+            (["ABS", "ASA"], ["ABS", "ASA"]),
+            (["PC", "NYLON", "PA"], ["PC", "NYLON", "PA"]),
+            (["ABS"], ["ABS"]),
+            (["PLA", "PETG", "TPU"], []),
+        ],
+    )
+    def test_the_enclosure_and_fume_caution_holds_offline(self, monkeypatch, materials, warned):
+        """A material the catalog says needs ventilation keeps its enclosure
+        line when Kiln's check does not answer, in the served check's words."""
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(materials)
+        assert result["basic"] is True
+        assert result["hardware_warnings"] == [
+            f"{m} requires an enclosure to prevent warping and fume issues." for m in warned
+        ]
 
-    def test_whitespace_stripped(self):
-        result = check_material_compatibility(["  PLA  ", "  ABS  "])
-        assert result["safe"] is False
+    def test_the_offline_enclosure_line_is_the_served_one(self, monkeypatch):
+        served = {"success": True, "names": ["ABS"],
+                  "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [],
+                                    "purge_volume_mm3": 40}]],
+                  "hardware": [{"hardened_nozzle": False, "enclosure": True}]}
+        _served(monkeypatch, served)
+        online = check_material_compatibility(["ABS"])["hardware_warnings"]
+        _served(monkeypatch, _SIGNED_OUT)
+        assert check_material_compatibility(["ABS"])["hardware_warnings"] == online
 
-    def test_empty_strings_ignored(self):
-        result = check_material_compatibility(["PLA", "", "PLA"])
-        assert result["safe"] is True
-        assert result["level"] == "ok"
-
-    def test_none_strings_ignored(self):
-        """None-like empty values should be filtered out gracefully."""
-        result = check_material_compatibility(["PLA", None, "PLA"])  # type: ignore[list-item]
-        assert result["safe"] is True
-
-
-# ---------------------------------------------------------------------------
-# Pairs structure
-# ---------------------------------------------------------------------------
-
-
-class TestPairsStructure:
-    def test_pairs_contains_level_warning_mitigations(self):
-        result = check_material_compatibility(["PLA", "PETG"])
-        assert len(result["pairs"]) == 1
-        pair = result["pairs"][0]
-        assert "level" in pair
-        assert "warning" in pair
-        assert "mitigations" in pair
-        assert "purge_volume_mm3" in pair
-
-    def test_pairs_symmetric_dedup(self):
-        """PLA+PETG should appear once, not twice."""
-        result = check_material_compatibility(["PLA", "PETG"])
-        assert len(result["pairs"]) == 1
-
-    def test_three_materials_two_pairs(self):
-        """PLA + PETG + TPU → 3 unique unordered pairs."""
-        result = check_material_compatibility(["PLA", "PETG", "TPU"])
-        # Pairs: PLA↔PETG, PLA↔TPU, PETG↔TPU
-        assert len(result["pairs"]) == 3
-
-    def test_incompatible_pair_has_zero_purge(self):
-        result = check_material_compatibility(["PLA", "ABS"])
-        pair = result["pairs"][0]
-        assert pair["purge_volume_mm3"] == 0
-
-
-# ---------------------------------------------------------------------------
-# Hardware warnings
-# ---------------------------------------------------------------------------
-
-
-class TestHardwareWarnings:
-    def test_pla_cf_triggers_hardened_nozzle_warning(self):
-        result = check_material_compatibility(["PLA", "PLA-CF"])
-        assert any("hardened" in w.lower() for w in result["hardware_warnings"])
-
-    def test_abs_triggers_enclosure_warning(self):
-        result = check_material_compatibility(["ABS"])
-        assert any("enclosure" in w.lower() for w in result["hardware_warnings"])
-
-    def test_pure_pla_no_hardware_warnings(self):
-        result = check_material_compatibility(["PLA"])
-        assert result["hardware_warnings"] == []
-
-    def test_duplicate_hardware_warnings_not_repeated(self):
-        """Two ABS slots should not double the enclosure warning."""
-        result = check_material_compatibility(["ABS", "ABS"])
-        enclosure_count = sum(1 for w in result["hardware_warnings"] if "enclosure" in w.lower())
-        assert enclosure_count == 1
+    @pytest.mark.parametrize("materials", [["ABS"], ["PLA", "PLA", "PLA"]])
+    def test_one_material_says_nothing_about_pairs(self, monkeypatch, materials):
+        """With one material loaded there is no pair to refuse or purge
+        between, so the line saying why the check is missing speaks of the
+        material's hardware."""
+        _served(monkeypatch, _SIGNED_OUT)
+        result = check_material_compatibility(materials)
+        assert result["basic"] is True and result["why"] == "signed_out"
+        assert "Kiln can't check what hardware this material needs right now because" in result["caution"]
+        assert "pair" not in result["caution"]
+        assert ("a slicer's default purge between its colours" in result["caution"]) is (len(materials) > 1)
+        assert result["caution"].endswith("Sign in and compose again (a free account is enough).")
 
 
-# ---------------------------------------------------------------------------
-# Purge matrix
-# ---------------------------------------------------------------------------
+class TestTheFlushMatrix:
+    def test_each_pair_purges_what_the_check_says(self):
+        assert build_bambu_flush_matrix(["PLA", "PETG"], n_slots=2, check=_check()) == "0 70 70 0"
+
+    def test_an_empty_slot_or_an_unanswered_pair_gets_the_conservative_purge(self):
+        assert build_bambu_flush_matrix(["PLA", "PETG", "", "TPU"], n_slots=4, check=_check()).split() == [
+            "0", "70", "800", "800", "70", "0", "800", "800", "800", "800", "0", "800", "800", "800", "800", "0",
+        ]
+
+    def test_without_an_answer_different_materials_get_the_conservative_purge(self, monkeypatch):
+        """Two materials get the conservative purge; two colours of one
+        material get a slicer's default for a change of filament."""
+        _served(monkeypatch, _SIGNED_OUT)
+        assert build_bambu_flush_matrix(["PLA", "PETG", "PLA"], n_slots=3) == "0 800 280 800 0 800 280 800 0"
 
 
-class TestPurgeMatrix:
-    def test_purge_matrix_shape(self):
-        result = check_material_compatibility(["PLA", "ABS"])
-        matrix = result["purge_matrix"]
-        assert len(matrix) == 2
-        assert all(len(row) == 2 for row in matrix)
-
-    def test_purge_matrix_diagonal_is_zero(self):
-        result = check_material_compatibility(["PLA", "PETG", "TPU"])
-        matrix = result["purge_matrix"]
-        for i in range(3):
-            assert matrix[i][i] == 0.0
-
-    def test_purge_matrix_values_are_floats(self):
-        result = check_material_compatibility(["PLA", "PVA"])
-        for row in result["purge_matrix"]:
-            for val in row:
-                assert isinstance(val, float)
-
-    def test_incompatible_purge_volume_zero(self):
-        """Incompatible pairs have purge_volume=0 (don't print at all)."""
-        result = check_material_compatibility(["PLA", "ABS"])
-        # Off-diagonal should be 0 for incompatible pair
-        assert result["purge_matrix"][0][1] == 0.0
-        assert result["purge_matrix"][1][0] == 0.0
+#: The pair and process tables' names, by digest (tests/_moved_away.py).
+_PAIR_TABLE_NAMES = frozenset({
+    "c7b40d3423e4838b08c272c9f25eaa921c992bace6329090da8024a8c43ee0a6",
+    "2c07a58cc1a3c05c565f0ef3aa46a33de7ab716af65c36fd934d6e537f501b9e",
+    "149e54a49728231c57960a88db4f9d7023956efec70ca3700a95fc960fef5459",
+    "969b9098705aebc40527330bab15e50ed1de979106657ab4bf4f96133f18b430",
+})
 
 
-# ---------------------------------------------------------------------------
-# Worst-level propagation with mixed pairings
-# ---------------------------------------------------------------------------
+def test_the_pair_and_process_tables_are_not_in_this_package():
+    from tests._moved_away import attributes_back
 
-
-class TestWorstLevelPropagation:
-    def test_incompatible_wins_over_caution(self):
-        """Three materials: PLA+TPU (caution) + PLA+ABS (incompatible) → incompatible."""
-        result = check_material_compatibility(["PLA", "TPU", "ABS"])
-        assert result["safe"] is False
-        assert result["level"] == "incompatible"
-
-    def test_conditional_wins_over_caution(self):
-        """PLA+PETG (conditional) + PLA+TPU (caution) → conditional."""
-        result = check_material_compatibility(["PLA", "PETG", "TPU"])
-        assert result["safe"] is True
-        assert result["level"] == "conditional"
-
-    def test_all_ok_stays_ok(self):
-        result = check_material_compatibility(["PLA", "PLA-HF"])
-        assert result["level"] == "ok"
-
-
-# ---------------------------------------------------------------------------
-# get_process_settings
-# ---------------------------------------------------------------------------
-
-
-class TestGetProcessSettings:
-    def test_known_material(self):
-        s = get_process_settings("PLA")
-        assert s is not None
-        assert "temp_range" in s
-        assert "bed_temp" in s
-        assert "speed_factor" in s
-        assert "requires_hardened_nozzle" in s
-        assert "requires_enclosure" in s
-
-    def test_unknown_material_returns_none(self):
-        assert get_process_settings("UNOBTANIUM") is None
-
-    def test_case_insensitive(self):
-        assert get_process_settings("pla") == get_process_settings("PLA")
-
-    def test_all_known_materials_have_temp_range(self):
-        for mat_name, info in MATERIAL_PROCESS.items():
-            assert "temp_range" in info, f"{mat_name} missing temp_range"
-            lo, hi = info["temp_range"]
-            assert lo < hi, f"{mat_name} temp_range inverted"
-
-    def test_pla_cf_requires_hardened_nozzle(self):
-        s = get_process_settings("PLA-CF")
-        assert s["requires_hardened_nozzle"] is True
-
-    def test_abs_requires_enclosure(self):
-        s = get_process_settings("ABS")
-        assert s["requires_enclosure"] is True
-
-    def test_pla_does_not_require_enclosure(self):
-        s = get_process_settings("PLA")
-        assert s["requires_enclosure"] is False
-
-
-# ---------------------------------------------------------------------------
-# build_bambu_flush_matrix
-# ---------------------------------------------------------------------------
-
-
-class TestBuildBambuFlushMatrix:
-    def test_returns_string(self):
-        result = build_bambu_flush_matrix(["PLA", "PLA"])
-        assert isinstance(result, str)
-
-    def test_default_4_slots_produces_16_values(self):
-        result = build_bambu_flush_matrix(["PLA", "PLA"])
-        values = result.split()
-        assert len(values) == 16  # 4×4
-
-    def test_diagonal_is_zero(self):
-        """Slots flushing into themselves = 0."""
-        result = build_bambu_flush_matrix(["PLA", "PETG"], n_slots=2)
-        values = [int(v) for v in result.split()]
-        # Matrix: [[0, PLA→PETG], [PETG→PLA, 0]]
-        assert values[0] == 0  # slot 0 → slot 0
-        assert values[3] == 0  # slot 1 → slot 1
-
-    def test_off_diagonal_non_zero_for_different_materials(self):
-        result = build_bambu_flush_matrix(["PLA", "PETG"], n_slots=2)
-        values = [int(v) for v in result.split()]
-        assert values[1] > 0
-        assert values[2] > 0
-
-    def test_unknown_slots_get_conservative_default(self):
-        """Empty / unspecified slots should get 800mm³ conservative default."""
-        result = build_bambu_flush_matrix(["PLA"], n_slots=4)
-        values = [int(v) for v in result.split()]
-        # Slot 0 (PLA) → slot 1 (empty) = 800
-        assert values[1] == 800
-
-    def test_n_slots_parameter(self):
-        result = build_bambu_flush_matrix(["PLA", "ABS", "PETG"], n_slots=3)
-        values = result.split()
-        assert len(values) == 9  # 3×3
+    assert attributes_back(ms, _PAIR_TABLE_NAMES) == []
+    assert set(ms._REFUSED_PAIRS) == {frozenset(pair) for pair in _REFUSED}
 
 
 # ---------------------------------------------------------------------------
@@ -318,16 +302,15 @@ class TestBuildBambuFlushMatrix:
 class TestAbrasiveFilament:
     """Filled-filament detection and the free nozzle-wear floor.
 
-    Coverage: curated-table hits, name-rule hits for the filled grades
-    the table does not carry, colourway names that must not trip it,
-    and the floor's honesty about what it cannot establish.
+    Coverage: the name rule's hits for filled grades, colourway names that
+    must not trip it, and the floor's honesty about what it cannot establish.
     """
 
     @pytest.mark.parametrize(
         "material",
         [
-            "PLA-CF",       # the one entry MATERIAL_PROCESS carries
-            "PETG-CF",      # not in the table — name rule must catch it
+            "PLA-CF",
+            "PETG-CF",
             "PA-CF",
             "PAHT-CF",
             "PPS-CF",
@@ -342,6 +325,24 @@ class TestAbrasiveFilament:
             "PLA Carbon Fiber",
             "Glass Fiber Nylon",
             "glass-fibre PA",
+            "Carbon Fibre PETG",
+            "CPE Carbon",          # a maker's carbon-filled grade, named for its filler alone
+            "Carbon Black PLA-CF",  # a black carbon-fibre grade is still carbon fibre
+            "Glass-filled PETG",
+            "Bronze-fill PLA",
+            "timber-fill PLA",
+            "PLA Timber Fill",
+            "hempfill PETG",
+            "steelFill",
+            "Glow PLA",
+            "Glow-in-the-dark PETG",
+            "Magnetic PLA",
+            "PLA filled with bamboo",
+            "wood_pla",            # catalogue ids: an underscore is a word break
+            "carbon_fiber_petg",
+            "glow_pla",
+            "pla_metal",
+            "pla_cf",
         ],
     )
     def test_filled_filament_is_abrasive(self, material):
@@ -357,20 +358,20 @@ class TestAbrasiveFilament:
             "Bronze PETG",
             "Sea Glass PLA",
             "Redwood PLA",
+            "Timber Brown PLA",          # a colourway named for wood, not a filler
+            "Hemp Beige PETG",
+            "PLA Basic Refill",          # a refill spool, not a filler
+            "PETG Refill",
+            "Examplefill PLA",           # a maker named for "fill", not a filler
+            "PLA Examplefill Plus",      # a product line named for "fill"
+            "Carbon Black PLA",          # a pigment
+            "carbon-black PETG",
+            "pla_basic", "petg_hf", "tpu_95a",
             "", "   ",
         ],
     )
     def test_unfilled_filament_is_not_abrasive(self, material):
         assert is_abrasive_filament(material) is False
-
-    def test_no_catalogued_material_trips_the_rule(self):
-        # Every material in MATERIAL_PROCESS must agree with its own
-        # requires_hardened_nozzle flag, so the name rule can never
-        # contradict the curated table it extends.
-        for name, settings in MATERIAL_PROCESS.items():
-            assert is_abrasive_filament(name) is bool(
-                settings["requires_hardened_nozzle"]
-            ), name
 
     def test_floor_names_the_material_and_the_fix(self):
         note = abrasive_nozzle_floor("PETG-CF")

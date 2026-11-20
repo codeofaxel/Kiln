@@ -385,12 +385,18 @@ class ImprovedPrompt:
     iteration: int  # which retry attempt this is
     expected_improvements: list[str]
     sanity: SanityResult | None = None
+    #: When no material was picked for the part: the design analysis's basic
+    #: material block (``kiln.design_intelligence.material_basic_of``), so a
+    #: prompt with no material constraint says why.
+    material_basic: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["feedback_applied"] = [f.to_dict() for f in self.feedback_applied]
         if self.sanity is not None:
             data["sanity"] = self.sanity.to_dict()
+        if self.material_basic is None:
+            del data["material_basic"]
         return data
 
 
@@ -1373,6 +1379,23 @@ def resolve_printer_generation_context(
     return ctx
 
 
+def _whose_wall(wall: float, rules: dict[str, Any], limits: Any) -> str:
+    """What a prompt says after the wall it states, so a figure is never
+    passed off as more than it is: nothing for the brief's own rule or the
+    plastic's own wall, the static-safe minimum named as such, and the
+    general figure said to be general."""
+    from kiln.material_limits import WALL_RECOMMENDED
+
+    brief = rules.get("min_wall_thickness_mm")
+    if isinstance(brief, (int, float)) and float(brief) == wall:
+        return ""
+    if limits.static_safe_floor() and wall == limits.wall_floor_mm():
+        return " (this plastic's static-safe minimum)"
+    if limits.is_own(WALL_RECOMMENDED):
+        return ""
+    return " (the general figure for any plastic)"
+
+
 def enhance_prompt_with_design_intelligence(
     prompt: str,
     *,
@@ -1424,6 +1447,7 @@ def enhance_prompt_with_design_intelligence(
         from kiln.design_intelligence import (
             get_design_constraints,
             get_printer_design_profile,
+            material_basic_of,
         )
 
         brief = get_design_constraints(
@@ -1452,18 +1476,40 @@ def enhance_prompt_with_design_intelligence(
     rules = brief.combined_rules
     mat = brief.recommended_material
     mat_limits: dict[str, Any] = {}
-    if mat and mat.material and hasattr(mat.material, "design_limits"):
-        mat_limits = mat.material.design_limits or {}
+    from kiln.material_limits import limits_for
+
+    # The plastic the design checks read: the recommended one, else the one
+    # named, else none (the general figures, with nothing asked).
+    plastic_limits = limits_for(None)
+    if mat and mat.material:
+        # The curated keys a profile carries, then the plastic's limits from
+        # the one helper every check reads.
+        plastic_limits = limits_for(mat.material.material_id)
+        mat_limits = {
+            **(getattr(mat.material, "design_limits", None) or {}),
+            **plastic_limits.design_limits(),
+        }
+    elif material:
+        # A name the catalogue cannot place: the plastic's own limits where
+        # Kiln's design limits place it (the brief read them already).
+        plastic_limits = limits_for(material)
+        if plastic_limits.known:
+            mat_limits = plastic_limits.design_limits()
 
     # -----------------------------------------------------------------
     # Core constraints (always included regardless of budget)
     # -----------------------------------------------------------------
     core_constraints: list[str] = []
 
-    # Wall thickness — prefer material-specific recommended value
-    rec_wall = mat_limits.get("recommended_wall_thickness_mm") or rules.get("min_wall_thickness_mm")
-    if rec_wall:
-        core_constraints.append(f"minimum wall thickness {rec_wall}mm")
+    # Wall thickness: the wall the design check will hold the part to, and
+    # whose figure it is when it is not the brief's or the plastic's own.
+    from kiln.design_validator import wall_held_to
+
+    held_wall = wall_held_to(rules, plastic_limits)
+    if held_wall:
+        core_constraints.append(
+            f"minimum wall thickness {float(held_wall)}mm{_whose_wall(float(held_wall), rules, plastic_limits)}"
+        )
 
     if rules.get("infill_min_pct"):
         core_constraints.append(f"solid infill, minimum {rules['infill_min_pct']}% density")
@@ -1485,7 +1531,9 @@ def enhance_prompt_with_design_intelligence(
         )
 
     # Material-specific overhang/bridge limits
-    overhang_limit = mat_limits.get("max_unsupported_overhang_deg", 50)
+    from kiln.generic_limits import OVERHANG_UNSUPPORTED_DEG
+
+    overhang_limit = mat_limits.get("max_unsupported_overhang_deg", OVERHANG_UNSUPPORTED_DEG)
     core_constraints.append(f"no overhangs greater than {overhang_limit} degrees")
 
     bridge_limit = mat_limits.get("max_bridge_length_mm")
@@ -1652,6 +1700,7 @@ def enhance_prompt_with_design_intelligence(
             iteration=0,
             expected_improvements=[],
             sanity=check_prompt_sanity(prompt, prompt, budget=limit),
+            material_basic=material_basic_of(brief),
         )
 
     # Build the enhanced prompt — use more constraints when budget allows
@@ -1704,6 +1753,7 @@ def enhance_prompt_with_design_intelligence(
             f"and {len(anti_clauses)} anti-patterns applied",
         ],
         sanity=sanity,
+        material_basic=material_basic_of(brief),
     )
 
 
@@ -1805,11 +1855,33 @@ def build_parametric_generation_prompt(
         if material:
             mat_profile = get_material_profile(material)
             if mat_profile:
-                dl = mat_profile.design_limits or {}
+                from kiln.material_limits import limits_for
+
+                # The curated keys a profile carries, then the plastic's
+                # limits from the one helper every check reads.
+                from kiln.material_limits import WALL_RECOMMENDED
+
+                plastic_limits = limits_for(material)
+                dl = {**(mat_profile.design_limits or {}), **plastic_limits.design_limits()}
                 lines = [f"// Material: {mat_profile.display_name} \u2014 Design limits:"]
-                rec_wall = dl.get("recommended_wall_thickness_mm")
+                if plastic_limits.miss is not None or plastic_limits.allowance:
+                    lines.append("// (general figures: this plastic's own limits were not read for this prompt)")
+                    # Why, said once in the call's reply.
+                    from kiln.reading_notes import LIMITS_KEY, note_said
+
+                    for note in plastic_limits.notes():
+                        note_said(LIMITS_KEY, note)
+                elif plastic_limits.basic:
+                    lines.append("// (general figures: Kiln has no limits of this plastic's own)")
+                # One wall with the checks: the plastic's own, else the general one.
+                rec_wall = dl.get("recommended_wall_thickness_mm") or plastic_limits.value(WALL_RECOMMENDED)
                 if rec_wall:
                     lines.append(f"// - Recommended wall thickness: {rec_wall}mm")
+                # A static-safe grade's own minimum wall, where it is above
+                # the recommended one: the checks hold the part to it.
+                floor = plastic_limits.wall_floor_mm()
+                if plastic_limits.static_safe_floor() and floor > float(rec_wall or 0.0):
+                    lines.append(f"// - Minimum wall thickness: {floor}mm (this plastic's static-safe minimum)")
                 overhang = dl.get("max_unsupported_overhang_deg")
                 if overhang:
                     lines.append(f"// - Max unsupported overhang: {overhang}\u00b0")
@@ -1850,6 +1922,7 @@ def build_parametric_generation_prompt(
             f"Parametric OpenSCAD prompt with {len(inner.constraints_added)} "
             "design constraints applied",
         ],
+        material_basic=inner.material_basic,
     )
 
 

@@ -493,6 +493,9 @@ def account_required_message(
     question being asked; a free-monthly figure alongside it only muddies
     which one applies.
 
+    *subject* names one thing ("Kiln's material pick"): the sentence says
+    "is" of it.
+
     *every_plan* is the tool's ``floor`` sentence from the pro tool manifest:
     what a paid tool answers on every plan, free included.  This refusal is
     decided before the question is read, so a paid tool with a floor leads

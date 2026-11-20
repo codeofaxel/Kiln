@@ -86,6 +86,41 @@ def test_a_pair_key_names_its_materials(tmp_path):
     assert list(gate.discover(src, NAMES)) == ["data/pairs.json::pairs"]
 
 
+@pytest.mark.parametrize(
+    "key",
+    ['frozenset({{"{a}", "{b}"}})', 'frozenset(["{a}", "{b}"])', '("{a}", "{b}")', 'frozenset(("{a}", "{b}"))'],
+)
+def test_a_table_keyed_by_material_pairs_written_as_sets_is_found(tmp_path, key):
+    rows = [("PLA", "ABS"), ("PLA", "NYLON"), ("PETG", "ABS")]
+    body = ",\n".join(f'    {key.format(a=a, b=b)}: {{"level": "bad", "warning": "do not pair these two"}}'
+                      for a, b in rows)
+    src = _tree(tmp_path, {"pairs.py": f"_PAIRS = {{\n{body},\n}}\n"})
+    assert gate.discover(src, NAMES) == {"pairs.py::_PAIRS": 3}
+
+
+def test_a_set_keyed_mapping_of_names_with_no_cells_is_not_a_table(tmp_path):
+    source = '_SEEN = {frozenset({"PLA", "ABS"}): None, frozenset({"PLA", "PETG"}): None, frozenset({"ABS", "PETG"}): None}\n'
+    src = _tree(tmp_path, {"seen.py": source})
+    assert gate.discover(src, NAMES) == {}
+
+
+def test_the_refused_pairs_are_kept_public_with_their_reason():
+    """The pairs the multi-colour composer refuses with no server at all are
+    found by the gate, listed by ``--list``, and kept with a recorded door."""
+    found = gate.discover()
+    table = "material_safety.py::_REFUSED_PAIRS"
+    assert found.get(table, 0) >= 3, sorted(found)
+    ledger = yaml.safe_load(gate.LEDGER.read_text(encoding="utf-8"))
+    row = ledger["keep"].get(table)
+    assert row and row["door"].strip() and row["why"].strip()
+    assert table not in ledger["baseline"]
+
+
+def test_list_shows_the_refused_pairs(capsys):
+    assert gate.main(["--list"]) == 0
+    assert "material_safety.py::_REFUSED_PAIRS" in capsys.readouterr().out
+
+
 def test_two_materials_are_not_a_table(tmp_path):
     src = _tree(tmp_path, {"two.py": '_X = {"PLA": 1, "PETG": 2, "other": 3}\n'})
     assert gate.discover(src, NAMES) == {}

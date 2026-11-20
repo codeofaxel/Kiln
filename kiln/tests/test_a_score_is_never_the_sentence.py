@@ -9,8 +9,8 @@ printer-health alert.
 Each says what it found: what turning the part changes, in the units it
 is measured in (``kiln.auto_orient.describe_orientation_change``, one wording
 for both orientation doors); why a material wins and what the runner-up
-would have given instead (``kiln.material_routing.describe_material_pick``);
-what the printer's prints did.  Every reply is read by the real-export
+would have given instead (Kiln's served material recommendation, relayed by
+``kiln.material_routing``); what the printer's prints did.  Every reply is read by the real-export
 corpus guard's own score reader (``tests._real_exports.scores_said``).
 """
 
@@ -136,26 +136,54 @@ class TestTheTurnIsSaidInItsOwnUnits:
 
 
 class TestTheMaterialPickSaysWhyItWins:
-    def test_the_pick_says_why_and_what_the_next_best_would_give(self):
-        reply = _call("recommend_material", intent="make it strong")
+    """The pick and its sentence are Kiln's served answer, whose wording is
+    pinned beside the recommender; the reply built around it here says no
+    score, and the scores stay in the data."""
+
+    @staticmethod
+    def _door():
+        from kiln.plugins.intelligence_tools import plugin
+
+        tools: dict = {}
+
+        class _MCP:
+            def tool(self, *a, **k):
+                def deco(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+                return deco
+
+        plugin.register(_MCP())
+        return tools["recommend_material"]
+
+    def test_the_relayed_pick_says_why_and_no_score(self):
+        from tests._routing_served import plain_install_served, served_pick
+
+        said = "PETG is the best fit for a strong part: against PLA, it is stronger."
+        answer = served_pick("petg", "PETG", sentence=said, alternatives=["pla", "abs"])
+        with rx.without_kiln_pro(), plain_install_served(answer):
+            reply = self._door()(intent="make it strong")
         assert reply.get("success"), reply
         assert rx.scores_said(reply) == []
         rec = reply["recommendation"]
-        pick, runner = rec["material"]["display_name"], rec["alternatives"][0]["material"]
-        assert rec["reasoning"].startswith(f"{pick} is the best fit for a strong part: against {runner}, it "), rec
-        assert "is stronger" in rec["reasoning"].split(". ")[0], rec["reasoning"]
-        assert f"{runner}, the next best, " in rec["reasoning"], rec["reasoning"]
+        assert rec["reasoning"] == said
         # The scores stay in the data, for comparing materials.
         assert isinstance(rec["score"], float) and all("score" in alt for alt in rec["alternatives"])
 
     def test_a_poor_fit_on_hand_says_what_the_better_material_would_give(self, tmp_path):
         from kiln.persistence import KilnDB
+        from tests._routing_served import plain_install_served, served_pick
 
+        better = {
+            "name": "tpu", "display_name": "TPU", "score": 90.0, "score_gap": 12.3,
+            "sentence": "TPU suits a flexible part materially better, but you don't have it: against PLA, it is more flexible.",
+        }
+        answer = served_pick("pla", "PLA", on_hand_status="on_hand", on_hand_catalog={"PLA": "pla"}, better=better)
         db = KilnDB(db_path=str(tmp_path / "shelf.db"))
         try:
             db.save_material("a1", 0, "PLA", color="white", remaining_grams=900.0)
-            with patch("kiln.persistence.get_db", return_value=db):
-                reply = _call("recommend_material", intent="flexible gasket", on_hand_only=True, printer_id="a1")
+            with rx.without_kiln_pro(), plain_install_served(answer), patch("kiln.persistence.get_db", return_value=db):
+                reply = self._door()(intent="flexible gasket", on_hand_only=True, printer_id="a1")
         finally:
             db.close()
         assert reply.get("success"), reply

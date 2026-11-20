@@ -468,8 +468,28 @@ def test_compose_no_material_no_safety_keys(stl_a: Path, tmp_path: Path):
     assert "safety_level" not in result
 
 
-def test_compose_compatible_materials_ok(stl_a: Path, stl_b: Path, tmp_path: Path):
-    """Compatible materials (PLA + PLA) → safety_level='ok', succeeds."""
+def _serve_entries(monkeypatch, entries: dict) -> list[str]:
+    """Kiln's servers answer the multi-material check with *entries*; the
+    list records each tool asked."""
+    import kiln.server as srv
+
+    asked: list[str] = []
+
+    def call(tool, **_kw):
+        asked.append(tool)
+        return {"success": True, **entries}
+
+    monkeypatch.setattr(srv, "_pro_api_call", call)
+    return asked
+
+
+def test_compose_compatible_materials_ok(stl_a: Path, stl_b: Path, tmp_path: Path, monkeypatch):
+    """A served check that finds the pair fine → safety_level='ok', succeeds."""
+    asked = _serve_entries(monkeypatch, {
+        "names": ["PLA"],
+        "pairs": [[0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 30}]],
+        "hardware": [{"hardened_nozzle": False, "enclosure": False}],
+    })
     out = str(tmp_path / "compat.3mf")
     result = compose_multicolor_3mf(
         [
@@ -482,6 +502,50 @@ def test_compose_compatible_materials_ok(stl_a: Path, stl_b: Path, tmp_path: Pat
     assert result["safety_level"] == "ok"
     assert "✅" in result["safety_message"]
     assert result.get("hardware_warnings", []) == []
+    assert "safety_basic" not in result
+    assert asked == ["material_mix_check"]
+    with zipfile.ZipFile(out) as zf:
+        import json
+
+        cfg = json.loads(zf.read("Metadata/project_settings.config").decode())
+    assert cfg["flush_volumes_matrix"] == ["0", "30", "30", "0"]
+
+
+def test_compose_offline_refuses_and_purges_conservatively(stl_a: Path, stl_b: Path, tmp_path: Path, monkeypatch):
+    """With no answer from Kiln's servers: PLA + ABS is still refused, word for
+    word; PLA + PETG composes with the conservative purge and says why."""
+    import json
+
+    import kiln.server as srv
+
+    monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **_kw: {
+        "status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "Sign in.", "why": "signed_out",
+    })
+    refused = compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, material="PLA"),
+            ColorPart(stl_path=str(stl_b), extruder=2, material="ABS"),
+        ],
+        output_path=str(tmp_path / "refused.3mf"),
+    )
+    assert refused["success"] is False
+    assert refused["error"] == (
+        "⛔ Incompatible materials — do not print. ⛔ INCOMPATIBLE MATERIALS: PLA + ABS. "
+        "Do not print — see warnings for details."
+    )
+    out = str(tmp_path / "basic.3mf")
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, material="PLA"),
+            ColorPart(stl_path=str(stl_b), extruder=2, material="PETG"),
+        ],
+        output_path=out,
+    )
+    assert result["success"] is True and result["safety_basic"] is True
+    assert "sign in" in result["safety_caution"] and result["safety_caution"] in result["message"]
+    with zipfile.ZipFile(out) as zf:
+        cfg = json.loads(zf.read("Metadata/project_settings.config").decode())
+    assert cfg["flush_volumes_matrix"] == ["0", "800", "800", "0"]
 
 
 def test_compose_incompatible_materials_blocked(stl_a: Path, stl_b: Path, tmp_path: Path):
@@ -501,9 +565,18 @@ def test_compose_incompatible_materials_blocked(stl_a: Path, stl_b: Path, tmp_pa
 
 
 def test_compose_incompatible_block_surfaces_hardware_warnings(
-    stl_a: Path, stl_b: Path, tmp_path: Path
+    stl_a: Path, stl_b: Path, tmp_path: Path, monkeypatch
 ):
     """Even on a hard block, hardware_warnings should be in the error response."""
+    asked = _serve_entries(monkeypatch, {
+        "names": ["PLA", "ABS"],
+        "pairs": [
+            [0, 0, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 30}],
+            [0, 1, {"known": True, "level": "incompatible", "warning": "w", "mitigations": [], "purge_volume_mm3": 0}],
+            [1, 1, {"known": True, "level": "ok", "warning": None, "mitigations": [], "purge_volume_mm3": 40}],
+        ],
+        "hardware": [{"hardened_nozzle": False, "enclosure": False}, {"hardened_nozzle": False, "enclosure": True}],
+    })
     out = str(tmp_path / "block_hw.3mf")
     result = compose_multicolor_3mf(
         [
@@ -515,6 +588,7 @@ def test_compose_incompatible_block_surfaces_hardware_warnings(
     assert result["success"] is False
     assert "hardware_warnings" in result
     assert any("enclosure" in w.lower() for w in result["hardware_warnings"])
+    assert asked == ["material_mix_check"]
 
 
 def test_compose_caution_materials_succeed_with_warning(stl_a: Path, stl_b: Path, tmp_path: Path):

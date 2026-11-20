@@ -46,13 +46,27 @@ _PERSONS_OWN_ASK = {
         "runs only when the person names the rules on check_material_environment; "
         "the per-requirement verdict is the feature they reached for"
     ),
+    "_pro_adaptive_bridge": (
+        "runs only when the person asks an adaptive slicing tool for a plan, a "
+        "material's settings or the materials Kiln tunes; the tuned answer is what "
+        "they reached for"
+    ),
     "_pro_fleet_materials_bridge": (
         "runs only when the person asks a material inventory door about several "
         "machines on Kiln Business; the cross-machine answer is what they reached for"
     ),
+    "_pro_substitution_bridge": (
+        "runs only when the person asks find_material_substitute or "
+        "get_best_material_substitute; the ranked substitutes are the feature they reached for"
+    ),
     "_pro_material_pick_bridge": (
-        "runs only when the person asks what material a part should be, on a "
-        "plan that includes Kiln Pro; the pick is the feature they reached for"
+        "runs only when the person asks what material a part should be "
+        "(recommend_design_material, or an analysis of what a part needs); the "
+        "pick is the feature they reached for"
+    ),
+    "_pro_routing_bridge": (
+        "runs only when the person asks recommend_material for a material or "
+        "list_available_materials for the list; the answer is what they reached for"
     ),
     "_pro_orientation_bridge": (
         "runs only when the person asks how to lay a part on the bed, on a plan "
@@ -110,6 +124,12 @@ _CALLER_DECIDES = {
 #: keyed by the name each call passes as its tool (its first argument): who
 #: asked, and why.
 _PER_CALL = {
+    "_pro_material_pairing_bridge": {
+        # The pairing verdict is what the person asked check_multi_material_pairing for.
+        "WIRE_TOOL": True,
+        # The multi-material check is fetched on the way to a compose or a print.
+        "MIX_TOOL": False,
+    },
     "_pro_assembly_bridge": {
         # The joint sweep IS the check the person asked for when they
         # validate or compose an assembly, and the parts' files are theirs.

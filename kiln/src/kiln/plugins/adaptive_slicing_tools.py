@@ -4,6 +4,13 @@ Extracts the adaptive slicing MCP tools into a focused plugin module.
 Provides tools for geometry analysis, material profiles, adaptive plan
 generation, slicer config export, and time savings estimation.
 
+A material's tuned settings, and a plan built from them, are Kiln's,
+asked for through :mod:`kiln._pro_adaptive_bridge`.  When they cannot be
+asked for (offline, signed out, Kiln's servers silent or saying no), the
+plan and profile tools answer with generic settings worked out from the
+nozzle size (:func:`kiln.adaptive_slicer.generic_profile`), marked
+``basic: true`` with one line saying why and what gets the tuned answer.
+
 Discovered and registered automatically by
 :func:`~kiln.plugin_loader.register_all_plugins`.
 """
@@ -16,6 +23,28 @@ from typing import Any
 from kiln.tool_annotations import read_only
 
 _logger = logging.getLogger(__name__)
+
+
+def _relay_plan(answer: dict[str, Any], nozzle: Any, *, model_name: str, printer: str | None) -> dict:
+    """A plan Kiln answered, with the caller's own model name and printer."""
+    if answer.get("success") is not True:
+        return {"success": False, "error": answer.get("error")}
+    plan = dict(answer["plan"])
+    plan["model_name"] = model_name
+    plan["printer"] = printer
+    return {"success": True, "plan": plan, "nozzle": nozzle.to_dict()}
+
+
+def _invalid_mode(mode: Any) -> dict | None:
+    """The refusal for a mode the planner does not know, else ``None``."""
+    from kiln.adaptive_slicer import AdaptiveMode
+
+    try:
+        AdaptiveMode(mode.lower())
+    except ValueError:
+        valid = ", ".join(m.value for m in AdaptiveMode)
+        return {"success": False, "error": f"Invalid mode '{mode}'. Valid: {valid}."}
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +96,10 @@ def get_material_slicing_profile(
     """Get material-specific slicing constraints for adaptive slicing.
 
     Returns layer height limits, bridge/overhang parameters, fan speeds,
-    and other material-tuned values used by the adaptive slicer.
+    and other material-tuned values used by the adaptive slicer.  When
+    Kiln's tuned settings cannot be reached (offline, signed out), the
+    reply carries generic settings worked out from the nozzle size,
+    ``basic: true`` and ``message`` saying why.
 
     Args:
         material: Material name — PLA, PETG, ABS, TPU, ASA, Nylon, PC,
@@ -76,17 +108,30 @@ def get_material_slicing_profile(
             limits).  Leave unset for the only printer Kiln knows of,
             else 0.4; the reply's ``nozzle`` says which.
     """
-    from kiln.adaptive_slicer import get_adaptive_slicer
+    from kiln import _pro_adaptive_bridge as bridge
+    from kiln.adaptive_slicer import generic_profile, text_refusal
     from kiln.assumed_nozzle import assumed_nozzle
 
     try:
+        refused = text_refusal(material)
+        if refused is not None:
+            return {"success": False, "error": refused}
         nozzle = assumed_nozzle(None, stated=nozzle_diameter_mm, or_only_printer=True)
-        slicer = get_adaptive_slicer()
-        profile = slicer.get_material_profile(material, nozzle_diameter_mm=nozzle.diameter_mm)
+        answer, miss = bridge.ask("profile", material=material, nozzle_diameter_mm=nozzle.diameter_mm)
+        if answer is not None:
+            if answer.get("success") is not True:
+                return {"success": False, "error": answer.get("error")}
+            return {
+                "success": True,
+                "profile": answer["profile"],
+                "nozzle": nozzle.to_dict(),
+            }
+        profile = generic_profile(material, nozzle_diameter_mm=nozzle.diameter_mm)
         return {
             "success": True,
             "profile": profile.to_dict(),
             "nozzle": nozzle.to_dict(),
+            **bridge.basic(miss, material, "profile"),
         }
     except Exception as exc:
         _logger.exception("Error in get_material_slicing_profile")
@@ -122,63 +167,57 @@ def generate_adaptive_slicing_plan(
             of), else 0.4; the reply's ``nozzle`` says which.
         mode: Adaptive strategy — "balanced" (default), "quality_first",
             "speed_first", or "material_optimized".
+
+    When Kiln's settings tuned to the material cannot be reached (offline,
+    signed out), the plan is built from generic settings worked out from
+    the nozzle size and the reply says ``basic: true``, with ``message``
+    saying why.
     """
+    from kiln import _pro_adaptive_bridge as bridge
     from kiln.adaptive_slicer import (
         AdaptiveMode,
         AdaptiveSlicerError,
+        _parse_region_dicts,
+        generic_profile,
         get_adaptive_slicer,
+        text_refusal,
     )
     from kiln.assumed_nozzle import assumed_nozzle
 
     try:
+        refused = text_refusal(material, mode)
+        if refused is not None:
+            return {"success": False, "error": refused}
         nozzle = assumed_nozzle(printer, stated=nozzle_diameter_mm, or_only_printer=True)
-        nozzle_diameter_mm = nozzle.diameter_mm
-        slicer = get_adaptive_slicer()
-        mat_profile = slicer.get_material_profile(material, nozzle_diameter_mm=nozzle_diameter_mm)
+        answer, miss = bridge.ask(
+            "plan",
+            material=material,
+            nozzle_diameter_mm=nozzle.diameter_mm,
+            model_height_mm=model_height_mm,
+            regions=regions,
+            mode=mode,
+        )
+        if answer is not None:
+            return _relay_plan(answer, nozzle, model_name=model_name, printer=printer)
 
-        try:
-            adaptive_mode = AdaptiveMode(mode.lower())
-        except ValueError:
-            valid = ", ".join(m.value for m in AdaptiveMode)
-            return {
-                "success": False,
-                "error": f"Invalid mode '{mode}'. Valid: {valid}.",
-            }
-
-        from kiln.adaptive_slicer import GeometryRegion, RegionType
-
-        geo_regions: list[GeometryRegion] = []
-        for item in regions:
-            try:
-                rtype = RegionType(item["region_type"])
-            except (KeyError, ValueError):
-                continue
-            geo_regions.append(
-                GeometryRegion(
-                    region_type=rtype,
-                    z_start_mm=float(item.get("z_start_mm", 0.0)),
-                    z_end_mm=float(item.get("z_end_mm", model_height_mm)),
-                    area_pct=float(item.get("area_pct", 10.0)),
-                    min_feature_size_mm=(float(item["min_feature_size_mm"]) if "min_feature_size_mm" in item else None),
-                    overhang_angle=(float(item["overhang_angle"]) if "overhang_angle" in item else None),
-                    bridge_length_mm=(float(item["bridge_length_mm"]) if "bridge_length_mm" in item else None),
-                    wall_thickness_mm=(float(item["wall_thickness_mm"]) if "wall_thickness_mm" in item else None),
-                )
-            )
-
-        plan = slicer.generate_plan(
-            geo_regions,
-            mat_profile,
-            mode=adaptive_mode,
+        refused = _invalid_mode(mode)
+        if refused is not None:
+            return refused
+        plan = get_adaptive_slicer().generate_plan(
+            _parse_region_dicts(regions, model_height_mm),
+            generic_profile(material, nozzle_diameter_mm=nozzle.diameter_mm),
+            mode=AdaptiveMode(mode.lower()),
             model_height_mm=model_height_mm,
             model_name=model_name,
             printer=printer,
-            nozzle_diameter_mm=nozzle_diameter_mm,
+            nozzle_diameter_mm=nozzle.diameter_mm,
         )
+        plan.basic = True
         return {
             "success": True,
             "plan": plan.to_dict(),
             "nozzle": nozzle.to_dict(),
+            **bridge.basic(miss, material, "plan"),
         }
     except AdaptiveSlicerError as exc:
         return {"success": False, "error": str(exc)}
@@ -201,6 +240,9 @@ def export_adaptive_slicer_config(
         plan_data: Plan dict from ``generate_adaptive_slicing_plan``.
         slicer: Target slicer — "prusaslicer", "orcaslicer", "cura",
             or "generic".
+
+    A plan built with generic settings (``basic: true``) exports with
+    ``basic: true`` and a first note saying its settings are generic.
     """
     from kiln.adaptive_slicer import (
         AdaptiveLayerPlan,
@@ -241,14 +283,18 @@ def export_adaptive_slicer_config(
             estimated_time_minutes=plan_data.get("estimated_time_minutes"),
             estimated_savings_pct=plan_data.get("estimated_savings_pct"),
             created_at=plan_data.get("created_at", ""),
+            basic=plan_data.get("basic") is True,
         )
 
         adaptive = get_adaptive_slicer()
         config = adaptive.export_config(plan, slicer=target)
-        return {
+        out: dict[str, Any] = {
             "success": True,
             "config": config.to_dict(),
         }
+        if plan.basic:
+            out["basic"] = True
+        return out
     except Exception as exc:
         _logger.exception("Error in export_adaptive_slicer_config")
         return {"success": False, "error": str(exc)}
@@ -267,6 +313,9 @@ def estimate_adaptive_time_savings(
         plan_data: Plan dict from ``generate_adaptive_slicing_plan``.
         uniform_height_mm: Reference uniform layer height for comparison
             (default 0.2mm).
+
+    Savings for a plan built with generic settings (``basic: true``) say
+    ``basic: true`` too.
     """
     from kiln.adaptive_slicer import (
         AdaptiveLayerPlan,
@@ -293,14 +342,18 @@ def estimate_adaptive_time_savings(
             layer_speeds=plan_data.get("layer_speeds", []),
             layer_cooling=plan_data.get("layer_cooling", []),
             estimated_time_minutes=plan_data.get("estimated_time_minutes"),
+            basic=plan_data.get("basic") is True,
         )
 
         adaptive = get_adaptive_slicer()
         savings = adaptive.estimate_time_savings(plan, uniform_height_mm=uniform_height_mm)
-        return {
+        out: dict[str, Any] = {
             "success": True,
             "savings": savings,
         }
+        if plan.basic:
+            out["basic"] = True
+        return out
     except Exception as exc:
         _logger.exception("Error in estimate_adaptive_time_savings")
         return {"success": False, "error": str(exc)}
@@ -333,35 +386,57 @@ def quick_adaptive_plan(
         printer: Optional printer identifier.
         regions: Optional list of region dicts.  If omitted, a default
             STANDARD region spanning the full height is used.
+
+    When Kiln's settings tuned to the material cannot be reached (offline,
+    signed out), the plan is built from generic settings worked out from
+    the nozzle size and the reply says ``basic: true``, with ``message``
+    saying why.
     """
-    from kiln.adaptive_slicer import AdaptiveMode, AdaptiveSlicerError, get_adaptive_slicer
+    from kiln import _pro_adaptive_bridge as bridge
+    from kiln.adaptive_slicer import (
+        AdaptiveMode,
+        AdaptiveSlicerError,
+        generic_profile,
+        get_adaptive_slicer,
+        text_refusal,
+    )
     from kiln.assumed_nozzle import assumed_nozzle
 
     try:
-        try:
-            adaptive_mode = AdaptiveMode(mode.lower())
-        except ValueError:
-            valid = ", ".join(m.value for m in AdaptiveMode)
-            return {
-                "success": False,
-                "error": f"Invalid mode '{mode}'. Valid: {valid}.",
-            }
+        refused_text = text_refusal(material, mode)
+        if refused_text is not None:
+            return {"success": False, "error": refused_text}
+        refused = _invalid_mode(mode)
+        if refused is not None:
+            return refused
 
         nozzle = assumed_nozzle(printer, stated=nozzle_diameter_mm, or_only_printer=True)
-        slicer = get_adaptive_slicer()
-        plan = slicer.quick_plan(
+        answer, miss = bridge.ask(
+            "quick_plan",
             material=material,
+            nozzle_diameter_mm=nozzle.diameter_mm,
+            model_height_mm=model_height_mm,
+            regions=regions,
+            mode=mode,
+        )
+        if answer is not None:
+            return _relay_plan(answer, nozzle, model_name=model_name, printer=printer)
+
+        plan = get_adaptive_slicer().quick_plan(
+            material_profile=generic_profile(material, nozzle_diameter_mm=nozzle.diameter_mm),
             model_height_mm=model_height_mm,
             model_name=model_name,
             nozzle_diameter_mm=nozzle.diameter_mm,
-            mode=adaptive_mode,
+            mode=AdaptiveMode(mode.lower()),
             printer=printer,
             regions=regions,
         )
+        plan.basic = True
         return {
             "success": True,
             "plan": plan.to_dict(),
             "nozzle": nozzle.to_dict(),
+            **bridge.basic(miss, material, "plan"),
         }
     except AdaptiveSlicerError as exc:
         return {"success": False, "error": str(exc)}
@@ -374,29 +449,40 @@ def list_supported_materials() -> dict:
     """List all materials with adaptive slicing profiles.
 
     Returns material names with their key slicing constraints
-    (layer height limits, bridge parameters, overhang angles).
+    (layer height limits, bridge parameters, overhang angles).  When the
+    list cannot be reached (offline, signed out), it is empty, the reply
+    says ``basic: true`` with ``message`` saying why, and
+    ``generic_settings`` shows what a plan uses for every material instead,
+    stated at Kiln's default nozzle (``nozzle_diameter_mm``), the size the
+    served list states every window at.
     """
-    from kiln.adaptive_slicer import get_adaptive_slicer
+    from kiln import _pro_adaptive_bridge as bridge
+    from kiln.adaptive_slicer import generic_profile
+    from kiln.assumed_nozzle import DEFAULT_MM
 
     try:
-        slicer = get_adaptive_slicer()
-        materials = slicer.list_supported_materials()
-        summaries: list[dict[str, Any]] = []
-        for mat in materials:
-            profile = slicer.get_material_profile(mat)
-            summaries.append(
-                {
-                    "material": mat,
-                    "layer_range_mm": f"{profile.min_layer_height_mm}-{profile.max_layer_height_mm}",
-                    "optimal_mm": profile.optimal_layer_height_mm,
-                    "bridge_mm": profile.bridge_layer_height_mm,
-                    "overhang_max_angle": profile.overhang_max_angle,
-                }
-            )
+        answer, miss = bridge.ask("materials")
+        if answer is not None:
+            if answer.get("success") is not True:
+                return {"success": False, "error": answer.get("error")}
+            return {
+                "success": True,
+                "materials": answer["materials"],
+                "count": answer.get("count", len(answer["materials"])),
+            }
+        generic = generic_profile(nozzle_diameter_mm=DEFAULT_MM)
         return {
             "success": True,
-            "materials": summaries,
-            "count": len(summaries),
+            "materials": [],
+            "count": 0,
+            "generic_settings": {
+                "nozzle_diameter_mm": DEFAULT_MM,
+                "layer_range_mm": f"{generic.min_layer_height_mm}-{generic.max_layer_height_mm}",
+                "optimal_mm": generic.optimal_layer_height_mm,
+                "bridge_mm": generic.bridge_layer_height_mm,
+                "overhang_max_angle": generic.overhang_max_angle,
+            },
+            **bridge.basic(miss, "", "materials"),
         }
     except Exception as exc:
         _logger.exception("Error in list_supported_materials")
@@ -443,8 +529,13 @@ def get_adaptive_plan_summary(plan_data: dict[str, Any]) -> dict:
             summary_lines.append(f"Estimated time: {plan_data['estimated_time_minutes']:.1f} min")
         if plan_data.get("estimated_savings_pct") is not None:
             summary_lines.append(f"Estimated savings: {plan_data['estimated_savings_pct']:.1f}%")
+        basic = plan_data.get("basic") is True
+        if basic:
+            from kiln.adaptive_slicer import generic_label
 
-        return {
+            summary_lines.append(f"Settings: {generic_label(plan_data.get('material', ''))}")
+
+        out: dict[str, Any] = {
             "success": True,
             "summary": "\n".join(summary_lines),
             "stats": {
@@ -455,6 +546,9 @@ def get_adaptive_plan_summary(plan_data: dict[str, Any]) -> dict:
                 "region_counts": region_counts,
             },
         }
+        if basic:
+            out["basic"] = True
+        return out
     except Exception as exc:
         _logger.exception("Error in get_adaptive_plan_summary")
         return {"success": False, "error": str(exc)}

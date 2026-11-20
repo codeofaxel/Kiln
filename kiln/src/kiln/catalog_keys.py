@@ -91,6 +91,14 @@ _MATERIAL_ABBREVIATIONS: dict[str, str] = {
     "pc": "polycarbonate",
 }
 
+#: Whole spellings of a catalog material that the token rules above do not
+#: reach, as a printer's multi-material unit reports a spool: the same
+#: material, never a family.  Keyed by token set, so word order is free.
+_MATERIAL_SPELLINGS: dict[frozenset[str], str] = {
+    frozenset({"pa", "gf"}): "pa6_gf",
+    frozenset({"petg", "high", "flow"}): "petg_hf",
+}
+
 
 def resolve_material_key(material_id: str, keys: Iterable[str]) -> str | None:
     """The catalog key ``material_id`` spells, or ``None``.
@@ -100,7 +108,8 @@ def resolve_material_key(material_id: str, keys: Iterable[str]) -> str | None:
     ``cf_pla``); then the same tokens with an abbreviation written out
     ("PA-CF" → ``cf_nylon``, "PC" → ``polycarbonate``) -- after the plain
     tokens, so a key that uses the short name itself (``pc_abs``, ``pa6_gf``)
-    still matches as spelled.  Never a family fallback.
+    still matches as spelled; then a whole spelling a printer reports a spool
+    by ("PA-GF" → ``pa6_gf``).  Never a family fallback.
     """
     if not material_id:
         return None
@@ -119,7 +128,8 @@ def resolve_material_key(material_id: str, keys: Iterable[str]) -> str | None:
         for key in catalog:
             if _tokens(key) == tokens:
                 return key
-    return None
+    spelled = _MATERIAL_SPELLINGS.get(want)
+    return spelled if spelled in catalog else None
 
 
 def _material_tokens(spelling: str) -> frozenset[str]:

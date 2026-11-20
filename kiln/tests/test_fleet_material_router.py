@@ -35,6 +35,11 @@ DOORS: list[tuple[str, dict[str, Any], str]] = [
     ("recommend_material", {"intent": "strong", "on_hand_only": True}, "on_hand"),
 ]
 
+#: recommend_material's pick: asked of Kiln's servers about the material, with
+#: the names of the materials on hand and never a row about the machines.
+PICK_WIRE = "intent_materials"
+PICK_FIELDS = {"want", "intent", "printer_capabilities", "budget_usd", "on_hand_materials", "inventory_recorded"}
+
 #: What a row of each kind may carry when it leaves this computer.
 SENT_FIELDS = {
     "spools": {"id", "material_type", "color", "brand", "remaining_grams"},
@@ -128,7 +133,7 @@ def servers(monkeypatch):
 
     asks: list[dict[str, Any]] = []
 
-    def answer(name, /, _timeout=None, _asked_by_user=True, question=None, params=None, **rows):
+    def answer(name, /, _timeout=None, _asked_by_user=True, _feature=None, question=None, params=None, **rows):
         asks.append({"tool": name, "question": question, "params": params, "rows": rows})
         value: Any = {"stood_in": True} if question == "forecast" else []
         return {"success": True, "status": "ok", "question": question, "answer": value}
@@ -138,12 +143,22 @@ def servers(monkeypatch):
     return asks
 
 
+def _about_the_machines(asks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The asks about the machines' material, leaving out recommend_material's
+    pick, which carries material names only (checked here)."""
+    for ask in asks:
+        if ask["tool"] == PICK_WIRE:
+            assert set(ask["rows"]) == PICK_FIELDS, sorted(ask["rows"])
+            assert all(isinstance(name, str) for name in ask["rows"]["on_hand_materials"] or [])
+    return [ask for ask in asks if ask["tool"] != PICK_WIRE]
+
+
 @pytest.mark.parametrize(("door", "kwargs", "question"), DOORS, ids=[d[0] for d in DOORS])
 def test_one_machine_answers_here_and_asks_nothing(tools, machines, servers, door, kwargs, question):
     machines(["a1"], cap=1)
     out = tools[door](**kwargs)
     assert out.get("success") is True, out
-    assert servers == []
+    assert _about_the_machines(servers) == []
 
 
 @pytest.mark.parametrize(("door", "kwargs", "question"), DOORS, ids=[d[0] for d in DOORS])
@@ -173,8 +188,9 @@ def test_on_the_plan_the_servers_answer_from_only_the_rows_needed(tools, machine
     machines(["a1", "b2", "c3"], cap=50)
     out = tools[door](**kwargs)
     assert out.get("success") is True, out
-    assert [(a["tool"], a["question"]) for a in servers] == [("plan_fleet_materials", question)]
-    rows = servers[0]["rows"]
+    asked = _about_the_machines(servers)
+    assert [(a["tool"], a["question"]) for a in asked] == [("plan_fleet_materials", question)]
+    rows = asked[0]["rows"]
     assert set(rows) == set(FLEET_QUESTIONS[question]), (question, sorted(rows))
     for kind, records in rows.items():
         for record in records:

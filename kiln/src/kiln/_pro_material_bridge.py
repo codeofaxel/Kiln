@@ -6,7 +6,7 @@ optimum, enclosure, hardened nozzle, AMS) are kiln-pro's
 material at a time.  Below Pro the servers refuse, the loaders fall to the
 material's own range and the warning says so.  Public Kiln keeps the FLOOR --
 the material's own temperatures and ranges, warping, the environment words,
-the design limits, the hazards -- and the ROSTER of brand profiles (which
+the hazards -- and the ROSTER of brand profiles (which
 exist, what they are called, which family they belong to).  Its loaders in
 :mod:`kiln.design_intelligence` ask here for a family's figures and merge
 them onto the roster rows, so every door downstream resolves exactly as it

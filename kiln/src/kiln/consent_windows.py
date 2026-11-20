@@ -693,6 +693,44 @@ def machine_under(printer_name: str | None) -> str:
         return ""
 
 
+def plate_holds_a_part(printer_name: str | None) -> bool:
+    """Whether the plate record of the machine under *printer_name* names a
+    part on it: a start there is a start beside it, and a standing window
+    then looks at the bed first too.  ``False`` for a name no machine
+    answers to (no plate to look at); a store refused on this server is
+    raised."""
+    from kiln import plate_state
+    from kiln.errors import HostedUnavailableError
+
+    try:
+        import kiln.server as _srv
+
+        state = plate_state.read(_srv._resolve_adapter(str(printer_name or "").strip()))
+        return state.occupied and bool(state.jobs)
+    except HostedUnavailableError:
+        raise  # a refusal to serve this store is not a fault to work around
+    except Exception:  # noqa: BLE001 -- no machine under the name, no plate
+        return False
+
+
+def looks_before_an_unasked_start(printer_name: str | None) -> bool:
+    """Whether a print on *printer_name* that nobody is asked about is
+    looked at first: always allow covers it, or a standing window does and
+    the plate holds a part.  ``False`` when the store cannot be read (no
+    standing yes then covers the print: the person is asked); a store
+    refused on this server is raised."""
+    from kiln.errors import HostedUnavailableError
+
+    try:
+        if always_for(printer_name) is not None:
+            return True
+        return covering(printer_name, for_a_start=True) is not None and plate_holds_a_part(printer_name)
+    except HostedUnavailableError:
+        raise  # a refusal to serve this store is not a fault to work around
+    except Exception:  # noqa: BLE001 -- an unreadable store is no window
+        return False
+
+
 def look_at_bed(printer_name: str | None) -> Any:
     """The plate of the machine under *printer_name*, for a start nobody
     is being asked about (:func:`kiln.plate_state.look_for_unasked_start`)

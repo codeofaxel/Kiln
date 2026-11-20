@@ -1,0 +1,629 @@
+"""One plastic's design limits: the one helper every design check reads.
+
+:func:`limits_for` answers, for one plastic at one nozzle, how steep a face
+may lean without support, how far a bridge may span, how thin a wall may go
+(the thinnest that closes, and the thinnest recommended for strength), how
+thin a pin may go, and how fine a thread and how small a hole print.
+
+A figure that is the same for every plastic is answered here, from
+:mod:`kiln.generic_limits`, with nothing asked.  A figure that differs by
+plastic is asked of kiln-pro (https://kiln3d.com) through
+:mod:`kiln._pro_material_limits_bridge`: on this computer when kiln-pro is
+installed, otherwise from Kiln's servers.  When no answer comes, every figure
+is the general one, ``basis`` says ``general``, and :attr:`MaterialLimits.miss`
+says why; the general figures are never called the plastic's own.
+
+:func:`sliced_floors` answers, for one nozzle, the thinnest wall and the
+thinnest round pin Kiln's own slice keeps, which is how the printability
+check knows what a slice will leave out.  It is the same for every plastic.
+With no answer, both are the general minimum wall: a heads-up that may warn
+about more than Kiln's own check would, never less.
+
+A check that reads a plastic only because the person named none reads it
+inside :func:`assuming`: the assumed plastic's own figures, without spending
+the person's daily allowance of plastics on Kiln's servers and with nothing
+said about them.  The same holds wherever :data:`ASSUMED_PLASTIC` is read
+inside a tool call whose own arguments do not name it
+(:func:`call_leaves_assumed_plastic_unnamed`): a door's own default is not
+the person's choice, whatever the door hands on, and a plastic named for
+another role does not make it one.
+
+A served answer is kept for the life of the process, per plastic and
+scenario, so a session asks once.  When kiln-pro is on this computer nothing
+is kept: one caller's answer never reaches the next.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import re
+from collections.abc import Iterator
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+from kiln import generic_limits as _generic
+from kiln.served_answer import Miss, free_account_note, sentence
+
+OVERHANG = "overhang_unsupported_deg"
+BRIDGE = "bridge_max_mm"
+WALL_RECOMMENDED = "wall_recommended_mm"
+PIN = "pin_min_mm"
+ESD_WALL = "esd_wall_min_mm"
+WALL_MIN = "wall_min_mm"
+BRIDGE_CLEAN = "bridge_clean_mm"
+HOLE_FORMS = "hole_forms_mm"
+HOLE_USABLE = "hole_usable_mm"
+THREAD_PITCH = "thread_min_pitch_mm"
+THREAD_DIAMETER = "thread_min_diameter_mm"
+SLICED_WALL = "sliced_wall_min_mm"
+SLICED_PIN = "sliced_pin_min_mm"
+
+#: The quantities that differ by plastic: asked of kiln-pro.
+PER_PLASTIC: tuple[str, ...] = (OVERHANG, BRIDGE, WALL_RECOMMENDED, PIN, ESD_WALL)
+#: The quantities that are one figure for every plastic: answered here.
+GENERAL_ONLY: tuple[str, ...] = (WALL_MIN, BRIDGE_CLEAN, HOLE_FORMS, HOLE_USABLE, THREAD_PITCH, THREAD_DIAMETER)
+
+#: A figure the plastic itself, or its family, has.
+OWN_BASES = ("plastic", "family")
+
+#: The plastic a check reads when the person named none.
+ASSUMED_PLASTIC = "pla"
+#: The plastics read here because the person named none (:func:`assuming`).
+_assumed: ContextVar[frozenset[str]] = ContextVar("kiln_material_limits_assumed", default=frozenset())
+
+_DATA = Path(__file__).resolve().parent / "data" / "design_knowledge" / "materials.json"
+
+#: (material, nozzle, layer, enclosed, pin height) -> the served answer; what
+#: the slice keeps at a nozzle is kept under ("", nozzle, None, None, "sliced").
+_answers: dict[tuple[Any, ...], dict[str, Any]] = {}
+#: The causes a miss has already been said for, outside a tool call
+#: (:func:`_said_here`); a call keeps its own.
+_said: set[str] = set()
+#: Where a tool call keeps the causes it has said (:func:`kiln.tool_context.call_memo`).
+_SAID_KEY = "kiln.material_limits.said"
+
+
+def _said_here() -> set[str]:
+    """The causes already said where a reply is being built: the running
+    call's own (one call is one caller, so a cause is said to every caller
+    who meets it), or this process's outside a call."""
+    try:
+        from kiln.tool_context import call_memo
+    except ImportError:  # pragma: no cover - the module ships beside this one
+        return _said
+    memo = call_memo()
+    if memo is None:
+        return _said
+    said = memo.get(_SAID_KEY)
+    if not isinstance(said, set):
+        said = memo[_SAID_KEY] = set()
+    return said
+
+
+@dataclass(frozen=True)
+class MaterialLimits:
+    """One plastic's limits in one scenario.  ``figures`` holds every
+    quantity's value (``None`` where it does not apply), ``basis`` where each
+    came from (``plastic``, ``family``, ``general``, ``not_applicable``)."""
+
+    material: str
+    material_id: str | None
+    known: bool
+    nozzle_mm: float
+    layer_height_mm: float | None
+    figures: dict[str, float | None] = field(default_factory=dict)
+    basis: dict[str, str] = field(default_factory=dict)
+    miss: Miss | None = None
+    #: The line Kiln's servers sent when they answered this plastic with the
+    #: general figures because the caller's daily allowance of plastics was
+    #: used; empty otherwise.
+    allowance: str = ""
+    #: Why a figure is what it is, per quantity, where the answer says so
+    #: (a static-safe grade's minimum wall is a floor for its electrical
+    #: property, not for strength).
+    why: dict[str, str] = field(default_factory=dict)
+
+    def value(self, quantity: str) -> float | None:
+        """The figure for *quantity*, ``None`` where it does not apply."""
+        return self.figures.get(quantity)
+
+    def is_own(self, quantity: str) -> bool:
+        """True when *quantity* is the plastic's own figure or its family's."""
+        return self.basis.get(quantity) in OWN_BASES
+
+    @property
+    def basic(self) -> bool:
+        """True when no plastic figure was read: every figure is general."""
+        return not any(self.is_own(q) for q in PER_PLASTIC)
+
+    def wall_floor_mm(self) -> float:
+        """The thinnest wall this plastic may have: the static-safe grade's
+        own electrical minimum where it has one, else the wall that closes."""
+        esd = self.value(ESD_WALL)
+        wall = self.value(WALL_MIN) or _generic.wall_min_mm(self.nozzle_mm)
+        return max(float(esd), float(wall)) if esd else float(wall)
+
+    def static_safe_floor(self) -> bool:
+        """True when the wall floor is a static-safe grade's own electrical
+        minimum rather than the wall that closes."""
+        esd = self.value(ESD_WALL)
+        return bool(esd) and self.wall_floor_mm() == float(esd)
+
+    def design_limits(self) -> dict[str, float]:
+        """The figures under the names a design check's reply carries.  The
+        recommended wall is there only when it is the plastic's own."""
+        out: dict[str, float] = {
+            "min_wall_thickness_mm": self.wall_floor_mm(),
+            "max_unsupported_overhang_deg": float(self.value(OVERHANG) or _generic.OVERHANG_UNSUPPORTED_DEG),
+            "max_bridge_length_mm": float(self.value(BRIDGE) or _generic.BRIDGE_MAX_MM),
+            "min_hole_diameter_mm": float(self.value(HOLE_USABLE) or _generic.HOLE_USABLE_MM),
+            "min_pin_diameter_mm": float(self.value(PIN) or _generic.PIN_MIN_MM),
+            "thread_min_pitch_mm": float(self.value(THREAD_PITCH) or _generic.thread_min_pitch_mm()),
+        }
+        recommended = self.value(WALL_RECOMMENDED)
+        if recommended and self.is_own(WALL_RECOMMENDED):
+            out["recommended_wall_thickness_mm"] = float(recommended)
+        return out
+
+    def notes(self) -> list[str]:
+        """What a reply should say about where its figures came from: why the
+        plastic's own were not read (once per cause in a tool call, or in a
+        process outside one) -- a miss, or the day's allowance of plastics
+        used (:attr:`allowance`) -- and for a flexible or static-safe plastic
+        answered generally, what the general figures leave out.  Empty when
+        the plastic's own figures were read."""
+        lines: list[str] = []
+        said = _said_here()
+        if self.miss is not None and self.miss.cause not in said:
+            said.add(self.miss.cause)
+            lines.append(miss_sentence(self.miss))
+        if self.allowance and self.allowance not in said:
+            said.add(self.allowance)
+            lines.append(self.allowance)
+        lines.extend(self.cautions())
+        return lines
+
+    def cautions(self) -> list[str]:
+        """For a plastic answered with the general figures, what a reply
+        should say beside them: that Kiln does not recognise the name (when
+        Kiln's design limits answered and could not place it), and for a
+        flexible or static-safe plastic what the general figures leave out.
+        Empty when its own were read."""
+        if self.miss is None and not self.allowance and self.known:
+            return []
+        lines: list[str] = []
+        if self.miss is None and not self.known and self.material:
+            lines.append(UNRECOGNISED)
+        plastic = self.material_id or _plastic_written_first(self.material)
+        lines.extend(general_figures_leave_out(
+            plastic, static_safe_wall_read=self.value(ESD_WALL) is not None,
+            flexible=self.material_id is None and _written_as_flexible(self.material),
+        ))
+        return lines
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "material_id": self.material_id,
+            "known": self.known,
+            "nozzle_mm": self.nozzle_mm,
+            "layer_height_mm": self.layer_height_mm,
+            "limits": {
+                q: {"value": self.figures.get(q), "basis": self.basis.get(q, "general")}
+                for q in (*PER_PLASTIC, *GENERAL_ONLY)
+            },
+        }
+
+
+#: The code the design limits answer a request with that falls outside what
+#: they cover (a nozzle, a layer or a name past their range): a fact about
+#: the request, the same on every ask, never a passing fault.
+_OUTSIDE_WHAT_THEY_COVER = "INVALID_INPUT"
+
+
+def _outside_what_they_cover(miss: Miss, *, on_the_line: str, wont: str) -> str | None:
+    """The sentence for a request the design limits do not cover, in their
+    own words (the range they cover), or ``None`` for any other miss.  It
+    says no "right now" and offers no retry: asking again gets the same."""
+    if miss.cause != "refused" or miss.code != _OUTSIDE_WHAT_THEY_COVER or not miss.detail.strip():
+        return None
+    covered = " ".join(miss.detail.split()).rstrip(". ")
+    return f"{on_the_line.rstrip('. ')}. {covered}, so here Kiln {wont.strip().rstrip('.')}."
+
+
+#: Said when Kiln's design limits answered and could not place the plastic
+#: named: the one name reader every check goes through, so every door says
+#: the same.
+UNRECOGNISED = (
+    "Kiln doesn't recognise the plastic named, so the checks use the general figures; "
+    "name it the way Kiln lists its plastics (PLA, PETG, ABS, ...) to check it against its own."
+)
+#: What the general figures leave out for a flexible plastic.
+FLEXIBLE_CAUTION = (
+    "The general figures are for ordinary rigid plastics; a flexible "
+    "plastic needs more margin than they give."
+)
+#: What the general figures leave out for a static-safe grade whose own
+#: minimum wall was not read.
+STATIC_SAFE_UNKNOWN = (
+    "This static-safe grade's own minimum wall for its electrical "
+    "property is not known here; the wall figure is the general one."
+)
+
+
+def general_figures_leave_out(
+    material_id: str | None, *, static_safe_wall_read: bool = False, flexible: bool = False,
+) -> list[str]:
+    """What a reply says beside the general figures for the plastic
+    *material_id*: for a flexible plastic (or one the caller found named
+    flexible, *flexible*), that they are for rigid ones
+    (:data:`FLEXIBLE_CAUTION`); for a static-safe grade whose own minimum
+    wall was not read (*static_safe_wall_read* false), that it is not known
+    here (:data:`STATIC_SAFE_UNKNOWN`).  Empty for any other plastic.  The
+    one place these are decided, for every reader of the general figures."""
+    lines: list[str] = []
+    if flexible or _category(material_id) == _FLEXIBLE_CATEGORY:
+        lines.append(FLEXIBLE_CAUTION)
+    if material_id and material_id.endswith("_esd") and not static_safe_wall_read:
+        lines.append(STATIC_SAFE_UNKNOWN)
+    return lines
+
+
+def _said_on_the_call(limits: MaterialLimits) -> MaterialLimits:
+    """*limits*, after noting on the running call, once whichever door read
+    it, why its figures are not the plastic's own (a miss, or the day's
+    allowance used) and what the general figures leave out for this plastic
+    (:meth:`MaterialLimits.cautions`): every door's reply says it, the doors
+    that never read :meth:`MaterialLimits.notes` included
+    (:func:`kiln.reading_notes.note_said`, under ``limits_note``)."""
+    from kiln.reading_notes import LIMITS_KEY, note_said
+
+    if limits.miss is not None:
+        note_said(LIMITS_KEY, miss_sentence(limits.miss))
+    if limits.allowance:
+        note_said(LIMITS_KEY, limits.allowance)
+    for line in limits.cautions():
+        note_said(LIMITS_KEY, line)
+    return limits
+
+
+def miss_sentence(miss: Miss) -> str:
+    """The one sentence for a miss, in the served-answer voice."""
+    on_the_line = "How steep, how far and how thin a part can go depends on the plastic"
+    wont = "checks the part against the general figures and won't call them this plastic's own"
+    outside = _outside_what_they_cover(miss, on_the_line=on_the_line, wont=wont)
+    if outside is not None:
+        return outside[:-1] + "; leave extra margin."
+    return sentence(
+        miss,
+        feature="design limits",
+        on_the_line=on_the_line,
+        cannot="get this plastic's own limits",
+        wont=wont,
+        safe_remedy="leave extra margin",
+        then="check again" + free_account_note(miss),
+    )
+
+
+@lru_cache(maxsize=1)
+def _catalogue() -> dict[str, Any]:
+    try:
+        raw = json.loads(_DATA.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in raw.items() if not k.startswith("_") and isinstance(v, dict)}
+
+
+def _public_id(material: str | None) -> str | None:
+    if not material:
+        return None
+    from kiln.catalog_keys import resolve_material_key
+
+    return resolve_material_key(str(material), _catalogue().keys())
+
+
+def _written_words(material: str | None) -> list[str]:
+    from kiln.catalog_keys import _slug
+
+    return [word for word in _slug(str(material or "")).split("_") if word]
+
+
+def _plastic_written_first(material: str | None) -> str | None:
+    """The catalog plastic *material* is written as a grade or a brand's
+    spool of, or ``None``.
+
+    A spool is named by its plastic and a grade or a brand, in either order
+    ("TPU-AMS", "TPU 95A HF", "Generic TPU", "CR-TPU"), so any word of it
+    that the catalog holds names the plastic; a flexible one is read first.
+    Read only for what the general figures leave out for that plastic,
+    never for a figure."""
+    held = [word for word in _written_words(material) if word in _catalogue()]
+    flexible = next((word for word in held if _category(word) == _FLEXIBLE_CATEGORY), None)
+    return flexible or (held[0] if held else None)
+
+
+#: The catalog category of a flexible plastic.
+_FLEXIBLE_CATEGORY = "thermoplastic_elastomer"
+#: A word for a flexible plastic the catalog holds no record of, or one
+#: written with its hardness run on ("TPU95A").
+_FLEXIBLE_WORD_RE = re.compile(r"^(?:tpe|tpu)(?:\d+[a-d]?)?$")
+
+
+def _written_as_flexible(material: str | None) -> bool:
+    """Whether a word of *material* names a flexible plastic."""
+    return any(_FLEXIBLE_WORD_RE.match(word) for word in _written_words(material))
+
+
+def _category(material_id: str | None) -> str | None:
+    record = _catalogue().get(material_id or "")
+    return record.get("category") if record else None
+
+
+def _general(nozzle: float, layer: float | None) -> tuple[dict[str, float | None], dict[str, str]]:
+    figures: dict[str, float | None] = {
+        OVERHANG: _generic.OVERHANG_UNSUPPORTED_DEG,
+        BRIDGE: _generic.BRIDGE_MAX_MM,
+        WALL_RECOMMENDED: _generic.wall_recommended_mm(nozzle),
+        PIN: max(_generic.PIN_MIN_MM, 2.0 * nozzle),
+        ESD_WALL: None,
+        WALL_MIN: _generic.wall_min_mm(nozzle),
+        BRIDGE_CLEAN: _generic.BRIDGE_CLEAN_MM,
+        HOLE_FORMS: _generic.HOLE_FORMS_MM,
+        HOLE_USABLE: _generic.HOLE_USABLE_MM,
+        THREAD_PITCH: _generic.thread_min_pitch_mm(layer),
+        THREAD_DIAMETER: _generic.THREAD_MIN_DIAMETER_MM,
+    }
+    basis = {q: "general" for q in figures}
+    basis[ESD_WALL] = "not_applicable"
+    return figures, basis
+
+
+#: The words a tool argument's name carries when it names a plastic
+#: (``material``, ``loaded_material``, ``filament_type``, ``materials``).
+_PLASTIC_ARGUMENT_WORDS = ("material", "filament", "plastic")
+
+
+def _names_a_plastic(key: Any, value: Any) -> bool:
+    """True when the argument *key* = *value* names a plastic: a plastic's
+    argument holding a word, or a list or table of them.  A switch
+    (``support_material``) names none."""
+    if not isinstance(key, str) or not any(word in key.lower() for word in _PLASTIC_ARGUMENT_WORDS):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, dict)):
+        return bool(value)
+    return False
+
+
+def _is_assumed_plastic(value: Any) -> bool:
+    """True when *value* (a word, or a list or table of them) spells
+    :data:`ASSUMED_PLASTIC`."""
+    if isinstance(value, str):
+        return value.strip().lower() == ASSUMED_PLASTIC
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_is_assumed_plastic(item) for item in value)
+    return False
+
+
+def call_leaves_assumed_plastic_unnamed() -> bool:
+    """True while a tool call runs none of whose own plastic arguments name
+    :data:`ASSUMED_PLASTIC`.
+
+    The assumed plastic read in such a call is the door's own default, not
+    the person's choice, even when the call names another plastic for
+    another role (a support material beside a part's own); only an
+    argument that names it is the person's choice.  ``False`` outside a
+    tool call, where nothing says what the person named."""
+    try:
+        from kiln.tool_context import current_tool_arguments, current_tool_name
+    except ImportError:  # pragma: no cover - the module ships beside this one
+        return False
+    if current_tool_name() is None:
+        return False
+    return not any(
+        _names_a_plastic(key, value) and _is_assumed_plastic(value)
+        for key, value in current_tool_arguments().items()
+    )
+
+
+def _the_calls_default(material: str) -> bool:
+    """True when *material* is :data:`ASSUMED_PLASTIC` read inside a tool
+    call whose own arguments do not name it
+    (:func:`call_leaves_assumed_plastic_unnamed`)."""
+    return material.strip().lower() == ASSUMED_PLASTIC and call_leaves_assumed_plastic_unnamed()
+
+
+@contextlib.contextmanager
+def assuming(material: str | None) -> Iterator[str]:
+    """The plastic a check reads: *material* when the person named one, else
+    :data:`ASSUMED_PLASTIC`.  Inside the block the assumed plastic's limits
+    are its own figures, read without spending the person's daily allowance
+    of plastics on Kiln's servers, and nothing is said about them; a plastic
+    the person named is read as always.  :data:`ASSUMED_PLASTIC` handed in
+    by a tool call that named no plastic (a door's own default) is read as
+    the assumed one, under the spelling handed in."""
+    plastic = ASSUMED_PLASTIC
+    if isinstance(material, str) and material.strip():
+        if not _the_calls_default(material):
+            yield material
+            return
+        plastic = material
+    from kiln import _pro_material_limits_bridge as bridge
+
+    token = _assumed.set(_assumed.get() | {ASSUMED_PLASTIC})
+    try:
+        with bridge.assuming_here(ASSUMED_PLASTIC):
+            yield plastic
+    finally:
+        _assumed.reset(token)
+
+
+def limits_for(
+    material: str | None,
+    *,
+    nozzle_mm: float | None = None,
+    layer_height_mm: float | None = None,
+    enclosed: bool | None = None,
+    pin_height_mm: float | None = None,
+) -> MaterialLimits:
+    """*material*'s limits at *nozzle_mm* (the reference nozzle when it is not
+    stated; the answer says which).  Never raises.
+
+    An empty material answers the general figures with nothing asked and no
+    miss.  A material Kiln cannot place answers the general figures,
+    ``known=False``."""
+    nozzle = _generic.stated_nozzle_mm(nozzle_mm)
+    layer = float(layer_height_mm) if isinstance(layer_height_mm, (int, float)) and layer_height_mm > 0 else None
+    figures, basis = _general(nozzle, layer)
+    name = str(material).strip() if material else ""
+    public_id = _public_id(name)
+    if not name:
+        return MaterialLimits("", None, False, nozzle, layer, figures, basis)
+    from kiln import _pro_material_limits_bridge as bridge
+
+    local = bridge.available()
+    key = (name.lower(), round(nozzle, 3), layer, enclosed, pin_height_mm)
+    answer = None if local else _answers.get(key)
+    miss: Miss | None = None
+    assumed = name.lower() in _assumed.get() or _the_calls_default(name)
+    if answer is None:
+        answer, miss = bridge.ask(
+            name, nozzle_mm=nozzle, layer_height_mm=layer, enclosed=enclosed, pin_height_mm=pin_height_mm,
+            assumed=assumed,
+        )
+        # An answer the allowance cut to the general figures holds only for
+        # today, so it is not kept.
+        if answer is not None and not local and not answer.get("allowance"):
+            _answers[key] = answer
+    if answer is None:
+        missed = MaterialLimits(name, public_id, public_id is not None, nozzle, layer, figures, basis, miss)
+        # A plastic read because the person named none says nothing about it.
+        return missed if assumed else _said_on_the_call(missed)
+    why: dict[str, str] = {}
+    for quantity, figure in answer["limits"].items():
+        figures[quantity] = float(figure["value"]) if figure.get("value") is not None else None
+        basis[quantity] = str(figure["basis"])
+        if isinstance(figure.get("note"), str) and figure["note"]:
+            why[quantity] = figure["note"]
+    read = MaterialLimits(
+        name, answer.get("material_id") or public_id, bool(answer["known"]), nozzle, layer, figures, basis,
+        allowance=str(answer.get("allowance") or ""), why=why,
+    )
+    return read if assumed else _said_on_the_call(read)
+
+
+#: What a material lookup says beside the general block.
+GENERAL_BLOCK_NOTE = (
+    "General figures for any plastic.  The design checks apply this plastic's "
+    "own limits where Kiln has them."
+)
+
+
+def general_design_limits() -> dict[str, Any]:
+    """The general figures under a design check's reply names, marked as
+    general, for a material lookup that shows no plastic's own limits."""
+    return {
+        **limits_for(None).design_limits(),
+        "basis": "general",
+        "note": GENERAL_BLOCK_NOTE,
+    }
+
+
+@dataclass(frozen=True)
+class SlicedFloors:
+    """What Kiln's own slice keeps at one nozzle: the thinnest wall, across
+    its layer, it lays a line in (``wall_mm``) and the thinnest round pin it
+    prints in every layer (``pin_mm``).
+
+    ``exact`` is true when Kiln's own figures were read (kiln-pro on this
+    computer, or Kiln's servers): a feature the check finds thinner than them
+    is left out of the slice.  Otherwise both are the general minimum wall at
+    the nozzle (:func:`kiln.generic_limits.wall_min_mm`), a heads-up: what the
+    check finds thinner than it may be left out, and ``miss`` says why Kiln's
+    own figures were not read."""
+
+    nozzle_mm: float
+    wall_mm: float
+    pin_mm: float
+    exact: bool
+    miss: Miss | None = None
+
+    def note(self) -> str:
+        """The one sentence for a heads-up: why the check is not Kiln's own
+        and how to get it.  Empty when the figures are Kiln's own."""
+        if self.exact or self.miss is None:
+            return ""
+        return sliced_miss_sentence(self.miss, self.wall_mm)
+
+
+def sliced_miss_sentence(miss: Miss, general_wall_mm: float) -> str:
+    """The one sentence for a miss of what Kiln's slice keeps, in the
+    served-answer voice."""
+    on_the_line = "Whether a thin wall or pin is left out when sliced depends on the slicer and the nozzle"
+    wont = (
+        f"warns about thin walls and pins from the general minimum wall ({general_wall_mm:g} mm) "
+        "instead and stops nothing"
+    )
+    outside = _outside_what_they_cover(miss, on_the_line=on_the_line, wont=wont)
+    if outside is not None:
+        return outside
+    return sentence(
+        miss,
+        feature="slicer check",
+        on_the_line=on_the_line,
+        cannot="check exactly what its slicer leaves out",
+        wont=wont,
+        then="check again for Kiln's exact check" + free_account_note(miss),
+    )
+
+
+def sliced_floors(*, nozzle_mm: float | None) -> SlicedFloors:
+    """What Kiln's own slice keeps at *nozzle_mm* (the reference nozzle when it
+    is not stated).  Never raises.
+
+    Asked of kiln-pro on this computer, else of Kiln's servers; a served
+    answer is kept for the life of the process, per nozzle.  With no answer
+    both figures are the general minimum wall and ``miss`` says why."""
+    nozzle = _generic.stated_nozzle_mm(nozzle_mm)
+    from kiln import _pro_material_limits_bridge as bridge
+
+    local = bridge.available()
+    key = ("", nozzle, None, None, "sliced")
+    answer = None if local else _answers.get(key)
+    miss: Miss | None = None
+    if answer is None:
+        answer, miss = bridge.ask_sliced(nozzle_mm=nozzle)
+        if answer is not None and not local:
+            _answers[key] = answer
+    if answer is None:
+        general = _generic.wall_min_mm(nozzle)
+        return SlicedFloors(nozzle, general, general, False, miss)
+    figures = answer["limits"]
+    return SlicedFloors(
+        nozzle, float(figures[SLICED_WALL]["value"]), float(figures[SLICED_PIN]["value"]), True,
+    )
+
+
+__all__ = [
+    "ASSUMED_PLASTIC",
+    "FLEXIBLE_CAUTION",
+    "GENERAL_ONLY",
+    "PER_PLASTIC",
+    "GENERAL_BLOCK_NOTE",
+    "STATIC_SAFE_UNKNOWN",
+    "UNRECOGNISED",
+    "MaterialLimits",
+    "SlicedFloors",
+    "assuming",
+    "general_design_limits",
+    "limits_for",
+    "miss_sentence",
+    "sliced_floors",
+    "sliced_miss_sentence",
+]

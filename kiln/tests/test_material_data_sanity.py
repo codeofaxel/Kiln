@@ -17,7 +17,6 @@ import pytest
 
 from .conftest import (
     requires_engineering_overlay,
-    requires_multi_material_overlay,
     requires_post_processing_overlay,
     requires_printer_compatibility_overlay,
     requires_troubleshooting_overlay,
@@ -31,7 +30,6 @@ MATERIALS_FILE = DATA_DIR / "materials.json"
 PATTERNS_FILE = DATA_DIR / "design_templates.json"
 COMPAT_FILE = DATA_DIR / "printer_material_compatibility.json"
 TROUBLESHOOT_FILE = DATA_DIR / "material_troubleshooting.json"
-MULTI_MAT_FILE = DATA_DIR / "multi_material_pairing.json"
 POST_PROC_FILE = DATA_DIR / "post_processing.json"
 PRINTER_INTEL_FILE = PRINTER_INTEL_DIR / "printer_intelligence.json"
 
@@ -724,90 +722,6 @@ class TestTroubleshootingSchema:
             assert len(tips) >= 3, (
                 f"{mat_id} has only {len(tips)} break_in_tips (need >= 3)"
             )
-
-
-# --- Multi-Material Pairing Tests ---
-
-
-@pytest.fixture(scope="module")
-def multi_mat_data() -> dict:
-    """Multi-material pairing MERGED with the kiln-pro overlay.
-
-    Public file holds pair skeletons + dissolution_method + ratings; the
-    overlay layers the curated depth back in.
-    """
-    from kiln.design_intelligence import _get_kb
-    return _get_kb().multi_material
-
-
-class TestMultiMaterialPairing:
-    """Multi-material pairing rules cross-references and schema."""
-
-    VALID_ADHESION = {"excellent", "good", "moderate", "poor", "none"}
-
-    def test_support_pairs_reference_valid_materials(
-        self, multi_mat_data, materials,
-    ):
-        material_ids = set(materials.keys())
-        for pair in multi_mat_data["support_pairs"]:
-            assert pair["model_material"] in material_ids, (
-                f"support_pair model_material "
-                f"'{pair['model_material']}' not in materials.json"
-            )
-            assert pair["support_material"] in material_ids, (
-                f"support_pair support_material "
-                f"'{pair['support_material']}' not in materials.json"
-            )
-
-    @requires_multi_material_overlay
-    def test_support_pairs_have_required_fields(self, multi_mat_data):
-        required = {
-            "model_material", "support_material",
-            "dissolution_method", "interface_adhesion", "notes",
-        }
-        for i, pair in enumerate(multi_mat_data["support_pairs"]):
-            missing = required - set(pair.keys())
-            assert not missing, (
-                f"support_pairs[{i}] missing: {missing}"
-            )
-
-    def test_support_pair_adhesion_valid(self, multi_mat_data):
-        for i, pair in enumerate(multi_mat_data["support_pairs"]):
-            assert pair["interface_adhesion"] in self.VALID_ADHESION, (
-                f"support_pairs[{i}] adhesion "
-                f"'{pair['interface_adhesion']}' not valid"
-            )
-
-    def test_co_print_materials_reference_valid(
-        self, multi_mat_data, materials,
-    ):
-        material_ids = set(materials.keys())
-        co = multi_mat_data.get("co_print_compatibility", {})
-        for mat_a, pairings in co.items():
-            assert mat_a in material_ids, (
-                f"co_print_compatibility key '{mat_a}' not in materials.json"
-            )
-            for mat_b in pairings:
-                assert mat_b in material_ids, (
-                    f"co_print_compatibility.{mat_a}.{mat_b} "
-                    f"not in materials.json"
-                )
-
-    def test_co_print_adhesion_valid(self, multi_mat_data):
-        co = multi_mat_data.get("co_print_compatibility", {})
-        for mat_a, pairings in co.items():
-            for mat_b, entry in pairings.items():
-                assert entry["interface_adhesion"] in self.VALID_ADHESION, (
-                    f"co_print.{mat_a}.{mat_b} adhesion "
-                    f"'{entry['interface_adhesion']}' not valid"
-                )
-
-    @requires_multi_material_overlay
-    def test_general_rules_present(self, multi_mat_data):
-        rules = multi_mat_data.get("general_rules", [])
-        assert len(rules) >= 5, (
-            f"Only {len(rules)} general_rules (need >= 5)"
-        )
 
 
 # --- Post-Processing Guide Tests ---

@@ -15,10 +15,30 @@ every food-contact recommendation.
 
 from __future__ import annotations
 
+import pytest
+
 from kiln.material_safety import (
     FOOD_CONTACT_NOZZLE_ADVISORY,
     food_contact_nozzle_advisory,
 )
+
+
+@pytest.fixture
+def served_pick(monkeypatch):
+    """A plain install on the free plan, with Kiln's servers answering the
+    material pick (a food-safe polymer, its own warnings only): what the
+    advisory rides on is the pick public Kiln hands back."""
+    import kiln.licensing as licensing
+    import kiln.server as srv
+    from kiln import _pro_material_pick_bridge as bridge
+
+    monkeypatch.setattr(bridge, "_service_down_until", 0.0)
+    monkeypatch.setattr(licensing, "check_tier", lambda *_a, **_k: (False, "needs Kiln Pro"))
+    monkeypatch.setattr(srv, "_pro_api_call", lambda tool_name, /, **_kw: {
+        "success": True, "status": "ok", "known": True,
+        "pick": {"material_id": "petg", "score": 70.0, "reasons": ["food-safe polymer family."],
+                 "warnings": [], "alternatives": [], "recommended_brands": [], "fallback": False},
+    })
 
 
 class TestTheAdvisoryItself:
@@ -41,6 +61,7 @@ class TestTheAdvisoryItself:
         assert food_contact_nozzle_advisory() is FOOD_CONTACT_NOZZLE_ADVISORY
 
 
+@pytest.mark.usefixtures("served_pick")
 class TestItReachesAFreeUser:
     def _recommend(self, description: str):
         from kiln.design_intelligence import recommend_material_for_design
@@ -68,6 +89,7 @@ class TestItReachesAFreeUser:
         assert "trace lead" not in text
 
 
+@pytest.mark.usefixtures("served_pick")
 class TestTheOtherDoor:
     """Naming your own material skips the recommender entirely, and
     "a cereal bowl in PETG" is exactly the ask that most needs telling."""
@@ -97,3 +119,15 @@ class TestTheOtherDoor:
         warnings = get_design_constraints("a bowl to eat cereal from").recommended_material.warnings
         nozzle_lines = [w for w in warnings if "nozzle" in w.lower()]
         assert len(nozzle_lines) == 1, nozzle_lines
+
+
+class TestWithNoPick:
+    """No pick came (this install is signed out): the reply lists plastics
+    and still says what they would be extruded through."""
+
+    def test_the_analysis_with_no_pick_still_carries_it(self) -> None:
+        from kiln.design_intelligence import get_design_constraints
+
+        brief = get_design_constraints("a bowl to eat cereal from")
+        assert brief.recommended_material is None
+        assert brief.material_basic["warnings"].count(food_contact_nozzle_advisory()) == 1

@@ -1,20 +1,23 @@
-"""Adaptive slicing based on geometry and material intelligence.
+"""Adaptive slicing based on geometry and a material's slicing settings.
 
-Analyzes model geometry and material properties to generate per-region
-slicing parameters instead of uniform layer heights across an entire
-print.  Thin walls and fine details get thinner layers for quality;
-bulk infill gets thicker layers for speed; overhangs get adjusted
-cooling and speed; top surfaces get finer layers for appearance.
+Analyzes model geometry to generate per-region slicing parameters instead
+of uniform layer heights across an entire print.  Thin walls and fine
+details get thinner layers for quality; bulk infill gets thicker layers for
+speed; overhangs get adjusted cooling and speed; top surfaces get finer
+layers for appearance.
 
-The material intelligence knowledge base informs layer height limits
-(e.g. PETG bridges need thinner layers than PLA).
+The settings a plan is built from come in a :class:`MaterialSlicingProfile`.
+Settings tuned to each material are Kiln's (https://kiln3d.com), asked for
+through :mod:`kiln._pro_adaptive_bridge`; :func:`generic_profile` gives
+settings for any material from the nozzle size alone, for a plan made when
+the tuned settings cannot be asked for.
 
 Usage::
 
-    from kiln.adaptive_slicer import get_adaptive_slicer
+    from kiln.adaptive_slicer import generic_profile, get_adaptive_slicer
 
     slicer = get_adaptive_slicer()
-    profile = slicer.get_material_profile("PLA")
+    profile = generic_profile("PLA", nozzle_diameter_mm=0.4)
     regions = slicer.analyze_geometry(model_stats={"height_mm": 30, ...})
     plan = slicer.generate_plan(
         regions, profile, model_height_mm=30.0, model_name="benchy"
@@ -24,7 +27,9 @@ Usage::
 
 from __future__ import annotations
 
+import functools
 import logging
+import math
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -92,7 +97,11 @@ class AdaptiveSlicerError(Exception):
 
 @dataclass
 class MaterialSlicingProfile:
-    """Material-specific slicing constraints."""
+    """The slicing settings a plan is built from.
+
+    ``top_surface_layers`` and ``cooling_threshold_layer_time_s`` are not
+    read by the plan; generic settings leave them unstated (``None``).
+    """
 
     material: str
     min_layer_height_mm: float
@@ -106,9 +115,9 @@ class MaterialSlicingProfile:
     bridge_fan_pct: float
     first_layer_height_mm: float
     first_layer_speed_factor: float
-    top_surface_layers: int
+    top_surface_layers: int | None
     top_surface_speed_factor: float
-    cooling_threshold_layer_time_s: float
+    cooling_threshold_layer_time_s: float | None
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -185,9 +194,12 @@ class AdaptiveLayerPlan:
     estimated_savings_pct: float | None = None
     regions_detected: list[GeometryRegion] = field(default_factory=list)
     created_at: str = ""
+    #: Built from :func:`generic_profile`, not from settings tuned to the
+    #: material.  Said in the record only when true.
+    basic: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "plan_id": self.plan_id,
             "model_name": self.model_name,
             "material": self.material,
@@ -207,6 +219,9 @@ class AdaptiveLayerPlan:
             "regions_detected": [r.to_dict() for r in self.regions_detected],
             "created_at": self.created_at,
         }
+        if self.basic:
+            d["basic"] = True
+        return d
 
 
 @dataclass
@@ -218,6 +233,9 @@ class SlicerConfig:
     config_data: dict[str, Any] = field(default_factory=dict)
     variable_layer_height_data: list[tuple[float, float]] | None = None
     notes: list[str] = field(default_factory=list)
+    #: Exported from a plan built with generic settings; its first note
+    #: says so.  Said in the record only when true.
+    basic: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -228,168 +246,10 @@ class SlicerConfig:
         }
         if self.variable_layer_height_data is not None:
             d["variable_layer_height_data"] = [list(pair) for pair in self.variable_layer_height_data]
+        if self.basic:
+            d["basic"] = True
         return d
 
-
-# ---------------------------------------------------------------------------
-# Built-in material profiles
-# ---------------------------------------------------------------------------
-
-_MATERIAL_PROFILES: dict[str, dict[str, Any]] = {
-    "PLA": {
-        "min_layer_height_mm": 0.08,
-        "max_layer_height_mm": 0.32,
-        "optimal_layer_height_mm": 0.20,
-        "bridge_layer_height_mm": 0.16,
-        "overhang_max_angle": 55.0,
-        "overhang_speed_factor": 0.6,
-        "overhang_fan_pct": 100.0,
-        "bridge_speed_mm_s": 25.0,
-        "bridge_fan_pct": 100.0,
-        "first_layer_height_mm": 0.25,
-        "first_layer_speed_factor": 0.5,
-        "top_surface_layers": 4,
-        "top_surface_speed_factor": 0.7,
-        "cooling_threshold_layer_time_s": 8.0,
-        "notes": "Excellent bridging and overhang performance. High fan for overhangs.",
-    },
-    "PETG": {
-        "min_layer_height_mm": 0.10,
-        "max_layer_height_mm": 0.30,
-        "optimal_layer_height_mm": 0.20,
-        "bridge_layer_height_mm": 0.12,
-        "overhang_max_angle": 45.0,
-        "overhang_speed_factor": 0.5,
-        "overhang_fan_pct": 50.0,
-        "bridge_speed_mm_s": 20.0,
-        "bridge_fan_pct": 50.0,
-        "first_layer_height_mm": 0.25,
-        "first_layer_speed_factor": 0.4,
-        "top_surface_layers": 5,
-        "top_surface_speed_factor": 0.6,
-        "cooling_threshold_layer_time_s": 10.0,
-        "notes": "Bridges need thinner layers than PLA. Moderate fan to avoid delamination.",
-    },
-    "ABS": {
-        "min_layer_height_mm": 0.10,
-        "max_layer_height_mm": 0.30,
-        "optimal_layer_height_mm": 0.20,
-        "bridge_layer_height_mm": 0.15,
-        "overhang_max_angle": 45.0,
-        "overhang_speed_factor": 0.5,
-        "overhang_fan_pct": 0.0,
-        "bridge_speed_mm_s": 25.0,
-        "bridge_fan_pct": 0.0,
-        "first_layer_height_mm": 0.25,
-        "first_layer_speed_factor": 0.4,
-        "top_surface_layers": 5,
-        "top_surface_speed_factor": 0.6,
-        "cooling_threshold_layer_time_s": 12.0,
-        "notes": "No fan for overhangs/bridges — warping risk. Enclosed printer recommended.",
-    },
-    "TPU": {
-        "min_layer_height_mm": 0.12,
-        "max_layer_height_mm": 0.28,
-        "optimal_layer_height_mm": 0.20,
-        "bridge_layer_height_mm": 0.15,
-        "overhang_max_angle": 40.0,
-        "overhang_speed_factor": 0.4,
-        "overhang_fan_pct": 50.0,
-        "bridge_speed_mm_s": 15.0,
-        "bridge_fan_pct": 50.0,
-        "first_layer_height_mm": 0.25,
-        "first_layer_speed_factor": 0.3,
-        "top_surface_layers": 4,
-        "top_surface_speed_factor": 0.5,
-        "cooling_threshold_layer_time_s": 15.0,
-        "notes": "Flexible — slow speeds critical for overhangs and bridges. Direct drive preferred.",
-    },
-    "ASA": {
-        "min_layer_height_mm": 0.10,
-        "max_layer_height_mm": 0.30,
-        "optimal_layer_height_mm": 0.20,
-        "bridge_layer_height_mm": 0.15,
-        "overhang_max_angle": 45.0,
-        "overhang_speed_factor": 0.5,
-        "overhang_fan_pct": 30.0,
-        "bridge_speed_mm_s": 25.0,
-        "bridge_fan_pct": 30.0,
-        "first_layer_height_mm": 0.25,
-        "first_layer_speed_factor": 0.4,
-        "top_surface_layers": 5,
-        "top_surface_speed_factor": 0.6,
-        "cooling_threshold_layer_time_s": 12.0,
-        "notes": "UV-resistant ABS alternative. Minimal fan to reduce warping.",
-    },
-    "NYLON": {
-        "min_layer_height_mm": 0.10,
-        "max_layer_height_mm": 0.28,
-        "optimal_layer_height_mm": 0.20,
-        "bridge_layer_height_mm": 0.12,
-        "overhang_max_angle": 40.0,
-        "overhang_speed_factor": 0.5,
-        "overhang_fan_pct": 30.0,
-        "bridge_speed_mm_s": 20.0,
-        "bridge_fan_pct": 30.0,
-        "first_layer_height_mm": 0.25,
-        "first_layer_speed_factor": 0.4,
-        "top_surface_layers": 5,
-        "top_surface_speed_factor": 0.6,
-        "cooling_threshold_layer_time_s": 12.0,
-        "notes": "Hygroscopic — must be dry. Thin bridge layers for good adhesion.",
-    },
-    "PC": {
-        "min_layer_height_mm": 0.12,
-        "max_layer_height_mm": 0.28,
-        "optimal_layer_height_mm": 0.20,
-        "bridge_layer_height_mm": 0.15,
-        "overhang_max_angle": 40.0,
-        "overhang_speed_factor": 0.5,
-        "overhang_fan_pct": 0.0,
-        "bridge_speed_mm_s": 20.0,
-        "bridge_fan_pct": 0.0,
-        "first_layer_height_mm": 0.25,
-        "first_layer_speed_factor": 0.4,
-        "top_surface_layers": 5,
-        "top_surface_speed_factor": 0.6,
-        "cooling_threshold_layer_time_s": 15.0,
-        "notes": "High-temp material. No fan — enclosed printer mandatory. Warp-prone.",
-    },
-    "PVA": {
-        "min_layer_height_mm": 0.10,
-        "max_layer_height_mm": 0.25,
-        "optimal_layer_height_mm": 0.15,
-        "bridge_layer_height_mm": 0.12,
-        "overhang_max_angle": 50.0,
-        "overhang_speed_factor": 0.5,
-        "overhang_fan_pct": 100.0,
-        "bridge_speed_mm_s": 20.0,
-        "bridge_fan_pct": 100.0,
-        "first_layer_height_mm": 0.20,
-        "first_layer_speed_factor": 0.4,
-        "top_surface_layers": 4,
-        "top_surface_speed_factor": 0.6,
-        "cooling_threshold_layer_time_s": 10.0,
-        "notes": "Water-soluble support material. Must be kept very dry.",
-    },
-    "HIPS": {
-        "min_layer_height_mm": 0.10,
-        "max_layer_height_mm": 0.30,
-        "optimal_layer_height_mm": 0.20,
-        "bridge_layer_height_mm": 0.15,
-        "overhang_max_angle": 50.0,
-        "overhang_speed_factor": 0.5,
-        "overhang_fan_pct": 50.0,
-        "bridge_speed_mm_s": 25.0,
-        "bridge_fan_pct": 50.0,
-        "first_layer_height_mm": 0.25,
-        "first_layer_speed_factor": 0.4,
-        "top_surface_layers": 4,
-        "top_surface_speed_factor": 0.6,
-        "cooling_threshold_layer_time_s": 10.0,
-        "notes": "Limonene-soluble support. Similar to ABS but easier to print.",
-    },
-}
 
 # ---------------------------------------------------------------------------
 # Nozzle-based layer height constraints
@@ -403,6 +263,197 @@ _DEFAULT_PRINT_SPEED_MM_S = 60.0
 
 # Average travel distance per layer for time estimation (mm).
 _DEFAULT_LAYER_TRAVEL_MM = 200.0
+
+#: The fan a layer runs at unless one of its regions asks for more.
+_BASELINE_FAN_PCT = 50.0
+
+
+# ---------------------------------------------------------------------------
+# What a plan is made for: every plan is bounded before its first layer
+# ---------------------------------------------------------------------------
+
+#: The nozzle sizes, in mm, a plan or a material's settings are made for.
+_PLAN_NOZZLE_MM = (0.1, 2.0)
+#: The tallest part, in mm, planned when the printer catalogue cannot be read.
+_FALLBACK_BUILD_HEIGHT_MM = 2000.0
+#: The most layers one plan holds.
+_MAX_PLAN_LAYERS = 100_000
+#: The most regions one plan reads.
+_MAX_PLAN_REGIONS = 200
+#: The most region names one plan's layers list between them: what bounds
+#: the plan's size when many regions span many layers.
+_MAX_PLAN_REGION_ENTRIES = 250_000
+#: The longest material name or mode a plan reads, and the most of anything
+#: a caller sent that a refusal repeats.
+MAX_TEXT_CHARS = 64
+
+
+def _is_number(value: Any) -> bool:
+    """A finite int or float (a bool is not a size; nor is a whole number too
+    large to be one)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _shown(value: Any) -> str:
+    """*value* as a refusal may repeat it: at most :data:`MAX_TEXT_CHARS`
+    characters of it."""
+    try:
+        text = repr(value)
+    except ValueError:  # a whole number too long to write out
+        return "a number too large to write out"
+    return text if len(text) <= MAX_TEXT_CHARS else f"{text[: MAX_TEXT_CHARS - 3]}..."
+
+
+def text_refusal(material: Any, mode: Any = None) -> str | None:
+    """Why a plan or a material's settings are refused for *material* or
+    *mode* before anything is asked, or ``None``.
+
+    A material that is not text or longer than :data:`MAX_TEXT_CHARS`; a mode
+    (when given) that is not text or longer than that.  A mode of the right
+    shape that the planner does not know is refused where a plan reads it.
+    """
+    if not isinstance(material, str):
+        return "Invalid material: name the material as text, e.g. 'PLA'."
+    if len(material) > MAX_TEXT_CHARS:
+        return f"Invalid material: a material name is at most {MAX_TEXT_CHARS} characters."
+    if mode is not None:
+        valid = ", ".join(m.value for m in AdaptiveMode)
+        if not isinstance(mode, str):
+            return f"Invalid mode: name the mode as text. Valid: {valid}."
+        if len(mode) > MAX_TEXT_CHARS:
+            return f"Invalid mode: a mode is at most {MAX_TEXT_CHARS} characters. Valid: {valid}."
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def max_build_height_mm() -> float:
+    """The tallest rated build height in Kiln's printer catalogue, in mm:
+    the tallest part a plan is made for.  The fallback stands in when the
+    catalogue cannot be read."""
+    try:
+        from kiln.printer_intelligence import _read_public_json
+
+        rows = _read_public_json()
+    except Exception:  # noqa: BLE001 -- an unreadable catalogue is the fallback, never a crash
+        return _FALLBACK_BUILD_HEIGHT_MM
+    heights: list[float] = []
+    for row in rows.values() if isinstance(rows, dict) else ():
+        if not isinstance(row, dict):
+            continue
+        volume = row.get("rated_build_volume_mm") or row.get("build_volume_mm")
+        if isinstance(volume, dict):
+            volume = [volume.get("x"), volume.get("y"), volume.get("z")]
+        if isinstance(volume, (list, tuple)) and len(volume) >= 3 and _is_number(volume[2]) and volume[2] > 0:
+            heights.append(float(volume[2]))
+    return max(heights) if heights else _FALLBACK_BUILD_HEIGHT_MM
+
+
+def check_nozzle(nozzle_diameter_mm: Any) -> float:
+    """*nozzle_diameter_mm* as a float, when it is a size a plan is made for.
+
+    :raises AdaptiveSlicerError: for a value that is not a finite number, or
+        one outside :data:`_PLAN_NOZZLE_MM`.
+    """
+    if not _is_number(nozzle_diameter_mm):
+        raise AdaptiveSlicerError(
+            f"Nozzle diameter must be a finite number of millimetres, got {_shown(nozzle_diameter_mm)}."
+        )
+    low, high = _PLAN_NOZZLE_MM
+    if not low <= nozzle_diameter_mm <= high:
+        raise AdaptiveSlicerError(
+            f"Nozzle diameter must be between {low:g} and {high:g} mm, got {_shown(nozzle_diameter_mm)}."
+        )
+    return float(nozzle_diameter_mm)
+
+
+def check_plan_inputs(model_height_mm: Any, nozzle_diameter_mm: Any) -> None:
+    """Refuse a height or nozzle no plan is made for, before any layer.
+
+    The height must be a finite number above zero and no taller than
+    :func:`max_build_height_mm`; the nozzle must pass :func:`check_nozzle`.
+
+    :raises AdaptiveSlicerError: naming what is wrong.
+    """
+    if not _is_number(model_height_mm):
+        raise AdaptiveSlicerError(
+            f"Model height must be a finite number of millimetres, got {_shown(model_height_mm)}."
+        )
+    if model_height_mm <= 0:
+        raise AdaptiveSlicerError(f"Model height must be positive, got {_shown(model_height_mm)}.")
+    tallest = max_build_height_mm()
+    if model_height_mm > tallest:
+        raise AdaptiveSlicerError(
+            f"Model height {_shown(model_height_mm)} mm is taller than any printer Kiln knows of ({tallest:g} mm)."
+        )
+    check_nozzle(nozzle_diameter_mm)
+
+
+# ---------------------------------------------------------------------------
+# Generic settings: any material, from the nozzle size alone
+# ---------------------------------------------------------------------------
+
+#: Generic settings lay a layer at this share of the nozzle's width, inside
+#: the window the two ratios above draw.
+_GENERIC_LAYER_NOZZLE_RATIO = 0.5
+
+#: Generic settings run overhangs, bridges, the first layer and top surfaces
+#: at this share of the plan's base speed.
+_GENERIC_SLOW_FACTOR = 0.5
+
+#: What generic settings say they are.
+GENERIC_NOTES = "Generic settings worked out from the nozzle size, not tuned to any material."
+
+
+def generic_profile(material: str = "", *, nozzle_diameter_mm: float = 0.4) -> MaterialSlicingProfile:
+    """Slicing settings for any material, worked out from the nozzle alone.
+
+    The settings a plan is built from when Kiln's settings tuned to the
+    material cannot be asked for.  The layer window is the nozzle's own (a
+    quarter to three quarters of its width, every other layer height at
+    half of it); overhangs, bridges, the first layer and top surfaces run at
+    a fixed share of the base speed; overhangs and bridges keep the baseline
+    fan; the overhang angle is printability's for every material
+    (:func:`kiln.printability._resolve_overhang_threshold` with no
+    material).  *material* is carried as a name and changes nothing else.
+    The two fields a plan never reads are left unstated.
+
+    :raises AdaptiveSlicerError: for a nozzle :func:`check_nozzle` refuses.
+    """
+    from kiln.printability import _resolve_overhang_threshold
+
+    nozzle_diameter_mm = check_nozzle(nozzle_diameter_mm)
+    low = round(nozzle_diameter_mm * _MIN_LAYER_NOZZLE_RATIO, 3)
+    high = round(nozzle_diameter_mm * _MAX_LAYER_NOZZLE_RATIO, 3)
+    middle = round(nozzle_diameter_mm * _GENERIC_LAYER_NOZZLE_RATIO, 3)
+    return MaterialSlicingProfile(
+        material=str(material or "").upper().strip(),
+        min_layer_height_mm=low,
+        max_layer_height_mm=high,
+        optimal_layer_height_mm=middle,
+        bridge_layer_height_mm=middle,
+        overhang_max_angle=_resolve_overhang_threshold(None, None, None),
+        overhang_speed_factor=_GENERIC_SLOW_FACTOR,
+        overhang_fan_pct=_BASELINE_FAN_PCT,
+        bridge_speed_mm_s=round(_DEFAULT_PRINT_SPEED_MM_S * _GENERIC_SLOW_FACTOR, 1),
+        bridge_fan_pct=_BASELINE_FAN_PCT,
+        first_layer_height_mm=middle,
+        first_layer_speed_factor=_GENERIC_SLOW_FACTOR,
+        top_surface_layers=None,
+        top_surface_speed_factor=_GENERIC_SLOW_FACTOR,
+        cooling_threshold_layer_time_s=None,
+        notes=GENERIC_NOTES,
+    )
+
+
+def generic_label(material: str) -> str:
+    """The note an export of a generic plan carries first."""
+    name = str(material or "").strip() or "the material"
+    return f"Generic settings worked out from the nozzle size, not tuned to {name}"
 
 
 # ---------------------------------------------------------------------------
@@ -474,63 +525,6 @@ class AdaptiveSlicer:
 
         return regions
 
-    def get_material_profile(
-        self,
-        material: str,
-        *,
-        nozzle_diameter_mm: float = 0.4,
-    ) -> MaterialSlicingProfile:
-        """Load material-specific slicing constraints.
-
-        Built-in profiles exist for PLA, PETG, ABS, TPU, ASA, Nylon,
-        PC, PVA, and HIPS.  Nozzle diameter affects min/max layer
-        heights (typically 25%-75% of nozzle).
-
-        :param material: Material name (case-insensitive).
-        :param nozzle_diameter_mm: Nozzle diameter for layer height limits.
-        :returns: A :class:`MaterialSlicingProfile`.
-        :raises AdaptiveSlicerError: If the material is unknown.
-        """
-        key = material.upper().strip()
-        raw = _MATERIAL_PROFILES.get(key)
-        if raw is None:
-            available = ", ".join(sorted(_MATERIAL_PROFILES.keys()))
-            raise AdaptiveSlicerError(f"Unknown material '{material}'. Available: {available}.")
-
-        nozzle_min = round(nozzle_diameter_mm * _MIN_LAYER_NOZZLE_RATIO, 3)
-        nozzle_max = round(nozzle_diameter_mm * _MAX_LAYER_NOZZLE_RATIO, 3)
-
-        return MaterialSlicingProfile(
-            material=key,
-            min_layer_height_mm=max(raw["min_layer_height_mm"], nozzle_min),
-            max_layer_height_mm=min(raw["max_layer_height_mm"], nozzle_max),
-            optimal_layer_height_mm=_clamp(
-                raw["optimal_layer_height_mm"],
-                max(raw["min_layer_height_mm"], nozzle_min),
-                min(raw["max_layer_height_mm"], nozzle_max),
-            ),
-            bridge_layer_height_mm=_clamp(
-                raw["bridge_layer_height_mm"],
-                max(raw["min_layer_height_mm"], nozzle_min),
-                min(raw["max_layer_height_mm"], nozzle_max),
-            ),
-            overhang_max_angle=raw["overhang_max_angle"],
-            overhang_speed_factor=raw["overhang_speed_factor"],
-            overhang_fan_pct=raw["overhang_fan_pct"],
-            bridge_speed_mm_s=raw["bridge_speed_mm_s"],
-            bridge_fan_pct=raw["bridge_fan_pct"],
-            first_layer_height_mm=_clamp(
-                raw["first_layer_height_mm"],
-                max(raw["min_layer_height_mm"], nozzle_min),
-                min(raw["max_layer_height_mm"], nozzle_max),
-            ),
-            first_layer_speed_factor=raw["first_layer_speed_factor"],
-            top_surface_layers=raw["top_surface_layers"],
-            top_surface_speed_factor=raw["top_surface_speed_factor"],
-            cooling_threshold_layer_time_s=raw["cooling_threshold_layer_time_s"],
-            notes=raw.get("notes", ""),
-        )
-
     def generate_plan(
         self,
         regions: list[GeometryRegion],
@@ -549,18 +543,26 @@ class AdaptiveSlicer:
         detected regions, material constraints, and chosen mode.
 
         :param regions: Geometry regions from :meth:`analyze_geometry`.
-        :param material_profile: Material constraints from
-            :meth:`get_material_profile`.
+        :param material_profile: The settings to plan with: Kiln's settings
+            tuned to the material, or :func:`generic_profile`.
         :param mode: Adaptive strategy.
         :param model_height_mm: Total model height in mm.
         :param model_name: Optional model name for the plan record.
         :param printer: Optional printer name.
         :param nozzle_diameter_mm: Nozzle diameter in mm.
         :returns: An :class:`AdaptiveLayerPlan`.
-        :raises AdaptiveSlicerError: If model_height_mm <= 0.
+        :raises AdaptiveSlicerError: For a height or nozzle
+            :func:`check_plan_inputs` refuses, more than
+            :data:`_MAX_PLAN_REGIONS` regions, a layer that would not be
+            thicker than zero, a plan past :data:`_MAX_PLAN_LAYERS` layers, or
+            one whose layers would name more than
+            :data:`_MAX_PLAN_REGION_ENTRIES` regions between them.
         """
-        if model_height_mm <= 0:
-            raise AdaptiveSlicerError(f"Model height must be positive, got {model_height_mm}.")
+        check_plan_inputs(model_height_mm, nozzle_diameter_mm)
+        if len(regions) > _MAX_PLAN_REGIONS:
+            raise AdaptiveSlicerError(
+                f"A plan reads at most {_MAX_PLAN_REGIONS} regions, got {len(regions)}."
+            )
 
         with self._lock:
             layer_heights: list[float] = []
@@ -570,6 +572,7 @@ class AdaptiveSlicer:
 
             z = 0.0
             layer_idx = 0
+            region_entries = 0
 
             while z < model_height_mm:
                 height = self._compute_layer_height(z, regions, material_profile, mode)
@@ -588,6 +591,17 @@ class AdaptiveSlicer:
                         break
                     height = max(remaining, material_profile.min_layer_height_mm)
 
+                if not height > 0:
+                    raise AdaptiveSlicerError(
+                        f"These settings lay a layer {height} mm thick at {round(z, 4)} mm; "
+                        "every layer must be thicker than zero."
+                    )
+                if layer_idx >= _MAX_PLAN_LAYERS:
+                    raise AdaptiveSlicerError(
+                        f"This plan would take more than {_MAX_PLAN_LAYERS} layers; "
+                        "check the model height and the layer settings."
+                    )
+
                 speed = self._compute_layer_speed(z, regions, material_profile)
                 if layer_idx == 0:
                     speed = material_profile.first_layer_speed_factor
@@ -595,6 +609,12 @@ class AdaptiveSlicer:
                 cooling = self._compute_layer_cooling(z, regions, material_profile)
 
                 active_regions = _regions_at_z(z, regions)
+                region_entries += len(active_regions)
+                if region_entries > _MAX_PLAN_REGION_ENTRIES:
+                    raise AdaptiveSlicerError(
+                        f"This plan's layers would name more than {_MAX_PLAN_REGION_ENTRIES:,} regions "
+                        "between them; send fewer regions, or regions that cover less of the part's height."
+                    )
 
                 layer_heights.append(round(height, 4))
                 layer_regions_list.append(active_regions)
@@ -639,6 +659,9 @@ class AdaptiveSlicer:
         PrusaSlicer/OrcaSlicer use the variable layer height format.
         Cura uses the adaptive layers plugin format.
 
+        A plan built with generic settings exports marked ``basic``, its
+        first note saying so.
+
         :param plan: The adaptive layer plan to export.
         :param slicer: Target slicer software.
         :returns: A :class:`SlicerConfig`.
@@ -649,7 +672,11 @@ class AdaptiveSlicer:
             SlicerTarget.CURA: self._export_cura,
             SlicerTarget.GENERIC: self._export_generic,
         }
-        return exporters[slicer](plan)
+        config = exporters[slicer](plan)
+        if plan.basic:
+            config.basic = True
+            config.notes.insert(0, generic_label(plan.material))
+        return config
 
     def estimate_time_savings(
         self,
@@ -695,7 +722,7 @@ class AdaptiveSlicer:
     def quick_plan(
         self,
         *,
-        material: str,
+        material_profile: MaterialSlicingProfile,
         model_height_mm: float,
         model_name: str = "",
         nozzle_diameter_mm: float = 0.4,
@@ -705,7 +732,7 @@ class AdaptiveSlicer:
     ) -> AdaptiveLayerPlan:
         """Convenience method combining analyze + plan in one call.
 
-        :param material: Material name.
+        :param material_profile: The settings to plan with.
         :param model_height_mm: Total model height.
         :param model_name: Optional model name.
         :param nozzle_diameter_mm: Nozzle diameter.
@@ -715,8 +742,6 @@ class AdaptiveSlicer:
             a default STANDARD region is used.
         :returns: An :class:`AdaptiveLayerPlan`.
         """
-        mat_profile = self.get_material_profile(material, nozzle_diameter_mm=nozzle_diameter_mm)
-
         if regions:
             geo_regions = _parse_region_dicts(regions, model_height_mm)
         else:
@@ -731,17 +756,13 @@ class AdaptiveSlicer:
 
         return self.generate_plan(
             geo_regions,
-            mat_profile,
+            material_profile,
             mode=mode,
             model_height_mm=model_height_mm,
             model_name=model_name,
             printer=printer,
             nozzle_diameter_mm=nozzle_diameter_mm,
         )
-
-    def list_supported_materials(self) -> list[str]:
-        """Return sorted list of all supported material names."""
-        return sorted(_MATERIAL_PROFILES.keys())
 
     # -- private: layer height computation ----------------------------------
 
@@ -918,7 +939,7 @@ class AdaptiveSlicer:
             return 100.0  # Default full fan for unknown regions.
 
         # Pick the highest fan speed needed.
-        fan = 50.0  # Baseline.
+        fan = _BASELINE_FAN_PCT
 
         if RegionType.BRIDGE in active_types:
             fan = max(fan, material.bridge_fan_pct)
@@ -1403,8 +1424,27 @@ def _estimate_time_uniform(height_mm: float, layer_height: float) -> float:
     return round((layers * per_layer) / 60.0, 1)
 
 
+def _region_number(value: Any) -> float:
+    """One number of a region, or a refusal that repeats at most
+    :data:`MAX_TEXT_CHARS` characters of what was sent."""
+    try:
+        return float(value)
+    except ValueError as exc:
+        if isinstance(value, str):
+            raise AdaptiveSlicerError(f"could not convert string to float: {_shown(value)}") from exc
+        raise AdaptiveSlicerError(_shown(str(exc))) from exc
+    except (TypeError, OverflowError) as exc:
+        raise AdaptiveSlicerError(str(exc)) from exc
+
+
 def _parse_region_dicts(raw: list[dict[str, Any]], model_height: float) -> list[GeometryRegion]:
-    """Parse a list of region dicts into GeometryRegion objects."""
+    """Parse a list of region dicts into GeometryRegion objects.
+
+    :raises AdaptiveSlicerError: for more than :data:`_MAX_PLAN_REGIONS`
+        regions (before any is read) or a region number that is not one.
+    """
+    if isinstance(raw, (list, tuple)) and len(raw) > _MAX_PLAN_REGIONS:
+        raise AdaptiveSlicerError(f"A plan reads at most {_MAX_PLAN_REGIONS} regions, got {len(raw)}.")
     regions: list[GeometryRegion] = []
     for item in raw:
         try:
@@ -1414,13 +1454,17 @@ def _parse_region_dicts(raw: list[dict[str, Any]], model_height: float) -> list[
         regions.append(
             GeometryRegion(
                 region_type=rtype,
-                z_start_mm=float(item.get("z_start_mm", 0.0)),
-                z_end_mm=float(item.get("z_end_mm", model_height)),
-                area_pct=float(item.get("area_pct", 10.0)),
-                min_feature_size_mm=(float(item["min_feature_size_mm"]) if "min_feature_size_mm" in item else None),
-                overhang_angle=(float(item["overhang_angle"]) if "overhang_angle" in item else None),
-                bridge_length_mm=(float(item["bridge_length_mm"]) if "bridge_length_mm" in item else None),
-                wall_thickness_mm=(float(item["wall_thickness_mm"]) if "wall_thickness_mm" in item else None),
+                z_start_mm=_region_number(item.get("z_start_mm", 0.0)),
+                z_end_mm=_region_number(item.get("z_end_mm", model_height)),
+                area_pct=_region_number(item.get("area_pct", 10.0)),
+                min_feature_size_mm=(
+                    _region_number(item["min_feature_size_mm"]) if "min_feature_size_mm" in item else None
+                ),
+                overhang_angle=(_region_number(item["overhang_angle"]) if "overhang_angle" in item else None),
+                bridge_length_mm=(_region_number(item["bridge_length_mm"]) if "bridge_length_mm" in item else None),
+                wall_thickness_mm=(
+                    _region_number(item["wall_thickness_mm"]) if "wall_thickness_mm" in item else None
+                ),
             )
         )
     return regions

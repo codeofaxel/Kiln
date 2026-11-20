@@ -292,9 +292,12 @@ def run_full_validation_pipeline(
     )
 
     # Step 5: Printability
-    _step_printability(
-        report, working_path, material=material or "pla", printer_id=printer_id or None,
-    )
+    from kiln.material_limits import assuming
+
+    with assuming(material) as plastic:
+        _step_printability(
+            report, working_path, material=plastic, printer_id=printer_id or None,
+        )
 
     # Step 5b: Support assessment
     _step_support_assessment(
@@ -543,7 +546,21 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
             report=report,
             bypassable=not no_part,
         )
-    return PrintGate(path=report.get("validated_path") or input_path, report=report)
+    path = report.get("validated_path") or input_path
+    if path != input_path:
+        # A repaired or rescaled mesh is another part than the one shown; a
+        # file only converted to a mesh is the same part.
+        from kiln.print_signoff import COPY_CONVERTED, COPY_REPAIRED, COPY_RESCALED, note_copy
+
+        rescaled = any(c.get("name") == "auto_scale" and c.get("passed") for c in report.get("checks") or [])
+        if rescaled:
+            how = COPY_RESCALED
+        elif report.get("conversion") is not None and not report.get("repaired"):
+            how = COPY_CONVERTED
+        else:
+            how = COPY_REPAIRED
+        note_copy(input_path, path, how=how)
+    return PrintGate(path=path, report=report)
 
 
 class _ValidationPipelinePlugin:
