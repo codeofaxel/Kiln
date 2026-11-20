@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-20T21:50:03.922767+00:00",
+  "generated": "2026-11-20T23:24:56.490156+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -24612,7 +24612,7 @@
           "category": {
             "title": "Category",
             "type": "string",
-            "description": "One of ``nozzle_replacement``, ``extrusion_signal``."
+            "description": "One of ``nozzle_replacement``, ``extrusion_signal``, or ``print_history``: where the person's print history is kept, set only when they ask. ``opted_out=True`` keeps it on the computer that printed it only (never sent to their Kiln account or Kiln's servers, never pooled); ``opted_out=False`` keeps it in their account."
           },
           "opted_out": {
             "default": false,
