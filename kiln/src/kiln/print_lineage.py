@@ -324,7 +324,21 @@ def note_sliced_with(output_path: str | None, sliced_with: dict[str, Any] | None
     record, and in every answer about a print of that file
     (:func:`resolve`).  ``False`` when the file has no record.  Never
     raises."""
-    if not output_path or not isinstance(sliced_with, dict) or _hosted():
+    return _note_on_record(output_path, "sliced_with", sliced_with)
+
+
+def note_one_nozzle(output_path: str | None, one_nozzle: dict[str, Any] | None) -> bool:
+    """Keep, on the record of the sliced file at *output_path*, that a print
+    Kiln would slice for more than one nozzle was sliced for one, and whether
+    its colours were lost (:mod:`kiln.maker_slicer_notes`): ``one_nozzle`` on
+    the record and in every answer about a print of that file
+    (:func:`resolve`).  ``False`` when the file has no record.  Never
+    raises."""
+    return _note_on_record(output_path, "one_nozzle", one_nozzle)
+
+
+def _note_on_record(output_path: str | None, key: str, value: dict[str, Any] | None) -> bool:
+    if not output_path or not isinstance(value, dict) or _hosted():
         return False
     try:
         stamps = read_stamps(output_path)
@@ -334,12 +348,12 @@ def note_sliced_with(output_path: str | None, sliced_with: dict[str, Any] | None
             data = _load()
             for record in data["records"]:
                 if record.get("id") in stamps:
-                    record["sliced_with"] = dict(sliced_with)
+                    record[key] = dict(value)
                     _save(data)
                     return True
         return False
     except Exception:  # noqa: BLE001 -- a record never costs a slice
-        logger.debug("slicer not kept on the slice's record", exc_info=True)
+        logger.debug("%s not kept on the slice's record", key, exc_info=True)
         return False
 
 
@@ -428,6 +442,7 @@ def _answer(record: dict[str, Any], matched_by: str) -> dict[str, Any]:
         "profile": record.get("profile"),
         "stated": record.get("stated") if isinstance(record.get("stated"), dict) else {},
         **({"sliced_with": record["sliced_with"]} if isinstance(record.get("sliced_with"), dict) else {}),
+        **({"one_nozzle": record["one_nozzle"]} if isinstance(record.get("one_nozzle"), dict) else {}),
     }
 
 

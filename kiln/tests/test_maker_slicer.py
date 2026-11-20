@@ -336,9 +336,10 @@ def _slicer_that_writes(seen: dict):
     return run
 
 
-def _slicer_swapping(seen: dict, swaps: int):
-    """A PrusaSlicer stand-in whose sliced file changes filament *swaps* times."""
-    body = "".join(f"T{i % 2}\nG1 X{i} Y1 E1\n" for i in range(swaps + 1))
+def _slicer_swapping(seen: dict, swaps: int, *, tools: int = 2):
+    """A PrusaSlicer stand-in whose sliced file changes filament *swaps* times,
+    or with *tools* 1 selects one tool only (a plate folded into one colour)."""
+    body = "".join(f"T{i % tools}\nG1 X{i} Y1 E1\n" for i in range(swaps + 1))
 
     def run(cmd, *, timeout, retryable_returncodes, remove_partial_output, output_is_complete, cwd=None):
         seen["settings"] = ini_to_settings(cmd[cmd.index("--load") + 1])
@@ -470,6 +471,27 @@ class TestTheSlice:
         assert refused.value.code == NEEDS_MAKER_SLICER and "2.4.0" in said
         assert "leave the map out" in said and "for one nozzle" in said
         assert not notes.exists()
+
+    def test_a_plate_printed_in_one_colour_says_so_first_and_names_the_slicer_every_time(
+        self, tmp_path, notes, monkeypatch,
+    ):
+        monkeypatch.setattr(print_lineage, "store_path", lambda: tmp_path / "lineage.json")
+        lead = "This will print in one colour: This printer's two-nozzle and multi-colour slicing needs PrusaSlicer 2.5.0 or newer"
+        for _ in range(3):
+            result = self._slice(tmp_path, _slicer_swapping({}, 0, tools=1), slicer=_prusa("2.4.0"))
+            assert result.message.startswith(f"{lead}. ")
+            assert "Sliced for one nozzle, with no filament swaps." in result.message
+            assert "Update PrusaSlicer to 2.5.0 or newer (free)" in result.message
+            assert result.one_nozzle["colours_flattened"] is True and "maker_slicer" in result.one_nozzle
+        # The person approving the print is told too, from the sliced file's own record.
+        row = maker_slicer_notes.approval_row(Path(result.output_path).name, result.output_path)
+        assert row == "one colour: This printer's two-nozzle and multi-colour slicing needs PrusaSlicer 2.5.0 or newer"
+
+    def test_a_plate_that_keeps_its_colours_is_not_said_to_lose_them(self, tmp_path, notes, monkeypatch):
+        monkeypatch.setattr(print_lineage, "store_path", lambda: tmp_path / "lineage.json")
+        result = self._slice(tmp_path, _slicer_swapping({}, 4), slicer=_prusa("2.4.0"))
+        assert "colours_flattened" not in result.one_nozzle and "one colour" not in result.message
+        assert maker_slicer_notes.approval_row(Path(result.output_path).name, result.output_path) is None
 
     def test_on_the_shared_server_nothing_is_kept_and_no_slicer_is_named(self, tmp_path, notes, monkeypatch):
         monkeypatch.setattr(maker_slicer_notes, "_hosted", lambda: True)

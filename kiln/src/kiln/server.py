@@ -2810,6 +2810,14 @@ def _consent_filament_line(
         return None
 
 
+def _consent_colours_line(file_value: str) -> str | None:
+    """``one colour: ...`` for a file Kiln sliced in fewer colours than its
+    plate (:func:`kiln.maker_slicer_notes.approval_row`), or ``None``."""
+    from kiln.maker_slicer_notes import approval_row
+
+    return approval_row(os.path.basename(file_value) or file_value, _local_copy_of(file_value))
+
+
 async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: Any):
     """Ask the person before this print starts.  Returns a reset token or None.
 
@@ -2948,6 +2956,9 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "material": arguments.get("material"),
             "printer model": arguments.get("printer_id"),
             "filament slots": _consent_filament_line(tool_name, file_value, printer_name),
+            # A plate of several colours Kiln sliced in one, for want of the
+            # printer's maker's slicer: said as the fact it is.
+            "colours": _consent_colours_line(file_value),
             # What the file IS, when the served side can say (a design drawn
             # as a sketch: its outline, holes, thickness, CAD exactness).
             "built": describe_file_for_approval(

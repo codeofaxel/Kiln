@@ -1116,6 +1116,15 @@ def profile_filament_slots(profile: str | None) -> int:
     return max(1, len([v for v in str(value).split(",") if v.strip()]))
 
 
+def colours_expressed(profile: str | None, counted: tuple[int, int] | None) -> int:
+    """How many filaments a slice with *profile* can print: the profile's
+    own slots (:func:`profile_filament_slots`) or the tools the sliced file
+    selects (*counted*, :func:`kiln.gcode.tool_changes`), whichever is more.
+    A plate asking for more filaments than this prints them folded
+    together, in one colour when this is 1."""
+    return max(profile_filament_slots(profile), counted[1] if counted is not None else 0)
+
+
 def _bed_xy_bounds_from_profile(
     profile: str | None,
 ) -> tuple[float, float, float, float] | None:
@@ -2406,6 +2415,7 @@ def _slice_file(
 
         return maker_slicer_notes.after_slice(
             result, printer=printer, miss=instead.miss if instead else None, nozzles=would_use,
+            colours=slots_needed, profile=profile,
         )
     finally:
         for scratch in (layer_scratch, kept_off_scratch):

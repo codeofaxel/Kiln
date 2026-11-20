@@ -304,6 +304,27 @@ class TestEveryDoorCarriesTheLine:
             {"id": 2, "fitted": True, "diameter_mm": None, "material": None},
         ])]
 
+    def test_the_print_approval_says_one_colour(self, monkeypatch):
+        from tests.test_the_user_is_actually_asked import _ask
+
+        kept = {"colours_flattened": True, "colours": "one colour", "because": "Invented Two's two-nozzle and "
+                "multi-colour slicing needs Bambu Studio"}
+        asked: list = []
+
+        def resolve(file_name, *, local_paths=()):
+            asked.append(file_name)
+            return {"part": "sliced_here", "one_nozzle": kept}
+
+        monkeypatch.setattr("kiln.print_lineage.resolve", resolve)
+        _ask(monkeypatch, "accept")
+        assert "  Colours: one colour: Invented Two's two-nozzle and multi-colour slicing needs Bambu Studio" in (
+            _ask.last_message.splitlines()
+        )
+        assert asked == ["benchy.3mf"]
+        monkeypatch.setattr("kiln.print_lineage.resolve", lambda file_name, *, local_paths=(): {"part": "unknown"})
+        _ask(monkeypatch, "accept")
+        assert "Colours:" not in _ask.last_message
+
     def test_the_checkup(self, monkeypatch, tmp_path):
         from kiln.cli.main import cli
 

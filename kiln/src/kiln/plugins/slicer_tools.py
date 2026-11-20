@@ -2956,9 +2956,11 @@ def _multicolor_flatten_advisory(
                 int(evidence.get("palette_colors") or 0),
             )
         )
+        from kiln.slicer import colours_expressed
+
         slots = _profile_filament_slots(profile_path)
         counted = _count_gcode_tools(gcode_path)
-        expressed = max(slots, counted[1] if counted is not None else 0)
+        expressed = colours_expressed(profile_path, counted)
         if expressed >= colors_needed:
             return None, None
 

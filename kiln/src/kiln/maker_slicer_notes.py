@@ -9,8 +9,13 @@ how often they are said, so every door says the same thing:
   for one nozzle and how many filament swaps the sliced file makes, read
   from the file.  The line naming the slicer to install or update is said
   the first time on a printer, then only on a print of
-  :data:`SWAPS_WORTH_SAYING` swaps or more.  The first slice for more than
-  one nozzle after a slice for one says "Using both nozzles now." once.
+  :data:`SWAPS_WORTH_SAYING` swaps or more.  A slice that prints a plate of
+  several colours in one leads with that, and names the slicer every time.
+  The first slice for more than one nozzle after a slice for one says
+  "Using both nozzles now." once.
+* **The print approval** (:func:`approval_row`): a print of a file sliced
+  that way in fewer colours than its plate says so ("one colour") in the
+  person's approval.
 * **Setting up** (:func:`setup_line`): when a printer is added, or its owner
   records a second nozzle as fitted, one line, once per printer.
 * **The checkup** (:func:`doctor_row`): a status row, every run.
@@ -144,21 +149,48 @@ def _swaps_sentence(swaps: int | None) -> str:
     return f"Sliced for one nozzle: {swaps} filament swap{'s' if swaps != 1 else ''}."
 
 
-def _swaps_in(path: str | None) -> int | None:
-    """The filament swaps the sliced file at *path* makes, or ``None`` when
-    it cannot be read."""
+def _tools_in(path: str | None) -> tuple[int, int] | None:
+    """``(swaps, tools)`` the sliced file at *path* makes
+    (:func:`kiln.gcode.tool_changes`), or ``None`` when it cannot be read."""
     if not path:
         return None
     from kiln.gcode import tool_changes
 
     try:
         with open(path, errors="replace", encoding="utf-8") as fh:
-            return tool_changes(fh)[0]
+            return tool_changes(fh)
     except OSError:
         return None
 
 
-def after_slice(result: Any, *, printer: str | None, miss: Any = None, nozzles: int = 2) -> Any:
+def _colours_because(printer: str | None, nozzles: int, miss: Any) -> str:
+    """``Bambu Lab H2D's two-nozzle and multi-colour slicing needs Bambu Studio``."""
+    from kiln.maker_slicer import UPDATE
+
+    whose = f"{_printer_name(printer)}'s" if printer else "This printer's"
+    kind = "two-nozzle" if nozzles == 2 else f"{nozzles}-nozzle"
+    needs = f"{miss.said} {miss.floor} or newer" if miss.need == UPDATE and miss.floor else miss.said
+    return f"{whose} {kind} and multi-colour slicing needs {needs}"
+
+
+def _colours_words(printed: int, asked: int) -> str:
+    """``one colour`` / ``2 colours of the plate's 4``."""
+    return "one colour" if printed <= 1 else f"{printed} colours of the plate's {asked}"
+
+
+def _printer_name(printer_id: str) -> str:
+    try:
+        from kiln.slicer_profiles import raw_profile
+
+        return str((raw_profile(printer_id) or {}).get("display_name") or "This printer")
+    except Exception:  # noqa: BLE001 -- a name is never worth the note
+        return "This printer"
+
+
+def after_slice(
+    result: Any, *, printer: str | None, miss: Any = None, nozzles: int = 2, colours: int = 0,
+    profile: str | None = None,
+) -> Any:
     """*result* saying what a slice of a printer sliced for more than one
     nozzle was made for.
 
@@ -166,14 +198,19 @@ def after_slice(result: Any, *, printer: str | None, miss: Any = None, nozzles: 
     nozzle of the *nozzles* the printer's record would use: its message
     gains the filament swaps the sliced file makes and, when due, the line
     naming the slicer that would use them all; ``one_nozzle`` holds the
-    same.  Without it, a slice for more than one nozzle (``sliced_with``)
-    after a slice for one says :data:`BOTH_NOW`, once.  *printer* is the
-    printer's id; ``None`` keeps nothing and says the slicer line every time.
-    Never raises.
+    same, and so does the sliced file's record
+    (:func:`kiln.print_lineage.note_one_nozzle`).  When the slice with
+    *profile* prints the plate's *colours* in one
+    (:func:`kiln.slicer.colours_expressed`), the message leads with that,
+    the slicer line is said every time, and ``one_nozzle`` carries
+    ``colours_flattened``.  Without *miss*, a slice for more than one nozzle
+    (``sliced_with``) after a slice for one says :data:`BOTH_NOW`, once.
+    *printer* is the printer's id; ``None`` keeps nothing and says the
+    slicer line every time.  Never raises.
     """
     try:
         if miss is not None:
-            return _said_one_nozzle(result, printer, miss, nozzles)
+            return _said_one_nozzle(result, printer, miss, nozzles, colours, profile)
         several = getattr(result, "sliced_with", None) is not None
         if printer is not None and several and _note(printer).get("one_nozzle"):
             _note(printer, one_nozzle=False)
@@ -183,12 +220,29 @@ def after_slice(result: Any, *, printer: str | None, miss: Any = None, nozzles: 
     return result
 
 
-def _said_one_nozzle(result: Any, printer: str | None, miss: Any, nozzles: int) -> Any:
-    swaps = _swaps_in(getattr(result, "output_path", None))
+def _said_one_nozzle(
+    result: Any, printer: str | None, miss: Any, nozzles: int, colours: int, profile: str | None,
+) -> Any:
+    from kiln.slicer import colours_expressed
+
+    counted = _tools_in(getattr(result, "output_path", None))
+    swaps = counted[0] if counted is not None else None
+    printed = colours_expressed(profile, counted)
+    flattened = colours >= 2 and printed < colours
     before = _note(printer, one_nozzle=True) if printer is not None else {}
-    due = not before.get("told") or (swaps is not None and swaps >= SWAPS_WORTH_SAYING)
+    due = flattened or not before.get("told") or (swaps is not None and swaps >= SWAPS_WORTH_SAYING)
     words = [_swaps_sentence(swaps)]
     block: dict[str, Any] = {"filament_swaps": swaps}
+    kept: dict[str, Any] = {"filament_swaps": swaps}
+    lead = ""
+    if flattened:
+        block["colours_flattened"] = kept["colours_flattened"] = True
+        kept["colours"] = _colours_words(printed, colours)
+        lead = f"This will print in {kept['colours']}"
+        if not _hosted():
+            kept["because"] = _colours_because(printer, nozzles, miss)
+            lead += f": {kept['because']}"
+        lead += "."
     if due and not _hosted():
         where, fields = _get_it(miss)
         both = _nozzles_words(nozzles)[1]
@@ -197,8 +251,31 @@ def _said_one_nozzle(result: Any, printer: str | None, miss: Any, nozzles: int) 
         if printer is not None:
             _note(printer, told=time.strftime("%Y-%m-%d"))
     result.one_nozzle = block
-    result.message = f"{result.message} {' '.join(words)}".strip()
+    result.message = " ".join(part for part in (lead, result.message, *words) if part).strip()
+    from kiln.print_lineage import note_one_nozzle
+
+    note_one_nozzle(getattr(result, "output_path", None), kept)
     return result
+
+
+def approval_row(file_name: str, local_path: str | None = None) -> str | None:
+    """The line a person's print approval shows for a file Kiln sliced in
+    fewer colours than its plate because the printer's maker's slicer was
+    missing or too old (``one colour: ...``), read from the sliced file's record
+    (:func:`kiln.print_lineage.resolve`); ``None`` for any other file.
+    Never raises."""
+    try:
+        from kiln.print_lineage import resolve
+
+        kept = resolve(file_name, local_paths=[local_path] if local_path else []).get("one_nozzle")
+        if not isinstance(kept, Mapping) or kept.get("colours_flattened") is not True:
+            return None
+        printed = str(kept.get("colours") or "one colour")
+        because = str(kept.get("because") or "").strip()
+        return f"{printed}: {because}" if because else printed
+    except Exception:  # noqa: BLE001 -- the approval must still open
+        logger.debug("one colour row skipped for %s", file_name, exc_info=True)
+        return None
 
 
 def _record_for(printer_model: str | None, positions: Sequence[Mapping[str, Any]] | None) -> tuple[str, str, Mapping[str, Any], int] | None:
