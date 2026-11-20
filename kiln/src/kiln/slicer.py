@@ -37,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -1652,6 +1652,7 @@ def _slice_with_orca(
     drawn_as: str | None = None,
     nozzles: dict[str, Any] | None = None,
     filament_map: list[int] | None = None,
+    routines: Mapping[str, str] | None = None,
 ) -> SliceResult:
     """Slice through the BambuStudio/OrcaSlicer command line.
 
@@ -1672,7 +1673,9 @@ def _slice_with_orca(
     (:func:`checked_filament_map`): the slicer is told to use it, and a
     file that states any other map is not kept.  With none, the slicer
     maps the filaments itself.  The result's ``filament_map`` is what the
-    file states.
+    file states.  *routines* are the printer's start, change and end
+    routines its maker's slicer holds (:func:`kiln.maker_slicer.slicer_for_several_nozzles`),
+    written into the machine preset as given.
     """
     with tempfile.TemporaryDirectory(prefix="kiln_orca_") as work_dir:
         cmd: list[str] = [slicer.path, "--slice", "0", "--outputdir", work_dir]
@@ -1758,6 +1761,7 @@ def _slice_with_orca(
             wipe_tower_xy=wipe_xy,
             wipe_tower_width_mm=None if tower is None else tower[2],
             nozzles=nozzles,
+            routines=routines,
         )
         cmd += ["--load-settings", f"{presets.machine_path};{presets.process_path}"]
         cmd += ["--load-filaments", ";".join(presets.filament_paths)]
@@ -2676,8 +2680,15 @@ def _slice_decided(
             timeout=timeout,
             multicolor=multicolor,
             drawn_as=drawn,
-            # Named only for a slice for more than one nozzle.
-            **({"nozzles": nozzles, "filament_map": filament_map} if nozzles else {}),
+            # Named only for a slice for more than one nozzle, with the
+            # printer's own routines read from its maker's slicer.
+            **(
+                {
+                    "nozzles": nozzles, "filament_map": filament_map,
+                    "routines": several.routines if several is not None else None,
+                }
+                if nozzles else {}
+            ),
         )
         result.filament = filament
         result.nozzle = nozzle

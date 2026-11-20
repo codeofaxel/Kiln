@@ -19,12 +19,13 @@ it names the maker's page and, on a Mac with Homebrew, the command.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import shutil
 import sys
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,19 +37,28 @@ NEEDS_MAKER_SLICER = "MULTI_NOZZLE_NEEDS_MAKER_SLICER"
 @dataclass(frozen=True)
 class _Known:
     """A slicer a record can name: what people call it, the words its binary
-    or version banner carries, where it is downloaded, and its Homebrew
-    cask, when it has one."""
+    or version banner carries, where it is downloaded, its Homebrew cask,
+    when it has one, and how it keeps its makers' settings: the kind of file
+    (``ini`` or ``json``) and the folder of the person's own settings it
+    keeps newer copies in (``(application, folder)``)."""
 
     said: str
     marks: tuple[str, ...]
     download: str
-    cask: str | None = None
+    cask: str | None
+    bundle: str
+    own_copies: tuple[str, str]
 
 
 _KNOWN: dict[str, _Known] = {
-    "bambu_studio": _Known("Bambu Studio", ("bambu",), "bambulab.com/download/studio", "bambu-studio"),
-    "prusaslicer": _Known("PrusaSlicer", ("prusaslicer", "prusa-slicer"), "prusa3d.com/p/prusaslicer", "prusaslicer"),
-    "orcaslicer": _Known("OrcaSlicer", ("orca",), "orcaslicer.com"),
+    "bambu_studio": _Known(
+        "Bambu Studio", ("bambu",), "bambulab.com/download/studio", "bambu-studio", "json", ("BambuStudio", "system"),
+    ),
+    "prusaslicer": _Known(
+        "PrusaSlicer", ("prusaslicer", "prusa-slicer"), "prusa3d.com/p/prusaslicer", "prusaslicer", "ini",
+        ("PrusaSlicer", "vendor"),
+    ),
+    "orcaslicer": _Known("OrcaSlicer", ("orca",), "orcaslicer.com", None, "json", ("OrcaSlicer", "system")),
 }
 
 #: What a person does about a :class:`Miss`.
@@ -332,36 +342,44 @@ def slicer_for_several_nozzles(
 # ---------------------------------------------------------------------------
 
 
-def _vendor_files(slicer_path: str, vendor: str) -> list[Path]:
-    """Where a slicer keeps the settings file of *vendor*: beside the
-    program, and in the person's own settings folder, which the slicer
-    updates between releases."""
-    name = f"{vendor}.ini"
+def _vendor_files(slicer_path: str, vendor: str, slicer_id: str) -> list[Path]:
+    """Where the slicer *slicer_id* keeps the settings of *vendor*: beside
+    the program, and in the person's own settings folder, where the slicer
+    keeps the newer copies it fetches between releases."""
+    known = _KNOWN[slicer_id]
+    name = f"{vendor}.{known.bundle}"
     real = Path(os.path.realpath(slicer_path))
     places: list[Path] = []
     at = str(real).find(".app/Contents/MacOS/")
     if at >= 0:
         places.append(Path(str(real)[: at + len(".app")]) / "Contents" / "Resources" / "profiles" / name)
-    places.extend(
-        [
-            real.parent / "resources" / "profiles" / name,
-            real.parent.parent / "resources" / "profiles" / name,
-            Path("/usr/share/PrusaSlicer/profiles") / name,
-        ]
-    )
+    places.extend([real.parent / "resources" / "profiles" / name, real.parent.parent / "resources" / "profiles" / name])
+    application, folder = known.own_copies
+    places.append(Path("/usr/share") / application / "profiles" / name)
     home = Path.home()
     if sys.platform == "darwin":
-        places.append(home / "Library" / "Application Support" / "PrusaSlicer" / "vendor" / name)
+        own = home / "Library" / "Application Support"
     elif sys.platform == "win32":
-        places.append(Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming") / "PrusaSlicer" / "vendor" / name)
+        own = Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming")
     else:
-        places.append(Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "PrusaSlicer" / "vendor" / name)
+        own = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    places.append(own / application / folder / name)
     return [place for place in places if place.is_file()]
 
 
+@dataclass(frozen=True)
+class _Bundle:
+    """One copy of a maker's settings: its version (as numbers) and its
+    printer presets, each as it is written there, by name (``KeyError`` for
+    a name it does not hold)."""
+
+    version: tuple[int, ...]
+    preset: Callable[[str], Mapping[str, Any]]
+
+
 def _sections(path: Path) -> dict[str, dict[str, str]]:
-    """A slicer settings bundle as its sections, each a mapping of setting
-    name to its text."""
+    """A slicer settings file of PrusaSlicer's kind as its sections, each a
+    mapping of setting name to its text."""
     sections: dict[str, dict[str, str]] = {}
     current: dict[str, str] | None = None
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -376,18 +394,61 @@ def _sections(path: Path) -> dict[str, dict[str, str]]:
     return sections
 
 
-def _resolved(sections: Mapping[str, Mapping[str, str]], name: str, depth: int = 0) -> dict[str, str]:
-    """The printer preset *name* with everything its parents state, the
-    nearest parent winning.  A preset or parent the bundle lacks raises
-    ``KeyError``."""
+def _ini_bundle(path: Path, _vendor: str) -> _Bundle:
+    """A maker's settings kept as one file of sections: its printer presets
+    are its ``[printer:<name>]`` sections, its version the ``[vendor]``
+    section's ``config_version``."""
+    sections = _sections(path)
+    return _Bundle(
+        version=_numbers(sections.get("vendor", {}).get("config_version")) or (),
+        preset=lambda name: sections[f"printer:{name}"],
+    )
+
+
+def _json_bundle(path: Path, vendor: str) -> _Bundle:
+    """A maker's settings kept as an index and a folder of presets: the
+    index names each printer preset's file under the folder *vendor* beside
+    it (``machine_list``) and states the version.  A preset is read when it
+    is asked for, and only from inside that folder."""
+    index = json.loads(path.read_text(encoding="utf-8"))
+    folder = (path.parent / vendor).resolve()
+    files = {
+        entry["name"]: entry["sub_path"]
+        for entry in index.get("machine_list") or ()
+        if isinstance(entry, Mapping) and isinstance(entry.get("name"), str) and isinstance(entry.get("sub_path"), str)
+    }
+
+    def preset(name: str) -> Mapping[str, Any]:
+        file = (folder / files[name]).resolve()
+        if not file.is_relative_to(folder):
+            raise KeyError(name)
+        body = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(body, Mapping):
+            raise KeyError(name)
+        return body
+
+    return _Bundle(version=_numbers(index.get("version")) or (), preset=preset)
+
+
+_BUNDLE_READERS: dict[str, Callable[[Path, str], _Bundle]] = {"ini": _ini_bundle, "json": _json_bundle}
+
+
+def _resolved(bundle: _Bundle, name: str, depth: int = 0) -> dict[str, Any]:
+    """The printer preset *name* with everything it takes from elsewhere in
+    *bundle*: first its parents (``inherits``), then the presets it includes
+    (``include``), then its own settings, each later one winning.  A preset
+    the bundle lacks raises ``KeyError``."""
     if depth > 16:
         raise KeyError(name)
-    section = sections[f"printer:{name}"]
-    out: dict[str, str] = {}
-    for parent in (part.strip() for part in section.get("inherits", "").split(";")):
+    preset = bundle.preset(name)
+    out: dict[str, Any] = {}
+    for parent in (part.strip() for part in str(preset.get("inherits") or "").split(";")):
         if parent:
-            out.update(_resolved(sections, parent, depth + 1))
-    out.update({key: value for key, value in section.items() if key != "inherits"})
+            out.update(_resolved(bundle, parent, depth + 1))
+    included = preset.get("include")
+    for template in [included] if isinstance(included, str) else included if isinstance(included, list) else ():
+        out.update(_resolved(bundle, str(template), depth + 1))
+    out.update({key: value for key, value in preset.items() if key not in ("inherits", "include")})
     return out
 
 
@@ -400,7 +461,8 @@ def _maker_routines(
     *asked* names the bundle (``vendor``), the printer preset in it
     (``preset``, where ``{nozzle}`` stands for the nozzle size), the
     routines to read (``keys``) and the lowest bundle version accepted
-    (``min_profile_version``).
+    (``min_profile_version``).  Each routine is its text as the bundle
+    writes it, ready for a settings file of the same kind.
     """
     said = _KNOWN[slicer_id].said
     vendor, preset, keys = asked.get("vendor"), asked.get("preset"), asked.get("keys")
@@ -413,17 +475,16 @@ def _maker_routines(
     if not usable:
         raise _miss(slicer_id, "this printer's record does not say where its routines are kept")
     wanted = preset.replace("{nozzle}", nozzle_size)
-    newest: tuple[tuple[int, ...], dict[str, dict[str, str]]] | None = None
-    for place in _vendor_files(slicer_path, vendor):
-        with contextlib.suppress(OSError):
-            sections = _sections(place)
-            version = _numbers(sections.get("vendor", {}).get("config_version")) or ()
-            if newest is None or version > newest[0]:
-                newest = (version, sections)
+    read = _BUNDLE_READERS[_KNOWN[slicer_id].bundle]
+    newest: _Bundle | None = None
+    for place in _vendor_files(slicer_path, vendor, slicer_id):
+        with contextlib.suppress(OSError, ValueError):
+            bundle = read(place, vendor)
+            if newest is None or bundle.version > newest.version:
+                newest = bundle
     if newest is None:
         raise _miss(slicer_id, f"the {said} installed does not hold its maker's printer settings where Kiln can read them")
-    version, sections = newest
-    shown = ".".join(str(part) for part in version) or None
+    shown = ".".join(str(part) for part in newest.version) or None
     floor = asked.get("min_profile_version")
     if isinstance(floor, str) and _older(shown, floor):
         raise _miss(
@@ -431,10 +492,10 @@ def _maker_routines(
             need=UPDATE,
         )
     try:
-        resolved = _resolved(sections, wanted)
-    except KeyError:
+        resolved = _resolved(newest, wanted)
+    except (KeyError, OSError, ValueError):
         raise _miss(slicer_id, f"the {said} installed has no settings for this printer with that nozzle") from None
-    routines = {key: resolved[key] for key in keys if key in resolved}
+    routines = {key: resolved[key] for key in keys if isinstance(resolved.get(key), str)}
     if len(routines) != len(keys):
         raise _miss(slicer_id, f"the {said} installed does not state every routine this printer needs")
     return routines, vendor, shown

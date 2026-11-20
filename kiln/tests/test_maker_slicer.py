@@ -15,6 +15,8 @@ say which slicer and version made the slice.
 
 from __future__ import annotations
 
+import json
+import os
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,7 +37,9 @@ from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
 from kiln.slicer import NozzleMapError, OneNozzleInstead, SlicerInfo, ini_to_settings, slice_file
 from kiln.slicer_orca import PresetExtrasError
 
-from .test_slicer_multi_nozzle import _cube
+from .test_slicer_multi_nozzle import _NOZZLES, _cube
+from .test_slicer_multi_nozzle import _profile as _pair_profile
+from .test_slicer_multi_nozzle import _slicer_that_writes as _studio_that_writes
 
 _SETTINGS = {
     "nozzle_diameter": "0.4",
@@ -113,6 +117,52 @@ def _bundle(folder: Path, version: str = "1.2.0") -> Path:
     path = folder / "Invented.ini"
     path.write_text(_BUNDLE.format(version=version), encoding="utf-8")
     return path
+
+
+#: An invented settings bundle of the other kind: an index naming each printer
+#: preset's file, and a printer preset that takes its routines from a parent
+#: and from the presets it includes, an included one winning over the parent.
+_PRESETS = {
+    "invented common": {
+        "machine_start_gcode": "COMMON START",
+        "change_filament_gcode": "COMMON CHANGE",
+        "machine_end_gcode": "COMMON END",
+    },
+    "Invented Two 0.4 nozzle start": {"machine_start_gcode": "TWO START\nLINE TWO"},
+    "Invented Two 0.4 nozzle change": {
+        "change_filament_gcode": "M620 S[next_filament_id]A\nT[next_filament_id]\nM621 S[next_filament_id]A",
+    },
+    "Invented Two 0.4 nozzle": {
+        "inherits": "invented common",
+        "include": ["Invented Two 0.4 nozzle start", "Invented Two 0.4 nozzle change"],
+        "nozzle_diameter": ["0.4", "0.4"],
+    },
+}
+
+_PRESET_ROUTINES = {
+    "vendor": "Invented",
+    "min_profile_version": "01.02.00.00",
+    "preset": "Invented Two {nozzle} nozzle",
+    "keys": ["machine_start_gcode", "change_filament_gcode", "machine_end_gcode"],
+}
+
+#: An invented two-nozzle machine whose maker's slicer keeps its settings that way.
+_PAIR = {**_NOZZLES, "maker_slicer": {"name": "bambu_studio", "routines": _PRESET_ROUTINES}}
+
+
+def _preset_bundle(folder: Path, version: str = "01.02.00.00", *, where: dict[str, str] | None = None) -> Path:
+    """:data:`_PRESETS` written as an index and a folder of preset files;
+    *where* gives a preset's file a path of its own."""
+    entries = []
+    for i, (name, body) in enumerate(_PRESETS.items()):
+        sub_path = (where or {}).get(name, f"machine/preset_{i}.json")
+        file = folder / "Invented" / sub_path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(json.dumps({"name": name, **body}), encoding="utf-8")
+        entries.append({"name": name, "sub_path": sub_path})
+    index = folder / "Invented.json"
+    index.write_text(json.dumps({"name": "Invented", "version": version, "machine_list": entries}), encoding="utf-8")
+    return index
 
 
 def _profile(tmp_path: Path, record: dict | None = None) -> str:
@@ -281,7 +331,60 @@ class TestTheRoutines:
         binary = app / "MacOS" / "PrusaSlicer"
         binary.write_text("")
         bundle = _bundle(app / "Resources" / "profiles")
-        assert bundle.resolve() in [p.resolve() for p in maker_slicer._vendor_files(str(binary), "Invented")]
+        found = maker_slicer._vendor_files(str(binary), "Invented", "prusaslicer")
+        assert bundle.resolve() in [p.resolve() for p in found]
+
+    # --- a maker's slicer that keeps each printer preset in a file of its own ---
+
+    def _choose_pair(self, tmp_path, bundles):
+        with (
+            patch("kiln.maker_slicer._find", return_value=None),
+            patch("kiln.maker_slicer._vendor_files", return_value=bundles),
+        ):
+            return slicer_for_several_nozzles(_PAIR, _studio(), chosen=False, profile=_pair_profile(tmp_path, _PAIR))
+
+    def test_preset_files_are_read_through_parents_and_included_presets(self, tmp_path):
+        several = self._choose_pair(tmp_path, [_preset_bundle(tmp_path / "app")])
+        assert several.routines == {
+            "machine_start_gcode": "TWO START\nLINE TWO",
+            "change_filament_gcode": "M620 S[next_filament_id]A\nT[next_filament_id]\nM621 S[next_filament_id]A",
+            "machine_end_gcode": "COMMON END",
+        }
+        assert (several.sliced_with["profile"], several.sliced_with["profile_version"]) == ("Invented", "1.2.0.0")
+
+    def test_the_newest_copy_of_the_preset_files_is_the_one_read(self, tmp_path):
+        older = _preset_bundle(tmp_path / "app", "01.02.00.00")
+        newer = _preset_bundle(tmp_path / "mine", "01.02.00.09")
+        assert self._choose_pair(tmp_path, [older, newer]).sliced_with["profile_version"] == "1.2.0.9"
+
+    def test_preset_files_older_than_the_record_accepts_are_a_miss_to_update(self, tmp_path):
+        with pytest.raises(OneNozzleInstead) as old:
+            self._choose_pair(tmp_path, [_preset_bundle(tmp_path / "app", "01.01.09.00")])
+        assert old.value.miss.need == "update"
+
+    def test_a_preset_file_outside_its_folder_is_never_read(self, tmp_path):
+        outside = tmp_path / "app" / "elsewhere.json"
+        outside.parent.mkdir(parents=True)
+        outside.write_text(json.dumps({"machine_start_gcode": "NOT THE MAKER'S"}), encoding="utf-8")
+        index = _preset_bundle(tmp_path / "app", where={"Invented Two 0.4 nozzle start": "../elsewhere.json"})
+        with pytest.raises(NozzleMapError) as refused:
+            self._choose_pair(tmp_path, [index])
+        assert "no settings for this printer" in str(refused.value)
+
+    def test_the_preset_files_are_looked_for_beside_the_program_and_in_the_persons_own_settings(
+        self, tmp_path, monkeypatch,
+    ):
+        contents = tmp_path / "Invented.app" / "Contents"
+        (contents / "MacOS").mkdir(parents=True)
+        binary = contents / "MacOS" / "BambuStudio"
+        binary.write_text("")
+        beside = _preset_bundle(contents / "Resources" / "profiles")
+        monkeypatch.setattr(maker_slicer, "sys", SimpleNamespace(platform="darwin"))
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+        own = _preset_bundle(tmp_path / "home" / "Library" / "Application Support" / "BambuStudio" / "system")
+        found = maker_slicer._vendor_files(str(binary), "Invented", "bambu_studio")
+        # A file system that ignores case finds the copy beside the program twice.
+        assert {os.stat(p).st_ino for p in found} == {os.stat(beside).st_ino, os.stat(own).st_ino}
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +638,42 @@ class TestTheSlice:
         assert result.sliced_with is None
         assert "example_machine_key" not in seen["settings"] and "toolchange_gcode" not in seen["settings"]
         assert seen["tower"] is None
+
+
+class TestABambuStudioSliceCarriesTheMakersRoutines:
+    """A printer whose maker's slicer keeps its routines in preset files is
+    sliced for more than one nozzle with those routines in the machine
+    preset the slicer is handed: the print starts, changes filament and ends
+    the way its maker's slicer would have it, and the result says which
+    copy of the maker's settings they came from."""
+
+    def _slice(self, tmp_path, seen, bundles):
+        with (
+            patch("kiln.slicer.find_slicer", return_value=_studio()),
+            patch("kiln.maker_slicer._find", return_value=None),
+            patch("kiln.maker_slicer._vendor_files", return_value=bundles),
+            patch("kiln.slicer._find_bambu_dialect_slicer", return_value=None),
+            patch("kiln.slicer._run_slicer_with_startup_retry", _studio_that_writes("; filament_map = 1,2\n", seen)),
+        ):
+            return slice_file(
+                _plate(tmp_path), output_dir=str(tmp_path / "out"), profile=_pair_profile(tmp_path, _PAIR),
+            )
+
+    def test_the_machine_preset_carries_the_makers_routines(self, tmp_path):
+        seen: dict = {}
+        result = self._slice(tmp_path, seen, [_preset_bundle(tmp_path / "app")])
+        machine = seen["machine"]
+        assert machine["machine_start_gcode"] == "TWO START\nLINE TWO"
+        assert machine["change_filament_gcode"] == (
+            "M620 S[next_filament_id]A\nT[next_filament_id]\nM621 S[next_filament_id]A"
+        )
+        assert machine["machine_end_gcode"] == "COMMON END"
+        assert (result.sliced_with["profile"], result.sliced_with["profile_version"]) == ("Invented", "1.2.0.0")
+
+    def test_without_the_makers_settings_nothing_is_sliced(self, tmp_path):
+        with pytest.raises(NozzleMapError) as refused:
+            self._slice(tmp_path, {}, [])
+        assert refused.value.code == NEEDS_MAKER_SLICER and "Bambu Studio" in str(refused.value)
 
 
 class TestTheFilesRecord:

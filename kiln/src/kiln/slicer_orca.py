@@ -684,6 +684,22 @@ def _for_nozzle_positions(machine: dict[str, Any], positions: int) -> None:
             machine[key] = value * positions
 
 
+def _routines(routines: Mapping[str, str] | None) -> dict[str, str]:
+    """*routines* checked for the machine preset: each name a routine's
+    (``*_gcode``) and held to the rule every setting name is
+    (:func:`refuse_unsafe_settings`), each value text.  A routine's value
+    keeps its real line breaks: it is written as JSON."""
+    if not routines:
+        return {}
+    refuse_unsafe_settings(dict.fromkeys(routines, ""))
+    for key, value in routines.items():
+        if not str(key).endswith("_gcode") or not isinstance(value, str):
+            raise PresetExtrasError(
+                f"The printer's routine {key!r} is not a routine Kiln writes into a preset, so nothing was sliced."
+            )
+    return dict(routines)
+
+
 def settings_to_orca_presets(
     settings: dict[str, str],
     *,
@@ -692,6 +708,7 @@ def settings_to_orca_presets(
     wipe_tower_xy: tuple[float, float] | None = None,
     wipe_tower_width_mm: float | None = None,
     nozzles: Mapping[str, Any] | None = None,
+    routines: Mapping[str, str] | None = None,
 ) -> OrcaPresets:
     """Translate Kiln's flat PrusaSlicer settings into Orca presets.
 
@@ -720,6 +737,10 @@ def settings_to_orca_presets(
             extras over the presets, the filament's onto every filament
             preset.  ``None``, or a record sliced for one position, leaves
             the presets exactly as they are without it.
+        routines: The printer's own routines, by machine setting name, as
+            its maker's slicer holds them (:mod:`kiln.maker_slicer`): the
+            last word on the machine preset's routines.  Each name is held
+            to the rule every setting name is.
 
     Returns:
         An :class:`OrcaPresets` with the preset bodies filled in.
@@ -962,6 +983,7 @@ def settings_to_orca_presets(
         for preset in _EXTRAS_PRESETS:
             bodies[preset].update(extras.get(preset, {}))
         served_filament = set(extras.get("filament", {}))
+    machine.update(_routines(routines))
 
     if not multicolor:
         return OrcaPresets(machine=machine, process=process, filament=filament)
@@ -1017,6 +1039,7 @@ def write_orca_presets(
     wipe_tower_xy: tuple[float, float] | None = None,
     wipe_tower_width_mm: float | None = None,
     nozzles: Mapping[str, Any] | None = None,
+    routines: Mapping[str, str] | None = None,
 ) -> OrcaPresets:
     """Serialize *settings* to preset files in *out_dir*.
 
@@ -1032,6 +1055,7 @@ def write_orca_presets(
         wipe_tower_xy=wipe_tower_xy,
         wipe_tower_width_mm=wipe_tower_width_mm,
         nozzles=nozzles,
+        routines=routines,
     )
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
 
