@@ -331,6 +331,56 @@ class TestListIntelProfiles:
         assert overrides["default_acceleration"] == "7000"
 
 
+class TestSpeedFallbackNamesNoModel:
+    """With no printer-specific figure in hand (offline, signed out, a
+    roster printer whose record is not here) the speeds Kiln fills in are
+    its firmware ecosystem's envelope: the same for every printer of that
+    firmware, never a per-model figure."""
+
+    def test_every_roster_printer_gets_its_ecosystems_envelope_or_nothing(self) -> None:
+        import kiln.printer_intelligence as pi
+
+        roster = json.loads(pi._DATA_FILE.read_text(encoding="utf-8"))
+        checked = 0
+        for pid, row in roster.items():
+            if pid.startswith("_") or pid == "default" or not isinstance(row, dict):
+                continue
+            raw = pi._get_raw(pid)
+            if raw and "max_speed_mm_s" in raw:
+                continue  # a row that states its own maximum is the first rule
+            ecosystem = pi._FIRMWARE_SPEED_TYPE.get(pi.roster_firmware(pid) or "")
+            expected = (
+                pi._build_speed_overrides(pi._TYPE_SPEED_DEFAULTS[ecosystem])
+                if ecosystem is not None
+                else {}
+            )
+            assert get_slicer_speed_overrides(pid) == expected, pid
+            checked += 1
+        assert checked >= 50
+
+    def test_two_models_of_one_firmware_get_the_same_speeds(self) -> None:
+        a1_mini = get_slicer_speed_overrides("bambu_a1_mini")
+        assert a1_mini == get_slicer_speed_overrides("bambu_x1c")
+        assert a1_mini == get_slicer_speed_overrides("bambu_h2d")
+        assert get_slicer_speed_overrides("voron_2") == get_slicer_speed_overrides("k1")
+
+    def test_the_slice_door_still_fills_speeds_for_a_printer_with_no_record(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Offline or signed out, the record does not answer and the printer
+        slices with the generic profile; the door still fills its firmware's
+        envelope rather than the generic profile's speeds."""
+        import kiln.server as srv
+        import kiln.slicer_profiles as sp
+
+        generic = sp.get_slicer_profile("default")
+        monkeypatch.setattr(sp, "get_slicer_profile", lambda _pid: generic)
+        fill = srv._speed_fill_for_slice("bambu_x1c", None, caller_profile=False)
+        import kiln.printer_intelligence as pi
+
+        assert fill == pi._build_speed_overrides(pi._TYPE_SPEED_DEFAULTS["bambu"]) != {}
+
+
 # ===================================================================
 # get_material_settings
 # ===================================================================
