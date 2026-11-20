@@ -16,6 +16,8 @@ own status read, the doors a print really passes, with a stand-in printer.
 from __future__ import annotations
 
 import json
+import pathlib
+import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -277,7 +279,7 @@ def _team_rule(monkeypatch, *, printers=("shop-x1",), designs=("team-design",)):
         print_keeping._TEAM_RULES_KEY: [{
             "org_id": "org-1", "name": "Acme", "printers": list(printers), "design_ids": list(designs),
         }],
-        print_keeping._TEAM_RULES_READ_KEY: 9e12,
+        print_keeping._TEAM_RULES_READ_KEY: time.time(),
     })
     sharing_consent._write(data)
 
@@ -508,3 +510,185 @@ class TestNothingNamesItAfterItEnds:
         row = plate_state._read_store()["machines"]["machine-1"]
         assert row["status"] == "occupied", "something is still on the plate"
         assert os.path.exists(gcode), "the person's own file is theirs"
+
+
+class TestATeamRuleThatCannotBeRead:
+    """A not-kept print of a team's design on the team's printer waits while
+    the team's rule cannot be read; the person's own designs do not."""
+
+    def _stale_rule(self, monkeypatch):
+        _team_rule(monkeypatch)
+        from kiln import sharing_consent
+
+        data = sharing_consent._read()
+        data[print_keeping._TEAM_RULES_READ_KEY] = time.time() - 3600  # an old reading
+        sharing_consent._write(data)
+        monkeypatch.setattr("kiln.history_courier._request", lambda *a, **k: {"status": "error", "why": "offline"})
+
+    def test_a_team_design_on_the_team_printer_is_held_and_nothing_is_sent(self, home, monkeypatch):
+        self._stale_rule(monkeypatch)
+        adapter = _printer()
+        out = _start(adapter, keep_record=False, design_id="team-design")
+        assert out["success"] is False and out.get("code") == print_keeping.TEAM_HOLD_CODE
+        assert print_keeping.TEAM_RULE_UNREAD_SAID in json.dumps(out)
+        assert adapter.sent == []
+        kept = _start(adapter, keep_record=True, design_id="team-design")
+        assert kept["success"] is True and kept["print_kept"] == "kept"
+
+    def test_a_personal_design_in_the_same_state_prints_privately(self, home, monkeypatch):
+        self._stale_rule(monkeypatch)
+        adapter = _printer()
+        out = _start(adapter, keep_record=False, design_id="my-own-design")
+        assert out["success"] is True and out["print_kept"] == "none"
+        assert adapter.sent == ["secret_part.gcode"]
+
+
+class TestThePlateCamera:
+    """A picture of the plate while it holds a print not kept is a record of
+    the print: none is kept, none is linked to the plate's record, and every
+    one is deleted when the print ends."""
+
+    def test_no_picture_outlives_the_print(self, home, monkeypatch):
+        import base64
+
+        from kiln import plate_state
+
+        monkeypatch.setattr(plate_state, "machine_id", lambda adapter: "machine-1")
+        adapter = _printer()
+        _start(adapter, keep_record=False)
+        found = plate_state.PlateLook(available=True, camera="printer",
+                                      image_b64=base64.b64encode(b"\x89PNG-secret").decode(), media_type="image/png")
+        path = plate_state.hand_over_frame(adapter, found)
+        assert path and pathlib.Path(path).exists(), "eyes still get the picture while it prints"
+        assert machine_not_in(plate_state._read_store().get("frames"), "machine-1")
+        assert plate_state._keep_judged_frame(adapter) is None
+        assert not (pathlib.Path(plate_state._kiln_dir()) / plate_state._LOOKS_DIR).exists()
+        _end(adapter)
+        assert not pathlib.Path(path).exists()
+
+    def test_a_kept_print_keeps_its_judged_picture(self, home, monkeypatch):
+        import base64
+
+        from kiln import plate_state
+
+        monkeypatch.setattr(plate_state, "machine_id", lambda adapter: "machine-1")
+        adapter = _printer()
+        _start(adapter)
+        found = plate_state.PlateLook(available=True, camera="printer",
+                                      image_b64=base64.b64encode(b"\x89PNG").decode(), media_type="image/png")
+        plate_state.hand_over_frame(adapter, found)
+        assert plate_state._keep_judged_frame(adapter) is not None
+
+
+def machine_not_in(frames, machine):
+    return not isinstance(frames, dict) or machine not in frames
+
+
+class TestWebhooks:
+    def _manager(self):
+        from kiln.events import EventBus
+        from kiln.webhooks import WebhookManager
+
+        mgr = WebhookManager(EventBus())
+        mgr.register("https://example.com/hook")
+        return mgr
+
+    def test_a_print_not_kept_sends_no_event(self, home):
+        from kiln.events import Event, EventType
+
+        adapter = _printer()
+        _start(adapter, keep_record=False)
+        mgr = self._manager()
+        mgr._on_event(Event(type=EventType.PRINT_COMPLETED,
+                            data={"printer_name": "shop-x1", "file_name": "secret_part.gcode"}))
+        mgr._on_event(Event(type=EventType.PRINT_PROGRESS, data={"printer_name": "shop-x1", "progress": 40}))
+        assert mgr._delivery_queue.empty()
+
+    def test_a_safety_event_still_reaches_the_person_without_the_name(self, home):
+        from kiln.events import Event, EventType
+
+        adapter = _printer()
+        _start(adapter, keep_record=False)
+        mgr = self._manager()
+        mgr._on_event(Event(type=EventType.TEMPERATURE_WARNING,
+                            data={"printer_name": "shop-x1", "file_name": "secret_part.gcode", "tool_c": 290}))
+        _endpoint, event = mgr._delivery_queue.get_nowait()
+        assert "secret_part" not in json.dumps(event.data) and event.data["tool_c"] == 290
+
+    def test_a_kept_print_still_sends_its_events(self, home):
+        from kiln.events import Event, EventType
+
+        adapter = _printer()
+        _start(adapter)
+        mgr = self._manager()
+        mgr._on_event(Event(type=EventType.PRINT_COMPLETED,
+                            data={"printer_name": "shop-x1", "file_name": "secret_part.gcode"}))
+        assert not mgr._delivery_queue.empty()
+
+
+class TestARunOfCopiesNotKept:
+    def _plan(self, plan_id):
+        import time as _t
+
+        from kiln.persistence import get_db
+
+        db = get_db()
+        db._conn.execute(
+            "INSERT INTO split_plans (id, original_file, split_type, parts, created_at, status) VALUES (?,?,?,?,?,?)",
+            (plan_id, "/tmp/secret_part.stl", "fill", json.dumps({"fill": {}}), _t.time(), "submitted"),
+        )
+        db._conn.commit()
+
+    def _rows(self, plan_id):
+        from kiln.persistence import get_db
+
+        return get_db()._conn.execute("SELECT id FROM split_plans WHERE id=?", (plan_id,)).fetchall()
+
+    def test_the_run_is_forgotten_only_once_all_of_it_has_ended(self, home):
+        import sqlite3
+
+        from kiln.queue import PrintQueue
+
+        part = home / ".kiln" / "queued_parts" / "part-secret.stl"
+        part.parent.mkdir(parents=True, exist_ok=True)
+        part.write_text("solid x")
+        self._plan("plan-1")
+        queue = PrintQueue(db_path=str(home / "queue.db"))
+        meta = {"keep_record": False, "split_plan_id": "plan-1", "fill": {"model_path": str(part), "copies": 2}}
+        first = queue.submit("secret_part.stl", metadata=dict(meta))
+        second = queue.submit("secret_part.stl", metadata=dict(meta))
+        for job_id in (first,):
+            queue.mark_starting(job_id, printer_name="shop-x1")
+            queue.mark_printing(job_id)
+            queue.mark_completed(job_id)
+        assert queue.get_job(first).file_name == "secret_part.stl", "the run is not over"
+        assert self._rows("plan-1") and part.exists()
+        queue.mark_starting(second, printer_name="shop-x1")
+        queue.mark_printing(second)
+        queue.mark_completed(second)
+        assert queue.get_job(first).file_name == "" and queue.get_job(second).file_name == ""
+        assert "model_path" not in queue.get_job(second).metadata.get("fill", {})
+        assert not part.exists()
+        assert self._rows("plan-1") == []
+        assert sqlite3.connect(str(home / "queue.db")).execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+
+    def test_a_failed_plate_waits_for_the_queue_to_settle_it(self, home):
+        from kiln.queue import PrintQueue
+
+        self._plan("plan-2")
+        queue = PrintQueue(db_path=str(home / "queue.db"))
+        job_id = queue.submit("secret_part.stl", metadata={"keep_record": False, "split_plan_id": "plan-2",
+                                                            "fill": {"model_path": "/nowhere.stl", "copies": 1}})
+        queue.mark_starting(job_id, printer_name="shop-x1")
+        queue.mark_printing(job_id)
+        queue.mark_failed(job_id, "spaghetti")
+        assert queue.get_job(job_id).file_name == "secret_part.stl", "it may be printed again"
+        assert queue.forget_run_if_ended(queue.get_job(job_id)) is True
+        assert self._rows("plan-2") == []
+
+    def test_the_fill_doors_take_the_switch(self):
+        import kiln.server as srv
+
+        tools = srv.mcp._tool_manager._tools
+        for name in ("multi_copy_print", "plan_multi_copy_split"):
+            assert "keep_record" in (tools[name].parameters.get("properties") or {}), name

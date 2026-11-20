@@ -911,6 +911,21 @@ def forget_file(file_names: set[str] | list[str]) -> int:
             if isinstance(row.get("note"), str) and any(n in row["note"] for n in names):
                 row["note"] = ""
         if unnamed:
+            # The plate's pictures while it held the part are pictures of it.
+            for machine, row in machines.items():
+                if not isinstance(row, dict) or not any(
+                    isinstance(j, dict) and j.get("file") == "" for j in [row.get("job"), *(row.get("jobs") or [])]
+                ):
+                    continue
+                look = row.get("look")
+                if isinstance(look, dict) and isinstance(look.get("frame"), str):
+                    with contextlib.suppress(OSError):
+                        os.unlink(look["frame"])
+                    row["look"] = {k: v for k, v in look.items() if k not in ("frame", "frame_at")}
+                handed = (store.get("frames") or {}).pop(machine, None) if isinstance(store.get("frames"), dict) else None
+                if isinstance(handed, dict) and isinstance(handed.get("path"), str):
+                    with contextlib.suppress(OSError):
+                        os.unlink(handed["path"])
             _write_store(store)
         return unnamed
     except Exception:  # noqa: BLE001
@@ -1377,6 +1392,10 @@ def hand_over_frame(adapter: Any, found: PlateLook) -> str | None:
     path = save_frame(found)
     machine = machine_id(adapter)
     if not path or not machine:
+        _note_picture(adapter, path)
+        return path
+    if _note_picture(adapter, path):
+        # A print not kept: the picture goes to eyes and is linked to nothing.
         return path
     try:
         store = _read_store() or {"machines": {}}
@@ -1387,13 +1406,37 @@ def hand_over_frame(adapter: Any, found: PlateLook) -> str | None:
     return path
 
 
+def _note_picture(adapter: Any, path: str | None) -> bool:
+    """Tell :mod:`kiln.print_keeping` a picture of *adapter*'s plate was
+    saved; ``True`` when its print is one not kept (the picture is then kept
+    nowhere and deleted when the print ends)."""
+    try:
+        from kiln.print_keeping import note_picture
+        from kiln.printers.base import outcome_printer_name
+
+        return note_picture(outcome_printer_name(adapter), path)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _not_kept_here(adapter: Any) -> bool:
+    try:
+        from kiln.print_keeping import keeps
+        from kiln.printers.base import outcome_printer_name
+
+        return not keeps(outcome_printer_name(adapter))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _keep_judged_frame(adapter: Any) -> dict[str, Any] | None:
     """The frame last handed over for this machine, moved to where it is
     kept: ``{"frame": path, "frame_at": iso}``.  ``None`` when no frame
     was handed over within :data:`LOOK_GOOD_FOR_SECONDS` -- a verdict with
-    no recent picture behind it is recorded as before, with no look."""
+    no recent picture behind it is recorded as before, with no look.  While
+    the machine's print is one not kept, no picture is kept."""
     machine = machine_id(adapter)
-    if not machine:
+    if not machine or _not_kept_here(adapter):
         return None
     try:
         handed = (_read_store().get("frames") or {}).get(machine)

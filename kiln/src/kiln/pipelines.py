@@ -1101,6 +1101,7 @@ def reslice_and_print(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    keep_record: bool | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
 
@@ -1160,6 +1161,7 @@ def reslice_and_print(
     # auto-scaled mesh.
     ctx: dict[str, Any] = {
         "signoff": signoff,
+        "keep_record": keep_record if isinstance(keep_record, bool) else None,
         "effective_profile": profile_path,
         "gcode_path": None,
         "adapter": None,
@@ -1489,6 +1491,8 @@ def reslice_and_print(
             grant_from_record(
                 ctx.get("signoff"), tool="pipeline", file_name=remote_name, printer_name=printer_name,
             )
+            if isinstance(ctx.get("keep_record"), bool):
+                start_kwargs["keep_record"] = ctx["keep_record"]
             sent_at = time.monotonic()
             try:
                 print_result = adapter.start_print(remote_name, **start_kwargs)
