@@ -96,7 +96,13 @@ def run_filament_op(
     """
     import kiln.server as _srv
     from kiln.hotend_safety import MOLTEN_FILAMENT_WARNING
-    from kiln.printers.base import FilamentHandlingUnsupported, PlateClearRequired, PrinterError
+    from kiln.printer_model_check import MISMATCH_CODE
+    from kiln.printers.base import (
+        FilamentHandlingUnsupported,
+        PlateClearRequired,
+        PrinterError,
+        PrinterModelDisagrees,
+    )
     from kiln.registry import PrinterNotFoundError
 
     verb = {
@@ -204,9 +210,12 @@ def run_filament_op(
         # rides beside the sentence, never inside it -- the same fields
         # the homing door carries.
         why = getattr(exc, "why_fields", None)
+        from kiln import bench
+
         return _srv._error_dict(
             str(exc), code="UNSUPPORTED",
-            extra={"outcome": "failed", **(why if isinstance(why, dict) else {})},
+            extra={"outcome": "failed", **(why if isinstance(why, dict) else {}),
+                   **bench.offer_fields(adapter, [action], "motion_refusal")},
         )
     except PlateClearRequired as exc:
         # The plate record (or the plan's own "this presses the plate")
@@ -217,6 +226,8 @@ def run_filament_op(
             str(exc), code="PLATE_CLEAR_REQUIRED",
             extra={"outcome": "failed", "snapshot_path": exc.snapshot_path, "plate_clear_required": True},
         )
+    except PrinterModelDisagrees as exc:
+        return _srv._error_dict(str(exc), code=MISMATCH_CODE, extra={"outcome": "failed"})
     except (PrinterError, RuntimeError) as exc:
         # The gate refused (or the transport did) before anything moved.
         return _srv._error_dict(

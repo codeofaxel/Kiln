@@ -701,6 +701,16 @@ class PrintWatchdog:
         except Exception:  # noqa: BLE001 — never breaks a watchdog poll
             logger.debug("PrintWatchdog: hardware alert skipped", exc_info=True)
 
+        # The same reading, handed to what learns how this printer ends a print
+        # (kiln.head_moves): in the print's last minutes it starts a position
+        # log on its own thread.  It reads and never commands, and returns at once.
+        try:
+            from kiln.head_moves import on_progress
+
+            on_progress(self._adapter, state, job)
+        except Exception:  # noqa: BLE001 — never breaks a watchdog poll
+            logger.debug("PrintWatchdog: end watch skipped", exc_info=True)
+
         if self._stop_event.is_set():
             # Stopped while this poll was reading -- most often retired by the
             # very read that saw its print end, which announces the ending

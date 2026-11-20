@@ -155,6 +155,13 @@ def _saved(config: Path) -> dict:
     return yaml.safe_load(config.read_text(encoding="utf-8"))["printers"]
 
 
+def _unlisted_serial(config: Path) -> None:
+    """Give the garage printer a serial number that names no model Kiln knows."""
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["printers"]["garage"]["serial"] = "ZZZ0001"
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # Reading the file
 # ---------------------------------------------------------------------------
@@ -327,6 +334,7 @@ class TestNothingIsWrittenWhenItShouldNotBe:
         assert sp.list_local_printer_overrides() == []
 
     def test_a_different_model_already_set_is_kept_unless_asked(self, config):
+        _unlisted_serial(config)
         set_printer_model("Bambu Lab A1", config_path=config)
         before = config.read_text(encoding="utf-8")
         out = set_printer_model("Bambu Lab P1S", config_path=config)
@@ -731,6 +739,7 @@ class TestEveryDoor:
 
         from kiln.cli.main import cli
 
+        _unlisted_serial(config)
         project = _bambu_project(tmp_path / "part.3mf")
         done = CliRunner().invoke(cli, ["set-model", "--from-file", project])
         assert done.exit_code == 0, done.output

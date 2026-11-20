@@ -498,6 +498,7 @@ class TestRefusalsAreCounted:
         _serve(monkeypatch, {"home": doc, "park": _fake_home_doc("bambu_a1_mini", verb="park")})
         bambu = _build("bambu")
         bambu._printer_model = "bambu_a1_mini"
+        bambu._serial = "03000A000000001"
         _idle(bambu, monkeypatch)
         monkeypatch.setattr(bambu, "_plate_witness", lambda: None)
         with pytest.raises(PlateClearRequired):

@@ -123,6 +123,214 @@ def test_a_started_bridge_knows_its_saved_printers_before_any_call(
     assert client._printers() == ("default",)
 
 
+NO_PRINTER_YAML = "printers: {}\n"
+
+SAVED_LATER_YAML = """\
+active_printer: workshop
+printers:
+  workshop:
+    type: bambu
+    host: 192.168.9.9
+    access_code: abcd1234
+    serial: TESTSERIAL0001
+    printer_model: bambu_a1
+"""
+
+
+@pytest.fixture
+def no_printer_yet(kiln_home, unconfigured_server, empty_registry, monkeypatch):
+    """A computer where Kiln is installed and no printer is saved yet, in a
+    process that has resolved no default printer."""
+    saved = kiln_home / ".kiln" / "config.yaml"
+    saved.write_text(NO_PRINTER_YAML, encoding="utf-8")
+    monkeypatch.setattr(unconfigured_server, "_adapter", None, raising=False)
+    monkeypatch.setattr(unconfigured_server, "_PRINTER_MODEL", "", raising=False)
+    return saved
+
+
+class _OpenSocket:
+    """A relay connection that stays open until it is closed, and keeps
+    every frame sent down it."""
+
+    def __init__(self):
+        import asyncio
+
+        self.sent: list[dict] = []
+        self._closed = asyncio.Event()
+
+    async def send(self, text):
+        self.sent.append(json.loads(text))
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        await self._closed.wait()
+        raise StopAsyncIteration
+
+    async def close(self, code=1000):  # noqa: ARG002
+        self._closed.set()
+
+    def announced(self):
+        return [frame["announce"]["printers"] for frame in self.sent if "announce" in frame]
+
+
+async def _until(reached, what, seconds=10.0):
+    import asyncio
+
+    for _ in range(int(seconds / 0.02)):
+        if reached():
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"never happened: {what}")
+
+
+def test_a_printer_saved_while_the_bridge_runs_is_announced_without_a_call(
+    no_printer_yet, monkeypatch, tmp_path
+):
+    """A connected bridge on a computer with no printer announces none.  When
+    a printer is then saved by another program, the bridge announces it on
+    its own: no relayed call, no restart."""
+    import asyncio
+    import sys
+    import types
+
+    from kiln import bridge_client as bc
+
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+    monkeypatch.setattr(bc, "SAVED_PRINTERS_CHECK_S", 0.02, raising=False)
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    # The stranded cool-down watch is another thread's business.
+    monkeypatch.setattr(client, "_start_warm_up", lambda: None)
+
+    async def scenario():
+        ws = _OpenSocket()
+
+        class _Connect:
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self):
+                return ws
+
+            async def __aexit__(self, *a):
+                return False
+
+        monkeypatch.setitem(sys.modules, "websockets", types.SimpleNamespace(connect=_Connect))
+        running = asyncio.create_task(client.run())
+        try:
+            await _until(lambda: ws.announced() == [[]], "the first announce, with no printers")
+            no_printer_yet.write_text(SAVED_LATER_YAML, encoding="utf-8")
+            await _until(
+                lambda: ws.announced()[-1] == ["workshop"],
+                "an announce naming the printer saved after the bridge started",
+            )
+        finally:
+            client.stop()
+            await asyncio.wait_for(running, 10)
+        return ws
+
+    ws = asyncio.run(scenario())
+    # Told once: an unchanged list is not announced again on later looks.
+    assert ws.announced() == [[], ["workshop"]]
+
+
+def test_a_relayed_call_is_answered_with_the_printers_saved_by_then(
+    no_printer_yet, monkeypatch
+):
+    """A call that reaches a bridge started before its printer was saved
+    finds the printer, and the announce that follows the reply names it."""
+    import asyncio
+
+    from kiln import bridge_client as bc
+
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    assert client._ensure_tool_caller() is not None
+    assert client._printers() == ()
+
+    sent: list[dict] = []
+
+    class _WS:
+        async def send(self, text):
+            sent.append(json.loads(text))
+
+    async def scenario():
+        ws = _WS()
+        client._ws = ws
+        await client._announce_when_ready(ws)
+        no_printer_yet.write_text(SAVED_LATER_YAML, encoding="utf-8")
+        await client._handle_and_reply(
+            ws, {"request_id": "r1", "tool_name": "queue_summary", "args": {}}
+        )
+
+    asyncio.run(scenario())
+
+    assert client._printers() == ("workshop",)
+    assert sent[0] == {"announce": {"printers": []}}
+    assert sent[1]["request_id"] == "r1"
+    assert sent[2] == {"announce": {"printers": ["workshop"]}}
+    # The call that names no printer reaches it too.
+    from kiln import server as ksrv
+
+    assert type(ksrv._get_adapter()).__name__ == "BambuAdapter"
+
+
+def test_an_unchanged_saved_file_is_not_read_again(no_printer_yet, monkeypatch):
+    from kiln import bridge_client as bc
+
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    client._ensure_tool_caller()
+    loads: list[int] = []
+    monkeypatch.setattr(bc, "_load_saved_printers", lambda: loads.append(1))
+
+    client._sync_saved_printers()
+    assert loads == []
+
+    no_printer_yet.write_text(SAVED_LATER_YAML, encoding="utf-8")
+    client._sync_saved_printers()
+    client._sync_saved_printers()
+    assert loads == [1]
+
+
+def test_a_caller_handed_in_from_outside_is_never_refreshed(no_printer_yet, monkeypatch):
+    """A client built around someone else's tool caller did not load this
+    computer's printers, and does not start loading them later."""
+    from kiln import bridge_client as bc
+
+    loads: list[int] = []
+    monkeypatch.setattr(bc, "_load_saved_printers", lambda: loads.append(1))
+    client = bc.BridgeClient(
+        license_key="lic", call_tool=lambda *_a: None, fetch_artifact=lambda tok: ""
+    )
+    no_printer_yet.write_text(SAVED_LATER_YAML, encoding="utf-8")
+    client._sync_saved_printers()
+    assert loads == []
+
+
+def test_a_second_saved_printer_joins_and_the_default_keeps_its_settings(
+    kiln_home, unconfigured_server, empty_registry, monkeypatch
+):
+    """With a default printer already resolved, a refresh adds a printer
+    saved since and leaves the default's own settings alone, even when the
+    saved file now names another printer as active."""
+    monkeypatch.setattr(unconfigured_server, "_adapter", None, raising=False)
+    unconfigured_server.ensure_runtime_config()
+    unconfigured_server.register_configured_printers()
+    assert unconfigured_server._PRINTER_HOST == "192.168.9.9"
+    assert "garage" not in empty_registry
+
+    (kiln_home / ".kiln" / "config.yaml").write_text(
+        CONFIG_YAML.replace("active_printer: default", "active_printer: garage")
+        + "  garage:\n    type: moonraker\n    host: 192.168.9.10\n",
+        encoding="utf-8",
+    )
+    unconfigured_server.refresh_configured_printers()
+
+    assert "garage" in empty_registry
+    assert unconfigured_server._PRINTER_HOST == "192.168.9.9"
+    assert unconfigured_server._PRINTER_TYPE == "bambu"
+
+
 def test_ensure_runtime_config_is_idempotent(kiln_home, unconfigured_server):
     """Every door may call it, in any order, without clobbering the result."""
     unconfigured_server.ensure_runtime_config()

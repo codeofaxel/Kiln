@@ -161,6 +161,30 @@ def redact_text(text: str) -> str:
 #: The one key a link to a model's public listing page travels under.
 LISTING_LINK_KEY = "listing_url"
 
+#: Keys whose value is a name from one of Kiln's own lists, judged by key
+#: AND value like a listing link: it goes as it is only when it is on that
+#: list, and nowhere otherwise.  ``reported_model`` is the catalogue model a
+#: printer names itself, sent beside its serial number's one-way code;
+#: ``upgrade`` is an upgrade from Kiln's list of those a printer's maker
+#: sells.  Neither can carry a serial number, an address or free text.
+_LISTED_VALUE_KEYS = ("reported_model", "upgrade")
+
+
+def _listed_value(key: str, value: Any) -> str | None:
+    """*value* when it is a name on the list *key* is judged against, else ``None``."""
+    if not isinstance(value, str) or not value or len(value) > 80:
+        return None
+    try:
+        if key == "reported_model":
+            from kiln.motion_facts import catalogue_keys
+
+            return value if value in catalogue_keys() else None
+        from kiln.printer_model_check import maker_upgrades
+
+        return value if value in maker_upgrades() else None
+    except Exception:  # noqa: BLE001 -- a list that cannot be read lets nothing through
+        return None
+
 
 def is_listing_link(value: Any) -> bool:
     """Whether *value* is an https link to a public listing page on a site a
@@ -365,6 +389,8 @@ VERSION_FIELDS: dict[str, frozenset[str]] = {
     "kiln/outcome_courier.py": frozenset({"firmware"}),
     "kiln/served_steps.py": frozenset({"firmware"}),
     "kiln/_pro_printer_checkin_bridge.py": frozenset({"firmware"}),
+    "kiln/sliced_routines.py": frozenset({"p_slicer_version", "version"}),
+    "kiln/printers/motion_walk.py": frozenset({"firmware"}),
 }
 
 
@@ -432,6 +458,11 @@ def scrub(value: Any, _depth: int = 0, *, version_keys: frozenset[str] = frozens
                 if is_listing_link(item):
                     out[key] = item.strip()
                 continue
+            if name in _LISTED_VALUE_KEYS:
+                listed = _listed_value(name, item)
+                if listed is not None:
+                    out[key] = listed
+                continue
             if _IDENTITY.match(name):
                 out[key] = machine_code(item) if isinstance(item, (str, int)) and not isinstance(item, bool) else None
                 continue
@@ -466,7 +497,11 @@ SENDERS: dict[str, tuple[str, str]] = {
         "sent by kiln/_pro_goal_bridge.py: the tool, the model's fingerprint, the "
         "kept id, the call's naming arguments and the made file's own name, each "
         "cleaned and capped there first; never the model, its source or a folder, "
-        "and nothing at all from a signed-out install)",
+        "and nothing at all from a signed-out install); and a step of a walked "
+        "home or park (kiln/printers/motion_walk.py, cleaned there first: the "
+        "printer's model, the step number, the person's two answers, four "
+        "temperature readings and the firmware version, declared in "
+        "VERSION_FIELDS; never a serial number)",
     ),
     "kiln/terms.py": ("own_schema", "the terms version and when it was accepted"),
     "kiln/community_sync.py": (
@@ -545,6 +580,32 @@ SENDERS: dict[str, tuple[str, str]] = {
         "made coming back; machine-read values ride the call through the served door",
     ),
     "kiln/stage_cache.py": ("own_schema", "fetches the 3D stage's own page; sends nothing of the person's"),
+    "kiln/bench.py": (
+        "own_schema",
+        "what a printer was seen to do on a pause, a cancel or an end, built field by field "
+        "(kiln.bench.observation): words from fixed vocabularies, numbers, the one-way hash of "
+        "the printer's serial and the firmware's own version label",
+    ),
+    "kiln/printer_motion_report.py": (
+        "own_schema",
+        "a Klipper-family printer's motion sections as kiln.machine_motion.motion_settings "
+        "builds them (serials, pins, paths and addresses removed there), the model key, the "
+        "board's chip name and the one-way hash of its serial",
+    ),
+    "kiln/printer_bed_report.py": (
+        "own_schema",
+        "for a printer outside the catalogue: the model key, its bed's three numbers, the "
+        "source's class, a maker page's web host, and the heartbeat's own install id",
+    ),
+    "kiln/sliced_routines.py": (
+        "scrubbed",
+        "a printer's own routines read from a print file a slicer made for it: each routine's "
+        "text and SHA-256, its word, the model key, the slicer's name and version (declared in "
+        "VERSION_FIELDS) and the one-way hash of the printer's serial -- signed in, to Kiln's API "
+        "as the person (kiln/history_courier.py's request helper), signed out, through the "
+        "database door with the install id; a payload scrub would change is not sent at all, and "
+        "a routine the file lists as changed from its preset is never sent",
+    ),
     "kiln/served_public.py": (
         "person's_own",
         "a public tool's own call run on Kiln's servers, with the files it names; the "

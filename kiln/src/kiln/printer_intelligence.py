@@ -29,7 +29,7 @@ Speed intelligence::
     from kiln.printer_intelligence import get_slicer_speed_overrides
 
     overrides = get_slicer_speed_overrides("bambu_a1")
-    # Returns PrusaSlicer INI keys tuned for the Bambu A1's capabilities.
+    # Returns PrusaSlicer INI keys for the Bambu A1's ecosystem envelope.
 """
 
 from __future__ import annotations
@@ -1057,202 +1057,10 @@ def _reset_caches() -> None:
 # Per-printer speed intelligence for PrusaSlicer
 # ---------------------------------------------------------------------------
 
-# Curated speed capability table keyed by printer_id.
-# Values: (max_print_speed_mm_s, max_accel_mm_s2, has_input_shaping, quality_factor)
-# quality_factor: fraction of max speed to use for quality prints (0.0-1.0).
-_SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
-    # --- Bambu Lab ---
-    "bambu_a1": {
-        "max_speed": 250,
-        "max_accel": 10000,
-        "input_shaping": True,
-        "quality_factor": 0.75,
-    },
-    "bambu_a2l": {
-        "max_speed": 250,
-        "max_accel": 10000,
-        "input_shaping": True,
-        "quality_factor": 0.75,
-    },
-    "bambu_a1_mini": {
-        "max_speed": 250,
-        "max_accel": 10000,
-        "input_shaping": True,
-        "quality_factor": 0.70,
-    },
-    "bambu_x1c": {
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.80,
-    },
-    "bambu_x1e": {
-        # X1E shares the X1C CoreXY motion platform; same speed/accel envelope.
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.80,
-    },
-    "bambu_p1s": {
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    "bambu_p2s": {
-        # P2S shares the enclosed CoreXY P-series platform; PMSM servo
-        # extruder rates higher but the conservative quality envelope
-        # mirrors the P1S until field data justifies tuning it up.
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    "bambu_h2s": {
-        # H2-series enclosed CoreXY.  BambuStudio reports a higher hardware
-        # ceiling (1000 mm/s, 20000 mm/s2) than the P/X CoreXY platform, but
-        # the quality envelope stays conservative — mirroring the enclosed
-        # P2S/X1 rows — until field data justifies tuning it up.
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    # The H2D / H2D Pro / H2C / X2D all publish the same 1000 mm/s,
-    # 20000 mm/s2 hardware ceiling as the H2S.  They inherit the H2S's
-    # conservative envelope for the same reason: this table is a slicing
-    # quality budget, not a spec sheet, and none of these machines has been
-    # hardware-proven with Kiln.  Raise only on field data, per machine.
-    "bambu_h2d": {
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    "bambu_h2d_pro": {
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    "bambu_h2c": {
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    "bambu_x2d": {
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    "bambu_p1p": {
-        "max_speed": 300,
-        "max_accel": 10000,
-        "input_shaping": True,
-        "quality_factor": 0.75,
-    },
-    # --- Creality ---
-    "ender3": {
-        "max_speed": 60,
-        "max_accel": 500,
-        "input_shaping": False,
-        "quality_factor": 0.75,
-    },
-    "ender3_v2": {
-        "max_speed": 70,
-        "max_accel": 600,
-        "input_shaping": False,
-        "quality_factor": 0.75,
-    },
-    "ender3_s1": {
-        "max_speed": 100,
-        "max_accel": 1500,
-        "input_shaping": False,
-        "quality_factor": 0.75,
-    },
-    # Same frame and motion system as the S1; the Pro upgrades the
-    # extruder, hotend and bed, not the kinematics.
-    "ender3_s1_pro": {
-        "max_speed": 100,
-        "max_accel": 1500,
-        "input_shaping": False,
-        "quality_factor": 0.75,
-    },
-    "k1": {
-        "max_speed": 300,
-        "max_accel": 12000,
-        "input_shaping": True,
-        "quality_factor": 0.75,
-    },
-    # --- Prusa ---
-    "prusa_mk3s": {
-        "max_speed": 100,
-        "max_accel": 1250,
-        "input_shaping": False,
-        "quality_factor": 0.75,
-    },
-    "prusa_mk4": {
-        "max_speed": 150,
-        "max_accel": 4000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    "prusa_mini": {
-        "max_speed": 100,
-        "max_accel": 1000,
-        "input_shaping": False,
-        "quality_factor": 0.70,
-    },
-    "prusa_xl": {
-        "max_speed": 150,
-        "max_accel": 4000,
-        "input_shaping": True,
-        "quality_factor": 0.78,
-    },
-    # --- Voron ---
-    "voron_2": {
-        "max_speed": 300,
-        "max_accel": 10000,
-        "input_shaping": True,
-        "quality_factor": 0.75,
-    },
-    "voron_trident": {
-        "max_speed": 300,
-        "max_accel": 10000,
-        "input_shaping": True,
-        "quality_factor": 0.75,
-    },
-    "voron_0": {
-        "max_speed": 250,
-        "max_accel": 8000,
-        "input_shaping": True,
-        "quality_factor": 0.75,
-    },
-    # --- Klipper generic ---
-    "klipper_generic": {
-        "max_speed": 150,
-        "max_accel": 3000,
-        "input_shaping": True,
-        "quality_factor": 0.70,
-    },
-    # --- Elegoo ---
-    "elegoo_neptune3": {
-        "max_speed": 60,
-        "max_accel": 500,
-        "input_shaping": False,
-        "quality_factor": 0.75,
-    },
-    "elegoo_neptune4": {
-        "max_speed": 250,
-        "max_accel": 8000,
-        "input_shaping": True,
-        "quality_factor": 0.72,
-    },
-}
-
-# Generic type-level fallbacks when no printer_id matches.
+# Generic speed envelopes by printer ecosystem, used when no printer-specific
+# figure is in hand.  Values: max_speed (mm/s), max_accel (mm/s2),
+# input_shaping, quality_factor (the fraction of max_speed a quality print
+# uses).
 _TYPE_SPEED_DEFAULTS: dict[str, dict[str, Any]] = {
     "bambu": {
         "max_speed": 250,
@@ -1272,6 +1080,15 @@ _TYPE_SPEED_DEFAULTS: dict[str, dict[str, Any]] = {
         "input_shaping": True,
         "quality_factor": 0.70,
     },
+}
+
+
+#: The ecosystem envelope a roster printer falls back to, by the coarse
+#: firmware label its public row states.
+_FIRMWARE_SPEED_TYPE: dict[str, str] = {
+    "bambu": "bambu",
+    "klipper": "moonraker",
+    "marlin": "octoprint",
 }
 
 
@@ -1341,26 +1158,15 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
     """Resolve speed capabilities for a printer.
 
     Priority order:
-    1. Curated ``_SPEED_CAPABILITIES`` table (hand-tuned practical limits).
-    2. Raw JSON extended fields (``max_speed_mm_s``) — these represent
-       hardware maximums and get derated via a conservative quality_factor.
-    3. Fuzzy prefix match on either source.
+    1. A printer row in hand that states ``max_speed_mm_s`` (a hardware
+       maximum, derated through a conservative quality factor).
+    2. The ecosystem envelope for the firmware the public roster row names
+       (``_TYPE_SPEED_DEFAULTS`` through ``_FIRMWARE_SPEED_TYPE``).  Never a
+       per-model figure: the same answer for every printer of that firmware,
+       offline and signed out included.
     """
     normalised = printer_id.lower().replace("-", "_").strip()
 
-    # 1. Curated table — exact match (preferred: hand-tuned practical limits).
-    caps = _SPEED_CAPABILITIES.get(normalised)
-    if caps is not None:
-        return caps
-
-    # 2. Fuzzy prefix match on curated table.
-    for key in _SPEED_CAPABILITIES:
-        if normalised.startswith(key) or key.startswith(normalised):
-            return _SPEED_CAPABILITIES[key]
-
-    # 3. Fall back to raw JSON extended fields.  These are hardware maximums
-    #    (e.g. 500 mm/s for bambu_a1) so we use a lower quality_factor to
-    #    derate to practical printing speeds.
     raw = _get_raw(normalised)
     if raw and "max_speed_mm_s" in raw:
         # has_input_shaping is a structured textbook field on each printer
@@ -1378,14 +1184,17 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
             "quality_factor": 0.50,  # conservative: hardware max != practical max
         }
 
+    ecosystem = _FIRMWARE_SPEED_TYPE.get(roster_firmware(normalised) or "")
+    if ecosystem is not None:
+        return _TYPE_SPEED_DEFAULTS[ecosystem]
     return None
 
 
 def get_slicer_speed_overrides(printer_id: str) -> dict[str, str]:
     """Generate PrusaSlicer speed overrides tuned for a specific printer model.
 
-    Uses the printer intelligence database to produce optimal speed,
-    acceleration, and jerk settings for PrusaSlicer.  This ensures that
+    Uses the printer intelligence database to produce speed and
+    acceleration settings for PrusaSlicer.  This ensures that
     prints sliced via Kiln run at the printer's actual capability
     instead of PrusaSlicer's conservative defaults.
 

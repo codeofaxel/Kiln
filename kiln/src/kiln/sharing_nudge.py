@@ -41,7 +41,40 @@ _NOTE = (
     "nothing: it stays off, and Kiln will not ask again."
 )
 
+#: The question about printer routines, asked once on its own, after the
+#: first print whose file carried them, word for word as approved; the
+#: printer's own name goes where ``{printer}`` stands (:func:`routines_question`).
+ROUTINES_KEY = "kiln_printer_routines"
+ROUTINES_TITLE = "Help Kiln learn your {printer}?"
+ROUTINES_BODY = (
+    "Your print files carry your printer's own built-in routines: how it starts, "
+    "pauses and finishes. Sharing them teaches Kiln more about the {printer}, so "
+    "every {printer} owner benefits."
+)
+ROUTINES_PRIVACY = "Your prints, designs and file names never leave your computer."
+ROUTINES_SHARE = "Share"
+ROUTINES_DONT = "Don't share"
+_ROUTINES_NOTE = (
+    "Ask the person once, at a natural pause, showing the title, the body and "
+    "the privacy line as written, with the two answers. On Share, they turn it "
+    "on themselves by running the Share command in their own terminal, which "
+    "asks them to confirm; do not run it for them. On Don't share, run the "
+    "Don't share command: nothing is ever sent and Kiln never asks again. If "
+    "they do not answer, do nothing: nothing is sent."
+)
+
+
+def routines_question(printer: str) -> dict[str, str]:
+    """The approved question for the printer named *printer*."""
+    name = printer.strip() or "printer"
+    return {
+        "title": ROUTINES_TITLE.format(printer=name),
+        "body": ROUTINES_BODY.format(printer=name),
+        "privacy": ROUTINES_PRIVACY,
+    }
+
 _attached = False
+_routines_attached = False
 
 
 def _result_seems_failed(inner: Any, payload: dict | None) -> bool:
@@ -85,21 +118,67 @@ def _attach(inner: Any, ctx: Any, name: str | None) -> None:
         logger.debug("sharing question not attached", exc_info=True)
 
 
-def install(mcp: Any) -> bool:
-    """Wrap the lowlevel handler on an install that waits for an answer."""
+def _routines_due() -> bool:
+    """The routines question has not been answered or asked on this computer."""
+    from kiln.sharing_consent import routines_answer, routines_asked
+
+    return routines_answer() is None and not routines_asked()
+
+
+def _attach_routines(inner: Any, ctx: Any, name: str | None) -> None:
+    """The routines question on one result, once, after a print file has
+    carried routines here.  Never raises outward."""
+    global _routines_attached
     try:
+        from kiln.sharing_consent import mark_routines_asked
+        from kiln.sliced_routines import kept_printer_name
+        from kiln.update_nudge import _hosted_multitenant
+
+        if _routines_attached or _hosted_multitenant() or not _routines_due():
+            return
+        printer = kept_printer_name()
+        if not printer:
+            return
+        from kiln.cli_command import kiln_command
+        from kiln.local_stage import _result_as_dict
+        from kiln.mcp_compat import result_structured_content, set_result_structured_content
+
+        sc = result_structured_content(inner)
+        sc = dict(sc) if isinstance(sc, dict) else (_result_as_dict(inner) or {})
+        if not sc or _result_seems_failed(inner, sc) or ROUTINES_KEY in sc or RESULT_KEY in sc:
+            return
+        sc[ROUTINES_KEY] = {
+            **routines_question(printer),
+            "answers": {ROUTINES_SHARE: kiln_command("sharing routines on"),
+                        ROUTINES_DONT: kiln_command("sharing routines off")},
+            "note": _ROUTINES_NOTE,
+        }
+        set_result_structured_content(inner, sc)
+        _routines_attached = True
+        mark_routines_asked()
+    except Exception:  # noqa: BLE001 -- a question must never break a result
+        logger.debug("routines question not attached", exc_info=True)
+
+
+def install(mcp: Any) -> bool:
+    """Wrap the lowlevel handler on an install that waits for an answer, or
+    where the routines question is still to be asked."""
+    try:
+        from kiln.mcp_compat import wrap_call_tool_result
         from kiln.sharing_consent import waiting_for_an_answer
 
-        if not waiting_for_an_answer():
-            return False
-        from kiln.mcp_compat import wrap_call_tool_result
-
-        return bool(wrap_call_tool_result(mcp, _attach))
+        wrapped = False
+        if waiting_for_an_answer():
+            wrapped = bool(wrap_call_tool_result(mcp, _attach)) or wrapped
+        if _routines_due():
+            wrapped = bool(wrap_call_tool_result(mcp, _attach_routines)) or wrapped
+        return wrapped
     except Exception:  # noqa: BLE001 -- optional capability, never fatal
         logger.debug("sharing question not installed", exc_info=True)
         return False
 
 
 def _reset_for_tests() -> None:
-    global _attached
+    global _attached, _routines_attached
     _attached = False
+    _routines_attached = False

@@ -842,10 +842,12 @@ class _SafetyToolsPlugin:
                     "next": (
                         "Call add_safety_profile again with the same limits; this yes covers them."
                         if issued.tool == screen_code.LIMITS_TOOL
+                        else "Call set_printer_model again with the same arguments; this yes covers it."
+                        if issued.tool == screen_code.MODEL_TOOL
                         else f"Call the tool that starts the print again ({issued.tool}); this yes covers it."
                     ),
                 }
-                for_a_print = issued.tool != screen_code.LIMITS_TOOL
+                for_a_print = issued.tool not in (screen_code.LIMITS_TOOL, screen_code.MODEL_TOOL)
                 if for_a_print and rec.answer.opens_window:
                     # The window opens where the dialog's does: when the print
                     # starts, in the wrapper — never from a tool.

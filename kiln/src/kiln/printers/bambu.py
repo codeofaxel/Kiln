@@ -823,6 +823,12 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
 }
 
 
+def model_of_serial(serial: object) -> str | None:
+    """The catalogue model a Bambu Lab serial number names, or ``None`` when its prefix is not one Kiln knows."""
+    family = _BAMBU_MODEL_FAMILIES.get(str(serial or "").strip()[:3].upper())
+    return f"bambu_{family}" if family else None
+
+
 _BAMBU_ACCESSORY_MODULE_HEADS: frozenset[str] = frozenset(
     {"ams_f1", "n3f", "n3s", "ams"}
 )
@@ -1305,6 +1311,7 @@ class BambuAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by Bambu Lab MQTT + FTPS."""
 
     _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
+    _MODEL_REPORT_HOLDS_MOVES: ClassVar[bool] = True
 
     @property
     def camera_fitted_at_factory(self) -> bool | None:

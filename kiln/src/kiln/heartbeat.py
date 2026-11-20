@@ -733,6 +733,13 @@ def _send_heartbeat(also_model: str = "") -> bool:
                 # Tokens only — no coordinate, serial or G-code line can be
                 # spelled in the key (daily_stats._MOTION_KEY_RE).
                 "motion_outcomes": _top_n(stats.get("motion_outcomes", {}), 100),
+                # How far the lessons that teach Kiln a printer get --
+                # {"<stage>|<lesson>[|<detail>]": count_today} over the
+                # closed vocabulary daily_stats.BENCH_FUNNEL: offered (by
+                # door), started, finished, learned something, later,
+                # declined, held.  Every stage happens on this machine.
+                # Counts only: no printer model, name or unit.
+                "bench_funnel": stats.get("bench_funnel", {}),
                 # Upgrade-nudge funnel — {stage: count_today}.  A closed
                 # five-value vocabulary, not tool names.  This is the
                 # only way the funnel is ever seen: the offer, the

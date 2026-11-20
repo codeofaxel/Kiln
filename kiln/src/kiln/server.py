@@ -938,6 +938,13 @@ def _build_instructions() -> str:
     if not _CRAFTCLOUD_API_KEY:
         parts.append("ORDERING: " + (ORDERING_STEPS if is_fresh else AGENT_ORDERING_LINE))
 
+    # --- Getting to know a printer ---
+    # After CONSENT for the same reason; get_started carries it for clients
+    # that cut before this.
+    from kiln.bench import AGENT_LEARN_LINE
+
+    parts.append("PRINTER KNOWLEDGE: " + AGENT_LEARN_LINE)
+
     # --- Monitoring & reporting ---
     parts.append(
         "MONITORING: During print jobs, use `monitor_print()` for status — "
@@ -6237,6 +6244,11 @@ def _install_print_lifecycle_hooks() -> None:
     register_print_started_hook(_spawn_print_watchdog)
     register_print_ended_hook(_retire_print_watchdog)
     register_print_ended_hook(_note_plate_after_print_ended_by_name)
+    # What a printer's first print left for its first lesson, offered once
+    # on the next reply (kiln.head_moves.print_ended).
+    from kiln.head_moves import print_ended as _bench_after_print
+
+    register_print_ended_hook(_bench_after_print)
     _print_lifecycle_hooks_installed = True
 
 
@@ -15023,22 +15035,6 @@ def register_printer(
             result["persisted"] = True
             result["config_path"] = persisted_path
 
-        # Once, for a model whose motion record has blanks: the offer of the
-        # short session that fills them (kiln.bench).  Never twice.  Not for
-        # an address that just failed to answer: the offer reads the printer's
-        # own settings, which there means waiting out every retry (3 x 30 s on
-        # Moonraker) to learn nothing, and offline is not a reason to nag --
-        # the offer stays unspent for a registration the printer answers.
-        if url_answered is not False:
-            try:
-                from kiln.bench import offer_after_registration
-
-                _offer = offer_after_registration(adapter, name)
-                if _offer is not None:
-                    result["bench_offer"] = _offer
-            except Exception:
-                logger.debug("bench offer after registration skipped", exc_info=True)
-
         # Does the camera answer?  Asked once, here, without a frame: the
         # printer's own camera only when the printer's address answered (an
         # offline printer is not asked twice), and a camera the user supplied
@@ -15142,6 +15138,7 @@ def set_printer_model(
     bed_mm: list[float] | None = None,
     bed_source: str | None = None,
     bed_confirmed: bool = False,
+    owner_says_so: bool = False,
 ) -> dict:
     """Tell Kiln which printer model a saved printer is -- by name, or from a slicer file.
 
@@ -15197,6 +15194,12 @@ def set_printer_model(
             or manual.  Required with ``bed_mm``.
         bed_confirmed: True only once the person has seen the size and its
             source and said it is right.  Never set it on their behalf.
+        owner_says_so: The person says this printer is the model named
+            although its serial number names another (or a maker's upgrade
+            kit is fitted).  A code is then shown on this computer's screen
+            (``CONFIRMATION_REQUIRED``); only the person can type it, through
+            give_print_code, and the call is then made again unchanged.  Use
+            it only when the person has said so in their own words.
 
     Returns ``applied`` (whether anything changed), the ``printer``, its
     ``printer_model`` and ``in_catalogue``, and a ``message`` to relay.
@@ -15217,15 +15220,70 @@ def set_printer_model(
     try:
         from kiln.printer_setup import set_printer_model as _set_printer_model
 
-        result = _set_printer_model(
-            printer_model, printer_make=printer_make, slicer_file=slicer_file,
-            printer_name=printer_name, replace=replace,
-            bed_mm=bed_mm, bed_source=bed_source, bed_confirmed=bed_confirmed,
-        )
+        def _call(said_by: dict | None = None) -> dict:
+            return _set_printer_model(
+                printer_model, printer_make=printer_make, slicer_file=slicer_file,
+                printer_name=printer_name, replace=replace,
+                bed_mm=bed_mm, bed_source=bed_source, bed_confirmed=bed_confirmed,
+                owner_says_so=owner_says_so, said_by=said_by,
+            )
+
+        result = _call()
+        if result.get("code") == "OWNER_MUST_SAY_SO":
+            said_by = _owner_statement_by_a_person(result)
+            if "how" not in said_by:
+                return said_by
+            result = _call(said_by)
         return _with_printer_report(result)
     except Exception as exc:
         logger.exception("Error in set_printer_model")
         return _error_dict(f"Could not set the printer model: {exc}", code="SET_PRINTER_MODEL_ERROR")
+
+
+def _owner_statement_by_a_person(result: dict[str, Any]) -> dict[str, Any]:
+    """``said_by`` once a person has typed the code shown for exactly this
+    statement on this computer's screen; otherwise the refusal that says how.
+
+    The code is the proof a print start takes (:mod:`kiln.screen_code`):
+    nothing an agent can call reveals it.  The banner carries the statement
+    itself, so the person reads what they are saying before they say it.
+    """
+    import hashlib
+    import json
+
+    from kiln import screen_code
+    from kiln.print_consent import SOURCE_CODE
+    from kiln.printer_setup import person_said
+
+    statement, question = result.get("statement") or {}, str(result.get("question") or "")
+    target = str(result.get("printer") or "")
+    key = f"model statement for {target}"
+    digest = hashlib.sha256(json.dumps(statement, sort_keys=True).encode()).hexdigest()
+    answered = screen_code.take_answer(key, target, tool=screen_code.MODEL_TOOL)
+    if answered is not None and answered.issued.file_sha256 == digest:
+        _audit(
+            "set_printer_model", "owner_statement_confirmed",
+            details={"printer": target, "statement": statement, "words": answered.words},
+        )
+        return person_said(SOURCE_CODE)
+    shown = screen_code.issue(
+        tool=screen_code.MODEL_TOOL, file_name=key, file_sha256=digest, printer_name=target,
+        host=_host_label(None), printer_label=target, subject=question[:1].upper() + question[1:],
+    )
+    outcome = shown.get("outcome")
+    lead = f"Only {target}'s owner can say this: {question}.  "
+    if outcome == screen_code.SHOWN:
+        how = (
+            "A code was just shown on this computer's screen.  If the person says that is true, ask them "
+            "to type the code, pass their words to give_print_code, then call set_printer_model again "
+            "with the same arguments."
+        )
+    elif outcome == screen_code.COOLDOWN:
+        how = f"Too many codes were shown recently; try again in {shown.get('seconds_left', 60)} seconds."
+    else:
+        line = kiln_command(f"set-model {statement.get('model', '')} --printer", target) + " --owner-says-so"
+        how = f"This computer cannot show a code, so the person says it themselves at a terminal: `{line}`."
+    return _error_dict(lead + how, code="CONFIRMATION_REQUIRED", extra={"code_shown": outcome})
 
 
 def _with_printer_report(result: dict[str, Any]) -> dict[str, Any]:
@@ -22306,6 +22364,25 @@ def register_configured_printers() -> None:
             )
 
 
+def refresh_configured_printers() -> None:
+    """Bring the live registry up to date with the printers saved on this computer.
+
+    For an entry point that stays up while its owner saves a printer from
+    another program (the web bridge): a printer saved since this process
+    started joins the registry under the names a fresh start would give
+    it.  Additive, like :func:`register_configured_printers`: a printer
+    already registered is left as it is, and nothing is removed.
+
+    The default printer's own settings are read again only while this
+    process has no default printer.  One it has already resolved keeps its
+    connection and the model its safety limits are read from, together,
+    until the process restarts.
+    """
+    if not _PRINTER_HOST and _adapter is None:
+        _reload_env_config()
+    register_configured_printers()
+
+
 
 def _install_goal_argument_note() -> bool:
     """Attach :mod:`kiln.goal_argument`'s reply note to every tool call."""
@@ -22695,6 +22772,15 @@ def _start() -> None:
         sharing_nudge.install(mcp)
     except Exception:
         logger.debug("sharing question not installed", exc_info=True)
+
+    # What a real print taught Kiln about the person's printer, said once on
+    # the next result (kiln.head_moves learns it; kiln.bench keeps it).
+    try:
+        from kiln import learned_notice
+
+        learned_notice.install(mcp)
+    except Exception:
+        logger.debug("what a print taught is not said", exc_info=True)
 
     # The onboarding pointer, same surface and same reasoning: agents are
     # told to call get_started() first and measurably skip it, and a

@@ -56,6 +56,9 @@ REFERENCE_DATA_FILES: dict[str, str] = {
         "(only printers that have such a rule)"
     ),
     "design_templates.json": "parametric template definitions, keyed by template",
+    "maker_upgrades.json": (
+        "upgrades a printer's maker sells, keyed by upgrade id: the model each is fitted to and what it then is"
+    ),
     "printer_support.json": (
         "printers Kiln has no connection to yet or has not tried on hardware, keyed by printer id "
         "(only printers whose support is not the ordinary case)"

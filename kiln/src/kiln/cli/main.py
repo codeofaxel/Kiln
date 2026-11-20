@@ -2085,6 +2085,47 @@ def sharing_off() -> None:
         click.echo(f"  {line}")
 
 
+@sharing.group(name="routines")
+def sharing_routines() -> None:
+    """Share your printer's own routines from your print files (off until you say yes)."""
+
+
+@sharing_routines.command(name="on")
+def sharing_routines_on() -> None:
+    """Share your printer's own routines from your print files (asks you to confirm)."""
+    from kiln.sharing_consent import record_routines_answer
+    from kiln.sharing_nudge import ROUTINES_SHARE, routines_question
+    from kiln.sliced_routines import kept_printer_name
+
+    # The person's consent, so it is confirmed at a terminal they are sitting
+    # at; a program running Kiln has no one to confirm and is refused.
+    if not _sharing_confirmable():
+        click.echo(
+            "Sharing your printer's routines needs you to confirm, so run this yourself in a "
+            "terminal.  Nothing was changed.",
+            err=True,
+        )
+        raise SystemExit(1)
+    question = routines_question(kept_printer_name() or "printer")
+    click.echo(question["title"])
+    click.echo(question["body"])
+    click.echo(question["privacy"])
+    if not click.confirm(ROUTINES_SHARE + "?", default=False):
+        click.echo("Left as it was.")
+        return
+    record_routines_answer(True, via="cli-confirmed")
+    click.echo("Your printer's routines will be shared. Thank you.")
+
+
+@sharing_routines.command(name="off")
+def sharing_routines_off() -> None:
+    """Never share your printer's routines."""
+    from kiln.sharing_consent import record_routines_answer
+
+    record_routines_answer(False, via="cli")
+    click.echo("Your printer's routines stay on this computer, and Kiln won't ask again.")
+
+
 @sharing.command(name="status")
 def sharing_status() -> None:
     """Show what this install shares, and why."""
@@ -4775,6 +4816,13 @@ def use(name: str) -> None:
     help="The bed size its maker publishes, XxYxZ in mm, for a printer Kiln does not list (e.g. 250x220x270).",
 )
 @click.option("--bed-source", "bed_source", help="Where that bed size came from: the maker's page or manual.")
+@click.option(
+    "--owner-says-so",
+    "owner_says_so",
+    is_flag=True,
+    help="It is this model although its serial number names another (or a maker's upgrade kit is fitted). "
+    "You confirm at this terminal.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def set_model(
     model: str | None,
@@ -4784,6 +4832,7 @@ def set_model(
     replace: bool,
     bed: str | None,
     bed_source: str | None,
+    owner_says_so: bool,
     json_mode: bool,
 ) -> None:
     """Tell Kiln which printer model a saved printer is.
@@ -4805,11 +4854,17 @@ def set_model(
             bed_mm = [float(p) for p in parts]
         except ValueError:
             bed_mm = bed  # the door words the refusal
-    result = set_printer_model(
-        model, printer_make=printer_make, slicer_file=slicer_file, printer_name=printer_name, replace=replace,
-        # A person typing the size and its source at a terminal is the yes.
-        bed_mm=bed_mm, bed_source=bed_source, bed_confirmed=bed is not None,
-    )
+    def _call(said_by: dict | None = None) -> dict:
+        return set_printer_model(
+            model, printer_make=printer_make, slicer_file=slicer_file, printer_name=printer_name, replace=replace,
+            # A person typing the size and its source at a terminal is the yes.
+            bed_mm=bed_mm, bed_source=bed_source, bed_confirmed=bed is not None,
+            owner_says_so=owner_says_so, said_by=said_by,
+        )
+
+    result = _call()
+    if result.get("code") == "OWNER_MUST_SAY_SO":
+        result = _owner_says_so_at_terminal(result, _call)
     if json_mode:
         click.echo(json.dumps(result, indent=2))
         if not result["success"]:
@@ -4818,6 +4873,27 @@ def set_model(
     if not result["success"]:
         raise click.ClickException(result["error"])
     click.echo(result["message"])
+
+
+def _owner_says_so_at_terminal(result: dict, call: Any) -> dict:
+    """The owner's statement *result* asks for, taken from a person at this
+    terminal who reads it and types the printer's name -- the proof
+    ``kiln consent window --always`` takes.  Anything else records nothing."""
+    from kiln.consent_windows import person_at_terminal
+    from kiln.print_consent import SOURCE_TERMINAL
+    from kiln.printer_setup import person_said
+
+    target = str(result.get("printer") or "")
+    if not person_at_terminal():
+        return {**result, "error": (
+            f"Only {target}'s owner can say this, at a terminal: {result.get('question')}.  Nothing was changed."
+        )}
+    click.echo(f"You are about to record that {result.get('question')}.")
+    click.echo("Kiln will then plan this printer's moves and check its prints as that model.")
+    typed = click.prompt(f"Type the printer's name ({target}) to record it", default="", show_default=False)
+    if typed.strip().lower() != target.strip().lower():
+        return {**result, "error": "That is not this printer's name; nothing was recorded."}
+    return call(person_said(SOURCE_TERMINAL))
 
 
 @cli.command("remove")
@@ -12061,6 +12137,23 @@ def _doctor_homing_how(adapter: Any) -> tuple[str, bool]:
     ), True
 
 
+def _doctor_learn(adapter: Any, check: dict[str, Any], gaps: tuple[str, ...]) -> dict[str, Any]:
+    """A checkup line that warns about *gaps* carries the one offer of a
+    lesson that can teach them (:func:`kiln.bench.offer_for`), when there is
+    one; otherwise the line is returned as it was."""
+    if not check.get("warn"):
+        return check
+    try:
+        from kiln.bench import offer_for
+
+        found = offer_for(adapter, list(gaps), "setup_check")
+    except Exception:  # noqa: BLE001 -- an offer never fails a checkup
+        found = None
+    if found:
+        check = {**check, "learn": found, "detail": f"{check['detail']} -- {found['sentence']}"}
+    return check
+
+
 def _doctor_camera_check(printer: str, adapter: Any) -> dict[str, Any] | None:
     """The doctor's ``camera`` line for *adapter*, or ``None`` when its camera needs no add-on.
 
@@ -12351,8 +12444,13 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                     resolve_adapter_model,
                 )
 
+                from kiln.printer_model_check import statement_line
+
                 conflict = detect_identity_conflict(verify_adapter)
-                if conflict is not None:
+                settled = statement_line(verify_adapter, str(ctx.obj.get("printer") or printer_cfg.get("name") or ""))
+                if conflict is not None and settled is not None:
+                    checks.append({"name": "printer_model", "ok": True, "warn": True, "detail": settled})
+                elif conflict is not None:
                     checks.append(
                         {
                             "name": "printer_model",
@@ -12399,7 +12497,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                     # the chute or extrude in place, and whether wipe_nozzle
                     # will run or refuse.
                     where, warn = _doctor_filament_where(verify_adapter)
-                    checks.append({
+                    checks.append(_doctor_learn(verify_adapter, {
                         "name": "filament_handling",
                         "ok": True,
                         "warn": warn,
@@ -12408,7 +12506,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                             "(kiln filament …, or the load_filament / "
                             f"unload_filament / purge_filament tools); {where}"
                         ),
-                    })
+                    }, ("wipe", "purge")))
                 else:
                     checks.append({
                         "name": "filament_handling",
@@ -12436,7 +12534,9 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
             #     park the tool refuses.
             try:
                 detail, warn = _doctor_homing_how(verify_adapter)
-                checks.append({"name": "homing", "ok": True, "warn": warn, "detail": detail})
+                checks.append(_doctor_learn(
+                    verify_adapter, {"name": "homing", "ok": True, "warn": warn, "detail": detail}, ("home", "park"),
+                ))
             except Exception as exc:
                 logger.debug("Homing check failed: %s", exc)
 

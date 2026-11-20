@@ -13,6 +13,11 @@ Each switch reads one of three settings:
 * anything else, or unset: on, unless the person turned it off.
 
 The answer is one choice covering both, kept in ``~/.kiln/sharing.json``.
+
+One more choice lives in the same file, asked once on its own: whether to
+share the printer routines Kiln reads from print files sliced for this
+computer's printers (:mod:`kiln.sliced_routines`).  It is off until the
+person says yes (``kiln sharing routines on``); no answer is no.
 """
 
 from __future__ import annotations
@@ -89,4 +94,27 @@ def was_asked() -> bool:
 def mark_asked() -> None:
     data = _read()
     data["asked_at"] = time.time()
+    _write(data)
+
+
+def routines_answer() -> bool | None:
+    """The person's answer about sharing printer routines: ``True`` /
+    ``False``, or ``None`` before they answer (which shares nothing)."""
+    share = _read().get("routines")
+    return share if isinstance(share, bool) else None
+
+
+def record_routines_answer(share: bool, *, via: str) -> None:
+    data = _read()
+    data.update({"routines": bool(share), "routines_answered_at": time.time(), "routines_via": via})
+    _write(data)
+
+
+def routines_asked() -> bool:
+    return bool(_read().get("routines_asked_at"))
+
+
+def mark_routines_asked() -> None:
+    data = _read()
+    data["routines_asked_at"] = time.time()
     _write(data)

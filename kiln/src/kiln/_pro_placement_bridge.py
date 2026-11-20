@@ -59,7 +59,8 @@ Request (``schema: "placement_request/1"``)::
      "suppress": [str] | null,
      "printer_observations": [<printer_motion_observation/1>] | null,   # kiln.bench
      "printer_settings": {"format": "klipper_motion_settings/1", "sections": {...},
-                          "chip": str|null, "unit": str|null} | null}
+                          "chip": str|null, "unit": str|null} | null,
+     "session": bool}               # optional; true only from the guided session (kiln.bench)
 
 ``occupant_gcode`` is the local G-code of what is on the plate when Kiln
 has it (the slice ledger joins the printer-side name to the file Kiln
@@ -78,7 +79,8 @@ Verdict (``schema: "placement_verdict/1"``)::
      "occupancy": {"kind": "kiln.plate_occupancy.v1", "bed_mm", "occupied",
                    "proposed", "source": "gcode"|"record_box"},
      "record": {"printer_id", "measured", "source", "quiet_start",
-                "machine_blocks": {block: "read" | why-not}},
+                "machine_blocks": {block: "read" | why-not},
+                "teach": [str]},   # a session's request only: what it can teach
      "start": {"mode": "quiet_start", "ok", "available", "refusals",
                "clear_z_mm", "lift_floor_mm", "travel_to_mm", "first_layer_z_mm",
                "approach_mm", "home_xy_gcode", "flags", "switched_off",
@@ -354,6 +356,7 @@ def request_for(
     from kiln import plate_state
     from kiln.bench import observations_for_request
     from kiln.machine_motion import motion_settings_of
+    from kiln.sliced_routines import routines_for_request
 
     state = plate_state.read(adapter)
     job = state.job
@@ -390,7 +393,7 @@ def request_for(
     else:
         placement_value = str(placement or "auto")
         who = placed_by or (placement_value if placement_value in ("keep", "auto") else "agent")
-    return {
+    doc: dict[str, Any] = {
         "schema": REQUEST_SCHEMA,
         "printer_id": str(printer_id or "").strip().lower(),
         "serial": _serial_of(adapter),
@@ -413,6 +416,13 @@ def request_for(
         # owner's numbers for THIS printer at once.
         "printer_observations": observations_for_request(adapter),
     }
+    # The printer's own routines from a file sliced for it
+    # (:mod:`kiln.sliced_routines`), for THIS printer's verdict; the key is
+    # sent only when there are some.
+    routines = routines_for_request(adapter)
+    if routines:
+        doc["printer_routines"] = routines
+    return doc
 
 
 # ---------------------------------------------------------------------------
