@@ -12089,6 +12089,23 @@ def _doctor_homing_how(adapter: Any) -> tuple[str, bool]:
     ), True
 
 
+def _doctor_learn(adapter: Any, check: dict[str, Any], gaps: tuple[str, ...]) -> dict[str, Any]:
+    """A checkup line that warns about *gaps* carries the one offer of a
+    lesson that can teach them (:func:`kiln.bench.offer_for`), when there is
+    one; otherwise the line is returned as it was."""
+    if not check.get("warn"):
+        return check
+    try:
+        from kiln.bench import offer_for
+
+        found = offer_for(adapter, list(gaps), "setup_check")
+    except Exception:  # noqa: BLE001 -- an offer never fails a checkup
+        found = None
+    if found:
+        check = {**check, "learn": found, "detail": f"{check['detail']} -- {found['sentence']}"}
+    return check
+
+
 def _doctor_camera_check(printer: str, adapter: Any) -> dict[str, Any] | None:
     """The doctor's ``camera`` line for *adapter*, or ``None`` when its camera needs no add-on.
 
@@ -12432,7 +12449,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                     # the chute or extrude in place, and whether wipe_nozzle
                     # will run or refuse.
                     where, warn = _doctor_filament_where(verify_adapter)
-                    checks.append({
+                    checks.append(_doctor_learn(verify_adapter, {
                         "name": "filament_handling",
                         "ok": True,
                         "warn": warn,
@@ -12441,7 +12458,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                             "(kiln filament …, or the load_filament / "
                             f"unload_filament / purge_filament tools); {where}"
                         ),
-                    })
+                    }, ("wipe", "purge")))
                 else:
                     checks.append({
                         "name": "filament_handling",
@@ -12469,7 +12486,9 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
             #     park the tool refuses.
             try:
                 detail, warn = _doctor_homing_how(verify_adapter)
-                checks.append({"name": "homing", "ok": True, "warn": warn, "detail": detail})
+                checks.append(_doctor_learn(
+                    verify_adapter, {"name": "homing", "ok": True, "warn": warn, "detail": detail}, ("home", "park"),
+                ))
             except Exception as exc:
                 logger.debug("Homing check failed: %s", exc)
 

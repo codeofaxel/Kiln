@@ -298,6 +298,35 @@ def test_a_motion_outcome_reaches_the_dashboard_complete(pipeline):
     assert sent[1]["p_details"]["previous_day"]["motion_outcomes"] == expected
 
 
+def test_the_lesson_funnel_reaches_the_dashboard_complete(pipeline):
+    """How far the lessons that teach Kiln a printer get has to survive the
+    whole chain: the offer, the start and what was learned all happen on
+    this machine, and nothing server-side sees an offer or a "later".  Same
+    day, and across midnight in the complete-day block -- and no printer
+    model rides in it."""
+    from kiln import bench
+
+    sent = pipeline
+
+    bench.count("offered", "motion", "print_beside")
+    bench.count("started", "motion")
+    bench.count("learned", "motion", "real_print")
+    bench.count("held", "limits", "signin")
+    expected = {
+        "offered|motion|print_beside": 1,
+        "started|motion": 1,
+        "learned|motion|real_print": 1,
+        "held|limits|signin": 1,
+    }
+
+    heartbeat._send_heartbeat()
+    assert sent[0]["p_details"]["bench_funnel"] == expected
+
+    _FakeDate._today = real_date(2026, 7, 26)
+    heartbeat._send_heartbeat()
+    assert sent[1]["p_details"]["previous_day"]["bench_funnel"] == expected
+
+
 def test_bridge_running_ships_in_the_payload(pipeline):
     """The field that says whether print hours can recover on their own.
 

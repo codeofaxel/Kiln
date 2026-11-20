@@ -210,9 +210,12 @@ def run_filament_op(
         # rides beside the sentence, never inside it -- the same fields
         # the homing door carries.
         why = getattr(exc, "why_fields", None)
+        from kiln import bench
+
         return _srv._error_dict(
             str(exc), code="UNSUPPORTED",
-            extra={"outcome": "failed", **(why if isinstance(why, dict) else {})},
+            extra={"outcome": "failed", **(why if isinstance(why, dict) else {}),
+                   **bench.offer_fields(adapter, [action], "motion_refusal")},
         )
     except PlateClearRequired as exc:
         # The plate record (or the plan's own "this presses the plate")

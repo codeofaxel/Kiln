@@ -937,6 +937,13 @@ def _build_instructions() -> str:
     if not _CRAFTCLOUD_API_KEY:
         parts.append("ORDERING: " + (ORDERING_STEPS if is_fresh else AGENT_ORDERING_LINE))
 
+    # --- Getting to know a printer ---
+    # After CONSENT for the same reason; get_started carries it for clients
+    # that cut before this.
+    from kiln.bench import AGENT_LEARN_LINE
+
+    parts.append("PRINTER KNOWLEDGE: " + AGENT_LEARN_LINE)
+
     # --- Monitoring & reporting ---
     parts.append(
         "MONITORING: During print jobs, use `monitor_print()` for status — "
@@ -6108,6 +6115,11 @@ def _install_print_lifecycle_hooks() -> None:
     register_print_started_hook(_spawn_print_watchdog)
     register_print_ended_hook(_retire_print_watchdog)
     register_print_ended_hook(_note_plate_after_print_ended_by_name)
+    # What a printer's first print left for its first lesson, offered once
+    # on the next reply (kiln.head_moves.print_ended).
+    from kiln.head_moves import print_ended as _bench_after_print
+
+    register_print_ended_hook(_bench_after_print)
     _print_lifecycle_hooks_installed = True
 
 
@@ -14882,22 +14894,6 @@ def register_printer(
             result["persisted"] = True
             result["config_path"] = persisted_path
 
-        # Once, for a model whose motion record has blanks: the offer of the
-        # short session that fills them (kiln.bench).  Never twice.  Not for
-        # an address that just failed to answer: the offer reads the printer's
-        # own settings, which there means waiting out every retry (3 x 30 s on
-        # Moonraker) to learn nothing, and offline is not a reason to nag --
-        # the offer stays unspent for a registration the printer answers.
-        if url_answered is not False:
-            try:
-                from kiln.bench import offer_after_registration
-
-                _offer = offer_after_registration(adapter, name)
-                if _offer is not None:
-                    result["bench_offer"] = _offer
-            except Exception:
-                logger.debug("bench offer after registration skipped", exc_info=True)
-
         # Does the camera answer?  Asked once, here, without a frame: the
         # printer's own camera only when the printer's address answered (an
         # offline printer is not asked twice), and a camera the user supplied
@@ -22629,6 +22625,15 @@ def _start() -> None:
         sharing_nudge.install(mcp)
     except Exception:
         logger.debug("sharing question not installed", exc_info=True)
+
+    # What a real print taught Kiln about the person's printer, said once on
+    # the next result (kiln.head_moves learns it; kiln.bench keeps it).
+    try:
+        from kiln import learned_notice
+
+        learned_notice.install(mcp)
+    except Exception:
+        logger.debug("what a print taught is not said", exc_info=True)
 
     # The onboarding pointer, same surface and same reasoning: agents are
     # told to call get_started() first and measurably skip it, and a
