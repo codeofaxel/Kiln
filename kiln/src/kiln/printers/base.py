@@ -2352,10 +2352,21 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "plate-state start note failed", exc_info=True
                 )
+            # What this print is, asked of the one resolver once: the nozzle
+            # count below and the outcome row both read this answer.
+            identity: dict[str, Any] = {}
+            try:
+                from kiln.auto_record_hook import print_identity_at_start
+
+                identity = print_identity_at_start(self, kwargs, file_name)
+            except Exception:  # noqa: BLE001 — identity never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug("print identity not read at start", exc_info=True)
             try:
                 from kiln._pro_nozzle_bridge import record_print_odometer
 
-                record_print_odometer(self.name, file_name)
+                record_print_odometer(self.name, file_name, lineage_id=identity.get("lineage_id"))
             except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
                 import logging as _logging
 
@@ -2378,11 +2389,7 @@ class PrinterAdapter(ABC):
             # Open the outcome row NOW, while we can still see the print
             opened = None
             try:
-                from kiln.auto_record_hook import (
-                    clear_cancel_intent,
-                    open_pending_outcome,
-                    print_identity_at_start,
-                )
+                from kiln.auto_record_hook import clear_cancel_intent, open_pending_outcome
 
                 # A cancel asked for before this print has nothing to say about this print
                 clear_cancel_intent(outcome_printer_name(self))
@@ -2395,7 +2402,7 @@ class PrinterAdapter(ABC):
                     material_type=(
                         str(commanded_material) if commanded_material else None
                     ),
-                    identity=print_identity_at_start(self, kwargs, file_name),
+                    identity=identity,
                 )
                 from kiln.learned_print_time import note_start_estimate
 

@@ -1740,7 +1740,8 @@ class TestTheOwnerMaySayPrintAnyway:
         invented_printer(None)
         owner_says(None, "brass")
         result = self._slice(tmp_path, _slicer_that_writes("", {}), material="PLA-CF", soft_nozzle_confirmed=True)
-        kept = print_lineage.resolve(result.output_path, local_paths=[result.output_path])["soft_nozzle"]
+        answer = print_lineage.resolve(result.output_path, local_paths=[result.output_path])
+        kept = answer["soft_nozzle"]
         assert kept["confirmed_by"] == "owner" and kept["at"] > 0
         assert kept["filaments"] == [{"filament": 1, "material": "PLA-CF"}]
         assert kept["nozzles"] == [{"position": None, "material": "brass"}]
@@ -1748,13 +1749,16 @@ class TestTheOwnerMaySayPrintAnyway:
         sent: list[dict] = []
         monkeypatch.setattr(server, "_pro_api_call", lambda tool, **kw: sent.append({"tool": tool, **kw}) or {})
         monkeypatch.setattr(bridge, "_service_down_until", 0.0)
-        bridge._served_odometer_report("invented_two", 5.0, "start:1", file_name=result.output_path)
+        run = bridge.abrasive_run_of(answer["lineage_id"])
+        bridge._served_odometer_report("invented_two", 5.0, "start:1", abrasive_run=run)
         assert sent[0]["tool"] == bridge.ODOMETER_TOOL
         assert sent[0]["abrasive_run"] == {"filaments": kept["filaments"], "nozzles": kept["nozzles"]}
 
         (tmp_path / "plain").mkdir()
         plain = self._slice(tmp_path / "plain", _slicer_that_writes("", {}), material="PLA")
-        bridge._served_odometer_report("invented_two", 5.0, "start:2", file_name=plain.output_path)
+        other = print_lineage.resolve(plain.output_path, local_paths=[plain.output_path])["lineage_id"]
+        assert bridge.abrasive_run_of(other) is None
+        bridge._served_odometer_report("invented_two", 5.0, "start:2", abrasive_run=bridge.abrasive_run_of(other))
         assert "abrasive_run" not in sent[1]
 
     def test_the_print_row_carries_the_word_to_the_account(self, tmp_path, invented_printer, owner_says):

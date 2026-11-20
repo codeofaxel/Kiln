@@ -841,6 +841,7 @@ def record_print_odometer(
     file_name: str | None,
     *,
     grams: float | None = None,
+    lineage_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Advance the nozzle odometer for one started print.
 
@@ -859,18 +860,18 @@ def record_print_odometer(
     and the print is simply not counted; nothing waits and nothing raises.
 
     A print of a slice the owner said to print anyway with an abrasive
-    filament through a nozzle that is not wear-resistant
-    (:func:`abrasive_run_of`) carries that with its grams, so the nozzle's
-    record keeps it.
+    filament through a nozzle that is not wear-resistant carries that with
+    its grams, so the nozzle's record keeps it: *lineage_id* is the slice
+    record the start resolved the file to (:func:`abrasive_run_of`).
     """
+    run = abrasive_run_of(lineage_id)
     try:
         from kiln_pro.nozzle_intelligence.odometer import record_print_filament
     except ImportError:
         record_print_filament = None
     if record_print_filament is None:
-        _report_print_grams(printer_id, file_name, grams)
+        _report_print_grams(printer_id, file_name, grams, abrasive_run=run)
         return None
-    run = abrasive_run_of(file_name)
     try:
         try:
             return record_print_filament(
@@ -889,32 +890,28 @@ def record_print_odometer(
         return None
 
 
-def abrasive_run_of(file_name: str | None) -> dict[str, Any] | None:
-    """What the owner said to print anyway in the print file *file_name*:
-    ``{"filaments": [{"filament", "material"}], "nozzles": [{"position",
-    "material"}]}`` from the slice's record on this computer
-    (:func:`kiln.print_lineage.resolve`), or ``None`` for every other
-    print.  Never raises."""
-    if not file_name or not isinstance(file_name, str):
-        return None
+def abrasive_run_of(lineage_id: str | None) -> dict[str, Any] | None:
+    """What the owner said to print anyway in the slice record *lineage_id*
+    (:func:`kiln.print_lineage.soft_nozzle_of`): ``{"filaments": [{"filament",
+    "material"}], "nozzles": [{"position", "material"}]}``, or ``None`` for
+    every other print.  Never raises."""
     try:
-        from kiln import print_lineage
-        from kiln._pro_cutter_bridge import local_sliced_path
+        from kiln.print_lineage import soft_nozzle_of
 
-        local = local_sliced_path(file_name)
-        kept = print_lineage.resolve(
-            file_name, local_paths=[local] if local else [], keep_foreign=False,
-        ).get("soft_nozzle")
+        kept = soft_nozzle_of(lineage_id)
     except Exception:  # noqa: BLE001 -- an unread record is no run
-        logger.debug("abrasive run not read for %s", file_name, exc_info=True)
+        logger.debug("abrasive run not read for %s", lineage_id, exc_info=True)
         return None
     if not isinstance(kept, dict) or not kept.get("filaments") or not kept.get("nozzles"):
         return None
     return {"filaments": list(kept["filaments"]), "nozzles": list(kept["nozzles"])}
 
 
-def _report_print_grams(printer_id: str, file_name: str | None, grams: float | None) -> None:
-    """Send one start's grams to the hosted odometer, off the calling thread."""
+def _report_print_grams(
+    printer_id: str, file_name: str | None, grams: float | None, *, abrasive_run: dict[str, Any] | None = None,
+) -> None:
+    """Send one start's grams to the hosted odometer, off the calling thread,
+    with the owner's word to print anyway that rides it (*abrasive_run*)."""
     if not printer_id or not isinstance(printer_id, str):
         return
     if grams is None:
@@ -931,19 +928,21 @@ def _report_print_grams(printer_id: str, file_name: str | None, grams: float | N
         # One start, one charge; the same file printed again later is
         # another print, so the key carries the moment.
         args=(printer_id, float(grams), f"start:{printer_id}:{file_name}:{time.time():.0f}"),
-        kwargs={"file_name": file_name},
+        kwargs={"abrasive_run": abrasive_run},
         name="kiln-odometer-report", daemon=True,
     ).start()
 
 
-def _served_odometer_report(printer_id: str, grams: float, dedupe_key: str, *, file_name: str | None = None) -> None:
+def _served_odometer_report(
+    printer_id: str, grams: float, dedupe_key: str, *, abrasive_run: dict[str, Any] | None = None,
+) -> None:
     """POST one start's grams to the hosted door, with what the owner said
     to print anyway in that file (:func:`abrasive_run_of`).  Runs off the
     calling thread."""
     global _service_down_until, _service_down_miss
     from kiln.served_answer import classify_answer, classify_transport_error
 
-    run = abrasive_run_of(file_name)
+    run = abrasive_run
     try:
         from kiln.server import _pro_api_call
 

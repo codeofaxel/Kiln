@@ -478,6 +478,48 @@ class TestEveryDoor:
         _fake_adapter().start_print("any.gcode")
         assert asked == ["any.gcode"]
 
+    def test_the_owners_word_reaches_the_nozzle_count_from_that_one_answer(self, home, monkeypatch):
+        """A slice the owner said to print anyway carries its word to the
+        nozzle count with the print's grams, read from the record the start
+        resolved: on a plain install too, where the count is reported on a
+        thread of its own after the template returns, the file is resolved
+        once."""
+        import sys
+        import threading
+
+        from kiln import _pro_nozzle_bridge, print_lineage
+        from kiln import server as srv
+
+        # A plain install: no kiln-pro, nor any part of one already imported.
+        for name in [m for m in sys.modules if m == "kiln_pro" or m.startswith("kiln_pro.")] + ["kiln_pro"]:
+            monkeypatch.setitem(sys.modules, name, None)
+        _, sliced = _slice_here(home, text=GCODE + "; filament used [g] = 3.20\n")
+        print_lineage.note_soft_nozzle(sliced, {
+            "confirmed_by": "owner",
+            "filaments": [{"filament": 1, "material": "PLA-CF"}],
+            "nozzles": [{"position": None, "material": "brass"}],
+        })
+        asked: list[str] = []
+        real = print_lineage.resolve
+        monkeypatch.setattr(print_lineage, "resolve", lambda name, **kw: asked.append(name) or real(name, **kw))
+        sent: list[dict] = []
+        monkeypatch.setattr(
+            srv, "_pro_api_call",
+            lambda tool, *_a, **kw: sent.append({"tool": tool, **kw}) or {"success": True, "status": "ok"},
+        )
+        monkeypatch.setattr(_pro_nozzle_bridge, "_service_down_until", 0.0)
+        _fake_adapter().start_print(sliced)
+        for thread in threading.enumerate():
+            if thread.name == "kiln-odometer-report":
+                thread.join(5)
+        assert asked == [sliced]
+        (report,) = [call for call in sent if call["tool"] == "nozzle_odometer"]
+        assert report["grams"] == pytest.approx(3.2)
+        assert report["abrasive_run"] == {
+            "filaments": [{"filament": 1, "material": "PLA-CF"}],
+            "nozzles": [{"position": None, "material": "brass"}],
+        }
+
     def test_the_contribution_resolver_asks_it_too(self, home, monkeypatch):
         from kiln import community_autofire, print_lineage
 
