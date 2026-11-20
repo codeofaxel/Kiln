@@ -1772,67 +1772,72 @@ def _surface_sums(corners: numpy.ndarray, bed_z: float) -> _SurfaceSums:
 
     Each sum is added face by face in file order, as
     :func:`_surface_sums_by_face` adds it, so the two agree to the bit; this
-    one reads whole arrays.  A face's lean is read by array where it is far
-    from 45 degrees and from the steepest, and one face at a time where it
-    is near either.  A mesh with a corner or a figure that is not a finite
-    number is summed by :func:`_surface_sums_by_face` itself.
+    one reads whole arrays, :data:`_SUM_BLOCK` faces at a time.  A face's
+    lean is read by array where it is far from 45 degrees and from the
+    steepest, and one face at a time where it is near either.  A mesh with a
+    corner or a figure that is not a finite number is summed by
+    :func:`_surface_sums_by_face` itself.
     """
     import numpy as np
 
     if not np.isfinite(corners).all():
         return _surface_sums_by_face(corners.tolist(), bed_z)
-    v0, v1, v2 = corners[:, 0], corners[:, 1], corners[:, 2]
-    e1 = v1 - v0
-    e2 = v2 - v0
-    c0 = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
-    c1 = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
-    c2 = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
-    # float_power is the C library's pow, as Python's ``**`` is, so each
-    # square is the one the face-by-face sum takes, to the bit.
-    area_2 = np.sqrt(np.float_power(c0, 2.0) + np.float_power(c1, 2.0) + np.float_power(c2, 2.0))
-    if not np.isfinite(area_2).all():
-        return _surface_sums_by_face(corners.tolist(), bed_z)
-    tri_area = area_2 / 2.0
-    keep = ~(tri_area < _DEGENERATE_AREA_MM2)
-    v0, v1, v2 = v0[keep], v1[keep], v2[keep]
-    tri_area, area_2, c2 = tri_area[keep], area_2[keep], c2[keep]
-
-    def in_order(terms: Any) -> float:
-        # A running sum from 0.0 adds left to right, as ``+=`` does.
-        return float(np.cumsum(np.concatenate(([0.0], terms)))[-1])
-
-    volume_terms = (
-        v0[:, 0] * (v1[:, 1] * v2[:, 2] - v2[:, 1] * v1[:, 2])
-        - v1[:, 0] * (v0[:, 1] * v2[:, 2] - v2[:, 1] * v0[:, 2])
-        + v2[:, 0] * (v0[:, 1] * v1[:, 2] - v1[:, 1] * v0[:, 2])
-    ) / 6.0
-    centroid = (v0 + v1 + v2) / 3.0
-    sums = _SurfaceSums(
-        volume=in_order(volume_terms),
-        area=in_order(tri_area),
-        cx=in_order(centroid[:, 0] * tri_area),
-        cy=in_order(centroid[:, 1] * tri_area),
-        cz=in_order(centroid[:, 2] * tri_area),
-        degenerate=int((~keep).sum()),
-    )
-
-    nz = c2 / area_2
-    on_bed = (corners[keep][:, :, 2] <= _bed_threshold_z(bed_z)).all(axis=1)
-    lean_of = -nz[(nz < 0) & ~on_bed]
-    if not len(lean_of):
-        return sums
+    threshold = _bed_threshold_z(bed_z)
+    running = [0.0] * 5  # volume, area, cx, cy, cz
+    sums = _SurfaceSums()
 
     def lean(x: float) -> float:
         return 90.0 - math.degrees(math.acos(max(-1.0, min(1.0, x))))
 
-    approx = 90.0 - np.degrees(np.arccos(np.clip(lean_of, -1.0, 1.0)))
-    near = np.abs(approx - 45.0) <= _LEAN_RECHECK_DEG
-    sums.overhang_count = int((approx[~near] > 45.0).sum()) + sum(
-        1 for x in lean_of[near].tolist() if lean(x) > 45
-    )
-    steepest = approx >= approx.max() - _LEAN_RECHECK_DEG
-    sums.max_overhang = max(0.0, *(lean(x) for x in lean_of[steepest].tolist()))
+    for start in range(0, len(corners), _SUM_BLOCK):
+        block = corners[start:start + _SUM_BLOCK]
+        v0, v1, v2 = block[:, 0], block[:, 1], block[:, 2]
+        e1 = v1 - v0
+        e2 = v2 - v0
+        c0 = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+        c1 = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+        c2 = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+        # float_power is the C library's pow, as Python's ``**`` is, so each
+        # square is the one the face-by-face sum takes, to the bit.
+        area_2 = np.sqrt(np.float_power(c0, 2.0) + np.float_power(c1, 2.0) + np.float_power(c2, 2.0))
+        if not np.isfinite(area_2).all():
+            return _surface_sums_by_face(corners.tolist(), bed_z)
+        tri_area = area_2 / 2.0
+        keep = ~(tri_area < _DEGENERATE_AREA_MM2)
+        sums.degenerate += int((~keep).sum())
+        v0, v1, v2 = v0[keep], v1[keep], v2[keep]
+        tri_area, area_2, c2 = tri_area[keep], area_2[keep], c2[keep]
+        volume_terms = (
+            v0[:, 0] * (v1[:, 1] * v2[:, 2] - v2[:, 1] * v1[:, 2])
+            - v1[:, 0] * (v0[:, 1] * v2[:, 2] - v2[:, 1] * v0[:, 2])
+            + v2[:, 0] * (v0[:, 1] * v1[:, 2] - v1[:, 1] * v0[:, 2])
+        ) / 6.0
+        centroid = (v0 + v1 + v2) / 3.0
+        terms = (volume_terms, tri_area, centroid[:, 0] * tri_area,
+                 centroid[:, 1] * tri_area, centroid[:, 2] * tri_area)
+        for k, values in enumerate(terms):
+            # A running sum carried from the faces before adds left to
+            # right, as ``+=`` does.
+            running[k] = float(np.cumsum(np.concatenate(([running[k]], values)))[-1])
+
+        nz = c2 / area_2
+        on_bed = (block[keep][:, :, 2] <= threshold).all(axis=1)
+        lean_of = -nz[(nz < 0) & ~on_bed]
+        if not len(lean_of):
+            continue
+        approx = 90.0 - np.degrees(np.arccos(np.clip(lean_of, -1.0, 1.0)))
+        near = np.abs(approx - 45.0) <= _LEAN_RECHECK_DEG
+        sums.overhang_count += int((approx[~near] > 45.0).sum()) + sum(
+            1 for x in lean_of[near].tolist() if lean(x) > 45
+        )
+        steepest = approx >= approx.max() - _LEAN_RECHECK_DEG
+        sums.max_overhang = max(sums.max_overhang, *(lean(x) for x in lean_of[steepest].tolist()))
+    sums.volume, sums.area, sums.cx, sums.cy, sums.cz = running
     return sums
+
+
+#: Faces :func:`_surface_sums` reads at once.
+_SUM_BLOCK: int = 1 << 18
 
 
 def _surface_sums_by_face(
@@ -7194,6 +7199,9 @@ _CREASE_CHECK_MIN_FACETS: int = 256
 #: own sorted members, so no small cluster pays for the whole mesh.
 _CREASE_MASK_SHARE: int = 64
 
+#: Creases :func:`_creases_that_may_grow` checks at once.
+_CREASE_CHECK_BLOCK: int = 1 << 18
+
 
 def _creases_that_may_grow(
     cluster: list[int], across: _ClusterEdges, cos_threshold: float,
@@ -7235,25 +7243,27 @@ def _creases_that_may_grow(
     slots = (seeds[:, None] * 3 + np.arange(3)).reshape(-1)
     across_slot = other[slots]
     slots = slots[(across_slot >= 0) & member(across_slot) & fold[slots]]
-    seed, o = slots // 3, other[slots]
-    axis = dirs[slots]
-
-    def parallel(at_slots: np.ndarray) -> np.ndarray:
-        d = dirs[at_slots]
-        return np.abs(d[:, 0] * axis[:, 0] + d[:, 1] * axis[:, 1] + d[:, 2] * axis[:, 2]) >= parallel_cos
-
     grows = np.zeros(len(slots), dtype=bool)
-    for at in (seed, o):
-        for j in range(3):
-            edge = at * 3 + j
-            nxt = other[edge]
-            on = np.maximum(nxt, 0)
-            crossed = (nxt >= 0) & member(nxt) & (nxt != seed) & (nxt != o)
-            folds_along = np.zeros(len(slots), dtype=bool)
-            for k in range(3):
-                beyond = on * 3 + k
-                folds_along |= (other[beyond] >= 0) & fold[beyond] & parallel(beyond)
-            grows |= crossed & ((fold[edge] & parallel(edge)) | (flat[edge] & folds_along))
+    for start in range(0, len(slots), _CREASE_CHECK_BLOCK):
+        block = slots[start:start + _CREASE_CHECK_BLOCK]
+        seed, o = block // 3, other[block]
+        axis = dirs[block]
+
+        def parallel(at_slots: np.ndarray, axis: np.ndarray = axis) -> np.ndarray:
+            d = dirs[at_slots]
+            return np.abs(d[:, 0] * axis[:, 0] + d[:, 1] * axis[:, 1] + d[:, 2] * axis[:, 2]) >= parallel_cos
+
+        for at in (seed, o):
+            for j in range(3):
+                edge = at * 3 + j
+                nxt = other[edge]
+                on = np.maximum(nxt, 0)
+                crossed = (nxt >= 0) & member(nxt) & (nxt != seed) & (nxt != o)
+                folds_along = np.zeros(len(block), dtype=bool)
+                for k in range(3):
+                    beyond = on * 3 + k
+                    folds_along |= (other[beyond] >= 0) & fold[beyond] & parallel(beyond)
+                grows[start:start + len(block)] |= crossed & ((fold[edge] & parallel(edge)) | (flat[edge] & folds_along))
     return slots[grows].tolist()
 
 

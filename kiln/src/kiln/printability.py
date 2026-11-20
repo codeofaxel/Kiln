@@ -1369,8 +1369,10 @@ def _signed_volume_total(
     """
     # det([a; b; c]) / 6 = signed volume of tetrahedron (origin, a, b, c),
     # added in triangle order from 0.0, as a running sum adds them.
-    terms = _signed_volumes(triangles, None)
-    return float(np.cumsum(np.concatenate(([0.0], terms)))[-1])
+    total = 0.0
+    for terms in _signed_volume_blocks(triangles, None):
+        total = float(np.cumsum(np.concatenate(([total], terms)))[-1])
+    return total
 
 
 def _bbox_volume(
@@ -5540,6 +5542,7 @@ class _InsideMeshTest:
 def _likely_bridge_substituted(
     overhang_triangles: list[tuple[tuple[float, ...], ...]],
     all_triangles: list[tuple[tuple[float, ...], ...]],
+    tris: np.ndarray | None = None,
 ) -> bool:
     """Whether a near-horizontal overhang is a genuine spannable bridge
     a slicer fills on its own — rather than a cantilever or island that
@@ -5568,7 +5571,8 @@ def _likely_bridge_substituted(
     registers.
 
     The caller still gates this behind a near-horizontal overhang check
-    before acting on it.
+    before acting on it.  *tris* is *all_triangles* as a ``(T, 3, 3)`` array
+    when the caller holds one.
     """
     if not overhang_triangles or not all_triangles:
         return False
@@ -5587,7 +5591,8 @@ def _likely_bridge_substituted(
     if overhang_height <= 1e-6:
         return False  # overhang sits on the bed — nothing to bridge over
 
-    tris = np.asarray(all_triangles, dtype=np.float64)
+    if tris is None or tris.ndim != 3 or tris.shape[1:] != (3, 3) or tris.shape[0] != len(all_triangles):
+        tris = np.asarray(all_triangles, dtype=np.float64)
     if tris.ndim != 3 or tris.shape[1:] != (3, 3):
         return False
 
@@ -5666,19 +5671,25 @@ def _overhangs_in_order(
             yield tri, angle
 
 
-def _signed_volumes(
+def _signed_volume_blocks(
     triangles: list[tuple[tuple[float, ...], ...]], tris: np.ndarray | None,
-) -> list[float]:
-    """:func:`_signed_volume_of_triangle` of each face, in order, read from
-    whole arrays by the same arithmetic, so each is the helper's own."""
+) -> Iterable[np.ndarray]:
+    """:func:`_signed_volume_of_triangle` of each face, in order, a block of
+    faces at a time, read from arrays by the same arithmetic, so each is the
+    helper's own."""
     if tris is None or tris.ndim != 3 or tris.shape[1:] != (3, 3) or tris.shape[0] != len(triangles):
-        tris = _triangle_array(triangles)
-    v1, v2, v3 = tris[:, 0], tris[:, 1], tris[:, 2]
-    return ((
-        v1[:, 0] * (v2[:, 1] * v3[:, 2] - v2[:, 2] * v3[:, 1])
-        + v1[:, 1] * (v2[:, 2] * v3[:, 0] - v2[:, 0] * v3[:, 2])
-        + v1[:, 2] * (v2[:, 0] * v3[:, 1] - v2[:, 1] * v3[:, 0])
-    ) / 6.0).tolist()
+        tris = None
+    for start in range(0, len(triangles), _LAYER_FACE_BLOCK):
+        block = (
+            _triangle_array(triangles[start:start + _LAYER_FACE_BLOCK])
+            if tris is None else tris[start:start + _LAYER_FACE_BLOCK]
+        )
+        v1, v2, v3 = block[:, 0], block[:, 1], block[:, 2]
+        yield (
+            v1[:, 0] * (v2[:, 1] * v3[:, 2] - v2[:, 2] * v3[:, 1])
+            + v1[:, 1] * (v2[:, 2] * v3[:, 0] - v2[:, 0] * v3[:, 2])
+            + v1[:, 2] * (v2[:, 0] * v3[:, 1] - v2[:, 1] * v3[:, 0])
+        ) / 6.0
 
 
 def _analyze_supports(
@@ -5747,7 +5758,9 @@ def _analyze_supports(
     support_regions.sort(key=lambda r: r["volume_mm3"], reverse=True)
 
     # Estimate model volume for percentage calculation.
-    model_volume = abs(sum(_signed_volumes(triangles, tris)))
+    model_volume = abs(sum(itertools.chain.from_iterable(
+        terms.tolist() for terms in _signed_volume_blocks(triangles, tris)
+    )))
 
     # Clamp at 100% — the naive support estimate can exceed the model
     # volume on geometries with large horizontal overhangs above small
@@ -5758,7 +5771,7 @@ def _analyze_supports(
     support_pct = (support_volume / model_volume * 100.0) if model_volume > 0 else 0.0
     support_pct = min(100.0, support_pct)
 
-    bridge_substituted = _likely_bridge_substituted(ceiling_tris, triangles)
+    bridge_substituted = _likely_bridge_substituted(ceiling_tris, triangles, tris)
 
     return SupportAnalysis(
         estimated_support_volume_mm3=round(support_volume, 2),
@@ -6024,13 +6037,16 @@ def _flat_faces(
     """``(triangle, area)`` of each face of *triangles*, in order, that lies
     within about 18 degrees of level (its unit normal's z past 0.95 either
     way); each area is :func:`_triangle_area`'s own."""
-    reading = _face_leans(triangles, None, None, 0.0)
-    if reading is None:
-        for tri in triangles:
-            if abs(_normalize(_triangle_normal(tri[0], tri[1], tri[2]))[2]) > 0.95:
-                yield tri, _triangle_area(tri[0], tri[1], tri[2])
-        return
-    level = np.flatnonzero(np.abs(reading[1]) > 0.95)
+    level_parts = []
+    for start in range(0, len(triangles), _LAYER_FACE_BLOCK):
+        reading = _face_leans(triangles[start:start + _LAYER_FACE_BLOCK], None, None, 0.0)
+        if reading is None:
+            for tri in triangles:
+                if abs(_normalize(_triangle_normal(tri[0], tri[1], tri[2]))[2]) > 0.95:
+                    yield tri, _triangle_area(tri[0], tri[1], tri[2])
+            return
+        level_parts.append(start + np.flatnonzero(np.abs(reading[1]) > 0.95))
+    level = np.concatenate(level_parts) if level_parts else np.empty(0, dtype=np.int64)
     if not len(level):
         return
     tris = _triangle_array([triangles[i] for i in level.tolist()])
@@ -6285,14 +6301,34 @@ def _wall_area_by_layer(
     layers it spans by its height in each (a face with next to no height
     goes whole to the layer it sits in).
 
-    Read from whole arrays, each share and each layer's running sum taken
-    by the same arithmetic in the same order as
-    :func:`_wall_area_by_layer_by_face`, so the two agree to the bit; a mesh
-    with a figure that is not a finite number is read by that one.
+    Read from whole arrays, :data:`_LAYER_FACE_BLOCK` faces at a time, each
+    share and each layer's running sum taken by the same arithmetic in the
+    same order as :func:`_wall_area_by_layer_by_face`, so the two agree to
+    the bit; a mesh with a figure that is not a finite number is read by
+    that one.
     """
-    tris = _triangle_array(triangles)
+    areas = np.zeros(num_layers)
+    for start in range(0, len(triangles), _LAYER_FACE_BLOCK):
+        if not _add_wall_area(areas, _triangle_array(triangles[start:start + _LAYER_FACE_BLOCK]),
+                              z_min, layer_height, num_layers):
+            return _wall_area_by_layer_by_face(triangles, z_min, layer_height, num_layers)
+    return areas.tolist()
+
+
+#: Faces a whole-array reading over every face reads at once
+#: (:func:`_wall_area_by_layer`, :func:`_flat_faces`,
+#: :func:`_signed_volume_blocks`), and the most face-layer shares
+#: :func:`_wall_area_by_layer` holds at once.
+_LAYER_FACE_BLOCK: int = 1 << 17
+_LAYER_SHARE_BLOCK: int = 1 << 20
+
+
+def _add_wall_area(areas: np.ndarray, tris: np.ndarray, z_min: float, layer_height: float, num_layers: int) -> bool:
+    """Add the wall area of the faces *tris* ``(T, 3, 3)`` to each layer of
+    *areas*, in face order (:func:`_wall_area_by_layer`); ``False``, with
+    nothing promised about *areas*, when a figure is not a finite number."""
     if not np.isfinite(tris).all():
-        return _wall_area_by_layer_by_face(triangles, z_min, layer_height, num_layers)
+        return False
     e1 = tris[:, 1] - tris[:, 0]
     e2 = tris[:, 2] - tris[:, 0]
     c0 = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
@@ -6310,7 +6346,7 @@ def _wall_area_by_layer(
     contribution = wall_weight[kept] * area
     z = tris[kept][:, :, 2]
     if not (np.isfinite(contribution).all() and np.isfinite(unit_nz).all()):
-        return _wall_area_by_layer_by_face(triangles, z_min, layer_height, num_layers)
+        return False
     # min() and max() over the three heights, first one kept on a tie.
     z_low = np.where(z[:, 1] < z[:, 0], z[:, 1], z[:, 0])
     z_low = np.where(z[:, 2] < z_low, z[:, 2], z_low)
@@ -6326,7 +6362,6 @@ def _wall_area_by_layer(
     last = np.where(flat, first, np.minimum(num_layers - 1, high_bucket))
     count = np.maximum(last - first + 1, 0)
 
-    areas = np.zeros(num_layers)
     ends = np.cumsum(count)
     start = 0
     while start < len(count):
@@ -6348,11 +6383,7 @@ def _wall_area_by_layer(
         takes = ~spanning | ~(overlap <= 0)
         np.add.at(areas, bucket[takes], share[takes])
         start = stop
-    return areas.tolist()
-
-
-#: The most face-layer shares :func:`_wall_area_by_layer` holds at once.
-_LAYER_SHARE_BLOCK: int = 1 << 20
+    return True
 
 
 def _wall_area_by_layer_by_face(
@@ -8545,9 +8576,10 @@ def _summarize_regions(
     return out
 
 
-#: The most region samples :func:`_regions_over_model` reads against the
-#: faces below them at once.
-_OVER_MODEL_SAMPLE_BLOCK: int = 4096
+#: The most region samples :func:`_regions_over_model` looks up at once, and
+#: the most sample-face pairs it reads at once.
+_OVER_MODEL_SAMPLE_BLOCK: int = 1024
+_OVER_MODEL_PAIR_BLOCK: int = 1 << 17
 
 
 def _regions_over_model(
@@ -8556,9 +8588,8 @@ def _regions_over_model(
     """For each region (its faces *members*, its points *samples*), whether
     a support there stands on the model: some sample has a face of the part
     straight below it (:func:`_gap_to_faces_below`), outside the region and
-    more than *layer_height* away.  Every sample is read in blocks of
-    :data:`_OVER_MODEL_SAMPLE_BLOCK`, each face by the same arithmetic as
-    :func:`_gap_to_faces_below`."""
+    more than *layer_height* away.  Every sample is read, in blocks, each
+    face by the same arithmetic as :func:`_gap_to_faces_below`."""
     over = [False] * len(members)
     if not members:
         return over
@@ -8571,24 +8602,25 @@ def _regions_over_model(
     for start in range(0, len(points), _OVER_MODEL_SAMPLE_BLOCK):
         block = points[start:start + _OVER_MODEL_SAMPLE_BLOCK]
         sample_of, face_of = index.at_points(block[:, :2])
-        sample_of = sample_of + start
-        keep = region_of_face[face_of] != owner[sample_of]
+        keep = region_of_face[face_of] != owner[start + sample_of]
         sample_of, face_of = sample_of[keep], face_of[keep]
-        sub = tris[face_of]
-        px, py, pz = points[sample_of, 0], points[sample_of, 1], points[sample_of, 2]
-        ax, ay = sub[:, 0, 0], sub[:, 0, 1]
-        bx, by = sub[:, 1, 0], sub[:, 1, 1]
-        cx, cy = sub[:, 2, 0], sub[:, 2, 1]
-        det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
-        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
-            u = ((px - ax) * (cy - ay) - (cx - ax) * (py - ay)) / det
-            v = ((bx - ax) * (py - ay) - (px - ax) * (by - ay)) / det
-            # Read for every pair, and kept only where the face is below.
-            z_at = sub[:, 0, 2] + u * (sub[:, 1, 2] - sub[:, 0, 2]) + v * (sub[:, 2, 2] - sub[:, 0, 2])
-            inside = (np.abs(det) > 1e-12) & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1.0 + 1e-9)
-        below = inside & (z_at <= pz + 1e-6)
         nearest = np.full(len(block), -np.inf)
-        np.maximum.at(nearest, sample_of[below] - start, z_at[below])
+        for first in range(0, len(face_of), _OVER_MODEL_PAIR_BLOCK):
+            at = sample_of[first:first + _OVER_MODEL_PAIR_BLOCK]
+            sub = tris[face_of[first:first + _OVER_MODEL_PAIR_BLOCK]]
+            px, py, pz = block[at, 0], block[at, 1], block[at, 2]
+            ax, ay = sub[:, 0, 0], sub[:, 0, 1]
+            bx, by = sub[:, 1, 0], sub[:, 1, 1]
+            cx, cy = sub[:, 2, 0], sub[:, 2, 1]
+            det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+            with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+                u = ((px - ax) * (cy - ay) - (cx - ax) * (py - ay)) / det
+                v = ((bx - ax) * (py - ay) - (px - ax) * (by - ay)) / det
+                # Read for every pair, and kept only where the face is below.
+                z_at = sub[:, 0, 2] + u * (sub[:, 1, 2] - sub[:, 0, 2]) + v * (sub[:, 2, 2] - sub[:, 0, 2])
+                inside = (np.abs(det) > 1e-12) & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1.0 + 1e-9)
+            below = inside & (z_at <= pz + 1e-6)
+            np.maximum.at(nearest, at[below], z_at[below])
         found = np.flatnonzero(np.isfinite(nearest))
         gap = block[found, 2] - nearest[found]
         for k in np.unique(owner[start + found[gap > layer_height]]).tolist():

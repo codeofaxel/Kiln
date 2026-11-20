@@ -46,7 +46,18 @@ def _bits(values: object) -> str:
     return repr(values)
 
 
-def test_volume_area_and_overhangs_agree():
+@pytest.fixture(params=["whole", "in small blocks"])
+def blocks(request, monkeypatch):
+    """Each reading whole, and again cut into blocks of a few faces, so a
+    running sum carried from block to block is checked as well."""
+    if request.param == "in small blocks":
+        monkeypatch.setattr(validation, "_SUM_BLOCK", 7)
+        monkeypatch.setattr(printability, "_LAYER_FACE_BLOCK", 5)
+        monkeypatch.setattr(printability, "_LAYER_SHARE_BLOCK", 3)
+    return request.param
+
+
+def test_volume_area_and_overhangs_agree(blocks):
     for triangles in _meshes(1):
         bed = min(corner[2] for tri in triangles for corner in tri)
         corners = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
@@ -56,7 +67,7 @@ def test_volume_area_and_overhangs_agree():
 
 
 @pytest.mark.parametrize("layer", [0.1, 0.2, 0.28])
-def test_wall_area_by_layer_agrees(layer):
+def test_wall_area_by_layer_agrees(layer, blocks):
     for triangles in _meshes(2):
         z = [corner[2] for tri in triangles for corner in tri]
         layers = max(2, int((max(z) - min(z)) / layer))
@@ -130,6 +141,14 @@ def _chords_one_by_one(points, pa, d_seg, supported):
                 best = min(best, float(t_f[i_f] + t_b[i_b]))
         out.append(best)
     return out
+
+
+def test_volume_by_winding_agrees(blocks):
+    for triangles in _meshes(8, count=30):
+        total = 0.0
+        for a, b, c in triangles:
+            total += printability._signed_volume_of_triangle(a, b, c)
+        assert _bits(printability._signed_volume_total(triangles)) == _bits(total)
 
 
 def test_bridge_chords_agree():
