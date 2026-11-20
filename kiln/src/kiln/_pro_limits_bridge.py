@@ -105,7 +105,7 @@ def ask(step: str, *, gcode_paths: list[str] | None = None, **args: Any) -> tupl
         try:
             from kiln import served_makes
 
-            answer = served_makes.arrive(WIRE_TOOL, answer, record_resumes=False)
+            answer = served_makes.arrive(WIRE_TOOL, answer, printer_name=args.get("printer_id"), record_resumes=False)
         except Exception:  # noqa: BLE001
             logger.debug("%s files not brought home", WIRE_TOOL, exc_info=True)
         if isinstance(answer, dict) and answer.get("status") == "ok":
