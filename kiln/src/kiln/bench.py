@@ -26,7 +26,11 @@ This module is everything under that tool that is not the conversation:
 * the position log a Klipper or Marlin printer gives instead of any ask;
 * what the record still lacks for a printer (``blanks_for``), read from
   the verdict itself so the session asks only about blanks;
-* the offers ledger, so nobody is nagged twice; and
+* the one offer every door makes (:func:`offer`): only where a lesson can
+  teach what stopped the person, worded as what they gain, never as what
+  Kiln lacks, and kept in a ledger so nobody is nagged;
+* the lesson funnel's counts (:func:`count`), under the one telemetry
+  switch, with no printer model in them; and
 * the send: one validated RPC into ``printer_motion_observations``, under
   the one telemetry switch, after the heartbeat and at the session's end.
 """
@@ -101,13 +105,15 @@ LOG_SETTLE_S = 4.0
 LOG_MAX_S = 120.0
 
 __all__ = [
-    "BLOCKS", "FOOTPRINT_MARGIN_MM", "HOWS", "LIFT_WORDS_MM", "OBSERVATION_FORMAT", "PUSH_MM", "RECORD_BLOCKS",
-    "RISE_MM", "TEACHABLE", "PositionLog", "bed_of", "bench_dir", "blanks_for", "block_start", "can_log_positions",
-    "draw_head_sketch", "draw_zones", "fingerprint_of", "firmware_of", "head_observation", "keep_observation",
-    "logged_block", "logs_positions", "may_offer", "note_offer", "observation", "observations_for_request",
-    "observations_of", "offer_after_registration", "offer_sentence", "parse_lift", "parse_zone", "position_of",
-    "position_reading", "print_footprint", "refusal_blanks", "send_after_heartbeat", "send_pending", "sharing",
-    "unit_from_machine", "unit_of", "way_back", "zone_of", "zone_rect",
+    "BLOCKS", "FOOTPRINT_MARGIN_MM", "HOWS", "LESSON_TEACHES", "LIFT_WORDS_MM", "LIMITS", "MOTION",
+    "OBSERVATION_FORMAT", "OFFER_DOORS", "OFFER_QUIET_S", "PUSH_MM", "RECORD_BLOCKS", "RISE_MM", "TEACHABLE",
+    "PositionLog", "bed_of", "bench_dir", "blanks_for", "block_start", "can_log_positions", "count",
+    "draw_head_sketch", "draw_zones", "fingerprint_of", "firmware_of", "gain_sentence", "head_observation",
+    "hold_kind", "keep_observation", "lesson_for", "logged_block", "logs_positions", "may_offer", "note_offer",
+    "observation", "observations_for_request", "observations_of", "offer", "offer_after_registration",
+    "offer_fields", "offer_for", "parse_lift", "parse_zone", "position_of", "position_reading", "print_footprint",
+    "refusal_blanks", "send_after_heartbeat", "send_pending", "sharing", "unit_from_machine", "unit_of", "way_back",
+    "zone_of", "zone_rect",
 ]
 
 
@@ -471,21 +477,128 @@ def _joined(words: list[str], last: str = "or") -> str:
     return ", ".join(words[:-1]) + f" {last} " + words[-1]
 
 
-def offer_sentence(model_name: str, blanks: list[str]) -> str:
-    """The offer: what Kiln does not know about this printer that a few
-    minutes can teach it -- only the blanks a session can fill."""
-    moves = [_BLOCK_VERBS[b] for b in ("pause", "cancel", "end") if b in blanks]
-    head = "head" in blanks
-    if moves and head:
-        what = f"where the {model_name} sends its head when it {_joined(moves)}, or how big the head is"
-    elif moves:
-        what = f"where the {model_name} sends its head when it {_joined(moves)}"
-    elif head:
-        what = f"how big the {model_name}'s head is"
-    else:
-        what = f"how the {model_name} moves its head on its own"
-    return (f"Kiln doesn't know {what}, so it assumes the worst. A few minutes with a coin-sized test "
-            "print teaches it; the printer_bench tool runs it.")
+#: The two lessons, as the session and the counters name them.
+MOTION = "motion"
+LIMITS = "limits"
+#: The gaps each lesson can teach, in the words a door names a gap with.  A
+#: gap no lesson can teach is absent, so a door that meets it offers nothing:
+#: a home, a park, a wipe or a purge is a sequence for the printer to run,
+#: which no test print shows.
+LESSON_TEACHES: dict[str, tuple[str, ...]] = {MOTION: TEACHABLE, LIMITS: ("limits",)}
+#: Every door that may offer a lesson unasked.  ``lesson`` is the session's
+#: own offer of the second lesson once the first is done.
+OFFER_DOORS = ("registration", "print_beside", "setup_check", "motion_refusal", "lesson")
+#: A door that meets a gap while the person is trying something offers at
+#: most once in this long; an answer of any kind ends its offers.
+OFFER_QUIET_S = 7 * 24 * 3600
+#: What a lesson gives back, by the door it is offered at; ``None`` is the
+#: words for every other door.
+_MOTION_GAINS = {
+    "registration": "keep the head clear of what's on the plate and check a second part beside the first",
+    "print_beside": "check a part beside this one",
+    None: "check a second part beside the first",
+}
+
+
+def lesson_for(gaps: Any) -> str | None:
+    """The lesson that can teach any of *gaps*, or ``None`` when none can."""
+    words = [str(g) for g in (gaps or []) if isinstance(g, str)]
+    for lesson, taught in LESSON_TEACHES.items():
+        if any(g in taught for g in words):
+            return lesson
+    return None
+
+
+def gain_sentence(lesson: str, door: str, model_name: str) -> str:
+    """The offer, as what the person gains for this printer: never what
+    Kiln lacks about it."""
+    if lesson == LIMITS:
+        return (f"Kiln can learn how steep, how far and how thin your {model_name} really prints from one small "
+                "test print; the printer_bench tool runs it.")
+    gain = _MOTION_GAINS.get(door) or _MOTION_GAINS[None]
+    return (f"A few minutes with a coin-sized test print teaches Kiln how your {model_name} moves its head, so it "
+            f"can {gain}; the printer_bench tool runs it.")
+
+
+def _offer_key(unit: str | None, lesson: str) -> str | None:
+    """The offers ledger's line for *lesson* on *unit*."""
+    if not unit:
+        return None
+    return unit if lesson == MOTION else f"{lesson}:{unit}"
+
+
+def offer(unit: str | None, gaps: Any, door: str, *, model_name: str,
+          printer_name: str | None = None) -> dict[str, Any] | None:
+    """The one place a door decides whether to offer a lesson, and words it.
+
+    *gaps* are what stopped the person (or, at registration, what a lesson
+    could teach); a gap no lesson can teach offers nothing.  The ledger
+    decides the rest (:func:`may_offer`).  An offer made is written down and
+    counted; ``None`` otherwise.  Never raises."""
+    try:
+        lesson = lesson_for(gaps)
+        if lesson is None or door not in OFFER_DOORS:
+            return None
+        key = _offer_key(unit, lesson)
+        if not may_offer(key, door):
+            return None
+        note_offer(key, door=door)
+        count("offered", lesson, door)
+        out: dict[str, Any] = {"tool": "printer_bench", "lesson": lesson,
+                               "sentence": gain_sentence(lesson, door, model_name)}
+        if printer_name:
+            out["printer_name"] = printer_name
+        return out
+    except Exception:  # noqa: BLE001 -- an offer is a courtesy; the door's answer stands without it
+        _logger.debug("bench: offer skipped", exc_info=True)
+        return None
+
+
+def offer_for(adapter: Any, gaps: Any, door: str, *, printer_name: str | None = None) -> dict[str, Any] | None:
+    """:func:`offer` for the printer behind *adapter*, named the catalogue's way."""
+    try:
+        if lesson_for(gaps) is None:
+            return None
+        from kiln.plate_state import declared_model_of
+
+        printer_id = declared_model_of(adapter)
+        name = _display_name(printer_id) if printer_id else "printer"
+        return offer(unit_of(adapter), gaps, door, model_name=name, printer_name=printer_name)
+    except Exception:  # noqa: BLE001
+        _logger.debug("bench: offer skipped", exc_info=True)
+        return None
+
+
+def offer_fields(adapter: Any, gaps: Any, door: str) -> dict[str, Any]:
+    """``{"learn": <offer>}`` for a refusal envelope, or ``{}``."""
+    found = offer_for(adapter, gaps, door)
+    return {"learn": found} if found else {}
+
+
+# ---------------------------------------------------------------------------
+# The funnel: counts only, under the one telemetry switch
+# ---------------------------------------------------------------------------
+
+
+def hold_kind(code: Any) -> str:
+    """What kind of wait a hold's code names: a sign-in, an allowance, or another."""
+    text = str(code or "").upper()
+    if "ACCOUNT" in text or "SIGNIN" in text or "SIGN_IN" in text:
+        return "signin"
+    if "LIMIT" in text:
+        return "limit"
+    return "other"
+
+
+def count(stage: str, lesson: str, detail: str | None = None) -> None:
+    """Count one step of the lesson funnel for today
+    (:func:`kiln.daily_stats.record_bench_funnel`).  Never raises."""
+    try:
+        from kiln.daily_stats import record_bench_funnel
+
+        record_bench_funnel(stage, lesson, detail)
+    except Exception:  # noqa: BLE001 -- a counter never touches a lesson
+        _logger.debug("bench: funnel not counted", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -505,14 +618,19 @@ def _load_offers() -> dict[str, Any]:
         return {}
 
 
-def note_offer(unit: str | None, *, answer: str | None = None) -> None:
-    """Record that the session was offered to *unit*, and the answer when
-    there is one (``later``, ``declined``, ``done``)."""
+def note_offer(unit: str | None, *, answer: str | None = None, door: str | None = None) -> None:
+    """Record that a lesson was offered to *unit* (through *door* when one
+    offered it), and the answer when there is one (``later``, ``declined``,
+    ``done``)."""
     if not unit:
         return
     offers = _load_offers()
     entry = dict(offers.get(unit) or {})
     entry.setdefault("offered_at", _now())
+    if door:
+        doors = dict(entry.get("doors") or {}) if isinstance(entry.get("doors"), dict) else {}
+        doors[door] = _now()
+        entry["doors"] = doors
     if answer:
         entry["answer"] = answer
         entry["answered_at"] = _now()
@@ -525,30 +643,42 @@ def note_offer(unit: str | None, *, answer: str | None = None) -> None:
         _logger.debug("bench: offers ledger not written", exc_info=True)
 
 
-def may_offer(unit: str | None, door: str) -> bool:
-    """Whether the session may be offered to *unit* through *door*.
+def _age_s(stamp: Any) -> float | None:
+    try:
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(str(stamp))).total_seconds()
+    except (TypeError, ValueError):
+        return None
 
-    ``registration`` offers once, ever: the first time a printer with
-    blanks is registered.  ``lesson`` is the session's own offer of its
-    second lesson, held to the same answers.  ``refusal`` offers at the point of need, every
-    time a refusal rests on a blank -- that is the answer to "why", not a
-    nag -- unless the person declined or already ran it.  ``later`` is
-    honoured by the registration door and never repeated there."""
+
+def may_offer(unit: str | None, door: str) -> bool:
+    """Whether a lesson may be offered to *unit* (an offers-ledger line)
+    through *door*.
+
+    Any answer ends every unasked offer: ``later`` and ``declined`` are the
+    person's, ``done`` is a lesson run or one with nothing to teach.
+    ``registration`` offers once, ever.  ``lesson`` is the session's own
+    offer of its second lesson to someone already in a session.  Every
+    other door meets the gap while the person is trying something, and
+    offers there at most once in :data:`OFFER_QUIET_S`."""
     if not unit:
         return False
     entry = _load_offers().get(unit) or {}
-    answer = entry.get("answer")
-    if answer in ("declined", "done"):
+    if entry.get("answer") in ("later", "declined", "done"):
         return False
     if door == "registration":
         return not entry
-    return True
+    if door == "lesson":
+        return True
+    doors = entry.get("doors") if isinstance(entry.get("doors"), dict) else {}
+    age = _age_s(doors.get(door)) if doors.get(door) else None
+    return age is None or age >= OFFER_QUIET_S
 
 
 def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] | None:
-    """The one-time offer a registration answers with when the model has
-    blanks: ``None`` when it has none, was offered before, or nothing can
-    be read right now.  Never raises."""
+    """The one-time offer a registration answers with: the first lesson
+    when it has something to teach this printer, else the second.  ``None``
+    when it was offered before, nothing can be read right now, or the
+    service will not start a session yet.  Never raises."""
     try:
         from kiln.plate_state import declared_model_of
 
@@ -559,44 +689,20 @@ def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] 
         if not printer_id:
             return None
         blanks, verdict = blanks_for(adapter, printer_id)
-        if session_hold(verdict) is not None:
-            return None                           # not startable yet; nothing is marked
-        if not blanks and verdict is not None:
-            note_offer(unit, answer="done")       # nothing to teach about the moves; never ask
+        if verdict is None or session_hold(verdict) is not None:
+            return None                           # offline, or not startable yet; nothing is marked
         teachable = [b for b in blanks if b in TEACHABLE]
-        if verdict is not None and not teachable:
-            return _limits_offer(unit, printer_id, printer_name)
         if not blanks:
-            return None
-        if not teachable:
-            return None                           # blanks no session can fill; a later one may
-        note_offer(unit)
-        first = bool(verdict and any(isinstance(r, dict) and r.get("code") == "PLACEMENT_UNKNOWN_PRINTER"
-                                     for r in verdict.get("refusals") or []))
+            note_offer(unit, answer="done")       # nothing to teach about the moves; never ask
         name = _display_name(printer_id)
-        if first:
-            sentence = (f"Kiln has no record for the {name} yet, so it can't check a second part beside the first. "
-                        "A few minutes with a coin-sized test print teaches it; the printer_bench tool runs it.")
-        else:
-            sentence = offer_sentence(name, teachable)
-        return {"tool": "printer_bench", "printer_name": printer_name, "first": first,
-                "minutes": 5, "sentence": sentence}
+        if teachable:
+            return offer(unit, teachable, "registration", model_name=name, printer_name=printer_name)
+        # Blanks no session can fill leave the first lesson unoffered and its
+        # one offer unspent; the second lesson has something for every printer.
+        return offer(unit, ["limits"], "registration", model_name=name, printer_name=printer_name)
     except Exception:  # noqa: BLE001
         _logger.debug("bench: registration offer skipped", exc_info=True)
         return None
-
-
-def _limits_offer(unit: str | None, printer_id: str, printer_name: str) -> dict[str, Any] | None:
-    """The one-time offer of the second lesson, for a printer whose moves
-    Kiln already knows: ``None`` once it was offered, declined or done."""
-    key = f"limits:{unit}" if unit else None
-    if not may_offer(key, "registration"):
-        return None
-    note_offer(key)
-    name = _display_name(printer_id)
-    return {"tool": "printer_bench", "printer_name": printer_name, "lesson": "limits", "first": False,
-            "sentence": (f"Kiln can learn how steep, how far and how thin your {name} really prints from one small "
-                         "test print; the printer_bench tool runs it.")}
 
 
 def _display_name(printer_id: str) -> str:

@@ -420,7 +420,8 @@ def _log_done(session: dict[str, Any], block: str) -> bool:
 
 def _keep(session: dict[str, Any], adapter: Any, doc: dict[str, Any]) -> None:
     session["observed"][doc["block"]] = doc
-    bench.keep_observation(adapter, doc)
+    if bench.keep_observation(adapter, doc) is not None:
+        session["kept"] = int(session.get("kept") or 0) + 1
 
 
 def _observed_from_log(session: dict[str, Any], adapter: Any, block: str, *, returns: bool,
@@ -668,6 +669,7 @@ def printer_bench(
                 # thing to do next.  Nothing is marked: the session starts
                 # the next time it is asked for.
                 tool = str(hold.get("tool") or "")
+                bench.count("held", MOTION, bench.hold_kind(hold.get("code")))
                 return {
                     "success": True, "step": "held", "printer_name": target_name, "hold": str(hold["code"]),
                     "ask": str(hold["sentence"]), "images": [], "learned": [],
@@ -728,15 +730,18 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
             return _reply(session, _intro(session), options=["yes", "later", "no"])
         if _is_later(answer):
             bench.note_offer(session["unit"], answer="later")
+            bench.count("later", MOTION)
             _end_session(session)
             return {"success": True, "step": "later", "printer_name": name, "ask": "",
                     "message": "No problem. Call printer_bench whenever you have a few minutes; Kiln won't bring it up again on its own."}
         if _is_no(answer):
             bench.note_offer(session["unit"], answer="declined")
+            bench.count("declined", MOTION)
             _end_session(session)
             return {"success": True, "step": "declined", "printer_name": name, "ask": "",
                     "message": "Understood. Kiln will keep assuming the worst for this printer and won't ask again."}
         bench.note_offer(session["unit"])
+        bench.count("started", MOTION)
         _next_step(session)
         answer = None
         step = session["step"]
@@ -1028,6 +1033,9 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
     # ---- done -------------------------------------------------------------
     if step == "done":
         bench.note_offer(session["unit"], answer="done")
+        bench.count("finished", MOTION)
+        if session.get("kept"):
+            bench.count("learned", MOTION, "session")
         _end_session(session)
         _send_in_background()
         learned = _learned_lines(session)
@@ -1043,7 +1051,8 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
             "kept_at": str(bench.bench_dir()),
         }
         follow = _limits_session(name, adapter, session["unit"], session["printer_id"], after_motion=True)
-        if follow is not None and limits_may_be_offered(session["unit"]):
+        if follow is not None and bench.offer(session["unit"], ["limits"], "lesson",
+                                              model_name=follow["model_name"]) is not None:
             # The second lesson, offered once the first is done: a new
             # session, so the person's answer to it continues there.
             _save_session(follow)
@@ -1060,8 +1069,8 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
 # ---------------------------------------------------------------------------
 
 #: The two lessons a session can be.
-MOTION = "motion"
-LIMITS = "limits"
+MOTION = bench.MOTION
+LIMITS = bench.LIMITS
 #: The test print the second lesson starts with; Kiln's servers name the other.
 FIRST_COUPON = "angles_and_spans"
 _MATERIAL_OPTIONS = ["PLA", "PETG", "ABS", "ASA", "TPU"]
@@ -1129,6 +1138,7 @@ def _limits_held(session: dict[str, Any]) -> dict[str, Any]:
     """The second lesson waits for a sign-in: nothing is marked, and the
     session starts where it stopped once the person is signed in."""
     _save_session(session)
+    bench.count("held", LIMITS, "signin")
     return {
         "success": True, "step": "held", "lesson": LIMITS, "printer_name": session["printer_name"],
         "hold": "LIMITS_ACCOUNT_REQUIRED", "images": [], "learned": list(session.get("learned") or []),
@@ -1151,6 +1161,9 @@ def _limits_missed(session: dict[str, Any], miss: Any, cannot: str) -> dict[str,
 
 def _limits_done(session: dict[str, Any], message: str) -> dict[str, Any]:
     bench.note_offer(_limits_key(session["unit"]), answer="done")
+    bench.count("finished", LIMITS)
+    if session.get("learned"):
+        bench.count("learned", LIMITS, "session")
     _end_session(session)
     return {"success": True, "step": "done", "lesson": LIMITS, "printer_name": session["printer_name"],
             "ask": "", "images": [], "learned": list(session.get("learned") or []), "message": message}
@@ -1277,16 +1290,19 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
             return _reply(session, _limits_intro(session), options=["yes", "later", "no"])
         if _is_later(answer):
             bench.note_offer(_limits_key(session["unit"]), answer="later")
+            bench.count("later", LIMITS)
             _end_session(session)
             return {"success": True, "step": "later", "lesson": LIMITS, "printer_name": name, "ask": "",
                     "message": ("No problem. Call printer_bench with lesson=\"limits\" whenever you have time for "
                                 "a test print; Kiln won't bring it up again on its own.")}
         if _is_no(answer):
             bench.note_offer(_limits_key(session["unit"]), answer="declined")
+            bench.count("declined", LIMITS)
             _end_session(session)
             return {"success": True, "step": "declined", "lesson": LIMITS, "printer_name": name, "ask": "",
                     "message": "Understood. Kiln won't ask about a test print for this printer again."}
         bench.note_offer(_limits_key(session["unit"]))
+        bench.count("started", LIMITS)
         session["step"] = step = "limits_material"
         answer = None
 

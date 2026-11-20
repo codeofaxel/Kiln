@@ -380,6 +380,13 @@ def _empty_day() -> dict[str, Any]:
         # file works on the machine it was derived for: the walk happens
         # on the owner's own printer and never touches a server.
         "motion_outcomes": {},
+        # How far the lessons that teach Kiln a printer get, as counts:
+        # {"<stage>|<lesson>[|<detail>]": count} over the closed vocabulary
+        # BENCH_FUNNEL below -- offered (and through which door), started,
+        # finished, learned something (in a lesson, or from a real print),
+        # later, declined, held (a sign-in, an allowance).  Never a printer
+        # model: which models are taught is not a fact this map carries.
+        "bench_funnel": {},
         # Print-counting bookkeeping — see _PENDING_STARTS_MAX above.
         # Local only: get_daily_stats() never returns these, so nothing
         # here reaches the heartbeat.
@@ -416,6 +423,7 @@ _ROLLOVER_MAPS = (
     "video_outcomes",
     "motion_refusals",
     "motion_outcomes",
+    "bench_funnel",
 )
 
 
@@ -1619,6 +1627,53 @@ def record_motion_fault(model: object, verb: str, code: object) -> None:
         _logger.debug("motion walk reset failed: %s", exc)
 
 
+# ---------------------------------------------------------------------------
+# The lesson funnel -- how far a lesson that teaches Kiln a printer gets
+# ---------------------------------------------------------------------------
+
+#: The lessons (:mod:`kiln.bench`).
+BENCH_LESSONS: tuple[str, ...] = ("motion", "limits")
+#: Each stage, and the details it may carry (an empty tuple: none).  The
+#: dashboard reads this rather than keeping a copy.
+BENCH_FUNNEL: dict[str, tuple[str, ...]] = {
+    "offered": ("registration", "print_beside", "setup_check", "motion_refusal", "lesson"),
+    "started": (),
+    "finished": (),
+    "learned": ("session", "real_print"),
+    "later": (),
+    "declined": (),
+    "held": ("signin", "limit", "other"),
+}
+_BENCH_FUNNEL_KEY_RE = re.compile(r"^[a-z]{1,16}\|[a-z]{1,16}(\|[a-z_]{1,24})?$")
+_BENCH_FUNNEL_MAX_DISTINCT = 64
+
+
+def record_bench_funnel(stage: str, lesson: str, detail: str | None = None) -> None:
+    """Count one step of a lesson that teaches Kiln a printer, for today.
+
+    Written only by :mod:`kiln.bench` (the one offer every door makes, and
+    the counts the session and real prints report through it).  A stage,
+    a lesson or a detail outside :data:`BENCH_FUNNEL` is dropped, and so is
+    a detail on a stage that takes none.  No printer model, name or unit:
+    which printers are taught is not a fact this map carries.  Silent by
+    contract.
+    """
+    details = BENCH_FUNNEL.get(stage)
+    if details is None or lesson not in BENCH_LESSONS:
+        return
+    if detail is None:
+        if details:
+            return
+        key = f"{stage}|{lesson}"
+    else:
+        if detail not in details:
+            return
+        key = f"{stage}|{lesson}|{detail}"
+    _record_name_count(
+        "bench_funnel", key, pattern=_BENCH_FUNNEL_KEY_RE, max_distinct=_BENCH_FUNNEL_MAX_DISTINCT,
+    )
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -1670,6 +1725,8 @@ def get_daily_stats() -> dict[str, Any]:
         "motion_refusals": data.get("motion_refusals", {}),
         # Same contract again: recorded, rolled over, returned.
         "motion_outcomes": data.get("motion_outcomes", {}),
+        # Same contract again: recorded, rolled over, returned.
+        "bench_funnel": data.get("bench_funnel", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.

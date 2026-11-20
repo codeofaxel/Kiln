@@ -791,22 +791,18 @@ def _placement_refusal(
 
 
 def _bench_offer(state: Any, verdict: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The point-of-need door: a refusal that rests on a block nobody has
-    described offers the short session that fills it, instead of a
-    dead end -- unless the person declined or already ran it."""
+    """The point-of-need door: a refusal that rests on a block a lesson can
+    teach offers that lesson (:func:`kiln.bench.offer`), instead of a dead
+    end."""
     try:
         from kiln import bench
 
-        blanks = bench.refusal_blanks(verdict)
-        if not blanks:
-            return None
-        unit = bench.unit_from_machine(getattr(state, "machine", None))
-        if not bench.may_offer(unit, "refusal"):
-            return None
         record = verdict.get("record") if isinstance(verdict, dict) else None
         printer_id = str(record.get("printer_id") or "") if isinstance(record, dict) else ""
-        name = bench._display_name(printer_id) if printer_id else "this printer"
-        return {"tool": "printer_bench", "minutes": 5, "sentence": bench.offer_sentence(name, blanks)}
+        return bench.offer(
+            bench.unit_from_machine(getattr(state, "machine", None)), bench.refusal_blanks(verdict), "print_beside",
+            model_name=bench._display_name(printer_id) if printer_id else "printer",
+        )
     except Exception:  # noqa: BLE001 -- an offer is a courtesy; the refusal stands without it
         _logger.debug("bench offer skipped", exc_info=True)
         return None

@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import json
 import sys
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -288,50 +289,71 @@ class TestWhatTheRecordLacks:
         colour = "the print head would hit jar during a filament change (this printer's own filament change motion is not on record, so the worst case is assumed)"
         assert bench.refusal_blanks(_verdict(ok=False, sentences=[colour], blanks=["filament_change"])) == []
 
-    def test_the_offer_names_only_what_a_session_can_teach_in_plain_words(self):
-        assert bench.offer_sentence("Bambu Lab A1", ["pause", "cancel"]) == (
-            "Kiln doesn't know where the Bambu Lab A1 sends its head when it pauses or cancels a print, so it "
-            "assumes the worst. A few minutes with a coin-sized test print teaches it; the printer_bench "
-            "tool runs it.")
-        every = bench.offer_sentence("Creality K1", ["pause", "cancel", "end", "head", "quiet_start"])
-        assert every.startswith("Kiln doesn't know where the Creality K1 sends its head when it pauses, cancels a "
-                                "print or finishes a print, or how big the head is, so it assumes the worst.")
-        assert bench.offer_sentence("Creality K1", ["head"]).startswith("Kiln doesn't know how big the Creality K1's head is,")
-        # A colour change is never triggered by a session, so it is never offered.
-        colour = bench.offer_sentence("Bambu Lab A1", ["filament_change", "pause"])
-        assert "colour" not in colour and "when it pauses, so" in colour
+    def test_the_offer_says_what_the_person_gains_never_what_kiln_lacks(self):
+        assert bench.gain_sentence("motion", "print_beside", "Bambu Lab A1") == (
+            "A few minutes with a coin-sized test print teaches Kiln how your Bambu Lab A1 moves its head, so it "
+            "can check a part beside this one; the printer_bench tool runs it.")
+        assert bench.gain_sentence("motion", "registration", "Creality K1") == (
+            "A few minutes with a coin-sized test print teaches Kiln how your Creality K1 moves its head, so it "
+            "can keep the head clear of what's on the plate and check a second part beside the first; the "
+            "printer_bench tool runs it.")
+        assert bench.gain_sentence("limits", "registration", "Creality K1") == (
+            "Kiln can learn how steep, how far and how thin your Creality K1 really prints from one small test "
+            "print; the printer_bench tool runs it.")
+        for lesson in ("motion", "limits"):
+            for door in bench.OFFER_DOORS:
+                said = bench.gain_sentence(lesson, door, "Bambu Lab X2D").lower()
+                assert not any(w in said for w in ("doesn't know", "no record", "worst", "blank", "unknown", "missing"))
+
+    def test_only_a_gap_a_lesson_can_teach_has_a_lesson(self):
+        for gap in ("pause", "cancel", "end", "head"):
+            assert bench.lesson_for([gap]) == "motion"
+        assert bench.lesson_for(["limits"]) == "limits"
+        # A home, a park, a wipe or a purge is a sequence for the printer to
+        # run; a colour change is never triggered; no lesson teaches them.
+        for gap in ("home", "park", "wipe", "purge", "load", "unload", "filament_change", "quiet_start"):
+            assert bench.lesson_for([gap]) is None, gap
+        assert bench.lesson_for(["filament_change", "pause"]) == "motion"
+        assert bench.lesson_for([]) is None and bench.lesson_for(None) is None
 
 
 class TestNeverNaggedTwice:
-    def test_the_registration_door_offers_once_and_later_is_honoured(self):
+    def test_registration_offers_once_a_door_once_a_week_and_any_answer_ends_every_offer(self, monkeypatch):
         unit = "ab" * 16
-        assert bench.may_offer(unit, "registration") is True and bench.may_offer(unit, "refusal") is True
-        bench.note_offer(unit)
-        assert bench.may_offer(unit, "registration") is False and bench.may_offer(unit, "refusal") is True
-        bench.note_offer(unit, answer="later")
-        assert bench.may_offer(unit, "registration") is False and bench.may_offer(unit, "refusal") is True
-        bench.note_offer(unit, answer="declined")
-        assert bench.may_offer(unit, "registration") is False and bench.may_offer(unit, "refusal") is False
-        assert bench.may_offer(None, "refusal") is False
-        other = "cd" * 16
-        bench.note_offer(other, answer="done")
-        assert bench.may_offer(other, "refusal") is False
+        assert bench.may_offer(unit, "registration") is True and bench.may_offer(unit, "print_beside") is True
+        bench.note_offer(unit, door="registration")
+        # Registration: once, ever.  A point-of-need door has not offered yet.
+        assert bench.may_offer(unit, "registration") is False and bench.may_offer(unit, "print_beside") is True
+        bench.note_offer(unit, door="print_beside")
+        assert bench.may_offer(unit, "print_beside") is False, "a second refusal the same week is not offered again"
+        assert bench.may_offer(unit, "setup_check") is True, "each door meets the person once"
+        # A week on, the same door may offer once more.
+        later = bench.datetime.now(bench.timezone.utc) + timedelta(seconds=bench.OFFER_QUIET_S + 1)
+        monkeypatch.setattr(bench, "_age_s", lambda stamp: (later - bench.datetime.fromisoformat(str(stamp))).total_seconds())
+        assert bench.may_offer(unit, "print_beside") is True
+        # Any answer ends every unasked offer, at every door.
+        for answer in ("later", "declined", "done"):
+            other = answer[:2] * 16
+            bench.note_offer(other, answer=answer)
+            assert not any(bench.may_offer(other, door) for door in bench.OFFER_DOORS), answer
+        assert bench.may_offer(None, "print_beside") is False
 
     def test_registration_offers_the_session_once_for_a_model_with_blanks(self, monkeypatch):
         machine = _Adapter()
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause", "cancel"], _verdict(ok=True, blanks=["pause", "cancel"])))
         offer = bench.offer_after_registration(machine, "a1")
-        assert offer["tool"] == "printer_bench" and offer["printer_name"] == "a1"
+        assert offer["tool"] == "printer_bench" and offer["printer_name"] == "a1" and offer["lesson"] == "motion"
         assert "blanks" not in offer, "an offer names the session, never a list of what Kiln lacks"
-        assert offer["first"] is False and "printer_bench" in offer["sentence"]
+        assert offer["sentence"] == bench.gain_sentence("motion", "registration", bench._display_name("bambu_a1"))
         assert bench.offer_after_registration(machine, "a1") is None       # once
+        # A model Kiln has no record for is offered the same way: what the
+        # person gains, never that the record is missing.
         fresh = _Adapter(); fresh.serial = "01P00A000000002"
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause", "cancel", "end", "filament_change", "head"],
                                                                         _verdict(ok=False, code="PLACEMENT_UNKNOWN_PRINTER")))
         first = bench.offer_after_registration(fresh, "new")
-        assert first["first"] is True and "blanks" not in first
-        assert first["sentence"].startswith("Kiln has no record for the") and "can't check a second part beside the first" in first["sentence"]
-        assert "A few minutes with a coin-sized test print teaches it" in first["sentence"]
+        assert "first" not in first and "blanks" not in first
+        assert "record" not in first["sentence"] and "how your" in first["sentence"]
         # Blanks no session can fill are no reason to offer the first lesson,
         # and its one offer is not spent on them.  The second lesson (what the
         # printer can print) has something to teach every printer, so it is
@@ -644,7 +666,8 @@ class TestTheConversation:
         assert out["step"] == "later" and "won't bring it up again" in out["message"]
         assert "whenever you have a few minutes" in out["message"]
         assert bench.may_offer(bench.unit_of(server.machine), "registration") is False
-        assert bench.may_offer(bench.unit_of(server.machine), "refusal") is True
+        # "Kiln won't bring it up again on its own": no door offers it again.
+        assert not any(bench.may_offer(bench.unit_of(server.machine), door) for door in bench.OFFER_DOORS)
         _step(server, restart=True)
         out = _step(server, "no")
         assert out["step"] == "declined" and bench.may_offer(bench.unit_of(server.machine), "refusal") is False
@@ -985,3 +1008,134 @@ class TestAHeldSession:
         monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _held()))
         assert bench.offer_after_registration(machine, "a1") is None
         assert bench.may_offer(bench.unit_of(machine), "registration") is True
+
+
+# ---------------------------------------------------------------------------
+# One offer, every door, and the funnel it feeds
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def funnel(tmp_path, monkeypatch):
+    """Today's lesson funnel, recorded to a file of the test's own."""
+    from kiln import daily_stats
+
+    monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "stats.json")
+    return lambda: daily_stats.get_daily_stats()["bench_funnel"]
+
+
+class _X2D(_Adapter):
+    """A printer whose home and park no lesson can teach."""
+
+    serial = "20P00A000000009"
+    _printer_model = "bambu_x2d"
+
+
+class TestOneOfferEveryDoor:
+    def test_the_print_beside_refusal_offers_once_and_counts_it(self, funnel):
+        from kiln.plate_state import PlateJob, PlateState
+        from kiln.plugins.slicer_tools import _placement_refusal
+
+        state = PlateState(machine="01P00A000000001", status="occupied", source="start",
+                           job=PlateJob(file="jar.gcode", footprint_mm=[90, 90, 160, 160], max_z_mm=40.0))
+        worst = "the print head would hit jar (40 mm tall) during a pause at 0.2 mm (this printer's own pause motion is not on record, so the worst case is assumed)"
+        refused = _verdict(ok=False, sentences=[worst], blanks=["pause"])
+        first = _placement_refusal("no", "PLACEMENT_REFUSED", state=state, bed=[256.0, 256.0], verdict=refused)
+        assert first["bench_offer"] == {"tool": "printer_bench", "lesson": "motion",
+                                        "sentence": bench.gain_sentence("motion", "print_beside", bench._display_name("bambu_a1"))}
+        again = _placement_refusal("no", "PLACEMENT_REFUSED", state=state, bed=[256.0, 256.0], verdict=refused)
+        assert "bench_offer" not in again, "the next refusal the same week is not a second offer"
+        assert funnel() == {"offered|motion|print_beside": 1}
+
+    def test_a_home_no_lesson_can_teach_is_refused_with_no_offer(self, funnel, monkeypatch):
+        import kiln.server as srv
+        from kiln.plugins import homing_tools
+        from kiln.printers.base import HomingUnsupported
+
+        machine = _X2D()
+
+        def refuse(**_kw):
+            raise HomingUnsupported("Kiln has no verified motion sequence for this model, so it does not home it.")
+
+        machine.home_axes = refuse
+        machine.park_head = refuse
+        monkeypatch.setattr(srv, "_resolve_control_target", lambda name: (machine, "x2d"))
+        monkeypatch.setattr(srv, "_emergency_latch_error", lambda *_a, **_k: None)
+        for action in ("home", "park"):
+            out = homing_tools.run_home(printer_name="x2d", action=action)
+            assert out["success"] is False and out["error"]["code"] == "UNSUPPORTED", out
+            assert "learn" not in out and "printer_bench" not in json.dumps(out)
+        assert funnel() == {}
+
+    def test_the_setup_check_offers_only_where_a_lesson_teaches_the_gap(self, funnel):
+        from kiln.cli.main import _doctor_learn
+
+        machine = _X2D()
+        homing = {"name": "homing", "ok": True, "warn": True, "detail": "home_axes and park_head both refuse"}
+        assert _doctor_learn(machine, dict(homing), ("home", "park")) == homing
+        assert _doctor_learn(machine, dict(homing), ("wipe", "purge")) == homing
+        assert funnel() == {}
+        # The decision is the engine's, not the line's: a gap a lesson does
+        # teach is offered from the same line, once.
+        taught = _doctor_learn(machine, dict(homing), ("pause",))
+        assert taught["learn"]["lesson"] == "motion" and taught["detail"].endswith(taught["learn"]["sentence"])
+        assert "learn" not in _doctor_learn(machine, dict(homing), ("pause",))
+        quiet = _doctor_learn(machine, {**homing, "warn": False}, ("pause",))
+        assert "learn" not in quiet, "a line that warns about nothing offers nothing"
+        assert funnel() == {"offered|motion|setup_check": 1}
+
+    def test_registration_counts_its_offer(self, funnel, monkeypatch):
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["pause"], _verdict(ok=True, blanks=["pause"])))
+        assert bench.offer_after_registration(_Adapter(), "a1") is not None
+        other = _Adapter()
+        other.serial = "01P00A000000005"
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _verdict(ok=True)))
+        assert bench.offer_after_registration(other, "b")["lesson"] == "limits"
+        assert funnel() == {"offered|motion|registration": 1, "offered|limits|registration": 1}
+
+
+class TestTheFunnelIsCounted:
+    def test_a_session_counts_its_start_its_finish_what_it_learned_and_the_next_offer(self, server, funnel, monkeypatch):
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["head"], _verdict(ok=True, blanks=["head"])))
+        _step(server)
+        _step(server, "yes")
+        _step(server, "60")
+        out = _step(server, "25 mm")
+        assert out["step"] == "done" and out["lesson_offered"] == "limits"
+        out = _step(server, "later")
+        assert out["step"] == "later"
+        assert funnel() == {"started|motion": 1, "finished|motion": 1, "learned|motion|session": 1,
+                            "offered|limits|lesson": 1, "later|limits": 1}
+
+    def test_a_session_that_learned_nothing_is_finished_and_not_learned(self, server, funnel, monkeypatch):
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["head"], _verdict(ok=True, blanks=["head"])))
+        monkeypatch.setattr(bench, "keep_observation", lambda adapter, doc, **kw: None)
+        for answer in (None, "yes", "60", "25 mm"):
+            _step(server, answer)
+        counted = funnel()
+        assert counted["finished|motion"] == 1 and "learned|motion|session" not in counted
+
+    def test_no_and_a_held_session_are_counted(self, server, funnel, monkeypatch):
+        _step(server)
+        _step(server, "no")
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _held()))
+        _step(server, restart=True)
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _held("SESSION_MODEL_LIMIT")))
+        _step(server, restart=True)
+        assert funnel() == {"declined|motion": 1, "held|motion|signin": 1, "held|motion|limit": 1}
+
+    def test_no_count_carries_a_printer(self, server, funnel, monkeypatch):
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: (["head"], _verdict(ok=True, blanks=["head"])))
+        for answer in (None, "yes", "60", "25 mm"):
+            _step(server, answer)
+        said = json.dumps(funnel()).lower()
+        assert said != "{}" and not any(w in said for w in ("bambu", "a1", bench.unit_of(server.machine)))
+
+    def test_a_word_outside_the_vocabulary_is_dropped(self, funnel):
+        from kiln import daily_stats
+
+        daily_stats.record_bench_funnel("offered", "motion", "bambu_x2d")
+        daily_stats.record_bench_funnel("started", "motion", "registration")
+        daily_stats.record_bench_funnel("offered", "walk", "registration")
+        daily_stats.record_bench_funnel("adopted", "motion")
+        assert funnel() == {}

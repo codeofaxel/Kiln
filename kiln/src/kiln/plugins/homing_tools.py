@@ -77,7 +77,7 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
     except ModelDeclarationRequired as exc:
         return _srv._error_dict(
             str(exc), code="PRINTER_MODEL_REQUIRED",
-            extra={"outcome": "failed", "printer_model_required": True},
+            extra={"outcome": "failed", "printer_model_required": True, **_learn(adapter, action)},
         )
     except HomingUnsupported as exc:
         # Why there was no plan (offline, signed out, unanswered, refused)
@@ -85,13 +85,22 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
         why = getattr(exc, "why_fields", None)
         return _srv._error_dict(
             str(exc), code="UNSUPPORTED",
-            extra={"outcome": "failed", **(why if isinstance(why, dict) else {})},
+            extra={"outcome": "failed", **(why if isinstance(why, dict) else {}), **_learn(adapter, action)},
         )
     except (PrinterError, RuntimeError) as exc:
         return _srv._error_dict(f"Failed to {action}: {exc}", extra={"outcome": "failed"})
     except Exception as exc:
         _logger.exception("Unexpected error in %s", tool_name)
         return _srv._error_dict(f"Unexpected error in {tool_name}: {exc}", code="INTERNAL_ERROR")
+
+
+def _learn(adapter: Any, action: str) -> dict[str, Any]:
+    """The one offer of a lesson that can teach what refused *action*
+    (:func:`kiln.bench.offer_fields`), or ``{}``: a home or a park is a
+    sequence for the printer to run, which no lesson teaches."""
+    from kiln import bench
+
+    return bench.offer_fields(adapter, [action], "motion_refusal")
 
 
 def _gated(tool_name: str, args: dict[str, Any]) -> dict[str, Any] | None:
