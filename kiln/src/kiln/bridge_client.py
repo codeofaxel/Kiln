@@ -123,6 +123,8 @@ BRIDGE_ARGUMENTS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "design_id",
                 "branch_id",
                 "account_sync_id",
+                # The person's own choice not to keep this one print.
+                "keep_record",
             }
         ),
         # Stopping, and resuming what was paused.

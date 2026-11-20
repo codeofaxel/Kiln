@@ -405,3 +405,106 @@ class TestWhenSomethingGoesWrongTheAskStands:
         _start(adapter, keep_record=False)
         _end(adapter)
         assert _rows() == []
+
+
+#: Every tool a person can start or queue a print through.
+PRINT_DOORS = frozenset({
+    "start_print", "slice_and_print", "start_monitored_print", "download_and_upload",
+    "print_plate_object", "run_quick_print", "generate_and_print", "retry_print_with_fix",
+    "submit_job",
+})
+
+
+class TestEveryDoor:
+    def test_every_print_door_takes_the_one_switch(self):
+        import kiln.server as srv
+
+        tools = srv.mcp._tool_manager._tools
+        missing = sorted(n for n in PRINT_DOORS if "keep_record" not in (tools[n].parameters.get("properties") or {}))
+        assert missing == [], f"print doors without keep_record: {missing}"
+
+    def test_a_new_print_door_is_on_the_list(self):
+        """The doors that start or queue a print, read from the source
+        (kiln.print_doors): a registered tool among them is on PRINT_DOORS."""
+        import kiln.server as srv
+        from kiln.print_doors import enumerate_print_doors
+
+        tools = set(srv.mcp._tool_manager._tools)
+        doors = {d.function for d in enumerate_print_doors() if d.kind in ("start", "queue")}
+        unlisted = sorted((doors & tools) - PRINT_DOORS)
+        assert unlisted == [], f"a print door with no switch: {unlisted}"
+
+    def test_the_cli_print_command_takes_it(self):
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        out = CliRunner().invoke(cli, ["print", "--help"])
+        assert "--dont-keep" in out.output
+
+    def test_never_suggested_in_any_door_description(self):
+        import kiln.server as srv
+
+        tools = srv.mcp._tool_manager._tools
+        for name in PRINT_DOORS:
+            said = " ".join(str(tools[name].description or "").split())
+            assert "only when the person asks" in said and "never suggest it" in said, name
+
+
+class TestAQueuedPrintNotKept:
+    def test_the_queue_forgets_it_when_it_ends(self, home):
+        import sqlite3
+
+        from kiln.queue import PrintQueue
+
+        db = home / "queue.db"
+        queue = PrintQueue(db_path=str(db))
+        job_id = queue.submit("secret_part.gcode", metadata={"keep_record": False, "design_id": "d-secret"})
+        queue.mark_starting(job_id, printer_name="shop-x1")
+        queue.mark_printing(job_id)
+        queue.mark_completed(job_id)
+        job = queue.get_job(job_id)
+        assert job.file_name == "" and "design_id" not in job.metadata
+        rows = sqlite3.connect(str(db)).execute("SELECT id FROM jobs WHERE id=?", (job_id,)).fetchall()
+        assert rows == []
+
+    def test_a_kept_queued_job_stays(self, home):
+        from kiln.queue import PrintQueue
+
+        queue = PrintQueue(db_path=str(home / "queue.db"))
+        job_id = queue.submit("part.gcode")
+        queue.mark_starting(job_id, printer_name="shop-x1")
+        queue.mark_printing(job_id)
+        queue.mark_completed(job_id)
+        assert queue.get_job(job_id).file_name == "part.gcode"
+
+
+class TestNothingNamesItAfterItEnds:
+    def test_the_slice_records_and_the_plate_forget_its_name(self, home, monkeypatch):
+        import os
+
+        from kiln import plate_state, print_lineage
+
+        model = home / "secret_part.stl"
+        model.write_text("solid x\nendsolid x\n")
+        gcode = home / "secret_part.gcode"
+        gcode.write_text("G28\n")
+        monitor_twin.note_sliced(str(model), str(gcode))
+        monkeypatch.setattr(print_lineage, "_hosted", lambda: False)
+        print_lineage.record_slice(str(model), str(gcode))
+        print_lineage.flush() if hasattr(print_lineage, "flush") else None
+        monkeypatch.setattr(plate_state, "machine_id", lambda adapter: "machine-1")
+        adapter = _printer()
+        _start(adapter, keep_record=False)
+        store = plate_state._read_store()
+        assert "secret_part" in json.dumps(store), "the plate holds the part while it prints"
+        _end(adapter)
+        text = "".join(
+            path.read_text(encoding="utf-8", errors="ignore")
+            for path in (plate_state._store_path(), print_lineage.store_path(), monitor_twin._SLICES_FILE)
+            if path.exists()
+        )
+        assert "secret_part" not in text
+        row = plate_state._read_store()["machines"]["machine-1"]
+        assert row["status"] == "occupied", "something is still on the plate"
+        assert os.path.exists(gcode), "the person's own file is theirs"

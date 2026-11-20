@@ -888,6 +888,36 @@ def _write_state(
         logger.debug("plate-state write failed", exc_info=True)
 
 
+def forget_file(file_names: set[str] | list[str]) -> int:
+    """Keep only that something is on the plate: every record naming one of
+    *file_names* (base names) loses the name and keeps the part's size, so
+    the next start still knows the plate is not clear.  For a print the
+    person asked not to keep, once it ends (:mod:`kiln.print_keeping`).
+    Returns how many parts were unnamed.  Never raises."""
+    names = {os.path.basename(str(n)) for n in file_names if n}
+    if not names:
+        return 0
+    try:
+        store = _read_store()
+        machines = store.get("machines") if isinstance(store.get("machines"), dict) else {}
+        unnamed = 0
+        for row in machines.values():
+            if not isinstance(row, dict):
+                continue
+            for job in [row.get("job"), *(row.get("jobs") or [])]:
+                if isinstance(job, dict) and os.path.basename(str(job.get("file") or "")) in names:
+                    job["file"] = ""
+                    unnamed += 1
+            if isinstance(row.get("note"), str) and any(n in row["note"] for n in names):
+                row["note"] = ""
+        if unnamed:
+            _write_store(store)
+        return unnamed
+    except Exception:  # noqa: BLE001
+        logger.debug("plate record not unnamed", exc_info=True)
+        return 0
+
+
 def mark_occupied(
     adapter: Any, job: PlateJob | dict[str, Any] | None, *, source: str = "kiln_started_print", note: str = "",
     keep_previous: bool = False,

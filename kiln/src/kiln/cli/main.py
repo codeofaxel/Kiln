@@ -3312,6 +3312,10 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
 )
 @click.option("--object", "object_name", type=str, default=None, help="Extract and print a single object from a multi-object .gcode.3mf (Bambu). Partial name match supported (e.g. 'cap').")
 @click.option("--list-objects", is_flag=True, help="List named objects on the plate of a .gcode.3mf file, then exit.")
+@click.option(
+    "--dont-keep", is_flag=True,
+    help="Keep no record of this print once it ends: while it prints, Kiln keeps only what it needs to stay safe.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def print_cmd(
@@ -3328,6 +3332,7 @@ def print_cmd(
     preview_tokens: tuple[str, ...],
     object_name: str | None,
     list_objects: bool,
+    dont_keep: bool,
     json_mode: bool,
 ) -> None:
     """Start a print or check print status.
@@ -3345,6 +3350,20 @@ def print_cmd(
     Use --object to extract and print a single object from a multi-object
     Bambu .gcode.3mf file (e.g. --object "cap" to print just the lid).
     """
+    if dont_keep:
+        if use_queue:
+            click.echo(
+                format_error(
+                    "--dont-keep is for a print started now; the queue keeps its own list of jobs. "
+                    "Nothing was queued.",
+                    code="DONT_KEEP_NOT_QUEUED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        from kiln.print_keeping import mark_call_not_kept
+
+        mark_call_not_kept()
     import glob as _glob
     import os
 
@@ -3643,7 +3662,7 @@ def print_cmd(
             # Only pass these to adapters that accept **kwargs (Bambu,
             # OctoPrint, Moonraker).  Avoids TypeError on adapters
             # with a strict start_print(file_name) signature.
-            print_kwargs: dict[str, Any] = {}
+            print_kwargs: dict[str, Any] = {"keep_record": False} if dont_keep else {}
             from kiln.printers.bambu import BambuAdapter
 
             is_bambu = isinstance(adapter, BambuAdapter)

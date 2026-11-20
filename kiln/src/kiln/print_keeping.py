@@ -467,10 +467,16 @@ def print_ended(printer_name: str | None) -> bool:
         file_name = str(record.get("file_name") or "") if recorded else remembered
         with _lock:
             _ended_not_kept[_slug(printer_name)] = file_name or ""
+        names = _names_of_the_print(file_name)
         if recorded:
             from kiln.monitor_twin import forget_print
 
             forget_print(printer_name)
+        for forget in (_forget_slice_records, _unname_plate):
+            try:
+                forget(names)
+            except Exception:  # noqa: BLE001
+                logger.debug("a record of a print not kept was not forgotten", exc_info=True)
         try:
             from kiln.hardware_stops import forget_plans_for_file
 
@@ -484,6 +490,36 @@ def print_ended(printer_name: str | None) -> bool:
     except Exception:  # noqa: BLE001
         logger.debug("print-not-kept cleanup failed", exc_info=True)
         return False
+
+
+def _names_of_the_print(file_name: str | None) -> set[str]:
+    """The base names this print went by: the file the printer started and
+    the slice and package the start record joined it to (never a match by
+    likeness: :func:`kiln.monitor_twin.sliced_entry_for` is the exact join
+    the start made)."""
+    names = {os.path.basename(str(file_name or ""))} - {""}
+    try:
+        from kiln.monitor_twin import sliced_entry_for
+
+        entry = sliced_entry_for(file_name or "") if file_name else None
+        for key in ("output", "wrapped"):
+            if isinstance(entry, dict) and entry.get(key):
+                names.add(os.path.basename(str(entry[key])))
+    except Exception:  # noqa: BLE001
+        logger.debug("slice join not read", exc_info=True)
+    return names
+
+
+def _forget_slice_records(names: set[str]) -> None:
+    from kiln.print_lineage import forget_files
+
+    forget_files(names)
+
+
+def _unname_plate(names: set[str]) -> None:
+    from kiln.plate_state import forget_file
+
+    forget_file(names)
 
 
 def reply_fields(result: Any) -> dict[str, Any]:
@@ -527,6 +563,12 @@ def call(fn: Callable[..., Any]) -> Callable[..., Any]:
             _not_kept_call.reset(token)
 
     return wrapper
+
+
+def mark_call_not_kept() -> None:
+    """For a one-shot process (the ``kiln print --dont-keep`` command): the
+    rest of this call is about a print not kept (:func:`audit_details`)."""
+    _not_kept_call.set(True)
 
 
 def audit_details(details: dict[str, Any] | None) -> dict[str, Any] | None:

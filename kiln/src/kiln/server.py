@@ -7441,8 +7441,22 @@ def _check_billing_auth(scope: str = "print") -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
+def _job_not_kept(data: Any) -> bool:
+    """Whether an event is about a queued print the person asked not to keep
+    (:mod:`kiln.print_keeping`): nothing about it is written down."""
+    try:
+        job_id = data.get("job_id") if isinstance(data, dict) else None
+        if not job_id:
+            return False
+        return (_get_queue().get_job(job_id).metadata or {}).get("keep_record") is False
+    except Exception:  # noqa: BLE001 -- an unknown job is not one of these
+        return False
+
+
 def _persist_event(event: Event) -> None:
     """EventBus subscriber that writes every event to SQLite."""
+    if _job_not_kept(event.data):
+        return
     try:
         db = get_db()
         db.log_event(
@@ -7519,6 +7533,8 @@ def _billing_hook(event: Event) -> None:
 
 def _log_print_completion(event: Event) -> None:
     """EventBus subscriber that logs completed/failed jobs to print_history."""
+    if _job_not_kept(event.data):
+        return
     try:
         job = _get_queue().get_job(event.data["job_id"])
         duration = None
@@ -15995,11 +16011,13 @@ def marketplace_info() -> dict:
 
 
 @mcp.tool(annotations=destructive("Download and send to printer", open_world=True))
+@print_keeping_call
 def download_and_upload(
     file_id: str | None = None,
     source: str = "thingiverse",
     printer_name: str | None = None,
     model_id: str | None = None,
+    keep_record: bool | None = None,
 ) -> dict:
     """Download model file(s) from any marketplace and upload to a printer.
 
@@ -16016,6 +16034,12 @@ def download_and_upload(
     upload's ``conversion`` names the original, which stays on disk.
 
     Args:
+        keep_record: ``False`` only when the person asks for this print not to be kept
+            ("print this privately", "don't keep a record of this"); never suggest it.
+            Kiln then keeps nothing of the print once it ends, and the answer carries
+            one line saying so.  ``True`` keeps it, for a start a team's rule held
+            (``TEAM_KEEPS_PRINTS``) after the person agreed.  Omit otherwise: the print
+            is kept the way the account says.
         file_id: File ID (from ``model_files`` results).  For Thingiverse
             this is a numeric ID; for MyMiniFactory it's the file ID string.
             If omitted and ``model_id`` is given, all printable files are
@@ -16216,7 +16240,9 @@ def download_and_upload(
                 source=print_signoff.SOURCE_STANDING_OPT_IN,
             )
             sent_at = time.monotonic()
-            print_res = adapter.start_print(file_name)
+            print_res = adapter.start_print(
+                file_name, **({"keep_record": keep_record} if isinstance(keep_record, bool) else {}),
+            )
             _note_print_started(adapter, print_res)
             print_verdict = resolve_print_start(
                 adapter, print_res, sent_at=sent_at, file_name=file_name,
@@ -19001,6 +19027,7 @@ def extract_plate_object(
 
 
 @mcp.tool(annotations=destructive("Print one plate object"))
+@print_keeping_call
 def print_plate_object(
     file_path: str,
     object_name: str,
@@ -19013,6 +19040,7 @@ def print_plate_object(
     plate_number: int = 1,
     printer_name: str | None = None,
     preview_token: str | None = None,
+    keep_record: bool | None = None,
 ) -> dict:
     """Extract a single object from a multi-object .gcode.3mf and print it.
 
@@ -19052,6 +19080,12 @@ def print_plate_object(
     :param preview_token: Token from ``issue_preview_token`` proving the
         object was shown to the person before printing.  Required beside their
         go-ahead: a print is shown to its owner before it starts.
+
+    keep_record: ``False`` only when the person asks for this print not to be kept
+    ("print this privately", "don't keep a record of this"); never suggest it.  Kiln
+    then keeps nothing of the print once it ends, and the answer carries one line saying
+    so.  ``True`` keeps it, for a start a team's rule held (``TEAM_KEEPS_PRINTS``) after
+    the person agreed.  Omit otherwise: the print is kept the way the account says.
     """
     if err := _check_auth("print"):
         return err
@@ -19138,6 +19172,7 @@ def print_plate_object(
         with _covered_by_approval("print_plate_object", file_path, uploaded_name, printer_name):
             print_result = start_print(
                 file_name=uploaded_name,
+                keep_record=keep_record,
                 use_ams=use_ams,
                 ams_mapping=ams_mapping,
                 bed_leveling=bed_leveling,
@@ -20313,6 +20348,7 @@ def troubleshoot_printer(
 
 
 @mcp.tool(annotations=destructive("Quick print"))
+@print_keeping_call
 def run_quick_print(
     model_path: str,
     printer_name: str | None = None,
@@ -20327,6 +20363,7 @@ def run_quick_print(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    keep_record: bool | None = None,
 ) -> dict:
     """Full print pipeline: validate + slice + safety-check + upload + print (recommended one-shot tool).
 
@@ -20343,6 +20380,12 @@ def run_quick_print(
     7. Start printing
 
     Args:
+        keep_record: ``False`` only when the person asks for this print not to be kept
+            ("print this privately", "don't keep a record of this"); never suggest it.
+            Kiln then keeps nothing of the print once it ends, and the answer carries
+            one line saying so.  ``True`` keeps it, for a start a team's rule held
+            (``TEAM_KEEPS_PRINTS``) after the person agreed.  Omit otherwise: the print
+            is kept the way the account says.
         mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
             ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only
             on their yes, each time; ``slice_model`` says what follows.
@@ -20431,6 +20474,7 @@ def run_quick_print(
             ams_mapping=parsed_ams_mapping,
             skip_validation=skip_validation,
             signoff=signoff,
+            **({"keep_record": keep_record} if isinstance(keep_record, bool) else {}),
             placement=placement,
             **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
         )

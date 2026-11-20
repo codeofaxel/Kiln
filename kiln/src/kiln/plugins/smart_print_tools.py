@@ -14,6 +14,7 @@ import os
 import time
 from typing import Any
 
+from kiln import print_keeping
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_annotations import destructive
 from kiln.tool_args import parse_json_object
@@ -41,6 +42,7 @@ class _SmartPrintToolsPlugin:
         """Register smart print tools with the MCP server."""
 
         @mcp.tool(annotations=destructive("Retry a print with a fix"))
+        @print_keeping.call
         def retry_print_with_fix(
             model_path: str,
             printer_name: str | None = None,
@@ -54,6 +56,7 @@ class _SmartPrintToolsPlugin:
             soft_nozzle_confirmed: bool = False,
             mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
+            keep_record: bool | None = None,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
 
@@ -77,6 +80,13 @@ class _SmartPrintToolsPlugin:
                overrides, uploads the result, and starts the print.
 
             Args:
+                keep_record: ``False`` only when the person asks for this print not to
+                    be kept ("print this privately", "don't keep a record of this");
+                    never suggest it.  Kiln then keeps nothing of the print once it
+                    ends, and the answer carries one line saying so.  ``True`` keeps it,
+                    for a start a team's rule held (``TEAM_KEEPS_PRINTS``) after the
+                    person agreed.  Omit otherwise: the print is kept the way the
+                    account says.
                 mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
                     with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
                     experiment). Only on their yes, each time; ``slice_model`` says what follows.
@@ -467,6 +477,8 @@ class _SmartPrintToolsPlugin:
                 start_kwargs: dict[str, Any] = {}
                 if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
                     start_kwargs["local_file_path"] = upload_path
+                if isinstance(keep_record, bool):
+                    start_kwargs["keep_record"] = keep_record
                 print_result = adapter.start_print(file_name, **start_kwargs)
             except Exception as exc:
                 return _srv._error_dict(

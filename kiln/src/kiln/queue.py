@@ -345,6 +345,7 @@ class PrintQueue:
             job.status = JobStatus.CANCELLED
             job.completed_at = time.time()
         self._update_job_db(job)
+        self._forget_if_not_kept(job)
         return job
 
     # ------------------------------------------------------------------
@@ -384,6 +385,7 @@ class PrintQueue:
             job.status = JobStatus.COMPLETED
             job.completed_at = time.time()
         self._update_job_db(job)
+        self._forget_if_not_kept(job)
         return job
 
     def mark_failed(self, job_id: str, error: str) -> PrintJob:
@@ -395,6 +397,7 @@ class PrintQueue:
             job.completed_at = time.time()
             job.error = error
         self._update_job_db(job)
+        self._forget_if_not_kept(job)
         return job
 
     def mark_paused(self, job_id: str) -> PrintJob:
@@ -699,6 +702,27 @@ class PrintQueue:
             raise
         except Exception:
             logger.exception("Failed to persist job %s to SQLite", job.id)
+
+    #: Job metadata that names the print, dropped from a print not kept.
+    _NAMING_METADATA = ("file_hash", "version_id", "design_id", "branch_id", "started_file",
+                        "preview_signoff", "material_type")
+
+    def _forget_if_not_kept(self, job: PrintJob) -> None:
+        """A job the person asked not to keep has ended: its row leaves this
+        queue's store and the job in memory keeps nothing that names the
+        print (:mod:`kiln.print_keeping`).  Never raises."""
+        if (job.metadata or {}).get("keep_record") is not False:
+            return
+        try:
+            with self._lock:
+                job.file_name = ""
+                job.error = None
+                job.metadata = {k: v for k, v in (job.metadata or {}).items() if k not in self._NAMING_METADATA}
+            if self._db is not None:
+                self._db.execute("DELETE FROM jobs WHERE id=?", (job.id,))
+                self._db.commit()
+        except Exception:
+            logger.debug("a job not kept was not forgotten", exc_info=True)
 
     def _update_job_db(self, job: PrintJob) -> None:
         """Update an existing job row in SQLite."""

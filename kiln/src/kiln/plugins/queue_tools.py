@@ -93,6 +93,7 @@ def submit_job(
     version_id: str | None = None,
     design_id: str | None = None,
     branch_id: str | None = None,
+    keep_record: bool | None = None,
 ) -> dict:
     """Submit a print job to the queue.
 
@@ -104,6 +105,12 @@ def submit_job(
     refusal says how many); Pro has no queue cap.
 
     Args:
+        keep_record: ``False`` only when the person asks for this print not to be kept
+            ("print this privately", "don't keep a record of this"); never suggest it.
+            Kiln then keeps nothing of the print once it ends, and the answer carries
+            one line saying so.  ``True`` keeps it, for a start a team's rule held
+            (``TEAM_KEEPS_PRINTS``) after the person agreed.  Omit otherwise: the
+            print is kept the way the account says.
         file_name: G-code file name (must already exist on the printer).
         printer_name: Target printer name.  Omit to let the scheduler
             choose: the printer the queue is already on (it stays on one
@@ -195,6 +202,7 @@ def submit_job(
             metadata=(
                 {
                     **({"preview_signoff": signoff} if signoff else {}),
+                    **({"keep_record": keep_record} if isinstance(keep_record, bool) else {}),
                     **{
                         k: v.strip()
                         for k, v in (
@@ -825,7 +833,9 @@ class _QueueToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register queue/job tools with the MCP server."""
 
-        mcp.tool(annotations=destructive("Queue a print"))(submit_job)
+        from kiln import print_keeping as _keeping
+
+        mcp.tool(annotations=destructive("Queue a print"))(_keeping.call(submit_job))
         mcp.tool(annotations=read_only("Job status"))(job_status)
         mcp.tool(annotations=read_only("Queue summary"))(queue_summary)
         mcp.tool(annotations=destructive("Cancel a queued job"))(cancel_queued_job)
