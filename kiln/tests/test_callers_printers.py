@@ -115,9 +115,22 @@ class TestTheReadersAnswerForTheCaller:
         with callers_printers.serving(ONE):
             got = nozzle_mod.assumed_nozzle(None, or_only_printer=True)
         assert (got.diameter_mm, got.printer_id, got.inferred_printer) == (0.6, "shop-mini", True)
+
+    def test_among_the_callers_printers_their_default_is_the_printer(self, this_machine, monkeypatch):
+        # The printer the bed and the model are read for (the caller's
+        # default) is the one the nozzle is read for too.
+        monkeypatch.setattr("kiln.printers.engagement._multi_machine_tier", lambda: False)
         with callers_printers.serving(SHOP):
             got = nozzle_mod.assumed_nozzle(None, or_only_printer=True)
-        assert got.source == "default"  # two machines: neither is picked
+            assert printer_model_resolver.resolve_printer_model() == "bambu_a1_mini"
+        assert (got.diameter_mm, got.printer_id, got.inferred_printer) == (0.6, "shop-mini", True)
+        assert "shop-mini's own nozzle setting, your default printer" in got.sentence()
+
+    def test_a_plan_that_runs_printers_side_by_side_picks_none_of_them(self, this_machine, monkeypatch):
+        monkeypatch.setattr("kiln.printers.engagement._multi_machine_tier", lambda: True)
+        with callers_printers.serving(SHOP):
+            got = nozzle_mod.assumed_nozzle(None, or_only_printer=True)
+        assert (got.source, got.printer_id) == ("default", None)
 
     def test_the_model_is_the_callers_never_this_machines(self, this_machine):
         assert printer_model_resolver.resolve_printer_model() == "bambu_x1c"
