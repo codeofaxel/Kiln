@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -541,6 +542,19 @@ def _fill_record(plan_id: str) -> tuple[str, dict[str, Any], str] | None:
     except (TypeError, ValueError):
         return None
     return str(row.get("original_file") or ""), record if isinstance(record, dict) else {}, str(row.get("status") or "")
+
+
+def forget_run_files(copies: set[str], pictures: set[str]) -> None:
+    """Delete the files Kiln made for a run the person asked not to keep:
+    its own copies of the part (only inside its queued-parts folder) and its
+    plate pictures (only Kiln's, by name).  Never raises."""
+    from kiln.asset_store import kiln_root
+    from kiln.print_keeping import PLATE_PICTURE_PREFIX, picture_roots, remove_kilns_own
+
+    for path in copies:
+        remove_kilns_own(path, (os.path.join(kiln_root(), "queued_parts"),))
+    for path in pictures:
+        remove_kilns_own(path, picture_roots(), prefix=PLATE_PICTURE_PREFIX)
 
 
 def forget_plan(plan_id: str) -> bool:

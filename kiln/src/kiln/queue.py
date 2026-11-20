@@ -777,13 +777,9 @@ class PrintQueue:
                     str(((j.metadata or {}).get("fill") or {}).get(key) or "")
                     for j in self._jobs.values() if j not in run for key in ("model_path", "owned_copy")
                 }
-            from kiln.asset_store import kiln_root
-            from kiln.print_keeping import PLATE_PICTURE_PREFIX, picture_roots, remove_kilns_own
+            from kiln.job_splitter import forget_run_files
 
-            for path in copies - still_used:
-                remove_kilns_own(path, (os.path.join(kiln_root(), "queued_parts"),))
-            for path in pictures:
-                remove_kilns_own(path, picture_roots(), prefix=PLATE_PICTURE_PREFIX)
+            forget_run_files(copies - still_used, pictures)
             if self._db is not None:
                 for j in run:
                     self._db.execute("DELETE FROM jobs WHERE id=?", (j.id,))
