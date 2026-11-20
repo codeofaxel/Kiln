@@ -8708,8 +8708,9 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
 
     Pieces in the air are judged as :mod:`kiln.fusion_check` judges them,
     and said in its words, so the make doors that refuse a floating piece
-    and this report name the same pieces.  ``None`` when the mesh has no
-    pieces to read.
+    and this report name the same pieces.  Separate parts on the plate that
+    stand a clearance apart print in place together, and are said so, never
+    told to be joined.  ``None`` when the mesh has no pieces to read.
     """
     if reading is None or reading.piece_count == 0:
         return None
@@ -8733,7 +8734,7 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     from kiln.fusion_check import judge_reading
 
     try:
-        fusion = judge_reading(triangles, reading)
+        fusion = judge_reading(triangles, reading, clearances=True)
     except Exception:  # noqa: BLE001 -- the parts are still counted; the air goes unjudged
         logger.debug("pieces in the air unjudged", exc_info=True)
         block.note = f"It prints as {block.solid_count} separate parts, not one."
@@ -8750,19 +8751,7 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     standing = [s for s in largest_first if s not in in_air]
     said: list[str] = []
     if len(standing) >= 2:
-        largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
-        across = [max(size[0], size[1]) for size in rest]
-        if len(rest) == 1:
-            others = f"and one {_size_said(rest[0])}"
-        elif max(across) - min(across) < 0.05:
-            others = f"and {len(rest)} more, each {_mm_said(min(across))} mm across"
-        else:
-            others = f"and {len(rest)} more, {_mm_said(min(across))} to {_mm_said(max(across))} mm across"
-        said.append(
-            f"It prints as {len(standing)} separate parts on the plate, not one: the largest is "
-            f"{_size_said(largest)} {others}, and each comes off the plate on its own. "
-            "If they belong together, join them so they overlap."
-        )
+        said.append(_standing_said(standing, size_of, fusion.get("clearances"), solid_of))
     # The pieces in the air that do print, by how the fusion check found
     # them: resting on the part, a clearance away from it, held inside it.
     resting: set[int] = set()
@@ -8785,6 +8774,60 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     return block
 
 
+def _standing_said(
+    standing: list[int], size_of: dict[int, list[float]], clearances: dict[str, Any] | None, solid_of: list[int],
+) -> str:
+    """What is said of the separate parts standing on the plate (*standing*,
+    largest first): their sizes, then that the ones a clearance apart
+    (:func:`kiln.fusion_check.judge_reading`'s *clearances*) print in place
+    together, and that the rest each come off the plate on their own."""
+    from kiln.fusion_check import embedment_floor_mm
+
+    largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
+    across = [max(size[0], size[1]) for size in rest]
+    if len(rest) == 1:
+        others = f"and one {_size_said(rest[0])}"
+    elif max(across) - min(across) < 0.05:
+        others = f"and {len(rest)} more, each {_mm_said(min(across))} mm across"
+    else:
+        others = f"and {len(rest)} more, {_mm_said(min(across))} to {_mm_said(max(across))} mm across"
+    parts = (
+        f"It prints as {len(standing)} separate parts on the plate, not one: the largest is "
+        f"{_size_said(largest)} {others}"
+    )
+    spaced: set[int] = set()
+    gaps: list[float] = []
+    for pair in (clearances or {}).get("pairs") or []:
+        spaced |= {solid_of[body - 1] for body in pair["bodies"]}
+        gaps.append(float(pair["gap_mm"]))
+    near = [s for s in standing if s in spaced]
+    if not near:
+        return f"{parts}, and each comes off the plate on its own. If they belong together, join them so they overlap."
+    who = "They" if len(near) == len(standing) else f"{len(near)} of them"
+    said = (
+        f"{parts}. {who} stand {_gaps_said(gaps)} apart without touching, so they print in place together "
+        "with nothing joining them: fine for a designed clearance. If they were meant to be one solid, "
+        f"sink them at least {embedment_floor_mm():g} mm into each other."
+    )
+    loose = len(standing) - len(near)
+    if loose == 1:
+        return f"{said} The other one comes off the plate on its own; if it belongs with them, join it so they overlap."
+    if loose:
+        return (
+            f"{said} The other {loose} each come off the plate on their own; "
+            "if they belong together, join them so they overlap."
+        )
+    return said
+
+
+def _gaps_said(gaps: list[float]) -> str:
+    def said(value: float) -> str:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    low, high = said(min(gaps)), said(max(gaps))
+    return f"{low} mm" if low == high else f"{low} to {high} mm"
+
+
 def _in_the_air_said(count: int, *, resting: bool) -> str:
     """What is said of *count* pieces off the plate that rest on the part
     without being joined to it (*resting*), or sit a clearance away from it."""
@@ -8803,10 +8846,14 @@ def _in_the_air_said(count: int, *, resting: bool) -> str:
             f"most. {sink}"
         )
     sit = "sits" if one else "sit"
+    meant = (
+        f"If {they} {'was' if one else 'were'} meant to be one solid with the part, "
+        f"sink {them} at least {embedment_floor_mm():g} mm into it."
+    )
     return (
         f"{pieces} {sit} less than {NEAR_GAP_MM:g} mm from the part, joined to nothing, "
         f"so {they} {'prints' if one else 'print'} loose on it: fine for a designed "
-        f"clearance. {sink}"
+        f"clearance. {meant}"
     )
 
 
