@@ -922,3 +922,42 @@ def test_no_ask_in_the_session_carries_a_list_of_what_kiln_lacks(tmp_path, monke
     session = {"printer_name": "a1", "step": "intro", "blanks": ["pause", "cancel", "head"], "observed": {"pause": {}}}
     reply = tool._reply(session, "Is the plate empty?")
     assert "blanks" not in reply and reply["learned"] == ["pause"]
+
+
+# ---------------------------------------------------------------------------
+# A session the service will not start yet
+# ---------------------------------------------------------------------------
+
+
+def _held(code: str = "SESSION_ACCOUNT_REQUIRED", **extra) -> dict:
+    doc = _verdict(ok=True)
+    del doc["record"]["blanks"]
+    doc["record"].update(teach=None, teach_hold={
+        "code": code, "sentence": "Sign in to Kiln to teach it your printer. An account is free and takes a minute.",
+        "tool": "kiln_signin", **extra})
+    return doc
+
+
+class TestAHeldSession:
+    def test_the_hold_is_read_and_is_never_nothing_to_teach(self, monkeypatch):
+        from kiln import _pro_placement_bridge as bridge
+
+        monkeypatch.setattr(bridge, "ask", lambda request: (_held(), None))
+        blanks, verdict = bench.blanks_for(_Adapter(), "bambu_a1")
+        assert blanks == [] and bench.session_hold(verdict)["code"] == "SESSION_ACCOUNT_REQUIRED"
+        assert bench.session_hold(_verdict(ok=True, blanks=["pause"])) is None
+
+    def test_the_session_says_the_services_sentence_and_what_to_call_next(self, server, monkeypatch):
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _held()))
+        out = _step(server)
+        assert out["step"] == "held" and out["hold"] == "SESSION_ACCOUNT_REQUIRED"
+        assert out["ask"] == "Sign in to Kiln to teach it your printer. An account is free and takes a minute."
+        assert "kiln_signin" in out["next"] and server.log == []
+        unit = bench.unit_of(_Adapter())
+        assert bench.may_offer(unit, "refusal") is True, "a held session is not a finished one"
+
+    def test_a_held_session_is_not_offered_at_registration_and_is_not_marked_done(self, monkeypatch):
+        machine = _Adapter()
+        monkeypatch.setattr(bench, "blanks_for", lambda adapter, pid: ([], _held()))
+        assert bench.offer_after_registration(machine, "a1") is None
+        assert bench.may_offer(bench.unit_of(machine), "registration") is True

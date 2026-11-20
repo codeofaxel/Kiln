@@ -449,6 +449,18 @@ def blanks_for(adapter: Any, printer_id: str | None) -> tuple[list[str], dict[st
     return [b for b in (record.get("blanks") or []) if isinstance(b, str)], verdict
 
 
+def session_hold(verdict: Any) -> dict[str, Any] | None:
+    """Why the service will not start a session for this printer yet, as it
+    said it (a ``code``, one ``sentence`` to say as written, and what to do
+    next), or ``None``.  A held session is not a finished one: nothing is
+    offered and nothing is marked done until it can start."""
+    record = verdict.get("record") if isinstance(verdict, dict) else None
+    hold = record.get("teach_hold") if isinstance(record, dict) else None
+    if isinstance(hold, dict) and hold.get("code") and hold.get("sentence"):
+        return hold
+    return None
+
+
 def _joined(words: list[str], last: str = "or") -> str:
     """``a``, ``a or b``, ``a, b or c``."""
     if len(words) <= 1:
@@ -543,6 +555,8 @@ def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] 
         if not printer_id:
             return None
         blanks, verdict = blanks_for(adapter, printer_id)
+        if session_hold(verdict) is not None:
+            return None                           # not startable yet; nothing is marked
         if not blanks:
             if verdict is not None:
                 note_offer(unit, answer="done")   # nothing to teach; never ask

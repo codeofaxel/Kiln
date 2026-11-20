@@ -628,6 +628,20 @@ def printer_bench(
                 return _srv._error_dict(
                     "Kiln could not read this printer's record right now (the placement service did not answer), "
                     "so it cannot say what the session would teach; try again when online.", code="BENCH_NO_VERDICT")
+            hold = bench.session_hold(verdict)
+            if hold is not None:
+                # The service's own sentence, said as written, and the one
+                # thing to do next.  Nothing is marked: the session starts
+                # the next time it is asked for.
+                tool = str(hold.get("tool") or "")
+                return {
+                    "success": True, "step": "held", "printer_name": target_name, "hold": str(hold["code"]),
+                    "ask": str(hold["sentence"]), "images": [], "learned": [],
+                    "retryable": bool(hold.get("retryable")),
+                    **({"upgrade_url": hold["upgrade_url"]} if hold.get("upgrade_url") else {}),
+                    "next": (f"Relay the ask word for word. Then call `{tool}`, and call printer_bench again." if tool
+                             else "Relay the ask word for word. Call printer_bench again when it can start."),
+                }
             bed = bench.bed_of(printer_id)
             if not bed:
                 return _srv._error_dict(f"Kiln's catalogue has no plate size for {printer_id}, so the zone drawing cannot be made.",
