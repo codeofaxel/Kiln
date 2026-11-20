@@ -106,14 +106,14 @@ LOG_MAX_S = 120.0
 
 __all__ = [
     "BLOCKS", "FOOTPRINT_MARGIN_MM", "HOWS", "LESSON_TEACHES", "LIFT_WORDS_MM", "LIMITS", "MOTION",
-    "OBSERVATION_FORMAT", "OFFER_DOORS", "OFFER_QUIET_S", "PUSH_MM", "RECORD_BLOCKS", "RISE_MM", "TEACHABLE",
-    "PositionLog", "bed_of", "bench_dir", "blanks_for", "block_start", "can_log_positions", "count",
-    "draw_head_sketch", "draw_zones", "fingerprint_of", "firmware_of", "gain_sentence", "head_observation",
-    "hold_kind", "keep_observation", "lesson_for", "logged_block", "logs_positions", "may_offer", "note_offer",
-    "observation", "observations_for_request", "observations_of", "offer", "offer_after_registration",
-    "offer_fields", "offer_for", "parse_lift", "parse_zone", "position_of", "position_reading", "print_footprint",
-    "refusal_blanks", "send_after_heartbeat", "send_pending", "sharing", "unit_from_machine", "unit_of", "way_back",
-    "zone_of", "zone_rect",
+    "OBSERVATION_FORMAT", "OFFER_DOORS", "OFFER_QUIET_S", "PUSH_MM", "PositionLog", "RECORD_BLOCKS", "RISE_MM",
+    "TEACHABLE", "bed_of", "bench_dir", "blanks_for", "block_start", "can_log_positions", "count",
+    "draw_head_sketch", "draw_zones", "ended_block", "fingerprint_of", "firmware_of", "gain_sentence",
+    "head_observation", "hold_kind", "keep_observation", "lesson_for", "logged_block", "logs_positions", "may_offer",
+    "note_learned", "note_offer", "observation", "observations_for_request", "observations_of", "offer",
+    "offer_after_registration", "offer_fields", "offer_for", "parse_lift", "parse_zone", "position_of",
+    "position_reading", "print_footprint", "refusal_blanks", "send_after_heartbeat", "send_pending", "sharing",
+    "take_learned", "unit_from_machine", "unit_of", "way_back", "zone_of", "zone_rect",
 ]
 
 
@@ -674,6 +674,58 @@ def may_offer(unit: str | None, door: str) -> bool:
     return age is None or age >= OFFER_QUIET_S
 
 
+# ---------------------------------------------------------------------------
+# What a real print taught, said once
+# ---------------------------------------------------------------------------
+
+#: What a printer does in each block, as the end of "how your <printer> ...".
+_LEARNED_VERBS = {"pause": "pauses a print", "cancel": "cancels a print", "end": "ends a print"}
+
+
+def _learned_path() -> Path:
+    return bench_dir() / "learned.json"
+
+
+def note_learned(adapter: Any, printer_id: str | None, block: str) -> None:
+    """A real print taught Kiln *block* on this printer: counted, and kept
+    to be said once on the person's next reply (:func:`take_learned`).
+    Never raises."""
+    if block not in _LEARNED_VERBS:
+        return
+    count("learned", MOTION, "real_print")
+    try:
+        unit = unit_of(adapter)
+        name = _display_name(printer_id) if printer_id else "printer"
+        try:
+            pending = json.loads(_learned_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pending = []
+        pending = [p for p in pending if isinstance(p, dict) and (p.get("unit"), p.get("block")) != (unit, block)]
+        pending.append({"unit": unit, "name": name, "block": block, "at": _now()})
+        path = _learned_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(pending[-20:], indent=2), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        _logger.debug("bench: what was learned is not kept to be said", exc_info=True)
+
+
+def take_learned() -> list[str]:
+    """What real prints taught Kiln since it was last said, one sentence
+    each, and forgotten once taken.  Never raises."""
+    path = _learned_path()
+    try:
+        pending = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    with contextlib.suppress(OSError):
+        path.unlink()
+    said = []
+    for p in pending if isinstance(pending, list) else []:
+        if isinstance(p, dict) and p.get("block") in _LEARNED_VERBS:
+            said.append(f"Kiln learned how your {p.get('name') or 'printer'} {_LEARNED_VERBS[p['block']]}.")
+    return said
+
+
 def offer_after_registration(adapter: Any, printer_name: str) -> dict[str, Any] | None:
     """The one-time offer a registration answers with: the first lesson
     when it has something to teach this printer, else the second.  ``None``
@@ -1089,6 +1141,38 @@ def logged_block(logs: list[Any], footprint: list[float] | None, *, returns: boo
     return points, layer
 
 
+def ended_block(log: Any, footprint: list[float] | None) -> tuple[list[tuple[float, float, float]], float] | str:
+    """An end's points and the layer it began at, from a log begun in a
+    print's last minutes -- or the reason nothing can be written.
+
+    A log begun minutes before the end climbs a layer at a time, so the
+    first rise is not the end's.  The end begins at the last point where
+    filament went forward over the print (or the next point, when that one
+    is still over it), and the layer is the highest point filament went
+    forward at.  A log cut short, no footprint, no filament going forward
+    over the print, the head away from the print first, or no movement
+    after the last line says nothing."""
+    if log is None or not getattr(log, "complete", False):
+        return "the position log was cut short before the head settled"
+    if footprint is None:
+        return "Kiln has no footprint for the print that was running, so the log can't tell the print from the block"
+    points = list(log.points)
+    extruder = list(getattr(log, "extruder", []) or [])
+    if len(points) < 2 or len(extruder) != len(points):
+        return "the log has no extruder readings to tell the print from the block"
+    printed = [i for i in range(1, len(points)) if _pushed(extruder, i) and _over(points[i], footprint)]
+    if not printed:
+        return "the log saw no filament going forward over the print"
+    last = printed[-1]
+    start = last + 1 if last + 1 < len(points) and _over(points[last + 1], footprint) else last
+    if not all(_over(p, footprint) for p in points[: start + 1]):
+        return "the log saw the head away from the print before the end began"
+    tail = points[start:]
+    if len({tuple(round(v, 1) for v in p) for p in tail}) < 2:
+        return "the position log caught no movement after the last line"
+    return tail, max(points[i][2] for i in printed)
+
+
 # ---------------------------------------------------------------------------
 # The send: one RPC, under the one switch
 # ---------------------------------------------------------------------------
@@ -1140,7 +1224,7 @@ def send_pending(supabase_url: str, anon_key: str) -> int:
     except OSError:
         return 0
     for path in paths:
-        if path.name == "offers.json":
+        if path.name in ("offers.json", "learned.json"):
             continue
         try:
             store = json.loads(path.read_text(encoding="utf-8"))

@@ -22556,6 +22556,15 @@ def _start() -> None:
     except Exception:
         logger.debug("sharing question not installed", exc_info=True)
 
+    # What a real print taught Kiln about the person's printer, said once on
+    # the next result (kiln.head_moves learns it; kiln.bench keeps it).
+    try:
+        from kiln import learned_notice
+
+        learned_notice.install(mcp)
+    except Exception:
+        logger.debug("what a print taught is not said", exc_info=True)
+
     # The onboarding pointer, same surface and same reasoning: agents are
     # told to call get_started() first and measurably skip it, and a
     # session that skipped it cannot rediscover what it never saw.  One

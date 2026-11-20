@@ -404,3 +404,219 @@ class TestTheWatch:
         with pytest.raises(RuntimeError, match="link lost"):
             m.pause_print()
         assert head_moves._RUNNING == {}
+
+
+# ---------------------------------------------------------------------------
+# The end of a print, and the footprint read while the print runs
+# ---------------------------------------------------------------------------
+
+#: A print's last layers climbing 0.2 mm at a time -- far more than a block's
+#: own rise over a few minutes -- then the last line stops, the head climbs
+#: and travels to its park.
+LAST_LAYERS = [
+    (x, 110.0 + 5.0 * k, z, 20.0 + 0.5 * n)
+    for n, (k, z, x) in enumerate(
+        (k, round(1.0 + 0.2 * layer, 1), x)
+        for layer in range(7) for k, x in enumerate((110.0, 125.0, 140.0))
+    )
+]
+END_STOP = [(140.0, 128.0, 2.2, LAST_LAYERS[-1][3])]
+END_CLIMB = [(140.0, 128.0, 4.0, LAST_LAYERS[-1][3] - 0.8), (140.0, 128.0, 12.0, LAST_LAYERS[-1][3] - 0.8)]
+END_PARK = [(60.0, 200.0, 12.0, LAST_LAYERS[-1][3] - 0.8), (0.0, 215.0, 12.0, LAST_LAYERS[-1][3] - 0.8)]
+
+
+class _Ending(_Klipperish):
+    """A print in its last minutes; the printer says the print is over once
+    the head reaches its park."""
+
+    def __init__(self, serial="HEADMOVES0002"):
+        super().__init__(serial)
+        self.gcode_sent: list[str] = []
+
+    def get_job(self):
+        return JobProgress(file_name="bracket.gcode", print_time_seconds=3600, print_time_left_seconds=60,
+                           completion=98.0, job_id="job-7")
+
+    def get_tool_position(self):
+        reading = super().get_tool_position()
+        if reading is not None and reading["z"] >= 12.0 and reading["x"] <= 0.0:
+            self.state = PrinterStatus.IDLE
+        return reading
+
+    def send_gcode(self, commands):
+        self.gcode_sent.append(str(commands))
+        return True
+
+
+@pytest.fixture
+def ending(watching, monkeypatch, tmp_path):
+    from kiln import daily_stats
+
+    monkeypatch.setattr(head_moves, "END_STATE_EVERY_S", 0.0)
+    monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "stats.json")
+    head_moves._ENDS.clear()
+    yield
+    head_moves._ENDS.clear()
+
+
+def _printing():
+    return PrinterState(connected=True, state=PrinterStatus.PRINTING)
+
+
+class TestTheEnd:
+    def test_the_end_is_read_from_after_the_last_line_not_from_the_first_layer_change(self, ending):
+        m = _Ending()
+        _on_the_plate(m)
+        m.script = list(LAST_LAYERS + END_STOP + END_CLIMB + END_PARK)
+        head_moves.on_progress(m, _printing(), m.get_job())
+        doc = _until(lambda: _kept(m, "end"))
+        assert doc is not None and doc["how"] == "position_log" and doc["returns"] is False
+        assert doc["layer_z_mm"] == 2.2, "the top layer, not the layer the log began at"
+        assert doc["points"][0] == list(END_STOP[0][:3]) and doc["points"][-1] == list(END_PARK[-1][:3])
+        # Read and never commanded: nothing was sent to the printer.
+        assert m.sent == [] and m.gcode_sent == []
+
+    def test_what_the_end_taught_is_said_once_and_counted(self, ending):
+        from kiln import daily_stats
+
+        m = _Ending()
+        _on_the_plate(m)
+        m.script = list(LAST_LAYERS + END_STOP + END_CLIMB + END_PARK)
+        head_moves.on_progress(m, _printing(), m.get_job())
+        assert _until(lambda: _kept(m, "end")) is not None
+        said = _until(lambda: bench._learned_path().exists() and bench.take_learned())
+        assert said == [f"Kiln learned how your {bench._display_name('creality_ender3')} ends a print."]
+        assert bench.take_learned() == [], "said once"
+        assert daily_stats.get_daily_stats()["bench_funnel"] == {"learned|motion|real_print": 1}
+
+    def test_an_end_is_logged_once_per_print_and_only_in_its_last_minutes(self, ending):
+        m = _Ending()
+        _on_the_plate(m)
+        early = JobProgress(file_name="bracket.gcode", print_time_left_seconds=head_moves.END_WINDOW_S + 1,
+                            job_id="job-7")
+        head_moves.on_progress(m, _printing(), early)
+        assert head_moves._ENDS == {} and m.asked == 0
+        m.script = list(LAST_LAYERS + END_STOP + END_CLIMB + END_PARK)
+        head_moves.on_progress(m, _printing(), m.get_job())
+        assert _until(lambda: _kept(m, "end")) is not None
+        asked = m.asked
+        head_moves.on_progress(m, _printing(), m.get_job())
+        time.sleep(0.2)
+        assert m.asked == asked, "the same print's end is not logged twice"
+        assert head_moves.near_end(JobProgress(completion=99.5)) and not head_moves.near_end(JobProgress(completion=90.0))
+
+    def test_a_print_kiln_did_not_start_or_a_printer_that_cannot_say_teaches_no_end(self, ending):
+        m = _Ending()
+        m.script = list(LAST_LAYERS + END_STOP + END_CLIMB + END_PARK)
+        head_moves.on_progress(m, _printing(), m.get_job())
+        time.sleep(0.3)
+        assert m.asked == 0 and head_moves._ENDS == {}, "a print Kiln did not start is not even read"
+        assert bench.observations_of(m) == [] and not bench._learned_path().exists()
+
+        class _ClosedEnding(_Ending):
+            head_position = "this printer reports no head position"
+
+        c = _ClosedEnding(serial="HEADMOVES0003")
+        _on_the_plate(c)
+        head_moves.on_progress(c, _printing(), c.get_job())
+        assert c.asked == 0 and head_moves._ENDS == {}
+
+    def test_a_cancel_is_kept_even_when_the_plate_record_moves_on_before_the_head_settles(self, ending):
+        # The print-ended hook re-marks the plate the moment a status read sees
+        # the print over, and from then on the record no longer says which
+        # print ran: the footprint is the one read when the log began.
+        m = _Klipperish()
+        _on_the_plate(m)
+        m.script = list(PRINT + STOP + CLIMB + PARK)
+        assert m.cancel_print().success
+        plate_state.mark_occupied(m, None, source="print_ended")
+        assert bench.print_footprint(m) is None
+        doc = _until(lambda: _kept(m, "cancel"))
+        assert doc is not None and doc["points"][0] == list(STOP[0][:3])
+
+
+class TestNeverInThePrintsWay:
+    """Observation on or off, the doors answer the same, send the same and
+    return at once, and the watchdog's poll reads the same and commands nothing."""
+
+    def _run(self, monkeypatch, on: bool, serial: str):
+        monkeypatch.setenv(head_moves.SWITCH_ENV, "1" if on else "0")
+        m = _Ending(serial=serial)
+        _on_the_plate(m)
+        m.script = list(PRINT + STOP + CLIMB + PARK)
+        answers, slowest = [], 0.0
+        for door in (m.pause_print, m.resume_print, m.cancel_print):
+            began = time.monotonic()
+            result = door()
+            slowest = max(slowest, time.monotonic() - began)
+            answers.append(result.to_dict())
+        return m, answers, slowest
+
+    def test_the_pause_resume_and_cancel_doors_are_the_same_with_the_watch_on_and_off(self, ending, monkeypatch):
+        on, on_answers, on_slowest = self._run(monkeypatch, True, "IDENTITY0001")
+        off, off_answers, _ = self._run(monkeypatch, False, "IDENTITY0002")
+        assert on_answers == off_answers and all(a["success"] for a in on_answers)
+        assert on.sent == off.sent == ["pause", "resume", "cancel"]
+        assert on.gcode_sent == off.gcode_sent == []
+        assert on_slowest < 0.1, "a door returns as soon as its command does; the log runs beside it"
+        assert off.asked == 0, "off reads nothing"
+
+    def test_the_watchdogs_poll_is_the_same_and_commands_nothing(self, ending, monkeypatch):
+        from kiln.print_watchdog import PrintWatchdog
+
+        seen = []
+        for on in (True, False):
+            monkeypatch.setenv(head_moves.SWITCH_ENV, "1" if on else "0")
+            m = _Ending(serial=f"IDENTITY001{int(on)}")
+            _on_the_plate(m)
+            m.script = list(LAST_LAYERS + END_STOP + END_CLIMB + END_PARK)
+            dog = PrintWatchdog(adapter=m, poll_interval_sec=60.0)
+            began = time.monotonic()
+            flag = dog.step()
+            seen.append((flag, time.monotonic() - began, m))
+        (on_flag, on_took, on_m), (off_flag, _t, off_m) = seen
+        assert on_flag is None and off_flag is None and on_took < 0.1
+        assert _until(lambda: _kept(on_m, "end")) is not None and bench.observations_of(off_m) == []
+        assert on_m.sent == off_m.sent == [] and on_m.gcode_sent == off_m.gcode_sent == []
+
+
+class _Result:
+    def __init__(self, structured=None, is_error=False):
+        self.structuredContent = structured
+        self.isError = is_error
+        self.content = []
+
+
+class TestWhatWasLearnedIsSaid:
+    def test_the_next_good_result_carries_it_once_and_a_failure_never(self, home, monkeypatch):
+        from kiln import learned_notice
+
+        monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+        bench.note_learned(_Machine(), "creality_ender3", "end")
+        failed = _Result({"success": False, "error": "x"})
+        learned_notice._attach(failed, None, "printer_status")
+        assert learned_notice.RESULT_KEY not in failed.structuredContent
+        ok = _Result({"success": True})
+        learned_notice._attach(ok, None, "printer_status")
+        block = ok.structuredContent[learned_notice.RESULT_KEY]
+        assert block["said"] == [f"Kiln learned how your {bench._display_name('creality_ender3')} ends a print."]
+        assert ok.structuredContent["success"] is True, "the result it rides on is kept"
+        again = _Result({"success": True})
+        learned_notice._attach(again, None, "printer_status")
+        assert learned_notice.RESULT_KEY not in again.structuredContent, "said once"
+
+    def test_it_names_what_was_learned_never_what_is_missing(self, home):
+        for block in ("pause", "cancel", "end"):
+            bench.note_learned(_Machine(), "creality_ender3", block)
+        said = " ".join(bench.take_learned()).lower()
+        assert said.count("kiln learned how your") == 3
+        assert not any(w in said for w in ("doesn't know", "no record", "worst", "still", "missing", "unknown"))
+
+    def test_not_on_the_hosted_server(self, home, monkeypatch):
+        from kiln import learned_notice
+
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        bench.note_learned(_Machine(), "creality_ender3", "end")
+        r = _Result({"success": True})
+        learned_notice._attach(r, None, "printer_status")
+        assert learned_notice.RESULT_KEY not in r.structuredContent
