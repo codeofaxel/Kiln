@@ -684,6 +684,20 @@ class TestThePackageIsJudged:
         _write_package(Path(b.print_package_path_for(gcode)), b"G28\n")
         assert b.multi_nozzle_print_package(str(gcode)) is None
 
+    def test_a_slice_for_one_nozzle_with_no_package_is_told_by_its_own_figures(self, tmp_path, monkeypatch):
+        # Every Bambu print is asked whether it is one of these: a file that
+        # states one nozzle and has no package beside it is answered from
+        # the lines a slicer writes its figures in, never by reading it whole.
+        b = _bambu_3mf()
+        gcode = _sliced(tmp_path, body="G28\n" + "G1 X10 Y10 E0.1\n" * 3000, header="; filament_map = 1,1\n")
+
+        def whole(self, *a, **k):
+            raise AssertionError(f"read whole: {self}")
+
+        monkeypatch.setattr(Path, "read_bytes", whole)
+        monkeypatch.setattr(Path, "read_text", whole)
+        assert b.multi_nozzle_print_package(str(gcode)) is None
+
     @pytest.mark.parametrize("asked", [{"lift_floor_mm": 12.0}, {"resume_mode": True}])
     def test_a_start_of_kilns_own_is_refused(self, tmp_path, asked):
         b = _bambu_3mf()
@@ -860,6 +874,17 @@ class TestASlicedFileIsHeldToTheBedItWasSlicedFor:
         assert invented_bed.sliced_file_bed(str(gcode), "invented_two").volume == (width, 200.0, 180.0)
         fit = invented_bed.validate_gcode_for_printer(str(gcode), "invented_two")
         assert fit["ok"] is (width > 240.0), fit
+
+    def test_the_file_is_read_where_a_slicer_writes_its_figures(self, tmp_path, invented_bed, monkeypatch):
+        gcode = tmp_path / "plate.gcode"
+        gcode.write_text("; filament_map = 1,2\nG28\n" + "G1 X200 Y20 E0.1\n" * 3000)
+
+        def whole(self, *a, **k):
+            raise AssertionError(f"read whole: {self}")
+
+        monkeypatch.setattr(Path, "read_text", whole)
+        monkeypatch.setattr(Path, "read_bytes", whole)
+        assert invented_bed.sliced_file_bed(str(gcode), "invented_two").volume == (260.0, 200.0, 180.0)
 
 
 class TestAPlateIsComposedOnTheBedItPrintsOn:

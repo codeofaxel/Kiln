@@ -2636,10 +2636,15 @@ def multi_nozzle_print_package(
     Raises :class:`MultiNozzlePackageError` when a start of Kiln's own is
     asked for, no package was made with the file, or it has a problem.
     """
-    gcode = Path(gcode_path).read_bytes()
+    from kiln.gcode import file_states_several_nozzles
+
     package = print_package_path_for(gcode_path)
+    several = file_states_several_nozzles(gcode_path)
+    if not several and not os.path.isfile(package):
+        return None
+    gcode = Path(gcode_path).read_bytes()
     made_with_it = os.path.isfile(package) and _package_plate(package)[0] == gcode
-    if not (made_with_it or states_several_nozzles(gcode.decode("utf-8", errors="replace"))):
+    if not (made_with_it or several):
         return None
     if quiet_start is not None or lift_floor_mm is not None or resume_mode:
         raise MultiNozzlePackageError(

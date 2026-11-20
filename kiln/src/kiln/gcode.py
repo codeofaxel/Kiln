@@ -2182,11 +2182,27 @@ def stated_filament_map(lines: Iterable[str]) -> tuple[list[int] | None, str | N
     return stated, mode
 
 
+_FILAMENT_MAP_STATEMENT = re.compile(r"^;\s*filament_map\s*=.*$", re.MULTILINE)
+
+
 def states_several_nozzles(text: str) -> bool:
     """Whether the sliced file *text* puts a filament on a nozzle beyond
-    the first, by its own stated filament-to-nozzle map."""
-    stated, _mode = stated_filament_map(text.splitlines())
+    the first, by its own stated filament-to-nozzle map
+    (:func:`stated_filament_map`, read from its statement lines only)."""
+    stated, _mode = stated_filament_map(m.group(0) for m in _FILAMENT_MAP_STATEMENT.finditer(text))
     return bool(stated) and max(stated) > 1
+
+
+def file_states_several_nozzles(path: str | None) -> bool:
+    """:func:`states_several_nozzles` for the sliced file at *path*, read
+    where a slicer writes its own figures
+    (:func:`kiln.file_metadata.sliced_gcode_lines`); ``False`` for a file
+    that cannot be read.  Never raises."""
+    if not path:
+        return False
+    from kiln.file_metadata import sliced_gcode_lines
+
+    return states_several_nozzles("\n".join(sliced_gcode_lines(path) or ()))
 
 
 # ---------------------------------------------------------------------------

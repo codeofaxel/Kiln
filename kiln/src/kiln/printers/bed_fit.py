@@ -338,12 +338,11 @@ def sliced_file_bed(gcode_path: str | None, printer_id: str | None) -> PrinterBe
     sliced for more than one, else :func:`printer_bed`."""
     two = two_nozzle_bed(printer_id)
     if two is not None and gcode_path:
+        from kiln.file_metadata import sliced_gcode_lines
         from kiln.gcode import slicer_nozzle_diameters, states_several_nozzles
 
-        try:
-            text = Path(gcode_path).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            text = ""
+        # Read where a slicer writes its own figures, never the whole file.
+        text = "\n".join(sliced_gcode_lines(gcode_path) or ())
         stated = slicer_nozzle_diameters(text)
         if states_several_nozzles(text) or (stated and len(stated[-1]) >= 2):
             return two
