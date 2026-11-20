@@ -7051,6 +7051,9 @@ def _error_dict(
     machine (:func:`kiln.printers.engagement.refusal_in_flight`), the answer
     is the refusal's own words and code, with the structured verdict under
     ``refusal`` -- never the door's "check that the printer is online".
+    A slicing refusal that one answer from the person lets through
+    (:class:`kiln.slicer.NozzleMapError` with ``parts``) carries its parts
+    under ``error.parts`` beside the door's whole message.
     A mention of a printer that could mean several of the person's own
     (:class:`kiln.registry.PrinterNotFoundError` with ``candidates``, "my
     bambu" with two Bambu Lab printers) is a question, and the question is
@@ -7102,6 +7105,11 @@ def _error_dict(
             "retryable": retryable,
         },
     }
+    # A refusal one answer from the person lets through carries itself laid
+    # out (kiln.slicer_profiles.RefusalParts), whichever door wrapped it.
+    parts = getattr(sys.exc_info()[1], "parts", None)
+    if parts is not None and callable(getattr(parts, "to_dict", None)):
+        payload["error"]["parts"] = parts.to_dict()
     if extra:
         payload.update(extra)
     return payload

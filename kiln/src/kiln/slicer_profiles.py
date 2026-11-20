@@ -1361,19 +1361,56 @@ MIXED_SIZES_EXPERIMENT = "mixed_nozzle_sizes"
 MIXED_SIZES_CODE = "MULTI_NOZZLE_MIXED_SIZES"
 
 
-def mixed_size_refusal(nozzles: Any) -> str:
-    """The sentence refusing a slice with *nozzles* when the nozzles it uses
-    were stated at different sizes and nobody agreed to the experiment;
-    ``""`` when they are one size."""
+@dataclass(frozen=True)
+class RefusalParts:
+    """A slicing refusal that one answer from the person lets through, in
+    parts a door can lay out: ``headline`` (one short line), ``reason`` (one
+    sentence), ``fix`` (one sentence: what else would let it slice) and
+    ``ask`` (the clause naming the answer, in this door's words, which
+    :func:`kiln.slicer.said_for` respells for a door that takes it another
+    way).  :meth:`message` is the whole refusal as one text."""
+
+    headline: str
+    reason: str
+    fix: str
+    ask: str
+    #: Said before the ask in :meth:`message`, for a reader who must go and
+    #: put the question to the person.
+    ask_lead: str = ""
+
+    def message(self) -> str:
+        fix = self.fix[:-1] if self.fix.endswith(".") else self.fix
+        return f"{self.reason} Nothing was sliced. {fix}; {self.ask_lead}{self.ask}."
+
+    def to_dict(self) -> dict[str, str]:
+        return {"headline": self.headline, "reason": self.reason, "fix": self.fix, "ask": self.ask}
+
+
+def mixed_size_parts(nozzles: Any) -> RefusalParts | None:
+    """The refusal of a slice with *nozzles* when the nozzles it uses were
+    stated at different sizes and nobody agreed to the experiment; ``None``
+    when they are one size."""
     used = mixed_sizes(nozzles)
     if not used:
-        return ""
-    return (
-        f"The nozzles this print would use are different sizes ({_sizes_said(used)}). Printing with "
-        "two nozzle sizes at once is an experiment Kiln has not proven on a printer, so nothing was "
-        f"sliced. To try it, ask the person; {MIXED_SIZES_CONFIRM}. Otherwise slice it with one "
-        "filament for one nozzle, or fit nozzles of one size."
+        return None
+    said = _sizes_said(used)
+    return RefusalParts(
+        headline="Two nozzle sizes at once is an experiment",
+        reason=(
+            f"{said[0].upper()}{said[1:]}, and printing with two nozzle sizes at once is something "
+            "Kiln has not proven on a printer."
+        ),
+        fix="Slice it with one filament for one nozzle, or fit nozzles of one size.",
+        ask=MIXED_SIZES_CONFIRM,
+        ask_lead="to try it, ask the person: ",
     )
+
+
+def mixed_size_refusal(nozzles: Any) -> str:
+    """:func:`mixed_size_parts` as one text; ``""`` when the nozzles are one
+    size."""
+    parts = mixed_size_parts(nozzles)
+    return parts.message() if parts else ""
 
 
 def mixed_size_experiment(nozzles: Any) -> dict[str, Any] | None:

@@ -203,11 +203,14 @@ class NozzleMapError(SlicerError):
     nozzles it would use are fitted at different sizes, an abrasive
     filament would print through a nozzle that is not wear-resistant, or
     the slicer in hand cannot slice for more than one nozzle.  Raised before
-    any slicer is launched; ``code`` is the door's error code."""
+    any slicer is launched; ``code`` is the door's error code, and
+    ``parts`` the refusal laid out (:class:`kiln.slicer_profiles.RefusalParts`)
+    when one answer from the person lets it through."""
 
-    def __init__(self, message: str, *, code: str) -> None:
+    def __init__(self, message: str, *, code: str, parts: Any = None) -> None:
         super().__init__(message)
         self.code = code
+        self.parts = parts
 
 
 class OneNozzleInstead(NozzleMapError):
@@ -889,11 +892,12 @@ def owner_asks(
 
 
 def said_for(text: str, *, confirm: str, map_with: str, experiment: str) -> str:
-    """*text*, a slicing refusal, with its three asks spelled for a door
-    that takes them another way: *confirm* replaces "call again with
-    soft_nozzle_confirmed=true" after "if the owner says to print it
-    anyway, ", *map_with* replaces "give a filament-to-nozzle map with"
-    before the filament and the nozzle, and *experiment* replaces "call
+    """*text*, a slicing refusal or one of its parts, with its three asks
+    spelled for a door that takes them another way: *confirm* replaces "call
+    again with soft_nozzle_confirmed=true" after "if the owner says to print
+    it anyway, ", *map_with* replaces "give a filament-to-nozzle map with"
+    (or its capitalised form) before the filament and the nozzle, and
+    *experiment* replaces "call
     again with mixed_nozzle_experiment=true" after "if they say yes to
     trying it for this print, "."""
     from kiln.slicer_profiles import MIXED_SIZES_CONFIRM
@@ -902,6 +906,7 @@ def said_for(text: str, *, confirm: str, map_with: str, experiment: str) -> str:
     return (
         text.replace(SOFT_NOZZLE_CONFIRM, f"if the owner says to print it anyway, {confirm}")
         .replace(MAP_ADVICE, f"{map_with} ")
+        .replace(MAP_ADVICE[0].upper() + MAP_ADVICE[1:], f"{map_with[:1].upper()}{map_with[1:]} ")
         .replace(MIXED_SIZES_CONFIRM, f"{yes}, {experiment}")
     )
 
@@ -916,8 +921,13 @@ class SoftNozzleRun:
     #: The nozzles that are not wear-resistant, each ``{"id", "material"}``;
     #: ``id`` is ``None`` for the one nozzle on record.
     nozzles: tuple[dict[str, Any], ...]
-    #: The sentence refusing the slice.
-    refusal: str
+    #: The refusal, laid out (:class:`kiln.slicer_profiles.RefusalParts`).
+    parts: Any
+
+    @property
+    def refusal(self) -> str:
+        """The refusal as one text, its answer named."""
+        return self.parts.message()
 
     def confirmed(self, stated_map: Sequence[int] | None = None) -> dict[str, Any] | None:
         """The block a slice the owner said to print anyway carries, or
@@ -1011,49 +1021,54 @@ def soft_nozzle_run(
         soft = [used[k - 1] for k in sorted({mapped[slot] for slot in on_soft})]
     if not abrasive or not soft:
         return None
-    slots = [slot for slot, _word in abrasive]
+    from kiln.slicer_profiles import RefusalParts
+
     named = sorted({word for _slot, word in abrasive})
-    if len(slots) == 1:
-        filament, it = f"Filament {slots[0]} is {named[0]}, an abrasive filament", "it"
+    one = len(abrasive) == 1
+    it, they = ("it", "it wears") if one else ("them", "they wear")
+    joined = " and ".join(named) if len(named) <= 2 else f"{', '.join(named[:-1])} and {named[-1]}"
+    if len(slot_materials) > 1:
+        slots = " and ".join(str(slot) for slot, _word in abrasive)
+        what = f"{joined} (filament{'' if one else 's'} {slots}) {'is an abrasive filament' if one else 'are abrasive'}"
     else:
-        listed = f"{', '.join(map(str, slots[:-1]))} and {slots[-1]}"
-        filament, it = f"Filaments {listed} are abrasive ({', '.join(named)})", "them"
+        what = f"{joined} {'is an abrasive filament' if len(named) == 1 else 'are abrasive filaments'}"
     hard = [str(n["id"]) for n in candidates if is_wear_resistant_nozzle(n.get("material"))]
     on = f"nozzle {' or '.join(hard)}"
-    hardened = f"fit a hardened one for {it}"
+    hardened = f"Fit a hardened nozzle for {it}."
+    said = " and ".join(_nozzle_said(n) for n in soft)
     if not known and candidates[0]["id"] is None:
         material = str(on_record).replace("_", " ")
-        refusal = (
-            f"{filament}, and the nozzle on record for this printer is {material}, which is not "
-            f"wear-resistant, so nothing was sliced; {hardened}, or record the nozzle that is fitted."
-        )
-        return SoftNozzleRun(tuple(abrasive), tuple(soft), refusal)
-    said = " and ".join(_nozzle_said(n) for n in soft)
-    verb = "is" if len(soft) == 1 else "are"
-    if known and filament_map:
-        where = f"the filament-to-nozzle map puts {it} on {said}, which {verb} not wear-resistant"
-        fix = f"put {it} on {on}" if hard else hardened
-    elif known:
-        where = f"the slicer chooses each filament's nozzle and {said} {verb} not wear-resistant"
-        fix = f"{MAP_ADVICE}{it} on {on}" if hard else hardened
-    elif len(candidates) == 1:
-        where = f"the one nozzle fitted, {said}, is not wear-resistant"
-        fix = hardened
+        reason = f"{what}, and this printer's nozzle is recorded as {material}, which {they} out quickly."
+        fix = "Fit a hardened nozzle, or tell Kiln which nozzle is fitted."
     else:
-        where = (
-            f"a slice for one nozzle may print through any nozzle fitted, and {said} {verb} not wear-resistant"
-        )
-        if hard and mappable:
-            fix = f"{MAP_ADVICE}{it} on {on}"
-        elif hard:
-            fix = f"only {on} can take {it}, so fit wear-resistant nozzles in place of the others for {it}"
-        else:
+        if known and filament_map:
+            where = f"the filament-to-nozzle map puts {it} on {said}"
+            fix = f"Put {it} on {on} in the map." if hard else hardened
+        elif known:
+            where = f"the slicer may print {it} through {said}"
+            fix = f"{MAP_ADVICE[0].upper()}{MAP_ADVICE[1:]}{it} on {on}." if hard else hardened
+        elif len(candidates) == 1:
+            where = f"the only nozzle fitted is {said}"
             fix = hardened
-    if not hard and known:
-        fix = f"no nozzle this print uses is wear-resistant, so {hardened}"
-    elif not hard:
-        fix = f"no nozzle fitted is wear-resistant, so {hardened}"
-    return SoftNozzleRun(tuple(abrasive), tuple(soft), f"{filament}, and {where}, so nothing was sliced; {fix}.")
+        else:
+            where = f"a slice for one nozzle can print through any nozzle fitted, including {said}"
+            if hard and mappable:
+                fix = f"{MAP_ADVICE[0].upper()}{MAP_ADVICE[1:]}{it} on {on}."
+            elif hard:
+                fix = f"Only {on} can take {it}: fit wear-resistant nozzles in place of the others."
+            else:
+                fix = hardened
+        if not hard:
+            fix = f"No nozzle {'this print uses' if known else 'fitted'} is wear-resistant: {hardened[0].lower()}{hardened[1:]}"
+        reason = f"{what}, and {where}, which {they} out quickly."
+    worn = "the nozzle" if len(soft) == 1 else "these nozzles"
+    parts = RefusalParts(
+        headline=f"{joined} would wear out {worn}",
+        reason=reason[0].upper() + reason[1:],
+        fix=fix,
+        ask=SOFT_NOZZLE_CONFIRM,
+    )
+    return SoftNozzleRun(tuple(abrasive), tuple(soft), parts)
 
 
 def filament_map_of(gcode_path: str | None) -> dict[str, Any] | None:
@@ -2308,7 +2323,7 @@ def _slice_file(
     from kiln.slicer_profiles import (
         MIXED_SIZES_CODE,
         mixed_size_experiment,
-        mixed_size_refusal,
+        mixed_size_parts,
         nozzle_bed,
         nozzle_positions,
         nozzle_record_of,
@@ -2394,9 +2409,9 @@ def _slice_file(
             instead = miss
             would_use = nozzle_positions(nozzles)
     experimental: dict[str, Any] | None = None
-    if several is not None and (mixed := mixed_size_refusal(nozzles)):
+    if several is not None and (mixed := mixed_size_parts(nozzles)):
         if mixed_nozzle_experiment is not True:
-            raise NozzleMapError(mixed, code=MIXED_SIZES_CODE)
+            raise NozzleMapError(mixed.message(), code=MIXED_SIZES_CODE, parts=mixed)
         experimental = mixed_size_experiment(nozzles)
         nozzles = mixed_size_nozzles(profile, nozzles, asked_map)
     if ext == ".3mf" and nozzle_bed(nozzles) is not None:
@@ -2498,7 +2513,7 @@ def _slice_file(
         mappable=mappable,
     )
     if soft_run is not None and soft_nozzle_confirmed is not True:
-        raise NozzleMapError(f"{soft_run.refusal[:-1]}; {SOFT_NOZZLE_CONFIRM}.", code=SOFT_NOZZLE_CODE)
+        raise NozzleMapError(soft_run.parts.message(), code=SOFT_NOZZLE_CODE, parts=soft_run.parts)
     # The layer height the part was designed in, decided here for the same
     # reason: a relief made in whole 0.2 mm layers printed at the profile's
     # 0.3 by every door and lost its levels.  A stated layer height is the
