@@ -69,17 +69,44 @@ def _lid_a_clearance_above(path: Path) -> Path:
     return path
 
 
-def _slider_in_its_slot(path: Path, *, with_a_block_beside: bool = False) -> Path:
+def _slider_and_slot(dx: float = 0.0) -> list[Any]:
     """A block with a T-shaped slot closed at both ends, and a T-shaped slider
     printed in place in it 0.4 mm clear all round: both stand on the plate,
     nothing joins them, and the slider slides but cannot come out."""
     block = _box((-20, -12, 0), (20, 12, 10))
     block = block.difference(_box((-15, -7, -1), (15, 7, 6))).difference(_box((-15, -3, 5.9), (15, 3, 11)))
     slider = _box((-10, -6.6, 0), (10, 6.6, 5.6)).union(_box((-10, -2.6, 5.5), (10, 2.6, 12)))
-    parts = [block, slider]
+    for mesh in (block, slider):
+        mesh.apply_translation((dx, 0, 0))
+    return [block, slider]
+
+
+def _slider_in_its_slot(path: Path, *, with_a_block_beside: bool = False) -> Path:
+    parts = _slider_and_slot()
     if with_a_block_beside:
         parts.append(_box((30, -5, 0), (40, 5, 10)))
     trimesh.util.concatenate(parts).export(path)
+    return path
+
+
+def _runs(meshes: list[Any]) -> list[list[int]]:
+    """Each mesh's run of triangles once they are written one after another."""
+    runs, first = [], 0
+    for mesh in meshes:
+        runs.append([first, len(mesh.faces)])
+        first += len(mesh.faces)
+    return runs
+
+
+def _with_a_mechanism_note(path: Path, meshes: list[Any], names: list[str], moving: list[str]) -> Path:
+    """*meshes* written to *path*, with the mechanism note a proved motion
+    keeps beside it: each named part's run of triangles, and which move."""
+    from kiln import mechanism_stage
+
+    trimesh.util.concatenate(meshes).export(path)
+    parts = {name: {"spans": [run]} for name, run in zip(names, _runs(meshes), strict=True)}
+    block = {"kind": mechanism_stage.KIND, "playable": False, "parts": parts, "moving_parts": moving}
+    assert mechanism_stage.record(str(path), block)
     return path
 
 
@@ -180,6 +207,89 @@ class TestTheVerdictSaysThePieces:
         assert "The other one comes off the plate on its own" in sentence
         assert "print in place" not in sentence
 
+    def test_parts_the_motion_note_moves_are_said_as_moving_parts(self, tmp_path):
+        meshes = _slider_and_slot()
+        path = _with_a_mechanism_note(tmp_path / "slider.stl", meshes, ["block", "slider"], ["slider"])
+        key, sentence = verdict(analyze_printability(str(path)))
+        assert key != "wont_print"
+        assert (
+            "They stand 0.4 mm apart without touching, so they print in place together with nothing "
+            "joining them, the way parts that move have to."
+        ) in sentence
+        assert "meant to be one solid" not in sentence
+        assert "join them so they overlap" not in sentence
+
+    def test_a_joints_note_says_the_same(self, tmp_path):
+        from kiln import joint_stage
+
+        meshes = _slider_and_slot()
+        path = tmp_path / "slider.stl"
+        trimesh.util.concatenate(meshes).export(path)
+        joint = {
+            "part_a": "block", "part_b": "slider",
+            "motion": {"kind": "slider", "axis_point_mm": [0.0, 0.0, 3.0], "axis_direction": [1.0, 0.0, 0.0],
+                       "range": [-4.0, 4.0], "unit": "mm", "swing_axis": None},
+            "moving": {"spans": [_runs(meshes)[1]], "parts": ["slider"]},
+            "sweep": None, "sweep_why_not": "not swept",
+        }
+        assert joint_stage.record(str(path), [joint], total_triangles=sum(len(m.faces) for m in meshes))
+        sentence = verdict(analyze_printability(str(path)))[1]
+        assert "the way parts that move have to" in sentence
+        assert "meant to be one solid" not in sentence
+
+    def test_parts_the_note_keeps_still_are_still_asked(self, tmp_path):
+        meshes = _slider_and_slot()
+        path = _with_a_mechanism_note(tmp_path / "slider.stl", meshes, ["block", "slider"], [])
+        sentence = verdict(analyze_printability(str(path)))[1]
+        assert "fine for a designed clearance. If they were meant to be one solid" in sentence
+        assert "the way parts that move have to" not in sentence
+
+    def test_a_still_gap_beside_a_moving_one_keeps_its_question(self, tmp_path):
+        meshes = _slider_and_slot() + _slider_and_slot(dx=60.0)
+        names = ["block", "slider", "block_b", "slider_b"]
+        path = _with_a_mechanism_note(tmp_path / "two.stl", meshes, names, ["slider"])
+        sentence = verdict(analyze_printability(str(path)))[1]
+        assert "It prints as 4 separate parts on the plate" in sentence
+        assert (
+            "2 of them stand 0.4 mm apart without touching, so they print in place together with nothing "
+            "joining them, the way parts that move have to. Other parts stand 0.4 mm apart with nothing "
+            "joining them: fine for a designed clearance. If they were meant to be one solid, sink them at "
+            "least 0.4 mm into each other."
+        ) in sentence
+
+    def test_a_note_written_for_other_bytes_is_not_read(self, tmp_path):
+        meshes = _slider_and_slot()
+        path = _with_a_mechanism_note(tmp_path / "slider.stl", meshes, ["block", "slider"], ["slider"])
+        moved = _slider_and_slot(dx=1.0)
+        trimesh.util.concatenate(moved).export(path)
+        sentence = verdict(analyze_printability(str(path)))[1]
+        assert "If they were meant to be one solid" in sentence
+        assert "the way parts that move have to" not in sentence
+
+    def test_a_note_that_does_not_fit_the_file_is_not_read(self, tmp_path):
+        from kiln import mechanism_stage
+
+        meshes = _slider_and_slot()
+        path = tmp_path / "slider.stl"
+        trimesh.util.concatenate(meshes).export(path)
+        total = sum(len(m.faces) for m in meshes)
+        parts = {"block": {"spans": [[0, total]]}, "slider": {"spans": [[total, 10]]}}
+        assert mechanism_stage.record(
+            str(path), {"kind": mechanism_stage.KIND, "playable": False, "parts": parts, "moving_parts": ["slider"]},
+        )
+        sentence = verdict(analyze_printability(str(path)))[1]
+        assert "If they were meant to be one solid" in sentence
+
+    def test_a_piece_in_the_air_the_note_moves(self, tmp_path):
+        meshes = [_box((0, 0, 0), (30, 30, 10)), _box((5, 5, 10.2), (15, 15, 14))]
+        path = _with_a_mechanism_note(tmp_path / "lid.stl", meshes, ["box", "lid"], ["lid"])
+        sentence = verdict(analyze_printability(str(path)))[1]
+        assert (
+            "1 piece sits less than 0.8 mm from the part, joined to nothing, so it prints loose on it, "
+            "the way parts that move have to."
+        ) in sentence
+        assert "meant to be one solid" not in sentence
+
     def test_pieces_that_print_as_one_solid_say_nothing(self, tmp_path):
         report = analyze_printability(str(_coated(tmp_path / "coated.stl")))
         assert (report.pieces.piece_count, report.pieces.solid_count) == (5, 1)
@@ -244,6 +354,15 @@ class TestEveryDoorSaysIt:
         message = analyze(file_path=str(_slider_in_its_slot(tmp_path / "slider.stl")))["message"]
         assert "print in place together with nothing joining them" in message
         assert "join them so they overlap" not in message
+
+    def test_the_printability_tool_reads_the_motion_note(self, tmp_path, no_auth):
+        from kiln.plugins.printability_tools import _PrintabilityToolsPlugin
+
+        analyze = _register(_PrintabilityToolsPlugin)["analyze_printability"]
+        path = _with_a_mechanism_note(tmp_path / "slider.stl", _slider_and_slot(), ["block", "slider"], ["slider"])
+        message = analyze(file_path=str(path))["message"]
+        assert "the way parts that move have to" in message
+        assert "meant to be one solid" not in message
 
     def test_the_pre_print_check(self, loose, floating):
         from kiln.plugins.validation_pipeline_tools import run_full_validation_pipeline
