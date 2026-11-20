@@ -2811,14 +2811,6 @@ def _consent_filament_line(
         return None
 
 
-def _consent_colours_line(file_value: str) -> str | None:
-    """``one colour: ...`` for a file Kiln sliced in fewer colours than its
-    plate (:func:`kiln.maker_slicer_notes.approval_row`), or ``None``."""
-    from kiln.maker_slicer_notes import approval_row
-
-    return approval_row(os.path.basename(file_value) or file_value, _local_copy_of(file_value))
-
-
 async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: Any):
     """Ask the person before this print starts.  Returns a reset token or None.
 
@@ -2909,11 +2901,14 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     # a part can lift off the bed as it cools, so no standing window answers
     # for it (kiln.plate_state.start_hold holds it without this print's yes).
     on_plate = await asyncio.to_thread(_recovery_plate_line, file_value, printer_name)
-    # An experimental print is asked about every time too, and the question
-    # says what the experiment is (kiln.experimental_print).
-    from kiln import experimental_print
+    # What the print itself is, said in the question: an experimental print
+    # is asked about every time too (kiln.experimental_print).
+    from kiln.print_consent import what_the_print_is
 
-    experiment = await asyncio.to_thread(experimental_print.approval_line, _local_copy_of(file_value))
+    about = await asyncio.to_thread(
+        what_the_print_is, os.path.basename(file_value) or file_value, _local_copy_of(file_value),
+    )
+    experiment = about.get("experimental")
     if standing is not None and not on_plate and not experiment:
         # A person already said yes for this — inside a window they
         # opened, on purpose.  Asking again would be the dialog the
@@ -2964,7 +2959,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
             "filament slots": _consent_filament_line(tool_name, file_value, printer_name),
             # A plate of several colours Kiln sliced in one, for want of the
             # printer's maker's slicer: said as the fact it is.
-            "colours": _consent_colours_line(file_value),
+            "colours": about.get("colours"),
             # What the file IS, when the served side can say (a design drawn
             # as a sketch: its outline, holes, thickness, CAD exactness).
             "built": describe_file_for_approval(

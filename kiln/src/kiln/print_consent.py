@@ -936,6 +936,34 @@ def display_name(file_name: str) -> str:
     return " ".join(kept.split()) or base
 
 
+def what_the_print_is(file_name: str, local_path: str | None) -> dict[str, str]:
+    """The rows a person's approval carries about the print itself, the same
+    at every door that asks: ``experimental`` for a print Kiln has not proven
+    on a printer (:func:`kiln.experimental_print.approval_line`), and
+    ``colours`` for a plate Kiln sliced in fewer colours than it holds
+    (:func:`kiln.maker_slicer_notes.approval_row`).  Only the rows that
+    apply; *local_path* is the copy of the file on this computer, when there
+    is one.  Never raises."""
+    rows: dict[str, str] = {}
+    try:
+        from kiln import experimental_print
+
+        line = experimental_print.approval_line(local_path)
+        if line:
+            rows["experimental"] = line
+    except Exception:  # noqa: BLE001 -- the approval opens without the row
+        logger.debug("experimental row skipped for %s", file_name, exc_info=True)
+    try:
+        from kiln.maker_slicer_notes import approval_row
+
+        row = approval_row(file_name, local_path)
+        if row:
+            rows["colours"] = row
+    except Exception:  # noqa: BLE001 -- the approval opens without the row
+        logger.debug("colours row skipped for %s", file_name, exc_info=True)
+    return rows
+
+
 def describe_print_request(
     tool: str,
     *,
