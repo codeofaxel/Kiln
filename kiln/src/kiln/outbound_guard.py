@@ -365,7 +365,7 @@ VERSION_FIELDS: dict[str, frozenset[str]] = {
     "kiln/outcome_courier.py": frozenset({"firmware"}),
     "kiln/served_steps.py": frozenset({"firmware"}),
     "kiln/_pro_printer_checkin_bridge.py": frozenset({"firmware"}),
-    "kiln/sliced_routines.py": frozenset({"p_slicer_version"}),
+    "kiln/sliced_routines.py": frozenset({"p_slicer_version", "version"}),
 }
 
 
@@ -567,9 +567,10 @@ SENDERS: dict[str, tuple[str, str]] = {
         "scrubbed",
         "a printer's own routines read from a print file a slicer made for it: each routine's "
         "text and SHA-256, its word, the model key, the slicer's name and version (declared in "
-        "VERSION_FIELDS), the one-way hash of the printer's serial and the install id; a payload "
-        "scrub would change is not sent at all, and a routine the file lists as changed from its "
-        "preset is never sent to the database door",
+        "VERSION_FIELDS) and the one-way hash of the printer's serial -- signed in, to Kiln's API "
+        "as the person (kiln/history_courier.py's request helper), signed out, through the "
+        "database door with the install id; a payload scrub would change is not sent at all, and "
+        "a routine the file lists as changed from its preset is never sent",
     ),
     "kiln/served_public.py": (
         "person's_own",

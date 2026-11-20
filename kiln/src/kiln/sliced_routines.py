@@ -13,10 +13,12 @@ What leaves, and when:
 
 * only while :data:`SENDING_FROM` names a day that has come, and only while
   this install shares (telemetry and community sharing both on);
-* each routine through one database door (:data:`RPC`): the routine's text,
-  its SHA-256, its one word (:data:`BLOCKS`), the printer model, the
-  slicer's name and version, the one-way hash of the printer's serial
-  (:func:`kiln.bench.unit_of`) and this install's random id;
+* signed in, each printer's routines to Kiln's API as the person
+  (:data:`PUSH_PATH`); signed out, each routine through one database door
+  (:data:`RPC`) with this install's random id.  Either way: the routine's
+  text, its SHA-256, its one word (:data:`BLOCKS`), the printer model, the
+  slicer's name and version, and the one-way hash of the printer's serial
+  (:func:`kiln.bench.unit_of`);
 * and the same routines, with no hash, id or version, ride the person's own
   print-beside requests (:func:`routines_for_request`).
 
@@ -54,8 +56,10 @@ _logger = logging.getLogger(__name__)
 #: either way.
 SENDING_FROM: str | None = None
 
-#: The database door every routine goes through.
+#: The database door a signed-out install's routines go through.
 RPC = "record_printer_sliced_routine"
+#: Kiln's API route a signed-in computer's routines go through.
+PUSH_PATH = "/api/printer-routines"
 
 #: The one word each routine is kept and sent under.
 BLOCKS = (
@@ -104,7 +108,7 @@ _SLICER_WORDS = {"bambustudio": "bambu_studio", "orcaslicer": "orca_slicer", "pr
 _lock = threading.Lock()
 
 __all__ = [
-    "BLOCKS", "MAX_ROUTINE_CHARS", "ROUTINE_FIELDS", "RPC", "SENDING_FROM",
+    "BLOCKS", "MAX_ROUTINE_CHARS", "PUSH_PATH", "ROUTINE_FIELDS", "RPC", "SENDING_FROM",
     "note_print_started", "read_routines", "routines_for_request", "send_pending", "sending",
 ]
 
@@ -529,9 +533,41 @@ def _payload(data: dict[str, Any], block: str, routine: dict[str, Any], installa
     }
 
 
+def _signed_in() -> bool:
+    """Whether this computer holds a Kiln sign-in it can send with."""
+    try:
+        from kiln.auth_session import resolve_api_bearer
+
+        return bool(resolve_api_bearer().token)
+    except Exception:  # noqa: BLE001 -- unsure is signed out
+        return False
+
+
+def _push_signed_in(data: dict[str, Any], pending: list[tuple[str, dict[str, Any]]]) -> bool:
+    """One printer's pending routines to Kiln's API as the signed-in person,
+    with no install id; whether Kiln took them."""
+    from kiln import outbound_guard
+    from kiln.history_courier import _request
+
+    body = {
+        "format": "printer_routines/1", "model": data["model"], "slicer": data["slicer"],
+        "version": outbound_guard.version_text(data.get("version") or ""), "unit": data.get("unit"),
+        "routines": [{"block": block, "text": r["text"], "sha256": r["sha256"]} for block, r in pending],
+    }
+    read = {k: v for k, v in body.items() if k != "unit" and v is not None}
+    if outbound_guard.scrub(read, version_keys=outbound_guard.VERSION_FIELDS["kiln/sliced_routines.py"]) != read:
+        return False
+    if body["unit"] is not None and not _KILN_MADE["p_unit"].fullmatch(str(body["unit"])):
+        return False
+    answer = _request("printer_routines", "POST", PUSH_PATH, body, timeout=_TIMEOUT_S)
+    return bool(isinstance(answer, dict) and answer.get("success") and "kept" in answer)
+
+
 def send_pending(supabase_url: str, anon_key: str) -> int:
-    """Post every shareable routine on this computer that has not landed,
-    through the database door; how many landed.  Only while
+    """Send every shareable routine on this computer that has not landed;
+    how many landed.  Signed in, each printer's routines go to Kiln's API
+    as the person (:data:`PUSH_PATH`), with no install id; signed out, each
+    goes through the database door with this install's id.  Only while
     :func:`sending`; never raises."""
     if not sending():
         return 0
@@ -539,12 +575,15 @@ def send_pending(supabase_url: str, anon_key: str) -> int:
 
     from kiln import outbound_guard
 
-    try:
-        from kiln.installation import get_installation_id
+    signed_in = _signed_in()
+    installation_id: str | None = None
+    if not signed_in:
+        try:
+            from kiln.installation import get_installation_id
 
-        installation_id: str | None = get_installation_id()
-    except Exception:  # noqa: BLE001
-        installation_id = None
+            installation_id = get_installation_id()
+        except Exception:  # noqa: BLE001
+            installation_id = None
     version_keys = outbound_guard.VERSION_FIELDS.get("kiln/sliced_routines.py", frozenset())
     landed = 0
     try:
@@ -558,32 +597,44 @@ def send_pending(supabase_url: str, anon_key: str) -> int:
             data = _load(key)
         routines = data.get("routines") if isinstance(data.get("routines"), dict) else {}
         sent = dict(data.get("sent") or {})
-        changed = False
+        pending: list[tuple[str, dict[str, Any]]] = []
         for block, routine in sorted(routines.items()):
             if block not in BLOCKS or not isinstance(routine, dict) or not routine.get("share"):
                 continue
             mark = f"{block}|{routine.get('sha256')}|{data.get('slicer')}|{data.get('version')}"
             if mark in sent:
                 continue
-            payload = _payload(data, block, routine, installation_id)
-            if not _guarded(payload, version_keys):
+            if not _guarded(_payload(data, block, routine, None), version_keys):
                 continue
+            pending.append((block, routine))
+        took: list[str] = []
+        if pending and signed_in:
             try:
-                req = urllib.request.Request(
-                    f"{supabase_url.rstrip('/')}/rest/v1/rpc/{RPC}",
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json", "apikey": anon_key,
-                             "Authorization": f"Bearer {anon_key}"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:
-                    if resp.status < 300:
-                        sent[mark] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                        landed += 1
-                        changed = True
+                if _push_signed_in(data, pending):
+                    took = [block for block, _r in pending]
             except Exception as exc:  # noqa: BLE001 -- non-fatal, like the heartbeat
                 _logger.debug("sliced routines: not sent (non-fatal): %s", exc)
-        if changed:
+        elif pending:
+            for block, routine in pending:
+                try:
+                    req = urllib.request.Request(
+                        f"{supabase_url.rstrip('/')}/rest/v1/rpc/{RPC}",
+                        data=json.dumps(_payload(data, block, routine, installation_id)).encode("utf-8"),
+                        headers={"Content-Type": "application/json", "apikey": anon_key,
+                                 "Authorization": f"Bearer {anon_key}"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:
+                        if resp.status < 300:
+                            took.append(block)
+                except Exception as exc:  # noqa: BLE001 -- non-fatal, like the heartbeat
+                    _logger.debug("sliced routines: not sent (non-fatal): %s", exc)
+        if took:
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            for block in took:
+                routine = routines[block]
+                sent[f"{block}|{routine.get('sha256')}|{data.get('slicer')}|{data.get('version')}"] = now
+            landed += len(took)
             with _lock, contextlib.suppress(OSError):
                 fresh = _load(key)
                 fresh["sent"] = {**dict(fresh.get("sent") or {}), **sent}

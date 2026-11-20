@@ -288,6 +288,36 @@ class TestWhatLeaves:
         assert sr.send_pending("https://example.invalid", "key") == 0
         assert printer_here == []
 
+    def test_signed_in_the_routines_go_to_kilns_api_as_the_person_with_no_install_id(
+        self, tmp_path, printer_here, monkeypatch,
+    ):
+        settings = _bambu_settings(different_settings_to_system=["", "", "machine_end_gcode"])
+        sr.keep(_Printer("bambu_p1s"), sr.read_routines(_package(tmp_path, settings)))
+        monkeypatch.setattr(sr, "_signed_in", lambda: True)
+        asked: list[tuple] = []
+        monkeypatch.setattr("kiln.history_courier._request",
+                            lambda tool, method, path, body, **kw: asked.append((method, path, body)) or
+                            {"success": True, "kept": len(body["routines"])})
+        assert sr.send_pending("https://example.invalid", "key") == 4
+        assert printer_here == []                       # the database door was never used
+        [(method, path, body)] = asked
+        assert (method, path) == ("POST", sr.PUSH_PATH)
+        assert set(body) == {"format", "model", "slicer", "version", "unit", "routines"}
+        assert (body["model"], body["slicer"], body["version"]) == ("bambu_p1s", "bambu_studio", "02.08.02.61")
+        assert END not in {r["text"] for r in body["routines"]}   # the owner's own edit stays out
+        raw = json.dumps(body)
+        for never in ("00000000-0000-4000-8000-000000000001", TOOLPATH_MARK, FILE_NAME, PRESET_NAME, FILAMENT_MARK):
+            assert never not in raw
+        assert sr.send_pending("https://example.invalid", "key") == 0
+
+    def test_signed_in_nothing_is_marked_sent_when_kiln_did_not_take_it(self, tmp_path, printer_here, monkeypatch):
+        sr.keep(_Printer("bambu_p1s"), sr.read_routines(_package(tmp_path, _bambu_settings())))
+        monkeypatch.setattr(sr, "_signed_in", lambda: True)
+        monkeypatch.setattr("kiln.history_courier._request", lambda *a, **k: {"success": False, "code": "X"})
+        assert sr.send_pending("https://example.invalid", "key") == 0
+        monkeypatch.setattr("kiln.history_courier._request", lambda *a, **k: {"success": True, "kept": 5})
+        assert sr.send_pending("https://example.invalid", "key") == 5
+
     def test_the_request_carries_routines_with_no_hash_id_or_version(self, tmp_path, printer_here):
         sr.keep(_Printer("bambu_p1s"), sr.read_routines(_package(tmp_path, _bambu_settings())))
         rider = sr.routines_for_request(_Printer("bambu_p1s"))
