@@ -8578,7 +8578,7 @@ def _summarize_regions(
 
 #: The most region samples :func:`_regions_over_model` looks up at once, and
 #: the most sample-face pairs it reads at once.
-_OVER_MODEL_SAMPLE_BLOCK: int = 1024
+_OVER_MODEL_SAMPLE_BLOCK: int = 128
 _OVER_MODEL_PAIR_BLOCK: int = 1 << 17
 
 
