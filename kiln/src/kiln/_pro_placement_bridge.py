@@ -204,19 +204,8 @@ def ask(request: dict[str, Any]) -> tuple[dict[str, Any] | None, served_answer.M
     there is no verdict (offline, signed out, unanswered, or a refusal in
     the server's own words), classified by ``served_answer`` the same way
     every served door classifies it, so the door words one sentence from
-    it and the code rides beside that sentence, never inside.  A sentence
-    the verdict says Kiln learned is said once on this computer
-    (:func:`kiln.sliced_routines.say_once`).  Never raises.
+    it and the code rides beside that sentence, never inside.  Never raises.
     """
-    verdict, miss = _ask(request)
-    if verdict is not None:
-        from kiln.sliced_routines import say_once
-
-        say_once(verdict)
-    return verdict, miss
-
-
-def _ask(request: dict[str, Any]) -> tuple[dict[str, Any] | None, served_answer.Miss | None]:
     try:
         if not isinstance(request, dict) or not request.get("printer_id"):
             return None, served_answer.Miss(UNANSWERED, detail="no printer declared")

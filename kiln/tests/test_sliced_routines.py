@@ -334,17 +334,6 @@ class TestThePrintIsNeverTouched:
         assert sr.keep(_Printer("bambu_p1s"), sr.read_routines(_package(tmp_path, _bambu_settings()))) is False
 
 
-def test_a_learned_sentence_is_said_once(tmp_path, monkeypatch):
-    monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
-    sentence = "Kiln learned how your Bambu Lab P1S ends a print."
-    first = {"record": {"learned": [sentence]}}
-    sr.say_once(first)
-    assert first["record"]["learned"] == [sentence]
-    second = {"record": {"learned": [sentence]}}
-    sr.say_once(second)
-    assert second["record"]["learned"] == []
-
-
 # ---------------------------------------------------------------------------
 # A crafted file never inflates past the cap
 # ---------------------------------------------------------------------------
