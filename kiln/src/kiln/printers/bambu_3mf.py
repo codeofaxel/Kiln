@@ -1340,11 +1340,9 @@ def _postprocess_prusa_body(
 ) -> str:
     """Post-process a sliced gcode body for Bambu firmware compatibility.
 
-    Every layer tells the printer which layer it is: the layer its screen
-    shows (``M73 L``, counted from 1) and the firmware's layer notice
-    (``M991 S0 P``, counted from 0).  A body whose slicer wrote them from
-    the printer's own routine keeps its lines and gets none of these.  The
-    progress lines (``M73 P R``) are Kiln's, at every layer.
+    Every layer gets Kiln's progress line (``M73 P R``).  It also gets its
+    screen layer (``M73 L``, from 1) and the firmware's layer notice
+    (``M991 S0 P``, from 0), unless the body already writes its own notice.
     """
     body_lines = gcode_body.split("\n")
 
