@@ -741,3 +741,25 @@ class TestOnlyWhatKilnMadeIsDeleted:
             "file_name": "secret_part.gcode", "printer_name": "shop-x1", "kept": "none", "gcode": str(own)}})
         assert monitor_twin.forget_print("shop-x1") is True
         assert own.exists()
+
+
+class TestTheChoiceIsSaidInOneVoice:
+    def test_setting_it_tells_an_agent_where_history_is_kept(self, home, monkeypatch):
+        from kiln import print_keeping
+
+        monkeypatch.setattr("kiln.history_courier._request", lambda *a, **k: {"status": "success"})
+        said = print_keeping.set_account_choice(print_keeping.COMPUTER)
+        assert said["summary"] == print_keeping.SAID_TO_AN_AGENT[print_keeping.COMPUTER]
+        assert said["summary"].startswith("Print history: kept only on the computer that printed it.")
+
+    def test_the_terminal_says_the_last_setting_when_the_account_cannot_be_asked(self, home, monkeypatch):
+        from click.testing import CliRunner
+
+        from kiln import print_keeping
+        from kiln.cli.main import cli
+
+        monkeypatch.setattr(print_keeping, "refresh_account_choice", lambda **k: None)
+        monkeypatch.setattr(print_keeping, "account_choice", lambda: print_keeping.ACCOUNT)
+        out = CliRunner().invoke(cli, ["sharing", "history"]).output
+        assert "Print history: kept in your Kiln account." in out
+        assert print_keeping.LAST_SEEN in out

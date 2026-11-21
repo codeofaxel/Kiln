@@ -2136,18 +2136,12 @@ def sharing_history(where: str | None) -> None:
     """Where your print history is kept: in your Kiln account, or on this computer only."""
     from kiln import print_keeping
 
-    said = {
-        print_keeping.ACCOUNT: "Print history: kept in your Kiln account.",
-        print_keeping.COMPUTER: (
-            "Print history: kept on this computer only. Nothing about your prints is sent "
-            "to your Kiln account or Kiln's servers, and none is pooled."
-        ),
-    }
+    said = print_keeping.SAID_AT_THIS_COMPUTER
     if where is None:
         read = print_keeping.refresh_account_choice(fresh=True)
         click.echo(said[read or print_keeping.account_choice()])
         if read is None:
-            click.echo("  (as this computer last read it; your account could not be asked just now)")
+            click.echo(f"  {print_keeping.LAST_SEEN}")
         return
     answer = print_keeping.set_account_choice(where)
     if answer.get("status") == "error":

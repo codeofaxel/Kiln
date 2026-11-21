@@ -61,6 +61,23 @@ ACCOUNT = "account"
 COMPUTER = "computer"
 ACCOUNT_CHOICES = (ACCOUNT, COMPUTER)
 
+_NOTHING_SENT = (
+    "Nothing about your prints is sent to your Kiln account or Kiln's servers, "
+    "and none is pooled."
+)
+#: What the person sees at a terminal for each choice: they sit at the computer.
+SAID_AT_THIS_COMPUTER: dict[str, str] = {
+    ACCOUNT: "Print history: kept in your Kiln account.",
+    COMPUTER: f"Print history: kept on this computer only. {_NOTHING_SENT}",
+}
+#: What an agent is told after the choice is set, wherever the agent runs.
+SAID_TO_AN_AGENT: dict[str, str] = {
+    ACCOUNT: "Print history: kept in your Kiln account.",
+    COMPUTER: f"Print history: kept only on the computer that printed it. {_NOTHING_SENT}",
+}
+#: Said under the choice when the account could not be asked.
+LAST_SEEN = "(Kiln couldn't check your account just now; this is the last setting it saw.)"
+
 #: The start's answer for a print the person asked not to keep, said once.
 NOT_KEPT_SAID = (
     "This print won't be kept. While it prints, Kiln keeps only what it needs "
@@ -197,7 +214,8 @@ def set_account_choice(choice: str) -> dict[str, Any]:
     if answer.get("status") == "error":
         return answer
     remember_account_choice(choice)
-    return {"status": "success", "success": True, "print_history": choice}
+    return {"status": "success", "success": True, "print_history": choice,
+            "summary": SAID_TO_AN_AGENT[choice]}
 
 
 # ---------------------------------------------------------------------------
