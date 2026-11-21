@@ -37,6 +37,7 @@ import os
 from typing import Any
 
 from kiln.quoted_text import fence
+from kiln.slicer_estimate import estimate_sentence, keep_estimate
 
 _logger = logging.getLogger(__name__)
 
@@ -336,6 +337,13 @@ def _apply_parameters_to_scad(
     return scad_code, applied, not_in_source, skipped
 
 
+def _print_time(recipe: Any) -> dict[str, str]:
+    """``{"print_time": <sentence>}`` when the rebuilt version keeps the
+    slicer's estimate, else nothing."""
+    sentence = estimate_sentence(recipe.provenance)
+    return {"print_time": sentence} if sentence is not None else {}
+
+
 def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | None = None) -> dict[str, Any]:
     """Re-derive geometry from the recipe's OpenSCAD source, then rebuild.
 
@@ -386,12 +394,14 @@ def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | Non
     recipe.stl_path = compiled_stl
     if artifact.get("output_3mf"):
         recipe.final_3mf = artifact["output_3mf"]
+    recipe.provenance = keep_estimate(recipe.provenance, gcode_path)
     try:
         save_recipe(recipe, design_dir)
     except Exception as exc:
         _logger.warning("Failed to save updated recipe: %s", exc)
 
     return {
+        **_print_time(recipe),
         "status": "success",
         "mode": "parametric",
         "message": (
@@ -483,6 +493,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
 
     if artifact.get("output_3mf"):
         recipe.final_3mf = artifact["output_3mf"]
+    recipe.provenance = keep_estimate(recipe.provenance, merged_gcode)
     try:
         save_recipe(recipe, design_dir)
     except Exception as exc:
@@ -490,6 +501,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
 
     n = len(part_results) or 1
     result = {
+        **_print_time(recipe),
         "status": "success",
         "mode": "mesh",
         "message": f"Design rebuilt — {n} part(s) sliced and packaged.",

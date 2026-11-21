@@ -65,6 +65,10 @@ class _DesignRebuildPlugin:
             registered and the merged G-code otherwise (send that with
             ``upload_file``); ``wrapped`` says which one you got.
 
+            The slicer's own time estimate for the rebuilt slice is kept on
+            the version, and ``print_time`` says it ("About 3h 1m, the
+            slicer's estimate.") when the slice states one.
+
             When the render pipeline is available this also returns an
             inline preview of the rebuilt design; display that image to the
             user rather than summarizing it. The rebuild itself never
