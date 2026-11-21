@@ -53,6 +53,13 @@ def normalize_color(color: str) -> str:
     return _COLOR_ALIASES.get(color, color)
 
 
+def _print_time(recipe: Any) -> dict[str, str]:
+    """``{"print_time": <sentence>}`` when the rebuilt version keeps the
+    slicer's estimate, else nothing."""
+    sentence = estimate_sentence(recipe.provenance)
+    return {"print_time": sentence} if sentence is not None else {}
+
+
 # ---------------------------------------------------------------------------
 # Recipe resolution
 # ---------------------------------------------------------------------------
@@ -335,13 +342,6 @@ def _apply_parameters_to_scad(
         except ValueError:
             not_in_source.append(name)
     return scad_code, applied, not_in_source, skipped
-
-
-def _print_time(recipe: Any) -> dict[str, str]:
-    """``{"print_time": <sentence>}`` when the rebuilt version keeps the
-    slicer's estimate, else nothing."""
-    sentence = estimate_sentence(recipe.provenance)
-    return {"print_time": sentence} if sentence is not None else {}
 
 
 def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | None = None) -> dict[str, Any]:
