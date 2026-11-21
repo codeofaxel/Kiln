@@ -195,6 +195,18 @@ def _slicer_available() -> bool:
 
 @pytest.mark.skipif(not _slicer_available(), reason="no PrusaSlicer/OrcaSlicer installed")
 class TestRebuildKeepsItsSlicesEstimate:
+    @pytest.fixture(autouse=True)
+    def _own_slice_folder(self, tmp_path):
+        """Each case slices into its own folder: a slice is written to a path
+        fixed by the part's name, so cases running side by side would
+        otherwise read each other's file."""
+        from kiln.output_paths import REQUEST_OUTPUT_ROOT
+
+        token = REQUEST_OUTPUT_ROOT.set(str(tmp_path / "out"))
+        (tmp_path / "out").mkdir()
+        yield
+        REQUEST_OUTPUT_ROOT.reset(token)
+
     @pytest.fixture
     def rebuild(self):
         from kiln.plugins.design_rebuild_tools import plugin
