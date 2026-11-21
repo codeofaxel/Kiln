@@ -749,7 +749,7 @@ class TestTheChoiceIsSaidInOneVoice:
 
         monkeypatch.setattr("kiln.history_courier._request", lambda *a, **k: {"status": "success"})
         said = print_keeping.set_account_choice(print_keeping.COMPUTER)
-        assert said["summary"] == print_keeping.SAID_TO_AN_AGENT[print_keeping.COMPUTER]
+        assert said["summary"] == print_keeping.SAID_BY_THE_ACCOUNT[print_keeping.COMPUTER]
         assert said["summary"].startswith("Print history: kept only on the computer that printed it.")
 
     def test_the_terminal_says_the_last_setting_when_the_account_cannot_be_asked(self, home, monkeypatch):

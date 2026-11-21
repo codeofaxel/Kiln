@@ -70,8 +70,9 @@ SAID_AT_THIS_COMPUTER: dict[str, str] = {
     ACCOUNT: "Print history: kept in your Kiln account.",
     COMPUTER: f"Print history: kept on this computer only. {_NOTHING_SENT}",
 }
-#: What an agent is told after the choice is set, wherever the agent runs.
-SAID_TO_AN_AGENT: dict[str, str] = {
+#: What the account says of the choice wherever the person is not at the
+#: computer: to an agent after it sets the choice, and on the web account page.
+SAID_BY_THE_ACCOUNT: dict[str, str] = {
     ACCOUNT: "Print history: kept in your Kiln account.",
     COMPUTER: f"Print history: kept only on the computer that printed it. {_NOTHING_SENT}",
 }
@@ -215,7 +216,7 @@ def set_account_choice(choice: str) -> dict[str, Any]:
         return answer
     remember_account_choice(choice)
     return {"status": "success", "success": True, "print_history": choice,
-            "summary": SAID_TO_AN_AGENT[choice]}
+            "summary": SAID_BY_THE_ACCOUNT[choice]}
 
 
 # ---------------------------------------------------------------------------
