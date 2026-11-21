@@ -1,7 +1,6 @@
 """The cost estimate prices the print it is asked about.
 
-A downward face within two layers of the plate rests on it; one higher up
-needs support.  Which faces those are depends on the layer the part prints
+Which downward faces need support depends on the layer the part prints
 at, so the support plastic in a cost estimate follows the print's own layer
 height, through both doors that price a mesh (the cost tool's estimator and
 the printability report).  And a saving the report suggests compares that

@@ -2,8 +2,8 @@
 
 Covered here, with an invented machine and placeholder preset extras: the
 printer's nozzle record travels from the resolved profile to the preset
-writer; the writer widens its per-extruder values and lays the record's
-preset extras over the presets, and writes the same bytes as before when
+writer; the writer builds presets for every nozzle the record names, and
+writes the same bytes as before when
 there is no record or the record is sliced for one nozzle; a caller's
 filament-to-nozzle map is checked, handed to the slicer and read back from
 the sliced file; and each refusal is said in plain words before or after

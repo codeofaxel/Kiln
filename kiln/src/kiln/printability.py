@@ -1094,10 +1094,9 @@ def material_overhangs(
     material: str | None, *, nozzle_mm: float | None = None, layer_height_mm: float | None = None,
 ) -> dict[str, Any]:
     """The ``overhangs`` block :func:`_resolve_overhang_threshold` reads for
-    *material* printed at *layer_height_mm* through *nozzle_mm*: the
-    plastic's own figure, or its family's, from the one helper every check
-    reads (:func:`kiln.material_limits.limits_for`), over the general figure.
-    With no figure of its own, the general figure only.  Every door that
+    *material* printed at *layer_height_mm* through *nozzle_mm*, from the
+    one helper every check reads (:func:`kiln.material_limits.limits_for`),
+    or the general figure when Kiln has none for it.  Every door that
     judges an overhang hands the layer and nozzle the part is printed at, so
     the report, the support verdict and the slice give one answer."""
     from kiln.material_limits import OVERHANG, limits_for
@@ -7794,10 +7793,9 @@ _PLACEMENT_PENALTY = 50
 #: that rounded to "0.0 mm below the build plate" — a fatal verdict on a
 #: part that prints perfectly.
 #:
-#: The floor that matters is the thinnest layer any supported machine can
-#: lay down, about 0.08mm.  Half of that is material the
-#: process cannot resolve in the first place, so clipping it costs nothing
-#: real.  Deliberately loose in the safe direction: a part 0.03mm low loses
+#: The tolerance sits well under the thinnest layer any supported machine
+#: can lay down, so clipping that much costs nothing real.
+#: Deliberately loose in the safe direction: a part 0.03mm low loses
 #: a slab far under one layer, while a false fatal teaches users that the
 #: printability grade is noise.
 _PLACEMENT_Z_TOLERANCE_MM = 0.04

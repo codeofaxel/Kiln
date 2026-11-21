@@ -1217,13 +1217,9 @@ def ended_block(log: Any, footprint: list[float] | None) -> tuple[list[tuple[flo
     """An end's points and the layer it began at, from a log begun in a
     print's last minutes -- or the reason nothing can be written.
 
-    A log begun minutes before the end climbs a layer at a time, so the
-    first rise is not the end's.  The end begins at the last point where
-    filament went forward over the print (or the next point, when that one
-    is still over it), and the layer is the highest point filament went
-    forward at.  A log cut short, no footprint, no filament going forward
-    over the print, the head away from the print first, or no movement
-    after the last line says nothing."""
+    Nothing is written when the log was cut short, Kiln has no footprint
+    for the print, the log shows no filament going forward over the print,
+    the head left the print first, or nothing moved after the last line."""
     if log is None or not getattr(log, "complete", False):
         return "the position log was cut short before the head settled"
     if footprint is None:
