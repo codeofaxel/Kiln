@@ -21263,9 +21263,9 @@ def _with_local_log_tail(kwargs: dict) -> dict:
             return kwargs
         # Redacted again at the door, whatever the reader did: the tail is
         # read off this computer and leaves it (kiln.outbound_guard).
-        from kiln.outbound_guard import redact_text
+        from kiln.outbound_guard import redact_log_text
 
-        return {**kwargs, "context": {**context, "log_tail": redact_text(tail)}}
+        return {**kwargs, "context": {**context, "log_tail": redact_log_text(tail)}}
     except Exception:  # noqa: BLE001 — the report matters more than its attachment
         return kwargs
 
