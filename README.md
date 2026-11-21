@@ -21,7 +21,7 @@ Kiln is how AI agents make real things, safely. Describe what you want to exist,
 
 **The open-source MCP server for 3D printing.**
 
-Kiln lets AI agents (ChatGPT, Claude Desktop, Claude Code, Gemini, GitHub Copilot, Grok, Codex, Cursor, OpenCode, Devin Desktop, Amp, Claude Duet, Hermes Agent, OpenClaw, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
+Kiln lets AI agents (ChatGPT, Claude Desktop, Claude Code, Gemini, GitHub Copilot, Grok, Codex, Cursor, Kimi Code, OpenCode, Devin Desktop, Amp, Claude Duet, Hermes Agent, OpenClaw, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. You approve every print, or let one printer run on its own for as long as you choose.
 
