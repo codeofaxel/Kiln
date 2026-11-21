@@ -158,6 +158,35 @@ def redact_text(text: str) -> str:
     return redact_machine_text(text)
 
 
+#: What a saved printer's identity values are called (``kiln.printer_names``):
+#: each leaves a log tail as its one-way code, never as itself.
+_IDENTITY_PHRASES = frozenset({
+    "the printer's serial number", "the printer's mainboard id", "the printer's machine id",
+})
+
+
+def redact_log_text(text: str) -> str:
+    """A log tail as it leaves for Kiln's servers.
+
+    Each serial or board id this computer holds for its printers becomes its
+    one-way code (:func:`machine_code`) wherever it appears, labelled or not;
+    each address or code becomes what it is.  Then :func:`redact_text`.
+    """
+    try:
+        own = _own_printer_values()
+    except Exception:  # noqa: BLE001 -- the general rules still apply
+        logger.debug("outbound guard: own printer values unreadable", exc_info=True)
+        own = []
+    lowered = text.lower()
+    for phrase, value in own:
+        if value.lower() not in lowered:
+            continue
+        said = machine_code(value) if phrase in _IDENTITY_PHRASES else f"[{phrase}]"
+        text = re.sub(_own_pattern(phrase, value), lambda _m, s=said: s, text, flags=re.IGNORECASE)
+        lowered = text.lower()
+    return redact_text(text)
+
+
 #: The one key a link to a model's public listing page travels under.
 LISTING_LINK_KEY = "listing_url"
 
