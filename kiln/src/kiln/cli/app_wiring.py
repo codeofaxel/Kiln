@@ -97,6 +97,11 @@ def _goose_dir() -> Path:
     return _home() / ".config/goose"
 
 
+def _kimi_home() -> Path:
+    custom = os.environ.get("KIMI_CODE_HOME")
+    return Path(custom).expanduser() if custom else _home() / ".kimi-code"
+
+
 def _opencode_settings() -> Path:
     folder = _home() / ".config/opencode"
     plain, commented = folder / "opencode.json", folder / "opencode.jsonc"
@@ -235,6 +240,16 @@ APPS: tuple[App, ...] = (
         shape="opencode",
     ),
     App(
+        "kimi",
+        "Kimi Code",
+        lambda: _kimi_home() / "mcp.json",
+        "json",
+        markers=lambda: (_kimi_home(),),
+        commands=("kimi",),
+        restart="quit and reopen Kimi Code, or start a new kimi session",
+        shape="kimi",
+    ),
+    App(
         "hermes",
         "Hermes Agent",
         lambda: _home() / ".hermes/config.yaml",
@@ -341,6 +356,15 @@ def _read_text(path: Path) -> str | None:
 SHAPES: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "standard": lambda e: {"command": e["command"], "args": list(e.get("args") or [])},
     "opencode": lambda e: {"type": "local", "command": [e["command"], *(e.get("args") or [])]},
+    # Kimi Code loads a deferred server's tools only when its model asks for
+    # them; without that, every Kiln tool rides along on each message.  The
+    # longer start limit covers Kiln's first start on a slow machine.
+    "kimi": lambda e: {
+        "command": e["command"],
+        "args": list(e.get("args") or []),
+        "deferred": True,
+        "startupTimeoutMs": 180000,
+    },
     "goose": lambda e: {
         "name": KILN_NAME,
         "type": "stdio",

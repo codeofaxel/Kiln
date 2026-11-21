@@ -720,7 +720,7 @@ def _qwen_app_here() -> bool:
 @click.option(
     "--only", multiple=True, metavar="ID",
     help="Only these apps (claude_code, claude_desktop, codex, cursor, gemini, grok, copilot, "
-    "devin, amp, opencode, hermes, openclaw).  "
+    "devin, amp, opencode, kimi, hermes, openclaw).  "
          "Repeat or comma-separate.",
 )
 @click.option(
@@ -780,7 +780,7 @@ def install_mcp(
 
     Finds every AI app Kiln knows (Claude Code, Claude Desktop, Codex,
     Cursor, Gemini CLI, Grok Build, GitHub Copilot, Devin Desktop, Amp,
-    opencode, Hermes Agent, OpenClaw), shows the
+    opencode, Kimi Code, Hermes Agent, OpenClaw), shows the
     plan for each, and carries it out.  Web apps get the address to add.
     Merges into existing settings, never rewrites a file it can't read,
     backs up what it edits, and writes a receipt so ``kiln uninstall-mcp``

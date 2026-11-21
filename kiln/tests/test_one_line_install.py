@@ -53,6 +53,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     empty_bin.mkdir()
     monkeypatch.setenv("PATH", str(empty_bin))
     monkeypatch.setenv("KILN_AUTH_HOME", str(h))
+    monkeypatch.delenv("KIMI_CODE_HOME", raising=False)
 
     from kiln.cli import install_mcp
 
@@ -772,6 +773,45 @@ def test_each_app_gets_kiln_in_its_own_spelling(home: Path, kiln_bin: Path) -> N
     for app_id in ("devin", "cline", "lmstudio"):
         assert not paths[app_id].exists()
     assert set(before_seed) <= set(paths)
+
+
+def test_kimi_code_gets_kiln_with_its_tools_loaded_on_demand(
+    home: Path, kiln_bin: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Kimi Code reads ~/.kimi-code/mcp.json (or $KIMI_CODE_HOME/mcp.json).
+    Kiln's entry asks Kimi to load its tools on demand and gives it room to
+    start; the person's other servers stay, and uninstall puts the file back."""
+    settings = home / ".kimi-code" / "mcp.json"
+    settings.parent.mkdir()
+    before = json.dumps({"mcpServers": {"fs": {"command": "/usr/bin/fs-mcp", "args": []}}})
+    settings.write_text(before, encoding="utf-8")
+
+    result = _install("--command", str(kiln_bin), "--only", "kimi")
+    assert result.exit_code == 0, result.output
+    servers = json.loads(settings.read_text(encoding="utf-8"))["mcpServers"]
+    assert servers == {
+        "fs": {"command": "/usr/bin/fs-mcp", "args": []},
+        "kiln": {
+            "command": str(kiln_bin),
+            "args": ["serve"],
+            "deferred": True,
+            "startupTimeoutMs": 180000,
+        },
+    }
+    assert "Kimi Code" in result.output
+
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert settings.read_text(encoding="utf-8") == before
+
+    # A moved Kimi home is followed.
+    moved = home / "kimi-elsewhere"
+    moved.mkdir()
+    monkeypatch.setenv("KIMI_CODE_HOME", str(moved))
+    from kiln.cli import install_mcp
+
+    monkeypatch.setattr(install_mcp, "_DEFAULT_CLIENTS", install_mcp._clients_from_registry())
+    assert _install("--command", str(kiln_bin), "--only", "kimi").exit_code == 0
+    assert json.loads((moved / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]["kiln"]["deferred"] is True
 
 
 def test_yaml_edits_survive_an_app_rewriting_the_rest(home: Path, kiln_bin: Path) -> None:

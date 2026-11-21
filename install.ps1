@@ -12,7 +12,7 @@
 #   -DryRun            show what would happen, change nothing
 #   -Only <apps>       only these apps, comma-separated: claude-code,
 #                      claude-desktop, codex, cursor, gemini, grok, copilot,
-#                      devin, amp, opencode, hermes, openclaw
+#                      devin, amp, opencode, kimi, hermes, openclaw
 #   -Uninstall         take Kiln back out, exactly as the receipt says
 #   -Version <x.y.z>   install this Kiln release
 #
