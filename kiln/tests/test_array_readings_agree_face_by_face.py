@@ -57,12 +57,13 @@ def blocks(request, monkeypatch):
     return request.param
 
 
-def test_volume_area_and_overhangs_agree(blocks):
+@pytest.mark.parametrize("layer", [0.08, 0.2, 0.28])
+def test_volume_area_and_overhangs_agree(layer, blocks):
     for triangles in _meshes(1):
         bed = min(corner[2] for tri in triangles for corner in tri)
         corners = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
-        assert _bits(validation._surface_sums(corners, bed)) == _bits(
-            validation._surface_sums_by_face(triangles, bed)
+        assert _bits(validation._surface_sums(corners, bed, layer)) == _bits(
+            validation._surface_sums_by_face(triangles, bed, layer)
         )
 
 

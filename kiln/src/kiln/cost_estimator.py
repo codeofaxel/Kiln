@@ -706,6 +706,8 @@ class CostEstimator:
         :param adhesion_type: ``"none"``, ``"brim"``, or ``"raft"``.
         :param electricity_rate: Electricity cost per kWh in USD.
         :param printer_wattage: Printer power consumption in watts.
+        :param analysis: The mesh's :func:`~kiln.generation.validation.measure_mesh`
+            reading at this ``layer_height_mm``, when the caller already has it.
         :returns: :class:`CostEstimate` with full cost breakdown.
         :raises FileNotFoundError: If *file_path* does not exist.
         :raises ValueError: If the mesh has zero or negative volume.
@@ -722,7 +724,7 @@ class CostEstimator:
         # 300k-triangle file once, not twice.  The estimate reads the size,
         # volume, surface and overhang share, all of which measure_mesh gives.
         if analysis is None:
-            analysis = measure_mesh(file_path)
+            analysis = measure_mesh(file_path, layer_height_mm=layer_height_mm)
         if analysis.printability_issues and analysis.volume_mm3 <= 0:
             raise ValueError(
                 f"Mesh has zero or negative volume ({analysis.volume_mm3:.2f} mm³). "

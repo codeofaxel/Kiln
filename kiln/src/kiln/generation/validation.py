@@ -1574,7 +1574,9 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     Returns:
         :class:`MeshAnalysis` with full metrics.
     """
-    analysis, triangles, vertices, exact = _measure_mesh_file(file_path)
+    analysis, triangles, vertices, exact = _measure_mesh_file(
+        file_path, _DEFAULT_LAYER_HEIGHT_MM,
+    )
     if triangles is None:
         return analysis
 
@@ -1638,7 +1640,9 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     return analysis
 
 
-def measure_mesh(file_path: str) -> MeshAnalysis:
+def measure_mesh(
+    file_path: str, layer_height_mm: float = _DEFAULT_LAYER_HEIGHT_MM,
+) -> MeshAnalysis:
     """:func:`analyze_mesh`'s measurements alone: size, volume, surface area,
     centre of mass and overhangs, each the number :func:`analyze_mesh` gives.
 
@@ -1646,12 +1650,17 @@ def measure_mesh(file_path: str) -> MeshAnalysis:
     so ``printability_issues`` holds only why a file could not be read.  For
     a caller that needs the numbers and nothing else, such as a cost
     estimate.
+
+    ``layer_height_mm`` is the layer the part will print at: a downward face
+    within two layers of the plate rests on it and is no overhang, so the
+    overhang share follows the print's own layer.  At the default it is the
+    number :func:`analyze_mesh` gives.
     """
     import numpy as np
 
     corners = _stl_corner_array(Path(file_path))
     if corners is None:
-        return _measure_mesh_file(file_path)[0]
+        return _measure_mesh_file(file_path, layer_height_mm)[0]
     flat = corners.reshape(-1, 3)
     low, high = flat.min(axis=0).tolist(), flat.max(axis=0).tolist()
     bbox = {
@@ -1660,12 +1669,13 @@ def measure_mesh(file_path: str) -> MeshAnalysis:
         "z_min": low[2], "z_max": high[2],
     }
     vertex_count = int(_exact_corner_ids(flat).max()) + 1
-    sums = _surface_sums(corners, float(np.min(flat[:, 2])))
+    sums = _surface_sums(corners, float(np.min(flat[:, 2])), layer_height_mm)
     return _measurements(len(corners), vertex_count, bbox, sums)[0]
 
 
 def _measure_mesh_file(
     file_path: str,
+    layer_height_mm: float,
 ) -> tuple[
     MeshAnalysis,
     list[tuple[tuple[float, ...], ...]] | None,
@@ -1676,7 +1686,8 @@ def _measure_mesh_file(
     the record holding them, the parsed triangles and vertices, and the
     volume, overhang share and steepest overhang before rounding.  The
     triangles and vertices are ``None`` when the file cannot be read, the
-    record then saying why."""
+    record then saying why.  ``layer_height_mm`` sets the plate band, as in
+    :func:`_bed_threshold_z`."""
     path = Path(file_path)
 
     if not path.is_file():
@@ -1704,7 +1715,8 @@ def _measure_mesh_file(
     ).reshape(-1, 3, 3)
     bed_z = _mesh_bed_z(triangles)  # the plane the model rests on
     analysis, exact = _measurements(
-        len(triangles), len(vertices), _bounding_box(vertices), _surface_sums(corners, bed_z),
+        len(triangles), len(vertices), _bounding_box(vertices),
+        _surface_sums(corners, bed_z, layer_height_mm),
     )
     return analysis, triangles, vertices, exact
 
@@ -1765,7 +1777,9 @@ class _SurfaceSums:
 _LEAN_RECHECK_DEG = 1e-6
 
 
-def _surface_sums(corners: numpy.ndarray, bed_z: float) -> _SurfaceSums:
+def _surface_sums(
+    corners: numpy.ndarray, bed_z: float, layer_height_mm: float,
+) -> _SurfaceSums:
     """Signed volume, surface area, area-weighted centroid sums and overhangs
     of the triangles *corners* ``(T, 3, 3)``, skipping faces below the
     degenerate-area floor.
@@ -1776,13 +1790,14 @@ def _surface_sums(corners: numpy.ndarray, bed_z: float) -> _SurfaceSums:
     lean is read by array where it is far from 45 degrees and from the
     steepest, and one face at a time where it is near either.  A mesh with a
     corner or a figure that is not a finite number is summed by
-    :func:`_surface_sums_by_face` itself.
+    :func:`_surface_sums_by_face` itself.  A downward face inside the plate
+    band of ``layer_height_mm`` (:func:`_bed_threshold_z`) is no overhang.
     """
     import numpy as np
 
     if not np.isfinite(corners).all():
-        return _surface_sums_by_face(corners.tolist(), bed_z)
-    threshold = _bed_threshold_z(bed_z)
+        return _surface_sums_by_face(corners.tolist(), bed_z, layer_height_mm)
+    threshold = _bed_threshold_z(bed_z, layer_height_mm)
     running = [0.0] * 5  # volume, area, cx, cy, cz
     sums = _SurfaceSums()
 
@@ -1801,7 +1816,7 @@ def _surface_sums(corners: numpy.ndarray, bed_z: float) -> _SurfaceSums:
         # square is the one the face-by-face sum takes, to the bit.
         area_2 = np.sqrt(np.float_power(c0, 2.0) + np.float_power(c1, 2.0) + np.float_power(c2, 2.0))
         if not np.isfinite(area_2).all():
-            return _surface_sums_by_face(corners.tolist(), bed_z)
+            return _surface_sums_by_face(corners.tolist(), bed_z, layer_height_mm)
         tri_area = area_2 / 2.0
         keep = ~(tri_area < _DEGENERATE_AREA_MM2)
         sums.degenerate += int((~keep).sum())
@@ -1841,7 +1856,7 @@ _SUM_BLOCK: int = 1 << 18
 
 
 def _surface_sums_by_face(
-    triangles: list[tuple[tuple[float, ...], ...]], bed_z: float,
+    triangles: list[tuple[tuple[float, ...], ...]], bed_z: float, layer_height_mm: float,
 ) -> _SurfaceSums:
     """:func:`_surface_sums` one face at a time."""
     sums = _SurfaceSums()
@@ -1885,7 +1900,7 @@ def _surface_sums_by_face(
         # A downward face sitting on the plate is held up by the bed, so
         # it is not an overhang — see _is_bed_supported_triangle.
         nz = cross[2] / area_2  # normalized Z component of normal
-        if nz < 0 and not _is_bed_supported_triangle(tri, bed_z):
+        if nz < 0 and not _is_bed_supported_triangle(tri, bed_z, layer_height_mm):
             angle = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
             overhang_angle = 90.0 - angle  # angle from vertical
             if overhang_angle > sums.max_overhang:
