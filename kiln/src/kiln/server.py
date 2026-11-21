@@ -7261,12 +7261,19 @@ def _error_dict(
         from kiln import failure_kind as _failure_kind
 
         code = _failure_kind.named_code(sys.exc_info()[1]) or code
+    # A person reads this sentence: a caught failure's own technical text
+    # becomes everyday words here, once, for every door, and is kept under
+    # ``detail`` for an agent (kiln.plain_words).
+    from kiln.plain_words import reworded as _reworded
+
+    message, detail = _reworded(message, sys.exc_info()[1])
     payload: dict[str, Any] = {
         "success": False,
         "error": {
             "code": code,
             "message": message,
             "retryable": retryable,
+            **({"detail": detail} if detail else {}),
         },
     }
     # A refusal one answer from the person lets through carries itself laid

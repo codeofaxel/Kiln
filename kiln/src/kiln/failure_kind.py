@@ -24,6 +24,9 @@ module is the one reading of it, asked by :func:`kiln.server._error_dict`:
 A cause the exception names (``raise ... from``, a ``PrinterError``'s
 ``cause``) is followed when the outer exception says neither, so an adapter
 that re-wraps a timeout is still read as a timeout.
+
+:func:`in_words` says the same reading to a person: what went wrong, as a
+clause in everyday words, for a failure whose own text is Python's.
 """
 
 from __future__ import annotations
@@ -131,3 +134,55 @@ def refusal_code(exc: BaseException | None) -> str | None:
         if isinstance(link, UnreadableMeshError):
             return "UNREADABLE_INPUT"
     return None
+
+
+#: Raised by a mistake in Kiln's own code, never by what the person did.
+_KILN_FAULTS: tuple[type[BaseException], ...] = (
+    KeyError, IndexError, AttributeError, AssertionError, NameError, RecursionError, NotImplementedError,
+    ArithmeticError,
+)
+#: Said for a failure nothing else here names, and for Kiln's own faults.
+INSIDE_KILN = "something went wrong inside Kiln (not something you did)"
+
+
+def _one_in_words(exc: BaseException) -> str | None:
+    name = type(exc).__name__
+    if isinstance(exc, FileNotFoundError):
+        return "the file wasn't found"
+    if isinstance(exc, (NotADirectoryError, IsADirectoryError)):
+        return "that path isn't a file"
+    if isinstance(exc, PermissionError):
+        return "Kiln isn't allowed to open that file or folder"
+    if isinstance(exc, FileExistsError):
+        return "a file with that name is already there"
+    if isinstance(exc, TimeoutError) or name in ("TimeoutExpired", "Timeout", "ReadTimeout", "ConnectTimeout"):
+        return "it took too long to answer"
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        return "the disk is full"
+    if _is_transient(exc):
+        return "the connection didn't go through"
+    if isinstance(exc, (zipfile.BadZipFile, struct.error)):
+        return "the file is damaged, or isn't the kind of file its name says"
+    if name == "JSONDecodeError" or isinstance(exc, UnicodeError):
+        return "the file or reply couldn't be read"
+    if isinstance(exc, MemoryError):
+        return "it needs more memory than this computer has free"
+    if isinstance(exc, ImportError):
+        return "a piece Kiln needs isn't installed"
+    if name == "CalledProcessError":
+        return "a program Kiln runs stopped with an error"
+    if type(exc) in _KILN_FAULTS:
+        return INSIDE_KILN
+    return None
+
+
+def in_words(exc: BaseException | None) -> str:
+    """What went wrong, as a clause a person reads ("the file wasn't
+    found"), from the exception or the first cause that says."""
+    for link in _chain(exc):
+        said = _one_in_words(link)
+        if said is not None:
+            return said
+    if isinstance(exc, _VALUE_ERRORS):
+        return "a value it was given can't be used"
+    return INSIDE_KILN
