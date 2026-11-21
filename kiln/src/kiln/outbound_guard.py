@@ -50,6 +50,9 @@ __all__ = [
     "file_code",
     "file_hash_code",
     "job_code",
+    "team_printer_id",
+    "is_team_printer_id",
+    "printer_label",
     "is_listing_link",
     "redact_text",
     "scrub",
@@ -147,6 +150,61 @@ def job_code(value: Any) -> str | None:
     """A stable one-way code for a print's job id on this computer, under
     its own label.  A job id is often a file's name; the code is not."""
     return _labelled_code("pj:", b"job", str(value or "").strip())
+
+
+#: Rounds of the slow one-way function behind :func:`team_printer_id`.
+TEAM_PRINTER_ID_ROUNDS = 200_000
+_TEAM_PRINTER_ID = re.compile(r"\Atp:[0-9a-f]{32}\Z")
+
+
+def team_printer_id(fingerprint: Any, team_key: Any) -> str | None:
+    """One id for one physical printer inside one team.
+
+    *fingerprint* is the machine's stable identity
+    (:func:`kiln.registry.stable_machine_fingerprint`: its serial when the
+    printer reports one, else its address); *team_key* is the team's own
+    key, which Kiln's account serves only to the team's members.  The same
+    machine gives the same id on every member's computer, so a team's list
+    of printers follows the machine and never a name; another team's key
+    gives another id, so two teams' lists never share one.  ``"tp:"`` and
+    32 hex digits of PBKDF2-SHA256 with the identity as the password and
+    the key in the salt, slow so that a guessed serial or address costs
+    real work to test against an id.  ``None`` without an identity or a key.
+    """
+    text = str(fingerprint or "").strip().lower()
+    key = str(team_key or "").strip()
+    if not text or not key:
+        return None
+    salt = f"kiln-team-printer-v1|{key}".encode()
+    digest = hashlib.pbkdf2_hmac("sha256", text.encode("utf-8"), salt, TEAM_PRINTER_ID_ROUNDS)
+    return "tp:" + digest.hex()[:32]
+
+
+def is_team_printer_id(value: Any) -> bool:
+    """Whether *value* has the shape :func:`team_printer_id` makes."""
+    return isinstance(value, str) and bool(_TEAM_PRINTER_ID.match(value))
+
+
+def printer_label(name: Any, *, cap: int | None = None, also: Any = ()) -> str | None:
+    """The person's name for a printer as it may be sent: one line, cut to
+    *cap* characters when one is given.  ``None`` for a name that holds one
+    of the addresses, serials or codes this computer keeps for its printers
+    (or one of *also*, values the caller holds for the same printer), or one
+    that cannot be checked against them."""
+    text = " ".join(str(name or "").split())
+    if not text:
+        return None
+    try:
+        own = [str(held) for _phrase, held in _own_printer_values()]
+    except Exception:  # noqa: BLE001 -- a name that cannot be checked is not sent
+        return None
+    own.extend(str(value) for value in also or () if value)
+    lowered = text.lower()
+    for held in own:
+        mine = held.strip().lower()
+        if mine and mine in lowered:
+            return None
+    return text[:cap] if cap else text
 
 
 def redact_text(text: str) -> str:
@@ -597,7 +655,13 @@ SENDERS: dict[str, tuple[str, str]] = {
         "file_hash_code(), the material word, the nozzle size, a one-way code of the "
         "sliced settings, the spool as spool_code(), how far the print got, and the "
         "firmware version, declared in VERSION_FIELDS -- never a file's name, path or "
-        "fingerprint, a job id, a serial, an address, a note, or settings",
+        "fingerprint, a job id, a serial, an address, a note, or settings; "
+        "and kiln/print_keeping.py's team printer changes, built field by field: a printer "
+        "put on a team's list goes as its team_printer_id() (a slow one-way function of the "
+        "machine's identity under the team's key), the person's name for it through "
+        "printer_label() (left out when it holds one of this computer's printer addresses, "
+        "serials or codes), its model word and whether it is known by serial or address; "
+        "one taken off goes as that id -- never the serial, the address or the access code",
     ),
     "kiln/account_plan.py": ("own_schema", "asks which plan the signed-in account holds; sends only the sign-in"),
     "kiln/plugins/spend_cap_tools.py": (

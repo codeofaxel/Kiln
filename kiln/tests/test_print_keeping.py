@@ -56,7 +56,11 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(_p, "_db", None, raising=False)
 
 
-def _printer(name: str = "shop-x1", job_file: str = "secret_part.gcode"):
+def _printer(name: str = "shop-x1", job_file: str = "secret_part.gcode", *,
+             serial: str | None = None, host: str | None = None, family: str | None = None):
+    """A stand-in printer registered as *name*.  *serial* / *host* give it a
+    machine identity; *family* is its backend's name (what a real adapter's
+    ``name`` answers), so one machine can be registered under two names."""
     from kiln.printers.base import JobProgress, PrinterAdapter, PrinterState, PrinterStatus, PrintResult
 
     class _Fake(PrinterAdapter):
@@ -66,6 +70,10 @@ def _printer(name: str = "shop-x1", job_file: str = "secret_part.gcode"):
             self.state_word = "idle"
             self.sent: list[str] = []
             self._kiln_registered_name = name
+            if serial:
+                self._serial = serial
+            if host:
+                self._host = host
 
         def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
             self.sent.append(file_name)
@@ -88,7 +96,7 @@ def _printer(name: str = "shop-x1", job_file: str = "secret_part.gcode"):
         def pause_print(self): ...
         def resume_print(self): ...
 
-    _Fake.name = name
+    _Fake.name = family or name
     _Fake.__abstractmethods__ = frozenset()
     return _Fake()
 
@@ -271,23 +279,46 @@ class TestThisComputerOnly:
         assert answer["contributed"] is False
 
 
-def _team_rule(monkeypatch, *, printers=("shop-x1",), designs=("team-design",)):
+#: The shop's printer: one machine, known by its serial number.
+SHOP_SERIAL = "01P00A391800231"
+TEAM_KEY = "a" * 64
+OTHER_TEAM_KEY = "b" * 64
+
+
+def _shop_printer(name: str = "shop-x1", serial: str = SHOP_SERIAL):
+    return _printer(name, serial=serial, family="bambu")
+
+
+def _team_id(adapter, key: str = TEAM_KEY) -> str:
+    from kiln.outbound_guard import team_printer_id
+    from kiln.registry import stable_machine_fingerprint
+
+    return team_printer_id(stable_machine_fingerprint(adapter), key)
+
+
+def _team_rule(monkeypatch, *, machines=None, designs=("team-design",), key: str = TEAM_KEY,
+               required: bool = True, org_id: str = "org-1", name: str = "Acme", also=()):
+    """A team rule as the account serves it, read on this computer just now:
+    *machines* (stand-in printers) are the team's list, by their team ids."""
     from kiln import sharing_consent
 
+    machines = [_shop_printer()] if machines is None else machines
     data = sharing_consent._read()
-    data.update({
-        print_keeping._TEAM_RULES_KEY: [{
-            "org_id": "org-1", "name": "Acme", "printers": list(printers), "design_ids": list(designs),
-        }],
-        print_keeping._TEAM_RULES_READ_KEY: time.time(),
-    })
+    rules = [*also, {
+        "org_id": org_id, "name": name, "required": required, "team_key": key,
+        "printers": [{"id": _team_id(m, key), "label": "Shop X1", "model": "X1 Carbon", "known_by": "serial"}
+                     for m in machines],
+        "design_ids": list(designs),
+    }]
+    data.update({print_keeping._TEAM_RULES_KEY: rules, print_keeping._TEAM_RULES_READ_KEY: time.time()})
     sharing_consent._write(data)
+    return rules
 
 
 class TestATeamRule:
     def test_a_team_design_on_a_team_printer_is_held_before_anything_is_sent(self, home, monkeypatch):
         _team_rule(monkeypatch)
-        adapter = _printer()
+        adapter = _shop_printer()
         out = _start(adapter, keep_record=False, design_id="team-design")
         assert out["success"] is False
         assert out.get("code") == print_keeping.TEAM_HOLD_CODE
@@ -300,26 +331,250 @@ class TestATeamRule:
 
     def test_a_personal_design_on_the_team_printer_stays_private(self, home, monkeypatch):
         _team_rule(monkeypatch)
-        adapter = _printer()
+        adapter = _shop_printer()
         out = _start(adapter, keep_record=False, design_id="my-own-design")
         assert out["success"] is True and out["print_kept"] == "none"
         assert _rows() == []
 
     def test_a_team_design_on_a_personal_printer_follows_the_person(self, home, monkeypatch):
-        _team_rule(monkeypatch, printers=("shop-other",))
-        adapter = _printer()
+        _team_rule(monkeypatch)
+        adapter = _shop_printer(serial="01P00A000000999")
         out = _start(adapter, keep_record=False, design_id="team-design")
         assert out["success"] is True and out["print_kept"] == "none"
 
     def test_this_computer_only_is_told_once_then_kept(self, home, monkeypatch):
         _team_rule(monkeypatch)
         print_keeping.remember_account_choice(print_keeping.COMPUTER)
-        adapter = _printer()
+        adapter = _shop_printer()
         first = _start(adapter, design_id="team-design")
         assert first["success"] is False and first["code"] == print_keeping.TEAM_HOLD_CODE
         second = _start(adapter, design_id="team-design")
         assert second["success"] is True and second["print_kept"] == "kept"
         assert "keeps its prints" in second["kept_note"]
+
+
+class TestATeamPrinterIsTheMachine:
+    """The team's list names machines.  A member who calls the shop printer
+    something else, or renames it, prints on the same team printer."""
+
+    def test_the_same_machine_under_another_name_is_still_the_teams(self, home, monkeypatch):
+        _team_rule(monkeypatch, machines=[_shop_printer("Shop X1")])
+        mine = _shop_printer("my bambu")
+        out = _start(mine, keep_record=False, design_id="team-design")
+        assert out["success"] is False and out.get("code") == print_keeping.TEAM_HOLD_CODE
+        assert mine.sent == []
+
+    def test_a_printer_named_like_the_team_printer_is_not_it(self, home, monkeypatch):
+        _team_rule(monkeypatch, machines=[_shop_printer("Shop X1")])
+        lookalike = _shop_printer("Shop X1", serial="01P00A000000777")
+        out = _start(lookalike, keep_record=False, design_id="team-design")
+        assert out["success"] is True and out["print_kept"] == "none"
+
+    def test_a_printer_known_by_its_address_is_matched_by_it(self, home, monkeypatch):
+        added = _printer("klipper", host="http://192.168.1.40:7125/", family="moonraker")
+        _team_rule(monkeypatch, machines=[added])
+        here = _printer("voron", host="192.168.1.40:7125", family="moonraker")
+        out = _start(here, keep_record=False, design_id="team-design")
+        assert out.get("code") == print_keeping.TEAM_HOLD_CODE
+
+    def test_a_printer_whose_identity_cannot_be_read_is_no_teams_printer(self, home, monkeypatch):
+        _team_rule(monkeypatch)
+        nameless = _printer("shop-x1")  # no serial, no address
+        out = _start(nameless, keep_record=False, design_id="team-design")
+        assert out["success"] is True and out["print_kept"] == "none"
+        assert print_keeping.team_rule_for(nameless, "team-design") is None
+
+    def test_one_teams_list_says_nothing_about_another_team(self, home, monkeypatch):
+        # Team B lists ids made under team A's key: they name no machine of B's.
+        shop = _shop_printer()
+        rules = _team_rule(monkeypatch, machines=[shop], key=TEAM_KEY)
+        rules[0]["team_key"] = OTHER_TEAM_KEY
+        from kiln import sharing_consent
+
+        data = sharing_consent._read()
+        data[print_keeping._TEAM_RULES_KEY] = rules
+        sharing_consent._write(data)
+        out = _start(shop, keep_record=False, design_id="team-design")
+        assert out["success"] is True and out["print_kept"] == "none"
+
+    def test_a_team_whose_owner_requires_nothing_keeps_nothing(self, home, monkeypatch):
+        _team_rule(monkeypatch, required=False)
+        out = _start(_shop_printer(), keep_record=False, design_id="team-design")
+        assert out["success"] is True and out["print_kept"] == "none"
+
+
+class TestTheTeamPrinterId:
+    def test_one_machine_one_id_per_team(self):
+        from kiln.outbound_guard import is_team_printer_id, team_printer_id
+
+        fp = "bambu:serial:01p00a391800231"
+        first, again = team_printer_id(fp, TEAM_KEY), team_printer_id(fp.upper(), TEAM_KEY)
+        assert first == again and is_team_printer_id(first)
+        assert team_printer_id(fp, OTHER_TEAM_KEY) != first, "another team, another id"
+        assert team_printer_id("bambu:serial:01p00a000000001", TEAM_KEY) != first
+        assert "01p00a391800231" not in first
+        assert team_printer_id("", TEAM_KEY) is None and team_printer_id(fp, "") is None
+
+
+def _account(monkeypatch, *, rules, answers=None):
+    """The account behind ``history_courier._request``: the team rules for a
+    GET, *answers* (or a success) for a PATCH.  Returns what was sent."""
+    sent: list[tuple[str, str, Any]] = []
+
+    def fake(tool, method, path, body=None, **kw):
+        sent.append((method, path, body))
+        if method == "GET":
+            return {"status": "success", "rules": rules}
+        return (answers or {}).get(path, {"success": True})
+
+    monkeypatch.setattr("kiln.history_courier._request", fake)
+    return sent
+
+
+class TestAddingATeamPrinter:
+    def _rules(self, *teams):
+        return [{"org_id": org, "name": name, "required": True, "team_key": key, "printers": [], "design_ids": []}
+                for org, name, key in teams or [("org-1", "Acme", TEAM_KEY)]]
+
+    def test_the_machine_goes_as_its_team_id_and_never_as_its_serial(self, home, monkeypatch):
+        sent = _account(monkeypatch, rules=self._rules())
+        shop = _shop_printer("Shop X1")
+        out = print_keeping.add_team_printer(shop, "Shop X1")
+        assert out["success"] is True, out
+        method, path, body = sent[1]
+        assert (method, path) == ("PATCH", "/api/team/orgs/org-1/print-history")
+        assert body == {"add_printer": {"id": _team_id(shop), "known_by": "serial", "label": "Shop X1"}}
+        assert SHOP_SERIAL.lower() not in json.dumps(body).lower()
+
+    def test_a_name_holding_the_serial_is_left_out(self, home, monkeypatch):
+        sent = _account(monkeypatch, rules=self._rules())
+        shop = _shop_printer(f"x1 {SHOP_SERIAL}")
+        out = print_keeping.add_team_printer(shop, f"x1 {SHOP_SERIAL}")
+        assert out["success"] is True
+        assert "label" not in sent[1][2]["add_printer"]
+        assert SHOP_SERIAL not in json.dumps(sent)
+        refused = print_keeping.add_team_printer(shop, "x1", label=f"shop {SHOP_SERIAL}")
+        assert refused["success"] is False and refused["code"] == "LABEL_NOT_SENT"
+
+    def test_a_printer_with_no_identity_is_refused_and_nothing_is_asked(self, home, monkeypatch):
+        sent = _account(monkeypatch, rules=self._rules())
+        out = print_keeping.add_team_printer(_printer("usb"), "usb")
+        assert out["success"] is False and out["error"] == print_keeping.NO_IDENTITY_SAID
+        assert sent == []
+
+    def test_a_printer_known_by_its_address_is_said_so(self, home, monkeypatch):
+        sent = _account(monkeypatch, rules=self._rules())
+        out = print_keeping.add_team_printer(_printer("voron", host="192.168.1.40", family="moonraker"), "voron")
+        assert out["success"] is True
+        assert sent[1][2]["add_printer"]["known_by"] == "address"
+        assert "192.168.1.40" not in json.dumps(sent)
+        assert print_keeping.KNOWN_BY_ADDRESS_SAID in out["summary"]
+
+    def test_two_teams_mean_saying_which(self, home, monkeypatch):
+        _account(monkeypatch, rules=self._rules(("org-1", "Acme", TEAM_KEY), ("org-2", "Lab", OTHER_TEAM_KEY)))
+        out = print_keeping.add_team_printer(_shop_printer(), "Shop X1")
+        assert out["success"] is False and out["code"] == "WHICH_TEAM"
+        sent = _account(monkeypatch, rules=self._rules(("org-1", "Acme", TEAM_KEY), ("org-2", "Lab", OTHER_TEAM_KEY)))
+        shop = _shop_printer()
+        assert print_keeping.add_team_printer(shop, "Shop X1", team="lab")["success"] is True
+        assert sent[1][1] == "/api/team/orgs/org-2/print-history"
+        assert sent[1][2]["add_printer"]["id"] == _team_id(shop, OTHER_TEAM_KEY)
+
+    def test_the_accounts_refusal_is_said_in_its_own_words(self, home, monkeypatch):
+        refusal = {"status": "error", "success": False, "error": "invalid_rule",
+                   "detail": "The printer name is longer than 60 characters."}
+        _account(monkeypatch, rules=self._rules(), answers={"/api/team/orgs/org-1/print-history": refusal})
+        out = print_keeping.add_team_printer(_shop_printer(), "Shop X1")
+        assert out["success"] is False and out["error"] == refusal["detail"]
+
+
+class TestTakingATeamPrinterOff:
+    def _rules(self, printers):
+        return [{"org_id": "org-1", "name": "Acme", "required": True, "team_key": TEAM_KEY,
+                 "printers": printers, "design_ids": []}]
+
+    def test_it_is_named_by_the_name_the_list_shows(self, home, monkeypatch):
+        listed = {"id": _team_id(_shop_printer()), "label": "Shop X1", "model": "", "known_by": "serial"}
+        sent = _account(monkeypatch, rules=self._rules([listed]))
+        out = print_keeping.remove_team_printer("shop x1")
+        assert out["success"] is True
+        assert sent[1][2] == {"remove_printer": listed["id"]}
+
+    def test_two_of_one_name_mean_saying_which(self, home, monkeypatch):
+        one = {"id": _team_id(_shop_printer()), "label": "X1", "model": "", "known_by": "serial"}
+        two = {"id": _team_id(_shop_printer(serial="01P00A000000555")), "label": "X1", "model": "", "known_by": "serial"}
+        sent = _account(monkeypatch, rules=self._rules([one, two]))
+        out = print_keeping.remove_team_printer("X1")
+        assert out["success"] is False and out["code"] == "WHICH_TEAM_PRINTER"
+        assert [s for s in sent if s[0] == "PATCH"] == []
+        assert print_keeping.remove_team_printer(two["id"])["success"] is True
+
+    def test_only_the_owner_is_the_accounts_to_say(self, home, monkeypatch):
+        listed = {"id": _team_id(_shop_printer()), "label": "Shop X1", "model": "", "known_by": "serial"}
+        refusal = {"status": "error", "success": False, "error": "forbidden",
+                   "detail": "Only the team's owner can take a printer off the team's list."}
+        _account(monkeypatch, rules=self._rules([listed]), answers={"/api/team/orgs/org-1/print-history": refusal})
+        out = print_keeping.remove_team_printer("Shop X1")
+        assert out["success"] is False and out["error"] == refusal["detail"]
+
+
+class TestTheListing:
+    def test_a_printer_set_up_here_is_marked_with_its_name_here(self, home, monkeypatch):
+        shop = _shop_printer("my bambu")
+        listed = {"id": _team_id(shop), "label": "Shop X1", "model": "", "known_by": "serial"}
+        _account(monkeypatch, rules=[{"org_id": "org-1", "name": "Acme", "required": True,
+                                      "team_key": TEAM_KEY, "printers": [listed], "design_ids": []}])
+        registry = MagicMock()
+        registry.list_all.return_value = {"my bambu": shop, "other": _shop_printer(serial="01P00A000000444")}
+        out = print_keeping.team_printer_listing(registry=registry)
+        assert out["teams"][0]["printers"][0]["here"] == "my bambu"
+
+
+class TestTheTerminalDoor:
+    """``kiln sharing team-printers``: the person's own saved printer is put
+    on the team's list as its team id, and the account's refusals are said."""
+
+    def _saved(self, home):
+        import yaml
+
+        path = home / ".kiln" / "config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump({"active_printer": "shop", "printers": {"shop": {
+            "type": "bambu", "host": "192.168.1.77", "access_code": "12345678", "serial": SHOP_SERIAL,
+        }}}), encoding="utf-8")
+
+    def _cli(self, *args):
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        return CliRunner().invoke(cli, ["sharing", "team-printers", *args])
+
+    def test_add_sends_the_saved_printers_team_id(self, home, monkeypatch):
+        self._saved(home)
+        sent = _account(monkeypatch, rules=[{"org_id": "org-1", "name": "Acme", "required": True,
+                                             "team_key": TEAM_KEY, "printers": [], "design_ids": []}])
+        out = self._cli("add")
+        assert out.exit_code == 0, out.output
+        assert "is now one of Acme's printers" in out.output
+        body = sent[1][2]["add_printer"]
+        assert body["label"] == "shop" and body["known_by"] == "serial"
+        from kiln.outbound_guard import team_printer_id
+
+        assert body["id"] == team_printer_id(f"bambu:serial:{SHOP_SERIAL.lower()}", TEAM_KEY)
+        for private in (SHOP_SERIAL, SHOP_SERIAL.lower(), "192.168.1.77", "12345678"):
+            assert private not in json.dumps(sent)
+
+    def test_a_refusal_is_said_and_exits_nonzero(self, home, monkeypatch):
+        self._saved(home)
+        refusal = {"status": "error", "success": False, "error": "forbidden",
+                   "detail": "Only the team's owner can take a printer off the team's list."}
+        listed = {"id": "tp:" + "9" * 32, "label": "shop", "model": "", "known_by": "serial"}
+        _account(monkeypatch, rules=[{"org_id": "org-1", "name": "Acme", "required": True, "team_key": TEAM_KEY,
+                                      "printers": [listed], "design_ids": []}],
+                 answers={"/api/team/orgs/org-1/print-history": refusal})
+        out = self._cli("remove", "shop")
+        assert out.exit_code == 1 and refusal["detail"] in out.output
 
 
 class TestTheRunningPrintsRecord:
@@ -527,7 +782,7 @@ class TestATeamRuleThatCannotBeRead:
 
     def test_a_team_design_on_the_team_printer_is_held_and_nothing_is_sent(self, home, monkeypatch):
         self._stale_rule(monkeypatch)
-        adapter = _printer()
+        adapter = _shop_printer()
         out = _start(adapter, keep_record=False, design_id="team-design")
         assert out["success"] is False and out.get("code") == print_keeping.TEAM_HOLD_CODE
         assert print_keeping.TEAM_RULE_UNREAD_SAID in json.dumps(out)
@@ -537,7 +792,7 @@ class TestATeamRuleThatCannotBeRead:
 
     def test_a_personal_design_in_the_same_state_prints_privately(self, home, monkeypatch):
         self._stale_rule(monkeypatch)
-        adapter = _printer()
+        adapter = _shop_printer()
         out = _start(adapter, keep_record=False, design_id="my-own-design")
         assert out["success"] is True and out["print_kept"] == "none"
         assert adapter.sent == ["secret_part.gcode"]

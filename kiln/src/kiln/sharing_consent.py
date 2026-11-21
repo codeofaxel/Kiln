@@ -22,6 +22,7 @@ person says yes (``kiln sharing routines on``); no answer is no.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -51,6 +52,9 @@ def _write(data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    # The person's own answers, and their teams' keys: readable by them alone.
+    with contextlib.suppress(OSError):
+        os.chmod(tmp, 0o600)
     os.replace(tmp, path)
 
 

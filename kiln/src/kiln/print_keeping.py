@@ -25,15 +25,22 @@ written into the running print's start record.  The one read is
 asks :func:`may_leave` before anything about a print leaves this computer.
 
 A team's rule.  A team owner can require that the team's designs printed on
-the team's printers are kept.  The rules of the person's teams are read from
-their account and kept on this computer, so applying one sends nothing about
-the print.  When a rule applies to a print the person asked not to keep, the
-start is held before anything reaches the printer and says so
-(``TEAM_KEEPS_PRINTS``); the print starts only when it is asked for again
-as a kept print.  A print the person would keep on this computer only is
-held the same way the first time a team's rule applies, and told in the
-start's answer after that.  A personal design follows the person's own
-choice on any printer.
+the team's printers are kept.  A team's printers are machines, never names:
+each is added from a computer it is set up on, by any member of the team,
+and listed by its team printer id (:func:`kiln.outbound_guard.team_printer_id`,
+made from the machine's own identity and the team's key), so the same
+machine is a team printer on every member's computer whatever each member
+calls it.  Only the team's owner takes one off.  A printer whose identity
+this computer cannot read (no serial number and no address) cannot be a
+team printer: its prints follow the person's own choice.  The rules of the
+person's teams are read from their account and kept on this computer, so
+applying one sends nothing about the print.  When a rule applies to a print
+the person asked not to keep, the start is held before anything reaches
+the printer and says so (``TEAM_KEEPS_PRINTS``); the print starts only when
+it is asked for again as a kept print.  A print the person would keep on
+this computer only is held the same way the first time a team's rule
+applies, and told in the start's answer after that.  A personal design
+follows the person's own choice on any printer.
 """
 
 from __future__ import annotations
@@ -95,9 +102,25 @@ TEAM_RULE_UNREAD_SAID = (
     "Try again when you're online, or print it as kept."
 )
 
+#: Said when a printer is asked to join a team's printers and this computer
+#: cannot tell it apart from another printer.
+NO_IDENTITY_SAID = (
+    "Kiln can't read this printer's serial number or its address, so it can't tell it apart "
+    "from another printer. It can't be one of a team's printers; its prints follow your own "
+    "print history choice."
+)
+#: Said beside a printer added by its address rather than its serial number.
+KNOWN_BY_ADDRESS_SAID = (
+    "Kiln knows this printer by its network address. The team's rule covers it on computers "
+    "that reach it at that address; if its address changes, or a teammate reaches it another "
+    "way, add it again from that computer."
+)
+
 #: The account route the choice and the team rules are read from.
 PREFS_PATH = "/api/cloud/user/prefs"
 TEAM_RULES_PATH = "/api/team/print-rules"
+#: The team's rule, and its printers, are changed here.
+TEAM_RULE_PATH = "/api/team/orgs/{org_id}/print-history"
 
 #: How long a reading of the account's choice or the team rules stands.
 _FRESH_S = 60.0
@@ -225,39 +248,76 @@ def set_account_choice(choice: str) -> dict[str, Any]:
 
 
 def team_rules(*, refresh: bool = True) -> list[dict[str, Any]]:
-    """The print rules of the person's teams: each ``{"org_id", "name",
-    "printers", "design_ids"}`` for a team whose owner requires its prints
-    kept.  Read from the account at most every ten minutes when *refresh*;
-    the last reading otherwise.  ``[]`` when none was ever read."""
-    sharing = _sharing()
+    """The person's teams as their print rules stand: each ``{"org_id",
+    "name", "required", "team_key", "printers", "design_ids"}``, where
+    ``printers`` are the team's machines (``{"id", "label", "model",
+    "known_by"}``) and ``design_ids`` the designs the team holds when its
+    owner requires its prints kept.  Read from the account at most every ten
+    minutes when *refresh*; the last reading otherwise.  ``[]`` when none
+    was ever read."""
     try:
-        data = sharing._read()
+        data = _sharing()._read()
     except Exception:  # noqa: BLE001
         data = {}
     read_at = float(data.get(_TEAM_RULES_READ_KEY) or 0.0)
     if refresh and not 0.0 <= time.time() - read_at < _TEAM_FRESH_S:
-        try:
-            from kiln.history_courier import _request
-
-            answer = _request("print_history", "GET", TEAM_RULES_PATH, timeout=_READ_TIMEOUT_S)
-        except Exception:  # noqa: BLE001 -- the last reading stands
-            answer = {"status": "error"}
-        if answer.get("status") != "error" and isinstance(answer.get("rules"), list):
-            rules = [_clean_rule(r) for r in answer["rules"]]
-            data = sharing._read()
-            data.update({_TEAM_RULES_KEY: [r for r in rules if r], _TEAM_RULES_READ_KEY: time.time()})
-            sharing._write(data)
+        read = _read_team_rules()
+        if read is not None:
+            return read
     rules = data.get(_TEAM_RULES_KEY)
     return [r for r in rules if isinstance(r, dict)] if isinstance(rules, list) else []
 
 
+def _read_team_rules() -> list[dict[str, Any]] | None:
+    """Read the team rules from the account now and keep them; ``None``
+    when they could not be read (the last reading stands)."""
+    answer = _ask_team_rules()
+    if answer.get("status") == "error":
+        return None
+    return answer["rules"]
+
+
+def _ask_team_rules() -> dict[str, Any]:
+    """The account's answer for the team rules, kept on this computer when it
+    came: ``{"rules": [...]}``, or the miss as the request words it."""
+    try:
+        from kiln.history_courier import _request
+
+        answer = _request("print_history", "GET", TEAM_RULES_PATH, timeout=_READ_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 -- the last reading stands
+        return {"status": "error", "success": False, "error": TEAM_RULE_UNREAD_SAID}
+    if answer.get("status") == "error":
+        return answer
+    if not isinstance(answer.get("rules"), list):
+        return {"status": "error", "success": False, "error": TEAM_RULE_UNREAD_SAID}
+    rules = [r for r in (_clean_rule(raw) for raw in answer["rules"]) if r]
+    sharing = _sharing()
+    data = sharing._read()
+    data.update({_TEAM_RULES_KEY: rules, _TEAM_RULES_READ_KEY: time.time()})
+    sharing._write(data)
+    return {"rules": rules}
+
+
 def _clean_rule(raw: Any) -> dict[str, Any] | None:
+    from kiln.outbound_guard import is_team_printer_id
+
     if not isinstance(raw, dict) or not raw.get("org_id"):
         return None
+    printers = []
+    for entry in raw.get("printers") or []:
+        if isinstance(entry, dict) and is_team_printer_id(entry.get("id")):
+            printers.append({
+                "id": entry["id"],
+                "label": str(entry.get("label") or ""),
+                "model": str(entry.get("model") or ""),
+                "known_by": str(entry.get("known_by") or ""),
+            })
     return {
         "org_id": str(raw["org_id"]),
         "name": str(raw.get("name") or ""),
-        "printers": [str(p) for p in raw.get("printers") or [] if isinstance(p, str) and p.strip()],
+        "required": raw.get("required") is True,
+        "team_key": str(raw.get("team_key") or ""),
+        "printers": printers,
         "design_ids": [str(d) for d in raw.get("design_ids") or [] if isinstance(d, str) and d.strip()],
     }
 
@@ -272,18 +332,217 @@ def team_rules_fresh() -> bool:
     return 0.0 <= time.time() - read_at < _TEAM_FRESH_S
 
 
-def team_rule_for(printer_name: str | None, design_id: str | None, *, refresh: bool = True) -> dict[str, Any] | None:
-    """The team rule that keeps a print of *design_id* on *printer_name*, or
-    ``None``.  A rule applies only to its own team's designs on the printers
-    its owner named."""
-    if not printer_name or not design_id:
+def team_rule_for(adapter: Any, design_id: str | None, *, refresh: bool = True) -> dict[str, Any] | None:
+    """The team rule that keeps a print of *design_id* on the machine behind
+    *adapter*, or ``None``.  A rule applies only to its own team's designs,
+    on the machines on that team's list, matched by the machine's team
+    printer id.  A machine whose identity cannot be read matches no team."""
+    if adapter is None or not design_id:
         return None
-    wanted = printer_name.strip().casefold()
+    from kiln.outbound_guard import team_printer_id
+    from kiln.registry import stable_machine_fingerprint
+
+    fingerprint = stable_machine_fingerprint(adapter)
+    if not fingerprint:
+        return None
     for rule in team_rules(refresh=refresh):
-        printers = {p.strip().casefold() for p in rule.get("printers") or []}
-        if wanted in printers and design_id in (rule.get("design_ids") or []):
+        if rule.get("required") is not True or design_id not in (rule.get("design_ids") or []):
+            continue
+        listed = {p.get("id") for p in rule.get("printers") or [] if isinstance(p, dict)}
+        if listed and team_printer_id(fingerprint, rule.get("team_key")) in listed:
             return rule
     return None
+
+
+# ---------------------------------------------------------------------------
+# A team's printers: added from the computer each is set up on
+# ---------------------------------------------------------------------------
+
+
+def _refused(code: str, said: str, **extra: Any) -> dict[str, Any]:
+    return {"status": "error", "success": False, "code": code, "error": said, **extra}
+
+
+def _said(answer: dict[str, Any]) -> str:
+    """The sentence a refusal from the account carries."""
+    detail = answer.get("detail")
+    if isinstance(detail, str) and detail.strip():
+        return detail.strip()
+    return str(answer.get("error") or "").strip()
+
+
+def _pick_team(rules: list[dict[str, Any]], team: str | None) -> dict[str, Any] | dict[str, str]:
+    """The one team *team* names (its name or id), or the only team the
+    person is on; a refusal saying why otherwise."""
+    if not rules:
+        return _refused("NOT_ON_A_TEAM", "You're not on a team in your Kiln account.")
+    if team:
+        wanted = team.strip().casefold()
+        found = [r for r in rules if r["org_id"] == team.strip() or r["name"].strip().casefold() == wanted]
+        if len(found) == 1:
+            return found[0]
+        names = ", ".join(sorted(r["name"] or r["org_id"] for r in rules))
+        return _refused("TEAM_NOT_FOUND", f"You're not on a team called {team!r}. Your teams: {names}.")
+    if len(rules) == 1:
+        return rules[0]
+    names = ", ".join(sorted(r["name"] or r["org_id"] for r in rules))
+    return _refused("WHICH_TEAM", f"You're on more than one team ({names}); say which with --team.")
+
+
+def _identifiers_of(adapter: Any) -> tuple[str, ...]:
+    """The values *adapter* holds that say where or which machine it is."""
+    found = []
+    for attr in ("serial", "_serial", "host", "_host", "access_code", "_access_code"):
+        value = getattr(adapter, attr, None)
+        if isinstance(value, str) and value.strip():
+            found.append(value.strip())
+    return tuple(found)
+
+
+def _model_of(adapter: Any) -> str | None:
+    from kiln.machine_repair_courier import _model_of as model_word
+
+    return model_word(adapter)
+
+
+def team_printer_listing(team: str | None = None, *, registry: Any = None) -> dict[str, Any]:
+    """The printers on the person's teams' lists, read from the account now:
+    ``{"teams": [{"org_id", "name", "required", "printers": [...]}]}``, each
+    printer marked ``here`` with this computer's name for it when it is one
+    of the printers set up here.  *team* narrows it to one team."""
+    from kiln.outbound_guard import team_printer_id
+    from kiln.registry import stable_machine_fingerprint
+
+    answer = _ask_team_rules()
+    if answer.get("status") == "error":
+        return answer
+    rules = answer["rules"]
+    if team:
+        picked = _pick_team(rules, team)
+        if picked.get("status") == "error":
+            return picked
+        rules = [picked]
+    here: list[tuple[str, str]] = []
+    try:
+        if registry is None:
+            import kiln.server as _srv
+
+            registry = _srv._get_registry()
+        for name, adapter in registry.list_all().items():
+            fingerprint = stable_machine_fingerprint(adapter)
+            if fingerprint:
+                here.append((str(name), fingerprint))
+    except Exception:  # noqa: BLE001 -- the list stands without this computer's names
+        logger.debug("team printers: this computer's printers unreadable", exc_info=True)
+    teams = []
+    for rule in rules:
+        ids = {fingerprint: team_printer_id(fingerprint, rule["team_key"]) for _n, fingerprint in here}
+        printers = []
+        for entry in rule["printers"]:
+            local = sorted(name for name, fingerprint in here if ids.get(fingerprint) == entry["id"])
+            printers.append({**entry, "here": local[0] if local else None})
+        teams.append({"org_id": rule["org_id"], "name": rule["name"], "required": rule["required"],
+                      "printers": printers})
+    return {"status": "success", "success": True, "teams": teams}
+
+
+def add_team_printer(adapter: Any, printer_name: str | None, *, team: str | None = None,
+                     label: str | None = None) -> dict[str, Any]:
+    """Put the machine behind *adapter* on one of the person's teams' lists
+    of printers, from this computer.  Any member of the team may.  What goes
+    to the account: the machine's team printer id, the name it has here
+    (*label* instead, when given; never one holding the printer's address,
+    serial or a code), its model word and whether Kiln knows it by serial
+    number or address.  Refused with a sentence when the machine's identity
+    cannot be read, the team cannot be chosen, or the account says no."""
+    from kiln.outbound_guard import printer_label, team_printer_id
+    from kiln.registry import stable_machine_fingerprint
+
+    fingerprint = stable_machine_fingerprint(adapter) if adapter is not None else None
+    if not fingerprint:
+        return _refused("PRINTER_HAS_NO_IDENTITY", NO_IDENTITY_SAID)
+    answer = _ask_team_rules()
+    if answer.get("status") == "error":
+        return answer
+    picked = _pick_team(answer["rules"], team)
+    if picked.get("status") == "error":
+        return picked
+    printer_id = team_printer_id(fingerprint, picked["team_key"])
+    if printer_id is None:
+        return _refused("TEAM_RULE_UNREAD", TEAM_RULE_UNREAD_SAID)
+    asked = label if label is not None else printer_name
+    shown = printer_label(asked, also=_identifiers_of(adapter))
+    if label is not None and not shown:
+        return _refused("LABEL_NOT_SENT", "That name holds the printer's address, serial number or a code, "
+                        "so Kiln won't send it. Choose another name.")
+    known_by = "serial" if ":serial:" in fingerprint else "address"
+    entry: dict[str, Any] = {"id": printer_id, "known_by": known_by}
+    if shown:
+        entry["label"] = shown
+    model = _model_of(adapter)
+    if model:
+        entry["model"] = model
+    from kiln.history_courier import _request
+
+    sent = _request("print_history", "PATCH", TEAM_RULE_PATH.format(org_id=picked["org_id"]),
+                    {"add_printer": entry}, timeout=_READ_TIMEOUT_S)
+    if sent.get("status") == "error" or sent.get("success") is False:
+        return _refused(str(sent.get("code") or "TEAM_PRINTER_NOT_ADDED"), _said(sent) or TEAM_RULE_UNREAD_SAID,
+                        **{k: sent[k] for k in ("why", "http_status") if k in sent})
+    _read_team_rules()
+    team_name = picked["name"] or "your team"
+    called = shown or model or "This printer"
+    said = (f"{called} was already one of {team_name}'s printers." if sent.get("already_listed")
+            else f"{called} is now one of {team_name}'s printers.")
+    if not shown and printer_name:
+        said += " Its name here holds its address or serial number, so it is listed without it."
+    if known_by == "address":
+        said += f" {KNOWN_BY_ADDRESS_SAID}"
+    return {"status": "success", "success": True, "team": team_name, "printer_id": printer_id,
+            "already_listed": bool(sent.get("already_listed")), "summary": said}
+
+
+def remove_team_printer(which: str, *, team: str | None = None, adapter: Any = None) -> dict[str, Any]:
+    """Take one printer off one of the person's teams' lists.  *which* is the
+    name the list shows for it, or its team printer id; *adapter*, when
+    given, is the printer set up here that *which* names.  Only the team's
+    owner may; the account refuses anyone else, and says so."""
+    from kiln.outbound_guard import team_printer_id
+    from kiln.registry import stable_machine_fingerprint
+
+    answer = _ask_team_rules()
+    if answer.get("status") == "error":
+        return answer
+    picked = _pick_team(answer["rules"], team)
+    if picked.get("status") == "error":
+        return picked
+    listed = picked["printers"]
+    found = [p for p in listed if p["id"] == (which or "").strip()]
+    if not found and adapter is not None:
+        fingerprint = stable_machine_fingerprint(adapter)
+        mine = team_printer_id(fingerprint, picked["team_key"]) if fingerprint else None
+        found = [p for p in listed if mine and p["id"] == mine]
+    if not found:
+        wanted = (which or "").strip().casefold()
+        found = [p for p in listed if wanted and p["label"].strip().casefold() == wanted]
+    team_name = picked["name"] or "your team"
+    if not found:
+        return _refused("TEAM_PRINTER_NOT_LISTED", f"{which!r} isn't one of {team_name}'s printers.")
+    if len(found) > 1:
+        ids = ", ".join(p["id"] for p in found)
+        return _refused("WHICH_TEAM_PRINTER", f"More than one of {team_name}'s printers is called {which!r}; "
+                        f"say which by its id: {ids}.")
+    from kiln.history_courier import _request
+
+    sent = _request("print_history", "PATCH", TEAM_RULE_PATH.format(org_id=picked["org_id"]),
+                    {"remove_printer": found[0]["id"]}, timeout=_READ_TIMEOUT_S)
+    if sent.get("status") == "error" or sent.get("success") is False:
+        return _refused(str(sent.get("code") or "TEAM_PRINTER_NOT_REMOVED"), _said(sent) or TEAM_RULE_UNREAD_SAID,
+                        **{k: sent[k] for k in ("why", "http_status") if k in sent})
+    _read_team_rules()
+    called = found[0]["label"] or found[0]["model"] or found[0]["id"]
+    return {"status": "success", "success": True, "team": team_name, "printer_id": found[0]["id"],
+            "summary": f"{called} is no longer one of {team_name}'s printers."}
 
 
 def _told(org_id: str) -> bool:
@@ -382,8 +641,6 @@ def _refresh_quietly() -> None:
 
 
 def _team_rule_at_start(adapter: Any, file_name: str, kwargs: dict[str, Any]) -> dict[str, Any] | None:
-    from kiln.printers.base import outcome_printer_name
-
     design_id = kwargs.get("design_id")
     if not design_id:
         try:
@@ -392,7 +649,7 @@ def _team_rule_at_start(adapter: Any, file_name: str, kwargs: dict[str, Any]) ->
             design_id = (print_identity_at_start(adapter, kwargs, file_name) or {}).get("design_id")
         except Exception:  # noqa: BLE001
             design_id = None
-    return team_rule_for(outcome_printer_name(adapter), str(design_id) if design_id else None)
+    return team_rule_for(adapter, str(design_id) if design_id else None)
 
 
 # ---------------------------------------------------------------------------

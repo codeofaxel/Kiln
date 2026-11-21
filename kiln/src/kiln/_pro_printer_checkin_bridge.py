@@ -332,21 +332,9 @@ def _label(printer_name: Any) -> str | None:
     :data:`LABEL_MAX`.  ``None`` for a name that holds one of the addresses,
     serials or codes this computer keeps for its printers, or one that cannot
     be checked against them."""
-    name = " ".join(str(printer_name or "").split())
-    if not name:
-        return None
-    try:
-        from kiln.outbound_guard import _own_printer_values
+    from kiln.outbound_guard import printer_label
 
-        own = _own_printer_values()
-    except Exception:  # noqa: BLE001 -- a name that cannot be checked is not sent
-        return None
-    lowered = name.lower()
-    for _phrase, held in own:
-        mine = str(held).strip().lower()
-        if mine and mine in lowered:
-            return None
-    return name[:LABEL_MAX]
+    return printer_label(printer_name, cap=LABEL_MAX)
 
 
 def request_body(store: Any, machine_fingerprint: str, printer_name: str) -> dict[str, Any] | None:

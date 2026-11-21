@@ -2150,6 +2150,93 @@ def sharing_history(where: str | None) -> None:
     click.echo(said[where])
 
 
+@sharing.group(name="team-printers")
+def sharing_team_printers() -> None:
+    """Your team's printers: prints of the team's designs on them are kept when its owner says so."""
+
+
+def _team_printer_refusal(answer: dict[str, Any]) -> None:
+    said = answer.get("detail") if isinstance(answer.get("detail"), str) else answer.get("error")
+    click.echo(f"Nothing was changed: {said}", err=True)
+    raise SystemExit(1)
+
+
+def _saved_printer(ctx: click.Context, printer: str | None) -> tuple[Any, str | None]:
+    """The saved printer *printer* (or ``--printer``, or the active one)
+    names, as an adapter, with the name it is saved under here."""
+    from kiln.cli.config import _read_config_file, get_config_path
+    from kiln.registry import resolve_saved_printer_mention
+
+    aimed = printer or ((ctx.obj or {}).get("printer") if ctx else None)
+    try:
+        cfg = load_printer_config(aimed)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    name = None
+    if not os.environ.get("KILN_PRINTER_HOST"):
+        raw = _read_config_file(get_config_path()) or {}
+        saved = raw.get("printers") if isinstance(raw.get("printers"), dict) else {}
+        if aimed:
+            name = aimed if aimed in saved else (resolve_saved_printer_mention(aimed, saved) or aimed)
+        else:
+            name = raw.get("active_printer") or (next(iter(saved)) if len(saved) == 1 else None)
+    return _make_adapter(cfg), name
+
+
+@sharing_team_printers.command(name="list")
+@click.option("--team", default=None, help="The team, by name, when you are on more than one.")
+def sharing_team_printers_list(team: str | None) -> None:
+    """Show the printers on your teams' lists, and which of them are set up here."""
+    from kiln import print_keeping
+
+    answer = print_keeping.team_printer_listing(team)
+    if answer.get("status") == "error":
+        _team_printer_refusal(answer)
+    for found in answer["teams"]:
+        rule = "keeps its prints on them" if found["required"] else "doesn't require its prints kept"
+        click.echo(f"{found['name'] or found['org_id']} ({rule}):")
+        if not found["printers"]:
+            click.echo("  No printers yet. Add one from the computer it's set up on: "
+                       "kiln sharing team-printers add <printer>")
+        for p in found["printers"]:
+            called = p["label"] or p["model"] or p["id"]
+            extra = [p["model"]] if p["model"] and p["model"] != called else []
+            if p["known_by"] == "address":
+                extra.append("known by its address")
+            if p.get("here"):
+                extra.append(f"set up here as {p['here']}")
+            click.echo(f"  {called}" + (f" ({'; '.join(extra)})" if extra else "") + f"  [{p['id']}]")
+
+
+@sharing_team_printers.command(name="add")
+@click.argument("printer", required=False)
+@click.option("--team", default=None, help="The team, by name, when you are on more than one.")
+@click.option("--label", default=None, help="The name the team sees, instead of the printer's name here.")
+@click.pass_context
+def sharing_team_printers_add(ctx: click.Context, printer: str | None, team: str | None, label: str | None) -> None:
+    """Put a printer set up on this computer on your team's list. Any member of the team can."""
+    from kiln import print_keeping
+
+    adapter, name = _saved_printer(ctx, printer)
+    answer = print_keeping.add_team_printer(adapter, name, team=team, label=label)
+    if answer.get("status") == "error":
+        _team_printer_refusal(answer)
+    click.echo(answer["summary"])
+
+
+@sharing_team_printers.command(name="remove")
+@click.argument("which")
+@click.option("--team", default=None, help="The team, by name, when you are on more than one.")
+def sharing_team_printers_remove(which: str, team: str | None) -> None:
+    """Take a printer off your team's list, by the name it shows or its id. The team's owner only."""
+    from kiln import print_keeping
+
+    answer = print_keeping.remove_team_printer(which, team=team)
+    if answer.get("status") == "error":
+        _team_printer_refusal(answer)
+    click.echo(answer["summary"])
+
+
 @sharing.group(name="routines")
 def sharing_routines() -> None:
     """Share your printer's own routines from your print files (off until you say yes)."""
