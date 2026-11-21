@@ -173,14 +173,36 @@ active_printer: default
 printers:
   default:
     type: bambu
+    printer_model: bambu_zz9
+""")
+        monkeypatch.setattr("kiln.printer_model_resolver._CONFIG_PATH", cfg)
+        import logging
+        with caplog.at_level(logging.WARNING, logger="kiln.printer_model_resolver"):
+            result = resolve_printer_model()
+        assert result == "bambu_zz9"  # raw value preserved
+        assert any(
+            "doesn't match any known printer" in r.message
+            for r in caplog.records
+        )
+
+    def test_a_row_written_in_capitals_is_that_row(
+        self, tmp_path, monkeypatch, caplog,
+    ):
+        """Case is not a typo: ``bambu_A1`` reads as ``bambu_a1``, unwarned."""
+        cfg = tmp_path / "config.yaml"
+        _write_yaml(cfg, """\
+active_printer: default
+printers:
+  default:
+    type: bambu
     printer_model: bambu_A1
 """)
         monkeypatch.setattr("kiln.printer_model_resolver._CONFIG_PATH", cfg)
         import logging
         with caplog.at_level(logging.WARNING, logger="kiln.printer_model_resolver"):
             result = resolve_printer_model()
-        assert result == "bambu_A1"  # raw value preserved
-        assert any(
+        assert result == "bambu_a1"
+        assert not any(
             "doesn't match any known printer" in r.message
             for r in caplog.records
         )

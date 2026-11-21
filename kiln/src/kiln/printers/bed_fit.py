@@ -150,12 +150,17 @@ def build_volume_exact(printer_id: str | None) -> tuple[float, float, float] | N
     return _lookup_build_volume_exact(key) if key else None
 
 
-def catalogue_printer_id(printer_id: str | None) -> str | None:
-    """The roster id *printer_id* spells, or ``None`` -- never ``default``."""
+def catalogue_printer_id(printer_id: str | None, *, typos: bool = True) -> str | None:
+    """The roster id *printer_id* spells, or ``None`` -- never ``default``.
+
+    ``typos=False`` accepts a spelling of a row (its id, its name, its name
+    with the maker's) and never a one-letter guess, for a reader of a fact
+    that belongs to one model only.
+    """
     from kiln.catalog_keys import GENERIC_ROWS
 
     roster = _load_printer_intelligence()
-    for candidate in _printer_id_candidates(printer_id):
+    for candidate in _printer_id_candidates(printer_id, typos=typos):
         if candidate not in GENERIC_ROWS and not candidate.startswith("_") and candidate in roster:
             return candidate
         if candidate in _BUILD_VOLUME_OVERRIDES:

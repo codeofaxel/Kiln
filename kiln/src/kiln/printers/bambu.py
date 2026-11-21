@@ -1307,6 +1307,24 @@ def _first_real_job_id(*candidates: Any) -> str | None:
     return None
 
 
+def _declared_model_id(printer_model: str | None) -> str:
+    """The catalogue id a declared model spells ("Bambu Lab P2S" is ``bambu_p2s``).
+
+    The camera, storage folder and AMS choices compare catalogue ids.  A
+    spelling Kiln cannot place stays as written, lower-cased, never guessed.
+    """
+    written = (printer_model or "").strip().lower()
+    if not written:
+        return ""
+    try:
+        from kiln.printers.bed_fit import catalogue_printer_id
+
+        return catalogue_printer_id(written, typos=False) or written
+    except Exception:  # noqa: BLE001 -- an unreadable catalogue leaves the model as written
+        logger.debug("Bambu: catalogue unreadable while reading printer_model %r", written, exc_info=True)
+        return written
+
+
 class BambuAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by Bambu Lab MQTT + FTPS."""
 
@@ -1357,7 +1375,7 @@ class BambuAdapter(PrinterAdapter):
         self._host = host
         self._access_code = access_code
         self._serial = serial
-        self._printer_model = (printer_model or "").strip().lower()
+        self._printer_model = _declared_model_id(printer_model)
         self._timeout = timeout
         configured_tls_mode = (tls_mode or os.environ.get(_TLS_MODE_ENV, _DEFAULT_TLS_MODE)).strip().lower()
         if configured_tls_mode not in _VALID_TLS_MODES:
@@ -5445,8 +5463,12 @@ class BambuAdapter(PrinterAdapter):
             raise self._camera_failure(said, code=code, detail=detail) from exc
 
     def _camera_family(self) -> str:
-        """The model the camera transport falls back to: declared, else what the printer says it is."""
-        declared = self._family()
+        """The model the camera transport falls back to: declared, else what the printer says it is.
+
+        A declaration names a model only when it is a catalogue id; one Kiln
+        cannot place gives way to the printer's own serial and report.
+        """
+        declared = self._family() if self._printer_model.startswith("bambu_") else ""
         if declared:
             return declared
         serial_family, mqtt_family, _ = self._identity_families()

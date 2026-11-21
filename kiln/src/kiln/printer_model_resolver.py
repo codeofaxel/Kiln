@@ -122,12 +122,12 @@ def _read_printer_model_from_config() -> str | None:
     """Parse ~/.kiln/config.yaml and return the active printer's
     ``printer_model`` field, or None if missing / malformed.
 
-    When the field IS set but doesn't match any entry in
-    ``printer_intelligence.json``, we log a loud warning (typo check)
-    and still return the raw value — the safety gates will then
-    soft-pass because ``get_build_volume`` / ``get_profile`` can't
-    resolve it.  Loud warning catches typos early without adding a
-    new MCP tool.
+    A spelling of a catalogue row ("Bambu Lab P2S") is returned as that
+    row's id (``bambu_p2s``), so every reader downstream compares ids.
+    When the field IS set but matches no printer Kiln knows, it logs a
+    loud warning (typo check) and returns the value as written; the
+    safety gates then soft-pass because ``get_build_volume`` /
+    ``get_profile`` can't resolve it.
     """
     cfg = _load_yaml_config()
     if not cfg:
@@ -144,8 +144,12 @@ def _read_printer_model_from_config() -> str | None:
         # get_printer_intel would silently fall back to "default".
         try:
             from kiln.printers.bed_fit import catalogue_printer_id, owner_stated_build_volume
+
+            row_id = catalogue_printer_id(model_str, typos=False)
+            if row_id is not None:
+                return row_id
             known = catalogue_printer_id(model_str) is not None or owner_stated_build_volume(model_str) is not None
-            if model_str != model_str.lower() or not known:
+            if not known:
                 logger.warning(
                     "printer_model=%r in %s doesn't match any known printer.  "
                     "Safety checks will be skipped.  Set it again with "
