@@ -8210,35 +8210,34 @@ def _analyze_cost(
     from kiln.generation.validation import measure_mesh
 
     estimator = CostEstimator()
-    # Read the file once for every estimate below; the PLA and low-infill
-    # alternatives are handed this reading too.
-    mesh_analysis = measure_mesh(file_path)
+    # Read the file once, at the print's own layer, for every estimate below;
+    # the PLA and low-infill alternatives are handed this reading too.
+    mesh_analysis = measure_mesh(file_path, layer_height_mm=layer_height_mm)
 
-    estimate = estimator.estimate_from_mesh(
-        file_path,
-        material=material,
-        infill_percent=infill_percent,
-        wall_layers=_COST_WALL_LAYERS,
-        layer_height_mm=layer_height_mm,
-        nozzle_mm=nozzle_mm,
-        include_supports=needs_supports,
-        adhesion_type=adhesion_type,
-        analysis=mesh_analysis,
-    )
+    def priced(**change: Any) -> Any:
+        """This print's estimate with one setting changed, every other one as
+        asked, so a saving compares the same print and nothing else."""
+        settings: dict[str, Any] = {
+            "material": material,
+            "infill_percent": infill_percent,
+            "wall_layers": _COST_WALL_LAYERS,
+            "layer_height_mm": layer_height_mm,
+            "nozzle_mm": nozzle_mm,
+            "include_supports": needs_supports,
+            "adhesion_type": adhesion_type,
+            "analysis": mesh_analysis,
+        }
+        settings.update(change)
+        return estimator.estimate_from_mesh(file_path, **settings)
+
+    estimate = priced()
 
     # --- Cost-saving recommendations ---
     recommendations: list[str] = []
 
     # Suggestion: lower infill
     if infill_percent > 15.0:
-        lower_est = estimator.estimate_from_mesh(
-            file_path,
-            material=material,
-            infill_percent=15.0,
-            include_supports=needs_supports,
-            adhesion_type=adhesion_type,
-            analysis=mesh_analysis,
-        )
+        lower_est = priced(infill_percent=15.0)
         savings = estimate.total_cost_usd - lower_est.total_cost_usd
         if savings > 0.01:
             recommendations.append(
@@ -8257,14 +8256,7 @@ def _analyze_cost(
     profile = estimator.get_material(mat_upper)
     pla = estimator.get_material("PLA")
     if profile is not None and pla is not None and profile.cost_per_kg_usd > pla.cost_per_kg_usd:
-        pla_est = estimator.estimate_from_mesh(
-            file_path,
-            material="PLA",
-            infill_percent=infill_percent,
-            include_supports=needs_supports,
-            adhesion_type=adhesion_type,
-            analysis=mesh_analysis,
-        )
+        pla_est = priced(material="PLA")
         savings = estimate.total_cost_usd - pla_est.total_cost_usd
         if savings > 0.01:
             recommendations.append(
@@ -8274,14 +8266,7 @@ def _analyze_cost(
 
     # Suggestion: high infill on expensive prints
     if estimate.total_cost_usd > 5.0 and infill_percent > 20.0:
-        low_est = estimator.estimate_from_mesh(
-            file_path,
-            material=material,
-            infill_percent=10.0,
-            include_supports=needs_supports,
-            adhesion_type=adhesion_type,
-            analysis=mesh_analysis,
-        )
+        low_est = priced(infill_percent=10.0)
         savings = estimate.total_cost_usd - low_est.total_cost_usd
         if savings > 0.01:
             recommendations.append(

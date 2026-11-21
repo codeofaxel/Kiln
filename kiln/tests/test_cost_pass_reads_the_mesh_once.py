@@ -34,9 +34,9 @@ def test_the_cost_pass_analyses_the_file_once(tmp_path, monkeypatch):
     reads = []
     real = validation.measure_mesh
 
-    def counted(file_path):
+    def counted(file_path, *args, **kwargs):
         reads.append(file_path)
-        return real(file_path)
+        return real(file_path, *args, **kwargs)
 
     monkeypatch.setattr(validation, "measure_mesh", counted)
     cost = printability._analyze_cost(None, path, material="PLA", infill_percent=20.0)
