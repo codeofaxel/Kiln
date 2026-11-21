@@ -345,6 +345,13 @@ def _carry_motion(answer: dict[str, Any], envelope: dict[str, Any], mesh: str) -
     note = said.get("note")
     if shown.get("plays") is True:
         kept = isinstance(note, dict) and _keep_motion_note(mesh, note)
+        if kept and isinstance(said.get("pieces"), dict):
+            # Which of its parts print as one piece, kept beside the file as
+            # a composed assembly's is: the stage reads it to know whether
+            # the design comes apart.
+            from kiln import assembly_stage
+
+            assembly_stage.keep_block(mesh, said["pieces"])
         shown["on_this_computer"] = kept
         # Only what was kept here is still being read here.
         shown.pop("still_checking", None)
