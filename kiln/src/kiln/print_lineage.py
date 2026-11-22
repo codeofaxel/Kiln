@@ -56,6 +56,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: Where a slice's record, and a design version's, keeps the person's own
+#: speed ranges the slice was made with (:mod:`kiln.speed_by_height`).
+SPEED_BY_HEIGHT_KEY = "speed_by_height"
+
 #: The stamp line's key; the whole line is ``; kiln_lineage = <id>``.
 STAMP_KEY = "kiln_lineage"
 _STAMP = re.compile(r"^\s*;\s*kiln_lineage\s*=\s*([0-9a-f]{16})\s*$")
@@ -386,6 +390,35 @@ def note_one_nozzle(output_path: str | None, one_nozzle: dict[str, Any] | None) 
     (:func:`resolve`).  ``False`` when the file has no record.  Never
     raises."""
     return _note_on_record(output_path, "one_nozzle", one_nozzle)
+
+
+def note_speed_by_height(output_path: str | None, wish: dict[str, Any] | None) -> bool:
+    """Keep, on the record of the sliced file at *output_path*, the person's
+    own speed ranges the slice was made with and each range's outcome
+    (:func:`kiln.speed_by_height.kept_form`): ``speed_by_height`` on the
+    record.  ``False`` when the file has no record.  Never raises."""
+    return _note_on_record(output_path, SPEED_BY_HEIGHT_KEY, wish)
+
+
+def speed_by_height_of(path: str | None) -> dict[str, Any] | None:
+    """The speed ranges Kiln's record says the sliced file at *path* was
+    made with, or ``None``: for a file that carries no stamp or several, one
+    this computer keeps no record of, and one sliced with no ranges.  The
+    answer is the record's, never the file's own words.  Never raises."""
+    if not path or _hosted():
+        return None
+    try:
+        stamps = read_stamps(path)
+        if len(stamps) != 1:
+            return None
+        with _lock:
+            data = _load()
+        record = _find(data, stamps=stamps, sha=None, name=None)
+        wish = record.get(SPEED_BY_HEIGHT_KEY) if record is not None else None
+        return dict(wish) if isinstance(wish, dict) else None
+    except Exception:  # noqa: BLE001 -- an unreadable record states no wish
+        logger.debug("speed ranges not read from the slice's record", exc_info=True)
+        return None
 
 
 def _note_on_record(output_path: str | None, key: str, value: dict[str, Any] | None) -> bool:

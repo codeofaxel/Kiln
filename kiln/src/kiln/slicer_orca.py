@@ -268,6 +268,8 @@ _NATIVE_HOME: dict[str, tuple[str, str]] = {
     # Orca's process-level flow ratio and its own spelling of the retraction
     # a filament carries.
     "print_flow_ratio": ("process", _NATIVE_SCALAR),
+    # The first layer's infill, which Orca states apart from its walls.
+    "initial_layer_infill_speed": ("process", _NATIVE_SCALAR),
     "filament_retraction_length": ("filament", _NATIVE_LIST),
 }
 
