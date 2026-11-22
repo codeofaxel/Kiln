@@ -228,3 +228,17 @@ class TestEveryOtherPosture:
         report = analyze_printability(str(flat_nylon), material="pa")
         assert report.plan_check["applied"] is False
         assert report.plan_check["why"] in ("refused", "unanswered")
+
+    def test_a_part_judged_while_the_servers_rest_keeps_the_cause(self, servers, flat_nylon, tmp_path, monkeypatch):
+        from kiln.printability import analyze_printability
+
+        trimesh = pytest.importorskip("trimesh")
+        other = tmp_path / "other.stl"
+        trimesh.creation.box(extents=(30, 30, 30)).apply_translation((0, 0, 15)).export(other)
+        _plan(monkeypatch, True)
+        servers.raises = OSError(51, "Network is unreachable")
+        first = analyze_printability(str(flat_nylon), material="pa")
+        asked = len(_asks(servers))
+        second = analyze_printability(str(other), material="pa")
+        assert len(_asks(servers)) == asked, "the servers were asked again while resting"
+        assert second.plan_check["why"] == first.plan_check["why"]

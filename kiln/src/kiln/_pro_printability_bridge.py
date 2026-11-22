@@ -25,6 +25,7 @@ here raises.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
@@ -50,6 +51,7 @@ _KEPT = 32
 _lock = threading.Lock()
 _kept: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _down_until: float = 0.0
+_down_miss: Miss | None = None
 
 
 def reading_or_miss(file_path: str, arguments: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss | None]:
@@ -89,7 +91,10 @@ def _reading_or_miss(file_path: str, arguments: dict[str, Any]) -> tuple[dict[st
                 _kept.move_to_end(key)
                 return _kept[key], None
     if time.monotonic() < _down_until:
-        return None, Miss("unanswered", "SERVER_UNREACHABLE", retry_after_s=_down_until - time.monotonic())
+        # The servers just went unanswered: said again with the wait, under
+        # the cause that started it (offline stays offline).
+        held = _down_miss or Miss("unanswered", "SERVER_UNREACHABLE")
+        return None, dataclasses.replace(held, retry_after_s=_down_until - time.monotonic())
     answer, miss = served_public.ask(WIRE_TOOL, dict(call), entry, timeout_s=ASK_TIMEOUT_S)
     if answer is None:
         miss = miss or Miss("unanswered")
@@ -148,17 +153,19 @@ def _key(file_path: str, call: dict[str, Any]) -> str | None:
 
 
 def _note(miss: Miss) -> None:
-    global _down_until
+    global _down_until, _down_miss
     if miss.no_answer:
         _down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _down_miss = miss
     logger.debug("printability reading not served (%s %s)", miss.cause, miss.code)
 
 
 def _reset_for_tests() -> None:
-    global _down_until
+    global _down_until, _down_miss
     with _lock:
         _kept.clear()
     _down_until = 0.0
+    _down_miss = None
 
 
 __all__ = ["ASK_TIMEOUT_S", "WIRE_TOOL", "miss_note", "reading_or_miss"]
