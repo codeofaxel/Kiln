@@ -154,3 +154,62 @@ class TestNoSimplifierIsLeftHere:
         from kiln.served_answer import HOSTED_DOORS
 
         assert HOSTED_DOORS["kiln._pro_simplify_bridge"][0] == "served_answer"
+
+
+class TestASizeAskedFor:
+    def test_the_size_asked_for_goes_to_the_servers(self, servers, part):
+        servers.answer = {"success": True, "path": str(part), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(part), max_megabytes=40)
+
+        ((_name, sent),) = servers.calls
+        assert sent["max_megabytes"] == 40
+
+    def test_no_size_asked_for_sends_none(self, servers, part):
+        servers.answer = {"success": True, "path": str(part), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(part))
+
+        ((_name, sent),) = servers.calls
+        assert not sent.get("max_megabytes")
+
+
+class TestALargeModelTravelsPacked:
+    def test_a_large_stl_goes_up_as_a_smaller_3mf_and_is_left_as_it_was(self, servers, tmp_path, monkeypatch):
+        import struct
+
+        from kiln import served_makes
+
+        # A real binary STL: many copies of one triangle pack far smaller.
+        triangle = struct.pack("<12fH", 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0)
+        big = tmp_path / "lamp.stl"
+        big.write_bytes(b"\x00" * 80 + struct.pack("<I", 400) + triangle * 400)
+        before = big.read_bytes()
+        monkeypatch.setattr(served_makes, "_PACK_PAST_BYTES", 1024)
+        servers.answer = {"success": True, "path": str(big), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(big), max_megabytes=1)
+
+        (upload,) = servers.uploads
+        assert upload["data"][:2] == b"PK", "the model did not travel packed"
+        assert len(upload["data"]) < len(before)
+        assert big.read_bytes() == before
+
+    def test_a_small_stl_travels_as_it_is(self, servers, part):
+        servers.answer = {"success": True, "path": str(part), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(part))
+
+        (upload,) = servers.uploads
+        assert upload["data"] == STL
+
+    def test_another_tool_never_gets_a_packed_model(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        from kiln import served_makes
+
+        monkeypatch.setattr(served_makes, "_PACK_PAST_BYTES", 1)
+        model = tmp_path / "m.stl"
+        model.write_bytes(STL)
+
+        assert served_makes._packed_for_the_trip("repair_mesh", Path(model)) is None

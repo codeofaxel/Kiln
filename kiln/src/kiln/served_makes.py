@@ -60,6 +60,14 @@ MAX_MODEL_BYTES = 64 * 1024 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 _SENDABLE_MODEL_TYPES = frozenset({".stl", ".3mf", ".obj"})
+#: Tools whose answer reads only a model's triangles, so a large STL or OBJ
+#: may travel to them packed as a 3MF: the same triangles in a fraction of
+#: the bytes.  The file on this computer is never changed.
+_TRAVELS_PACKED = frozenset({"simplify_mesh_model"})
+#: Packing is tried past this size: the courier's own choice of when it pays
+#: for itself, not a limit of the servers'.
+_PACK_PAST_BYTES = 16 * 1024 * 1024
+_PACKABLE = frozenset({".stl", ".obj"})
 _SENDABLE_IMAGE_TYPES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".svg"})
 _KIND_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "obj": ".obj", "step": ".step"}
 
@@ -163,6 +171,27 @@ def _remember(token: str, **facts: Any) -> None:
 def _known(token: str) -> dict | None:
     entry = _read_record().get(token)
     return entry if isinstance(entry, dict) else None
+
+
+def _packed_for_the_trip(tool: str, local: Path) -> Path | None:
+    """*local* packed as a 3MF in Kiln's own files folder, when *tool* takes
+    one and the 3MF is smaller; else ``None`` and the file travels as it is."""
+    if tool not in _TRAVELS_PACKED or local.suffix.lower() not in _PACKABLE:
+        return None
+    try:
+        if local.stat().st_size <= _PACK_PAST_BYTES:
+            return None
+        from kiln.generation.validation import export_3mf
+        from kiln.output_paths import kiln_temp_dir
+
+        packed = Path(kiln_temp_dir()) / f"{local.stem}.3mf"
+        export_3mf(str(local), output_path=str(packed))
+        if packed.stat().st_size >= local.stat().st_size:
+            packed.unlink()
+            return None
+        return packed
+    except Exception:  # noqa: BLE001 - a file that will not pack travels as it is
+        return None
 
 
 def token_for_path(path: str) -> str | None:
@@ -1104,6 +1133,9 @@ class _Sending:
     def __init__(self, tool: str) -> None:
         self.tool = tool
         self.tokens: dict[str, str] = {}
+        #: The name a file travelled under, when it is not its own (a model
+        #: sent packed), so the servers lay it down as what it now is.
+        self.names: dict[str, str] = {}
         #: Why the last upload got no token (a ``kiln.served_answer.Miss``).
         self.miss: Any = None
 
@@ -1122,7 +1154,15 @@ class _Sending:
                     "more than one call to Kiln's servers carries.",
                 )
             self.miss = None
-            token, said = _upload_file(local, on_miss=self._missed)
+            # A large STL or OBJ travels packed where the tool reads only
+            # its triangles; the file here is never changed.
+            packed = _packed_for_the_trip(self.tool, local)
+            try:
+                token, said = _upload_file(packed or local, on_miss=self._missed)
+            finally:
+                if packed is not None:
+                    with contextlib.suppress(OSError):
+                        packed.unlink()
             if token is None:
                 return None, _not_sent(
                     self.tool, "FILE_NOT_SENT", self.miss,
@@ -1130,7 +1170,9 @@ class _Sending:
                     f"sent there first, which did not work: {said}",
                 )
             self.tokens[key] = token
-        return {"token": token, "name": local.name}, None
+            if packed is not None:
+                self.names[key] = packed.name
+        return {"token": token, "name": self.names.get(key, local.name)}, None
 
     def one(self, value: Any) -> tuple[Any, dict[str, Any] | None]:
         """What to send for one value of a file parameter: an entry, or the

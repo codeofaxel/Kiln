@@ -29,13 +29,25 @@ NOT_SIMPLIFIED_CODE = "MESH_NOT_SIMPLIFIED"
 __all__ = ["LOCAL_MODULE", "NOT_SIMPLIFIED_CODE", "WIRE_TOOL", "simplify"]
 
 
-def simplify(file_path: str, *, target_ratio: float = 0.5, output_path: str = "") -> dict[str, Any]:
+def _size_ask(max_megabytes: float) -> int | None:
+    """The size asked for, in bytes, or ``None`` when none was."""
+    try:
+        megabytes = float(max_megabytes or 0)
+    except (TypeError, ValueError):
+        return None
+    return int(megabytes * 1024 * 1024) if megabytes > 0 else None
+
+
+def simplify(
+    file_path: str, *, target_ratio: float = 0.5, output_path: str = "", max_megabytes: float = 0,
+) -> dict[str, Any]:
     """Simplify the mesh at *file_path*; the reply ``simplify_mesh_model`` gives.
 
     ``success`` True with ``path`` and the measured facts, or ``success``
     False with a sentence saying why nothing was written: the simplifier's
     own refusal (``code`` and ``message``), or a miss worded with its cause
-    (``error``, ``why``).
+    (``error``, ``why``).  With *max_megabytes*, the size is what is asked
+    for: the file written is at most that large, or nothing is written.
 
     :raises kiln.mesh_errors.MeshFileMissing: no file at *file_path*.
     """
@@ -46,18 +58,22 @@ def simplify(file_path: str, *, target_ratio: float = 0.5, output_path: str = ""
     try:
         from kiln_pro.part_simplify import simplify_file
     except ImportError:
-        return _served(file_path, target_ratio, output_path)
-    return simplify_file(file_path, target_ratio=target_ratio, output_path=output_path or None)
+        return _served(file_path, target_ratio, output_path, max_megabytes)
+    return simplify_file(
+        file_path, target_ratio=target_ratio, output_path=output_path or None,
+        max_bytes=_size_ask(max_megabytes),
+    )
 
 
-def _served(file_path: str, target_ratio: float, output_path: str) -> dict[str, Any]:
+def _served(file_path: str, target_ratio: float, output_path: str, max_megabytes: float = 0) -> dict[str, Any]:
     """The servers' answer, or the miss in words."""
     from kiln import served_public
     from kiln.served_answer import fields, sentence
 
-    answer, miss = served_public.answer_or_missed(
-        WIRE_TOOL, {"file_path": file_path, "target_ratio": target_ratio, "output_path": output_path},
-    )
+    asked = {"file_path": file_path, "target_ratio": target_ratio, "output_path": output_path}
+    if _size_ask(max_megabytes) is not None:
+        asked["max_megabytes"] = float(max_megabytes)
+    answer, miss = served_public.answer_or_missed(WIRE_TOOL, asked)
     if answer is not None:
         return answer
     name = os.path.basename(file_path) or "this file"
