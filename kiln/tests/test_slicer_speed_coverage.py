@@ -473,9 +473,7 @@ class TestOrcaCarriesThePace:
                 assert process.get(dst) == settings[src], f"{pid}: {dst}"
 
     def test_the_first_layers_infill_is_handed_the_first_layer_speed(self) -> None:
-        """PrusaSlicer prints the first layer's infill at the first-layer
-        speed; the Orca family states that infill apart, with a default of
-        its own, so the same speed is handed over."""
+        """Every slicer is handed the first-layer speed for the first layer's infill."""
         for pid in _profiles_in_hand():
             settings = _ini(resolve_slicer_profile(pid))
             first = speed_mm_s(settings, "first_layer_speed")
