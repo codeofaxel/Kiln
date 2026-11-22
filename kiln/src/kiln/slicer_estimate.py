@@ -3,7 +3,8 @@
 A version that has a sliced file (G-code, or a 3MF carrying a sliced plate)
 keeps what that file says the print will take, under
 ``provenance[RECORD_KEY]``: ``{"seconds": int}`` plus ``"slicer"`` when the
-file names the slicer that wrote it.  The figure is read by the one reader of
+file names the slicer that wrote it, and ``"plates"`` when a 3MF holds
+several, whose seconds are then every plate's together.  The figure is read by the one reader of
 a slicer's time (:func:`kiln.gcode.slicer_print_time`) from the same lines
 every reader of a file's own figures sees
 (:func:`kiln.file_metadata.sliced_gcode_lines`).  A file that carries a print
@@ -30,24 +31,34 @@ _SAME_WITHIN_SECONDS = 60
 
 
 def read_estimate(sliced_path: str | None) -> dict[str, Any] | None:
-    """``{"seconds", "slicer"?}`` as the sliced file at *sliced_path* states
-    them, or ``None`` for a mesh, an unreadable file or one stating no time.
-    Never raises."""
+    """``{"seconds", "slicer"?, "plates"?}`` as the sliced file at
+    *sliced_path* states them, or ``None`` for a mesh, an unreadable file or
+    one stating no time.
+
+    A sliced 3MF of several plates keeps the time to print every plate, the
+    sum of each plate's own time, with ``"plates"`` saying how many; when
+    any plate states no time, none is kept.  This is the version's figure,
+    never one plate's time at a printer (that is
+    :func:`kiln.learned_print_time.slicer_seconds_for`).  Never raises."""
     if not sliced_path:
         return None
     try:
-        from kiln.file_metadata import sliced_gcode_lines
+        from kiln.file_metadata import every_plate_gcode_lines
         from kiln.gcode import slicer_made_by, slicer_print_time
 
-        lines = sliced_gcode_lines(sliced_path)
-        if not lines:
+        plates = every_plate_gcode_lines(sliced_path)
+        if not plates:
             return None
-        text = "\n".join(lines)
-        printed = slicer_print_time(text)
-        if printed is None or printed.seconds <= 0:
-            return None
-        estimate: dict[str, Any] = {"seconds": int(printed.seconds)}
-        made_by = slicer_made_by(text)
+        total = 0.0
+        for lines in plates:
+            printed = slicer_print_time("\n".join(lines)) if lines else None
+            if printed is None or printed.seconds <= 0:
+                return None
+            total += printed.seconds
+        estimate: dict[str, Any] = {"seconds": int(total)}
+        if len(plates) > 1:
+            estimate["plates"] = len(plates)
+        made_by = slicer_made_by("\n".join(plates[0]))
         if made_by is not None and made_by.label:
             estimate["slicer"] = made_by.label
         return estimate
@@ -92,6 +103,12 @@ def estimate_sentence(provenance: Any) -> str | None:
     estimate = estimate_on(provenance)
     if estimate is None:
         return None
+    plates = estimate.get("plates")
+    if isinstance(plates, int) and not isinstance(plates, bool) and plates > 1:
+        return (
+            f"About {_duration(estimate['seconds'])} for all {plates} plates at the sliced speed, "
+            "the slicer's estimate."
+        )
     return f"About {_duration(estimate['seconds'])} at the sliced speed, the slicer's estimate."
 
 

@@ -2605,6 +2605,13 @@ def continues_a_print(text: str | Iterable[str]) -> bool:
         return False
 
 
+def states_print_time(line: str) -> bool:
+    """Whether *line* is a comment stating the print's time in one of the
+    spellings :func:`slicer_print_time` reads."""
+    stripped = line.strip()
+    return stripped.startswith(";") and any(p.search(stripped) for p in _PRINT_TIME_LINES)
+
+
 def slicer_print_time(text: str) -> SlicerPrintTime | None:
     """The whole print's time as the slicer wrote it into *text*, or ``None``.
 

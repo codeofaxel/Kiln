@@ -3468,7 +3468,7 @@ def _figures_for_ask(local: str | None) -> dict[str, Any]:
     (:meth:`kiln.cost_estimator.CostEstimator.filament_pricing`) — or ``{}``.
 
     Only a file that carries its slicer's own figures has any: G-code, or
-    a 3MF holding sliced G-code (:func:`kiln.file_metadata.sliced_gcode_lines`).
+    a 3MF holding one sliced plate (:func:`kiln.file_metadata.printed_gcode_lines`).
     A mesh has none — nothing is estimated for it, and nothing is borrowed
     from another slice of the same mesh, so the person never reads a number
     that is not this print's.  The weight counts only when the slicer's own
@@ -3478,10 +3478,12 @@ def _figures_for_ask(local: str | None) -> dict[str, Any]:
     if not local:
         return out
     try:
-        from kiln.file_metadata import sliced_gcode_lines
+        from kiln.file_metadata import printed_gcode_lines
         from kiln.gcode import slicer_print_time
 
-        lines = sliced_gcode_lines(local)
+        # No plate is named here: a 3MF of several plates has no one print's
+        # figures, so none are said.
+        lines = printed_gcode_lines(local, None)
         if lines is None:
             return out
         printed = slicer_print_time("\n".join(lines))

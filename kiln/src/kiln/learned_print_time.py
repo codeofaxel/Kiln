@@ -87,24 +87,26 @@ class Pace:
 # ---------------------------------------------------------------------------
 
 
-def _sent_file_lines(file_name: str | None) -> list[str] | None:
-    """The slicer's own lines of the file a start sent, or ``None``.
+def _sent_file_lines(file_name: str | None, plate_number: int | None = None) -> list[str] | None:
+    """The slicer's own lines of the plate a start printed, or ``None``.
 
     Read from the G-code Kiln sliced or uploaded under *file_name*: the slice
     ledger's file behind the printer-side name, else the copy this session
-    uploaded.  Never raises.
+    uploaded.  A sliced 3MF gives plate *plate_number*'s lines, and with no
+    plate named only a 3MF of one plate gives any
+    (:func:`kiln.file_metadata.printed_gcode_lines`).  Never raises.
     """
     if not file_name:
         return None
     try:
         from kiln._pro_cutter_bridge import local_sliced_path
-        from kiln.file_metadata import sliced_gcode_lines
+        from kiln.file_metadata import printed_gcode_lines
         from kiln.spool_usage import _uploaded_copy
 
         path = local_sliced_path(file_name) or _uploaded_copy(file_name)
         if not path:
             return None
-        return sliced_gcode_lines(path) or None
+        return printed_gcode_lines(path, plate_number) or None
     except Exception:  # noqa: BLE001 -- a file Kiln cannot read says nothing
         logger.debug("the sent file was not read for %s", file_name, exc_info=True)
         return None
@@ -119,22 +121,28 @@ def _seconds_in(lines: list[str] | None) -> float | None:
     return float(printed.seconds) if printed is not None and printed.seconds > 0 else None
 
 
-def slicer_seconds_for(file_name: str | None) -> float | None:
-    """The slicer's own time for the file a start sent, or ``None``.  Never raises."""
+def slicer_seconds_for(file_name: str | None, plate_number: int | None = None) -> float | None:
+    """The slicer's own time for the plate a start sent, or ``None``: plate
+    *plate_number* of a sliced 3MF, and none for a 3MF of several plates
+    when no plate is named.  Never raises."""
     try:
-        return _seconds_in(_sent_file_lines(file_name))
+        return _seconds_in(_sent_file_lines(file_name, plate_number))
     except Exception:  # noqa: BLE001 -- a file Kiln cannot read has no time
         logger.debug("no slicer time read for %s", file_name, exc_info=True)
         return None
 
 
-def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
-    """Write what the sent file says onto the outcome row a start just opened:
-    the slicer's time for it, which slicer made it, and a one-way code of the
-    settings it was sliced with (:func:`kiln.print_evidence.settings_code`).
+def note_start_estimate(job_id: str | None, file_name: str | None, plate_number: int | None = None) -> None:
+    """Write what the printed plate says onto the outcome row a start just
+    opened: the slicer's time for it, which slicer made it, and a one-way
+    code of the settings it was sliced with
+    (:func:`kiln.print_evidence.settings_code`).
 
-    Called from ``PrinterAdapter.start_print``.  The file is read once; a
-    figure the file does not state is left empty, never guessed.  Never raises.
+    Called from ``PrinterAdapter.start_print`` with the plate it printed.
+    For a sliced 3MF only that plate is read; with no plate named a 3MF of
+    several plates writes nothing, never one plate's figures or their sum.
+    The file is read once; a figure it does not state is left empty, never
+    guessed.  Never raises.
     """
     if not job_id or _hosted():
         return
@@ -142,7 +150,7 @@ def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
         from kiln.gcode import slicer_made_by
         from kiln.persistence import get_db
 
-        lines = _sent_file_lines(file_name)
+        lines = _sent_file_lines(file_name, plate_number)
         if not lines:
             return
         from kiln.gcode import continues_a_print

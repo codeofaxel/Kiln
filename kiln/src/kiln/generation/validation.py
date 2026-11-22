@@ -5884,7 +5884,6 @@ def extract_plate_object_gcode(
     # extracted object.  We need to:
     #   1. Find the time range this object's layers span
     #   2. Rescale P to 0-100% and R to count down from object time
-    #   3. Update the header comment with correct time/filament estimates
     #
     # This benefits ALL printer brands — Bambu uses M73 for its display,
     # OctoPrint/Moonraker parse M73 for progress reporting, and PrusaLink
@@ -5950,16 +5949,10 @@ def extract_plate_object_gcode(
                 ))
                 start_lines_copy[i] = f"M73 P{old_p} R{new_r}\n"
 
-    # --- Phase 2.6: Update header comments --------------------------------
-    # Fix the time/filament header lines so monitoring tools, printer
-    # displays, and Kiln's own cost estimator show correct values.
-    _time_comment_re = re.compile(
-        r"^;\s*model printing time:.*?total estimated time:\s*(.+)",
-        re.IGNORECASE,
-    )
-    _total_time_re = re.compile(
-        r"^;\s*total estimated time:\s*(.+)", re.IGNORECASE,
-    )
+    # --- Phase 2.6: The slicer's time lines ------------------------------
+    # Every line stating a print time is left out: the slicer stated the
+    # whole plate's, and the kept object's own time is not in the file.
+    from kiln.gcode import states_print_time
 
     object_time_sec = object_time_min * 60
     hours = object_time_sec // 3600
@@ -5970,20 +5963,8 @@ def extract_plate_object_gcode(
     else:
         time_str = f"{mins}m {secs}s"
 
-    for i, line in enumerate(start_lines_copy):
-        stripped = line.strip()
-        # Update combined time line (Bambu format)
-        if _time_comment_re.match(stripped):
-            start_lines_copy[i] = (
-                f"; model printing time: {time_str}; "
-                f"total estimated time: {time_str}\n"
-            )
-        # Update layer count if it reflects the full plate
-        elif stripped.startswith("; total layer number:"):
-            # Layer count is actually correct — extraction preserves
-            # all layers (just removes other objects' toolpaths within
-            # each layer).  No change needed.
-            pass
+    start_lines_copy = [line for line in start_lines_copy if not states_print_time(line)]
+    end_lines = [line for line in lines[end_start_idx:] if not states_print_time(line)]
 
     # --- Phase 3: Assemble the final gcode ---
     result_lines: list[str] = []
@@ -5995,7 +5976,7 @@ def extract_plate_object_gcode(
     result_lines.extend(filtered_layer_lines)
 
     # Machine end gcode (cool-down, retract, park)
-    result_lines.extend(lines[end_start_idx:])
+    result_lines.extend(end_lines)
 
     # --- Phase 4: Write output ---
     if output_path is None:

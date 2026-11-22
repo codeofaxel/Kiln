@@ -2553,7 +2553,10 @@ class PrinterAdapter(ABC):
                 ran_as_sliced.open_record(opened)
                 if continuing:
                     ran_as_sliced.note_on_job(opened, ran_as_sliced.RESUMED)
-                note_start_estimate(opened, file_name)
+                from kiln.printers.print_gate import _plate_number
+
+                # The plate the printer prints: the one named, else plate 1.
+                note_start_estimate(opened, file_name, plate_number=_plate_number(kwargs))
                 from kiln.print_evidence import note_start_firmware
 
                 note_start_firmware(opened, self)

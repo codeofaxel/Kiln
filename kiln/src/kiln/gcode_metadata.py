@@ -136,6 +136,36 @@ def sliced_gcode_member(zf: zipfile.ZipFile) -> str | None:
     return (plates or names or [None])[0]
 
 
+#: A plate's G-code in a sliced 3MF, as Bambu Studio and OrcaSlicer name it.
+_PLATE_GCODE = re.compile(r"^metadata/plate_(\d+)\.gcode$", re.I)
+
+
+def plate_gcode_members(zf: zipfile.ZipFile) -> list[tuple[int, str]]:
+    """Every plate's G-code a sliced 3MF carries, as ``(plate number,
+    member)`` in plate order.  An archive whose one G-code member is not
+    named for a plate holds it as plate 1; one holding several such members
+    and no plate names lists none, since which is which is not stated."""
+    names = [n for n in zf.namelist() if n.lower().endswith(".gcode")]
+    plates = sorted(
+        (int(m.group(1)), n) for n in names if (m := _PLATE_GCODE.match(n))
+    )
+    if plates:
+        return plates
+    return [(1, names[0])] if len(names) == 1 else []
+
+
+def plate_gcode_member(zf: zipfile.ZipFile, plate_number: int | None) -> str | None:
+    """The G-code a sliced 3MF prints for plate *plate_number*, or ``None``.
+
+    With no plate named, the archive's only plate; ``None`` when it holds
+    several (which one is printed is not known), when it lacks the plate
+    named, or when it holds no G-code.  Never another plate's, never all."""
+    plates = plate_gcode_members(zf)
+    if plate_number is None:
+        return plates[0][1] if len(plates) == 1 else None
+    return next((name for number, name in plates if number == plate_number), None)
+
+
 #: How a member may be compressed for Kiln to unpack it.  Stored and
 #: deflated members unpack in bounded chunks; bzip2 and LZMA members unpack
 #: whole inside one call, so a few hundred crafted bytes could fill memory
