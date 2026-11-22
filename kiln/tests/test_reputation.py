@@ -427,7 +427,7 @@ class TestFeedback:
     def test_feedback_comment_control_chars(self):
         engine = _make_engine()
         engine.register_operator("op-1", "Test")
-        with pytest.raises(ReputationValidationError, match="control characters"):
+        with pytest.raises(ReputationValidationError, match="invisible characters"):
             engine.submit_feedback(_make_feedback(comment="bad\x00char"))
 
     def test_feedback_comment_none_is_valid(self):
@@ -797,7 +797,7 @@ class TestInputValidation:
 
     def test_display_name_control_chars_raises(self):
         engine = _make_engine()
-        with pytest.raises(ReputationValidationError, match="control characters"):
+        with pytest.raises(ReputationValidationError, match="invisible characters"):
             engine.register_operator("op-1", "bad\x00name")
 
     def test_display_name_max_length_exactly(self):

@@ -131,7 +131,7 @@ class TestResolvePrintStart:
         # The adapter's claim is kept, labelled, and not published as the verdict.
         assert verdict.evidence["adapter_reported_success"] is False
         assert verdict.evidence["adapter_message"] == INCIDENT_ADAPTER_MESSAGE
-        assert "printer_status()" in verdict.message
+        assert "`printer_status`" in verdict.message
 
     def test_failure_confirmed_after_the_command_stays_failed(self):
         """A real refusal must still read as a refusal — the gate can fail."""

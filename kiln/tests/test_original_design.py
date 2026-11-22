@@ -199,7 +199,7 @@ class TestGenerateOriginalDesign:
         assert session.attempts[0].next_prompt_suggestion == provider.prompts[1]
 
     def test_openscad_is_rejected_for_natural_language_original_design(self):
-        with pytest.raises(GenerationError, match="compile-only backend"):
+        with pytest.raises(GenerationError, match="only builds code it's given"):
             generate_original_design(
                 "phone stand with cable slot",
                 provider="openscad",

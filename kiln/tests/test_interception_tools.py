@@ -101,7 +101,7 @@ class TestStartGcodeInterception:
         result = start_gcode_interception("ender3")
 
         assert result["success"] is False
-        assert "Unexpected" in result["error"]
+        assert result["error"] == "boom"
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ class TestStopGcodeInterception:
         result = stop_gcode_interception("sess-123")
 
         assert result["success"] is False
-        assert "Unexpected" in result["error"]
+        assert result["error"] == "boom"
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +307,7 @@ class TestInterceptGcodeCommand:
         result = intercept_gcode_command("sess-1", "G28")
 
         assert result["success"] is False
-        assert "Unexpected" in result["error"]
+        assert result["error"] == "boom"
 
 
 # ---------------------------------------------------------------------------

@@ -378,7 +378,7 @@ class TestTripo3DProviderGetJobStatus:
     def test_non_json_body_raises_invalid_response(self):
         responses.add(responses.GET, _task_url("task_html"), body="<html>gateway</html>", status=200)
         p = Tripo3DProvider(api_key="test-key")
-        with pytest.raises(GenerationError, match="not a JSON object") as excinfo:
+        with pytest.raises(GenerationError, match="reply Kiln couldn't read") as excinfo:
             p.get_job_status("task_html")
         assert excinfo.value.code == "INVALID_RESPONSE"
 
@@ -517,7 +517,7 @@ class TestTripo3DProviderMisc:
             body=requests_lib.ConnectionError("Network down"),
         )
         p = Tripo3DProvider(api_key="test-key")
-        with pytest.raises(GenerationError, match="Could not connect"):
+        with pytest.raises(GenerationError, match="couldn't reach Tripo3D"):
             p.generate("connection test")
 
     @responses.activate

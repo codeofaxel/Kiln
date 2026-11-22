@@ -258,7 +258,7 @@ class TestOctoPrintUpdateFirmware:
         })
 
         with mock.patch.object(adapter._session, "request", return_value=state_resp):
-            with pytest.raises(PrinterError, match="Cannot update firmware while printing"):
+            with pytest.raises(PrinterError, match="can't update the firmware while printing"):
                 adapter.update_firmware()
 
     def test_http_failure_raises_printer_error(self) -> None:

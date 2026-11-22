@@ -143,7 +143,7 @@ class TestRequestHelper:
             f"{BASE}/test",
             body=requests.ConnectionError("conn failed"),
         )
-        with pytest.raises(ThingiverseError, match="Connection"):
+        with pytest.raises(ThingiverseError, match="couldn't reach Thingiverse"):
             client._request("GET", "/test")
 
     @responses.activate

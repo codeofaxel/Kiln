@@ -993,7 +993,7 @@ class TestRetryPrintValidationGate:
         assert result["success"] is False
         assert result["error"]["code"] == "VALIDATION_ERROR", result
         message = result["error"]["message"]
-        assert "could not check" in message and "skip_validation=True" in message
+        assert "couldn't check" in message and "skip_validation=True" in message
         adapter.start_print.assert_not_called()
 
 

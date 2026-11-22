@@ -205,7 +205,7 @@ class TestPipelineExecutionPauseResume:
         ex.run()  # completes
         result = ex.resume()
         assert result.success is False
-        assert "Cannot resume" in result.message
+        assert "can't resume" in result.message
 
     def test_auto_pause_after_last_step_completes_normally(self) -> None:
         steps = [_ok_step("a"), _ok_step("b")]

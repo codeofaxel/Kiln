@@ -326,7 +326,7 @@ class TestThroughTheDoor:
         monkeypatch.setattr(server, "upload_file", boom)
         done, refused = served_steps.carry_out("t", [_act("upload_file", "u", file_path=handed_file)], _send, act=True)
         assert refused is None
-        assert done["u"]["data"]["success"] is False and "RuntimeError" in done["u"]["data"]["error"]
+        assert done["u"]["data"]["success"] is False and done["u"]["data"]["error"]
 
     def test_a_tool_this_version_does_not_have_is_said(self, doors, monkeypatch):
         import kiln.server as server

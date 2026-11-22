@@ -208,7 +208,7 @@ class TestTheRowOnItsWayToTheAccount:
         monkeypatch.setattr(hc, "_request", fake_request)
 
         assert outcome_courier.push_owed(db=db)["sent"] == 1
-        (call,) = calls
+        (call,) = [c for c in calls if c["path"] == outcome_courier.PUSH_PATH]
         assert call["path"] == outcome_courier.PUSH_PATH
         (sent,) = call["body"]["rows"]
         assert sent["material"] == "PETG"

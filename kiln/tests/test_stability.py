@@ -168,7 +168,7 @@ class TestStabilityProviderMisc:
             body=requests_lib.ConnectionError("Network down"),
         )
         p = StabilityProvider(api_key="test-key")
-        with pytest.raises(GenerationError, match="Could not connect"):
+        with pytest.raises(GenerationError, match="couldn't reach Stability AI"):
             p.generate("connection test")
 
     @responses.activate

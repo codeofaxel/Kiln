@@ -194,7 +194,7 @@ class TestAdapterSafetyProfile:
         # Without a profile the adapter is held to the generic floor, not to
         # the 300 the caller passes: an adapter literal is the loosest hotend
         # its protocol can drive and says nothing about the one on the bench.
-        with pytest.raises(PrinterError, match="has not been told this printer's model"):
+        with pytest.raises(PrinterError, match="hasn't been told this printer's model"):
             adapter._validate_temp(300, 300.0, "Hotend")
         adapter._validate_temp(240, 300.0, "Hotend")  # at the floor: fine
 

@@ -944,7 +944,7 @@ class TestStepColors:
             step_colors={"0": "#FFFFFF"},
         )
         assert result["success"] is False
-        assert "floors/walls" in result["error"]
+        assert "floors or walls" in result["error"]
 
     def test_bad_hex_refused(self, carved_pair, chained_pair):
         decorated2, _idx2, _record = self._chained_record(carved_pair, chained_pair)
@@ -952,7 +952,7 @@ class TestStepColors:
             model_path=decorated2, step_colors={"0": "red"}
         )
         assert result["success"] is False
-        assert "#RRGGBB" in result["error"]
+        assert "#FF8800" in result["error"]
 
     def test_single_step_record_is_step_zero(self, carved_pair, tmp_path):
         original, decorated, idx = carved_pair

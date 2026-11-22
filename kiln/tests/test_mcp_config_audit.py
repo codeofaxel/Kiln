@@ -238,7 +238,7 @@ class TestClaudeJsonAudit:
         desktop_result = next(r for r in results if r.client == "Claude Desktop")
         assert desktop_result.config_exists
         assert desktop_result.parse_error is not None
-        assert "JSONDecodeError" in desktop_result.parse_error
+        assert "couldn't be read" in desktop_result.parse_error
         assert desktop_result.entries == []
 
     def test_config_without_mcp_servers_section_is_neutral(

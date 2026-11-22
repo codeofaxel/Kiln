@@ -711,7 +711,7 @@ class TestPerformTrim:
             result = serve_siblings.perform_trim()
         assert result["trimmed"] == []
         assert [f["pid"] for f in result["failed"]] == [711]
-        assert "SIGTERM and SIGKILL" in result["failed"][0]["error"]
+        assert "asked it to stop and then forced it" in result["failed"][0]["error"]
 
     @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGKILL"), reason="the escalation step is a POSIX signal")
     def test_zombie_after_sigterm_counts_as_gone(self) -> None:

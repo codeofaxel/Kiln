@@ -164,7 +164,7 @@ def test_the_default_refuses_rather_than_pretending():
     # It names the machine and the way out, because the user still has to get
     # the printer going and Kiln has just admitted it cannot help.
     assert "mystery-printer" in result.message
-    assert "power-cycle" in result.message.lower()
+    assert "turn the printer off and on" in result.message.lower()
     assert _Unteachable().capabilities.can_clear_error is False
 
 
