@@ -376,17 +376,16 @@ class TestThePrintDoorsSayTheSame:
         shelf("PLA", "red", brand="Polymaker")
         got = server._resolve_use_ams("auto", None, _Printer(_ams(_WHITE)), file_path=_two_colour_gcode(tmp_path))
         assert got["blocked"] is True and got["ams_mapping"] is None
-        assert "cannot supply them all" in got["warnings"][0]
-        assert (
-            "You have Polymaker red PLA but it isn't loaded on workshop. Load it before printing." in got["warnings"][0]
-        )
+        assert "The red part needs red PLA, and there's none loaded." in got["warnings"][0]
+        assert "Load your Polymaker red PLA " in got["warnings"][0]
+        assert got["options"][0]["on_record"] == "Polymaker red PLA"
 
-    def test_the_gate_offers_help_once_when_nothing_is_on_record(self, printer, tmp_path):
+    def test_the_gate_names_the_colour_when_nothing_is_on_record(self, printer, tmp_path):
         got = server._resolve_use_ams("auto", None, _Printer(_ams(_WHITE)), file_path=_two_colour_gcode(tmp_path))
         assert got["blocked"] is True and got["ams_mapping"] is None
         refusal = got["warnings"][0]
-        assert refusal.count("Want help finding a filament that suits this print?") == 1
-        assert "I don't see red loaded on workshop." in refusal
+        assert "The red part needs red PLA, and there's none loaded. Load red " in refusal
+        assert "on_record" not in got["options"][0]
         for maker in _MAKERS:
             assert maker not in refusal
 

@@ -6,7 +6,7 @@ import io
 import os
 import re
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,13 +24,17 @@ __all__ = [
     "Filament",
     "MATCH_DELTA_E",
     "SpoolAdvisory",
+    "SpoolMiss",
     "Tray",
     "advise_colours",
+    "empty_slots",
     "loaded_trays",
     "normalize_hex",
     "plan_ams_mapping",
+    "plastic_words",
     "read_file_filaments",
     "same_plastic",
+    "spool_miss",
 ]
 
 MATCH_DELTA_E = 28.0
@@ -289,6 +293,24 @@ def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
     return out
 
 
+def empty_slots(ams_info: dict[str, Any] | None) -> list[str]:
+    """Studio's names for the slots an ``ams_status`` reading reports empty."""
+    out: list[str] = []
+    if not isinstance(ams_info, dict):
+        return out
+    for position, unit in enumerate(ams_info.get("units", []) or []):
+        if not isinstance(unit, dict):
+            continue
+        for tray in unit.get("trays", []) or []:
+            if not isinstance(tray, dict) or str(tray.get("tray_type", "") or "").strip():
+                continue
+            try:
+                out.append(_bambu_tray_name(int(unit.get("unit_id", position)), int(tray.get("slot", -1))))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Is this spool that plastic?
 # ---------------------------------------------------------------------------
@@ -486,6 +508,293 @@ def plan_ams_mapping(
     if not plan.unmatched:
         plan.mapping = mapping
     return plan
+
+
+# ---------------------------------------------------------------------------
+# What a print door says when no loaded spool fits
+# ---------------------------------------------------------------------------
+
+
+_COUNT_WORDS = ("none", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
+
+#: Asks whether each loaded plastic suits the part: ``(job's plastic, loaded
+#: plastics) -> {"verdicts": {plastic: {"suits", "why"}}, "missed": str}`` or ``None``.
+Judge = Callable[[str, list[str]], Any]
+
+
+@dataclass
+class SpoolMiss:
+    """What a print door says, and offers, when no loaded spool fits."""
+
+    code: str
+    message: str
+    options: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _count(n: int, *, capital: bool = False) -> str:
+    word = _COUNT_WORDS[n] if 0 <= n < len(_COUNT_WORDS) else str(n)
+    return word[:1].upper() + word[1:] if capital else word
+
+
+def _listed(words: Sequence[str], conjunction: str = "and") -> str:
+    kept = [w for w in words if w]
+    if len(kept) <= 1:
+        return "".join(kept)
+    return f"{', '.join(kept[:-1])} {conjunction} {kept[-1]}"
+
+
+def _a(words: str) -> str:
+    return f"an {words}" if words[:1].upper() in "AEIOU" else f"a {words}"
+
+
+def plastic_words(material: str | None) -> str:
+    """A plastic as a sentence says it: ``PLA``, ``nylon``, ``PLA matte``."""
+    from kiln.catalog_keys import material_label
+    from kiln.printers.bambu_3mf import BAMBU_FILAMENT_TYPES
+
+    text = str(material or "").strip()
+    if not text or text.upper() == UNREAD_MATERIAL:
+        return "filament"
+    words = (material_label(text) or text.upper()).split()
+    return " ".join(w if not w.isalpha() or w in BAMBU_FILAMENT_TYPES or len(w) <= 3 else w.lower() for w in words)
+
+
+def _spool(colour: str | None, material: str | None) -> str:
+    plastic = plastic_words(material) if material else ""
+    return " ".join(w for w in (colour, plastic) if w) or "filament"
+
+
+def _loaded_said(trays: Sequence[Tray]) -> str:
+    """``white, black and red PLA, and grey ABS``."""
+    groups: dict[str, list[str]] = {}
+    for t in trays:
+        names = groups.setdefault(plastic_words(t.material), [])
+        name = _colour_name(t.hex6) if t.hex6 else ""
+        if name and name not in names:
+            names.append(name)
+    parts = [f"{_listed(names)} {plastic}".strip() for plastic, names in groups.items()]
+    if len(parts) > 1 and any(" and " in p for p in parts):
+        return f"{', '.join(parts[:-1])}, and {parts[-1]}"
+    return _listed(parts)
+
+
+def _close(hex6: str | None, tray: Tray) -> bool:
+    return bool(hex6 and tray.hex6) and _delta_e(hex6, tray.hex6) <= MATCH_DELTA_E
+
+
+def _nearest(hex6: str | None, trays: Sequence[Tray]) -> list[Tray]:
+    read = [t for t in trays if t.hex6]
+    return sorted(read, key=lambda t: _delta_e(hex6, t.hex6)) if hex6 else read
+
+
+def _option(action: str, *, tray: Tray | None = None, material: str | None = None,
+            colour: str | None = None, hex6: str | None = None, **more: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {"action": action, "slot": tray.name or str(tray.slot + 1) if tray else None}
+    if tray is not None:
+        out["tray_id"] = tray.tray_id
+    out.update({"material": material, "color": colour, "hex": f"#{hex6}" if hex6 else None, **more})
+    return out
+
+
+def _judged(judge: Judge | None, wanted: str | None, stand_ins: list[str]) -> tuple[dict[str, Any], str | None]:
+    """``({plastic: {"suits", "why"}}, missed)``; empty when nothing was asked."""
+    if judge is None or not wanted or not stand_ins:
+        return {}, None
+    try:
+        answer = judge(wanted, stand_ins) or {}
+    except Exception:  # noqa: BLE001 -- an unanswered check offers with the hedge
+        return {}, None
+    verdicts = answer.get("verdicts") if isinstance(answer.get("verdicts"), dict) else {}
+    missed = answer.get("missed") if isinstance(answer.get("missed"), str) else None
+    return verdicts, missed
+
+
+def _fit(verdicts: dict[str, Any], material: str) -> dict[str, Any]:
+    """The option fields a goal check adds for *material*."""
+    verdict = verdicts.get(material)
+    if not isinstance(verdict, dict) or not isinstance(verdict.get("suits"), bool):
+        return {}
+    return {"suits_goal": verdict["suits"], **({"why": verdict["why"]} if verdict.get("why") else {})}
+
+
+def spool_miss(
+    wanted: Sequence[Filament],
+    trays: Sequence[Tray],
+    *,
+    plan: AmsPlan | None = None,
+    names: Sequence[str | None] = (),
+    colour_counts: bool = True,
+    sliced: bool = True,
+    free_slots: Sequence[str] = (),
+    noun: str = "part",
+    judge: Judge | None = None,
+    on_record: dict[int, str] | None = None,
+) -> SpoolMiss | None:
+    """The sentence and choices for *wanted* when no loaded spool fits, or ``None`` when one does.
+
+    *names* are the colour words the person used; *sliced* whether the file is already sliced;
+    *on_record* the person's recorded spool for a filament, by its index.
+    """
+    trays = list(trays)
+    if not wanted or not trays:
+        return None
+    if len(wanted) >= 2:
+        plan = plan or plan_ams_mapping(list(wanted), trays)
+        return None if plan.ok else _parts_missing(list(wanted), trays, plan, list(names), free_slots, noun,
+                                                   on_record or {})
+    want = wanted[0]
+    name = (names[0] if names else None) or (_colour_name(want.hex6) if want.hex6 else None)
+    hex6 = want.hex6 if colour_counts else None
+    plastic = [t for t in trays if want.material is None or same_plastic(want.material, t.material)]
+    if plastic and (hex6 is None or any(_close(hex6, t) or not t.hex6 for t in plastic)):
+        return None
+    shade = [t for t in _nearest(hex6, trays) if _close(hex6, t) and t.material != UNREAD_MATERIAL]
+    if plastic:
+        return _colour_not_loaded(want, name, plastic, shade, sliced, judge)
+    if shade:
+        return _colour_in_other_plastic(want, name, shade, sliced, judge)
+    return _plastic_not_loaded(want, name if hex6 else None, trays, sliced, judge)
+
+
+def _colour_not_loaded(want: Filament, name: str | None, plastic: list[Tray], other: list[Tray], sliced: bool,
+                       judge: Judge | None) -> SpoolMiss:
+    near = _nearest(want.hex6, plastic)[0]
+    shade = _colour_name(near.hex6)
+    said = "another shade of " + shade if shade == name else shade
+    if want.material:
+        kind = plastic_words(want.material)
+        message = (f"This print wants {name} {kind}. You have {kind} loaded, but no {name}: "
+                   f"the closest is {said} in {near.where}.")
+    else:
+        message = f"This print wants {name}. No {name} spool is loaded: the closest is {said} {plastic_words(near.material)} in {near.where}."
+    options = [_option("print_from_slot", tray=near, material=near.material, colour=shade, hex6=near.hex6)]
+    alt = other[0] if other and want.material else None
+    fit: dict[str, Any] = {}
+    if alt is not None:
+        verdicts, missed = _judged(judge, want.material, [alt.material])
+        fit = {**_fit(verdicts, alt.material), **({"goal_check_missed": missed} if missed else {})}
+        options.append(_option("reslice_for", tray=alt, material=alt.material, colour=name, hex6=alt.hex6, **fit))
+    choices = [f"Print it in {'that shade' if shade == name else shade}"]
+    if alt is not None and fit.get("suits_goal") is not False:
+        choices.append(f"{'re-slice' if sliced else 'slice'} it for the {name} {plastic_words(alt.material)} in {alt.where}")
+    message += f" {', '.join(choices)}, or load {name} first?"
+    options.append(_option("load_spool", material=want.material, colour=name, hex6=want.hex6))
+    return SpoolMiss("COLOR_NOT_LOADED", message, options)
+
+
+def _colour_in_other_plastic(want: Filament, name: str | None, shade: list[Tray], sliced: bool,
+                             judge: Judge | None) -> SpoolMiss:
+    picks: dict[str, Tray] = {}
+    for t in shade:
+        picks.setdefault(plastic_words(t.material), t)
+    verdicts, missed = _judged(judge, want.material, [t.material for t in picks.values()])
+    kind = plastic_words(want.material)
+    spools = _listed([f"{name} {p} in {t.where}" for p, t in picks.items()])
+    first = (f"This print is set up for {name} {kind}, but the only {name} spool loaded is {spools}."
+             if len(picks) == 1 else f"This print is set up for {name} {kind}, but the {name} spools loaded are {spools}.")
+    who = f"{next(iter(picks))} can't" if len(picks) == 1 else ("Neither can" if len(picks) == 2 else "None of them can")
+    basis = "the file is sliced for" if sliced else "this print is set up for"
+    first += f" {who} just stand in, because {basis} {kind}'s temperatures."
+    offered = [(p, t) for p, t in picks.items() if _fit(verdicts, t.material).get("suits_goal") is not False]
+    unfit = [_fit(verdicts, t.material).get("why") or f"{plastic_words(t.material)} doesn't suit what this part is for"
+             for t in picks.values() if _fit(verdicts, t.material).get("suits_goal") is False]
+    if offered:
+        asks = _listed([f"for {p} and print from {t.name or t.where}" for p, t in offered], "or")
+        lead = "re-slice it" if sliced else "slice it"
+        aside = f" ({unfit[0]})" if unfit else ""
+        message = (f"{first} Want me to {lead} {asks}{'' if sliced else ' instead'}{aside}? "
+                   f"Or load {name} {kind} and I'll start it as is.")
+    else:
+        message = f"{first} {unfit[0]}, so I'd load {name} {kind} and start it as is."
+    reslices = [_option("reslice_for", tray=t, material=t.material, colour=name, hex6=t.hex6, **_fit(verdicts, t.material))
+                for t in picks.values()]
+    load = _option("load_spool", material=want.material, colour=name, hex6=want.hex6)
+    options = [*reslices, load] if offered else [load, *reslices]
+    if missed:
+        for o in reslices:
+            o["goal_check_missed"] = missed
+    return SpoolMiss("AMS_MATERIAL_NOT_LOADED", message, options)
+
+
+def _plastic_not_loaded(want: Filament, name: str | None, trays: list[Tray], sliced: bool,
+                        judge: Judge | None) -> SpoolMiss:
+    kind = plastic_words(want.material)
+    needs = f"{name} {kind}" if name else kind
+    first = f"This print needs {needs}, and none of your spools are {kind} (you have {_loaded_said(trays)})."
+    stand_ins: dict[str, Tray] = {}
+    for t in sorted(trays, key=lambda t: -1 if t.remain is None else -t.remain):
+        if t.material != UNREAD_MATERIAL:
+            stand_ins.setdefault(plastic_words(t.material), t)
+    verdicts, missed = _judged(judge, want.material, [t.material for t in stand_ins.values()])
+    fits = {p: _fit(verdicts, t.material) for p, t in stand_ins.items()}
+    offered = [p for p, f in fits.items() if f.get("suits_goal") is not False]
+    unfit = [f.get("why") or f"{p} doesn't suit what this part is for" for p, f in fits.items()
+             if f.get("suits_goal") is False]
+    load = f"Load {_a(needs)} spool and I'll start it."
+    offer = f"Or I can {'re-slice' if sliced else 'slice'} it for {_listed(offered, 'or')}{'' if sliced else ' instead'}"
+    if offered and all(fits[p].get("suits_goal") for p in offered):
+        message = f"{first} {load} {offer}" + (f" ({unfit[0]})." if unfit else ".")
+    elif offered:
+        hedge = f"if {offered[0]} suits" if len(offered) == 1 else "if one of them suits"
+        message = f"{first} {load} {offer}, {hedge} what this part is for."
+    elif unfit:
+        message = f"{first} {unfit[0]}, so I'd load {_a(needs)} spool and start it as is."
+    else:
+        message = f"{first} {load}"
+    options = [_option("load_spool", material=want.material, colour=name, hex6=want.hex6 if name else None)]
+    for p, t in stand_ins.items():
+        options.append(_option("reslice_for", tray=t, material=t.material, colour=_colour_name(t.hex6) if t.hex6 else None,
+                               hex6=t.hex6, **fits[p],
+                               **({"goal_check_missed": missed} if missed else {})))
+    return SpoolMiss("AMS_MATERIAL_NOT_LOADED", message, options)
+
+
+def _parts_missing(wanted: list[Filament], trays: list[Tray], plan: AmsPlan, names: list[str | None],
+                   free_slots: Sequence[str], noun: str, on_record: dict[int, str]) -> SpoolMiss:
+    missing = [i for i in plan.unmatched if i < len(wanted)]
+    used = {m["slot"] for m in plan.matches if m.get("slot") is not None}
+    have, total = len(wanted) - len(missing), len(wanted)
+    is_are = "is" if have == 1 else "are"
+    message = f"{_count(have, capital=True)} of the {_count(total)} colours {is_are} loaded."
+
+    def colour_of(i: int) -> str | None:
+        return (names[i] if i < len(names) else None) or (_colour_name(wanted[i].hex6) if wanted[i].hex6 else None)
+
+    subs: dict[int, list[Tray]] = {}
+    for i in missing:
+        fits = [t for t in trays if t.tray_id not in used
+                and (wanted[i].material is None or same_plastic(wanted[i].material, t.material))]
+        subs[i] = _nearest(wanted[i].hex6, fits)[:4]
+    spare = [t for t in trays if t.tray_id not in used]
+    where = ("into any empty slot" if len(free_slots) > 1 else f"into empty slot {free_slots[0]}" if free_slots
+             else "in place of a spool this print doesn't use" if spare else "into the AMS")
+    parts = [colour_of(i) or plastic_words(wanted[i].material) for i in missing]
+    needs = [_spool(colour_of(i), wanted[i].material) for i in missing]
+    if len(missing) == 1:
+        message += f" The {parts[0]} {noun} needs {needs[0]}, and there's none loaded."
+        mine = on_record.get(missing[0])
+        load = f"Load your {mine} {where}" if mine else f"Load {colour_of(missing[0]) or needs[0]} {where}"
+        pick = f"pick a loaded colour for that {noun}"
+    else:
+        none = "neither is" if len(missing) == 2 else "none of them is"
+        nouns = noun[:-1] + "ies" if noun.endswith("y") else noun + "s"
+        message += f" The {_listed(parts)} {nouns} need {_listed(needs)}, and {none} loaded."
+        load = "Load them " + ("into empty slots" if free_slots else where.replace(" a spool", " spools"))
+        pick = f"pick loaded colours for those {nouns}"
+    message += f" {load}, or {pick}." if any(subs.values()) else f" {load} and I'll start it."
+
+    mapping = [m.get("slot") for m in plan.matches]
+    options: list[dict[str, Any]] = []
+    for i in missing:
+        options.append(_option("load_spool", part=i, material=wanted[i].material, colour=colour_of(i),
+                               hex6=wanted[i].hex6, empty_slots=list(free_slots),
+                               **({"on_record": on_record[i]} if i in on_record else {})))
+        for t in subs[i]:
+            whole = [t.tray_id if k == i else s for k, s in enumerate(mapping)] if len(missing) == 1 else None
+            options.append(_option("print_from_slot", tray=t, part=i, material=t.material,
+                                   colour=_colour_name(t.hex6), hex6=t.hex6,
+                                   **({"mapping": whole} if whole else {})))
+    return SpoolMiss("AMS_COLOR_MISMATCH", message, options)
 
 
 # ---------------------------------------------------------------------------

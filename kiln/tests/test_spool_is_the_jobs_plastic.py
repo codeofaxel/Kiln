@@ -162,15 +162,16 @@ class TestThePrintGate:
         assert out["blocked"] is True and out["ams_mapping"] is None
         assert out["code"] == "AMS_MATERIAL_NOT_LOADED"
         said = out["warnings"][0]
-        assert "needs PC" in said and "white PLA-CF in slot A1" in said and "Load a PC spool" in said
+        assert said.startswith("This print needs PC, and none of your spools are PC (you have white PLA-CF and white PLA).")
+        assert "Load a PC spool and I'll start it." in said
 
     def test_the_asked_colour_loaded_in_another_plastic_is_said_as_that(self, tmp_path):
         gcode = tmp_path / "part.gcode"
         gcode.write_text("G28\n; filament_colour = #FFFFFF\n; filament_type = PLA\n")
         dc.record(str(gcode), dc.ShownColour("teal", "#008080"))
         out = _resolve(_ams(("PETG", "008080FF"), ("PLA", WHITE)), material="PLA", file_path=str(gcode))
-        assert out["blocked"] is True and out["code"] == "AMS_MATERIAL_NOT_LOADED"
-        assert "no loaded spool is teal PLA" in out["warnings"][0]
+        assert out["blocked"] is True and out["code"] == "COLOR_NOT_LOADED"
+        assert "re-slice it for the teal PETG in slot A1" in out["warnings"][0]
 
     def test_a_cf_pla_job_does_not_take_plain_pla(self):
         assert _resolve(_ams(("PLA", WHITE)), material="cf_pla")["blocked"] is True
@@ -208,12 +209,15 @@ class TestSmartReprint:
         result = doors.reprint(_stl(str(tmp_path / "part.stl")), "polycarbonate")
         assert result["success"] is False and doors.calls == []
         assert result["error"]["code"] == "AMS_MATERIAL_NOT_LOADED"
-        assert "Loaded: white PLA-CF in slot A1, white PLA in slot A2" in result["error"]["message"]
+        assert "(you have white PLA-CF and white PLA)" in result["error"]["message"]
 
     def test_a_cf_pla_job_does_not_print_from_plain_pla(self, tmp_path):
+        # An abrasive filament's own refusal comes first, at the slice; the
+        # print step then holds it to the spool of its plastic.
         doors = _Doors(_ams(("PLA", WHITE)))
-        result = doors.reprint(_stl(str(tmp_path / "part.stl")), "cf_pla")
-        assert result["success"] is False and doors.calls == []
+        doors.reprint(_stl(str(tmp_path / "part.stl")), "cf_pla")
+        assert len(doors.calls) == 1
+        assert doors.calls[0]["material"] == "cf_pla" and doors.calls[0]["ams_mapping"] is None
 
     def test_a_nylon_job_prints_from_the_pa_spool(self, tmp_path):
         doors = _Doors(_ams(("PLA", WHITE), ("PA", WHITE)))
@@ -284,8 +288,9 @@ class TestMultiColorCopies:
             doors = _Doors(_ams((other, WHITE), (other, GREEN)))
             result = doors.copies(model, material=material)
             assert result["error"]["code"] == "NO_MATERIAL" and doors.calls == []
-            assert f"No loaded spool is {material}" in result["error"]["message"]
-            assert f"A1 {other}" in result["error"]["message"]
+            assert result["error"]["message"].startswith(
+                f"This print needs {material}, and none of your spools are {material} (you have white and green {other})."
+            )
 
     def test_nylon_copies_print_from_the_pa_spools(self, tmp_path):
         doors = _Doors(_ams(("PLA", WHITE), ("PA", WHITE), ("PA", GREEN)))

@@ -484,6 +484,36 @@ def _refused_step(name: str, err: dict[str, Any], step_start: float) -> Pipeline
     )
 
 
+def _spool_step(
+    decision: dict[str, Any], step_start: float, *, model_path: str,
+    printer_name: str | None, material: str | None,
+) -> PipelineStep:
+    """The start step for a print the loaded spools cannot supply: the gate's
+    sentence, and its choices carried out by ``run_reslice_and_print``."""
+    from kiln.server import _mapping_of, _material_arg, _spool_calls
+
+    said = list(decision.get("warnings") or [])
+    data: dict[str, Any] = {"ams_plan": decision.get("plan"), "ams_warnings": said}
+    if decision.get("options"):
+        here = {"model_path": model_path, **({"printer_name": printer_name} if printer_name else {})}
+        data["code"] = decision.get("code")
+        data["options"] = _spool_calls(
+            decision["options"],
+            print_from=lambda o: {"tool": "run_reslice_and_print", "arguments": {
+                **here, **({"material": material} if material else {}), "ams_mapping": _mapping_of(o)}},
+            reslice=lambda o: {"tool": "run_reslice_and_print", "arguments": {
+                **here, "material": _material_arg(o),
+                **({"ams_mapping": [o["tray_id"]]} if o.get("tray_id") is not None else {})}},
+        )
+    return PipelineStep(
+        name="start_print",
+        success=False,
+        message=" ".join(said) if decision.get("options") else "Not started: " + " ".join(said),
+        duration_seconds=time.time() - step_start,
+        data=data,
+    )
+
+
 def _start_refused_step(
     adapter: Any, step_start: float, *, file_name: str | None = None, local_path: str | None = None,
 ) -> PipelineStep | None:
@@ -968,12 +998,8 @@ def quick_print(
             )
             ams_warnings = list(ams_decision.get("warnings") or [])
             if ams_decision.get("blocked"):
-                return PipelineStep(
-                    name="start_print",
-                    success=False,
-                    message="Not started: " + " ".join(ams_warnings),
-                    duration_seconds=time.time() - step_start,
-                    data={"ams_plan": ams_decision.get("plan"), "ams_warnings": ams_warnings},
+                return _spool_step(
+                    ams_decision, step_start, model_path=model_path, printer_name=printer_name, material=material,
                 )
             ams_selection = None
             if ams_decision.get("use_ams"):
@@ -1469,12 +1495,9 @@ def reslice_and_print(
                 )
                 ams_warnings = list(ams_decision.get("warnings") or [])
                 if ams_decision.get("blocked"):
-                    return PipelineStep(
-                        name="start_print",
-                        success=False,
-                        message="Not started: " + " ".join(ams_warnings),
-                        duration_seconds=time.time() - step_start,
-                        data={"ams_plan": ams_decision.get("plan"), "ams_warnings": ams_warnings},
+                    return _spool_step(
+                        ams_decision, step_start, model_path=model_path, printer_name=printer_name,
+                        material=material,
                     )
                 if defer_multi_material_3mf and not ams_decision.get("plan"):
                     ams_decision = {"use_ams": False, "warnings": ams_warnings}

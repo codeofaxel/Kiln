@@ -233,6 +233,26 @@ def not_loaded_say(
         return ""
 
 
+def spools_on_record(filaments: Sequence[Any], *, loaded: Iterable[str | None] = ()) -> dict[int, str]:
+    """``{index: "Polymaker red PLA"}`` for each of *filaments* a spool the
+    person recorded covers, paired as :func:`not_loaded_say` pairs them
+    (*loaded* the colour codes the print already uses).  ``{}`` on the
+    hosted server or when nothing is recorded.  Never raises."""
+    try:
+        if _hosted():
+            return {}
+        wanted = {
+            i: _Colour(hex6, None, getattr(f, "material", None))
+            for i, f in enumerate(filaments)
+            if (hex6 := normalize_hex(getattr(f, "hex6", None)))
+        }
+        owned = _owned_spools(list(wanted.values()), list(loaded))
+        return {i: _spool_words(owned[c.code]) for i, c in wanted.items() if c.code in owned}
+    except Exception:  # noqa: BLE001 -- the print door names the colour instead
+        logger.debug("spools on record not read", exc_info=True)
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # The sentences
 # ---------------------------------------------------------------------------

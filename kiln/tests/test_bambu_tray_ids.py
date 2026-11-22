@@ -295,7 +295,9 @@ class TestTheServerSelection:
         out = self._resolve(_ams("255", _B), material="PLA")
         assert out["blocked"] is True and out["ams_mapping"] is None
         assert out["code"] == "AMS_MATERIAL_NOT_LOADED"
-        assert "PETG in slot B2" in out["warnings"][0]
+        assert "(you have blue PETG)" in out["warnings"][0]
+        reslice = next(o for o in out["options"] if o["action"] == "reslice_for")
+        assert reslice["slot"] == "B2" and reslice["tray_id"] == 5
 
 
 # ---------------------------------------------------------------------------
