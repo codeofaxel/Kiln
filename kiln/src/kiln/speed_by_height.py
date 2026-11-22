@@ -110,7 +110,7 @@ INSIDE_KEYS: dict[str, tuple[str, ...]] = {
     PRUSA: ("perimeter_speed", "infill_speed", "solid_infill_speed"),
     BAMBU: ("inner_wall_speed", "sparse_infill_speed", "internal_solid_infill_speed"),
 }
-_INSIDE_KINDS = frozenset({
+INSIDE_KINDS = frozenset({
     "perimeter", "internal infill", "solid infill", "inner wall", "sparse infill", "internal solid infill",
 })
 
@@ -890,7 +890,7 @@ def _inside(layers: Sequence[_Layer]) -> list[_Layer]:
     layers that have any."""
     kept = []
     for layer in layers:
-        moves = [move for move in layer.moves if move[3].strip().lower() in _INSIDE_KINDS]
+        moves = [move for move in layer.moves if move[3].strip().lower() in INSIDE_KINDS]
         if moves:
             kept.append(_Layer(z=layer.z, moves=moves, support_moves=[], seconds=layer.seconds, height=layer.height))
     return kept
@@ -1193,6 +1193,7 @@ __all__ = [
     "ALREADY_SLOWER",
     "APPLIED",
     "CAPPED",
+    "INSIDE_KINDS",
     "LIMITED",
     "NOT_APPLIED",
     "PICKED_BY_KILN",
