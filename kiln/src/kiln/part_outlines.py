@@ -190,10 +190,11 @@ def outlines_by_height(path: str, *, levels: int = MAX_LEVELS) -> dict[str, Any]
         raise PartOutlinesError(f"{path} could not be read as a mesh: {exc}") from exc
     if triangles.ndim != 3 or len(triangles) == 0:
         raise PartOutlinesError(f"{path} holds no triangles.")
-    triangles = triangles[np.isfinite(triangles).all(axis=(1, 2))]
-    normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
-    size = np.linalg.norm(normals, axis=1)
-    flat = size > 1e-12
+    with np.errstate(invalid="ignore", over="ignore"):
+        normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+        size = np.linalg.norm(normals, axis=1)
+    # A triangle with a corner that is not a number has no area that is one.
+    flat = np.isfinite(size) & (size > 1e-12) & np.isfinite(triangles).all(axis=(1, 2))
     triangles, normals = triangles[flat], normals[flat] / size[flat][:, None]
     if len(triangles) == 0:
         raise PartOutlinesError(f"{path} holds no triangles with any area.")

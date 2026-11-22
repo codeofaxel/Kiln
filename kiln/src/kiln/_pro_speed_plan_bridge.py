@@ -12,7 +12,7 @@ hands the answer to :func:`kiln.speed_by_height.sliced` as its planner:
 * the slice's own flow limit, cooling time, acceleration and infill.
 
 With kiln-pro installed here (Kiln's servers) the answer is read in process
-(:func:`_local`, which imports kiln-pro by name); on a plain install it is
+(:func:`_engine`, which imports kiln-pro by name); on a plain install it is
 asked of Kiln's servers as :data:`WIRE_TOOL`, through the door every served
 tool uses (:func:`kiln.server._pro_api_call`).  The answer is ranges in the
 wish's own form, each with its sentence, and nothing else.
@@ -201,13 +201,22 @@ def _read(answer: Any) -> tuple[dict[str, Any] | None, Miss | None]:
     return None, classify_answer(answer) or Miss("unanswered", detail="an answer that did not say it succeeded")
 
 
-def _local(fields: dict[str, Any]) -> Any:
+def _engine() -> Any:
+    """kiln-pro's own answer on this computer, or ``None`` when kiln-pro is
+    not installed here."""
     try:
         from kiln_pro.speed_plan.engine import answer_for_caller
     except ImportError:
+        return None
+    return answer_for_caller
+
+
+def _local(fields: dict[str, Any]) -> Any:
+    answer = _engine()
+    if answer is None:
         return _NOT_HERE
     try:
-        return answer_for_caller(**fields)
+        return answer(**fields)
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         return local_fault(exc, where="Kiln's speeds by height")
 
