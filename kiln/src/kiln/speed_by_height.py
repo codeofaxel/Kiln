@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.print_lineage import SPEED_BY_HEIGHT_KEY
 from kiln.slicer import SlicerError
 
@@ -182,22 +183,22 @@ def checked(wish: Any) -> list[SpeedRange]:
         start = _number(raw.get("from_mm", 0))
         end = None if raw.get("to_mm") is None else _number(raw.get("to_mm"))
         if start is None or (raw.get("to_mm") is not None and end is None):
-            raise SpeedByHeightError(f"Range {number}: from_mm and to_mm are heights in millimetres. {_SHAPE}")
+            raise SpeedByHeightError(f"Range {number}: `from_mm` and `to_mm` are heights in millimetres. {_SHAPE}")
         if start < 0:
             raise SpeedByHeightError(f"Range {number} starts {abs(start):g} mm below the plate; heights start at 0.")
         if end is not None and end <= start:
             raise SpeedByHeightError(
                 f"Range {number} runs from {start:g} mm to {end:g} mm, so it has no height: "
-                "to_mm must be above from_mm."
+                "`to_mm` must be above `from_mm`."
             )
         speed, percent = raw.get("speed_mm_s"), raw.get("percent")
         if (speed is None) == (percent is None):
-            raise SpeedByHeightError(f"Range {number} needs one speed: speed_mm_s, or percent, not both and not neither.")
+            raise SpeedByHeightError(f"Range {number} needs one speed: `speed_mm_s`, or `percent`, not both and not neither.")
         if speed is not None:
             value = _number(speed)
             if value is None or not MIN_SPEED_MM_S <= value <= MAX_SPEED_MM_S:
                 raise SpeedByHeightError(
-                    f"Range {number}: speed_mm_s is from {MIN_SPEED_MM_S:g} to {MAX_SPEED_MM_S:g} mm/s."
+                    f"Range {number}: `speed_mm_s` is from {MIN_SPEED_MM_S:g} to {MAX_SPEED_MM_S:g} mm/s."
                 )
             ranges.append(SpeedRange(start, end, speed_mm_s=value))
         else:
@@ -495,7 +496,7 @@ def _asked_speeds(band: SpeedRange, stated: Mapping[str, float], family: str) ->
     if not stated:
         raise SpeedByHeightError(
             f"The range {band.span()} asks for {band.percent:g}% of the profile's speeds, and this slice states "
-            "no speeds to take a share of. Ask for speed_mm_s instead."
+            "no speeds to take a share of. Ask for `speed_mm_s` instead."
         )
     return {key: speed * band.percent / 100.0 for key, speed in stated.items()}
 
@@ -547,7 +548,7 @@ def plate_3mf(input_path: str, out_dir: str, *, bed_centre: tuple[float, float] 
     except (OSError, ValueError) as exc:
         raise SpeedByHeightError(
             f"{Path(input_path).name} could not be read as a mesh, so the speed ranges were not put into its "
-            f"slice: {exc}"
+            f"slice: {_plain_words.said(exc)}"
         ) from exc
     corner_ids: dict[tuple[float, ...], int] = {}
     rows = [
@@ -598,7 +599,7 @@ def with_ranges(
             raise SpeedByHeightError("This 3MF has no model Kiln can read, so the speed ranges were not put into its slice.")
         if any(n.lstrip("/") in _RANGE_MEMBER.values() for n in names):
             raise SpeedByHeightError(
-                "This 3MF already carries height ranges of its own. Slice it without speed_by_height, or take "
+                "This 3MF already carries height ranges of its own. Slice it without `speed_by_height`, or take "
                 "its ranges out in the slicer that made it."
             )
         objects = max(1, len(_BUILD_ITEM.findall(zin.read(root).decode("utf-8", errors="replace"))))
@@ -824,7 +825,7 @@ def sliced(
             raise SpeedByHeightError(
                 "The slicer did not apply every speed range, so no file was kept. "
                 + " ".join(o["said"] for o in refused)
-                + " Slice again without speed_by_height, or with other ranges.",
+                + " Slice again without `speed_by_height`, or with other ranges.",
                 code="SPEED_BY_HEIGHT_NOT_APPLIED", ranges=outcomes,
             )
         inside = {id(layer) for band in ranges for layer in _layers_in(made, band)}

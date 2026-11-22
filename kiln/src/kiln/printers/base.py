@@ -2379,7 +2379,7 @@ class PrinterAdapter(ABC):
             plate_number = printed_plate_number(kwargs)
         except ValueError as exc:
             return CodedPrintResult(
-                success=False, message=str(exc), refused_before_send=True, code=PLATE_NUMBER_REFUSED,
+                success=False, message=_plain_words.sentence(exc), refused_before_send=True, code=PLATE_NUMBER_REFUSED,
             )
         if "plate_number" in kwargs:
             kwargs = {**kwargs, "plate_number": plate_number}

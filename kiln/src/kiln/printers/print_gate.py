@@ -932,17 +932,21 @@ PLATE_NUMBER_REFUSED = "PLATE_NUMBER_REFUSED"
 PLATE_NOT_IN_FILE = "PLATE_NOT_IN_FILE"
 
 
+class PlateNumberError(ValueError):
+    """A plate number that is not one; its message is written to be shown."""
+
+
 def printed_plate_number(kwargs: dict[str, Any]) -> int:
     """The plate a start prints, the one value every gate, reader and printer
     command uses: ``plate_number`` as given, 1 when none is.
 
-    :raises ValueError: in plain words, for anything but a whole number from 1 up.
+    :raises PlateNumberError: in plain words, for anything but a whole number from 1 up.
     """
     value = kwargs.get("plate_number")
     if value is None:
         return 1
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError(
+        raise PlateNumberError(
             f"The plate to print has to be a whole number from 1 up, the plate's number as the slicer "
             f"shows it; {value!r} is not one, so nothing was started."
         )
@@ -1707,7 +1711,7 @@ def run_adapter_gate(
     try:
         plate_number = printed_plate_number(kwargs)
     except ValueError as exc:
-        return {"ok": False, "blocked": True, "code": PLATE_NUMBER_REFUSED, "reason": str(exc)}
+        return {"ok": False, "blocked": True, "code": PLATE_NUMBER_REFUSED, "reason": _plain_words.sentence(exc)}
     if _is_resume_print(file_name, kwargs, adapter=adapter):
         return None
 

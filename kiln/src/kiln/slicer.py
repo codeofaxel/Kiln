@@ -2699,7 +2699,7 @@ def _slice_file(
         if bed is None and not placed and not sliced_input.lower().endswith(".3mf"):
             raise _speed_by_height.SpeedByHeightError(
                 "Speed ranges need the printer's bed to place the part on, and this slice has no profile that "
-                "states one. Name the printer, or slice without speed_by_height."
+                "states one. Name the printer, or slice without `speed_by_height`."
             )
         centre = None if bed is None else ((bed[0] + bed[2]) / 2.0, (bed[1] + bed[3]) / 2.0)
 
