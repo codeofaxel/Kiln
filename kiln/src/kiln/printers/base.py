@@ -1549,6 +1549,69 @@ def _wrap_cancel_gives_back(cls: type) -> None:
     cls.cancel_print = _cancel_and_give_back
 
 
+def _command_took(result: Any) -> bool:
+    """Whether a command's result says the printer took it."""
+    ok = getattr(result, "ok", None)
+    if isinstance(ok, bool):
+        return ok
+    success = getattr(result, "success", None)
+    if isinstance(success, bool):
+        return success
+    return result is not False and result is not None
+
+
+def _note_commands_not_as_sliced(adapter: Any, commands: Any) -> None:
+    try:
+        from kiln.ran_as_sliced import note_commands
+
+        note_commands(adapter, commands)
+    except Exception:  # noqa: BLE001 — bookkeeping never changes a command
+        pass
+
+
+#: Adapter commands that change how the running print runs, by the reason
+#: each writes (:mod:`kiln.ran_as_sliced`).
+_NOT_AS_SLICED_COMMANDS: dict[str, str] = {
+    "set_speed_profile": "speed_changed",
+    "skip_objects": "objects_skipped",
+    "firmware_resume_print": "resumed",
+}
+
+
+def _wrap_not_as_sliced(cls: type) -> None:
+    """Wrap *cls*'s own commands that change how a print runs so a command
+    the printer took writes its reason on the open print."""
+    import functools
+
+    for action, kind in _NOT_AS_SLICED_COMMANDS.items():
+        original = cls.__dict__.get(action)
+        if (
+            original is None
+            or not callable(original)
+            or getattr(original, "_kiln_as_sliced_wrapped", False)
+            or getattr(original, "__isabstractmethod__", False)
+        ):
+            continue
+
+        def _make(original: Any, kind: str) -> Any:
+            @functools.wraps(original)
+            def _noted(self, *args, **kwargs):
+                result = original(self, *args, **kwargs)
+                if _command_took(result):
+                    try:
+                        from kiln.ran_as_sliced import note
+
+                        note(self, kind)
+                    except Exception:  # noqa: BLE001 — bookkeeping never changes a command
+                        pass
+                return result
+
+            _noted._kiln_as_sliced_wrapped = True  # type: ignore[attr-defined]
+            return _noted
+
+        setattr(cls, action, _make(original, kind))
+
+
 def _wrap_head_moves(cls: type) -> None:
     """Wrap *cls*'s own ``pause_print`` and ``cancel_print`` so a printer that says where its head is."""
     import functools
@@ -2008,7 +2071,10 @@ class PrinterAdapter(ABC):
             @functools.wraps(gcode_original)
             def _watched_send_gcode(self, commands, *args, **kwargs):
                 _note_resume_raw_commands(self, commands)
-                return gcode_original(self, commands, *args, **kwargs)
+                result = gcode_original(self, commands, *args, **kwargs)
+                if _command_took(result):
+                    _note_commands_not_as_sliced(self, commands)
+                return result
 
             _watched_send_gcode._kiln_files_watched = True  # type: ignore[attr-defined]
             cls.send_gcode = _watched_send_gcode
@@ -2047,6 +2113,12 @@ class PrinterAdapter(ABC):
                         "outcome lifecycle feed failed", exc_info=True
                     )
                 try:
+                    from kiln.ran_as_sliced import observe_state
+
+                    observe_state(self, state)
+                except Exception:  # noqa: BLE001 — bookkeeping never breaks status
+                    pass
+                try:
                     _feed_slot_observer(self, state)
                 except Exception:  # noqa: BLE001 — bookkeeping never breaks status
                     import logging as _logging
@@ -2064,6 +2136,7 @@ class PrinterAdapter(ABC):
         _wrap_cancel_gives_back(cls)
         _wrap_emergency_reads_nothing(cls)
         _wrap_head_moves(cls)
+        _wrap_not_as_sliced(cls)
 
         # ------------------------------------------------------------------
         # ------------------------------------------------------------------
@@ -2321,6 +2394,12 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug("repair warning not read", exc_info=True)
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
             try:
+                from kiln.ran_as_sliced import started as _as_sliced_started
+
+                _as_sliced_started(self)
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
+                pass
+            try:
                 from kiln.printers.progress_motion import note_job_start
 
                 note_job_start(self, file_name)
@@ -2468,8 +2547,12 @@ class PrinterAdapter(ABC):
                     ),
                     identity=identity,
                 )
+                from kiln import ran_as_sliced
                 from kiln.learned_print_time import note_start_estimate
 
+                ran_as_sliced.open_record(opened)
+                if continuing:
+                    ran_as_sliced.note_on_job(opened, ran_as_sliced.RESUMED)
                 note_start_estimate(opened, file_name)
                 from kiln.print_evidence import note_start_firmware
 
@@ -2519,6 +2602,15 @@ class PrinterAdapter(ABC):
                     )
             _fire_print_started_hooks(self, file_name)
         elif getattr(result, "success", False):
+            try:
+                from kiln import ran_as_sliced
+
+                base = os.path.basename(str(file_name)).lower()
+                ran_as_sliced.note(
+                    self, ran_as_sliced.RESUMED if base.startswith("original_resume") else ran_as_sliced.EDITED,
+                )
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
+                pass
             try:
                 from kiln.spool_usage import resume_print as _spools_resume
 
@@ -2571,6 +2663,13 @@ class PrinterAdapter(ABC):
             from kiln.hardware_stops import note_resumed
 
             note_resumed(self, waiting)
+        if getattr(result, "success", False):
+            try:
+                from kiln.ran_as_sliced import PAUSED, note
+
+                note(self, PAUSED)
+            except Exception:  # noqa: BLE001 — bookkeeping never changes a resume
+                pass
         return result
 
     def _not_paused_refusal(self) -> PrintResult | None:

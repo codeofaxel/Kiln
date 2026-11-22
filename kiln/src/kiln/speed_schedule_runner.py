@@ -209,6 +209,10 @@ def start(
     if _state_word(adapter) in _ENDED:
         raise ScheduleRefused("the printer is not printing, so there is nothing to pace")
     run = RunState(segments=segments, printer_name=printer_name, watching=_identity(adapter.get_job()))
+    if any(segment.speed_percent != 100 for segment in segments):
+        from kiln.ran_as_sliced import SPEED_CHANGED, note
+
+        note(adapter, SPEED_CHANGED)
     run.thread = threading.Thread(
         target=_loop, args=(run, resolve, poll_s), daemon=True, name="kiln-speed-schedule",
     )

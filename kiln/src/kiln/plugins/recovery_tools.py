@@ -204,8 +204,8 @@ def _printer_times(
             left = job.print_time_left_seconds
             busy = float(left) if left else 0.0
             if busy:
-                learned = learned_time_left(name, getattr(job, "print_time_seconds", None))
-                busy = float(learned["seconds_left"]) if learned else busy
+                learned = learned_time_left(name, getattr(job, "print_time_seconds", None), left)
+                busy = float(learned["seconds_left"]) if learned and learned.get("seconds_left") else busy
         except Exception:  # noqa: BLE001 -- a printer that says nothing adds nothing
             busy = 0.0
         times[name] = {

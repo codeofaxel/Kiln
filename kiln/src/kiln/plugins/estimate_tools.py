@@ -806,7 +806,9 @@ class _EstimateToolsPlugin:
                 out: dict[str, Any] = {"success": True, "progress": estimate.to_dict()}
                 if jd.get("print_time_left_seconds") is not None:
                     out["printer_time_left_seconds"] = jd["print_time_left_seconds"]
-                left = learned_time_left(outcome_printer_name(adapter), float(elapsed))
+                left = learned_time_left(
+                    outcome_printer_name(adapter), float(elapsed), jd.get("print_time_left_seconds"),
+                )
                 if left:
                     out["learned_time_left"] = left
                     out["message"] = left["said"]

@@ -6,7 +6,12 @@ keeps what that file says the print will take, under
 file names the slicer that wrote it.  The figure is read by the one reader of
 a slicer's time (:func:`kiln.gcode.slicer_print_time`) from the same lines
 every reader of a file's own figures sees
-(:func:`kiln.file_metadata.sliced_gcode_lines`).
+(:func:`kiln.file_metadata.sliced_gcode_lines`).  A file that carries a print
+on from a layer states no time of its own
+(:func:`kiln.gcode.continues_a_print`), so none is kept for it.
+
+The figure is the file printed as written, at the speed it was sliced at;
+the sentences say so.
 
 It is one version's own fact: a version made from another never carries its
 parent's (``kiln.design_recipe.VERSION_STORY_KEYS``).  A file that states no
@@ -82,12 +87,12 @@ def _duration(seconds: float) -> str:
 
 
 def estimate_sentence(provenance: Any) -> str | None:
-    """``"About 3h 1m, the slicer's estimate."`` for a version's
+    """``"About 3h 1m at the sliced speed, the slicer's estimate."`` for a version's
     *provenance*, or ``None`` when it keeps no estimate."""
     estimate = estimate_on(provenance)
     if estimate is None:
         return None
-    return f"About {_duration(estimate['seconds'])}, the slicer's estimate."
+    return f"About {_duration(estimate['seconds'])} at the sliced speed, the slicer's estimate."
 
 
 def estimate_change(provenance_a: Any, provenance_b: Any) -> str | None:
@@ -99,11 +104,11 @@ def estimate_change(provenance_a: Any, provenance_b: Any) -> str | None:
     before, after = float(a["seconds"]), float(b["seconds"])
     delta = after - before
     if abs(delta) < _SAME_WITHIN_SECONDS:
-        sentence = f"The slicer's estimate stayed at about {_duration(after)}."
+        sentence = f"At the sliced speed, the slicer's estimate stayed at about {_duration(after)}."
     else:
         longer = "longer" if delta > 0 else "shorter"
         sentence = (
-            f"The slicer's estimate went from about {_duration(before)} to about "
+            f"At the sliced speed, the slicer's estimate went from about {_duration(before)} to about "
             f"{_duration(after)}, {_duration(abs(delta))} {longer}."
         )
     slicer_a, slicer_b = a.get("slicer"), b.get("slicer")

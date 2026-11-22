@@ -19,8 +19,11 @@ their computer, and never sent anywhere.
 
 What counts.  Only prints that finished (a cancelled or failed one stopped
 short of the time it was estimated for), whose start Kiln sent with a file it
-could read the slicer's time from, and whose length Kiln watched or the
-printer's own clock reported.  A print that ended unseen is not a sample,
+could read the slicer's time from, whose length Kiln watched or the
+printer's own clock reported, and that carries no reason it did not run as
+its file was sliced (:mod:`kiln.ran_as_sliced`: a speed or flow change, a
+pause, skipped objects, a resumed or edited file).  A print started before
+those reasons were kept carries none and counts.  A print that ended unseen is not a sample,
 never a guess.  The last :data:`WINDOW` count; each is real time over slicer
 time, a reading outside :data:`RATIO_BOUNDS` is left out (a print paused
 overnight, a file whose estimate was for another machine), and the middle
@@ -28,7 +31,8 @@ reading is the printer's pace, so one odd print moves nothing.  Below
 :data:`MIN_PRINTS` the slicer's time is said as the slicer's, with how many
 prints Kiln has timed so far.
 
-Honest bounds.  A pause the printer's clock counts is in the time.  A print
+Honest bounds.  A change made while no Kiln process watched is not known,
+so a pause the printer's clock counts can still be in the time.  A print
 started outside Kiln, or from a file Kiln never read, teaches nothing.  One
 figure per printer: a printer that runs slow on small parts and on time on
 large ones is told the middle of the two.
@@ -141,6 +145,12 @@ def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
         lines = _sent_file_lines(file_name)
         if not lines:
             return
+        from kiln.gcode import continues_a_print
+
+        if continues_a_print(lines):
+            from kiln.ran_as_sliced import START_FILE_EDITED, note_on_job
+
+            note_on_job(job_id, START_FILE_EDITED)
         seconds = _seconds_in(lines)
         if seconds is not None:
             get_db().set_outcome_estimate(job_id, seconds)
@@ -195,8 +205,12 @@ def pace_for(printer_name: str | None) -> Pace | None:
     except Exception:  # noqa: BLE001 -- no records is no pace
         logger.debug("print times unread for %s", printer_name, exc_info=True)
         return None
+    from kiln.ran_as_sliced import known_not_as_sliced
+
     ratios = []
     for row in rows:
+        if known_not_as_sliced(row):
+            continue
         estimate, actual = row.get("estimated_seconds"), row.get("print_seconds")
         if not estimate or not actual or estimate < MIN_ESTIMATE_SECONDS:
             continue
@@ -314,7 +328,11 @@ def attach_learned_time(
     return learned
 
 
-def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = None) -> dict[str, Any] | None:
+def learned_time_left(
+    printer_name: str | None,
+    elapsed_seconds: float | None = None,
+    printer_seconds_left: float | None = None,
+) -> dict[str, Any] | None:
     """When the print running now on *printer_name* should end, from its own pace.
 
     Read from the print Kiln started: the slicer's time for its file, scaled
@@ -325,11 +343,14 @@ def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = 
     time (the printer's own countdown is then the better word).  Otherwise::
 
         {"seconds_left", "printer", "prints", "said"}
+
+    A print with a recorded reason it is not running as sliced
+    (:mod:`kiln.ran_as_sliced`) gets no figure worked from the slicer's
+    time: ``said`` is :data:`kiln.ran_as_sliced.NOT_AT_SLICED_SPEED`,
+    ``ran_as_sliced`` is ``False``, and ``seconds_left`` is the printer's own
+    countdown (*printer_seconds_left*) when it gives one, else ``None``.
     """
     if not printer_name or _hosted():
-        return None
-    pace = pace_for(printer_name)
-    if pace is None or not pace.usable:
         return None
     names, fingerprint = _machine(printer_name)
     try:
@@ -340,6 +361,23 @@ def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = 
         running = get_db().running_print_estimate(names, fingerprint)
         if not running:
             return None
+        from kiln.ran_as_sliced import NOT_AT_SLICED_SPEED, known_not_as_sliced
+
+        if known_not_as_sliced(running):
+            countdown = (
+                round(float(printer_seconds_left))
+                if isinstance(printer_seconds_left, (int, float))
+                and not isinstance(printer_seconds_left, bool)
+                and printer_seconds_left > 0
+                else None
+            )
+            return {
+                "seconds_left": countdown,
+                "from": "printer" if countdown is not None else None,
+                "printer": printer_name,
+                "ran_as_sliced": False,
+                "said": NOT_AT_SLICED_SPEED,
+            }
         elapsed = (
             float(elapsed_seconds)
             if isinstance(elapsed_seconds, (int, float)) and not isinstance(elapsed_seconds, bool) and elapsed_seconds >= 0
@@ -347,6 +385,9 @@ def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = 
         )
     except Exception:  # noqa: BLE001 -- no record is no time
         logger.debug("running print unread for %s", printer_name, exc_info=True)
+        return None
+    pace = pace_for(printer_name)
+    if pace is None or not pace.usable:
         return None
     left = float(running["estimated_seconds"]) * pace.factor - elapsed
     if left <= 0:
@@ -372,7 +413,9 @@ def attach_time_left(job_block: dict[str, Any] | None, adapter: Any) -> dict[str
             return None
         from kiln.printers.base import outcome_printer_name
 
-        left = learned_time_left(outcome_printer_name(adapter), job_block.get("print_time_seconds"))
+        left = learned_time_left(
+            outcome_printer_name(adapter), job_block.get("print_time_seconds"), job_block.get("print_time_left_seconds"),
+        )
     except Exception:  # noqa: BLE001 -- a status read never fails on a forecast
         logger.debug("learned time left not attached", exc_info=True)
         return None

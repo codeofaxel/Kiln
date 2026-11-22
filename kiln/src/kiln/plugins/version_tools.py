@@ -585,8 +585,8 @@ class _VersionToolsPlugin:
             Returns:
                 A unified diff string showing changes from version A to B,
                 and ``print_time_change`` when both versions keep the
-                slicer's estimate ("The slicer's estimate went from about
-                2h 50m to about 3h 1m, 11m longer.").
+                slicer's estimate ("At the sliced speed, the slicer's estimate
+                went from about 2h 50m to about 3h 1m, 11m longer.").
             """
             import difflib
 
@@ -772,8 +772,8 @@ class _VersionToolsPlugin:
             Returns:
                 The version record including source_scad, prompt,
                 parameters, notes, and parent_version, and ``print_time``
-                when the version keeps the slicer's estimate ("About 3h 1m,
-                the slicer's estimate.").
+                when the version keeps the slicer's estimate ("About 3h 1m
+                at the sliced speed, the slicer's estimate.").
                 Returns an error if the version does not exist.
             """
             from kiln.slicer_estimate import estimate_sentence

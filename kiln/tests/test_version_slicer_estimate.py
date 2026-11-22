@@ -106,17 +106,17 @@ class TestTheReader:
 
 class TestTheWords:
     def test_one_version(self):
-        assert estimate_sentence({RECORD_KEY: {"seconds": 10860}}) == "About 3h 1m, the slicer's estimate."
+        assert estimate_sentence({RECORD_KEY: {"seconds": 10860}}) == "About 3h 1m at the sliced speed, the slicer's estimate."
         assert estimate_sentence({}) is None
         assert estimate_sentence({RECORD_KEY: {"seconds": True}}) is None
 
     def test_a_change_names_both_figures_and_the_difference(self):
         a, b = {RECORD_KEY: {"seconds": 10200}}, {RECORD_KEY: {"seconds": 10860}}
         assert estimate_change(a, b) == (
-            "The slicer's estimate went from about 2h 50m to about 3h 1m, 11m longer."
+            "At the sliced speed, the slicer's estimate went from about 2h 50m to about 3h 1m, 11m longer."
         )
         assert estimate_change(b, a).endswith("11m shorter.")
-        assert estimate_change(a, {RECORD_KEY: {"seconds": 10230}}) == "The slicer's estimate stayed at about 2h 50m."
+        assert estimate_change(a, {RECORD_KEY: {"seconds": 10230}}) == "At the sliced speed, the slicer's estimate stayed at about 2h 50m."
 
     def test_unknown_on_either_side_says_nothing(self):
         assert estimate_change({}, {RECORD_KEY: {"seconds": 10860}}) is None
@@ -134,7 +134,7 @@ class TestThroughTheVersionTools:
             design_id="bracket", scad_source="cube(10);", gcode_path=_gcode(tmp_path / "v1.gcode", "3h 1m 0s"),
         )
         assert r["ok"] is True, r
-        assert r["version"]["print_time"] == "About 3h 1m, the slicer's estimate."
+        assert r["version"]["print_time"] == "About 3h 1m at the sliced speed, the slicer's estimate."
         assert _kept(tmp_path, "bracket", 1)["provenance"][RECORD_KEY]["seconds"] == 10860
 
     def test_a_save_with_no_slice_keeps_and_says_nothing(self, tools, tmp_path):
@@ -156,18 +156,18 @@ class TestThroughTheVersionTools:
         tools["save_design_version"](design_id="bracket", scad_source="cube(14);")
 
         got = tools["get_design_version"](version_id="bracket:2")
-        assert got["version"]["print_time"] == "About 3h 1m, the slicer's estimate."
+        assert got["version"]["print_time"] == "About 3h 1m at the sliced speed, the slicer's estimate."
         third = tools["get_design_version"](version_id="bracket:3")
         assert "print_time" not in third["version"], "the parent's slice is not the child's"
         assert RECORD_KEY not in (third["version"]["provenance"] or {})
 
         listed = {v["version"]: v for v in tools["list_design_versions"](design_id="bracket")["versions"]}
-        assert listed[1]["print_time"] == "About 2h 50m, the slicer's estimate."
+        assert listed[1]["print_time"] == "About 2h 50m at the sliced speed, the slicer's estimate."
         assert "print_time" not in listed[3]
 
         diff = tools["diff_design_versions"](version_id_a="bracket:1", version_id_b="bracket:2")
         assert diff["print_time_change"] == (
-            "The slicer's estimate went from about 2h 50m to about 3h 1m, 11m longer."
+            "At the sliced speed, the slicer's estimate went from about 2h 50m to about 3h 1m, 11m longer."
         )
         unknown = tools["diff_design_versions"](version_id_a="bracket:2", version_id_b="bracket:3")
         assert "print_time_change" not in unknown

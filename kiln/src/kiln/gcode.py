@@ -2578,12 +2578,43 @@ def _comments_naming(text: str, *words: str) -> str:
     )
 
 
+#: The banner a file that carries a print on from a layer opens with
+#: (``; ... RESUME FROM LAYER`` then ``; target_layer: N``): a resume after a
+#: stop, or the rest of a print edited while it ran.
+_CONTINUES_FROM_LAYER = re.compile(r"^;[^\n]*\bRESUME FROM LAYER[ \t]*$|^;[ \t]*target_layer[ \t]*:", re.M)
+#: How far into a file that banner is looked for.
+_CONTINUES_WITHIN_CHARS = 2048
+
+
+def continues_a_print(text: str | Iterable[str]) -> bool:
+    """Whether *text* (a file's text or its lines) carries a print on from a
+    layer rather than printing from the first: such a file keeps the whole
+    print's time comments, which are never its own time.  Never raises."""
+    try:
+        if not isinstance(text, str):
+            head: list[str] = []
+            size = 0
+            for line in text:
+                head.append(line)
+                size += len(line) + 1
+                if size >= _CONTINUES_WITHIN_CHARS:
+                    break
+            text = "\n".join(head)
+        return bool(_CONTINUES_FROM_LAYER.search(text.lstrip()[:_CONTINUES_WITHIN_CHARS]))
+    except Exception:  # noqa: BLE001 -- unreadable text is an ordinary file
+        return False
+
+
 def slicer_print_time(text: str) -> SlicerPrintTime | None:
     """The whole print's time as the slicer wrote it into *text*, or ``None``.
 
     The one reader of a slicer's time estimate: every door that reports a
-    print time from a G-code file's own comments calls it.  Never raises.
+    print time from a G-code file's own comments calls it.  A file that
+    carries a print on from a layer (:func:`continues_a_print`) states no
+    time of its own: ``None``.  Never raises.
     """
+    if continues_a_print(text):
+        return None
     candidates = _comments_naming(text, "ime", "IME")
     for pattern in _PRINT_TIME_LINES:
         m = pattern.search(candidates)

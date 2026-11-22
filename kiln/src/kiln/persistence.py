@@ -752,6 +752,15 @@ class KilnDB:
                 self._conn.execute(
                     f"ALTER TABLE print_outcomes ADD COLUMN {name} TEXT DEFAULT NULL"
                 )
+        # Why a print did not run the way its file was sliced
+        # (kiln.ran_as_sliced): a JSON list of {"kind", "seen_by"}.  NULL for a
+        # print started before this column; ``[]`` once a start opened the
+        # record and nothing has been seen yet.  Kept on this computer.
+        for name in self.RAN_AS_SLICED_COLUMNS:
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE print_outcomes ADD COLUMN {name} TEXT DEFAULT NULL"
+                )
         # What a print ran with and how far it got (kiln.print_evidence):
         # each NULL when Kiln had no reading it could vouch for.
         for name, sql_type in self.PRINT_EVIDENCE_COLUMNS.items():
@@ -2988,6 +2997,10 @@ class KilnDB:
     #: Which slicer made the printed file, read from it at the start.
     SLICER_COLUMNS = ("slicer_name", "slicer_version")
 
+    #: Why the print did not run as its file was sliced; see
+    #: :mod:`kiln.ran_as_sliced`.
+    RAN_AS_SLICED_COLUMNS = ("not_as_sliced",)
+
     #: Evidence about a print, written beside its ending and never read into
     #: a verdict here: a one-way code of the settings the sent file was
     #: sliced with, how far the print had got when it ended (a 0..1 share
@@ -3458,6 +3471,72 @@ class KilnDB:
                     return True
         return False
 
+    def open_as_sliced_record(self, job_id: str) -> bool:
+        """Mark the print *job_id* names as watched from its start, with no
+        reason yet that it did not run as sliced (``[]``), once."""
+        if not job_id:
+            return False
+        with self._write_lock:
+            cur = self._conn.execute(
+                "UPDATE print_outcomes SET not_as_sliced = '[]' WHERE job_id = ? AND not_as_sliced IS NULL",
+                (job_id,),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
+
+    def note_not_as_sliced(
+        self,
+        kind: str,
+        seen_by: str,
+        *,
+        job_id: str | None = None,
+        printer_names: list[str] | None = None,
+        machine_fingerprint: str | None = None,
+    ) -> bool:
+        """Add one reason the print did not run as sliced: onto the row
+        *job_id* names, else onto the newest open (``pending``) print of the
+        machine (its fingerprint, else any of *printer_names*).  A reason
+        already there is not added twice.  Returns whether a row took it."""
+        if not kind or not seen_by:
+            return False
+        if job_id:
+            where, params = "job_id = ?", [job_id]
+        else:
+            clauses: list[str] = []
+            params = []
+            if machine_fingerprint:
+                clauses.append("machine_fingerprint = ?")
+                params.append(machine_fingerprint)
+            names = [n for n in (printer_names or []) if n]
+            if names:
+                clauses.append(f"printer_name IN ({', '.join('?' for _ in names)})")
+                params.extend(names)
+            if not clauses:
+                return False
+            where = f"({' OR '.join(clauses)}) AND outcome = 'pending'"
+        with self._write_lock:
+            row = self._conn.execute(
+                f"SELECT id, not_as_sliced FROM print_outcomes WHERE {where} ORDER BY created_at DESC LIMIT 1",
+                params,
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                reasons = json.loads(row[1]) if row[1] else []
+                if not isinstance(reasons, list):
+                    reasons = []
+            except (TypeError, ValueError):
+                reasons = []
+            entry = {"kind": kind, "seen_by": seen_by}
+            if entry in reasons:
+                return False
+            reasons.append(entry)
+            self._conn.execute(
+                "UPDATE print_outcomes SET not_as_sliced = ? WHERE id = ?", (json.dumps(reasons), row[0])
+            )
+            self._conn.commit()
+            return True
+
     def set_outcome_slicer(self, job_id: str, name: str, version: str | None) -> bool:
         """Write which slicer made the file the print *job_id* names, once.
 
@@ -3609,7 +3688,7 @@ class KilnDB:
             return []
         params.append(int(limit))
         rows = self._conn.execute(
-            "SELECT job_id, printer_name, estimated_seconds, print_seconds, created_at, ended_at "
+            "SELECT job_id, printer_name, estimated_seconds, print_seconds, created_at, ended_at, not_as_sliced "
             f"FROM print_outcomes WHERE ({' OR '.join(clauses)}) AND outcome = 'success' "
             "AND estimated_seconds IS NOT NULL AND print_seconds IS NOT NULL "
             "ORDER BY COALESCE(ended_at, created_at) DESC LIMIT ?",
@@ -3636,7 +3715,7 @@ class KilnDB:
         if not clauses:
             return None
         row = self._conn.execute(
-            "SELECT job_id, printer_name, file_name, estimated_seconds, created_at "
+            "SELECT job_id, printer_name, file_name, estimated_seconds, created_at, not_as_sliced "
             f"FROM print_outcomes WHERE ({' OR '.join(clauses)}) AND outcome = 'pending' "
             "AND estimated_seconds IS NOT NULL ORDER BY created_at DESC LIMIT 1",
             params,
