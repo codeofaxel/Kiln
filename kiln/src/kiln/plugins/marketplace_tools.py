@@ -78,7 +78,7 @@ def _arrive(response: dict, entries: list[dict], *, mkt: Any = None, model_id: A
             ready, conversion = convert_on_arrival(original, tool="download_model")
         except Exception as exc:  # noqa: BLE001 — the download stands; the person is told
             entry["conversion_failed"] = (
-                f"{os.path.basename(original)} could not be turned into an STL ({exc}), "
+                f"{os.path.basename(original)} could not be turned into an STL ({_plain_words.said(exc)}), "
                 "so the 3D stage and the slicer cannot open it."
             )
             continue
@@ -214,10 +214,10 @@ class _MarketplaceToolsPlugin:
                     }
                 return resp
             except MarketplaceError as exc:
-                return _error_dict(f"Failed to search models: {_plain_words.said(exc)}. Check marketplace credentials are configured.")
+                return _error_dict(f"Kiln couldn't search the models: {_plain_words.said(exc)}. Check that a model site's key is set.")
             except Exception as exc:
                 logger.exception("Unexpected error in search_all_models")
-                return _error_dict(f"Unexpected error in `search_all_models`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't search the model sites: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ---------------------------------------------------------------
         # Thingiverse-specific tools
@@ -262,10 +262,10 @@ class _MarketplaceToolsPlugin:
                     "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
                 }
             except (ThingiverseError, RuntimeError) as exc:
-                return _error_dict(f"Failed to search Thingiverse: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
+                return _error_dict(f"Kiln couldn't search Thingiverse: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
             except Exception as exc:
                 logger.exception("Unexpected error in search_models")
-                return _error_dict(f"Unexpected error in `search_models`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't search for models: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Get model details", open_world=True))
         def model_details(thing_id: int) -> dict:
@@ -299,10 +299,10 @@ class _MarketplaceToolsPlugin:
             except ThingiverseNotFoundError:
                 return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
             except (ThingiverseError, RuntimeError) as exc:
-                return _error_dict(f"Failed to get model details: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
+                return _error_dict(f"Kiln couldn't get the model details: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
             except Exception as exc:
                 logger.exception("Unexpected error in model_details")
-                return _error_dict(f"Unexpected error in `model_details`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't read the model's details: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("List a model's files", open_world=True))
         def model_files(thing_id: int) -> dict:
@@ -338,10 +338,10 @@ class _MarketplaceToolsPlugin:
             except ThingiverseNotFoundError:
                 return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
             except (ThingiverseError, RuntimeError) as exc:
-                return _error_dict(f"Failed to list model files: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
+                return _error_dict(f"Kiln couldn't list the model files: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
             except Exception as exc:
                 logger.exception("Unexpected error in model_files")
-                return _error_dict(f"Unexpected error in `model_files`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't list the model's files: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=creates("Download a marketplace model", open_world=True))
         def download_model(
@@ -441,8 +441,8 @@ class _MarketplaceToolsPlugin:
                 for root in _allowed_roots
             ):
                 return _error_dict(
-                    "`dest_dir` must be within /tmp/, home directory, or current "
-                    f"working directory. Got: {dest_dir}",
+                    "`dest_dir` must be inside the temporary folder, your home folder, or the current "
+                    f"folder; {dest_dir} isn't.",
                     code="INVALID_PATH",
                 )
             # -------------------------------------------------------------------
@@ -535,7 +535,7 @@ class _MarketplaceToolsPlugin:
                 # Single-file download, from the marketplace it belongs to
                 if file_id is None:
                     return _error_dict(
-                        "Either `file_id` or `model_id` must be provided.",
+                        "Give a `file_id` or a `model_id`.",
                         code="INVALID_INPUT",
                     )
                 path, mkt = _download_marketplace_file(source, file_id, dest_dir, file_name=file_name)
@@ -576,11 +576,11 @@ class _MarketplaceToolsPlugin:
                 )
             except (ThingiverseError, MarketplaceError, RuntimeError) as exc:
                 return _error_dict(
-                    f"Failed to download model: {_plain_words.said(exc)}. Check marketplace credentials and that the model/file ID is correct."
+                    f"Kiln couldn't download the model: {_plain_words.said(exc)}. Check the model site's key, and that the model or file id is right."
                 )
             except Exception as exc:
                 logger.exception("Unexpected error in download_model")
-                return _error_dict(f"Unexpected error in `download_model`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't download the model: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Browse marketplace models", open_world=True))
         def browse_models(
@@ -618,7 +618,7 @@ class _MarketplaceToolsPlugin:
                     results = client.featured(page=page, per_page=per_page)
                 else:
                     return _error_dict(
-                        f"Unknown `browse_type`: {browse_type!r}.  Supported: 'popular', 'newest', 'featured'.",
+                        f"Kiln doesn't know the `browse_type` {browse_type!r}. Use `popular`, `newest` or `featured`.",
                         code="INVALID_ARGS",
                     )
 
@@ -630,10 +630,10 @@ class _MarketplaceToolsPlugin:
                     "page": page,
                 }
             except (ThingiverseError, RuntimeError) as exc:
-                return _error_dict(f"Failed to browse models: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
+                return _error_dict(f"Kiln couldn't browse the models: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
             except Exception as exc:
                 logger.exception("Unexpected error in browse_models")
-                return _error_dict(f"Unexpected error in `browse_models`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't browse the models: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("List model categories", open_world=True))
         def list_model_categories() -> dict:
@@ -654,10 +654,10 @@ class _MarketplaceToolsPlugin:
                     "count": len(cats),
                 }
             except (ThingiverseError, RuntimeError) as exc:
-                return _error_dict(f"Failed to list categories: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
+                return _error_dict(f"Kiln couldn't list the categories: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
             except Exception as exc:
                 logger.exception("Unexpected error in list_model_categories")
-                return _error_dict(f"Unexpected error in `list_model_categories`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't list the model categories: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ---------------------------------------------------------------
         # Marketplace status & diagnostics
@@ -684,7 +684,7 @@ class _MarketplaceToolsPlugin:
                     "success": False,
                     "error": {
                         "code": "IMPORT_ERROR",
-                        "message": "Could not access marketplace registry.",
+                        "message": "Kiln couldn't load its list of model sites.",
                         "retryable": False,
                     },
                 }
@@ -726,7 +726,7 @@ class _MarketplaceToolsPlugin:
                     "success": False,
                     "error": {
                         "code": "INTERNAL_ERROR",
-                        "message": f"Unexpected error: {_plain_words.said(exc)}",
+                        "message": _plain_words.sentence(exc),
                         "retryable": True,
                         **_plain_words.detail_field(exc),
                     },
@@ -750,7 +750,7 @@ class _MarketplaceToolsPlugin:
                     "success": False,
                     "error": {
                         "code": "IMPORT_ERROR",
-                        "message": "Could not access marketplace registry.",
+                        "message": "Kiln couldn't load its list of model sites.",
                         "retryable": False,
                     },
                 }
@@ -796,7 +796,7 @@ class _MarketplaceToolsPlugin:
                     "success": False,
                     "error": {
                         "code": "INTERNAL_ERROR",
-                        "message": f"Unexpected error: {_plain_words.said(exc)}",
+                        "message": _plain_words.sentence(exc),
                         "retryable": True,
                         **_plain_words.detail_field(exc),
                     },

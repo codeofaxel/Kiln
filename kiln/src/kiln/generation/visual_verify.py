@@ -26,6 +26,7 @@ from typing import Any
 
 import requests
 
+from kiln import plain_words as _plain_words
 from kiln.generation.base import GenerationError
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ def _load_stl_as_colored_triangles(stl_path: str, color=_DEFAULT_COLOR) -> list:
     raw_triangles, _vertices = _parse_stl(Path(stl_path), errors)
     if errors:
         raise GenerationError(
-            f"Could not parse STL for rendering: {'; '.join(errors)}",
+            f"Kiln couldn't read the STL for rendering: {'; '.join(errors)}",
             code="STL_PARSE_ERROR",
         )
     if not raw_triangles:
@@ -158,7 +159,7 @@ class VisualVerifier:
             results = render_colored_mesh_multi_angle(triangles, angles=["isometric"])
         except Exception as exc:  # noqa: BLE001 — surface as GenerationError
             raise GenerationError(
-                f"Rendering STL preview failed: {exc}",
+                f"Kiln couldn't draw the preview: {_plain_words.said(exc)}.",
                 code="RENDER_FAILED",
             ) from exc
 
@@ -208,7 +209,7 @@ class VisualVerifier:
             )
         except Exception as exc:  # noqa: BLE001 — surface as GenerationError
             raise GenerationError(
-                f"Rendering STL multi-angle preview failed: {exc}",
+                f"Kiln couldn't draw the previews from each side: {_plain_words.said(exc)}.",
                 code="RENDER_FAILED",
             ) from exc
 
@@ -274,7 +275,7 @@ class VisualVerifier:
             )
         except (requests.ConnectionError, requests.Timeout) as exc:
             raise GenerationError(
-                f"Gemini Vision API request failed: {exc}",
+                f"The request to Gemini didn't go through: {_plain_words.said(exc)}.",
                 code="VISION_API_ERROR",
             ) from exc
 

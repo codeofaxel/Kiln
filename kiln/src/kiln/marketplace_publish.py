@@ -19,6 +19,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -376,7 +378,7 @@ def _publish_to_marketplace(
                 success=False,
                 listing_url=None,
                 listing_id=None,
-                error=f"{adapter.display_name} adapter does not implement upload_model.",
+                error=f"Kiln can't publish to {adapter.display_name} yet.",
             )
 
         result = upload_fn(
@@ -402,7 +404,7 @@ def _publish_to_marketplace(
             success=False,
             listing_url=None,
             listing_id=None,
-            error=str(exc),
+            error=_plain_words.sentence(exc),
         )
 
 

@@ -27,6 +27,7 @@ from typing import Any
 
 import trimesh
 
+from kiln import plain_words as _plain_words
 from kiln.mesh_errors import MeshFileMissing, UnreadableMeshError
 
 #: File types whose own specification puts up on +Y.
@@ -573,7 +574,7 @@ def _load_3mf(source: Any, kwargs: dict[str, Any]) -> Any:
         if isinstance(exc.__cause__, ModelBudgetExceeded):
             # More than one read may hold once every copy the build places
             # is counted: the same refusal as a file too large as written.
-            raise MeshTooLargeError(str(exc)) from exc
+            raise MeshTooLargeError(_plain_words.sentence(exc)) from exc
         raise
     unit = str(scene.metadata.get("units") or "millimeter").strip().lower()
     to_mm = _3MF_UNIT_TO_MM.get(unit)

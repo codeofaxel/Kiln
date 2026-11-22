@@ -80,7 +80,7 @@ class _CredentialToolsPlugin:
                 return {"success": True, "credential": cred.to_dict()}
             except Exception as exc:
                 _logger.exception("Error in store_credential")
-                return _srv._error_dict(f"Failed to store credential: {exc}", code="CREDENTIAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't store the credential: {exc}", code="CREDENTIAL_ERROR")
 
         # ------------------------------------------------------------------
         # list_credentials
@@ -101,7 +101,7 @@ class _CredentialToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Error in list_credentials")
-                return _srv._error_dict(f"Failed to list credentials: {exc}", code="CREDENTIAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't list the credentials: {exc}", code="CREDENTIAL_ERROR")
 
         # ------------------------------------------------------------------
         # retrieve_credential
@@ -125,7 +125,7 @@ class _CredentialToolsPlugin:
                 return {"success": True, "credential_id": credential_id, "value": value}
             except Exception as exc:
                 _logger.exception("Error in retrieve_credential")
-                return _srv._error_dict(f"Failed to retrieve credential: {exc}", code="CREDENTIAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't get the credential: {exc}", code="CREDENTIAL_ERROR")
 
 
 plugin = _CredentialToolsPlugin()

@@ -437,7 +437,7 @@ class TestQuickPrintValidationStep:
         validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
         assert len(validate_steps) == 1
         assert validate_steps[0].success is False
-        assert "could not check" in validate_steps[0].message
+        assert "couldn't check" in validate_steps[0].message
         assert "skip_validation=True" in validate_steps[0].message
         assert not [s for s in result.steps if s.name == "slice"]
         mock_slice.assert_not_called()

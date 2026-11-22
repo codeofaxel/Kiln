@@ -28,6 +28,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.untrusted_zip import UntrustedArchiveError, open_untrusted_zip
 
 # ---------------------------------------------------------------------------
@@ -1318,7 +1319,7 @@ class _ModelArchive:
             with fh:
                 model_el, meshes = _stream_part(fh, self._budget, self._mode)
         except ET.ParseError as exc:
-            self.errors.append(f"Corrupt 3MF model XML in {name!r}: {exc}")
+            self.errors.append(f"Corrupt 3MF model XML in {name!r}: {_plain_words.said(exc)}")
             return None
         objects: dict[int, ET.Element] = {}
         resources_el = model_el.find(f"{{{_CORE_NS}}}resources")

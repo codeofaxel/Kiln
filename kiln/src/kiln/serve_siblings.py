@@ -506,7 +506,7 @@ def check_serve_siblings() -> dict:
             f"are leftovers from closed sessions. {stakes} Kiln can close "
             f"the leftovers for you whenever you like — just say so, and "
             f"it will check that nothing is printing first (tool: "
-            f"trim_serve_processes; terminal: `{kiln_command('trim')}`). They also "
+            f"`trim_serve_processes`; terminal: `{kiln_command('trim')}`). They also "
             f"clear on their own next time you fully quit your Claude/MCP "
             f"apps."
         )
@@ -630,7 +630,7 @@ def printer_slot_report() -> dict:
             f"allow only a few connections at once, so this is a common reason "
             f"one that is powered on and on the network still times out — the "
             f"printer is fine, its connection slots are taken. Closing the "
-            f"leftover servers frees them (tool: trim_serve_processes; "
+            f"leftover servers frees them (tool: `trim_serve_processes`; "
             f"terminal: `{kiln_command('trim')}`). Power-cycling the printer will not help."
         )
     return {"checked": checked, "hosts": reports, "warning": warning}
@@ -689,7 +689,7 @@ def printing_now() -> dict:
         adapters = _srv._get_registry().list_all()
     except Exception as exc:
         logger.debug("serve-siblings: registry unavailable: %s", exc)
-        return {"active": [], "unknown": [f"registry unavailable: {exc}"]}
+        return {"active": [], "unknown": [f"registry unavailable: {_plain_words.said(exc)}"]}
 
     seen: set[int] = set()
     for name, adapter in adapters.items():
@@ -725,7 +725,7 @@ def printing_now() -> dict:
             if occupied:
                 active.append(f"{name} ({value})")
         except Exception as exc:
-            unknown.append(f"{name}: {exc}")
+            unknown.append(f"{name}: {_plain_words.said(exc)}")
     return {"active": active, "unknown": unknown}
 
 
@@ -983,7 +983,7 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
             trimmed.append(cand)
         except Exception as exc:
             failed.append(
-                {**cand, "error": f"ignored SIGTERM, and SIGKILL failed: {_plain_words.said(exc)}"}
+                {**cand, "error": f"That Kiln process ignored the request to stop, and Kiln couldn't force it: {_plain_words.said(exc)}."}
             )
 
     unkillable = _await_exit([c["pid"] for c in kill_pending], _KILL_GRACE_S)

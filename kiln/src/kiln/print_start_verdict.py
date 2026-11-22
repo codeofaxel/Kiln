@@ -326,7 +326,7 @@ def resolve_print_start(
             f"Print command accepted for {said}. {detail} The start check's "
             f"failure verdict came from a reading that does not postdate this "
             f"command, so it is not evidence about this job — call "
-            f"printer_status() to confirm."
+            f"`printer_status` to confirm."
         ),
         job_id=job_id,
         evidence=evidence,

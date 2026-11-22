@@ -782,7 +782,7 @@ class TestSendCommand:
 
     def test_send_command_raises_on_ws_error(self, adapter_with_ws: ElegooAdapter) -> None:
         adapter_with_ws._ws.send.side_effect = Exception("ws broken")
-        with pytest.raises(PrinterError, match="Failed to send"):
+        with pytest.raises(PrinterError, match="couldn't send the command"):
             adapter_with_ws._send_command(_CMD_STATUS_REQUEST)
 
     def test_send_command_checked_no_response(self, adapter_with_ws: ElegooAdapter) -> None:

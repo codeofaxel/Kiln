@@ -16,6 +16,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln._vec import add as _vec_add
 from kiln._vec import cross as _vec_cross
 from kiln._vec import dot as _vec_dot
@@ -48,7 +49,7 @@ def _parse_stl(path: str) -> list[dict[str, Any]]:
     errors: list[str] = []
     raw_tris, _ = _parse_stl_raw(p, errors)
     if errors:
-        raise UnreadableMeshError(f"STL parse error: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read that STL file. {' '.join(errors)}")
 
     # Convert (v1, v2, v3) tuples to dicts with computed normals
     result: list[dict[str, Any]] = []
@@ -86,7 +87,9 @@ def _parse_mesh(path: str) -> list[dict[str, Any]]:
         mesh = load_mesh(path, force="mesh", process=False)
         triangles = mesh.triangles
     except Exception as exc:
-        raise UnreadableMeshError(f"Mesh parse error ({suffix}): {exc}") from exc
+        raise UnreadableMeshError(
+            f"Kiln couldn't read that {suffix.lstrip('.').upper()} file: {_plain_words.said(exc)}."
+        ) from exc
 
     result: list[dict[str, Any]] = []
     for tri in triangles:

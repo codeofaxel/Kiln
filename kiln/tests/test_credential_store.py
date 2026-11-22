@@ -132,7 +132,7 @@ class TestCredentialStoreInit:
         db_path = str(tmp_path / "credentials.db")
         with mock.patch.dict(os.environ, {}, clear=True):
             with mock.patch("kiln.credential_store._DEFAULT_MASTER_KEY_PATH", str(tmp_path / "master.key")):
-                with pytest.raises(CredentialStoreError, match="No master key configured"):
+                with pytest.raises(CredentialStoreError, match="Kiln has no master key"):
                     CredentialStore(db_path=db_path)
 
     def test_db_directory_created(self, tmp_path):

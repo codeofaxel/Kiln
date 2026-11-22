@@ -108,14 +108,14 @@ def _limits_confirmed_by_a_person(printer_model: str, profile: dict) -> Any:
     if outcome == screen_code.SHOWN:
         how = (
             "A code was just shown on the person's screen. Ask them to type it, pass their words "
-            "to give_print_code, then call add_safety_profile again with the same numbers."
+            "to `give_print_code`, then call `add_safety_profile` again with the same numbers."
         )
     elif outcome == screen_code.COOLDOWN:
         how = f"Too many codes were shown recently; try again in {shown.get('seconds_left', 60)} seconds."
     else:
         how = (
             "This machine cannot show the person a code, so Kiln cannot take these limits here. "
-            "Set printer_model to a printer Kiln knows, or state limits at or below the generic floor."
+            "Set `printer_model` to a printer Kiln knows, or state limits at or below the generic floor."
         )
     return _srv._error_dict(lead + how, code="CONFIRMATION_REQUIRED", extra={"code_shown": outcome})
 
@@ -154,7 +154,7 @@ def _limits_read_off_the_printer(printer_model: str, printer_name: str) -> dict:
         proposal = adapter.read_machine_limits()
     except PrinterError as exc:
         return _srv._error_dict(
-            f"{adapter.name} could not be asked for its configuration ({_plain_words.said(exc)}). Try again when it is "
+            f"Kiln couldn't ask {adapter.name} for its settings ({_plain_words.said(exc)}). Try again when it is "
             "reachable, " + or_say_profile,
             code="PRINTER_UNREACHABLE", retryable=True,
         )
@@ -262,7 +262,7 @@ class _SafetyToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in safety_audit")
                 return _srv._error_dict(
-                    f"Unexpected error in `safety_audit`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
+                    f"Kiln couldn't run the safety check: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
                 )
 
         # ------------------------------------------------------------------
@@ -394,7 +394,7 @@ class _SafetyToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in safety_status")
                 return _srv._error_dict(
-                    f"Unexpected error in `safety_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
+                    f"Kiln couldn't read the safety status: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
                 )
 
         # ------------------------------------------------------------------
@@ -524,7 +524,7 @@ class _SafetyToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in list_safety_profiles")
                 return _srv._error_dict(
-                    f"Unexpected error in `list_safety_profiles`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't list the safety profiles: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -567,7 +567,7 @@ class _SafetyToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in get_safety_profile")
                 return _srv._error_dict(
-                    f"Unexpected error in `get_safety_profile`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't read the safety profile: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -659,7 +659,7 @@ class _SafetyToolsPlugin:
                 errors = validate_safety_profile(profile)
                 if errors:
                     return _srv._error_dict(
-                        f"Validation failed: {'; '.join(errors)}",
+                        f"The safety profile has problems: {'; '.join(errors)}.",
                         code="VALIDATION_ERROR", extra=shown or None,
                     )
                 confirmed = False
@@ -681,12 +681,12 @@ class _SafetyToolsPlugin:
                 }
             except ValueError as exc:
                 return _srv._error_dict(
-                    f"Failed to add safety profile: {_plain_words.said(exc)}", code="VALIDATION_ERROR"
+                    f"Kiln couldn't add the safety profile: {_plain_words.said(exc)}.", code="VALIDATION_ERROR"
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in add_safety_profile")
                 return _srv._error_dict(
-                    f"Unexpected error in `add_safety_profile`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't add the safety profile: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -721,7 +721,7 @@ class _SafetyToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in list_printer_variants")
                 return _srv._error_dict(
-                    f"Unexpected error in `list_printer_variants`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't list the printer's variants: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -765,7 +765,7 @@ class _SafetyToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in select_printer_variant")
                 return _srv._error_dict(
-                    f"Unexpected error in `select_printer_variant`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't choose the printer variant: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

@@ -155,7 +155,7 @@ class TestValidateSafetyProfile:
         profile = _valid_profile()
         profile["build_volume"] = [100, 100]
         errors = validate_safety_profile(profile)
-        assert any("build_volume" in e and "3" in e for e in errors)
+        assert any("build_volume" in e and "three numbers" in e for e in errors)
 
     def test_build_volume_not_list(self):
         profile = _valid_profile()
@@ -167,19 +167,19 @@ class TestValidateSafetyProfile:
         profile = _valid_profile()
         profile["build_volume"] = [0, 200, 200]
         errors = validate_safety_profile(profile)
-        assert any("build_volume[0]" in e and "positive" in e for e in errors)
+        assert any("width in `build_volume`" in e and "above 0" in e for e in errors)
 
     def test_build_volume_negative_dimension(self):
         profile = _valid_profile()
         profile["build_volume"] = [200, -5, 200]
         errors = validate_safety_profile(profile)
-        assert any("build_volume[1]" in e for e in errors)
+        assert any("depth in `build_volume`" in e for e in errors)
 
     def test_build_volume_non_numeric(self):
         profile = _valid_profile()
         profile["build_volume"] = [200, "big", 200]
         errors = validate_safety_profile(profile)
-        assert any("build_volume[1]" in e and "number" in e for e in errors)
+        assert any("depth in `build_volume`" in e and "number" in e for e in errors)
 
     def test_temperature_type_string(self):
         profile = _valid_profile()
@@ -253,7 +253,7 @@ class TestAddCommunityProfile:
 
     def test_invalid_profile_raises_value_error(self):
         bad = {"max_hotend_temp": 999}
-        with pytest.raises(ValueError, match="Invalid safety profile"):
+        with pytest.raises(ValueError, match="The safety profile has problems"):
             add_community_profile("bad_printer", bad, confirmed=True)
 
     def test_source_tagging_in_notes(self):

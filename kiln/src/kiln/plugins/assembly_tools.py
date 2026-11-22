@@ -37,7 +37,7 @@ def _assembly_state(assembly_json: Any) -> dict[str, Any]:
         raise json.JSONDecodeError(err["error"]["message"], "", 0)
     if not state:
         raise json.JSONDecodeError(
-            "assembly_json is required: pass the state create_assembly returned.", "", 0
+            "`assembly_json` is required: pass the state `create_assembly` returned.", "", 0
         )
     return state
 

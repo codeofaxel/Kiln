@@ -39,6 +39,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 #: A bed in a slicer file and in the catalogue are one bed within this.
@@ -178,7 +180,7 @@ def read_slicer_setup(file_path: str) -> SlicerSetup:
     try:
         settings = slicer_settings(path)
     except OSError as exc:
-        raise SetupFileError(f"{os.path.basename(path)} could not be read: {exc}") from exc
+        raise SetupFileError(f"{os.path.basename(path)} could not be read: {_plain_words.said(exc)}.") from exc
     if not settings:
         raise SetupFileError(
             f"{os.path.basename(path)} holds no slicer settings.  Kiln reads a project saved from "
@@ -634,7 +636,7 @@ def set_printer_model(
         try:
             key, said = _set_up_locally(setup, key)
         except ValueError as exc:
-            return refused("LOCAL_SETUP_REFUSED", f"{named} could not be set up on this machine: {exc}")
+            return refused("LOCAL_SETUP_REFUSED", f"{named} could not be set up on this machine: {_plain_words.said(exc)}")
     elif in_catalogue:
         said = "Kiln checks its prints against that model's bed and temperature limits and slices with its profile."
     elif declared is not None:

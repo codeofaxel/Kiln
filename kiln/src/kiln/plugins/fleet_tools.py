@@ -432,7 +432,7 @@ class _FleetToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in fleet_analytics")
-                return _srv._error_dict(f"Unexpected error in `fleet_analytics`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't put together the fleet report: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # list_fleet_sites
@@ -457,7 +457,7 @@ class _FleetToolsPlugin:
                 return {"success": True, "sites": site_data, "count": len(site_data)}
             except Exception as exc:
                 _logger.exception("Unexpected error in list_fleet_sites")
-                return _srv._error_dict(f"Unexpected error in `list_fleet_sites`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't list the fleet's sites: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # fleet_status_by_site
@@ -524,7 +524,7 @@ class _FleetToolsPlugin:
                 return _srv._error_dict(f"Printer {name!r} not registered.", code="NOT_FOUND")
             except Exception as exc:
                 _logger.exception("Unexpected error in update_printer_site")
-                return _srv._error_dict(f"Unexpected error in `update_printer_site`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't update the printer's site: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # route_print_job
@@ -716,7 +716,7 @@ class _FleetToolsPlugin:
                 return _srv._error_dict(_plain_words.sentence(exc), code="ROUTING_ERROR")
             except Exception as exc:
                 _logger.exception("Error in route_print_job")
-                return _srv._error_dict(f"Failed to route print job: {_plain_words.said(exc)}", code="ROUTING_ERROR")
+                return _srv._error_dict(f"Kiln couldn't route the print job: {_plain_words.said(exc)}.", code="ROUTING_ERROR")
 
         # ------------------------------------------------------------------
         # fleet_submit_job
@@ -789,7 +789,7 @@ class _FleetToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Error in fleet_utilization")
-                return _srv._error_dict(f"Failed to get fleet utilization: {_plain_words.said(exc)}", code="FLEET_ERROR")
+                return _srv._error_dict(f"Kiln couldn't get the fleet utilization: {_plain_words.said(exc)}.", code="FLEET_ERROR")
 
 
 plugin = _FleetToolsPlugin()

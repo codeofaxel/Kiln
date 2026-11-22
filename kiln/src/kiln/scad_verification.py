@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 _logger = logging.getLogger(__name__)
 
 
@@ -158,7 +160,7 @@ def verify_flip_readability(scad_path: str) -> dict[str, Any]:
             Issue(
                 severity="error",
                 code="SCAD_UNREADABLE",
-                message=f"Could not read SCAD file: {exc}",
+                message=f"Kiln couldn't read the SCAD file: {_plain_words.said(exc)}.",
             )
         )
         return report.to_dict()

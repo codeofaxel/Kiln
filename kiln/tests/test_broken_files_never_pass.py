@@ -306,7 +306,7 @@ def test_a_real_part_that_fails_the_check_can_still_be_printed_anyway(files):
     with patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline", return_value=failed):
         gate = gate_for_print(files["cube.stl"])
 
-    assert gate.refusal.endswith("Pass skip_validation=True to bypass.")
+    assert gate.refusal.endswith("Pass `skip_validation=True` to print it anyway.")
 
 
 def test_the_gate_refuses_when_the_check_cannot_run(files):
@@ -315,7 +315,7 @@ def test_the_gate_refuses_when_the_check_cannot_run(files):
     with patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline", side_effect=MemoryError()):
         gate = gate_for_print(files["cube.stl"])
 
-    assert gate.code == "VALIDATION_ERROR" and "could not check" in gate.reason
+    assert gate.code == "VALIDATION_ERROR" and "couldn't check" in gate.reason
     assert gate.report is None and gate.path == files["cube.stl"]
 
 

@@ -149,42 +149,42 @@ def _validate_listing(listing: OperatorListing) -> None:
     """
     # -- operator_id --
     if not isinstance(listing.operator_id, str) or not listing.operator_id.strip():
-        raise DiscoveryValidationError("operator_id must be a non-empty string")
+        raise DiscoveryValidationError("`operator_id` can't be empty.")
     if len(listing.operator_id) > _MAX_OPERATOR_ID_LEN:
-        raise DiscoveryValidationError(f"operator_id exceeds max length of {_MAX_OPERATOR_ID_LEN} characters")
+        raise DiscoveryValidationError(f"`operator_id` is longer than {_MAX_OPERATOR_ID_LEN} characters.")
 
     # -- display_name --
     if not isinstance(listing.display_name, str) or not listing.display_name.strip():
-        raise DiscoveryValidationError("display_name must be a non-empty string")
+        raise DiscoveryValidationError("`display_name` can't be empty.")
     if len(listing.display_name) > _MAX_DISPLAY_NAME_LEN:
-        raise DiscoveryValidationError(f"display_name exceeds max length of {_MAX_DISPLAY_NAME_LEN} characters")
+        raise DiscoveryValidationError(f"`display_name` is longer than {_MAX_DISPLAY_NAME_LEN} characters.")
 
     # -- materials --
     if not listing.materials:
-        raise DiscoveryValidationError("materials must be a non-empty list")
+        raise DiscoveryValidationError("`materials` must list at least one material.")
     for mat in listing.materials:
         if not isinstance(mat, str) or not mat.strip():
-            raise DiscoveryValidationError("each material must be a non-empty string")
+            raise DiscoveryValidationError("Each material needs a name.")
         if len(mat) > _MAX_MATERIAL_LEN:
-            raise DiscoveryValidationError(f"material exceeds max length of {_MAX_MATERIAL_LEN} characters")
+            raise DiscoveryValidationError(f"A material name is longer than {_MAX_MATERIAL_LEN} characters.")
 
     # -- printer_models --
     if not listing.printer_models:
-        raise DiscoveryValidationError("printer_models must be a non-empty list")
+        raise DiscoveryValidationError("`printer_models` must list at least one printer.")
 
     # -- avg_quality_score --
     if not (_MIN_QUALITY_SCORE <= listing.avg_quality_score <= _MAX_QUALITY_SCORE):
         raise DiscoveryValidationError(
-            f"avg_quality_score must be between {_MIN_QUALITY_SCORE} and {_MAX_QUALITY_SCORE}"
+            f"`avg_quality_score` must be between {_MIN_QUALITY_SCORE} and {_MAX_QUALITY_SCORE}"
         )
 
     # -- success_rate --
     if not (_MIN_SUCCESS_RATE <= listing.success_rate <= _MAX_SUCCESS_RATE):
-        raise DiscoveryValidationError(f"success_rate must be between {_MIN_SUCCESS_RATE} and {_MAX_SUCCESS_RATE}")
+        raise DiscoveryValidationError(f"`success_rate` must be between {_MIN_SUCCESS_RATE} and {_MAX_SUCCESS_RATE}")
 
     # -- min_lead_time_hours --
     if listing.min_lead_time_hours < 0:
-        raise DiscoveryValidationError("min_lead_time_hours must be >= 0")
+        raise DiscoveryValidationError("`min_lead_time_hours` can't be negative.")
 
 
 # ---------------------------------------------------------------------------

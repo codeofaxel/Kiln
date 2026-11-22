@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 from kiln.events import EventBus, EventType
 from kiln.print_signoff import grant_from_record, record_refusal
@@ -1792,9 +1793,9 @@ class JobScheduler:
                 if code in _TURN_CODES:
                     self._wait_turn(next_job, printer_name, idle_printers, code, waits)
                     break
-                self._requeue_or_fail(next_job.id, f"Failed to start print on {printer_name}: {exc}", failed)
+                self._requeue_or_fail(next_job.id, f"Failed to start print on {printer_name}: {_plain_words.said(exc)}", failed)
             except PrinterError as exc:
-                error_msg = f"Failed to start print on {printer_name}: {exc}"
+                error_msg = f"Failed to start print on {printer_name}: {_plain_words.said(exc)}"
                 self._requeue_or_fail(next_job.id, error_msg, failed)
             except Exception as exc:
                 logger.exception("Unexpected error dispatching job %s", next_job.id)

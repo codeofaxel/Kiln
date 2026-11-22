@@ -134,7 +134,7 @@ class _FirmwareToolsPlugin:
                 try:
                     answer = do(_srv._resolve_adapter(name))
                 except Exception as exc:
-                    answer = _srv._error_dict(f"{fail}: {_plain_words.said(exc)}", code="FIRMWARE_ERROR")
+                    answer = _srv._error_dict(f"{fail}: {_plain_words.said(exc)}.", code="FIRMWARE_ERROR")
                 results.append({"machine": name, **answer})
             done = sum(1 for r in results if r.get("success"))
             return {
@@ -151,7 +151,7 @@ class _FirmwareToolsPlugin:
                 )
             status = adapter.get_firmware_status()
             if status is None:
-                return _srv._error_dict("Could not read the firmware status.", code="UNAVAILABLE")
+                return _srv._error_dict("Kiln couldn't read the firmware status.", code="UNAVAILABLE")
             return {
                 "success": True,
                 "busy": status.busy,
@@ -200,7 +200,7 @@ class _FirmwareToolsPlugin:
                 return _srv._error_dict(f"{fail}: {_plain_words.said(exc)}. {hint}")
             except Exception as exc:
                 _logger.exception("Unexpected error in machine firmware tool")
-                return _srv._error_dict(f"{fail}: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"{fail}: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
             return {"machine": target, **answer} if target else answer
 
         # ------------------------------------------------------------------

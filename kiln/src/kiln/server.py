@@ -4690,16 +4690,16 @@ def _look_first_error(tool_name: str, aimed: str, look: Any, *, window: bool = F
     if look.beside:
         judge = (
             f"{look.beside} is still on the plate, so before a print starts beside it that way the bed is looked "
-            f"at through the camera. Here is the bed now: {look.frame} (or call look_at_plate to see it). Look at "
-            f'the picture, then call look_at_plate with seen="as_recorded" if {look.beside} is all that is on the '
-            'bed, seen="clear" if the bed is empty, or seen="occupied" if anything else is on it or you cannot '
-            "tell, and start again."
+            f"at through the camera. Here is the bed now: {look.frame} (or call `look_at_plate` to see it). Look at "
+            f'the picture, then call `look_at_plate` with `seen="as_recorded"` if {look.beside} is all that is on '
+            'the bed, `seen="clear"` if the bed is empty, or `seen="occupied"` if anything else is on it or you '
+            "cannot tell, and start again."
         )
     else:
         judge = (
             "before a print starts that way the bed is looked at through the camera. Here is the bed now: "
-            f"{look.frame} (or call look_at_plate to see it). Look at the picture, then call look_at_plate "
-            'with seen="clear" if the bed is empty, or seen="occupied" if anything is on it or you cannot '
+            f"{look.frame} (or call `look_at_plate` to see it). Look at the picture, then call `look_at_plate` "
+            'with `seen="clear"` if the bed is empty, or `seen="occupied"` if anything is on it or you cannot '
             "tell, and start again."
         )
     return _error_dict(
@@ -5079,8 +5079,8 @@ def _unknown_printer_error(printer_name: str | None, verb: str) -> dict:
         known = []
     known_msg = f" Registered printers: {', '.join(known)}." if known else ""
     return _error_dict(
-        f"No printer named {printer_name!r} — cannot {verb} it.{known_msg} "
-        "Omit `printer_name` to target the default printer, or register this "
+        f"Kiln has no printer named {printer_name!r}, so it can't {verb} it.{known_msg} "
+        "Leave out `printer_name` to use the default printer, or register this "
         "one with `register_printer`.",
         code="PRINTER_NOT_FOUND",
         retryable=False,
@@ -5944,7 +5944,7 @@ def _reheat_before_resume(adapter: PrinterAdapter) -> tuple[PrintResult | None, 
         adapter.set_tool_temp(target)
     except Exception as exc:
         return refuse(
-            f"Kiln could not heat {label}'s nozzle back to {target:.0f}°C ({exc}), so it did not "
+            f"Kiln could not heat {label}'s nozzle back to {target:.0f}°C ({_plain_words.said(exc)}), so it did not "
             "resume: a resume onto a cooled nozzle grinds the filament or prints nothing.",
             "RESUME_REHEAT_FAILED",
         ), False
@@ -7039,7 +7039,7 @@ def _refund_after_order_failure(
                     EventType.PAYMENT_FAILED,
                     {
                         "payment_id": payment_id,
-                        "error": f"Auto-refund failed: {_plain_words.said(exc)}",
+                        "error": f"Kiln couldn't refund automatically: {_plain_words.said(exc)}.",
                         "requires_manual_refund": True,
                         **_plain_words.detail_field(exc),
                     },
@@ -7068,7 +7068,7 @@ def _refund_after_order_failure(
                     EventType.PAYMENT_FAILED,
                     {
                         "payment_id": payment_hold_id,
-                        "error": f"Hold cancellation failed: {_plain_words.said(exc)}",
+                        "error": f"Kiln couldn't cancel the payment hold: {_plain_words.said(exc)}.",
                         "requires_manual_refund": True,
                         **_plain_words.detail_field(exc),
                     },
@@ -8058,11 +8058,11 @@ def printer_status(
                 logger.debug("printer list unavailable", exc_info=True)
             return offline
         return _error_dict(
-            f"Failed to get printer status: {_plain_words.said(exc)}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+            f"Kiln couldn't get the printer status: {_plain_words.said(exc)}. Check that the printer is online and that `KILN_PRINTER_HOST` is right."
         )
     except Exception as exc:
         logger.exception("Unexpected error in printer_status")
-        return _error_dict(f"Unexpected error in `printer_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the printer's status: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # -- Material cost estimation --------------------------------------------------
@@ -8493,7 +8493,7 @@ def monitor_print(
                 if getattr(snap_exc, "code", None) == camera_addon.REFUSAL_CODE:
                     snapshot_line = str(snap_exc)
                 else:
-                    snapshot_line = f"Snapshot capture failed: {snap_exc}"
+                    snapshot_line = f"Snapshot capture failed: {_plain_words.said(snap_exc)}"
 
         _resolved_printer = (
             printer_name or _resolve_effective_printer_name(printer_name)
@@ -8820,11 +8820,11 @@ def monitor_print(
             code="PRINTER_NOT_FOUND",
         )
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to monitor print: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't monitor the print: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in monitor_print")
         return _error_dict(
-            f"Unexpected error in `monitor_print`: {_plain_words.said(exc)}",
+            f"Kiln couldn't check on the print: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -8860,11 +8860,11 @@ def printer_files() -> dict:
         }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
-            f"Failed to list printer files: {_plain_words.said(exc)}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+            f"Kiln couldn't list the printer files: {_plain_words.said(exc)}. Check that the printer is online and that `KILN_PRINTER_HOST` is right."
         )
     except Exception as exc:
         logger.exception("Unexpected error in printer_files")
-        return _error_dict(f"Unexpected error in `printer_files`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't list the printer's files: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Upload a file to the printer"))
@@ -9107,14 +9107,14 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
 
         return resp
     except FileNotFoundError as exc:
-        return _error_dict(f"Failed to upload file: {_plain_words.said(exc)}", code="FILE_NOT_FOUND")
+        return _error_dict(f"Kiln couldn't upload the file: {_plain_words.said(exc)}.", code="FILE_NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
-            f"Failed to upload file: {_plain_words.said(exc)}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+            f"Kiln couldn't upload the file: {_plain_words.said(exc)}. Check that the printer is online and that `KILN_PRINTER_HOST` is right."
         )
     except Exception as exc:
         logger.exception("Unexpected error in upload_file")
-        return _error_dict(f"Unexpected error in `upload_file`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't upload the file: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Confirm a file upload"))
@@ -9133,7 +9133,7 @@ def upload_file_confirm(token: str) -> dict:
     pending = _pending_uploads.pop(token, None)
     if pending is None:
         return _error_dict(
-            f"Invalid or expired upload token: {token!r}. Call `upload_file` again to get a new token.",
+            "That upload token isn't valid any more. Call `upload_file` again for a new one.",
             code="INVALID_TOKEN",
         )
     # Tokens issued before this tool could be aimed stored a bare path.
@@ -9168,14 +9168,14 @@ def upload_file_confirm(token: str) -> dict:
         resp["printer_name"] = target_name
         return resp
     except FileNotFoundError as exc:
-        return _error_dict(f"Failed to confirm upload: {_plain_words.said(exc)}", code="FILE_NOT_FOUND")
+        return _error_dict(f"Kiln couldn't confirm the upload: {_plain_words.said(exc)}.", code="FILE_NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
-            f"Failed to confirm upload: {_plain_words.said(exc)}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+            f"Kiln couldn't confirm the upload: {_plain_words.said(exc)}. Check that the printer is online and that `KILN_PRINTER_HOST` is right."
         )
     except Exception as exc:
         logger.exception("Unexpected error in upload_file_confirm")
-        return _error_dict(f"Unexpected error in `upload_file_confirm`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't finish the upload: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Analyze a printer file"))
@@ -9215,7 +9215,7 @@ def analyze_print_file(filename: str) -> dict:
 
         if target is None:
             return _error_dict(
-                f"File not found on printer: {fence(filename)}. Use `printer_files` to list available files.",
+                f"The printer has no file called {fence(filename)}. `printer_files` lists the files on it.",
                 code="FILE_NOT_FOUND",
             )
 
@@ -9240,10 +9240,10 @@ def analyze_print_file(filename: str) -> dict:
             "has_metadata": bool(metadata_dict),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to analyze print file: {_plain_words.said(exc)}. Use `printer_files` to list available files.")
+        return _error_dict(f"Kiln couldn't analyze the print file: {_plain_words.said(exc)}. Use `printer_files` to list available files.")
     except Exception as exc:
         logger.exception("Unexpected error in analyze_print_file")
-        return _error_dict(f"Unexpected error in `analyze_print_file`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't check the print file: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Delete a printer file"))
@@ -9262,17 +9262,17 @@ def delete_file(file_path: str) -> dict:
         ok = adapter.delete_file(file_path)
         if not ok:
             return _error_dict(
-                f"Failed to delete {file_path}. The printer may have rejected the request. Use `printer_files` to verify the file exists."
+                f"Kiln couldn't delete {file_path}. The printer may have rejected the request. Use `printer_files` to verify the file exists."
             )
         return {
             "success": True,
             "message": f"Deleted {file_path}.",
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to delete {file_path}: {_plain_words.said(exc)}. Use `printer_files` to verify the file exists.")
+        return _error_dict(f"Kiln couldn't delete {file_path}: {_plain_words.said(exc)}. Use `printer_files` to verify the file exists.")
     except Exception as exc:
         logger.exception("Unexpected error in delete_file")
-        return _error_dict(f"Unexpected error in `delete_file`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't delete the file: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _ams_selection_record(
@@ -9726,9 +9726,9 @@ def _resolve_use_ams(
             "use_ams": False,
             "ams_mapping": None,
             "warnings": [
-                f"AMS auto-detect probe failed: {exc}.  Falling back to "
-                "external spool — pass use_ams='true' with an explicit "
-                "ams_mapping=[<tray id>] if you want AMS."
+                f"AMS auto-detect probe failed: {_plain_words.said(exc)}.  Falling back to "
+                "external spool — pass `use_ams='true'` with an explicit "
+                "`ams_mapping=[<tray id>]` if you want AMS."
             ],
             "ambiguous": True,
         }
@@ -10052,7 +10052,7 @@ def _resolve_bed_type(bed_type: str) -> tuple[str, dict | None]:
     if key in accepted:
         return key, None
     return key, _error_dict(
-        f"Unknown `bed_type` {bed_type!r}. Accepted values: "
+        f"Kiln doesn't know the `bed_type` {bed_type!r}. Use one of: "
         + ", ".join(f'"{name}"' for name in accepted) + ".",
         code="UNKNOWN_BED_TYPE",
     )
@@ -10707,11 +10707,11 @@ def start_print(
         return out
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
-            f"Failed to start print: {_plain_words.said(exc)}. Check that the printer is online and idle. Use `printer_files` to verify the file exists."
+            f"Kiln couldn't start the print: {_plain_words.said(exc)}. Check that the printer is online and idle. Use `printer_files` to verify the file exists."
         )
     except Exception as exc:
         logger.exception("Unexpected error in start_print")
-        return _error_dict(f"Unexpected error in `start_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't start the print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _cancel_print_on(
@@ -11051,10 +11051,10 @@ def cancel_print(
             expected_chamber_target=expected_chamber_target,
         )
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to cancel print: {_plain_words.said(exc)}. Check that a print is currently active.")
+        return _error_dict(f"Kiln couldn't cancel the print: {_plain_words.said(exc)}. Check that a print is currently active.")
     except Exception as exc:
         logger.exception("Unexpected error in cancel_print")
-        return _error_dict(f"Unexpected error in `cancel_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't cancel the print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Run printer calibration"), name="calibrate_direct")
@@ -11091,10 +11091,10 @@ def run_calibration(options: list[str] | None = None) -> dict:
         _audit("run_calibration", "executed", extra={"options": options})
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to run calibration: {_plain_words.said(exc)}. Check that the printer is idle.")
+        return _error_dict(f"Kiln couldn't run the calibration: {_plain_words.said(exc)}. Check that the printer is idle.")
     except Exception as exc:
         logger.exception("Unexpected error in run_calibration")
-        return _error_dict(f"Unexpected error in `run_calibration`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't run the calibration: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Emergency stop"))
@@ -11191,10 +11191,17 @@ def emergency_stop(
                 "not_confirmed_stopped": not_confirmed,
             }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to execute emergency stop: {_plain_words.said(exc)}. Check that the printer is online.")
+        return _error_dict(
+            f"Kiln couldn't run the emergency stop: {_plain_words.said(exc)}. If the printer is still "
+            "moving or heating, switch it off at its power switch."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in emergency_stop")
-        return _error_dict(f"Unexpected error in `emergency_stop`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(
+            f"Kiln couldn't send the emergency stop: {_plain_words.said(exc)}. If the printer is still "
+            "moving or heating, switch it off at its power switch.",
+            code="INTERNAL_ERROR",
+        )
 
 
 @mcp.tool(annotations=read_only("Emergency stop status"))
@@ -11237,7 +11244,7 @@ def emergency_status(printer_name: str | None = None, include_unlatched: bool = 
         }
     except Exception as exc:
         logger.exception("Unexpected error in emergency_status")
-        return _error_dict(f"Unexpected error in `emergency_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the emergency stop status: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Clear a printer error"))
@@ -11284,7 +11291,7 @@ def clear_printer_error(printer_name: str | None = None) -> dict:
         # vouch for cannot show the bed is clear either.
         if state.effective_state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
             return _error_dict(
-                f"Not clearing anything while a print is "
+                f"Kiln won't clear anything while a print is "
                 f"{state.effective_state.value}. "
                 "Use `cancel_print` first if you mean to stop it.",
                 code="PRINTER_BUSY",
@@ -11312,10 +11319,10 @@ def clear_printer_error(printer_name: str | None = None) -> dict:
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Could not clear the printer error: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't clear the printer error: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in clear_printer_error")
-        return _error_dict(f"Unexpected error in `clear_printer_error`: {_plain_words.said(exc)}",
+        return _error_dict(f"Kiln couldn't clear the printer's error: {_plain_words.said(exc)}.",
                            code="INTERNAL_ERROR")
 
 
@@ -11394,7 +11401,7 @@ def clear_emergency_stop(
         }
     except Exception as exc:
         logger.exception("Unexpected error in clear_emergency_stop")
-        return _error_dict(f"Unexpected error in `clear_emergency_stop`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't clear the emergency stop: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Allow an oversize print"))
@@ -11450,7 +11457,7 @@ def force_print_oversize(printer_id: str = "", ttl_minutes: int = 5) -> dict:
 
         grant_oversize_override(pid, ttl_seconds=ttl * 60)
     except Exception as exc:
-        return _error_dict(f"Could not grant override: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't grant the override: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
     _audit(
         "force_print_oversize",
@@ -11532,7 +11539,10 @@ def emergency_trip_input(
         }
     except Exception as exc:
         logger.exception("Unexpected error in emergency_trip_input")
-        return _error_dict(f"Unexpected error in `emergency_trip_input`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't carry out the emergency stop from that input: {_plain_words.said(exc)}. If the "
+            "printer is still moving or heating, switch it off at its power switch.",
+            code="INTERNAL_ERROR",
+        )
 
 
 def _pause_print_on(
@@ -11657,10 +11667,10 @@ def pause_print(
             adapter, target_name, keep_temps=keep_temps, leave_nozzle=leave_nozzle,
         )
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to pause print: {_plain_words.said(exc)}. Check that a print is currently active.")
+        return _error_dict(f"Kiln couldn't pause the print: {_plain_words.said(exc)}. Check that a print is currently active.")
     except Exception as exc:
         logger.exception("Unexpected error in pause_print")
-        return _error_dict(f"Unexpected error in `pause_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't pause the print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Skip objects mid-print"))
@@ -11774,18 +11784,18 @@ def skip_print_objects(
         # to the right one instead of blaming the print state.
         if "integer" in str(exc).lower():
             return _error_dict(
-                f"Couldn't skip: {_plain_words.said(exc)} Bambu uses the numeric `label_id` from "
-                "`list_plate_objects`; OctoPrint/USB use the numeric M486 index; "
-                "Klipper/Moonraker uses the object NAME (a string).",
+                f"Kiln couldn't skip those objects: {_plain_words.said(exc)}. A Bambu printer uses "
+                "the numbered `label_id` from `list_plate_objects`, OctoPrint and USB printers use "
+                "the object's number, and Klipper (Moonraker) uses the object's name.",
                 code="BAD_OBJECT_ID",
             )
         return _error_dict(
-            f"Couldn't skip those objects: {_plain_words.said(exc)} "
-            "(skipping only works during a live multi-object print).",
+            f"Kiln couldn't skip those objects: {_plain_words.said(exc)}. "
+            "Skipping only works during a print with several objects.",
         )
     except Exception as exc:
         logger.exception("Unexpected error in skip_print_objects")
-        return _error_dict(f"Unexpected error in `skip_print_objects`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't skip those objects: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _resume_print_on(
@@ -11881,10 +11891,10 @@ def resume_print(
             return _unknown_printer_error(printer_name, "resume a print on")
         return _resume_print_on(adapter, target_name, force=force, hardware_confirmed=hardware_confirmed)
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to resume print: {_plain_words.said(exc)}. Check that the printer is in a paused state.")
+        return _error_dict(f"Kiln couldn't resume the print: {_plain_words.said(exc)}. Check that the printer is in a paused state.")
     except Exception as exc:
         logger.exception("Unexpected error in resume_print")
-        return _error_dict(f"Unexpected error in `resume_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't resume the print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Set temperature"))
@@ -11944,7 +11954,7 @@ def set_temperature(
         return conf
     if tool_temp is None and bed_temp is None:
         return _error_dict(
-            "At least one of `tool_temp` or `bed_temp` must be provided.",
+            "Give `tool_temp`, `bed_temp`, or both.",
             code="INVALID_ARGS",
         )
     # Turning heat OFF is allowed on a latched machine; turning it ON is not.
@@ -11973,7 +11983,7 @@ def set_temperature(
             )
         if tool_temp > _MAX_TOOL:
             return _error_dict(
-                f"Hotend temperature {tool_temp}°C exceeds safety limit ({_MAX_TOOL}°C)."
+                f"{tool_temp}°C for the hotend is above the {_MAX_TOOL}°C safety limit."
                 + _unknown_limit_ask(printer_name),
                 code="VALIDATION_ERROR",
             )
@@ -11985,7 +11995,7 @@ def set_temperature(
             )
         if bed_temp > _MAX_BED:
             return _error_dict(
-                f"Bed temperature {bed_temp}°C exceeds safety limit ({_MAX_BED}°C)."
+                f"{bed_temp}°C for the bed is above the {_MAX_BED}°C safety limit."
                 + _unknown_limit_ask(printer_name),
                 code="VALIDATION_ERROR",
             )
@@ -12113,11 +12123,11 @@ def set_temperature(
         return results
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
-            f"Failed to set temperature: {_plain_words.said(exc)}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+            f"Kiln couldn't set the temperature: {_plain_words.said(exc)}. Check that the printer is online and that `KILN_PRINTER_HOST` is right."
         )
     except Exception as exc:
         logger.exception("Unexpected error in set_temperature")
-        return _error_dict(f"Unexpected error in `set_temperature`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't set the temperature: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -12203,10 +12213,10 @@ def ams_status() -> dict:
         _audit("ams_status", "queried")
         return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to query AMS status: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't read the AMS status: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in ams_status")
-        return _error_dict(f"Unexpected error in `ams_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the AMS status: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("CFS status"))
@@ -12238,10 +12248,10 @@ def cfs_status() -> dict:
         _audit("cfs_status", "queried")
         return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to query CFS status: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't read the CFS status: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in cfs_status")
-        return _error_dict(f"Unexpected error in `cfs_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the CFS status: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Set print speed"))
@@ -12319,10 +12329,10 @@ def _set_speed_preset(profile: str, printer_name: str | None) -> dict:
             **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to set speed profile: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't set the speed profile: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in set_speed_profile")
-        return _error_dict(f"Unexpected error in `set_speed_profile`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't set the speed profile: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _set_speed_percent(percent: Any, printer_name: str | None) -> dict:
@@ -12356,10 +12366,10 @@ def _set_speed_percent(percent: Any, printer_name: str | None) -> dict:
             )
         return out
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to set the speed: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't set the speed: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in set_speed_profile")
-        return _error_dict(f"Unexpected error in `set_speed_profile`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't set the speed profile: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 #: The speed schedule running for each printer, by its lifecycle name.
@@ -12442,10 +12452,10 @@ def run_speed_schedule(
             ),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Speed schedule failed: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't start the speed schedule: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in run_speed_schedule")
-        return _error_dict(f"Unexpected error in `run_speed_schedule`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't start the speed schedule: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Get print speed"))
@@ -12477,10 +12487,10 @@ def get_speed_profile() -> dict:
         _audit("get_speed_profile", "queried")
         return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to get speed profile: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't get the speed profile: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in get_speed_profile")
-        return _error_dict(f"Unexpected error in `get_speed_profile`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the speed profile: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Set printer light"))
@@ -12532,10 +12542,10 @@ def set_printer_light(mode: str, node: str = "chamber_light") -> dict:
             **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to set printer light: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't set the printer light: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in set_printer_light")
-        return _error_dict(f"Unexpected error in `set_printer_light`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't set the printer's light: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Set fan speed"))
@@ -12614,10 +12624,10 @@ def set_fan(percent: int, node: str = "part") -> dict:
             **verdict.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to set fan: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't set the fan: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in set_fan")
-        return _error_dict(f"Unexpected error in `set_fan`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't set the fan: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _wrapped_filament_type(threemf_path: str) -> str | None:
@@ -12714,8 +12724,8 @@ def wrap_gcode_as_3mf(
         adapter = _get_adapter()
         if not hasattr(adapter, "wrap_gcode_as_3mf"):
             return _error_dict(
-                "3MF wrapping is only available on Bambu Lab printers. "
-                "Other printers accept G-code files directly via `upload_file`.",
+                "Only Bambu Lab printers need G-code wrapped as a 3MF. "
+                "Other printers take the G-code directly with `upload_file`.",
                 code="UNSUPPORTED",
             )
         stl_paths = [stl_path] if stl_path and os.path.isfile(stl_path) else None
@@ -12814,19 +12824,19 @@ def wrap_gcode_as_3mf(
                 result, list(filament_colors), adapter=adapter, material=material,
             )
         return result
-    except FileNotFoundError as exc:
-        return _error_dict(f"G-code file not found: {_plain_words.said(exc)}")
+    except FileNotFoundError:
+        return _error_dict("Kiln couldn't find that G-code file.")
     except ValueError as exc:
         # A file sliced for more than one nozzle says why in its own words.
         code = getattr(exc, "code", None)
         if code:
             return _error_dict(_plain_words.sentence(exc), code=code)
-        return _error_dict(f"Invalid G-code: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln can't use this G-code: {_plain_words.said(exc)}.")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to wrap G-code as 3MF: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't wrap the G-code as 3MF: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in wrap_gcode_as_3mf")
-        return _error_dict(f"Unexpected error in `wrap_gcode_as_3mf`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't wrap the G-code as a 3MF: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -12866,10 +12876,10 @@ def get_bed_mesh() -> dict:
         _audit("get_bed_mesh", "queried")
         return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to get bed mesh: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't get the bed mesh: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in get_bed_mesh")
-        return _error_dict(f"Unexpected error in `get_bed_mesh`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the bed mesh: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Filament sensor status"))
@@ -12895,17 +12905,17 @@ def get_filament_status() -> dict:
         result = adapter.get_filament_status()
         if result is None:
             return _error_dict(
-                "This printer does not support filament sensor queries. "
-                "For Bambu Lab printers, use `ams_status` to check filament.",
+                "This printer can't report its filament sensor. "
+                "On a Bambu Lab printer, use `ams_status` to check the filament.",
                 code="UNSUPPORTED",
             )
         _audit("get_filament_status", "queried")
         return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to get filament status: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't get the filament status: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in get_filament_status")
-        return _error_dict(f"Unexpected error in `get_filament_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the filament status: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Get tool position"))
@@ -12934,17 +12944,17 @@ def get_tool_position() -> dict:
         result = adapter.get_tool_position()
         if result is None:
             return _error_dict(
-                "This printer does not support tool position queries. "
-                "Try using `printer_status` for general state information.",
+                "This printer can't report where the nozzle is. "
+                "`printer_status` shows its general state.",
                 code="UNSUPPORTED",
             )
         _audit("get_tool_position", "queried")
         return {"success": True, "position": result}
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to get tool position: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't get the tool position: {_plain_words.said(exc)}.")
     except Exception as exc:
         logger.exception("Unexpected error in get_tool_position")
-        return _error_dict(f"Unexpected error in `get_tool_position`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the print head's position: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Preflight check"))
@@ -13883,11 +13893,11 @@ def preflight_check(
         )
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
-            f"Failed to run preflight check: {_plain_words.said(exc)}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+            f"Kiln couldn't run the pre-print check: {_plain_words.said(exc)}. Check that the printer is online and that `KILN_PRINTER_HOST` is right."
         )
     except Exception as exc:
         logger.exception("Unexpected error in preflight_check")
-        return _error_dict(f"Unexpected error in `preflight_check`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't run the pre-print check: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Send G-code"))
@@ -14097,7 +14107,7 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 
         if not adapter.capabilities.can_send_gcode:
             return _error_dict(
-                f"`send_gcode` is not supported by the {adapter.name} adapter.",
+                f"Kiln can't send the G-code to a {adapter.name} printer.",
                 code="UNSUPPORTED",
             )
 
@@ -14115,10 +14125,10 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         return result
 
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to send G-code: {_plain_words.said(exc)}. Check that the printer is online and connected.")
+        return _error_dict(f"Kiln couldn't send the G-code: {_plain_words.said(exc)}. Check that the printer is online and connected.")
     except Exception as exc:
         logger.exception("Unexpected error in send_gcode")
-        return _error_dict(f"Unexpected error in `send_gcode`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't send the G-code: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # validate_gcode — moved to plugins/gcode_validation_tools.py
@@ -14240,7 +14250,7 @@ def issue_preview_token(
             ),
         }
     except Exception as exc:
-        return _error_dict(f"Failed to issue preview token: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't issue the preview token: {_plain_words.said(exc)}.")
 
 
 # ---------------------------------------------------------------------------
@@ -14290,12 +14300,14 @@ def confirm_action(token: str) -> dict:
         # Dispatch to the actual tool function
         tool_fn = mcp._tool_manager._tools.get(tool)
         if tool_fn is None:
-            return _error_dict(f"Unknown tool: {tool}", code="INTERNAL_ERROR")
+            return _error_dict(f"Kiln has no tool called {tool!r}.", code="INTERNAL_ERROR")
         result = tool_fn.fn(**args)
         return result
     except Exception as exc:
         logger.exception("Error executing confirmed action %s", tool)
-        return _error_dict(f"Error executing {tool}: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(
+            f"Kiln couldn't carry out the action you confirmed: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
+        )
     finally:
         _CONFIRM_MODE = saved
 
@@ -14484,7 +14496,7 @@ def _several_printers_read(
         return result
     except Exception as exc:
         logger.exception("Unexpected error in %s", asked_through)
-        return _error_dict(f"Unexpected error in {asked_through}: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the printers' status: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _printers_listed_without_fleet_view(asked_through: str) -> dict[str, Any] | None:
@@ -15068,7 +15080,7 @@ def register_printer(
                     extra={"suggested_name": exc.suggested_name},
                 )
             except Exception as exc:
-                warnings_out.append(f"Printer registered for this session but could not be saved: {exc}")
+                warnings_out.append(f"Printer registered for this session but could not be saved: {_plain_words.said(exc)}")
 
         # Disconnect the boot-time default adapter if it's a separate
         # object not managed by the registry.  The registry's own
@@ -15252,7 +15264,7 @@ def register_printer(
         return result
     except Exception as exc:
         logger.exception("Unexpected error in register_printer")
-        return _error_dict(f"Unexpected error in `register_printer`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't add the printer: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # discover_printers — extracted to plugins/printer_management_tools.py
@@ -15371,7 +15383,7 @@ def set_printer_model(
         return _with_printer_report(result)
     except Exception as exc:
         logger.exception("Error in set_printer_model")
-        return _error_dict(f"Could not set the printer model: {_plain_words.said(exc)}", code="SET_PRINTER_MODEL_ERROR")
+        return _error_dict(f"Kiln couldn't set the printer model: {_plain_words.said(exc)}.", code="SET_PRINTER_MODEL_ERROR")
 
 
 def _owner_statement_by_a_person(result: dict[str, Any]) -> dict[str, Any]:
@@ -15409,7 +15421,7 @@ def _owner_statement_by_a_person(result: dict[str, Any]) -> dict[str, Any]:
     if outcome == screen_code.SHOWN:
         how = (
             "A code was just shown on this computer's screen.  If the person says that is true, ask them "
-            "to type the code, pass their words to give_print_code, then call set_printer_model again "
+            "to type the code, pass their words to `give_print_code`, then call `set_printer_model` again "
             "with the same arguments."
         )
     elif outcome == screen_code.COOLDOWN:
@@ -15474,7 +15486,7 @@ def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in recent_events")
-        return _error_dict(f"Unexpected error in `recent_events`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the recent events: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # Billing tools -- removed from public repo (proprietary, lives in kiln-pro).
@@ -15566,7 +15578,7 @@ def license_status() -> dict:
         return payload
     except Exception as exc:
         logger.exception("Unexpected error in license_status")
-        return _error_dict(f"Unexpected error in `license_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't check the license: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _plan_status_from_account() -> dict:
@@ -15866,7 +15878,7 @@ def get_autonomy_level() -> dict:
         return {"success": True, **cfg.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in get_autonomy_level")
-        return _error_dict(f"Unexpected error in `get_autonomy_level`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the autonomy level: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Set autonomy level"))
@@ -15911,7 +15923,7 @@ def set_autonomy_level(level: int) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in set_autonomy_level")
-        return _error_dict(f"Unexpected error in `set_autonomy_level`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't set the autonomy level: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Check autonomy"))
@@ -15956,7 +15968,7 @@ def check_autonomy(
         return {"success": True, **result}
     except Exception as exc:
         logger.exception("Unexpected error in check_autonomy")
-        return _error_dict(f"Unexpected error in `check_autonomy`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't check what it may do on its own: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # get_started — moved to plugins/utility_tools.py
@@ -16019,7 +16031,7 @@ def marketplace_info() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in marketplace_info")
-        return _error_dict(f"Unexpected error in `marketplace_info`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the marketplace details: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -16194,7 +16206,7 @@ def download_and_upload(
             local_path, conversion = convert_on_arrival(local_path, tool="download_and_upload")
         except (ValueError, OSError) as exc:
             return _error_dict(
-                f"{os.path.basename(local_path)} could not be turned into an STL ({_plain_words.said(exc)}), "
+                f"Kiln couldn't turn {os.path.basename(local_path)} into an STL ({_plain_words.said(exc)}), "
                 "so it was not sent to the printer.",
                 code="CONVERSION_FAILED",
             )
@@ -16297,7 +16309,7 @@ def download_and_upload(
                 _tail = (
                     "and sent the print command (auto-print ON). The printer "
                     "has not confirmed it is running yet — call "
-                    "printer_status() to watch it start."
+                    "`printer_status` to watch it start."
                 )
             else:
                 _tail = (
@@ -16312,7 +16324,7 @@ def download_and_upload(
                 "KILN_AUTO_PRINT_MARKETPLACE=true to enable auto-print."
             )
             resp["message"] = (
-                f"Downloaded from {source} and uploaded to printer. Call start_print with {fence(file_name)} to begin printing."
+                f"Downloaded from {source} and uploaded to printer. Call `start_print` with {fence(file_name)} to begin printing."
             )
 
         # Telemetry: count the download.  WHICH marketplace it came from is
@@ -16334,11 +16346,11 @@ def download_and_upload(
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (ThingiverseError, MarketplaceError, PrinterError, RuntimeError) as exc:
         return _error_dict(
-            f"Failed to download and upload model: {_plain_words.said(exc)}. Check marketplace credentials and printer connection."
+            f"Kiln couldn't download the model and send it to the printer: {_plain_words.said(exc)}. Check the model site's key and the printer connection."
         )
     except Exception as exc:
         logger.exception("Unexpected error in download_and_upload")
-        return _error_dict(f"Unexpected error in `download_and_upload`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't download the model and send it to the printer: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # browse_models, list_model_categories — moved to plugins/marketplace_tools.py
@@ -16543,7 +16555,7 @@ def rotate_model(
         ext = Path(input_path).suffix.lower()
         if ext not in (".stl", ".3mf"):
             return _error_dict(
-                f"Unsupported file format {ext!r}. `rotate_model` supports .stl and .3mf files.",
+                f"Kiln can rotate .stl and .3mf files, not {ext!r} files.",
                 code="UNSUPPORTED",
             )
 
@@ -16584,10 +16596,10 @@ def rotate_model(
         except ImportError:
             return response
     except (ValueError, FileNotFoundError) as exc:
-        return _error_dict(f"Failed to rotate model: {_plain_words.said(exc)}", code="ROTATE_ERROR")
+        return _error_dict(f"Kiln couldn't rotate the model: {_plain_words.said(exc)}.", code="ROTATE_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in rotate_model")
-        return _error_dict(f"Unexpected error in `rotate_model`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't rotate the model: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Check orientation"))
@@ -16617,7 +16629,7 @@ async def check_orientation(
         result = check_stability(model_path)
         return {"success": True, **result.to_dict()}
     except Exception as e:
-        return _error_dict(f"Orientation check failed: {_plain_words.said(e)}", code="ORIENTATION_ERROR")
+        return _error_dict(f"The orientation check didn't finish: {_plain_words.said(e)}.", code="ORIENTATION_ERROR")
 
 
 # find_slicer — moved to plugins/slicer_tools.py
@@ -16689,7 +16701,7 @@ def printer_snapshot(
             _allowed = (_home, _tmpdir)
             if not any(_safe.startswith(p) for p in _allowed):
                 return _error_dict(
-                    "`save_path` must be under home directory or a temp directory.",
+                    "`save_path` must be in your home folder or the temporary folder.",
                     code="VALIDATION_ERROR",
                 )
             os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
@@ -16723,10 +16735,10 @@ def printer_snapshot(
         if _snapshot_detail(exc):
             # A camera that gave no picture, already said in the person's words.
             return _error_dict(_plain_words.sentence(exc), extra=_snapshot_detail(exc))
-        return _error_dict(f"Failed to capture snapshot: {str(exc).rstrip('.')}. Check that the printer has a webcam configured.")
+        return _error_dict(f"Kiln couldn't take a picture: {_plain_words.said(exc)}. Check that the printer has a webcam set up.")
     except Exception as exc:
         logger.exception("Unexpected error in printer_snapshot")
-        return _error_dict(f"Unexpected error in `printer_snapshot`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't take a picture with the printer's camera: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # estimate_cost — moved to plugins/estimate_tools.py
@@ -16794,7 +16806,7 @@ def set_material(
         return {"success": True, "material": mat.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in set_material")
-        return _error_dict(f"Unexpected error in `set_material`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't record the loaded material: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Get loaded material"))
@@ -16816,7 +16828,7 @@ def get_material(printer_name: str | None = None) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in get_material")
-        return _error_dict(f"Unexpected error in `get_material`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the loaded material: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Check material match"))
@@ -16857,7 +16869,7 @@ def check_material_match(
         return result
     except Exception as exc:
         logger.exception("Unexpected error in check_material_match")
-        return _error_dict(f"Unexpected error in `check_material_match`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't check whether the loaded material matches: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("List spools"))
@@ -16882,7 +16894,7 @@ def list_spools() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in list_spools")
-        return _error_dict(f"Unexpected error in `list_spools`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't list the spools: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Add or correct a spool"))
@@ -16966,7 +16978,7 @@ def add_spool(
         return {"success": True, "spool": spool.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in add_spool")
-        return _error_dict(f"Unexpected error in `add_spool`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't add the spool: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Remove a spool"))
@@ -16992,7 +17004,7 @@ def remove_spool(spool_id: str) -> dict:
         return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
     except Exception as exc:
         logger.exception("Unexpected error in remove_spool")
-        return _error_dict(f"Unexpected error in `remove_spool`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't remove the spool: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -17013,7 +17025,7 @@ def bed_level_status(printer_name: str | None = None) -> dict:
         return {"success": True, "status": status.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in bed_level_status")
-        return _error_dict(f"Unexpected error in `bed_level_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the bed leveling status: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Level the bed"))
@@ -17041,10 +17053,10 @@ def trigger_bed_level(printer_name: str | None = None) -> dict:
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to trigger bed leveling: {_plain_words.said(exc)}. Check that the printer is online and idle.")
+        return _error_dict(f"Kiln couldn't trigger the bed leveling: {_plain_words.said(exc)}. Check that the printer is online and idle.")
     except Exception as exc:
         logger.exception("Unexpected error in trigger_bed_level")
-        return _error_dict(f"Unexpected error in `trigger_bed_level`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't start the bed leveling: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Set leveling policy"))
@@ -17078,7 +17090,7 @@ def set_leveling_policy(
         return {"success": True, "policy": policy.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in set_leveling_policy")
-        return _error_dict(f"Unexpected error in `set_leveling_policy`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't set the bed leveling rule: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -17212,10 +17224,10 @@ def webcam_stream(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to manage webcam stream: {_plain_words.said(exc)}. Check that the printer has a webcam configured.")
+        return _error_dict(f"Kiln couldn't manage the webcam stream: {_plain_words.said(exc)}. Check that the printer has a webcam configured.")
     except Exception as exc:
         logger.exception("Unexpected error in webcam_stream")
-        return _error_dict(f"Unexpected error in `webcam_stream`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't open the camera stream: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # Cloud sync tools — moved to plugins/cloud_sync_tools.py
@@ -17352,7 +17364,7 @@ def _validate_local_file(file_path: str) -> dict[str, Any]:
         errors.append(f"File is not readable (permission denied): {file_path}")
         return {"valid": False, "errors": errors, "warnings": warnings, "info": info}
     except OSError as exc:
-        errors.append(f"Cannot read file: {exc}")
+        errors.append(f"Cannot read file: {_plain_words.said(exc)}")
         return {"valid": False, "errors": errors, "warnings": warnings, "info": info}
 
     ext = path.suffix.lower()
@@ -17363,7 +17375,7 @@ def _validate_local_file(file_path: str) -> dict[str, Any]:
     try:
         size = path.stat().st_size
     except OSError as exc:
-        errors.append(f"Could not determine file size: {exc}")
+        errors.append(f"Could not determine file size: {_plain_words.said(exc)}")
         return {"valid": False, "errors": errors, "warnings": warnings, "info": info}
 
     info["size_bytes"] = size
@@ -17420,7 +17432,7 @@ def register_webhook(
         }
     except Exception as exc:
         logger.exception("Unexpected error in register_webhook")
-        return _error_dict(f"Unexpected error in `register_webhook`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't add the webhook: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("List webhooks"))
@@ -17449,7 +17461,7 @@ def list_webhooks() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in list_webhooks")
-        return _error_dict(f"Unexpected error in `list_webhooks`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't list the webhooks: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Delete a webhook"))
@@ -17477,7 +17489,7 @@ def delete_webhook(endpoint_id: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in delete_webhook")
-        return _error_dict(f"Unexpected error in `delete_webhook`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't delete the webhook: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 #: A queued job's state as the wait's progress line says it.
@@ -17786,10 +17798,10 @@ def await_print_completion(
             # than an "unexpected error".
             return _error_dict(_plain_words.sentence(exc), code="HOSTED_UNAVAILABLE")
         except (PrinterError, RuntimeError) as exc:
-            return _error_dict(f"Failed to poll print status: {_plain_words.said(exc)}. Check that the printer is online.")
+            return _error_dict(f"Kiln couldn't poll the print status: {_plain_words.said(exc)}. Check that the printer is online.")
         except Exception as exc:
             logger.exception("Unexpected error in await_print_completion")
-            return _error_dict(f"Unexpected error in `await_print_completion`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+            return _error_dict(f"Kiln couldn't keep waiting for the print to finish: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         if (stopped := _pause(elapsed)) is not None:
             return stopped
@@ -17861,7 +17873,7 @@ def compare_print_options(
     except FileNotFoundError:
         local_error = "G-code file not found"
     except Exception as exc:
-        local_error = str(exc)
+        local_error = _plain_words.said(exc)
 
     result["local"] = {
         "available": local_estimate is not None,
@@ -17894,7 +17906,7 @@ def compare_print_options(
                 sent_file=priced.sent, as_sent=True,
             )
         except (FileNotFoundError, ValueError) as exc:
-            fulfillment_error = str(exc)
+            fulfillment_error = _plain_words.said(exc)
         else:
             if answer.ok:
                 fulfillment_quote_data = served.folded(answer.body, "quote")
@@ -17922,9 +17934,9 @@ def compare_print_options(
             fulfillment_quote_data["kiln_fee"] = fee_calc.to_dict()
             fulfillment_quote_data["total_with_fee"] = float(fee_calc.total_cost)
         except (service.FulfillmentError, RuntimeError) as exc:
-            fulfillment_error = str(exc)
+            fulfillment_error = _plain_words.said(exc)
         except Exception as exc:
-            fulfillment_error = str(exc)
+            fulfillment_error = _plain_words.said(exc)
 
     result["fulfillment"] = {
         "available": fulfillment_quote_data is not None,
@@ -18151,7 +18163,7 @@ def analyze_print_failure(job_id: str) -> dict:
         return _error_dict(_plain_words.sentence(exc), code="HOSTED_UNAVAILABLE")
     except Exception as exc:
         logger.exception("Unexpected error in analyze_print_failure")
-        return _error_dict(f"Unexpected error in `analyze_print_failure`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't look into the failed print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # validate_print_quality — moved to plugins/gcode_validation_tools.py
@@ -18483,7 +18495,7 @@ def visualize_model(
         )
     except Exception as exc:
         logger.exception("Unexpected error in visualize_model")
-        return _error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Compare renders"))
@@ -18535,7 +18547,7 @@ def compare_renders(
         )
     except Exception as exc:
         logger.exception("Unexpected error in compare_renders")
-        return _error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Feedback loop status"))
@@ -18560,7 +18572,7 @@ def get_feedback_loop_status(model_id: str) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in get_feedback_loop_status")
-        return _error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("List design templates"))
@@ -18621,7 +18633,7 @@ def list_design_templates() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in list_design_templates")
-        return _error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 def _overridden_fastener_params(tpl: dict, parameters: dict | None) -> list[str]:
@@ -18747,10 +18759,10 @@ def generate_from_template(
                     hint = (
                         f" {template_id!r} is a design PATTERN, not a "
                         f"parametric part — it carries guidance, not "
-                        f"geometry. Call get_design_template_info("
-                        f"{template_id!r}) for its material and "
+                        f"geometry. Call `get_design_template_info("
+                        f"{template_id!r})` for its material and "
                         f"orientation rules, then write the OpenSCAD "
-                        f"yourself and compile it with compile_scad."
+                        f"yourself and compile it with `compile_scad`."
                     )
             except Exception:  # noqa: BLE001
                 pass
@@ -18787,7 +18799,7 @@ def generate_from_template(
                     extra={"parameters_used": params, **({"nozzle": nozzle} if nozzle else {})},
                 )
             return _error_dict(
-                f"Template compilation failed: {job.error}",
+                f"Kiln couldn't build the template: {job.error}",
                 code="COMPILATION_ERROR",
             )
 
@@ -18918,10 +18930,10 @@ def generate_from_template(
 
         return result_dict
     except GenerationError as exc:
-        return _error_dict(f"Template generation failed: {_plain_words.said(exc)}", code=exc.code or "GENERATION_ERROR")
+        return _error_dict(f"The template generation didn't finish: {_plain_words.said(exc)}.", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in generate_from_template")
-        return _error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 # smart_generate_from_template — moved to plugins/generation_ai_tools.py
@@ -18967,7 +18979,7 @@ def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
     except FileNotFoundError as exc:
         return _error_dict(_plain_words.sentence(exc), code="FILE_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(f"Failed to list plate objects: {_plain_words.said(exc)}", code="PLATE_PARSE_ERROR")
+        return _error_dict(f"Kiln couldn't list the plate objects: {_plain_words.said(exc)}.", code="PLATE_PARSE_ERROR")
 
 
 @mcp.tool(annotations=creates("Extract a plate object"))
@@ -19033,7 +19045,7 @@ def extract_plate_object(
     except FileNotFoundError as exc:
         return _error_dict(_plain_words.sentence(exc), code="FILE_NOT_FOUND")
     except ValueError as exc:
-        msg = str(exc)
+        msg = _plain_words.said(exc)
         if "absolute extrusion" in msg or "M82" in msg:
             code = "EXTRUSION_MODE_ERROR"
         elif "No object matching" in msg:
@@ -19042,7 +19054,7 @@ def extract_plate_object(
             code = "VALIDATION_ERROR"
         return _error_dict(msg, code=code)
     except Exception as exc:
-        return _error_dict(f"Failed to extract plate object: {_plain_words.said(exc)}", code="EXTRACT_ERROR")
+        return _error_dict(f"Kiln couldn't extract the plate object: {_plain_words.said(exc)}.", code="EXTRACT_ERROR")
 
 
 @mcp.tool(annotations=destructive("Print one plate object"))
@@ -19135,7 +19147,7 @@ def print_plate_object(
     except ValueError as exc:
         return _error_dict(_plain_words.sentence(exc), code="OBJECT_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(f"Failed to extract object: {_plain_words.said(exc)}", code="EXTRACT_ERROR")
+        return _error_dict(f"Kiln couldn't extract the object: {_plain_words.said(exc)}.", code="EXTRACT_ERROR")
 
     extracted_path = extract_result["output_path"]
     matched_object = extract_result["matched_object"]
@@ -19172,7 +19184,7 @@ def print_plate_object(
                 "status": "upload_failed",
                 "phase": "upload",
                 "message": (
-                    f"Upload failed. The extracted G-code is at: {extracted_path}. Try `upload_file` manually."
+                    f"The upload didn't finish. The G-code Kiln took out is at {extracted_path}; try `upload_file` with it."
                 ),
                 "extracted_gcode": extracted_path,
                 "matched_object": matched_object,
@@ -19180,7 +19192,7 @@ def print_plate_object(
             }
     except Exception as exc:
         return _error_dict(
-            f"Upload failed: {_plain_words.said(exc)}. Extracted gcode at: {extracted_path}",
+            f"The upload didn't finish: {_plain_words.said(exc)}. The G-code Kiln took out is at {extracted_path}.",
             code="UPLOAD_ERROR",
         )
 
@@ -19202,7 +19214,7 @@ def print_plate_object(
             )
     except Exception as exc:
         return _error_dict(
-            f"Start print failed: {_plain_words.said(exc)}. File uploaded as: {uploaded_name}",
+            f"Kiln couldn't start the print: {_plain_words.said(exc)}. The file is on the printer as {uploaded_name}.",
             code="PRINT_ERROR",
         )
 
@@ -19212,8 +19224,8 @@ def print_plate_object(
             "status": "print_blocked",
             "phase": "start_print",
             "message": (
-                f"Print could not start. The file was uploaded as: {uploaded_name}. "
-                f"Resolve the issue and call `start_print` manually."
+                f"The print didn't start. The file is on the printer as {uploaded_name}; "
+                f"fix the problem, then call `start_print` with it."
             ),
             "extracted_gcode": extracted_path,
             "matched_object": matched_object,
@@ -19355,7 +19367,7 @@ def resolve_model_source(file_path: str) -> dict:
     except ValueError as exc:
         return _error_dict(_plain_words.sentence(exc), code="SOURCE_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(f"Failed to resolve model source: {_plain_words.said(exc)}", code="RESOLVE_ERROR")
+        return _error_dict(f"Kiln couldn't find the model source: {_plain_words.said(exc)}.", code="RESOLVE_ERROR")
 
 
 @mcp.tool(annotations=read_only("Validate OpenSCAD code"))
@@ -19389,9 +19401,9 @@ def validate_openscad_code(scad_code: str = "", code: str = "") -> dict:
         result = gen.validate_scad(code)
         return {"success": True, **result}
     except GenerationError as exc:
-        return _error_dict(f"OpenSCAD validation failed: {_plain_words.said(exc)}", code=exc.code or "VALIDATION_ERROR")
+        return _error_dict(f"Kiln couldn't check the OpenSCAD code: {_plain_words.said(exc)}.", code=exc.code or "VALIDATION_ERROR")
     except Exception as exc:
-        return _error_dict(f"Validation error: {_plain_words.said(exc)}", code="VALIDATION_ERROR")
+        return _error_dict(f"Kiln couldn't check the code: {_plain_words.said(exc)}.", code="VALIDATION_ERROR")
 
 
 # estimate_print_time — moved to plugins/estimate_tools.py
@@ -19461,7 +19473,7 @@ def predict_print_failure(
             "message": nozzle.sentence(),
         }
     except Exception as exc:
-        return _error_dict(f"Failure prediction failed: {_plain_words.said(exc)}")
+        return _error_dict(f"The failure prediction didn't finish: {_plain_words.said(exc)}.")
 
 
 # estimate_material_cost — moved to plugins/estimate_tools.py
@@ -19504,7 +19516,7 @@ def search_design_templates(
         )
         return {"success": True, **result.to_dict()}
     except Exception as exc:
-        return _error_dict(f"Template search failed: {_plain_words.said(exc)}")
+        return _error_dict(f"The template search didn't finish: {_plain_words.said(exc)}.")
 
 
 @mcp.tool(annotations=creates("Design to G-code"))
@@ -19584,7 +19596,7 @@ def design_to_gcode_pipeline(
             join_goal(goal_id, result_dict, result.stl_file)
         return result_dict
     except Exception as exc:
-        return _error_dict(f"Design-to-gcode pipeline failed: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't take the design through to G-code: {_plain_words.said(exc)}.")
 
 
 @mcp.tool(annotations=creates("Merge STL files"))
@@ -19638,7 +19650,7 @@ def merge_stl(
         except ImportError:
             return response
     except Exception as exc:
-        return _error_dict(f"STL merge failed: {_plain_words.said(exc)}")
+        return _error_dict(f"Kiln couldn't merge the STL files: {_plain_words.said(exc)}.")
 
 
 @mcp.tool(annotations=creates("Compose multicolor 3MF"))
@@ -19731,7 +19743,7 @@ def compose_multicolor_3mf(
         from kiln.multicolor_3mf import ColorPart
         from kiln.multicolor_3mf import compose_multicolor_3mf as _compose
     except ImportError as exc:
-        return {"success": False, "error": f"`multicolor_3mf` module unavailable: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
+        return {"success": False, "error": f"`multicolor_3mf` module unavailable: {_plain_words.said(exc)}.", **_plain_words.detail_field(exc)}
 
     color_parts = []
     for i, p in enumerate(parts):
@@ -19832,7 +19844,7 @@ def print_history(
         )
     except Exception as exc:
         logger.exception("Unexpected error in print_history")
-        return _error_dict(f"Unexpected error in `print_history`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the print history: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Printer statistics"))
@@ -19849,7 +19861,7 @@ def printer_stats(printer_name: str) -> dict:
         return {"success": True, **stats}
     except Exception as exc:
         logger.exception("Unexpected error in printer_stats")
-        return _error_dict(f"Unexpected error in `printer_stats`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't read the printer's statistics: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Annotate a print"))
@@ -19872,13 +19884,13 @@ def annotate_print(job_id: str, notes: str) -> dict:
         updated = get_db().update_print_notes(job_id, notes)
         if not updated:
             return _error_dict(
-                f"Failed to update notes for job '{job_id}'.",
+                f"Kiln couldn't update the notes for job '{job_id}'.",
                 code="ERROR",
             )
         return {"success": True, "job_id": job_id, "notes": notes}
     except Exception as exc:
         logger.exception("Unexpected error in annotate_print")
-        return _error_dict(f"Unexpected error in `annotate_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't add the note to the print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # _PHASE_HINTS, _detect_phase — moved to plugins/monitoring_tools.py
@@ -19937,7 +19949,7 @@ def export_safety_profile(printer_model: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in export_safety_profile")
-        return _error_dict(f"Unexpected error in `export_safety_profile`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't export the safety profile: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # validate_gcode_safe — moved to plugins/gcode_validation_tools.py
@@ -19973,7 +19985,7 @@ def get_printer_intelligence(printer_id: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in get_printer_intelligence")
-        return _error_dict(f"Unexpected error in `get_printer_intelligence`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't look up the printer: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=read_only("Get material slicer settings"))
@@ -20020,7 +20032,7 @@ def get_material_recommendation(
         )
     except Exception as exc:
         logger.exception("Unexpected error in get_material_recommendation")
-        return _error_dict(f"Unexpected error in `get_material_recommendation`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't recommend a material: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # Bambu printers report failures as HMS codes: four 4-hex-digit groups, e.g.
@@ -20136,7 +20148,7 @@ def troubleshoot_printer(
         return err
     if not symptom.strip() and not hms_code.strip():
         return _error_dict(
-            "Provide a symptom describing the problem, or an `hms_code` to look up.",
+            "Describe the problem in `symptom`, or give the printer's `hms_code` to look up.",
             code="INVALID_INPUT",
         )
     try:
@@ -20355,7 +20367,7 @@ def troubleshoot_printer(
         )
     except Exception as exc:
         logger.exception("Unexpected error in troubleshoot_printer")
-        return _error_dict(f"Unexpected error in `troubleshoot_printer`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't troubleshoot the printer: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -20515,7 +20527,7 @@ def run_quick_print(
         return resp
     except Exception as exc:
         logger.exception("Unexpected error in run_quick_print")
-        return _error_dict(f"Unexpected error in `run_quick_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't start the quick print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Reslice and print"))
@@ -20681,7 +20693,7 @@ def run_reslice_and_print(
         return resp
     except Exception as exc:
         logger.exception("Unexpected error in run_reslice_and_print")
-        return _error_dict(f"Unexpected error in `run_reslice_and_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't slice and print again: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _queue_fill_rest(
@@ -20854,12 +20866,12 @@ def multi_copy_print(
     if copies > max_copies:
         return _error_dict(f"copies must be <= {max_copies}.", code="VALIDATION_ERROR")
     if spacing_mm < 0:
-        return _error_dict("`spacing_mm` must be >= 0.", code="VALIDATION_ERROR")
+        return _error_dict("`spacing_mm` can't be negative.", code="VALIDATION_ERROR")
 
     ext = os.path.splitext(model_path)[1].lower()
     if ext not in (".stl", ".obj"):
         return _error_dict(
-            f"`multi_copy_print` requires an STL or OBJ file, got {ext!r}.",
+            f"Kiln makes copies from an STL or OBJ file, not {ext!r}.",
             code="VALIDATION_ERROR",
         )
 
@@ -21003,7 +21015,7 @@ def multi_copy_print(
         return _error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in multi_copy_print")
-        return _error_dict(f"Unexpected error in `multi_copy_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't set up the copies: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Run calibration"))
@@ -21032,7 +21044,7 @@ def run_calibrate(
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in run_calibrate")
-        return _error_dict(f"Unexpected error in `run_calibrate`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't run the calibration: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 @mcp.tool(annotations=destructive("Prepare a benchmark print"))
@@ -21087,7 +21099,7 @@ def run_benchmark(
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in run_benchmark")
-        return _error_dict(f"Unexpected error in `run_benchmark`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't run the benchmark: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -23375,7 +23387,7 @@ def find_material_substitute(
         return result
     except Exception as exc:
         logger.exception("Error in find_material_substitute")
-        return _error_dict(f"Failed to find material substitutes: {_plain_words.said(exc)}", code="SUBSTITUTION_ERROR")
+        return _error_dict(f"Kiln couldn't find the material substitutes: {_plain_words.said(exc)}.", code="SUBSTITUTION_ERROR")
 
 
 @mcp.tool(annotations=read_only("Best material substitute"))
@@ -23422,7 +23434,7 @@ def get_best_material_substitute(material: str) -> dict:
         return {"success": True, "material": material, "substitute": subs[0]}
     except Exception as exc:
         logger.exception("Error in get_best_material_substitute")
-        return _error_dict(f"Failed to get best material substitute: {_plain_words.said(exc)}", code="SUBSTITUTION_ERROR")
+        return _error_dict(f"Kiln couldn't get the best material substitute: {_plain_words.said(exc)}.", code="SUBSTITUTION_ERROR")
 
 
 @mcp.tool(annotations=read_only("Material properties"))
@@ -23470,7 +23482,7 @@ def get_material_properties(material_id: str) -> dict:
     except Exception as exc:
         logger.exception("Error in get_material_properties")
         return _error_dict(
-            f"Failed to get material properties: {_plain_words.said(exc)}",
+            f"Kiln couldn't get the material properties: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -23499,7 +23511,7 @@ def check_printer_material_support(
         return err
     if not isinstance(material_id, str) or not material_id.strip():
         return _error_dict(
-            "Provide one `material_id` to check.",
+            "Give one `material_id` to check.",
             code="INVALID_INPUT",
         )
     try:
@@ -23570,7 +23582,7 @@ def check_printer_material_support(
     except Exception as exc:
         logger.exception("Error in check_printer_material_support")
         return _error_dict(
-            f"Failed to check printer material support: {_plain_words.said(exc)}",
+            f"Kiln couldn't check the printer material support: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -23667,7 +23679,7 @@ def compare_material_properties(
     except Exception as exc:
         logger.exception("Error in compare_material_properties")
         return _error_dict(
-            f"Failed to compare materials: {_plain_words.said(exc)}",
+            f"Kiln couldn't compare the materials: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -23787,7 +23799,7 @@ def build_material_overrides(
     except Exception as exc:
         logger.exception("Error in build_material_overrides")
         return _error_dict(
-            f"Failed to build material overrides: {_plain_words.said(exc)}",
+            f"Kiln couldn't build the material overrides: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -23932,7 +23944,7 @@ def reprint_with_material(
     except Exception as exc:
         logger.exception("Error in reprint_with_material")
         return _error_dict(
-            f"Failed to reprint with material: {_plain_words.said(exc)}",
+            f"Kiln couldn't reprint with that material: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -24124,9 +24136,9 @@ def smart_reprint(
         if found_path is None:
             searched = ", ".join(d for d in default_dirs if _os.path.isdir(d))
             return _error_dict(
-                f"Could not find model file matching {fence(file_name)}. "
-                f"Searched directories: {searched}. "
-                f"Provide the full path or add `search_dirs`.",
+                f"Kiln couldn't find the model file for {fence(file_name)}. "
+                f"It looked in: {searched}. "
+                f"Give the full path, or add folders with `search_dirs`.",
                 code="NOT_FOUND",
             )
 
@@ -24299,7 +24311,7 @@ def smart_reprint(
     except Exception as exc:
         logger.exception("Error in smart_reprint")
         return _error_dict(
-            f"Failed in `smart_reprint`: {_plain_words.said(exc)}",
+            f"Kiln couldn't set up the reprint: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -24674,12 +24686,12 @@ def multi_material_print(
                         logger.warning("multi_material_print: could not record what the plate was built from: %s", exc)
         except Exception as exc:
             return _error_dict(
-                f"Failed to build multi-material 3MF: {_plain_words.said(exc)}",
+                f"Kiln couldn't build the multi-material 3MF: {_plain_words.said(exc)}.",
                 code="INTERNAL_ERROR",
             )
         if not compose_result.get("success"):
             return _error_dict(
-                f"Failed to build multi-material 3MF: {compose_result.get('error')}",
+                f"Kiln couldn't build the multi-material 3MF: {compose_result.get('error')}",
                 code="INTERNAL_ERROR",
             )
         if refusal := _plate_too_big_refusal(compose_result, output_3mf):
@@ -24891,7 +24903,7 @@ def multi_material_print(
     except Exception as exc:
         logger.exception("Error in multi_material_print")
         return _error_dict(
-            f"Failed in `multi_material_print`: {_plain_words.said(exc)}",
+            f"Kiln couldn't set up the multi-material print: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -24982,7 +24994,7 @@ def merge_multicolor_gcode(
     except Exception as exc:
         logger.exception("Unexpected error in merge_multicolor_gcode")
         return _error_dict(
-            f"Failed to merge gcode: {_plain_words.said(exc)}",
+            f"Kiln couldn't merge the G-code: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -25076,9 +25088,8 @@ def multi_color_copies(
         ext = os.path.splitext(model_path)[1].lower()
         if ext not in (".stl", ".obj"):
             return _error_dict(
-                f"`multi_color_copies` requires an STL or OBJ file, got {ext!r}. "
-                f"If you have a .gcode.3mf, extract the mesh first or use "
-                f"the original STL/OBJ source file.",
+                f"Kiln makes colored copies from an STL or OBJ file, not {ext!r}. "
+                "If you have a .gcode.3mf, use the STL or OBJ it was sliced from.",
                 code="VALIDATION_ERROR",
             )
 
@@ -25095,8 +25106,8 @@ def multi_color_copies(
             resolved_slots = list(ams_slots)
             if copies is not None and copies != len(resolved_slots):
                 return _error_dict(
-                    f"copies ({copies}) doesn't match `ams_slots` length "
-                    f"({len(resolved_slots)}). Provide one slot per copy.",
+                    f"There are {copies} copies but {len(resolved_slots)} `ams_slots`. "
+                    f"Give one slot per copy.",
                     code="VALIDATION_ERROR",
                 )
             # Best-effort: verify the requested slots actually hold filament,
@@ -25136,7 +25147,7 @@ def multi_color_copies(
                 ams_result = ams_status()
                 if not ams_result.get("success"):
                     return _error_dict(
-                        "Could not query AMS status. Specify `ams_slots` manually.",
+                        "Kiln couldn't read the AMS. Give the slots yourself in `ams_slots`.",
                         code="AMS_ERROR",
                     )
                 mat_upper = material.upper().strip()
@@ -25151,14 +25162,14 @@ def multi_color_copies(
                             resolved_colors.append(f"#{color_hex[:6]}")
             except Exception as exc:
                 return _error_dict(
-                    f"AMS query failed: {_plain_words.said(exc)}. Specify `ams_slots` manually.",
+                    f"Kiln couldn't read the AMS: {_plain_words.said(exc)}. Give the slots yourself in `ams_slots`.",
                     code="AMS_ERROR",
                 )
 
             if not resolved_slots:
                 return _error_dict(
-                    f"No AMS trays found with material type '{material}'. "
-                    f"Check that filament is loaded or specify `ams_slots` manually.",
+                    f"No AMS tray has {material} loaded. "
+                    f"Check the filament is loaded, or give the slots yourself in `ams_slots`.",
                     code="NO_MATERIAL",
                 )
 
@@ -25170,7 +25181,7 @@ def multi_color_copies(
         n_copies = len(resolved_slots)
         if n_copies < 2:
             return _error_dict(
-                "Need at least 2 AMS slots for multi-color copies. For single-color, use `start_print` directly.",
+                "Copies in more than one colour need at least 2 AMS slots. For one colour, use `start_print`.",
                 code="VALIDATION_ERROR",
             )
         if n_copies > 16:
@@ -25243,12 +25254,12 @@ def multi_color_copies(
             )
         except Exception as exc:
             return _error_dict(
-                f"Failed to build multi-color 3MF: {_plain_words.said(exc)}",
+                f"Kiln couldn't build the multi-colour 3MF: {_plain_words.said(exc)}.",
                 code="INTERNAL_ERROR",
             )
         if not compose_result.get("success"):
             return _error_dict(
-                f"Failed to build multi-color 3MF: {compose_result.get('error')}",
+                f"Kiln couldn't build the multi-colour 3MF: {compose_result.get('error')}",
                 code="INTERNAL_ERROR",
             )
         if refusal := _plate_too_big_refusal(compose_result, output_3mf):
@@ -25310,7 +25321,7 @@ def multi_color_copies(
     except Exception as exc:
         logger.exception("Error in multi_color_copies")
         return _error_dict(
-            f"Failed in `multi_color_copies`: {_plain_words.said(exc)}",
+            f"Kiln couldn't set up the multicolor copies: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 
@@ -25339,7 +25350,7 @@ def extract_file_metadata(file_path: str) -> dict:
         return {"success": True, "metadata": meta.to_dict()}
     except Exception as exc:
         logger.exception("Error in extract_file_metadata")
-        return _error_dict(f"Failed to extract file metadata: {_plain_words.said(exc)}", code="FILE_METADATA_ERROR")
+        return _error_dict(f"Kiln couldn't extract the file metadata: {_plain_words.said(exc)}.", code="FILE_METADATA_ERROR")
 
 
 @mcp.tool(annotations=creates("Save a print checkpoint"))
@@ -25398,7 +25409,7 @@ def save_print_checkpoint(
         return _error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
     except Exception as exc:
         logger.exception("Error in save_print_checkpoint")
-        return _error_dict(f"Failed to save print checkpoint: {_plain_words.said(exc)}", code="CHECKPOINT_ERROR")
+        return _error_dict(f"Kiln couldn't save the print checkpoint: {_plain_words.said(exc)}.", code="CHECKPOINT_ERROR")
 
 
 @mcp.tool(annotations=read_only("Plan a print recovery"))
@@ -25456,8 +25467,8 @@ def plan_print_recovery(
             ft = FailureType((failure_type or "communication_loss").lower())
         except ValueError:
             return _error_dict(
-                f"Unknown `failure_type`: {failure_type!r}.  "
-                f"Valid values: {[t.value for t in FailureType]}",
+                f"Kiln doesn't know the `failure_type` {failure_type!r}. "
+                f"Use one of: {', '.join(t.value for t in FailureType)}.",
                 code="VALIDATION_ERROR",
             )
 
@@ -25481,7 +25492,7 @@ def plan_print_recovery(
         return {"success": True, "recommendation": plan.to_dict()}
     except Exception as exc:
         logger.exception("Error in plan_print_recovery")
-        return _error_dict(f"Failed to plan print recovery: {_plain_words.said(exc)}", code="RECOVERY_ERROR")
+        return _error_dict(f"Kiln couldn't plan the print recovery: {_plain_words.said(exc)}.", code="RECOVERY_ERROR")
 
 
 #: What someone without Kiln Pro can do about a power cut, said in the
@@ -25623,7 +25634,7 @@ def firmware_resume_print(
         }
     except Exception as exc:
         logger.exception("Error in firmware_resume_print")
-        return _error_dict(f"Failed to resume print via firmware: {_plain_words.said(exc)}", code="FIRMWARE_RESUME_ERROR")
+        return _error_dict(f"Kiln couldn't resume the print via firmware: {_plain_words.said(exc)}.", code="FIRMWARE_RESUME_ERROR")
 
 
 @mcp.tool(annotations=read_only("Check printer health"))
@@ -25644,7 +25655,7 @@ def check_printer_health(printer_name: str) -> dict:
         return {"success": True, "health_report": report.to_dict()}
     except Exception as exc:
         logger.exception("Error in check_printer_health")
-        return _error_dict(f"Failed to check printer health: {_plain_words.said(exc)}", code="HEALTH_CHECK_ERROR")
+        return _error_dict(f"Kiln couldn't check the printer health: {_plain_words.said(exc)}.", code="HEALTH_CHECK_ERROR")
 
 
 @mcp.tool(annotations=destructive("Start health monitoring"))
@@ -25697,7 +25708,7 @@ def start_printer_health_monitoring(
         return result
     except Exception as exc:
         logger.exception("Error in start_printer_health_monitoring")
-        return _error_dict(f"Failed to start health monitoring: {_plain_words.said(exc)}", code="MONITORING_ERROR")
+        return _error_dict(f"Kiln couldn't start the health monitoring: {_plain_words.said(exc)}.", code="MONITORING_ERROR")
 
 
 @mcp.tool(annotations=destructive("Stop health monitoring"))
@@ -25722,7 +25733,7 @@ def stop_printer_health_monitoring(printer_name: str) -> dict:
         return {"success": True, "printer": printer_name, "monitoring": "stopped"}
     except Exception as exc:
         logger.exception("Error in stop_printer_health_monitoring")
-        return _error_dict(f"Failed to stop health monitoring: {_plain_words.said(exc)}", code="MONITORING_ERROR")
+        return _error_dict(f"Kiln couldn't stop the health monitoring: {_plain_words.said(exc)}.", code="MONITORING_ERROR")
 
 
 # estimate_print_progress — moved to plugins/estimate_tools.py
@@ -25756,7 +25767,7 @@ def analyze_print_snapshot(file_path: str) -> dict:
         return {"success": True, "analysis": result.to_dict()}
     except Exception as exc:
         logger.exception("Error in analyze_print_snapshot")
-        return _error_dict(f"Failed to analyze snapshot: {_plain_words.said(exc)}", code="SNAPSHOT_ERROR")
+        return _error_dict(f"Kiln couldn't analyze the snapshot: {_plain_words.said(exc)}.", code="SNAPSHOT_ERROR")
 
 
 # acquire_printer_lock, release_printer_lock
@@ -25793,7 +25804,7 @@ def get_fulfillment_quote_cached(
         return {"success": True, "quote": quote.to_dict()}
     except Exception as exc:
         logger.exception("Error in get_fulfillment_quote_cached")
-        return _error_dict(f"Failed to get cached quote: {_plain_words.said(exc)}", code="QUOTE_CACHE_ERROR")
+        return _error_dict(f"Kiln couldn't get the cached quote: {_plain_words.said(exc)}.", code="QUOTE_CACHE_ERROR")
 
 
 
@@ -25839,7 +25850,7 @@ def list_snapshots(
         }
     except Exception as exc:
         logger.exception("Error in list_snapshots")
-        return _error_dict(f"Failed to list snapshots: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _error_dict(f"Kiln couldn't list the snapshots: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 # Enterprise admin tools -- moved to plugins/enterprise_tools.py
@@ -25883,7 +25894,7 @@ def printer_trend_analysis(
         return {"success": True, "trend_report": report.to_dict()}
     except Exception as exc:
         logger.exception("Error in printer_trend_analysis")
-        return _error_dict(f"Failed to analyze printer trends: {_plain_words.said(exc)}", code="TREND_ANALYSIS_ERROR")
+        return _error_dict(f"Kiln couldn't analyze the printer trends: {_plain_words.said(exc)}.", code="TREND_ANALYSIS_ERROR")
 
 
 @mcp.tool(annotations=read_only("Check ambient conditions"))
@@ -25933,12 +25944,12 @@ def check_ambient_conditions(
         return {"success": True, "ambient_safety": result.to_dict()}
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
-            f"Failed to check ambient conditions: {_plain_words.said(exc)}. "
+            f"Kiln couldn't check the ambient conditions: {_plain_words.said(exc)}. "
             "Check that the printer is online and supports chamber temperature reporting."
         )
     except Exception as exc:
         logger.exception("Error in check_ambient_conditions")
-        return _error_dict(f"Failed to check ambient conditions: {_plain_words.said(exc)}", code="AMBIENT_CHECK_ERROR")
+        return _error_dict(f"Kiln couldn't check the ambient conditions: {_plain_words.said(exc)}.", code="AMBIENT_CHECK_ERROR")
 
 
 def _refund_decoration_quota(consumed: bool) -> None:
@@ -26256,7 +26267,7 @@ def decorate_surface(
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
                     f"{os.path.basename(model_path)} is a CAD file, and this computer "
-                    f"cannot turn it into a mesh to decorate: {_plain_words.said(exc)}",
+                    f"can't turn it into a mesh to decorate: {_plain_words.said(exc)}.",
                     code="UNSUPPORTED_FORMAT",
                 )
     except ImportError:
@@ -26265,7 +26276,7 @@ def decorate_surface(
     if model_ext not in (".stl", ".obj"):
         _refund_decoration_quota(quota_consumed)
         return _error_dict(
-            f"`decorate_surface` requires STL or OBJ, got {model_ext!r}.",
+            f"Kiln decorates an STL or OBJ file, not {model_ext!r}.",
             code="VALIDATION_ERROR",
         )
 
@@ -26353,7 +26364,7 @@ def decorate_surface(
             else:
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
-                    f"Cannot resolve content: {content!r}. Provide a file path or 'text:...' for text.",
+                    f"Kiln can't find {content!r}. Give a file path, or 'text:...' for text.",
                     code="INVALID_CONTENT",
                 )
 
@@ -26370,8 +26381,8 @@ def decorate_surface(
             if ctype not in ("text", "svg", "image"):
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
-                    "face='wall' takes text ('text:...'), an SVG logo, or a "
-                    "bi-level raster mark. For repeating patterns on curved "
+                    "`face='wall'` takes text ('text:...'), an SVG logo, or a "
+                    "two-colour picture. For repeating patterns on curved "
                     "walls use `apply_image_texture` or `apply_procedural_texture`.",
                     code="INVALID_CONTENT",
                 )
@@ -26416,7 +26427,7 @@ def decorate_surface(
             if os.path.splitext(model_path)[1].lower() != ".stl":
                 _refund_decoration_quota(quota_consumed)
                 return _error_dict(
-                    "face='wall' needs an STL. Convert with "
+                    "`face='wall'` needs an STL. Convert with "
                     "`import_external_mesh`, or use a flat face for this "
                     "model.",
                     code="UNSUPPORTED_FORMAT",
@@ -26783,7 +26794,7 @@ def decorate_surface(
                         "success": False,
                         "status": "error",
                         "code": "IMAGE_STYLE_UNKNOWN",
-                        "error": f"{_plain_words.said(exc)}; 'auto' lets Kiln pick.",
+                        "error": f"{_plain_words.sentence(exc).rstrip('.')}; 'auto' lets Kiln pick.",
                         "accepted_styles": ["auto", *accepted_styles()],
                         **_plain_words.detail_field(exc),
                     }
@@ -26926,7 +26937,7 @@ def decorate_surface(
         else:
             _refund_decoration_quota(quota_consumed)
             return _error_dict(
-                f"Unknown `content_type`: {content_type!r}.",
+                f"Kiln doesn't know the `content_type` {content_type!r}. Use `auto`, `text`, `image`, `svg` or `qr`.",
                 code="VALIDATION_ERROR",
             )
 
@@ -27032,7 +27043,7 @@ def decorate_surface(
             _refund_decoration_quota(quota_consumed)
             result_dict: dict[str, Any] = {
                 "status": "compile_failed",
-                "message": (f"OpenSCAD compilation failed. Error: {compile_result.get('error', 'unknown')}"),
+                "message": (f"OpenSCAD couldn't build it: {compile_result.get('error', 'no reason given')}"),
                 "scad_path": scad_result["scad_path"],
                 "compile_result": compile_result,
             }
@@ -27295,7 +27306,7 @@ def decorate_surface(
         logger.exception("Error in decorate_surface")
         _refund_decoration_quota(quota_consumed)
         return _error_dict(
-            f"Failed in `decorate_surface`: {_plain_words.said(exc)}",
+            f"Kiln couldn't decorate the surface: {_plain_words.said(exc)}.",
             code="INTERNAL_ERROR",
         )
 

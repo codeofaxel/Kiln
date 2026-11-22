@@ -224,7 +224,7 @@ class _GenerationToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_model_with_provider")
                 return _srv._error_dict(
-                    f"Unexpected error in `generate_model_with_provider`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't make the model with that service: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -345,7 +345,7 @@ class _GenerationToolsPlugin:
             except Exception as exc:
                 _logger.exception("Failed to render preview")
                 return _srv._error_dict(
-                    f"Failed to render preview: {_plain_words.said(exc)}",
+                    f"Kiln couldn't render the preview: {_plain_words.said(exc)}.",
                     code="RENDER_ERROR",
                 )
 
@@ -434,7 +434,7 @@ class _GenerationToolsPlugin:
                 return err
             except Exception as exc:
                 return _srv._error_dict(
-                    f"STEP conversion failed: {_plain_words.said(exc)}",
+                    f"Kiln couldn't convert the STEP file: {_plain_words.said(exc)}.",
                     code="STEP_CONVERSION_FAILED",
                 )
 
@@ -509,7 +509,7 @@ class _GenerationToolsPlugin:
                     return _srv._error_dict(_plain_words.sentence(exc), code="UNKNOWN_PRINTER", retryable=False)
                 _logger.exception("Unexpected error in validate_and_prepare_mesh")
                 return _srv._error_dict(
-                    f"Unexpected error in `validate_and_prepare_mesh`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't check and prepare the model: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -587,19 +587,19 @@ class _GenerationToolsPlugin:
                 }
             except GenerationAuthError as exc:
                 return _srv._error_dict(
-                    f"Failed to generate texture (auth): {_plain_words.said(exc)}. "
-                    "Check that KILN_MESHY_API_KEY is set.",
+                    f"Kiln couldn't generate the texture: {_plain_words.said(exc)}. "
+                    "Check that `KILN_MESHY_API_KEY` is set.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
                 return _srv._error_dict(
-                    f"Failed to generate texture: {_plain_words.said(exc)}",
+                    f"Kiln couldn't generate the texture: {_plain_words.said(exc)}.",
                     code=exc.code or "GENERATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_texture")
                 return _srv._error_dict(
-                    f"Unexpected error in `generate_texture`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't make the texture: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

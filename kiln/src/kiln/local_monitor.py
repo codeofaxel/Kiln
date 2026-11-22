@@ -402,7 +402,7 @@ def _camera_frame(printer_name: str | None, status: dict | None) -> tuple[str | 
         if waiting:
             return None, waiting
         # The camera's own reason (liveview off, not a picture) is the note.
-        return None, f"camera unavailable: {exc}" if str(exc) else "camera unavailable"
+        return None, f"camera unavailable: {_plain_words.said(exc)}" if str(exc) else "camera unavailable"
 
 
 def _addon_note(exc: BaseException) -> str | None:

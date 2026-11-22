@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from kiln import plain_words as _plain_words
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
 
 # The units judgement lives beside the rescale engine it steers, under a
@@ -226,7 +227,7 @@ def _inline_stl_binary_fallback(path: Path) -> dict[str, Any]:
         count = data.count(b"endfacet")
         if count > 0:
             return {"triangle_count": count}
-        return {"error": "Could not parse ASCII STL"}
+        return {"error": "Kiln couldn't read ASCII STL"}
 
     # Binary STL: 80-byte header + 4-byte count + 50 bytes per triangle
     if len(data) < 84:
@@ -824,7 +825,7 @@ def _step_mesh_analysis(
         report.checks.append(_CheckResult(
             name="mesh_geometry",
             passed=False,
-            details=f"Kiln could not check this file's geometry: {exc}",
+            details=f"Kiln could not check this file's geometry: {_plain_words.said(exc)}",
             severity="error",
         ))
     return mesh_info
@@ -981,7 +982,7 @@ def _step_watertight_check(
         report.checks.append(_CheckResult(
             name="watertight",
             passed=True,
-            details=f"Skipped — check error: {exc}",
+            details=f"Skipped — check error: {_plain_words.said(exc)}",
             severity="warning",
         ))
     return is_manifold
@@ -1051,7 +1052,7 @@ def _step_repair(
             report.checks.append(_CheckResult(
                 name="repair",
                 passed=False,
-                details=f"Repair failed: {exc}",
+                details=f"Repair failed: {_plain_words.said(exc)}",
                 severity="warning",
             ))
             report.recommendations.append(
@@ -1144,7 +1145,7 @@ def _step_printability(
         report.checks.append(_CheckResult(
             name="printability",
             passed=False,
-            details=f"Kiln could not run the printability analysis: {exc}",
+            details=f"Kiln could not run the printability analysis: {_plain_words.said(exc)}",
             severity="error",
         ))
 
@@ -1205,7 +1206,7 @@ def _step_structural(report: _PipelineReport) -> None:
         report.checks.append(_CheckResult(
             name="structural",
             passed=True,
-            details=f"Skipped — assessment error: {exc}",
+            details=f"Skipped — assessment error: {_plain_words.said(exc)}",
             severity="warning",
         ))
 
@@ -1307,7 +1308,7 @@ def _step_support_assessment(
         report.checks.append(_CheckResult(
             name="support_assessment",
             passed=True,
-            details=f"Skipped — assessment error: {exc}",
+            details=f"Skipped — assessment error: {_plain_words.said(exc)}",
             severity="warning",
         ))
 
@@ -1422,7 +1423,7 @@ def _step_estimate(report: _PipelineReport, working_path: str) -> None:
         # estimator raises for each of these and must not take the whole
         # pipeline with it.  The bounding-box fallback below answers
         # instead, and says why.
-        report.model_info["estimate_note"] = f"exact estimate unavailable: {exc}"
+        report.model_info["estimate_note"] = f"exact estimate unavailable: {_plain_words.said(exc)}"
 
     if not _estimate_available:
         # Fallback: rough estimate from bounding box volume

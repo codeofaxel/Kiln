@@ -450,7 +450,7 @@ class TestMyMiniFactoryAdapterInit:
     def test_requires_api_key(self):
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("KILN_MMF_API_KEY", None)
-            with pytest.raises(MarketplaceAuthError, match="API key is required"):
+            with pytest.raises(MarketplaceAuthError, match="needs an API key"):
                 MyMiniFactoryAdapter(api_key="")
 
     def test_api_key_from_env(self):
@@ -676,7 +676,7 @@ class TestMyMiniFactoryAdapterErrors:
             f"{MMF_BASE}/search",
             body=requests.ConnectionError("conn failed"),
         )
-        with pytest.raises(MarketplaceError, match="Connection"):
+        with pytest.raises(MarketplaceError, match="couldn't reach"):
             mmf_adapter.search("test")
 
     @responses.activate
@@ -686,7 +686,7 @@ class TestMyMiniFactoryAdapterErrors:
             f"{MMF_BASE}/search",
             body=requests.Timeout("timed out"),
         )
-        with pytest.raises(MarketplaceError, match="timed out"):
+        with pytest.raises(MarketplaceError, match="took too long to answer"):
             mmf_adapter.search("test")
 
 
@@ -1088,7 +1088,7 @@ class TestCults3DAdapterErrors:
             CULTS_GQL_URL,
             body=requests.ConnectionError("conn failed"),
         )
-        with pytest.raises(MarketplaceError, match="Connection"):
+        with pytest.raises(MarketplaceError, match="couldn't reach"):
             cults_adapter.search("test")
 
     @responses.activate
@@ -1098,7 +1098,7 @@ class TestCults3DAdapterErrors:
             CULTS_GQL_URL,
             body=requests.Timeout("timed out"),
         )
-        with pytest.raises(MarketplaceError, match="timed out"):
+        with pytest.raises(MarketplaceError, match="took too long to answer"):
             cults_adapter.search("test")
 
 
@@ -1647,7 +1647,7 @@ class TestThingiverseAdapterUploadModel:
         client._session.patch.return_value = fail_resp
 
         adapter = ThingiverseAdapter(client)
-        with pytest.raises(MarketplaceError, match="Failed to set thing metadata"):
+        with pytest.raises(MarketplaceError, match="turned down the listing's details"):
             adapter.upload_model(
                 file_path=str(stl), title="T", description="D",
                 tags=["t"], category="c", license_type="cc-by",
@@ -1797,7 +1797,7 @@ class TestMyMiniFactoryAdapterUploadModel:
 
         responses.add(responses.POST, f"{MMF_BASE}/objects", status=500, body="Internal Server Error")
 
-        with pytest.raises(MarketplaceError, match="Failed to create object"):
+        with pytest.raises(MarketplaceError, match="turned down the new listing"):
             mmf_adapter.upload_model(
                 file_path=str(stl), title="T", description="D",
                 tags=["t"], category="c", license_type="cc-by",
@@ -1875,7 +1875,7 @@ class TestMyMiniFactoryAdapterUploadModel:
 
         responses.add(responses.POST, f"{MMF_BASE}/objects", body=requests.ConnectionError("conn failed"))
 
-        with pytest.raises(MarketplaceError, match="Connection"):
+        with pytest.raises(MarketplaceError, match="couldn't reach"):
             mmf_adapter.upload_model(
                 file_path=str(stl), title="T", description="D",
                 tags=["t"], category="c", license_type="cc-by",
@@ -1888,7 +1888,7 @@ class TestMyMiniFactoryAdapterUploadModel:
 
         responses.add(responses.POST, f"{MMF_BASE}/objects", body=requests.Timeout("timed out"))
 
-        with pytest.raises(MarketplaceError, match="timed out"):
+        with pytest.raises(MarketplaceError, match="took too long to answer"):
             mmf_adapter.upload_model(
                 file_path=str(stl), title="T", description="D",
                 tags=["t"], category="c", license_type="cc-by",

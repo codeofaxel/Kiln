@@ -110,6 +110,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from kiln import plain_words as _plain_words
 from kiln.auto_record_hook import cancel_intent_pending, note_cancel_requested
 
 if TYPE_CHECKING:
@@ -937,8 +938,8 @@ class PrintWatchdog:
                     kind="red",
                     rule="print_error",
                     message=(
-                        f"Printer reported print_error={code} (hex: {code:08X}) "
-                        f"and kept printing through it for {stood:.0f}s"
+                        f"The printer reported an error (code {code:08X}) "
+                        f"and kept printing through it for {stood:.0f} s."
                     ),
                     timestamp=now,
                     context={"print_error": code, "persisted_seconds": float(stood)},
@@ -967,7 +968,7 @@ class PrintWatchdog:
                 return Flag(
                     kind="red",
                     rule="hms_blocklist",
-                    message=f"Printer print_error hex {as_hex} is on HMS blocklist",
+                    message=f"The printer reported error {as_hex}, one Kiln treats as a reason to stop.",
                     timestamp=now,
                     context={"hms_code": as_hex},
                 )
@@ -1233,7 +1234,7 @@ class PrintWatchdog:
             result = self._adapter.emergency_stop()
         except Exception as exc:
             logger.exception("PrintWatchdog: emergency_stop() FAILED")
-            return False, f"emergency_stop() raised: {exc}"
+            return False, f"`emergency_stop` raised: {_plain_words.said(exc)}"
         said = getattr(result, "message", None)
         return _stop_confirmed(result), (str(said) if said else None)
 

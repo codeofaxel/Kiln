@@ -407,7 +407,7 @@ class _TierDiagnosticPlugin:
                     "success": False,
                     "effective_tier": "unknown",
                     "agent_summary": (
-                        f"Couldn't resolve your tier — diagnostic crashed: {exc}. "
+                        f"Couldn't resolve your tier — diagnostic crashed: {_plain_words.said(exc)}. "
                         "This shouldn't happen; please report at "
                         "https://github.com/codeofaxel/Kiln/issues."
                     ),

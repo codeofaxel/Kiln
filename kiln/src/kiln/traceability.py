@@ -127,15 +127,15 @@ class TraceabilityEngine:
         :raises TraceabilityError: If required fields are empty.
         """
         if not printer_id:
-            raise TraceabilityError("printer_id must not be empty")
+            raise TraceabilityError("`printer_id` can't be empty.")
         if not file_name:
-            raise TraceabilityError("file_name must not be empty")
+            raise TraceabilityError("`file_name` can't be empty.")
         if not file_hash:
-            raise TraceabilityError("file_hash must not be empty")
+            raise TraceabilityError("`file_hash` can't be empty.")
         if not material:
             raise TraceabilityError("material must not be empty")
         if not safety_profile_version:
-            raise TraceabilityError("safety_profile_version must not be empty")
+            raise TraceabilityError("`safety_profile_version` can't be empty.")
 
         part_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
@@ -174,15 +174,18 @@ class TraceabilityEngine:
             is invalid.
         """
         if status not in _VALID_STATUSES:
-            raise TraceabilityError(f"Invalid status '{status}'; must be one of {sorted(_VALID_STATUSES)}")
+            raise TraceabilityError(
+                f"Kiln doesn't know the status '{status}'. Use one of: "
+                + ", ".join(f"`{s}`" for s in sorted(_VALID_STATUSES)) + "."
+            )
         if status == "printing":
             raise TraceabilityError(
-                "Cannot complete a record with status 'printing'; use 'completed', 'failed', or 'cancelled'"
+                "A finished record can't have the status `printing`. Use `completed`, `failed` or `cancelled`."
             )
 
         record = self._records.get(part_id)
         if record is None:
-            raise TraceabilityError(f"No record found for part_id '{part_id}'")
+            raise TraceabilityError(f"Kiln has no record of the part '{part_id}'.")
 
         record.completed_at = datetime.now(timezone.utc).isoformat()
         record.status = status
@@ -238,7 +241,7 @@ class TraceabilityEngine:
         for pid in part_ids:
             record = self._records.get(pid)
             if record is None:
-                raise TraceabilityError(f"Cannot generate report: no record for part_id '{pid}'")
+                raise TraceabilityError(f"Kiln can't make the report: it has no record of the part '{pid}'.")
             is_verified = self.verify_chain_of_custody(pid)
             entry = record.to_dict()
             entry["chain_of_custody_verified"] = is_verified

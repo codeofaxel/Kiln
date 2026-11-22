@@ -34,6 +34,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from kiln import plain_words as _plain_words
+
 PACKAGE_NAME = "kiln3d"
 UPGRADE_COMMAND = f"pip install --upgrade {PACKAGE_NAME}"
 
@@ -171,7 +173,7 @@ def run_installer(
         try:
             proc = runner(argv, capture_output=True, text=True, timeout=timeout)
         except Exception as exc:  # noqa: BLE001 -- reported, never raised
-            last = InstallRun(ok=False, argv=argv, tail=str(exc), offline=False, error=str(exc))
+            last = InstallRun(ok=False, argv=argv, tail=str(exc), offline=False, error=_plain_words.sentence(exc))
             continue
         stdout, stderr = proc.stdout or "", proc.stderr or ""
         if proc.returncode == 0:

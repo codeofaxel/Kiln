@@ -16,6 +16,7 @@ import logging
 import os
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.marketplaces.base import (
     MarketplaceAdapter,
     MarketplaceAuthError,
@@ -48,13 +49,14 @@ _deprecation_warned = False
 
 def _wrap_error(exc: ThingiverseError) -> MarketplaceError:
     """Convert a Thingiverse-specific exception to a generic one."""
+    said = _plain_words.sentence(exc)
     if isinstance(exc, ThingiverseAuthError):
-        return MarketplaceAuthError(str(exc), status_code=exc.status_code)
+        return MarketplaceAuthError(said, status_code=exc.status_code)
     if isinstance(exc, ThingiverseNotFoundError):
-        return MarketplaceNotFoundError(str(exc), status_code=exc.status_code)
+        return MarketplaceNotFoundError(said, status_code=exc.status_code)
     if isinstance(exc, ThingiverseRateLimitError):
-        return MarketplaceRateLimitError(str(exc), status_code=exc.status_code)
-    return MarketplaceError(str(exc), status_code=exc.status_code)
+        return MarketplaceRateLimitError(said, status_code=exc.status_code)
+    return MarketplaceError(said, status_code=exc.status_code)
 
 
 class ThingiverseAdapter(MarketplaceAdapter):
@@ -223,7 +225,7 @@ class ThingiverseAdapter(MarketplaceAdapter):
             )
             if resp.status_code >= 400:
                 raise MarketplaceError(
-                    f"Failed to set thing metadata ({resp.status_code}): {resp.text[:200]}",
+                    "Thingiverse turned down the listing's details.",
                     status_code=resp.status_code,
                 )
 

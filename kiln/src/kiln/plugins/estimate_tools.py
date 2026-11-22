@@ -451,7 +451,7 @@ class _EstimateToolsPlugin:
                 return plate_choice_refusal(exc)
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Failed to slice model: {_plain_words.said(exc)}. Ensure PrusaSlicer or OrcaSlicer is installed.",
+                    f"Kiln couldn't slice the model: {_plain_words.said(exc)}. Install PrusaSlicer or OrcaSlicer.",
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
@@ -464,7 +464,7 @@ class _EstimateToolsPlugin:
                 # alone.  Said once: a part the check calls ready keeps the
                 # slicer's words as the message.
                 failed = _srv._error_dict(
-                    f"Failed to slice model: {_plain_words.said(exc)}",
+                    f"Kiln couldn't slice the model: {_plain_words.said(exc)}.",
                     code=getattr(exc, "code", "SLICER_ERROR"),
                 )
                 try:
@@ -481,13 +481,13 @@ class _EstimateToolsPlugin:
                 return failed
             except FileNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Failed to slice model: {_plain_words.said(exc)}",
+                    f"Kiln couldn't slice the model: {_plain_words.said(exc)}.",
                     code="FILE_NOT_FOUND",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in slice_and_estimate")
                 return _srv._error_dict(
-                    f"Unexpected error in `slice_and_estimate`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't slice and estimate the model: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -551,13 +551,13 @@ class _EstimateToolsPlugin:
                 attach_learned_time(data, printer_id or None)
                 return {"success": True, "estimate": data}
             except FileNotFoundError as exc:
-                return _srv._error_dict(f"Failed to estimate cost: {_plain_words.said(exc)}", code="FILE_NOT_FOUND")
+                return _srv._error_dict(f"Kiln couldn't estimate the cost: {_plain_words.said(exc)}.", code="FILE_NOT_FOUND")
             except ValueError as exc:
-                return _srv._error_dict(f"Failed to estimate cost: {_plain_words.said(exc)}", code="INVALID_ARGS")
+                return _srv._error_dict(f"Kiln couldn't estimate the cost: {_plain_words.said(exc)}.", code="INVALID_ARGS")
             except Exception as exc:
                 _logger.exception("Unexpected error in estimate_cost")
                 return _srv._error_dict(
-                    f"Unexpected error in `estimate_cost`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
+                    f"Kiln couldn't estimate the cost: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
                 )
 
         # ------------------------------------------------------------------
@@ -680,7 +680,7 @@ class _EstimateToolsPlugin:
                     from kiln.plugins.slicer_tools import plate_choice_refusal
 
                     return plate_choice_refusal(exc)
-                return _srv._error_dict(f"Print estimation failed: {_plain_words.said(exc)}", code="ESTIMATE_ERROR")
+                return _srv._error_dict(f"Kiln couldn't estimate the print: {_plain_words.said(exc)}.", code="ESTIMATE_ERROR")
 
         # ------------------------------------------------------------------
         # estimate_material_cost
@@ -739,7 +739,7 @@ class _EstimateToolsPlugin:
                     "nozzle": nozzle.to_dict(),
                 }
             except Exception as exc:
-                return _srv._error_dict(f"Cost estimation failed: {_plain_words.said(exc)}")
+                return _srv._error_dict(f"Kiln couldn't estimate the cost: {_plain_words.said(exc)}.")
 
         # ------------------------------------------------------------------
         # estimate_print_progress
@@ -815,7 +815,7 @@ class _EstimateToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in estimate_print_progress")
                 return _srv._error_dict(
-                    f"Failed to estimate print progress: {_plain_words.said(exc)}", code="PROGRESS_ERROR"
+                    f"Kiln couldn't estimate the print progress: {_plain_words.said(exc)}.", code="PROGRESS_ERROR"
                 )
 
         # ------------------------------------------------------------------
@@ -1020,7 +1020,7 @@ class _EstimateToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in estimate_before_design")
                 return _srv._error_dict(
-                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
+                    _plain_words.sentence(exc), code="INTERNAL_ERROR"
                 )
 
         # ------------------------------------------------------------------
@@ -1064,13 +1064,13 @@ class _EstimateToolsPlugin:
                     "message": (
                         f"{len(addons)} add-on(s) available"
                         + (f" for {printer_id}" if eff_printer else "")
-                        + ". Pass the 'id' as `tool_changer_addon` in `estimate_before_design`."
+                        + ". To use one, pass its `id` as `tool_changer_addon` to `estimate_before_design`."
                     ),
                 }
             except Exception as exc:
                 _logger.exception("Error in list_multi_material_addons")
                 return _srv._error_dict(
-                    f"Failed to list add-ons: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
+                    f"Kiln couldn't list the add-ons: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
                 )
 
         _logger.debug("Registered estimate tools")

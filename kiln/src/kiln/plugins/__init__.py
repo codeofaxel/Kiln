@@ -305,7 +305,7 @@ class PluginManager:
                 error_info = PluginInfo(
                     name=ep.name,
                     version="unknown",
-                    error=str(exc),
+                    error=_plain_words.sentence(exc),
                 )
                 with self._lock:
                     self._infos[ep.name] = error_info

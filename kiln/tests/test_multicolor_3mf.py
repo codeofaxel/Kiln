@@ -1020,7 +1020,7 @@ class TestComposePainted:
             _cube_soup(), ["#F72323"], output_path=str(tmp_path / "y.3mf"),
         )
         assert result["success"] is False
-        assert "length" in result["error"]
+        assert "one colour per triangle" in result["error"]
 
     def test_thumbnail_is_embedded(self, tmp_path: Path):
         pytest.importorskip("PIL.Image", reason="colored renderer needs PIL")

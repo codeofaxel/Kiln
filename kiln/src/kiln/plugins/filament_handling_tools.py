@@ -231,7 +231,7 @@ def run_filament_op(
     except (PrinterError, RuntimeError) as exc:
         # The gate refused (or the transport did) before anything moved.
         return _srv._error_dict(
-            f"Failed to {action} {what}: {exc}", extra={"outcome": "failed"}
+            f"Kiln couldn't {action} {what}: {exc}", extra={"outcome": "failed"}
         )
     except Exception as exc:
         _logger.exception("Unexpected error in %s", tool_name)

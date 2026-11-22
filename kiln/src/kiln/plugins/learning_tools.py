@@ -293,7 +293,7 @@ def _clear_print_note(job_id: str, outcome: str, notes: str | None) -> dict:
 
     if notes:
         return _srv._error_dict(
-            "Send `clear_note` to delete a note, or notes to write one, not both.",
+            "Send `clear_note` to delete a note, or `notes` to write one, not both.",
             code="VALIDATION_ERROR",
         )
     db = get_db()
@@ -644,12 +644,12 @@ def record_print_outcome(
         )
     if quality_grade and quality_grade not in _VALID_QUALITY_GRADES:
         return _srv._error_dict(
-            f"Invalid `quality_grade` {quality_grade!r}. Must be one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}",
+            f"Kiln doesn't know the `quality_grade` {quality_grade!r}. Use one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}.",
             code="VALIDATION_ERROR",
         )
     if determined_by and determined_by not in _valid_determined_by():
         return _srv._error_dict(
-            f"Invalid `determined_by` {determined_by!r}. Must be one of: {', '.join(sorted(_valid_determined_by()))}",
+            f"Kiln doesn't know the `determined_by` {determined_by!r}. Use one of: {', '.join(sorted(_valid_determined_by()))}.",
             code="VALIDATION_ERROR",
         )
     if clear_note:
@@ -667,7 +667,7 @@ def record_print_outcome(
 
     if note_by is not None and note_by not in NOTE_BY:
         return _srv._error_dict(
-            f"Invalid `note_by` {note_by!r}. Must be one of: {', '.join(NOTE_BY)}",
+            f"Kiln doesn't know the `note_by` {note_by!r}. Use one of: {', '.join(NOTE_BY)}.",
             code="VALIDATION_ERROR",
         )
     if note_by is None and notes and not auto_recorded:
@@ -685,8 +685,8 @@ def record_print_outcome(
             print_error = int(print_error)
         except (TypeError, ValueError):
             return _srv._error_dict(
-                f"Invalid `print_error` {print_error!r} — expected a firmware "
-                "error code as an integer.",
+                f"`print_error` must be the printer's error code as a whole number, "
+                f"not {print_error!r}.",
                 code="VALIDATION_ERROR",
             )
 
@@ -703,7 +703,7 @@ def record_print_outcome(
 
     if failure_mode and failure_mode not in _VALID_FAILURE_MODES:
         return _srv._error_dict(
-            f"Invalid `failure_mode` {failure_mode!r}. Must be one of: {', '.join(sorted(_VALID_FAILURE_MODES))}",
+            f"Kiln doesn't know the `failure_mode` {failure_mode!r}. Use one of: {', '.join(sorted(_VALID_FAILURE_MODES))}.",
             code="VALIDATION_ERROR",
         )
 
@@ -1022,7 +1022,7 @@ def record_print_outcome(
         return result
     except Exception as exc:
         _logger.exception("Unexpected error in record_print_outcome")
-        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 def recommend_settings(
@@ -1066,7 +1066,7 @@ def recommend_settings(
 
     if not printer_name and not material_type and not file_hash:
         return _srv._error_dict(
-            "At least one filter required: `printer_name`, `material_type`, or `file_hash`",
+            "Give at least one of `printer_name`, `material_type` or `file_hash`.",
             code="VALIDATION_ERROR",
         )
 
@@ -1235,7 +1235,7 @@ def recommend_settings(
         return result
     except Exception as exc:
         _logger.exception("Unexpected error in recommend_settings")
-        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 # Tiers where the user's calibrated values win over historical medians.
@@ -1389,7 +1389,7 @@ def save_agent_note(
         }
     except Exception as exc:
         _logger.exception("Unexpected error in save_agent_note")
-        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 def get_agent_context(
@@ -1419,7 +1419,7 @@ def get_agent_context(
         return {"success": True, "agent_id": agent_id, "entries": entries, "count": len(entries)}
     except Exception as exc:
         _logger.exception("Unexpected error in get_agent_context")
-        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 def clean_agent_memory() -> dict:
@@ -1442,7 +1442,7 @@ def clean_agent_memory() -> dict:
         }
     except Exception as exc:
         _logger.exception("Unexpected error in clean_agent_memory")
-        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -1621,7 +1621,7 @@ class _LearningToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in get_printer_insights")
-                return _error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Suggest a printer for a job"))
         def suggest_printer_for_job(
@@ -1719,7 +1719,7 @@ class _LearningToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in suggest_printer_for_job")
-                return _error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=destructive("Delete an agent note"))
         def delete_agent_note(
@@ -1748,7 +1748,7 @@ class _LearningToolsPlugin:
                 return {"success": True, "key": key, "scope": effective_scope}
             except Exception as exc:
                 _logger.exception("Unexpected error in delete_agent_note")
-                return _error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         _logger.debug("Registered learning and agent memory tools")
 

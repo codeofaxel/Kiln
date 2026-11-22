@@ -16,6 +16,7 @@ import os
 import sys
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.child_interpreter import MEMORY, TIME_LIMIT
 
 #: The allowance, in MB.  Unset or not a positive number: no limit.
@@ -148,7 +149,7 @@ def find_holes(file_path: str, *, diagnostics: dict[str, int] | None = None) -> 
             max_memory_mb=allowed,
         )
     except ChildOverMemory as exc:
-        raise HoleCheckStopped(str(exc), cause=MEMORY, held_mb=exc.held_mb, allowed_mb=exc.allowed_mb) from exc
+        raise HoleCheckStopped(_plain_words.sentence(exc), cause=MEMORY, held_mb=exc.held_mb, allowed_mb=exc.allowed_mb) from exc
     except HoleCheckStopped as exc:
         # A time limit, a crash or a refusal arrives as HoleCheckStopped
         # already, its cause set where run_in_child raised it; the time

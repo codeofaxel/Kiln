@@ -304,14 +304,14 @@ class _GenerationAIToolsPlugin:
                 return result_dict
             except GenerationAuthError as exc:
                 return _srv._error_dict(
-                    f"Failed to generate model (auth): {_plain_words.said(exc)}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).",
+                    f"Kiln couldn't make the model: {_plain_words.said(exc)}. Check that the service's API key is set (`KILN_MESHY_API_KEY` or `KILN_GEMINI_API_KEY`).",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
-                return _srv._error_dict(f"Failed to generate model: {_plain_words.said(exc)}", code=exc.code or "GENERATION_ERROR")
+                return _srv._error_dict(f"Kiln couldn't make the model: {_plain_words.said(exc)}.", code=exc.code or "GENERATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_model")
-                return _srv._error_dict(f"Unexpected error in `generate_model`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't make the model: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # generate_model_from_image
@@ -436,10 +436,10 @@ class _GenerationAIToolsPlugin:
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
-                return _srv._error_dict(f"Failed to generate from image: {_plain_words.said(exc)}", code=exc.code or "GENERATION_ERROR")
+                return _srv._error_dict(f"Kiln couldn't make a model from the picture: {_plain_words.said(exc)}.", code=exc.code or "GENERATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_model_from_image")
-                return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # generation_status
@@ -479,16 +479,16 @@ class _GenerationAIToolsPlugin:
                 }
             except GenerationAuthError as exc:
                 return _srv._error_dict(
-                    f"Failed to check generation status (auth): {_plain_words.said(exc)}. Check that KILN_MESHY_API_KEY is set.",
+                    f"Kiln couldn't check the generation status: {_plain_words.said(exc)}. Check that `KILN_MESHY_API_KEY` is set.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
                 return _srv._error_dict(
-                    f"Failed to check generation status: {_plain_words.said(exc)}", code=exc.code or "GENERATION_ERROR"
+                    f"Kiln couldn't check the generation status: {_plain_words.said(exc)}.", code=exc.code or "GENERATION_ERROR"
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in generation_status")
-                return _srv._error_dict(f"Unexpected error in `generation_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't check on the model being made: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # download_generated_model
@@ -631,16 +631,16 @@ class _GenerationAIToolsPlugin:
                     return response
             except GenerationAuthError as exc:
                 return _srv._error_dict(
-                    f"Failed to download generated model (auth): {_plain_words.said(exc)}. Check that KILN_MESHY_API_KEY is set.",
+                    f"Kiln couldn't download the generated model: {_plain_words.said(exc)}. Check that `KILN_MESHY_API_KEY` is set.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
                 return _srv._error_dict(
-                    f"Failed to download generated model: {_plain_words.said(exc)}", code=exc.code or "GENERATION_ERROR"
+                    f"Kiln couldn't download the generated model: {_plain_words.said(exc)}.", code=exc.code or "GENERATION_ERROR"
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in download_generated_model")
-                return _srv._error_dict(f"Unexpected error in `download_generated_model`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't download the model that was made: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # await_generation
@@ -734,14 +734,14 @@ class _GenerationAIToolsPlugin:
 
             except GenerationAuthError as exc:
                 return _srv._error_dict(
-                    f"Failed to await generation (auth): {_plain_words.said(exc)}. Check that KILN_MESHY_API_KEY is set.",
+                    f"Kiln couldn't wait for the model to finish: {_plain_words.said(exc)}. Check that `KILN_MESHY_API_KEY` is set.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
-                return _srv._error_dict(f"Failed to await generation: {_plain_words.said(exc)}", code=exc.code or "GENERATION_ERROR")
+                return _srv._error_dict(f"Kiln couldn't wait for the model to finish: {_plain_words.said(exc)}.", code=exc.code or "GENERATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in await_generation")
-                return _srv._error_dict(f"Unexpected error in `await_generation`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't keep waiting for the model to be made: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # generate_and_print
@@ -1178,7 +1178,7 @@ class _GenerationAIToolsPlugin:
                         _tail = (
                             "and sent the print command (auto-print ON). The "
                             "printer has not confirmed it is running yet — "
-                            "call printer_status() to watch it start."
+                            "call `printer_status` to watch it start."
                         )
                     else:
                         _tail = (
@@ -1200,7 +1200,7 @@ class _GenerationAIToolsPlugin:
                     )
                     resp["message"] = (
                         f"Generated '{prompt[:80]}' via {gen.display_name}, "
-                        f"sliced, and uploaded. Call start_print with {fence(file_name)} "
+                        f"sliced, and uploaded. Call `start_print` with {fence(file_name)} "
                         f"to begin printing after review."
                     )
 
@@ -1218,20 +1218,20 @@ class _GenerationAIToolsPlugin:
                     return resp
             except GenerationAuthError as exc:
                 return _srv._error_dict(
-                    f"Failed to generate and print (auth): {_plain_words.said(exc)}. Check that KILN_MESHY_API_KEY is set.",
+                    f"Kiln couldn't generate and print: {_plain_words.said(exc)}. Check that `KILN_MESHY_API_KEY` is set.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
-                return _srv._error_dict(f"Failed to generate and print: {_plain_words.said(exc)}", code=exc.code or "GENERATION_ERROR")
+                return _srv._error_dict(f"Kiln couldn't generate and print: {_plain_words.said(exc)}.", code=exc.code or "GENERATION_ERROR")
             except PrinterNotFoundError:
                 return _srv._error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to generate and print: {_plain_words.said(exc)}. Check printer connection and slicer availability."
+                    f"Kiln couldn't generate and print: {_plain_words.said(exc)}. Check printer connection and slicer availability."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_and_print")
-                return _srv._error_dict(f"Unexpected error in `generate_and_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't make and print the model: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # smart_generate_from_template
@@ -1358,7 +1358,7 @@ class _GenerationAIToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _srv._error_dict(f"Smart template generation failed: {_plain_words.said(exc)}")
+                return _srv._error_dict(f"Kiln couldn't make the model from the template: {_plain_words.said(exc)}.")
 
         # ------------------------------------------------------------------
         # generate_template_variations
@@ -1494,10 +1494,10 @@ class _GenerationAIToolsPlugin:
                 except ImportError:
                     return response
             except GenerationError as exc:
-                return _srv._error_dict(f"Variation generation failed: {_plain_words.said(exc)}", code=exc.code or "GENERATION_ERROR")
+                return _srv._error_dict(f"Kiln couldn't make the variations: {_plain_words.said(exc)}.", code=exc.code or "GENERATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_template_variations")
-                return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         _logger.debug("Registered generation AI tools")
 

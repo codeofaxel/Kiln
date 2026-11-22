@@ -409,10 +409,10 @@ def _build(solid: Any, edges: Any, plan: list[dict[str, Any]]) -> tuple[Any, str
             if not beveller.IsDone():
                 return None, "the kernel could not bevel these edges together"
             shape = beveller.Shape()
-    except Exception as exc:  # noqa: BLE001 -- the kernel signals a failed build by raising
-        return None, f"the kernel failed on these edges ({type(exc).__name__})"
+    except Exception:  # noqa: BLE001 -- the kernel signals a failed build by raising
+        return None, "the CAD add-on couldn't build the shape along these edges"
     if shape is None or shape.IsNull():
-        return None, "the kernel returned nothing"
+        return None, "the CAD add-on returned nothing"
     if len(k.subshapes(shape, "solid")) != 1 or not BRepCheck_Analyzer(shape).IsValid():
         return None, "the result was not one valid solid"
     before, after = k.box(solid), k.box(shape)

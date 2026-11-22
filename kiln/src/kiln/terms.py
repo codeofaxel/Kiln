@@ -14,6 +14,7 @@ import contextlib
 import os
 import time
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 
 # The header of the document at kiln3d.com/terms carries its own page
@@ -195,7 +196,7 @@ def _server_request(path: str, method: str, bearer: str, payload: dict | None = 
         return None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         # Nothing answered: the question never arrived or the answer never came.
-        raise TermsCheckUnreachable(str(exc)) from exc
+        raise TermsCheckUnreachable(_plain_words.sentence(exc)) from exc
     except Exception:
         # An answer we could not read — the local record is the fallback.
         return None

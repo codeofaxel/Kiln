@@ -38,6 +38,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from kiln import plain_words as _plain_words
 from kiln.print_signoff import grant_from_record
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printers.base import PrinterEngagementError
@@ -208,7 +209,7 @@ class PipelineExecution:
         if self.state != PipelineState.PAUSED:
             return self._build_result(
                 success=False,
-                message=f"Cannot resume: state is {self.state.value}",
+                message=f"Kiln can't resume this: it is {self.state.value}.",
             )
         self.state = PipelineState.RUNNING
         self._pause_requested = False
@@ -278,7 +279,7 @@ class PipelineExecution:
                 step_result = PipelineStep(
                     name=step_def.name,
                     success=False,
-                    message=f"Unexpected error: {exc}",
+                    message=_plain_words.sentence(exc),
                 )
 
             self.steps.append(step_result)
@@ -288,7 +289,7 @@ class PipelineExecution:
                 self.state = PipelineState.FAILED
                 return self._build_result(
                     success=False,
-                    message=f"Pipeline failed at {step_def.name}: {step_result.message}",
+                    message=f"The pipeline stopped at {step_def.name}: {step_result.message}",
                 )
 
             # Check auto-pause after completing this step
@@ -387,7 +388,7 @@ def _run_stability_check(model_path: str, ctx: dict[str, Any]) -> PipelineStep:
         return PipelineStep(
             name="stability_check",
             success=True,
-            message="Skipped (not a mesh file)",
+            message="Skipped: not a model file.",
             duration_seconds=time.time() - step_start,
         )
 
@@ -629,7 +630,7 @@ def _safety_check_step(
         return PipelineStep(
             name="safety_check",
             success=True,
-            message="Skipped (no gcode_path)",
+            message="Skipped: no `gcode_path`.",
         )
     step_start = time.time()
     try:
@@ -671,7 +672,7 @@ def _safety_check_step(
         return PipelineStep(
             name="safety_check",
             success=False,
-            message=f"G-code safety validation error: {exc}",
+            message=f"Kiln couldn't safety-check the G-code: {_plain_words.said(exc)}.",
             duration_seconds=time.time() - step_start,
         )
 
@@ -760,7 +761,7 @@ def quick_print(
             return PipelineStep(
                 name="validate_mesh",
                 success=True,
-                message="Validation skipped (skip_validation=True)",
+                message="Validation skipped (`skip_validation=True`).",
             )
         step, gate = _validate_mesh_step(
             model_path, printer_id=effective_pid or "", label="quick_print",
@@ -781,7 +782,7 @@ def quick_print(
             return PipelineStep(
                 name="resolve_profile",
                 success=True,
-                message="No profile needed",
+                message="No slicer profile needed.",
             )
         step_start = time.time()
         try:
@@ -799,7 +800,7 @@ def quick_print(
             return PipelineStep(
                 name="resolve_profile",
                 success=False,
-                message=f"Profile resolution failed: {exc}",
+                message=f"Kiln couldn't pick a slicer profile: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -846,7 +847,7 @@ def quick_print(
             return PipelineStep(
                 name="slice",
                 success=False,
-                message=f"Slicing failed: {exc}",
+                message=f"The slicing didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -895,7 +896,7 @@ def quick_print(
             return PipelineStep(
                 name="upload",
                 success=False,
-                message=f"Upload failed: {exc}",
+                message=f"The upload didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -923,7 +924,7 @@ def quick_print(
             return PipelineStep(
                 name="preflight",
                 success=False,
-                message=f"Preflight check failed: {exc}",
+                message=f"The preflight check didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -942,7 +943,7 @@ def quick_print(
                 return PipelineStep(
                     name="start_print",
                     success=False,
-                    message="Cannot start print (missing adapter or file name)",
+                    message="Kiln can't start the print: it has no printer connection or no file name.",
                     duration_seconds=time.time() - step_start,
                 )
             # Resolve AMS routing through the shared resolver so the A1
@@ -1048,7 +1049,7 @@ def quick_print(
             return PipelineStep(
                 name="start_print",
                 success=False,
-                message=f"Failed to start print: {exc}",
+                message=f"Kiln couldn't start the print: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -1176,7 +1177,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="validate_mesh",
                 success=True,
-                message="Validation skipped (skip_validation=True)",
+                message="Validation skipped (`skip_validation=True`).",
             )
         step, gate = _validate_mesh_step(
             model_path, printer_id=effective_pid or "", label="reslice_and_print",
@@ -1197,7 +1198,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="resolve_profile",
                 success=True,
-                message="No profile needed (no printer_id)",
+                message="No slicer profile needed: no `printer_id`.",
             )
         step_start = time.time()
         try:
@@ -1244,7 +1245,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="resolve_profile",
                 success=False,
-                message=f"Profile resolution failed: {exc}",
+                message=f"Kiln couldn't pick a slicer profile: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -1283,7 +1284,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="slice",
                 success=False,
-                message=f"Slicing failed: {exc}",
+                message=f"The slicing didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -1356,7 +1357,7 @@ def reslice_and_print(
             # first gated command: said with its code, so a caller that
             # waits rather than retries (the queue) can tell.
             return PipelineStep(
-                name="upload", success=False, message=f"Upload failed: {exc}",
+                name="upload", success=False, message=f"The upload didn't finish: {_plain_words.said(exc)}.",
                 data={"code": str((exc.verdict or {}).get("code") or "")},
                 duration_seconds=time.time() - step_start,
             )
@@ -1364,7 +1365,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="upload",
                 success=False,
-                message=f"Upload failed: {exc}",
+                message=f"The upload didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -1392,7 +1393,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="preflight",
                 success=False,
-                message=f"Preflight check failed: {exc}",
+                message=f"The preflight check didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -1418,7 +1419,7 @@ def reslice_and_print(
                 return PipelineStep(
                     name="start_print",
                     success=False,
-                    message="Cannot start print (missing adapter or file name)",
+                    message="Kiln can't start the print: it has no printer connection or no file name.",
                     duration_seconds=time.time() - step_start,
                 )
             # For Bambu 3MF uploads, pass local_file_path so the adapter
@@ -1500,7 +1501,7 @@ def reslice_and_print(
                 # Another printer's turn on this plan: said with its code, so
                 # a caller that waits rather than retries (the queue) can tell.
                 return PipelineStep(
-                    name="start_print", success=False, message=f"Failed to start print: {exc}",
+                    name="start_print", success=False, message=f"Kiln couldn't start the print: {_plain_words.said(exc)}.",
                     data={"code": str((exc.verdict or {}).get("code") or "")},
                     duration_seconds=time.time() - step_start,
                 )
@@ -1550,7 +1551,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="start_print",
                 success=False,
-                message=f"Failed to start print: {exc}",
+                message=f"Kiln couldn't start the print: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -1652,14 +1653,14 @@ def calibrate(
             PipelineStep(
                 name="connect",
                 success=False,
-                message=f"Connection failed: {exc}",
+                message=f"Kiln couldn't connect to the printer: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
         )
         return PipelineResult(
             pipeline="calibrate",
             success=False,
-            message=f"Pipeline failed at connect: {exc}",
+            message=f"The run stopped while connecting to the printer: {_plain_words.said(exc)}.",
             steps=steps,
             total_duration_seconds=time.time() - start,
         )
@@ -1681,7 +1682,7 @@ def calibrate(
             PipelineStep(
                 name="home",
                 success=False,
-                message=f"Homing failed: {exc}",
+                message=f"Kiln couldn't home the printer: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
         )
@@ -1703,7 +1704,7 @@ def calibrate(
             PipelineStep(
                 name="bed_level",
                 success=True,  # Non-fatal — not all printers support G29.
-                message=f"Auto bed level not available or failed: {exc}",
+                message=f"Automatic bed leveling isn't available or didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
         )
@@ -1731,7 +1732,7 @@ def calibrate(
                 PipelineStep(
                     name="guidance",
                     success=True,
-                    message=f"No calibration guidance available: {exc}",
+                    message=f"Kiln has no calibration advice for this: {_plain_words.said(exc)}.",
                     duration_seconds=time.time() - step_start,
                 )
             )
@@ -1803,13 +1804,13 @@ def benchmark(
             PipelineStep(
                 name="model",
                 success=False,
-                message="No benchmark model path provided. Supply a model_path to benchmark.",
+                message="Give a `model_path` (an STL file) to run the benchmark.",
             )
         )
         return PipelineResult(
             pipeline="benchmark",
             success=False,
-            message="Benchmark requires a model_path. Provide an STL file.",
+            message="Give a `model_path` (an STL file) to run the benchmark.",
             steps=steps,
             total_duration_seconds=time.time() - start,
         )
@@ -1840,7 +1841,7 @@ def benchmark(
             PipelineStep(
                 name="validate_mesh",
                 success=True,
-                message="Validation skipped (skip_validation=True)",
+                message="Validation skipped (`skip_validation=True`).",
             )
         )
 
@@ -1866,7 +1867,7 @@ def benchmark(
                 PipelineStep(
                     name="resolve_profile",
                     success=True,
-                    message=f"Profile resolution failed, using slicer defaults: {exc}",
+                    message=f"Kiln couldn't pick a slicer profile, so it used the slicer's defaults: {_plain_words.said(exc)}.",
                     duration_seconds=time.time() - step_start,
                 )
             )
@@ -1899,14 +1900,14 @@ def benchmark(
             PipelineStep(
                 name="slice",
                 success=False,
-                message=f"Slicing failed: {exc}",
+                message=f"The slicing didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
         )
         return PipelineResult(
             pipeline="benchmark",
             success=False,
-            message=f"Benchmark failed at slicing: {exc}",
+            message=f"The benchmark stopped at slicing: {_plain_words.said(exc)}.",
             steps=steps,
             total_duration_seconds=time.time() - start,
         )
@@ -1931,14 +1932,14 @@ def benchmark(
             PipelineStep(
                 name="upload",
                 success=False,
-                message=f"Upload failed: {exc}",
+                message=f"The upload didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
         )
         return PipelineResult(
             pipeline="benchmark",
             success=False,
-            message=f"Benchmark failed at upload: {exc}",
+            message=f"The benchmark stopped at upload: {_plain_words.said(exc)}.",
             steps=steps,
             total_duration_seconds=time.time() - start,
         )
@@ -1965,7 +1966,7 @@ def benchmark(
                 PipelineStep(
                     name="stats",
                     success=True,
-                    message=f"Stats unavailable: {exc}",
+                    message=f"Kiln couldn't read the printer's stats: {_plain_words.said(exc)}.",
                     duration_seconds=time.time() - step_start,
                 )
             )

@@ -1247,9 +1247,9 @@ class _DesignToolsPlugin:
                         return {
                             "success": False,
                             "error": (
-                                f"Unknown post-processing goal '{goal}'. "
-                                "Use `surface_finish`, paint, strengthen, or one "
-                                f"of: {', '.join(names)}"
+                                f"Kiln doesn't know the finishing goal '{goal}'. "
+                                "Use `surface_finish`, `paint`, `strengthen`, or one "
+                                f"of: {', '.join(names)}."
                             ),
                         }
                     answer = {"technique": match}
@@ -1783,7 +1783,7 @@ class _DesignToolsPlugin:
                     with open(scad_path, encoding="utf-8") as f:
                         code = f.read()
                 if not code:
-                    return {"success": False, "error": "Provide `scad_code` or `scad_path`"}
+                    return {"success": False, "error": "Give `scad_code` or `scad_path`."}
 
                 build = compile_scad_source(code, timeout=timeout)
                 stl_path = build.stl_path
@@ -2386,7 +2386,7 @@ class _DesignToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in resolve_filament_profile")
                 return _srv._error_dict(
-                    f"Failed to resolve filament: {_plain_words.said(exc)}",
+                    f"Kiln couldn't find the filament: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

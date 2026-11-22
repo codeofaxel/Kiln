@@ -82,7 +82,7 @@ class _MonitorTwinToolsPlugin:
                 return {
                     "success": False,
                     "code": "INTERNAL_ERROR",
-                    "message": f"Unexpected error publishing the print twin: {_plain_words.said(exc)}",
+                    "message": f"Kiln couldn't finish publishing the print twin: {_plain_words.said(exc)}.",
                     **_plain_words.detail_field(exc),
                 }
 

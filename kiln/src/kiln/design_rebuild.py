@@ -109,7 +109,7 @@ def load_recipe_or_error(recipe_path: str) -> tuple[Any, str] | dict[str, Any]:
     except Exception as exc:
         return {
             "status": "error",
-            "error": f"Failed to load recipe: {_plain_words.said(exc)}",
+            "error": f"Kiln couldn't load the design's recipe: {_plain_words.said(exc)}.",
             "code": "RECIPE_LOAD_ERROR",
             **_plain_words.detail_field(exc),
         }
@@ -266,7 +266,7 @@ def wrap_or_gcode(
         else:
             note = f"unexpected wrap result: {type(wrapped).__name__}"
     except Exception as exc:  # noqa: BLE001 — degrade, never derail
-        note = f"3MF wrap unavailable: {exc}"
+        note = f"3MF wrap unavailable: {_plain_words.said(exc)}"
 
     return {
         "output_gcode": gcode_path,
@@ -362,7 +362,7 @@ def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | Non
     except Exception as exc:
         return {
             "status": "error",
-            "error": f"OpenSCAD re-derivation failed: {_plain_words.said(exc)}",
+            "error": f"OpenSCAD couldn't rebuild the model: {_plain_words.said(exc)}.",
             "code": "COMPILE_ERROR",
             "parameters_applied": applied,
             "parameters_not_in_source": not_in_source,
@@ -375,7 +375,7 @@ def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | Non
     except Exception as exc:
         return {
             "status": "error",
-            "error": f"Slicing failed for re-derived model: {_plain_words.said(exc)}",
+            "error": f"Kiln couldn't slice the rebuilt model: {_plain_words.said(exc)}.",
             "code": "SLICE_ERROR",
             **_plain_words.detail_field(exc),
         }
@@ -435,7 +435,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
             except Exception as exc:
                 return {
                     "status": "error",
-                    "error": f"Slicing failed for part {fence(part.name)}: {_plain_words.said(exc)}",
+                    "error": f"Kiln couldn't slice {fence(part.name)}: {_plain_words.said(exc)}.",
                     "code": "SLICE_ERROR",
                     **_plain_words.detail_field(exc),
                 }
@@ -454,7 +454,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
             except Exception as exc:
                 return {
                     "status": "error",
-                    "error": f"Gcode merge failed: {_plain_words.said(exc)}",
+                    "error": f"Kiln couldn't combine the parts' print files: {_plain_words.said(exc)}.",
                     "code": "MERGE_ERROR",
                     **_plain_words.detail_field(exc),
                 }
@@ -474,7 +474,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
         except Exception as exc:
             return {
                 "status": "error",
-                "error": f"Slicing failed: {_plain_words.said(exc)}",
+                "error": f"Kiln couldn't slice the model: {_plain_words.said(exc)}.",
                 "code": "SLICE_ERROR",
                 **_plain_words.detail_field(exc),
             }
@@ -513,8 +513,8 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
             "This recipe also carries OpenSCAD source, but its part meshes "
             "were derived by steps rebuild cannot replay, so they were "
             "re-sliced unchanged. Parameter changes do not reach this "
-            "build; re-derive the base model with update_scad_parameter + "
-            "compile_scad, then re-split."
+            "build; re-derive the base model with `update_scad_parameter` + "
+            "`compile_scad`, then re-split."
         )
     return result
 

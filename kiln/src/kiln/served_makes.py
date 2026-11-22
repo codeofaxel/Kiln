@@ -1281,7 +1281,7 @@ def _send_text(
             return _refusal(
                 tool, "FILE_NOT_READ",
                 f"{tool} runs on Kiln's servers and needs {local.name} read here first, "
-                f"which did not work: {exc.strerror or exc}.",
+                f"which did not work: {_plain_words.said(exc)}.",
             )
     return None
 

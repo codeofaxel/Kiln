@@ -354,7 +354,7 @@ class TestGetState:
             json={"error": "Unauthorized"},
             status=401,
         )
-        with pytest.raises(PrinterError, match="401"):
+        with pytest.raises(PrinterError, match="refused the API key"):
             adapter.get_state()
 
 
@@ -558,7 +558,7 @@ class TestStartPrint:
             json={"error": "not found"},
             status=404,
         )
-        with pytest.raises(PrinterError, match="404"):
+        with pytest.raises(PrinterError, match="doesn't have what Kiln asked for"):
             adapter.start_print("missing.gcode")
 
 
@@ -584,7 +584,7 @@ class TestCancelPrint:
             json={"error": "No job running"},
             status=409,
         )
-        with pytest.raises(PrinterError, match="409"):
+        with pytest.raises(PrinterError, match="can't do that right now"):
             adapter.cancel_print()
 
 
@@ -844,7 +844,7 @@ class TestRetryLogic:
                 json={"error": "Bad Gateway"},
                 status=502,
             )
-        with patch("kiln.printers.octoprint.time.sleep"), pytest.raises(PrinterError, match="502"):
+        with patch("kiln.printers.octoprint.time.sleep"), pytest.raises(PrinterError, match="isn't answering right now"):
             adapter_with_retries.get_state()
         assert len(responses.calls) == 3
 
@@ -857,7 +857,7 @@ class TestRetryLogic:
             json={"error": "Unauthorized"},
             status=401,
         )
-        with pytest.raises(PrinterError, match="401"):
+        with pytest.raises(PrinterError, match="refused the API key"):
             adapter_with_retries.get_state()
         assert len(responses.calls) == 1
 
@@ -978,7 +978,7 @@ class TestRequestMethod:
             status=200,
             content_type="text/plain",
         )
-        with pytest.raises(PrinterError, match="Invalid JSON"):
+        with pytest.raises(PrinterError, match="reply Kiln couldn't read"):
             adapter.get_job()
 
     @responses.activate

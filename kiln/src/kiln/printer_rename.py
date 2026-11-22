@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
@@ -341,7 +342,7 @@ def rename_printer(
         logger.warning("rename %r -> %r failed at %s: %s", old, new, failed_at, exc, exc_info=True)
         raise RenameRefused(
             "RENAME_FAILED",
-            f"Kiln could not rename {old!r}: {exc}. "
+            f"Kiln could not rename {old!r}: {_plain_words.said(exc)}. "
             + (
                 f"Everything was put back, so it is still {old!r}."
                 if not warnings

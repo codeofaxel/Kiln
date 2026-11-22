@@ -253,7 +253,7 @@ def wire_task(
     if result_type == "complete" and status == "completed" and result is not None:
         shape["result"] = result
     if result_type == "complete" and status == "failed":
-        shape["error"] = error or {"code": _INTERNAL_ERROR, "message": "The call failed."}
+        shape["error"] = error or {"code": _INTERNAL_ERROR, "message": "The call didn't finish."}
     return shape
 
 
@@ -359,7 +359,7 @@ def _known_or_refuse(task_id: str) -> _Task:
     if task is None:
         from mcp.shared.exceptions import MCPError  # type: ignore[import-not-found]
 
-        raise MCPError(code=_INVALID_PARAMS, message="Failed to retrieve task: Task not found")
+        raise MCPError(code=_INVALID_PARAMS, message="Kiln has no task with that id.")
     return task
 
 

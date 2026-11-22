@@ -19,6 +19,7 @@ from typing import Any
 
 import requests
 
+from kiln import plain_words as _plain_words
 from kiln.marketplaces.base import (
     MarketplaceAdapter,
     MarketplaceAuthError,
@@ -59,7 +60,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         self._api_key = api_key or os.environ.get("KILN_MMF_API_KEY", "")
         if not self._api_key:
             raise MarketplaceAuthError(
-                "MyMiniFactory API key is required.  Set KILN_MMF_API_KEY or pass api_key= to MyMiniFactoryAdapter."
+                "MyMiniFactory needs an API key. Set `KILN_MMF_API_KEY`, or pass `api_key`."
             )
         self._base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
@@ -100,11 +101,11 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
             )
         except requests.ConnectionError as exc:
             raise MarketplaceError(
-                f"Connection to MyMiniFactory failed: {exc}",
+                f"Kiln couldn't reach MyMiniFactory: {_plain_words.said(exc)}.",
             ) from exc
         except requests.Timeout as exc:
             raise MarketplaceError(
-                f"MyMiniFactory request timed out: {exc}",
+                "MyMiniFactory took too long to answer. Try again in a moment.",
             ) from exc
 
         if resp.status_code == 401:
@@ -190,7 +191,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         try:
             name = safe_saved_name(raw_name, f"file_{file_id}")
         except ValueError as exc:
-            raise MarketplaceError(str(exc)) from exc
+            raise MarketplaceError(_plain_words.sentence(exc)) from exc
         dest = Path(dest_dir)
         out_path = dest / name
 
@@ -208,7 +209,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
             raise
         except Exception as exc:
             raise MarketplaceError(
-                f"Failed to download file {file_id}: {exc}",
+                f"Kiln couldn't download the file {file_id}: {_plain_words.said(exc)}.",
             ) from exc
 
     def upload_model(
@@ -256,15 +257,15 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
                 timeout=_REQUEST_TIMEOUT,
             )
         except requests.ConnectionError as exc:
-            raise MarketplaceError(f"Connection to MyMiniFactory failed: {exc}") from exc
+            raise MarketplaceError(f"Kiln couldn't reach MyMiniFactory: {_plain_words.said(exc)}.") from exc
         except requests.Timeout as exc:
-            raise MarketplaceError(f"MyMiniFactory request timed out: {exc}") from exc
+            raise MarketplaceError("MyMiniFactory took too long to answer. Try again in a moment.") from exc
 
         if resp.status_code == 401:
             raise MarketplaceAuthError("Invalid or expired MyMiniFactory API key.", status_code=401)
         if resp.status_code >= 400:
             raise MarketplaceError(
-                f"Failed to create object ({resp.status_code}): {resp.text[:200]}",
+                "MyMiniFactory turned down the new listing.",
                 status_code=resp.status_code,
             )
 
@@ -284,9 +285,9 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
                     timeout=_DOWNLOAD_TIMEOUT,
                 )
         except requests.ConnectionError as exc:
-            raise MarketplaceError(f"File upload connection failed: {exc}") from exc
+            raise MarketplaceError(f"The upload didn't go through: {_plain_words.said(exc)}.") from exc
         except requests.Timeout as exc:
-            raise MarketplaceError(f"File upload timed out: {exc}") from exc
+            raise MarketplaceError("The upload took too long. Try again in a moment.") from exc
 
         if resp.status_code >= 400:
             raise MarketplaceError(

@@ -514,7 +514,7 @@ def _execute_tool(name: str, arguments: dict[str, Any]) -> str:
         logger.exception("Tool execution failed: %s", name)
         return json.dumps(
             {
-                "error": f"Tool execution error: {_plain_words.said(exc)}",
+                "error": f"The tool didn't finish: {_plain_words.said(exc)}.",
                 "tool": name,
                 "success": False,
                 **_plain_words.detail_field(exc),
@@ -579,9 +579,9 @@ def _call_llm(
             f"LLM API timed out after {config.timeout}s. Try increasing config.timeout or using a faster model."
         ) from None
     except ConnectionError as exc:
-        raise AgentLoopError(f"Cannot connect to LLM API at {url}: {exc}") from exc
+        raise AgentLoopError(f"Kiln couldn't reach the AI service at {url}: {_plain_words.said(exc)}.") from exc
     except RequestException as exc:
-        raise AgentLoopError(f"LLM API request failed: {exc}") from exc
+        raise AgentLoopError(f"The request to the AI service didn't go through: {_plain_words.said(exc)}.") from exc
 
     if resp.status_code == 429:
         retry_after = resp.headers.get("Retry-After", "unknown")
@@ -594,7 +594,7 @@ def _call_llm(
     try:
         return resp.json()
     except ValueError:
-        raise AgentLoopError("LLM API returned non-JSON response.") from None
+        raise AgentLoopError("The AI service sent back a reply Kiln couldn't read.") from None
 
 
 def _execute_tool_call(tool_call: dict) -> str:

@@ -27,6 +27,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 # Re-export the internals so tests + callers can reach private symbols
 # from this module path (backward-compatible import surface).
 from kiln.plugins._validation_pipeline_internals import (
@@ -245,13 +247,13 @@ def run_full_validation_pipeline(
         report.checks.append(_CheckResult(
             name="format",
             passed=False,
-            details=f"STEP conversion failed: {exc}",
+            details=f"STEP conversion failed: {_plain_words.said(exc)}",
             severity="error",
         ))
         report.status = "fail"
         report.ready_to_print = False
         report.validated_path = input_path
-        report.summary = f"Not ready. STEP conversion failed: {exc}"
+        report.summary = f"Not ready. STEP conversion failed: {_plain_words.said(exc)}"
         report.readiness_score = 0
         report.next_action = None
         return report.to_dict()
@@ -458,8 +460,8 @@ def _with_conversion(out: dict[str, Any], conversion: Any) -> dict[str, Any]:
 
 #: How to print anyway, by refusal code, for a door that takes skip_validation.
 _BYPASS = {
-    "VALIDATION_FAILED": "Pass skip_validation=True to bypass.",
-    "VALIDATION_ERROR": "Pass skip_validation=True to print it without the check.",
+    "VALIDATION_FAILED": "Pass `skip_validation=True` to print it anyway.",
+    "VALIDATION_ERROR": "Pass `skip_validation=True` to print it without the check.",
 }
 
 
@@ -527,10 +529,9 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
         report = run_full_validation_pipeline(input_path, printer_id=printer_id, material=material)
     except Exception as exc:  # noqa: BLE001 -- a check that cannot run is not a pass
         _logger.warning("Pre-print check could not run on %s", input_path, exc_info=True)
-        cause = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
         return PrintGate(
             path=input_path,
-            reason=f"Kiln could not check this file before printing ({cause}).",
+            reason=f"Kiln couldn't check this file before printing: {_plain_words.said(exc)}.",
             code="VALIDATION_ERROR",
         )
     if not report.get("ready_to_print"):

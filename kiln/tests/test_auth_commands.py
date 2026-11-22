@@ -479,7 +479,8 @@ class TestHttpPostUnavailable:
         with pytest.raises(auth_commands._ApiUnavailable) as exc:
             auth_commands._http_post("/api/auth/device/poll", {})
         assert isinstance(exc.value, click.ClickException)
-        assert "is the server up" in str(exc.value)
+        assert "Kiln couldn't reach its servers" in str(exc.value)
+        assert isinstance(exc.value.__cause__, requests.exceptions.ConnectionError)
 
     def test_timeout_is_api_unavailable(self, monkeypatch):
         import requests
@@ -521,7 +522,8 @@ class TestHttpPostUnavailable:
         monkeypatch.setattr(requests, "post", boom)
         with pytest.raises(auth_commands._ApiUnavailable) as exc:
             auth_commands._http_post("/api/auth/device/poll", {})
-        assert "ChunkedEncodingError" in str(exc.value)
+        assert "dropped before Kiln got an answer" in str(exc.value)
+        assert isinstance(exc.value.__cause__, requests.exceptions.ChunkedEncodingError)
 
 
 # =====================================================================

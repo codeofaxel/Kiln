@@ -47,7 +47,7 @@ def _not_found_error(name: str) -> dict[str, Any]:
         return {"success": False, "error": hint}
     return {
         "success": False,
-        "error": f"Decoration not found: {name!r}. Use `list_decorations` to see available.",
+        "error": f"Kiln has no decoration called {name!r}. `list_decorations` lists the ones you have.",
     }
 
 
@@ -457,7 +457,7 @@ class _DecorationLibraryPlugin:
                 _logger.debug("decorate_surface failed: %s", exc)
                 return {
                     "success": False,
-                    "error": f"Failed to apply decoration: {_plain_words.said(exc)}",
+                    "error": f"Kiln couldn't apply the decoration: {_plain_words.said(exc)}.",
                     **_plain_words.detail_field(exc),
                 }
 
@@ -527,7 +527,7 @@ class _DecorationLibraryPlugin:
                 _logger.debug("decoration_quota_status failed: %s", exc)
                 return {
                     "success": False,
-                    "error": f"Failed to check decoration quota: {_plain_words.said(exc)}",
+                    "error": f"Kiln couldn't check the decoration quota: {_plain_words.said(exc)}.",
                     **_plain_words.detail_field(exc),
                 }
 

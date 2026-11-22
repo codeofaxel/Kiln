@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.events import Event, EventBus, EventType
 from kiln.gcode import GCODE_NUMBER
 
@@ -1171,7 +1172,7 @@ class GcodeInterceptor:
         except Exception as exc:  # noqa: BLE001
             msg = (
                 f"Failed to install default bed-safety rules for {printer_name!r}: "
-                f"{exc}. Out-of-bounds moves will NOT be caught by this session."
+                f"{_plain_words.said(exc)}. Out-of-bounds moves will NOT be caught by this session."
             )
             logger.warning(msg)
             if warnings is not None:

@@ -108,7 +108,7 @@ class _PrinterManagementToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in discover_printers")
                 return _srv._error_dict(
-                    f"Unexpected error in `discover_printers`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't look for printers on the network: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -133,7 +133,7 @@ class _PrinterManagementToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in list_trusted_printers")
                 return _srv._error_dict(
-                    f"Unexpected error in `list_trusted_printers`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't list the trusted printers: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -159,11 +159,11 @@ class _PrinterManagementToolsPlugin:
                 add_trusted_printer(host)
                 return {"success": True, "host": host}
             except ValueError as exc:
-                return _srv._error_dict(f"Failed to trust printer: {_plain_words.said(exc)}", code="VALIDATION_ERROR")
+                return _srv._error_dict(f"Kiln couldn't trust the printer: {_plain_words.said(exc)}.", code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in trust_printer")
                 return _srv._error_dict(
-                    f"Unexpected error in `trust_printer`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't trust the printer: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -186,11 +186,11 @@ class _PrinterManagementToolsPlugin:
                 remove_trusted_printer(host)
                 return {"success": True, "host": host}
             except ValueError as exc:
-                return _srv._error_dict(f"Failed to untrust printer: {_plain_words.said(exc)}", code="NOT_FOUND")
+                return _srv._error_dict(f"Kiln couldn't untrust the printer: {_plain_words.said(exc)}.", code="NOT_FOUND")
             except Exception as exc:
                 _logger.exception("Unexpected error in untrust_printer")
                 return _srv._error_dict(
-                    f"Unexpected error in `untrust_printer`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't stop trusting the printer: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -250,7 +250,7 @@ class _PrinterManagementToolsPlugin:
                 return _srv._error_dict(_plain_words.sentence(exc), code="TIER_SINGLE_PRINTER_LIMIT")
             except Exception as exc:
                 _logger.exception("Error in acquire_printer_lock")
-                return _srv._error_dict(f"Failed to acquire printer lock: {_plain_words.said(exc)}", code="LOCK_ERROR")
+                return _srv._error_dict(f"Kiln couldn't lock the printer: {_plain_words.said(exc)}.", code="LOCK_ERROR")
 
         # ------------------------------------------------------------------
         # hand_back_printer
@@ -393,7 +393,7 @@ class _PrinterManagementToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in hand_back_printer")
                 return _srv._error_dict(
-                    f"Failed to hand back printer: {_plain_words.said(exc)}", code="INTERNAL_ERROR",
+                    f"Kiln couldn't hand the printer back: {_plain_words.said(exc)}.", code="INTERNAL_ERROR",
                 )
 
         # ------------------------------------------------------------------
@@ -443,7 +443,7 @@ class _PrinterManagementToolsPlugin:
                     return _srv._error_dict(refused.message, code=refused.code, extra=refused.extra)
             except Exception as exc:
                 _logger.exception("Error in rename_printer")
-                return _srv._error_dict(f"Failed to rename printer: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't rename the printer: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # set_machine_repair
@@ -525,7 +525,7 @@ class _PrinterManagementToolsPlugin:
                 if answer_to or answer:
                     if status or same_as or different_from or not (answer_to and answer):
                         return _srv._error_dict(
-                            "Answering a question about the printer takes `answer_to` and answer, and nothing "
+                            "Answering a question about the printer takes `answer_to` and `answer`, and nothing "
                             "else; mark the printer in a second call.",
                             code="REPAIR_ANSWER_AMBIGUOUS",
                         )
@@ -550,8 +550,8 @@ class _PrinterManagementToolsPlugin:
                     return {"success": True, **result}
                 if not status:
                     return _srv._error_dict(
-                        "status is needed, done or clear; or answer a question with `same_as` / `different_from`, "
-                        "or with `answer_to` and answer.",
+                        "Set `status` to `needed`, `done` or `clear`, or answer a question with `same_as` / "
+                        "`different_from`, or with `answer_to` and `answer`.",
                         code="REPAIR_STATUS_UNKNOWN",
                     )
                 result = mark(machine_name, status, kind=kind, note=note, when=when)
@@ -562,7 +562,7 @@ class _PrinterManagementToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in set_machine_repair")
                 return _srv._error_dict(
-                    f"Failed to record the printer's repair: {_plain_words.said(exc)}", code="INTERNAL_ERROR",
+                    f"Kiln couldn't record the printer's repair: {_plain_words.said(exc)}.", code="INTERNAL_ERROR",
                 )
 
         def _account_after_mark() -> dict:
@@ -614,7 +614,7 @@ class _PrinterManagementToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in release_printer_lock")
                 return _srv._error_dict(
-                    f"Failed to release printer lock: {_plain_words.said(exc)}",
+                    f"Kiln couldn't unlock the printer: {_plain_words.said(exc)}.",
                     code="LOCK_ERROR",
                 )
 

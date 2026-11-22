@@ -1354,7 +1354,7 @@ def measure_text_block_mm(
                 openscad = _find_openscad()
             except FileNotFoundError as exc:
                 raise TextMeasureError(
-                    f"OpenSCAD not found for text probe: {exc}"
+                    "OpenSCAD isn't installed, so Kiln can't measure the text."
                 ) from exc
             try:
                 proc = run_openscad(
@@ -1364,7 +1364,7 @@ def measure_text_block_mm(
                 )
             except (subprocess.TimeoutExpired, OSError) as exc:
                 raise TextMeasureError(
-                    f"text probe did not run: {exc}"
+                    f"Kiln couldn't measure the text: {_plain_words.said(exc)}."
                 ) from exc
             if proc.returncode != 0 or not os.path.exists(stl):
                 raise TextMeasureError(

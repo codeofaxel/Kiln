@@ -148,7 +148,7 @@ class _GcodeValidationToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in validate_gcode_safe")
                 return _srv._error_dict(
-                    f"Unexpected error in `validate_gcode_safe`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't check the G-code: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -199,7 +199,7 @@ class _GcodeValidationToolsPlugin:
                             break
                     if target_job is None:
                         return _srv._error_dict(
-                            "No completed jobs found. Provide a `job_id` explicitly.",
+                            "Kiln has no finished prints on record. Pass a `job_id`.",
                             code="NO_COMPLETED_JOB",
                         )
 
@@ -231,7 +231,7 @@ class _GcodeValidationToolsPlugin:
                                 _tmpdir = os.path.realpath(tempfile.gettempdir())
                                 if not (_safe.startswith(_home) or _safe.startswith(_tmpdir)):
                                     return _srv._error_dict(
-                                        "`save_snapshot` path must be under home directory or temp directory.",
+                                        "`save_snapshot` must be a path in your home folder or the temporary folder.",
                                         code="VALIDATION_ERROR",
                                     )
                                 os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
@@ -324,12 +324,12 @@ class _GcodeValidationToolsPlugin:
                 return _srv._error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to validate print quality: {_plain_words.said(exc)}. Check that the printer is online."
+                    f"Kiln couldn't validate the print quality: {_plain_words.said(exc)}. Check that the printer is online."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in validate_print_quality")
                 return _srv._error_dict(
-                    f"Unexpected error in `validate_print_quality`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't check the print quality: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

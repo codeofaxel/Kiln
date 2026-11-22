@@ -81,7 +81,7 @@ class TestAutoArrange:
     def test_parts_that_fit_keep_the_next_step(self, tmp_path):
         result = _auto_arrange()(part_specs=_specs(tmp_path, 4), printer_id=BED_256, gap_mm=12.0)
         assert result["fits_bed"] is True
-        assert "Pass 'parts' directly to compose_multicolor_3mf()" in result["message"]
+        assert "Pass 'parts' directly to `compose_multicolor_3mf`" in result["message"]
 
 
 # ---------------------------------------------------------------------------

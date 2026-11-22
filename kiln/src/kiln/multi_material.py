@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.ams_routing import UNREAD_MATERIAL, Tray, loaded_trays, normalize_hex
 from kiln.bambu_trays import EXTERNAL_SPOOL_TRAY, NO_TRAY, TRAYS_PER_UNIT, read_tray_id
 
@@ -198,7 +199,7 @@ def multi_material_status(adapter: Any) -> MultiMaterialStatus:
             logger.debug("multi-material probe failed on %r: %s", adapter, exc)
             status = unknown_status(
                 f"{getattr(adapter, 'name', type(adapter).__name__)}:probe_failed",
-                f"probe failed: {exc}",
+                f"probe failed: {_plain_words.said(exc)}",
             )
     if not isinstance(status, MultiMaterialStatus):
         status = _legacy_ams_status(adapter)
@@ -225,7 +226,7 @@ def _legacy_ams_status(adapter: Any) -> MultiMaterialStatus:
     except Exception as exc:
         _reraise_refusal(exc)
         logger.debug("AMS not readable on %r: %s", adapter, exc)
-        return unknown_status(f"{label}:ams_unreadable", f"AMS not readable: {exc}")
+        return unknown_status(f"{label}:ams_unreadable", f"AMS not readable: {_plain_words.said(exc)}")
     return from_bambu_ams(info if isinstance(info, dict) else None, printer_model=None)
 
 

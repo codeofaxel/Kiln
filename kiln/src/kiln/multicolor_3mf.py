@@ -1122,7 +1122,7 @@ def compose_multicolor_3mf(
         except Exception as exc:
             return {
                 "success": False,
-                "error": f"Failed to parse STL for part '{part.name or part.stl_path}': {_plain_words.said(exc)}",
+                "error": f"Kiln couldn't read the STL for part '{part.name or part.stl_path}': {_plain_words.said(exc)}.",
                 **_plain_words.detail_field(exc),
             }
 
@@ -1207,7 +1207,7 @@ def compose_multicolor_3mf(
                 ))
                 _write_archive(output_path, members)
     except Exception as exc:
-        return {"success": False, "error": f"Failed to write 3MF archive: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
+        return {"success": False, "error": f"Kiln couldn't write the 3MF archive: {_plain_words.said(exc)}.", **_plain_words.detail_field(exc)}
 
     total_v = sum(len(v) for _, v, _ in parsed)
     total_t = sum(len(t) for _, _, t in parsed)
@@ -1264,8 +1264,8 @@ def compose_multicolor_3mf(
         next_step = f" {plate_verdict['message']} It is not ready to print as laid out."
     else:
         next_step = (
-            f" Next step: slice_and_print('{output_path}') slices it for the printer and "
-            f"prints it, or slice_model('{output_path}') to look at the slice first."
+            f" Next step: `slice_and_print('{output_path}')` slices it for the printer and "
+            f"prints it, or `slice_model('{output_path}')` to look at the slice first."
         )
     joined_note = ""
     if joined:
@@ -1649,8 +1649,8 @@ def compose_painted_3mf(
         return {
             "success": False,
             "error": (
-                f"`triangle_colors` length {len(triangle_colors)} != "
-                f"triangle count {len(triangles)}"
+                f"`triangle_colors` has {len(triangle_colors)} colours for "
+                f"{len(triangles)} triangles; it needs one colour per triangle."
             ),
         }
 
@@ -1811,7 +1811,7 @@ def compose_painted_3mf(
             if thumbnail:
                 zf.writestr("Metadata/plate_1.png", thumbnail)
     except Exception as exc:  # noqa: BLE001 — mirror compose_multicolor_3mf
-        return {"success": False, "error": f"Failed to write 3MF archive: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
+        return {"success": False, "error": f"Kiln couldn't write the 3MF archive: {_plain_words.said(exc)}.", **_plain_words.detail_field(exc)}
 
     logger.info(
         "compose_painted_3mf: wrote %s (1 object, %d triangles, %d colors)",

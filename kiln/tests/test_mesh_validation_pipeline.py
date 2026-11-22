@@ -962,7 +962,7 @@ class TestMCPToolIntegration:
             )
 
         assert "error" in result
-        assert "Unexpected error" in result["error"]
+        assert "Kiln couldn't check and prepare the model" in result["error"]
 
     @patch("kiln.mesh_validation_pipeline.run_validation_pipeline")
     def test_validate_and_prepare_mesh_with_build_volume(self, mock_pipeline, stl_file):

@@ -255,7 +255,7 @@ def test_persistent_401_eventually_raises_rather_than_looping() -> None:
     fake = _rrf3(rr_model=(401, "Unauthorized"), rr_status=(401, "Unauthorized"))
     adapter = fake.install(_adapter())
 
-    with pytest.raises(PrinterError, match="HTTP 401"):
+    with pytest.raises(PrinterError, match="didn't accept Kiln's password"):
         adapter.get_state()
 
     # One re-auth attempt per request, never an unbounded retry storm.
@@ -321,7 +321,7 @@ def test_non_duet_host_gets_an_actionable_error() -> None:
     fake = _rrf3(rr_model=(404, "nope"), rr_status=(404, "nope"))
     adapter = fake.install(_adapter())
 
-    with pytest.raises(PrinterError, match="does not look like a Duet"):
+    with pytest.raises(PrinterError, match="not the way a Duet"):
         adapter.get_state()
 
 
@@ -743,7 +743,7 @@ def test_delete_file_failure_raises() -> None:
     fake = _rrf3(rr_delete={"err": 1})
     adapter = fake.install(_adapter())
 
-    with pytest.raises(PrinterError, match="Could not delete"):
+    with pytest.raises(PrinterError, match="couldn't delete"):
         adapter.delete_file("old.gcode")
 
 
@@ -985,7 +985,7 @@ def test_an_unnamed_machine_is_held_to_the_floor_until_it_is_named() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    with pytest.raises(PrinterError, match="has not been told this printer's model"):
+    with pytest.raises(PrinterError, match="hasn't been told this printer's model"):
         adapter.set_tool_temp(450)
     assert fake.gcodes() == []
 
@@ -994,7 +994,7 @@ def test_temperature_above_the_ceiling_is_refused() -> None:
     fake = _rrf3()
     adapter = fake.install(_adapter())
 
-    with pytest.raises(PrinterError, match="exceeds safety limit"):
+    with pytest.raises(PrinterError, match=r"is above .*safety limit"):
         adapter.set_tool_temp(900)
     assert fake.gcodes() == []
 
@@ -1015,7 +1015,7 @@ def test_safety_profile_narrows_the_ceiling() -> None:
     profile = mock.MagicMock(max_hotend_temp=260.0, max_bed_temp=100.0)
     with mock.patch("kiln.safety_profiles.get_profile", return_value=profile):
         adapter.set_safety_profile("some_printer")
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             adapter.set_tool_temp(400)
 
 
@@ -1268,7 +1268,7 @@ def test_a_bound_safety_profile_clamps_the_adapter_ceiling() -> None:
     assert adapter.set_bed_temp(190).ok
 
     # Beyond it, the profile refuses even though the class ceiling is 500.
-    with pytest.raises(PrinterError, match="exceeds safety limit"):
+    with pytest.raises(PrinterError, match=r"is above .*safety limit"):
         adapter.set_bed_temp(250)
 
 

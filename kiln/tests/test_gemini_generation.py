@@ -640,7 +640,7 @@ class TestGeminiDeepThinkProviderErrors:
             GENERATE_URL,
             body=requests_lib.ConnectionError("Connection failed"),
         )
-        with pytest.raises(GenerationError, match="Could not connect"):
+        with pytest.raises(GenerationError, match="couldn't reach Gemini"):
             gemini_provider.generate(
                 "a cube",
                 output_dir=str(tmp_path),

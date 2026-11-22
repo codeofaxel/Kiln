@@ -73,6 +73,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 from kiln.untrusted_zip import UntrustedZipFile
 
@@ -1229,7 +1230,7 @@ def look(adapter: Any) -> PlateLook:
         frame = adapter.get_snapshot()
     except Exception as exc:  # noqa: BLE001
         logger.debug("plate look: snapshot failed", exc_info=True)
-        return PlateLook(False, camera, why=f"the camera did not answer ({exc})")
+        return PlateLook(False, camera, why=f"the camera did not answer ({_plain_words.said(exc)})")
     if not frame or not isinstance(frame, (bytes, bytearray)):
         return PlateLook(False, camera, why="the camera answered with no image")
     try:
@@ -1565,7 +1566,7 @@ def look_for_unasked_start(adapter: Any) -> UnaskedStartLook:
         return UnaskedStartLook(LOOK_NEEDED, camera, frame=path, frame_at=_now_iso(), beside=beside)
     except Exception as exc:  # noqa: BLE001 -- a look that failed has seen nothing
         logger.debug("look for an unasked start failed", exc_info=True)
-        return UnaskedStartLook(LOOK_BLIND, None, why=f"Kiln could not look ({str(exc)[:120]})")
+        return UnaskedStartLook(LOOK_BLIND, None, why=f"Kiln could not look ({_plain_words.said(exc)})")
 
 
 def offer_look(adapter: Any, state: PlateState | None = None, *, say_so: str = SAY_SO) -> LookOffer:

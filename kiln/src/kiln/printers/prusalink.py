@@ -12,6 +12,7 @@ import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 from kiln.printer_backends import PRUSALINK_PI_KEY_WHERE, need_where
 from kiln.printers.base import (
@@ -324,79 +325,81 @@ class PrusaLinkAdapter(PrinterAdapter):
                 if response.status_code not in _RETRYABLE_STATUS_CODES:
                     if response.status_code == 401:
                         raise PrinterError(
-                            f"Authentication failed (HTTP 401) for Prusa Link at {self._host}. "
-                            f"Your API key is invalid or missing. The key is the PrusaLink "
-                            f"password, {need_where('prusalink', 'api_key')}. Then update "
-                            f"with: {kiln_command('auth --name <name> --host', self._host)} "
+                            f"Prusa Link at {self._host} didn't accept the API key: it's wrong "
+                            f"or missing. The key is the PrusaLink password, "
+                            f"{need_where('prusalink', 'api_key')}. Then update it with: "
+                            f"{kiln_command('auth --name <name> --host', self._host)} "
                             f"--type prusalink --api-key <YOUR_KEY>",
+                            detail="HTTP 401",
                         )
                     if response.status_code == 403 and _BAD_API_KEY_MARKER in (response.text or ""):
                         raise PrusaLinkAuthError(
-                            f"Prusa Link at {self._host} refused the API key (HTTP 403, "
-                            f"'{_BAD_API_KEY_MARKER}'). That is how PrusaLink on a Raspberry Pi "
+                            f"Prusa Link at {self._host} refused the API key. That is how PrusaLink on a Raspberry Pi "
                             f"(MK3S/MK2.5) answers a wrong or empty key. Its API key is not the "
                             f"login the setup wizard made and is empty until you make one, "
                             f"{PRUSALINK_PI_KEY_WHERE}, not on the printer's screen. Then update "
                             f"with: {kiln_command('auth --name <name> --host', self._host)} "
                             f"--type prusalink --api-key <YOUR_KEY>",
+                            detail=f"HTTP 403: {_BAD_API_KEY_MARKER}",
                         )
                     if response.status_code == 403:
                         endpoint_hint = (
-                            " This endpoint is under /api/v1/files; if status/cancel work but "
-                            "files/print fail, verify the storage root/path and use the API "
-                            f"filename (often 8.3) shown by `{kiln_command('files')}`."
+                            " This was a file request: if checking status and cancelling work "
+                            "but files and printing don't, check the storage folder and use the "
+                            f"file's short name, as `{kiln_command('files')}` shows it."
                             if path.startswith("/api/v1/files/")
                             else ""
                         )
                         raise PrinterError(
-                            f"Access forbidden (HTTP 403) for Prusa Link at {self._host} "
-                            f"on {method} {path}. Your API key may lack required permissions, "
-                            f"or this firmware may reject the requested operation/path. "
-                            f"Check the key: it is the PrusaLink password, "
+                            f"Prusa Link at {self._host} refused this request. The API key "
+                            f"may not allow it, or this firmware may not support it. Check "
+                            f"the key: it is the PrusaLink password, "
                             f"{need_where('prusalink', 'api_key')}.{endpoint_hint}",
+                            detail=f"HTTP 403 on {method} {path}",
                         )
                     if response.status_code == 404:
                         raise PrinterError(
-                            f"Endpoint not found (HTTP 404) for {method} {path} on {self._host}. "
-                            f"This may indicate an unsupported Prusa Link firmware version. "
-                            f"Ensure your printer firmware is up to date.",
+                            f"{self._host} doesn't offer what Kiln asked for, which usually "
+                            f"means older Prusa Link firmware. Update the printer's firmware "
+                            f"and try again.",
+                            detail=f"HTTP 404 on {method} {path}",
                         )
                     if response.status_code == 409:
                         raise PrinterError(
-                            f"Conflict (HTTP 409) for {method} {path} — the printer may be busy "
-                            f"with another operation. Wait a moment and try again.",
+                            "The printer is busy with something else. Wait a moment and try again.",
+                            detail=f"HTTP 409 on {method} {path}",
                         )
                     raise PrinterError(
-                        f"Prusa Link returned HTTP {response.status_code} for {method} {path}: {response.text[:300]}",
+                        "Prusa Link didn't complete the request.",
+                        detail=f"HTTP {response.status_code} on {method} {path}: {response.text[:300]}",
                     )
 
                 last_exc = PrinterError(
-                    f"Prusa Link returned HTTP {response.status_code} "
-                    f"for {method} {path} "
-                    f"(attempt {attempt + 1}/{self._retries})"
+                    "Prusa Link didn't complete the request.",
+                    detail=f"HTTP {response.status_code} on {method} {path} (try {attempt + 1} of {self._retries})",
                 )
 
             except Timeout as exc:
                 last_exc = PrinterError(
-                    f"Request to Prusa Link at {self._host} timed out after {self._timeout}s "
-                    f"(attempt {attempt + 1}/{self._retries}). "
-                    f"The printer may be busy, overloaded, or on a slow network. "
-                    f"Try: (1) check the printer's LCD for errors, "
-                    f"(2) restart the printer, (3) verify the IP is correct.",
+                    f"Prusa Link at {self._host} took longer than {self._timeout:g}s to answer. "
+                    f"The printer may be busy, or on a slow network. Check its screen for "
+                    f"errors, restart it, or check that the address is right.",
                     cause=exc,
+                    detail=f"try {attempt + 1} of {self._retries}",
                 )
             except ReqConnectionError as exc:
                 last_exc = PrinterError(
-                    f"Could not connect to Prusa Link at {self._host} "
-                    f"(attempt {attempt + 1}/{self._retries}). "
-                    f"Check: (1) printer is powered on and connected to LAN (Ethernet or Wi-Fi), "
-                    f"(2) IP address is correct (find it on the printer's LCD under "
-                    f"Settings > Network), (3) Prusa Link is enabled.",
+                    f"Kiln couldn't reach Prusa Link at {self._host}. Check that the printer "
+                    f"is on and connected to your network, that the address is right (it's "
+                    f"on the printer's screen under Settings > Network), and that Prusa Link "
+                    f"is turned on.",
                     cause=exc,
+                    detail=f"try {attempt + 1} of {self._retries}",
                 )
             except RequestException as exc:
                 raise PrinterError(
-                    f"Request error for {method} {path}: {exc}",
+                    f"Kiln couldn't reach Prusa Link: {_plain_words.said(exc)}.",
+                    detail=f"{method} {path}",
                     cause=exc,
                 ) from exc
 
@@ -422,8 +425,9 @@ class PrusaLinkAdapter(PrinterAdapter):
             return response.json()
         except ValueError as exc:
             raise PrinterError(
-                f"Invalid JSON in response from GET {path}",
+                "The printer sent back a reply Kiln couldn't read.",
                 cause=exc,
+                detail=f"invalid JSON from GET {path}",
             ) from exc
 
     # ------------------------------------------------------------------
@@ -440,7 +444,7 @@ class PrusaLinkAdapter(PrinterAdapter):
 
     @staticmethod
     def _is_http_error(exc: PrinterError, status_code: int) -> bool:
-        return f"HTTP {status_code}" in str(exc)
+        return f"HTTP {status_code}" in f"{exc} {getattr(exc, 'detail', '') or ''}"
 
     @classmethod
     def _is_storage_fallback_error(cls, exc: PrinterError) -> bool:
@@ -682,7 +686,7 @@ class PrusaLinkAdapter(PrinterAdapter):
             roots = ", ".join(root for root, _ in fallback_errors)
             detail = "; ".join(str(exc) for _, exc in fallback_errors)
             raise PrinterError(
-                f"Unable to list files from Prusa Link storage roots ({roots}). {detail}",
+                f"Kiln couldn't list the files from Prusa Link storage roots ({roots}). {detail}",
             )
 
         deduped: list[PrinterFile] = []
@@ -779,7 +783,7 @@ class PrusaLinkAdapter(PrinterAdapter):
             root_list = ", ".join(_FILE_ROOTS)
             detail = f" Last error: {last_fallback_error}" if last_fallback_error else ""
             raise PrinterError(
-                f"Failed to upload {filename} to Prusa storage roots ({root_list}).{detail}",
+                f"Kiln couldn't upload {filename} to Prusa storage roots ({root_list}).{detail}",
             )
 
         return UploadResult(
@@ -813,7 +817,7 @@ class PrusaLinkAdapter(PrinterAdapter):
             root_list = ", ".join(roots)
             detail = f" Last error: {last_fallback_error}" if last_fallback_error else ""
             raise PrinterError(
-                f"Failed to start print for '{file_name}' from Prusa storage roots "
+                f"Kiln couldn't start the print for '{file_name}' from Prusa storage roots "
                 f"({root_list}). The file may require its API path/8.3 name.{detail}",
             )
 
@@ -914,7 +918,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         root_list = ", ".join(roots)
         detail = f" Last error: {last_fallback_error}" if last_fallback_error else ""
         raise PrinterError(
-            f"Failed to delete '{file_path}' from Prusa storage roots ({root_list}).{detail}",
+            f"Kiln couldn't delete '{file_path}' from Prusa storage roots ({root_list}).{detail}",
         )
 
     # ------------------------------------------------------------------

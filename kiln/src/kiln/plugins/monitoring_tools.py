@@ -489,8 +489,8 @@ class _PrintWatcher:
                     and job.completion >= self._cancel_at_percent
                 ):
                     cancel_msg = (
-                        f"Auto-cancelling print at {job.completion:.1f}% "
-                        f"(cancel_at_percent={self._cancel_at_percent}%)."
+                        f"Cancelling the print at {job.completion:.1f}%, as "
+                        f"`cancel_at_percent` ({self._cancel_at_percent}%) asked."
                     )
                     _logger.info("[watch %s] %s", self._watch_id, cancel_msg)
                     note_cancel_requested(adapter)
@@ -1145,12 +1145,12 @@ class _MonitoringToolsPlugin:
                 )
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to run vision monitoring: {_plain_words.said(exc)}. Check that the printer is online and has a webcam."
+                    f"Kiln couldn't run the vision monitoring: {_plain_words.said(exc)}. Check that the printer is online and has a webcam."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in monitor_print_vision")
                 return _srv._error_dict(
-                    f"Unexpected error in `monitor_print_vision`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
+                    f"Kiln couldn't check on the print with the camera: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=destructive("Watch a print"))
@@ -1318,7 +1318,7 @@ class _MonitoringToolsPlugin:
                 )
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to start print watcher: {_plain_words.said(exc)}. Check that the printer is online."
+                    f"Kiln couldn't start the print watcher: {_plain_words.said(exc)}. Check that the printer is online."
                 )
             except HostedUnavailableError as exc:
                 # The frames-store refusal, verbatim — not an "unexpected
@@ -1327,7 +1327,7 @@ class _MonitoringToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in watch_print")
                 return _srv._error_dict(
-                    f"Unexpected error in `watch_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
+                    f"Kiln couldn't watch the print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("Print watcher status"))
@@ -1399,10 +1399,12 @@ class _MonitoringToolsPlugin:
             )
             try:
                 type_enums = {EventType(t) for t in requested_types}
-            except ValueError as exc:
+            except ValueError:
                 valid = sorted(t.value for t in EventType)
+                unknown = ", ".join(repr(t) for t in requested_types if t not in valid)
                 return _srv._error_dict(
-                    f"Unknown event type: {_plain_words.said(exc)}. Valid types: {valid}",
+                    f"Kiln doesn't know the event type {unknown}. It can watch: "
+                    + ", ".join(f"`{v}`" for v in valid) + ".",
                     code="VALIDATION_ERROR",
                 )
 
@@ -1665,7 +1667,7 @@ class _MonitoringToolsPlugin:
                     )
                     response["message"] = (
                         f"{lead} and the first-layer monitor is running "
-                        f"(id={response['monitor_id']}). Check first_layer_status after "
+                        f"(id={response['monitor_id']}). Check `first_layer_status` after "
                         f"~{first_layer_delay + first_layer_checks * first_layer_interval}s."
                     )
                     # How the agent will LEARN of a fault, stated where the
@@ -1687,8 +1689,8 @@ class _MonitoringToolsPlugin:
                     )
                     response["monitor_status"] = "not_started"
                     response["warning"] = (
-                        f"The first-layer monitor could not start ({exc}). Watch the "
-                        "first layer yourself with watch_print_status or the "
+                        f"The first-layer monitor could not start ({_plain_words.said(exc)}). Watch the "
+                        "first layer yourself with `watch_print_status` or the "
                         "printer's camera."
                     )
                     response["message"] = (
@@ -1702,12 +1704,12 @@ class _MonitoringToolsPlugin:
                 )
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to start monitored print: {_plain_words.said(exc)}. Check that the printer is online and idle."
+                    f"Kiln couldn't start the monitored print: {_plain_words.said(exc)}. Check that the printer is online and idle."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in start_monitored_print")
                 return _srv._error_dict(
-                    f"Unexpected error in `start_monitored_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
+                    f"Kiln couldn't start the watched print: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("First-layer status"))

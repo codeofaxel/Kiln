@@ -390,6 +390,6 @@ class BedLevelManager:
 
             return {
                 "success": False,
-                "message": f"Bed leveling failed: {_plain_words.said(exc)}",
+                "message": f"The bed leveling didn't finish: {_plain_words.said(exc)}.",
                 **_plain_words.detail_field(exc),
             }

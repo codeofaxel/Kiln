@@ -36,6 +36,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.events import Event, EventBus
 
 logger = logging.getLogger(__name__)
@@ -139,7 +140,7 @@ def _validate_webhook_url(url: str) -> tuple[bool, str]:
     try:
         addrinfos = socket.getaddrinfo(hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
-        return False, f"DNS resolution failed for '{hostname}': {exc}"
+        return False, f"DNS resolution failed for '{hostname}': {_plain_words.said(exc)}"
 
     for _family, _type, _proto, _canonname, sockaddr in addrinfos:
         ip_str = sockaddr[0]

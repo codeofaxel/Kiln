@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.failure_vocabulary import PRINTER_LOG
 
 logger = logging.getLogger(__name__)
@@ -152,16 +153,17 @@ def backfill_history(adapter: Any, *, limit: int = 200) -> dict[str, Any]:
             _HISTORY_PATH, params={"limit": int(limit), "order": "desc"}
         )
     except Exception as exc:  # noqa: BLE001 — a courtesy import never raises
-        message = str(exc)
-        if "404" in message:
+        cause = f"{exc} {getattr(exc, 'detail', '') or ''}"
+        if "404" in cause:
             logger.debug(
                 "Moonraker history component not available on %s: %s",
                 printer_name,
-                message,
+                cause,
             )
         else:
-            logger.debug("Moonraker history fetch failed: %s", message)
-        result["error"] = message
+            logger.debug("Moonraker history fetch failed: %s", cause)
+        result["error"] = _plain_words.sentence(exc)
+        result["detail"] = cause
         return result
 
     jobs = payload.get("result", {}) if isinstance(payload, dict) else {}
@@ -179,7 +181,7 @@ def backfill_history(adapter: Any, *, limit: int = 200) -> dict[str, Any]:
         db = get_db()
     except Exception as exc:  # noqa: BLE001
         logger.debug("Moonraker history import: DB unavailable: %s", exc)
-        result["error"] = str(exc)
+        result["error"] = _plain_words.sentence(exc)
         return result
 
     kiln_stamps = _kiln_recorded_timestamps(db, printer_name)

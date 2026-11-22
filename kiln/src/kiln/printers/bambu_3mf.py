@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.gcode import (
     FIRST_PSEUDO_TOOL,
     GCODE_NUMBER,
@@ -862,7 +863,7 @@ def _eval_template_expr(expr: str, variables: dict[str, Any]) -> Any:
     try:
         tree = ast.parse(py_expr, mode="eval")
     except SyntaxError as exc:
-        msg = f"Cannot parse gcode template expression {expr!r}: {exc}"
+        msg = f"Cannot parse gcode template expression {expr!r}: {_plain_words.said(exc)}"
         raise ValueError(msg) from exc
 
     def visit(node: ast.AST) -> Any:
@@ -1949,7 +1950,7 @@ def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = N
     try:
         zf = UntrustedZipFile(str(p))
     except (OSError, zipfile.BadZipFile) as exc:
-        return [f"{p.name} is not a readable 3MF archive ({exc})"]
+        return [f"{p.name} is not a readable 3MF archive ({_plain_words.said(exc)})"]
     with zf:
         names = set(zf.namelist())
         if "Metadata/plate_1.gcode" not in names:

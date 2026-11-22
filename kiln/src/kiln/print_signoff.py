@@ -697,7 +697,12 @@ def exemption_verdict(
 
 def token_rejected_message(reason: str | None) -> str:
     """What a start is told when its preview token does not fit the print."""
-    return f"Preview token rejected: {reason}. Re-render the preview and issue a fresh token."
+    from kiln.preview_gate import reason_in_words
+
+    return (
+        f"Kiln can't start this print yet: {reason_in_words(reason)}. Show the print again, "
+        "then issue a fresh token with `issue_preview_token`."
+    )
 
 
 def token_verdict(

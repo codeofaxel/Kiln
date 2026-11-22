@@ -373,7 +373,7 @@ class TestSharedGate:
     def test_refuses_above_the_adapter_ceiling(self):
         stub = _Stub()
         stub._MAX_HOTEND_C = 250.0
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             stub.load_filament(temperature=260)
 
     def test_a_bound_safety_profile_tightens_the_ceiling(self):
@@ -385,7 +385,7 @@ class TestSharedGate:
 
         ceiling = get_profile("kilntest_ptfe").max_hotend_temp
         assert ceiling < stub._MAX_HOTEND_C, "the premise: the profile is the tighter limit"
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             stub.purge_filament(temperature=ceiling + 10)
 
     def test_no_temperature_and_no_material_is_refused_not_guessed(self):
@@ -425,7 +425,7 @@ class TestSharedGate:
 
     def test_negative_slot_is_refused(self):
         stub = _Stub()
-        with pytest.raises(PrinterError, match="slot must be >= 0"):
+        with pytest.raises(PrinterError, match="The slot must be 0 or more"):
             stub.load_filament(temperature=200, slot=-1)
 
     def test_an_unsupported_backend_is_refused_by_name_before_the_hook(self):
@@ -771,7 +771,7 @@ class TestBambuLoad:
         assert result.success is False
         assert result.extrusion_verified is None
         assert result.verification_source == "timeout_no_signal"
-        assert "never reported tray_now=0" in result.message
+        assert "never reported tray 0 in use" in result.message
 
 
 class TestBambuPurge:
@@ -1014,7 +1014,7 @@ class TestOctoPrint:
         result = adapter.load_filament(temperature=210)
         assert result.success is False
         assert result.verification_source == "firmware_rejected_move"
-        assert "409" in result.error_hint
+        assert "can't do that right now" in result.error_hint
 
 
 def _moon_response(status_code=200, json_data=None, text=""):

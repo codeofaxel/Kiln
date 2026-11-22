@@ -838,7 +838,7 @@ def estimate_price(
         volume_cm3=round(volume_cm3, 2) if volume_cm3 else None,
         confidence=confidence,
         note=(
-            f"Rough estimate for {tech}. Request a full quote with fulfillment_quote for exact pricing with shipping."
+            f"Rough estimate for {tech}. Request a full quote with `fulfillment_quote` for exact pricing with shipping."
         ),
     )
 

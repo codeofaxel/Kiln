@@ -372,6 +372,20 @@ def issue_shipping_confirmation_token(
     return confirmation
 
 
+# What each refusal below means to a person, for every door that shows one.
+_SHIPPING_REASON_WORDS: dict[str, str] = {
+    "invalid_token_format": "the shipping confirmation token isn't one Kiln issued",
+    "token_not_found_or_already_used": "Kiln has no record of the shipping confirmation, or it was already used",
+    "token_expired": "the shipping confirmation has expired",
+    "token_shipping_details_mismatch": "the shipping details changed after they were confirmed",
+}
+
+
+def shipping_reason_in_words(reason: str | None) -> str:
+    """A refusal from :func:`validate_shipping_confirmation_token` as a clause a person can read."""
+    return _SHIPPING_REASON_WORDS.get(reason or "", "the shipping confirmation doesn't fit this order")
+
+
 def validate_shipping_confirmation_token(
     token: str,
     *,

@@ -8,6 +8,7 @@ import os
 import re
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.nozzle_size_check import MISMATCH_CODE as NOZZLE_SIZE_MISMATCH
 from kiln.printer_model_check import MISMATCH_CODE as PRINTER_MODEL_MISMATCH
 from kiln.tiers_and_terms import plan_offer, upgrade_nudge_block
@@ -500,7 +501,7 @@ def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
             fh.write(data)
             return fh.name
     except OSError as exc:
-        raise _ReadBackFailed(f"could not stage the printer's copy locally: {exc}") from exc
+        raise _ReadBackFailed(f"Kiln couldn't make a copy of the printer's file on this computer: {_plain_words.said(exc)}.") from exc
 
 
 def _resolve_material(kwargs: dict[str, Any]) -> str | None:
@@ -1292,7 +1293,7 @@ def evaluate_quiet_start(adapter: Any, job_path: str, kwargs: dict[str, Any] | N
     except Exception as exc:  # noqa: BLE001
         return refuse(
             "QUIET_START_STATE_READ_FAILED", "printer_state",
-            f"could not read the printer's state before the quiet start ({exc}); try again in a moment.",
+            f"could not read the printer's state before the quiet start ({_plain_words.said(exc)}); try again in a moment.",
         )
     from kiln.printers.base import PrinterStatus, effective_state_of
 
@@ -1310,7 +1311,7 @@ def evaluate_quiet_start(adapter: Any, job_path: str, kwargs: dict[str, Any] | N
     except Exception as exc:  # noqa: BLE001
         return refuse(
             "QUIET_START_HOMED_READ_FAILED", "homed_axes",
-            f"could not read which axes are homed from the printer ({exc}); try again in a moment.",
+            f"could not read which axes are homed from the printer ({_plain_words.said(exc)}); try again in a moment.",
         )
     try:
         field = adapter.homed_axes_field()
@@ -1484,7 +1485,7 @@ def evaluate_same_bed_retry(adapter: Any, job_path: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return refuse(
             "SAME_BED_RETRY_STATE_READ_FAILED", "printer_state",
-            f"could not read the printer's state before the retry ({exc}); "
+            f"could not read the printer's state before the retry ({_plain_words.said(exc)}); "
             f"retry in a moment, or reslice and print normally.",
         )
     from kiln.printers.base import PrinterStatus, effective_state_of
@@ -1505,7 +1506,7 @@ def evaluate_same_bed_retry(adapter: Any, job_path: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return refuse(
             "SAME_BED_RETRY_HOMED_READ_FAILED", "homed_axes",
-            f"could not read which axes are homed from the printer ({exc}); "
+            f"could not read which axes are homed from the printer ({_plain_words.said(exc)}); "
             f"retry in a moment, or reslice and print normally.",
         )
     try:

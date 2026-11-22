@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.gcode import has_axis_word
 from kiln.printers.base import FilamentOpPlan, FilamentOpResult, HomeResult, HomeStep, PrinterError
 from kiln.printers.command_verdict import CommandVerdict
@@ -240,7 +241,7 @@ def run_home_plan(
     elif flags is not None:
         outcome, source = "accepted", "homed_flag_bits_partial"
         flag_note = (f" The printer's homed flags report {', '.join(sorted(flags)) or 'no axis'} homed and "
-                     f"not {', '.join(sorted(wanted - flags))} -- read printer_status again; the routine may still be running.")
+                     f"not {', '.join(sorted(wanted - flags))} -- read `printer_status` again; the routine may still be running.")
     else:
         outcome, source = "accepted", "not_read_back"
         flag_note = " The printer reported no homed flag Kiln could read this time."
@@ -397,7 +398,7 @@ def run_wipe_step(
                 hold_heater(target)
         except PrinterError as exc:
             return FilamentOpResult(
-                success=False, message=f"Could not set the hotend to {target:g}°C: {exc}",
+                success=False, message=f"Kiln couldn't set the hotend to {target:g}°C: {_plain_words.said(exc)}.",
                 verification_source="heater_command_rejected", error_hint=str(exc), details=details, **common,
             )
         reached, reading = adapter._wait_for_hotend(target)

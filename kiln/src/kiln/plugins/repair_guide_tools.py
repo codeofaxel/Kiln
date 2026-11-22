@@ -584,7 +584,7 @@ def repair_guide(
         )
     except Exception as exc:
         _logger.exception("Unexpected error in repair_guide")
-        return _srv._error_dict(f"Unexpected error in `repair_guide`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Kiln couldn't find the repair guide: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def coverage_line(printer_id: str) -> tuple[str, bool]:

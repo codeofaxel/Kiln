@@ -742,7 +742,7 @@ def printer_bench(
         return _with_pictures(_advance(session, adapter, answer, gcode_paths))
     except Exception as exc:  # noqa: BLE001
         _logger.exception("Unexpected error in printer_bench")
-        return _srv._error_dict(f"Unexpected error in the bench session: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"The bench session didn't finish: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _advance(session: dict[str, Any], adapter: Any, answer: Any,

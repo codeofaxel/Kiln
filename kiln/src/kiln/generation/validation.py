@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from kiln import _vec
+from kiln import plain_words as _plain_words
 from kiln.generation.base import MeshAnalysis, MeshValidationResult
 from kiln.mesh_errors import UnreadableMeshError
 from kiln.untrusted_zip import UntrustedZipFile
@@ -172,7 +173,7 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
     except Exception as exc:
         return MeshValidationResult(
             valid=False,
-            errors=[f"Failed to parse mesh: {exc}"],
+            errors=[f"Failed to parse mesh: {_plain_words.said(exc)}"],
         )
 
     if errors:
@@ -618,7 +619,7 @@ def _parse_stl_ascii(
                         triangles.append(tuple(current_verts))
                     current_verts = []
     except Exception as exc:
-        errors.append(f"Could not read ASCII STL: {exc}")
+        errors.append(f"Kiln couldn't read this text STL file: {_plain_words.said(exc)}")
 
     return triangles, list(vertex_set)
 
@@ -698,7 +699,7 @@ def _parse_obj(
                             if 0 <= i0 < len(vertices) and 0 <= i1 < len(vertices) and 0 <= i2 < len(vertices):
                                 triangles.append((vertices[i0], vertices[i1], vertices[i2]))
     except Exception as exc:
-        errors.append(f"Could not read OBJ file: {exc}")
+        errors.append(f"Kiln couldn't read this OBJ file: {_plain_words.said(exc)}")
 
     return triangles, vertices
 
@@ -1299,14 +1300,14 @@ def _parse_glb(
         with open(path, "rb") as fh:
             header = fh.read(12)
     except OSError as exc:
-        errors.append(f"Could not read GLB file: {exc}")
+        errors.append(f"Kiln couldn't read this GLB file: {_plain_words.said(exc)}")
         return [], []
     if len(header) < 12:
-        errors.append("GLB file too small (< 12 bytes).")
+        errors.append("This GLB file is too small to hold a model.")
         return [], []
     magic = struct.unpack_from("<I", header, 0)[0]
     if magic != _GLB_MAGIC:
-        errors.append(f"Not a valid GLB file (magic: {magic:#010x}).")
+        errors.append("This isn't a GLB file: its first bytes don't match the GLB format.")
         return [], []
 
     from kiln.mesh_frame import GLTF_SCALE_KEY, load_mesh
@@ -1314,7 +1315,7 @@ def _parse_glb(
     try:
         mesh = load_mesh(str(path), force="mesh", process=False)
     except Exception as exc:  # noqa: BLE001 — a malformed file is reported, never raised
-        errors.append(f"Could not parse GLB file: {exc}")
+        errors.append(f"Kiln couldn't read this GLB file: {_plain_words.said(exc)}")
         return [], []
     if facts is not None:
         facts["read_scale"] = float(mesh.metadata.get(GLTF_SCALE_KEY, 1.0))
@@ -1449,13 +1450,13 @@ def _placed_3mf_meshes(
     except UntrustedArchiveError as exc:
         # A ZIP, refused in its own words: too large to hold, or a build that
         # places more than one read may (a BadZipFile too, so first).
-        errors.append(f"This 3MF cannot be read: {exc}")
+        errors.append(f"This 3MF cannot be read: {_plain_words.said(exc)}")
         return []
     except zipfile.BadZipFile:
         errors.append("Not a valid 3MF: the file is not a ZIP archive.")
         return []
     except (ValueError, KeyError, OSError) as exc:
-        errors.append(f"Not a valid 3MF: {exc}")
+        errors.append(f"Not a valid 3MF: {_plain_words.said(exc)}")
         return []
     return out
 
@@ -1475,7 +1476,7 @@ def _parse_gltf(
     try:
         mesh = load_mesh(str(path), force="mesh", process=False)
     except Exception as exc:  # noqa: BLE001 — a malformed file is reported, never raised
-        errors.append(f"Could not parse glTF file: {exc}")
+        errors.append(f"Kiln couldn't read this glTF file: {_plain_words.said(exc)}")
         return [], []
     points = [tuple(p) for p in mesh.vertices.tolist()]
     triangles = [(points[a], points[b], points[c]) for a, b, c in mesh.faces.tolist()]
@@ -1496,7 +1497,7 @@ def _parse_step(
         errors.append(str(exc))  # the remedy's own words: what can read it
         return [], []
     except StepImportError as exc:
-        errors.append(f"Could not read that CAD file: {exc}")
+        errors.append(f"Could not read that CAD file: {_plain_words.said(exc)}")
         return [], []
     mesh = Path(mesh_path)
     reader = _OTHER_FORMATS.get(mesh.suffix.lower())
@@ -1937,7 +1938,7 @@ def repair_stl(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -2682,7 +2683,7 @@ def rescale_stl(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -2789,7 +2790,7 @@ def optimize_orientation(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -3006,7 +3007,7 @@ def repair_stl_advanced(
     errors: list[str] = []
     triangles, _ = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -3370,7 +3371,7 @@ def predict_print_failures(
     errors: list[str] = []
     tris = _load_triangles(path, errors)
     if errors or not tris:
-        raise UnreadableMeshError(f"Cannot parse mesh: {errors or ['No geometry']}")
+        raise UnreadableMeshError(f"Kiln can't read the model: {'; '.join(errors) if errors else 'there is no shape in it'}.")
 
     # Gather all vertices for bounding box
     all_verts: list[tuple[float, ...]] = []
@@ -4291,7 +4292,7 @@ def remove_floating_regions(
     errors: list[str] = []
     triangles, _ = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -4676,7 +4677,7 @@ def mirror_mesh(
     errors: list[str] = []
     triangles, _ = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -4731,7 +4732,7 @@ def hollow_mesh(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -4835,7 +4836,7 @@ def center_on_bed(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -4908,7 +4909,7 @@ def count_non_manifold_edges(file_path: str) -> dict[str, Any]:
     errors: list[str] = []
     tris = _load_triangles(path, errors)
     if errors or not tris:
-        raise UnreadableMeshError(f"Cannot parse mesh: {errors or ['No geometry']}")
+        raise UnreadableMeshError(f"Kiln can't read the model: {'; '.join(errors) if errors else 'there is no shape in it'}.")
 
     # Counted on the welded surface (:func:`_edge_reading`), so a seam-split
     # glTF and an exporter's slivers are not counted as holes and pinches.
@@ -4969,7 +4970,7 @@ def scale_to_fit(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -5123,7 +5124,7 @@ def split_by_component(
     errors: list[str] = []
     triangles, _ = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}")
     if not triangles:
         raise UnreadableMeshError("STL contains no geometry.")
 
@@ -5286,7 +5287,7 @@ def estimate_print_time_from_mesh(
     errors: list[str] = []
     tris = _load_triangles(path, errors)
     if errors or not tris:
-        raise UnreadableMeshError(f"Cannot parse mesh: {errors or ['No geometry']}")
+        raise UnreadableMeshError(f"Kiln can't read the model: {'; '.join(errors) if errors else 'there is no shape in it'}.")
 
     # Collect all vertices for bounding box
     all_verts: list[tuple[float, ...]] = []
@@ -6054,7 +6055,7 @@ def detect_mesh_pockets(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise UnreadableMeshError(f"STL parse errors: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}.")
     if not triangles:
         raise ValueError("STL file contains no triangles.")
 
@@ -6397,7 +6398,7 @@ def detect_holes(
         errors: list[str] = []
         triangles, vertices = _parse_stl(path, errors)
         if errors:
-            raise UnreadableMeshError(f"STL parse errors: {'; '.join(errors)}")
+            raise UnreadableMeshError(f"Kiln couldn't read the STL: {'; '.join(errors)}.")
         if not triangles:
             return []
         triangles = in_geometric_order(triangles)

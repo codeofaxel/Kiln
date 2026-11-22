@@ -37,6 +37,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -492,7 +494,7 @@ class AdaptiveSlicer:
         :raises AdaptiveSlicerError: If neither source is provided.
         """
         if model_stats is None and model_path is None:
-            raise AdaptiveSlicerError("Either model_path or model_stats must be provided.")
+            raise AdaptiveSlicerError("Either `model_path` or `model_stats` must be provided.")
 
         stats = model_stats or {}
 
@@ -1293,7 +1295,7 @@ def _parse_model_file(model_path: str) -> dict[str, Any]:
         # handed a number nobody took.
         logger.debug("Could not parse geometry from %s: %s", model_path, exc)
         raise AdaptiveSlicerError(
-            f"Could not read geometry from this file: {exc}"
+            f"Kiln couldn't read the geometry from this file: {_plain_words.said(exc)}."
         ) from exc
 
     return stats
@@ -1333,8 +1335,8 @@ def _parse_binary_stl_bbox(path: str) -> dict[str, Any]:
     if looks_like_step(path):
         raise AdaptiveSlicerError(
             "This is a STEP (CAD) file, not a mesh, and nothing is wrong with "
-            "it: this check reads meshes. Import it with import_step_file "
-            '(output_format="stl") and run this on the STL it hands back, or '
+            "it: this check reads meshes. Import it with `import_step_file` "
+            '(`output_format="stl"`) and run this on the STL it hands back, or '
             "export the part as STL from your CAD program."
         )
 
@@ -1342,7 +1344,7 @@ def _parse_binary_stl_bbox(path: str) -> dict[str, Any]:
         header = fh.read(80)
         if header[:5] == b"solid":
             # Might be ASCII STL — treat as unknown.
-            raise AdaptiveSlicerError("ASCII STL not supported for bbox parsing")
+            raise AdaptiveSlicerError("Kiln can't size a text (ASCII) STL here. Save it as a binary STL and try again.")
 
         count_bytes = fh.read(4)
         if len(count_bytes) < 4:
@@ -1431,10 +1433,12 @@ def _region_number(value: Any) -> float:
         return float(value)
     except ValueError as exc:
         if isinstance(value, str):
-            raise AdaptiveSlicerError(f"could not convert string to float: {_shown(value)}") from exc
-        raise AdaptiveSlicerError(_shown(str(exc))) from exc
-    except (TypeError, OverflowError) as exc:
-        raise AdaptiveSlicerError(str(exc)) from exc
+            raise AdaptiveSlicerError(f"Each value in a region must be a number; {_shown(value)} isn't one.") from exc
+        raise AdaptiveSlicerError(f"Each value in a region must be a number; {_shown(repr(value))} isn't one.") from exc
+    except OverflowError as exc:
+        raise AdaptiveSlicerError(f"{_shown(repr(value))} is too large to be a size in a region.") from exc
+    except TypeError as exc:
+        raise AdaptiveSlicerError(f"Each value in a region must be a number; {_shown(repr(value))} isn't one.") from exc
 
 
 def _parse_region_dicts(raw: list[dict[str, Any]], model_height: float) -> list[GeometryRegion]:
@@ -1444,7 +1448,7 @@ def _parse_region_dicts(raw: list[dict[str, Any]], model_height: float) -> list[
         regions (before any is read) or a region number that is not one.
     """
     if isinstance(raw, (list, tuple)) and len(raw) > _MAX_PLAN_REGIONS:
-        raise AdaptiveSlicerError(f"A plan reads at most {_MAX_PLAN_REGIONS} regions, got {len(raw)}.")
+        raise AdaptiveSlicerError(f"A plan can hold at most {_MAX_PLAN_REGIONS} regions; this one has {len(raw)}.")
     regions: list[GeometryRegion] = []
     for item in raw:
         try:

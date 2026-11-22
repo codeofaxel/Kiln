@@ -98,10 +98,10 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
             extra={"outcome": "failed", **(why if isinstance(why, dict) else {}), **_learn(adapter, action)},
         )
     except (PrinterError, RuntimeError) as exc:
-        return _srv._error_dict(f"Failed to {action}: {_plain_words.said(exc)}", extra={"outcome": "failed"})
+        return _srv._error_dict(f"Kiln couldn't {action}: {_plain_words.said(exc)}.", extra={"outcome": "failed"})
     except Exception as exc:
         _logger.exception("Unexpected error in %s", tool_name)
-        return _srv._error_dict(f"Unexpected error in {tool_name}: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Kiln couldn't {action}: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _learn(adapter: Any, action: str) -> dict[str, Any]:
@@ -314,7 +314,7 @@ def run_plate(*, printer_name: str | None = None) -> dict[str, Any]:
         return _plate_answer(adapter, target_name, plate_occupancy(adapter))
     except Exception as exc:
         _logger.exception("Unexpected error in plate status")
-        return _srv._error_dict(f"Unexpected error reading the plate record: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Kiln couldn't finish reading the plate record: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def clear_plate(*, printer_name: str | None = None, note: str = "") -> dict[str, Any]:
@@ -345,7 +345,7 @@ def clear_plate(*, printer_name: str | None = None, note: str = "") -> dict[str,
         return answer
     except Exception as exc:
         _logger.exception("Unexpected error in plate clear")
-        return _srv._error_dict(f"Unexpected error reading the plate record: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Kiln couldn't finish reading the plate record: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def plate_status(printer_name: str | None = None) -> dict[str, Any]:
@@ -562,7 +562,7 @@ def look_at_plate(
         return answer
     except Exception as exc:
         _logger.exception("Unexpected error in look_at_plate")
-        return _srv._error_dict(f"Unexpected error looking at the plate: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Kiln couldn't finish looking at the plate: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _record_persons_word(adapter: Any, target_name: str, words: str) -> dict[str, Any]:

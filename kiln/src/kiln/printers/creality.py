@@ -837,10 +837,10 @@ class CrealityAdapter(PrinterAdapter):
         if steps:
             guidance = f"{guidance} Next steps: {steps}"
         raise PrinterError(
-            "Could not find a Moonraker API on this Creality printer. "
-            "For K1/K1 Max/K1C/Ender-3 V3/Ender-3 V3 KE/CR-10 SE/K2/Hi, verify the printer is on the LAN "
-            "and Moonraker is reachable, then try the printer IP, http://<ip>:7125, or model-specific Fluidd port hints. "
-            f"Probe results: {detail or 'no candidates reached'}.{cause}{guidance}"
+            "Kiln couldn't find Moonraker, the printer's control service, on this Creality printer. "
+            "On a K1, K1 Max, K1C, Ender-3 V3, Ender-3 V3 KE, CR-10 SE, K2 or Hi, check that the printer "
+            "is on your network and Moonraker is on, then try the printer's address, or that address "
+            f"with :7125 on the end. What Kiln tried: {detail or 'nothing answered'}.{cause}{guidance}"
         )
 
     def get_state(self) -> PrinterState:

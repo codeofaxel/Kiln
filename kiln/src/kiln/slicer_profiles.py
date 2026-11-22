@@ -372,7 +372,7 @@ def refuse_unsafe_settings(settings: Mapping[str, Any]) -> None:
             raise SettingNameError(
                 f"The slicer setting {name!r} is not the name of a setting, so it was refused and "
                 "nothing was sliced. A setting's name is a lowercase letter followed by letters, "
-                "digits and underscores (temperature, first_layer_bed_temperature), with no spaces "
+                "digits and underscores (temperature, `first_layer_bed_temperature`), with no spaces "
                 "around it and the value given separately."
             )
         if name in _PROGRAM_SETTINGS or _PROGRAM_SETTING_SHAPE.search(name):

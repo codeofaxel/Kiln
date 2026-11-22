@@ -219,7 +219,7 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
     except (subprocess.TimeoutExpired, OSError) as exc:
         return None, _refusal(
             tool, "LOCAL_STEP_FAILED",
-            f"This computer's slicer could not slice the added part: {exc}",
+            f"This computer's slicer could not slice the added part: {_plain_words.said(exc)}",
         )
     if run.returncode != 0 or not out.is_file():
         said = ((run.stderr or "").strip() or (run.stdout or "").strip())[:300]

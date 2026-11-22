@@ -206,29 +206,31 @@ class TestHTTPLayer:
         adapter = _adapter()
         resp = _mock_response(status_code=404, text="Not Found", ok=False)
         with mock.patch.object(adapter._session, "request", return_value=resp):
-            with pytest.raises(PrinterError, match="HTTP 404"):
+            with pytest.raises(PrinterError, match="doesn't have what Kiln asked for") as caught:
                 adapter._get_json("/printer/info")
+        assert "HTTP 404" in caught.value.detail
 
     def test_retryable_http_error_exhausts_retries(self) -> None:
         adapter = _adapter(retries=2)
         resp = _mock_response(status_code=503, text="Unavailable", ok=False)
         with mock.patch.object(adapter._session, "request", return_value=resp):
             with mock.patch("kiln.printers.moonraker.time.sleep"):
-                with pytest.raises(PrinterError, match="HTTP 503"):
+                with pytest.raises(PrinterError, match="isn't answering right now") as caught:
                     adapter._get_json("/printer/info")
+        assert "HTTP 503" in caught.value.detail
 
     def test_timeout_raises_printer_error(self) -> None:
         adapter = _adapter()
         with mock.patch.object(
             adapter._session, "request", side_effect=Timeout("timed out")
-        ), pytest.raises(PrinterError, match="timed out"):
+        ), pytest.raises(PrinterError, match="took longer than"):
             adapter._get_json("/printer/info")
 
     def test_connection_error_raises_printer_error(self) -> None:
         adapter = _adapter()
         with mock.patch.object(
             adapter._session, "request", side_effect=ReqConnectionError("refused")
-        ), pytest.raises(PrinterError, match="Could not connect"):
+        ), pytest.raises(PrinterError, match="couldn't reach Moonraker"):
             adapter._get_json("/printer/info")
 
     def test_invalid_json_raises_printer_error(self) -> None:
@@ -236,7 +238,7 @@ class TestHTTPLayer:
         resp = _mock_response(status_code=200)
         resp.json.side_effect = ValueError("bad json")
         with mock.patch.object(adapter._session, "request", return_value=resp):
-            with pytest.raises(PrinterError, match="Invalid JSON"):
+            with pytest.raises(PrinterError, match="reply Kiln couldn't read"):
                 adapter._get_json("/printer/info")
 
     def test_post_delegates_to_request(self) -> None:
@@ -263,7 +265,7 @@ class TestHTTPLayer:
             adapter._session,
             "request",
             side_effect=requests.exceptions.InvalidURL("bad url"),
-        ), pytest.raises(PrinterError, match="Request error"):
+        ), pytest.raises(PrinterError, match="couldn't reach Moonraker"):
             adapter._get_json("/printer/info")
 
 
@@ -437,7 +439,7 @@ class TestGetState:
         adapter = _adapter()
         resp = _mock_response(status_code=401, text="Unauthorized", ok=False)
         with mock.patch.object(adapter._session, "request", return_value=resp):
-            with pytest.raises(PrinterError, match="HTTP 401"):
+            with pytest.raises(PrinterError, match="didn't accept the API key"):
                 adapter.get_state()
 
     def test_non_string_klippy_state_handled(self) -> None:
@@ -741,8 +743,9 @@ class TestStartPrint:
         resp = _mock_response(status_code=400, text="No file", ok=False)
 
         with mock.patch.object(adapter._session, "request", return_value=resp):
-            with pytest.raises(PrinterError, match="HTTP 400"):
+            with pytest.raises(PrinterError, match="didn't complete the request") as caught:
                 adapter.start_print("missing.gcode")
+        assert "HTTP 400" in caught.value.detail
 
 
 # ---------------------------------------------------------------------------

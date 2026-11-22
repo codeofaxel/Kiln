@@ -162,7 +162,7 @@ class TestTaxJurisdictionLookup:
         result = consumer_tools["tax_jurisdiction_lookup"]("ZZ-XX")
 
         assert result["success"] is False
-        assert "Unknown jurisdiction" in result["error"]["message"]
+        assert "doesn't know the tax region" in result["error"]["message"]
 
     @patch("kiln_pro.tax.TaxCalculator")
     def test_failure(self, mock_calc_cls, consumer_tools):

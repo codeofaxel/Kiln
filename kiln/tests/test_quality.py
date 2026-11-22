@@ -368,7 +368,7 @@ class TestAssessQuality:
             )
 
     def test_empty_job_id_raises(self):
-        with pytest.raises(QualityError, match="job_id is required"):
+        with pytest.raises(QualityError, match="`job_id` is required"):
             assess_quality(
                 metrics={"overall": 0.8},
                 job_id="",
@@ -378,7 +378,7 @@ class TestAssessQuality:
             )
 
     def test_empty_printer_id_raises(self):
-        with pytest.raises(QualityError, match="printer_id is required"):
+        with pytest.raises(QualityError, match="`printer_id` is required"):
             assess_quality(
                 metrics={"overall": 0.8},
                 job_id="job-1",
@@ -388,7 +388,7 @@ class TestAssessQuality:
             )
 
     def test_empty_assessed_by_raises(self):
-        with pytest.raises(QualityError, match="assessed_by is required"):
+        with pytest.raises(QualityError, match="`assessed_by` is required"):
             assess_quality(
                 metrics={"overall": 0.8},
                 job_id="job-1",
@@ -398,7 +398,7 @@ class TestAssessQuality:
             )
 
     def test_empty_signing_key_raises(self):
-        with pytest.raises(QualityError, match="signing_key is required"):
+        with pytest.raises(QualityError, match="`signing_key` is required"):
             assess_quality(
                 metrics={"overall": 0.8},
                 job_id="job-1",

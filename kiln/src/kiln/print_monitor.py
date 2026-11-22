@@ -9,6 +9,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from kiln import plain_words as _plain_words
 from kiln.events import EventType
 from kiln.printers.base import PrinterError, PrinterStatus
 
@@ -169,7 +170,7 @@ class FirstLayerMonitor:
             outcome = MonitorResult(
                 success=False,
                 outcome="error",
-                message=f"The first-layer monitor stopped with an error: {exc}",
+                message=f"The first-layer monitor stopped with an error: {_plain_words.said(exc)}.",
             )
         with self._lock:
             self._result = outcome
@@ -197,8 +198,8 @@ class FirstLayerMonitor:
                 outcome="no_camera",
                 duration_seconds=0.0,
                 message=(
-                    f"Printer {self._printer_name} does not support snapshots. "
-                    "Vision monitoring requires a camera when require_camera is enabled."
+                    f"{self._printer_name} can't take pictures, and watching with the camera "
+                    "needs one when `require_camera` is on."
                 ),
             )
 
@@ -253,7 +254,7 @@ class FirstLayerMonitor:
                     snapshots=snapshots,
                     snapshot_failures=consecutive_failures,
                     duration_seconds=round(time.time() - start_time, 1),
-                    message=f"Could not read printer state: {exc}",
+                    message=f"Kiln couldn't read the printer state: {_plain_words.said(exc)}.",
                 )
 
             if state.confirmed_state in _TERMINAL_STATES:
@@ -384,7 +385,7 @@ class FirstLayerMonitor:
                     outcome="error",
                     snapshots=telemetry_snapshots,
                     duration_seconds=round(time.time() - start_time, 1),
-                    message=f"Could not read printer state: {exc}",
+                    message=f"Kiln couldn't read the printer state: {_plain_words.said(exc)}.",
                 )
 
             if state.confirmed_state in _TERMINAL_STATES:

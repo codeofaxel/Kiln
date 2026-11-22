@@ -159,7 +159,7 @@ class _MaterialToolsPlugin:
                 )
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Could not connect to printer: {_plain_words.said(exc)}",
+                    f"Kiln couldn't connect to the printer: {_plain_words.said(exc)}.",
                     code="CONNECTION_ERROR",
                 )
 
@@ -175,13 +175,13 @@ class _MaterialToolsPlugin:
                 ams = adapter.get_ams_status()
             except PrinterError as exc:
                 return _srv._error_dict(
-                    f"Failed to query AMS status: {_plain_words.said(exc)}",
+                    f"Kiln couldn't read the AMS status: {_plain_words.said(exc)}.",
                     code="PRINTER_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error querying AMS status")
                 return _srv._error_dict(
-                    f"Unexpected error querying AMS status: {_plain_words.said(exc)}",
+                    f"Kiln couldn't read the AMS status: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -271,7 +271,7 @@ class _MaterialToolsPlugin:
                     "success": True,
                     "material": "unknown",
                     "source": "unknown",
-                    "message": f"Could not parse AMS tray index: {tray_now!r}.",
+                    "message": f"The AMS reported a tray number Kiln doesn't understand: {tray_now!r}.",
                 }
 
             unit_index, tray_index = active
@@ -392,7 +392,7 @@ class _MaterialToolsPlugin:
                 )
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Could not resolve printer adapter: {_plain_words.said(exc)}",
+                    f"Kiln couldn't find how to talk to this printer: {_plain_words.said(exc)}.",
                     code="CONNECTION_ERROR",
                 )
 
@@ -479,7 +479,7 @@ class _MaterialToolsPlugin:
                     "status": "critical",
                     "detail": f"Failed to read printer state: {exc}",
                 }
-                anomalies.append(f"Could not read printer state: {exc}")
+                anomalies.append(f"Could not read printer state: {_plain_words.said(exc)}")
 
             # ------------------------------------------------------------------
             # 3. Job progress

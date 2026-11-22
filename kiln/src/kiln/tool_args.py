@@ -29,6 +29,8 @@ import types
 import typing
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 # Kiln's failure envelope, mirrored rather than imported: ``kiln.server``
 # imports this module, and a door helper must not boot the server.
 _JSON_ERROR_CODE = "VALIDATION_ERROR"
@@ -59,7 +61,7 @@ def parse_json_object(
         try:
             parsed = json.loads(value)
         except json.JSONDecodeError as exc:
-            return None, _error(f"{name} is not valid JSON: {exc}")
+            return None, _error(f"{name} is not valid JSON: {_plain_words.said(exc)}")
         if not isinstance(parsed, dict):
             return None, _error(
                 f"{name} must be a JSON object (key-value pairs), "
@@ -88,7 +90,7 @@ def parse_json_array(
         try:
             parsed = json.loads(value)
         except json.JSONDecodeError as exc:
-            return None, _error(f"{name} is not valid JSON: {exc}")
+            return None, _error(f"{name} is not valid JSON: {_plain_words.said(exc)}")
         if not isinstance(parsed, list):
             return None, _error(
                 f"{name} must be a JSON array, got {type(parsed).__name__}."

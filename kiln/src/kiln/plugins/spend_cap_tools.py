@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 from kiln.tool_annotations import creates, destructive, read_only
 
@@ -116,7 +117,7 @@ def _ask(tool: str, method: str, path: str, body: dict[str, Any] | None = None):
     try:
         return _call(token, method, path, body), None
     except Exception as exc:  # noqa: BLE001 — said to the person, not raised
-        return None, _err(f"{tool}: could not reach Kiln's servers: {exc}")
+        return None, _err(f"{tool}: could not reach Kiln's servers: {_plain_words.said(exc)}")
 
 
 def _refusal(resp: dict[str, Any], *, default: str) -> dict[str, Any]:

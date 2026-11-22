@@ -293,7 +293,7 @@ class TestCallLLM:
         mock_post.side_effect = ConnectionError("refused")
         config = self._make_config()
 
-        with pytest.raises(AgentLoopError, match="Cannot connect"):
+        with pytest.raises(AgentLoopError, match="couldn't reach the AI service"):
             _call_llm([], [], config)
 
     @mock.patch("kiln.agent_loop.requests.post")
@@ -303,7 +303,7 @@ class TestCallLLM:
         mock_post.return_value = resp
         config = self._make_config()
 
-        with pytest.raises(AgentLoopError, match="non-JSON"):
+        with pytest.raises(AgentLoopError, match="sent back a reply Kiln couldn't read"):
             _call_llm([], [], config)
 
 
@@ -387,7 +387,7 @@ class TestExecuteToolCall:
         }
         result = _execute_tool_call(tc)
         parsed = json.loads(result)
-        assert "Invalid JSON" in parsed["error"]
+        assert "couldn't be read" in parsed["error"]
         assert parsed["success"] is False
 
     @mock.patch("kiln.agent_loop._execute_tool")

@@ -237,6 +237,23 @@ class PreviewGate:
 # Helpers
 # ---------------------------------------------------------------------------
 
+# What each refusal above means to a person, for every door that shows one.
+_REASON_WORDS: dict[str, str] = {
+    "invalid_token_format": "the preview token isn't one Kiln issued",
+    "token_not_found_or_already_used": "Kiln has no record of the preview token, or it was already used",
+    "token_expired": "the preview token has expired",
+    "token_filename_mismatch": "the preview token was issued for a different file",
+    "token_file_hash_mismatch": "the file has changed since its preview was shown",
+    "token_has_no_binding": "the preview token doesn't name a file",
+    "token_printer_mismatch": "the preview token was issued for a different printer",
+}
+
+
+def reason_in_words(reason: str | None) -> str:
+    """A refusal from :meth:`PreviewGate.validate_detail` as a clause a person can read."""
+    return _REASON_WORDS.get(reason or "", "the preview token doesn't fit this print")
+
+
 def hash_file(path: str) -> str:
     """SHA-256 hash of a file's contents (first 16 hex chars — short but
     collision-resistant enough for this use case)."""

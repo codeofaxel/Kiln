@@ -29,7 +29,8 @@ _TECHNICAL: tuple[tuple[str, str], ...] = (
                     r"invalid literal for|unsupported operand|No module named|line \d+ column \d+|\(char \d+\)|<class '|"
                     r"\b0x[0-9a-fA-F]{4,}\b"),
     ("an exception name", r"\b[A-Z][A-Za-z]*(?:Error|Exception)\b"),
-    ("a code value", r"\b(?:None|True|False|null|undefined|NaN)\b"),
+    # "None of the attempts worked" is English; a bare None is Python's.
+    ("a code value", r"\b(?:None(?! of\b)|True|False|null|undefined|NaN)\b"),
     ("a code call", r"\b[A-Za-z_][A-Za-z0-9_.]*\(\)"),
     ("a code name", r"\b[a-z][a-z0-9]*_[a-z0-9_]+\b"),
     ("a programmer's word", r"\b(?:kwargs?|argv|stdout|stderr|subprocess|payload|endpoint|schema|"

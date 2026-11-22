@@ -30,6 +30,8 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 
@@ -474,7 +476,7 @@ def cancel_split_plan(plan_id: str) -> dict[str, Any]:
                 part["status"] = "cancelled"
                 cancelled += 1
             except Exception as exc:
-                errors.append(f"Failed to cancel {part['part_id']}: {exc}")
+                errors.append(f"Failed to cancel {part['part_id']}: {_plain_words.said(exc)}")
 
     # Update the plan
     try:
@@ -805,7 +807,7 @@ def _cancel_fill_plan(plan_id: str) -> dict[str, Any]:
                 _srv._get_queue().cancel(job.id)
                 cancelled += 1
             except Exception as exc:  # noqa: BLE001 -- said, never lost
-                errors.append(f"{job.printer_name}: {exc}")
+                errors.append(f"{job.printer_name}: {_plain_words.said(exc)}")
         elif job.status in (JobStatus.PRINTING, JobStatus.STARTING):
             printing.append(str(job.printer_name))
     found = _fill_record(plan_id)

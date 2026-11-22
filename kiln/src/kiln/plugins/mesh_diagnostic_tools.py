@@ -105,13 +105,13 @@ class _MeshDiagnosticToolsPlugin:
                 )
             except ValueError as exc:
                 return _srv._error_dict(
-                    f"Failed to diagnose mesh: {_plain_words.said(exc)}",
+                    f"Kiln couldn't diagnose the mesh: {_plain_words.said(exc)}.",
                     code="VALIDATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in diagnose_mesh")
                 return _srv._error_dict(
-                    f"Unexpected error in `diagnose_mesh`: {_plain_words.said(exc)}",
+                    f"Kiln couldn't check the model for problems: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

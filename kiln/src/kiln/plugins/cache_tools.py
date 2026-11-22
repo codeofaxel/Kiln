@@ -105,12 +105,12 @@ class _CacheToolsPlugin:
                 )
                 return {"success": True, "entry": entry.to_dict()}
             except FileNotFoundError as exc:
-                return _srv._error_dict(f"Failed to cache model: {_plain_words.said(exc)}", code="NOT_FOUND")
+                return _srv._error_dict(f"Kiln couldn't cache the model: {_plain_words.said(exc)}.", code="NOT_FOUND")
             except (ValueError, _json.JSONDecodeError) as exc:
-                return _srv._error_dict(f"Failed to cache model: {_plain_words.said(exc)}", code="VALIDATION_ERROR")
+                return _srv._error_dict(f"Kiln couldn't cache the model: {_plain_words.said(exc)}.", code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in cache_model")
-                return _srv._error_dict(f"Unexpected error in `cache_model`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't save the model to its library: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # search_cached_models
@@ -155,7 +155,7 @@ class _CacheToolsPlugin:
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in search_cached_models")
-                return _srv._error_dict(f"Unexpected error in `search_cached_models`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't search the saved models: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # get_cached_model
@@ -179,7 +179,7 @@ class _CacheToolsPlugin:
                 return {"success": True, "entry": entry.to_dict()}
             except Exception as exc:
                 _logger.exception("Unexpected error in get_cached_model")
-                return _srv._error_dict(f"Unexpected error in `get_cached_model`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't find the saved model: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # list_cached_models
@@ -216,7 +216,7 @@ class _CacheToolsPlugin:
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in list_cached_models")
-                return _srv._error_dict(f"Unexpected error in `list_cached_models`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't list the saved models: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # delete_cached_model
@@ -240,7 +240,7 @@ class _CacheToolsPlugin:
                 return {"success": True, "cache_id": cache_id}
             except Exception as exc:
                 _logger.exception("Unexpected error in delete_cached_model")
-                return _srv._error_dict(f"Unexpected error in `delete_cached_model`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't delete the saved model: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # cache_design
@@ -275,7 +275,7 @@ class _CacheToolsPlugin:
                 return {"success": True, "cached_design": entry.to_dict()}
             except Exception as exc:
                 _logger.exception("Error in cache_design")
-                return _srv._error_dict(f"Failed to cache design: {_plain_words.said(exc)}", code="CACHE_ERROR")
+                return _srv._error_dict(f"Kiln couldn't cache the design: {_plain_words.said(exc)}.", code="CACHE_ERROR")
 
         # ------------------------------------------------------------------
         # list_cached_designs
@@ -320,7 +320,7 @@ class _CacheToolsPlugin:
                 )
             except Exception as exc:
                 _logger.exception("Error in list_cached_designs")
-                return _srv._error_dict(f"Failed to list cached designs: {_plain_words.said(exc)}", code="CACHE_ERROR")
+                return _srv._error_dict(f"Kiln couldn't list the cached designs: {_plain_words.said(exc)}.", code="CACHE_ERROR")
 
         # ------------------------------------------------------------------
         # get_cached_design
@@ -345,7 +345,7 @@ class _CacheToolsPlugin:
                 return {"success": True, "design": entry.to_dict()}
             except Exception as exc:
                 _logger.exception("Error in get_cached_design")
-                return _srv._error_dict(f"Failed to get cached design: {_plain_words.said(exc)}", code="CACHE_ERROR")
+                return _srv._error_dict(f"Kiln couldn't get the cached design: {_plain_words.said(exc)}.", code="CACHE_ERROR")
 
 
 plugin = _CacheToolsPlugin()

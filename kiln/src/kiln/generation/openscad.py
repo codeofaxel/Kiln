@@ -24,6 +24,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.generation.base import (
     GenerationError,
     GenerationJob,
@@ -234,9 +235,9 @@ def _find_openscad(explicit_path: str | None = None) -> str:
         # Path exists + is executable but the probe rejected it.
         # Surface the OS's reason and the install hint together so
         # the operator can act without grepping the stack.
-        reason = attempted[-1][1] if attempted else "openscad --version failed"
+        reason = attempted[-1][1] if attempted else "it didn't answer when asked for its version"
         raise GenerationError(
-            f"OpenSCAD binary at {explicit_path} cannot execute:\n"
+            f"The OpenSCAD program at {explicit_path} won't run:\n"
             f"  {reason}\n"
             f"{_OPENSCAD_INSTALL_HINT}",
             code="OPENSCAD_NOT_RUNNABLE",
@@ -284,7 +285,7 @@ def _find_openscad(explicit_path: str | None = None) -> str:
         if matches and not any_executable:
             app_path = matches[0].split("/Contents/")[0]
             raise GenerationError(
-                f"OpenSCAD found at {app_path} but cannot execute.\n"
+                f"OpenSCAD is at {app_path}, but it won't run.\n"
                 f"macOS Gatekeeper may be blocking it. Fix with:\n"
                 f'  xattr -dr com.apple.quarantine "{app_path}"\n'
                 f"Then retry the operation.",
@@ -294,7 +295,7 @@ def _find_openscad(explicit_path: str | None = None) -> str:
     if attempted:
         attempted_msg = "\n".join(f"  - {path} -> {reason}" for path, reason in attempted)
         raise GenerationError(
-            f"OpenSCAD found on this machine but no candidate could execute:\n"
+            f"OpenSCAD is on this computer, but none of its copies would run:\n"
             f"{attempted_msg}\n\n"
             f"{_OPENSCAD_INSTALL_HINT}",
             code="OPENSCAD_NOT_RUNNABLE",
@@ -462,7 +463,7 @@ class OpenSCADProvider(GenerationProvider):
                     return job
                 except OSError as exc:
                     raise GenerationError(
-                        f"Failed to run OpenSCAD: {exc}",
+                        f"Kiln couldn't run OpenSCAD: {_plain_words.said(exc)}.",
                         code="OPENSCAD_EXEC_ERROR",
                     ) from exc
             finally:
@@ -637,7 +638,7 @@ class OpenSCADProvider(GenerationProvider):
             )
         else:
             raise GenerationError(
-                f"Cannot render preview for {ext!r} files. Supported: .stl, .scad",
+                f"Kiln can't draw a preview of {ext!r} files; it draws .stl and .scad files.",
                 code="UNSUPPORTED_FORMAT",
             )
 
@@ -703,7 +704,7 @@ class OpenSCADProvider(GenerationProvider):
             ) from None
         except OSError as exc:
             raise GenerationError(
-                f"Failed to run OpenSCAD for preview: {exc}",
+                f"Kiln couldn't run OpenSCAD to draw the preview: {_plain_words.said(exc)}.",
                 code="OPENSCAD_EXEC_ERROR",
             ) from exc
         finally:
@@ -890,7 +891,7 @@ class OpenSCADProvider(GenerationProvider):
                 ) from None
             except OSError as exc:
                 raise GenerationError(
-                    f"Failed to run OpenSCAD for boolean: {exc}",
+                    f"Kiln couldn't run OpenSCAD to combine the shapes: {_plain_words.said(exc)}.",
                     code="OPENSCAD_EXEC_ERROR",
                 ) from exc
 
@@ -957,7 +958,7 @@ def _python_boolean_fallback(
 
     if not body_tris or not cutter_verts:
         raise GenerationError(
-            "Failed to parse input STLs for Python boolean fallback.",
+            "Kiln couldn't read the parts to combine them.",
             code="BOOL_FALLBACK_PARSE",
         )
 
@@ -1216,7 +1217,7 @@ def compose_from_primitives(
         )
         if result.returncode != 0:
             raise GenerationError(
-                f"OpenSCAD compilation failed: {result.stderr[:500]}",
+                f"OpenSCAD couldn't build the model. It said: {result.stderr[:500]}",
                 code="OPENSCAD_COMPILE_ERROR",
             )
     except subprocess.TimeoutExpired as exc:

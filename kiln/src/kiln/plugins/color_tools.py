@@ -1621,7 +1621,7 @@ class _ColorToolsPlugin:
                 return {"success": False, "error": f"File not found: {input_path}"}
 
             if num_colors < 1:
-                return {"success": False, "error": "`num_colors` must be >= 1"}
+                return {"success": False, "error": "`num_colors` must be at least 1."}
 
             palette = color_palette or _DEFAULT_PALETTE
             if len(palette) < num_colors:
@@ -1744,7 +1744,7 @@ class _ColorToolsPlugin:
                 return {"success": False, "error": f"File not found: {input_path}"}
 
             if num_colors < 1:
-                return {"success": False, "error": "`num_colors` must be >= 1"}
+                return {"success": False, "error": "`num_colors` must be at least 1."}
 
             palette = color_palette or _DEFAULT_PALETTE
             if len(palette) < num_colors:
@@ -1937,8 +1937,8 @@ class _ColorToolsPlugin:
                     return {
                         "success": False,
                         "error": (
-                            "`step_colors` paints whole decoration steps — "
-                            "it cannot be combined with a floors/walls target"
+                            "`step_colors` colours whole decoration steps, so it "
+                            "can't be combined with a floors or walls target."
                         ),
                     }
                 for raw_key, raw_val in step_colors.items():
@@ -1947,7 +1947,7 @@ class _ColorToolsPlugin:
                     except (TypeError, ValueError):
                         return {
                             "success": False,
-                            "error": f"`step_colors` key {raw_key!r} is not a step index",
+                            "error": f"{raw_key!r} in `step_colors` isn't a step number.",
                         }
                     if not 0 <= idx_key < len(steps):
                         return {
@@ -1965,15 +1965,15 @@ class _ColorToolsPlugin:
                         return {
                             "success": False,
                             "error": (
-                                f"`step_colors`[{idx_key}] must be a #RRGGBB hex "
-                                f"color, got {raw_val!r}"
+                                f"Step {idx_key} in `step_colors` needs a colour written "
+                                f"like #FF8800, not {raw_val!r}."
                             ),
                         }
                     coerced_steps[idx_key] = val
                 if not coerced_steps:
                     return {
                         "success": False,
-                        "error": "`step_colors` is empty — name at least one step",
+                        "error": "`step_colors` is empty: name at least one step.",
                         "decorations": _describe_steps(steps, {}),
                     }
                 indices = sorted(
@@ -2004,7 +2004,7 @@ class _ColorToolsPlugin:
             try:
                 triangles = load_mesh_triangles(model_path)
             except Exception as exc:  # noqa: BLE001 — loader errors vary by format
-                return {"success": False, "error": f"could not load mesh: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
+                return {"success": False, "error": f"Kiln couldn't load the model: {_plain_words.said(exc)}.", **_plain_words.detail_field(exc)}
             if len(triangles) != record.get("triangle_count"):
                 # The sha256 gate should catch any edit first; this is a
                 # belt-and-braces refusal against loader disagreement.

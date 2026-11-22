@@ -42,6 +42,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln import run_program
 from kiln.openscad_runner import present_signals
 from kiln.output_paths import kiln_output_dir
@@ -1648,7 +1649,7 @@ def _run_slicer_with_startup_retry(
                 f"sliced. Slice again with a longer time limit, or a simpler plate."
             ) from None
         except OSError as exc:
-            raise SlicerError(f"Failed to run slicer: {exc}") from exc
+            raise SlicerError(f"Kiln couldn't run the slicer: {_plain_words.said(exc)}.") from exc
         elapsed = time.monotonic() - started
         if (
             attempt < _SLICE_ATTEMPTS
@@ -1860,7 +1861,7 @@ def _slice_with_orca(
                     f"again, and if it crashes the same way, slice this printer with "
                     f"PrusaSlicer instead; Kiln wraps the result as a Bambu 3MF itself, "
                     f"so nothing about the print is lost. Please report it with "
-                    f"report_issue so it can be looked into.\n"
+                    f"`report_issue` so it can be looked into.\n"
                     f"{_INSTALL_SLICER}"
                 )
             for_printer = f" for the {printer_name}" if printer_name else ""
@@ -1893,7 +1894,10 @@ def _slice_with_orca(
             refusal = _orca_refusal(os.path.basename(slicer.path), result.returncode, stderr_snippet)
             if refusal is not None:
                 raise refusal
-            raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet[:500]}")
+            logger.warning("slicer exited %s: %s", result.returncode, stderr_snippet[:500])
+            said = f" It said: {stderr_snippet[:500]}" if stderr_snippet else ""
+            what = "crashed" if result.returncode < 0 else "stopped with an error"
+            raise SlicerError(f"The slicer {what} and made no file.{said}")
 
         if not produced:
             # This CLI reports on stdout, but surface both streams — the
@@ -2028,10 +2032,9 @@ def slice_file(input_path: str, **kwargs: Any) -> SliceResult:
         question = _units_question_for(input_path)
         if not question:
             raise
-        said = str(exc)
-        if _NO_LAYERS.search(said):
+        if _NO_LAYERS.search(str(exc)):
             raise SlicerError(f"{question}  At that size the slicer found no layer to print.") from exc
-        raise SlicerError(f"{question}  The slicer said: {said}") from exc
+        raise SlicerError(f"{question}  The slicer said: {_plain_words.said(exc)}") from exc
 
 
 def take_project_plate(input_path: str, plate_number: int | None, profile: str | None) -> Any | None:
@@ -2058,7 +2061,7 @@ def take_project_plate(input_path: str, plate_number: int | None, profile: str |
     try:
         return one_plate(input_path, plate_number, bed=bed)
     except PlateChoiceError as exc:
-        raise ProjectPlateError(str(exc), code=exc.code, plates=exc.plates) from exc
+        raise ProjectPlateError(_plain_words.sentence(exc), code=exc.code, plates=exc.plates) from exc
 
 
 def say_project_plate(result: SliceResult, taken: Any | None) -> SliceResult:
@@ -2433,7 +2436,7 @@ def _slice_file(
         except OneNozzleInstead as miss:
             if asked_map:
                 raise NozzleMapError(
-                    f"{miss} A filament-to-nozzle map needs it too: leave the map out and Kiln slices this "
+                    f"{_plain_words.said(miss)} A filament-to-nozzle map needs it too: leave the map out and Kiln slices this "
                     "print for one nozzle, with filament swaps.",
                     code=miss.code,
                 ) from miss
@@ -2530,7 +2533,7 @@ def _slice_file(
             loaded_determined_by=loaded_determined_by,
         )
     except MaterialRefused as exc:
-        raise MaterialNotPrintableError(str(exc), code=exc.code, verdict=exc.verdict) from exc
+        raise MaterialNotPrintableError(_plain_words.sentence(exc), code=exc.code, verdict=exc.verdict) from exc
     # Supports, decided at the same place for the same reason: a part the
     # printability engine says needs them was sliced without them by every
     # tool door, and the estimate was of that file.  A caller's statement
@@ -2873,7 +2876,10 @@ def _slice_with_slic3r(
     )
     if result.returncode != 0 and not crashed_after_finishing:
         stderr_snippet = (result.stderr or "").strip()[:500]
-        raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet}")
+        logger.warning("slicer exited %s: %s", result.returncode, stderr_snippet)
+        said = f" It said: {stderr_snippet}" if stderr_snippet else ""
+        what = "crashed" if result.returncode < 0 else "stopped with an error"
+        raise SlicerError(f"The slicer {what} and made no file.{said}")
 
     # Verify output exists.  PrusaSlicer can exit 0 without writing — e.g.
     # "All objects are outside of the print volume." — and it says why on

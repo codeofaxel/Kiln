@@ -83,7 +83,7 @@ class TestPublishResultIsRead:
         """paho returns MQTT_ERR_NO_CONN instead of raising; that is a failure."""
         adapter = _connected(rc=mqtt.MQTT_ERR_NO_CONN)
 
-        with pytest.raises(PrinterError, match="NOT delivered"):
+        with pytest.raises(PrinterError, match="was not sent"):
             adapter.set_tool_temp(220)
 
         # And the next call reconnects instead of reusing the dead client.
@@ -92,7 +92,7 @@ class TestPublishResultIsRead:
 
     def test_any_non_success_rc_is_a_failure(self) -> None:
         adapter = _connected(rc=mqtt.MQTT_ERR_QUEUE_SIZE)
-        with pytest.raises(PrinterError, match="NOT delivered"):
+        with pytest.raises(PrinterError, match="was not sent"):
             adapter.send_gcode(["G28"])
         # Only NO_CONN means the session is gone.
         assert adapter._mqtt_connected.is_set()
@@ -101,7 +101,7 @@ class TestPublishResultIsRead:
         adapter = _connected()
         adapter._mqtt_client.is_connected.return_value = False
 
-        with pytest.raises(PrinterError, match="not connected"):
+        with pytest.raises(PrinterError, match="isn't connected"):
             adapter.set_bed_temp(60)
 
         adapter._mqtt_client.publish.assert_not_called()
@@ -332,7 +332,7 @@ class TestServerDoors:
         # message is the truth, and neither is "accepted".
         assert result["success"] is False
         msg = result["error"]["message"]
-        assert "NOT delivered" in msg or "Couldn't reach the printer" in msg
+        assert "was not sent" in msg or "Couldn't reach the printer" in msg
         assert "tool" not in result
 
 
@@ -409,7 +409,7 @@ class TestNothingToPublishThrough:
     def test_a_client_that_knows_it_is_disconnected_refuses(self) -> None:
         adapter = _connected()
         adapter._mqtt_client.is_connected.return_value = False
-        with pytest.raises(PrinterError, match="NOT delivered"):
+        with pytest.raises(PrinterError, match="was not sent"):
             adapter.set_light("chamber_light", "on")
         assert adapter._mqtt_client.publish.called is False
 
@@ -417,7 +417,7 @@ class TestNothingToPublishThrough:
         adapter = _connected()
         adapter._mqtt_client = None
         monkeypatch.setattr(BambuAdapter, "_ensure_mqtt", lambda self: None)
-        with pytest.raises(PrinterError, match="NOT delivered"):
+        with pytest.raises(PrinterError, match="was not sent"):
             adapter.set_light("chamber_light", "on")
 
 

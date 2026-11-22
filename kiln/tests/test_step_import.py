@@ -430,7 +430,7 @@ def test_parse_subprocess_failure():
     mock_proc.stdout = ""
     mock_proc.stderr = "Segmentation fault"
 
-    with pytest.raises(StepImportError, match="FreeCAD conversion failed"):
+    with pytest.raises(StepImportError, match="FreeCAD couldn't convert the file"):
         _parse_kiln_result(mock_proc, "FreeCAD")
 
 
@@ -441,7 +441,7 @@ def test_parse_subprocess_no_result_line():
     mock_proc.stdout = "some random output\nno result here\n"
     mock_proc.stderr = ""
 
-    with pytest.raises(StepImportError, match="no result"):
+    with pytest.raises(StepImportError, match="without sending back a result"):
         _parse_kiln_result(mock_proc, "Gmsh")
 
 
@@ -681,7 +681,7 @@ def test_parse_subprocess_malformed_json():
     mock_proc.stdout = "KILN_RESULT:{not valid json\n"
     mock_proc.stderr = ""
 
-    with pytest.raises(StepImportError, match="malformed result JSON"):
+    with pytest.raises(StepImportError, match="a result Kiln couldn't read"):
         _parse_kiln_result(mock_proc, "FreeCAD")
 
 
@@ -697,7 +697,7 @@ def test_parse_subprocess_missing_keys():
     mock_proc.stdout = 'KILN_RESULT:{"body_count": 1}\n'
     mock_proc.stderr = ""
 
-    with pytest.raises(StepImportError, match="missing required keys"):
+    with pytest.raises(StepImportError, match="without the parts Kiln needs"):
         _parse_kiln_result(mock_proc, "Gmsh")
 
 

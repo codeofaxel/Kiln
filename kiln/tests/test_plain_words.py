@@ -123,3 +123,8 @@ def test_a_lookup_failure_with_a_written_message_is_said_as_written():
     )
     # Only the missing key: that is a slip in the code, said as one.
     assert said(KeyError("nominal_size_mm")) == "something went wrong inside Kiln (not something you did)"
+
+
+def test_the_english_none_is_not_mistaken_for_a_code_value():
+    assert technical_words("None of the attempts worked.") == []
+    assert technical_words("The layer height was None.") == ["a code value"]

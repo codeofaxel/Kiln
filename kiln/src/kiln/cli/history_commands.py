@@ -51,7 +51,7 @@ def _finish(answer: dict[str, Any], json_mode: bool, say: Callable[[dict[str, An
     failed = not isinstance(answer, dict) or answer.get("status") == "error" or answer.get("success") is False
     if failed:
         if not json_mode:
-            click.echo(f"ERROR: {_shown(answer.get('error') or 'Kiln could not do that.', lines=True)}", err=True)
+            click.echo(f"{_shown(answer.get('error') or 'Kiln could not do that.', lines=True)}", err=True)
         sys.exit(1)
     if not json_mode:
         click.echo(say(answer))
@@ -113,7 +113,7 @@ def branch_create(
         finally:
             vault.close()
         if not base_version_id:
-            click.echo(f"ERROR: {design_id} has no branch {from_branch} with a version on this computer.", err=True)
+            click.echo(f"{design_id} has no branch {from_branch} with a version on this computer.", err=True)
             sys.exit(1)
     answer = _served(
         "create_design_branch",

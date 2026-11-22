@@ -13,6 +13,7 @@ import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
+from kiln import plain_words as _plain_words
 from kiln.printers.base import (
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
@@ -210,13 +211,13 @@ class DuetAdapter(PrinterAdapter):
             )
         except (Timeout, ReqConnectionError) as exc:
             raise PrinterError(
-                f"Could not connect to the Duet board at {self._host}. "
+                f"Kiln couldn't connect to the Duet board at {self._host}. "
                 "Check the address and that the board is powered and on the network.",
                 cause=exc,
             ) from exc
         except RequestException as exc:
             raise PrinterError(
-                f"Request error connecting to {self._host}: {exc}",
+                f"Kiln couldn't connect to {self._host}: {_plain_words.said(exc)}.",
                 cause=exc,
             ) from exc
 
@@ -307,51 +308,45 @@ class DuetAdapter(PrinterAdapter):
                         body += " (truncated)"
                     sc = response.status_code
                     if sc == 401:
-                        hint = (
-                            " Re-authentication did not restore the session. Check the "
-                            "machine password (M551 in config.g). Retry with `get_state()`."
+                        said = (
+                            "The Duet board didn't accept Kiln's password, even after signing in "
+                            "again. Check the board's password (M551 in config.g)."
                         )
                     elif sc == 404:
-                        hint = (
-                            " Endpoint or file not found. Verify with `list_files()`;"
-                            " very old RepRapFirmware builds may not serve this request."
+                        said = (
+                            "The Duet board doesn't have what Kiln asked for: the file may not be "
+                            "there (check with `printer_files`), or the firmware is too old for it."
                         )
                     else:
-                        hint = " Retry with `get_state()` to check printer status."
-                    error = PrinterError(
-                        f"Duet returned HTTP {sc} for {method} {path}: {body}.{hint}",
-                    )
+                        said = "The Duet board didn't complete the request. Check `printer_status`, then try again."
+                    error = PrinterError(said, detail=f"HTTP {sc} on {method} {path}: {body}")
                     error.status_code = sc  # type: ignore[attr-defined]
                     raise error
 
                 # Retryable HTTP status -- fall through to backoff
                 last_exc = PrinterError(
-                    f"Duet returned HTTP {response.status_code} "
-                    f"for {method} {path} "
-                    f"(attempt {attempt + 1}/{self._retries}). "
-                    f"The board may be busy or low on memory. "
-                    f"Retry with `get_state()`."
+                    "The Duet board isn't answering right now; it may be busy or low on memory. Try again in a moment.",
+                    detail=f"HTTP {response.status_code} on {method} {path} (try {attempt + 1} of {self._retries})",
                 )
 
             except Timeout as exc:
                 last_exc = PrinterError(
-                    f"{method} {path} timed out after {self._timeout}s. "
-                    f"Printer may be offline or overloaded. "
-                    f"(attempt {attempt + 1}/{self._retries})",
+                    f"The printer took longer than {self._timeout:g}s to answer. It may be off or busy.",
                     cause=exc,
+                    detail=f"{method} {path} (try {attempt + 1} of {self._retries})",
                 )
             except ReqConnectionError as exc:
                 last_exc = PrinterError(
-                    f"Could not connect to the Duet board at {self._host} "
-                    f"(attempt {attempt + 1}/{self._retries})",
+                    f"Kiln couldn't reach the Duet board at {self._host}.",
                     cause=exc,
+                    detail=f"try {attempt + 1} of {self._retries}",
                 )
             except RequestException as exc:
                 raise PrinterError(
-                    f"Request error for {method} {path}: {exc}. "
-                    f"Cannot reach the Duet board at {self._host}. "
-                    f"Check network connectivity. Retry with `get_state()`.",
+                    f"Kiln couldn't reach the Duet board at {self._host}: {_plain_words.said(exc)}. "
+                    "Check the network.",
                     cause=exc,
+                    detail=f"{method} {path}",
                 ) from exc
 
             attempt += 1
@@ -370,7 +365,7 @@ class DuetAdapter(PrinterAdapter):
                 time.sleep(backoff)
 
         if last_exc is None:  # pragma: no cover - defensive
-            last_exc = PrinterError(f"{method} {path} failed with no recorded cause.")
+            last_exc = PrinterError("The request to the Duet board didn't finish.", detail=f"{method} {path}: no recorded cause")
         raise last_exc
 
     def _get_json(self, path: str, **kwargs: Any) -> dict[str, Any]:
@@ -380,11 +375,12 @@ class DuetAdapter(PrinterAdapter):
             body = response.json()
         except ValueError as exc:
             raise PrinterError(
-                f"Invalid JSON in response from GET {path}",
+                "The printer sent back a reply Kiln couldn't read.",
                 cause=exc,
+                detail=f"invalid JSON from GET {path}",
             ) from exc
         if not isinstance(body, dict):
-            raise PrinterError(f"Unexpected non-object JSON in response from GET {path}")
+            raise PrinterError("The printer sent back a reply Kiln couldn't use.", detail=f"non-object JSON from GET {path}")
         return body
 
     # ------------------------------------------------------------------
@@ -424,12 +420,11 @@ class DuetAdapter(PrinterAdapter):
             if self._is_access_failure(exc):
                 raise
             raise PrinterError(
-                f"{self._host} answered, but neither the RepRapFirmware object model "
-                "(rr_model) nor the legacy status endpoint (rr_status) responded. "
-                "This does not look like a Duet / RepRapFirmware controller -- check "
-                "the address, and that you have not pointed Kiln at a different "
-                "printer's web interface.",
+                f"{self._host} answered, but not the way a Duet (RepRapFirmware) board "
+                "does. Check the address, and that Kiln isn't pointed at a different "
+                "printer's web page.",
                 cause=exc,
+                detail="neither rr_model nor rr_status answered",
             ) from exc
 
         self._rrf_generation = 2
@@ -853,8 +848,8 @@ class DuetAdapter(PrinterAdapter):
         body = self._get_json("/rr_delete", params={"name": target})
         if body.get("err") != 0:
             raise PrinterError(
-                f"Could not delete {target} from the printer. It may not exist, or "
-                "may be the file currently being printed. Check `list_files()`."
+                f"Kiln couldn't delete {target} from the printer. It may not exist, or "
+                "may be the file currently being printed. Check it with `printer_files`."
             )
         return True
 
@@ -892,7 +887,7 @@ class DuetAdapter(PrinterAdapter):
                     "The print did not reach a paused state within "
                     f"{int(_PAUSE_SETTLE_TIMEOUT_S)}s, so it was not cancelled. "
                     "RepRapFirmware only cancels a paused job. The printer may be "
-                    "running a long pause macro -- check `get_state()` and retry."
+                    "running a long pause routine; check `printer_status`, then try again."
                 )
 
         self._run_gcode("M0")
@@ -954,7 +949,7 @@ class DuetAdapter(PrinterAdapter):
         return PrintResult(
             success=True,
             message=(
-                "Sent M999 to reset the board. Re-read printer_status to "
+                "Sent M999 to reset the board. Re-read `printer_status` to "
                 "confirm it came back ready."
             ),
         )

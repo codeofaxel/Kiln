@@ -679,10 +679,10 @@ def plan_travel(
             return TravelPlan(
                 ok=False,
                 reason=(
-                    f"{label} lies inside keep-out region "
-                    f"{inside[0]!r} (margin included) — cannot prove a "
-                    "clear approach; pass ignore_names to aim at it "
-                    "deliberately"
+                    f"{label} is inside the keep-out area "
+                    f"{inside[0]!r} (counting the margin), so Kiln can't prove the "
+                    "way there is clear. Pass `ignore_names` to aim at it "
+                    "deliberately."
                 ),
             )
 

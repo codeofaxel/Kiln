@@ -480,7 +480,7 @@ def _load_incident_meta(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return {"incident_id": path.name, "warning": f"parse error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
+        return {"incident_id": path.name, "warning": f"Kiln couldn't read this record: {_plain_words.said(exc)}.", **_plain_words.detail_field(exc)}
     return {
         "incident_id": raw.get("incident_id", path.name),
         "incident_type": raw.get("incident_type"),

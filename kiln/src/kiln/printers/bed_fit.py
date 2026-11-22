@@ -888,7 +888,7 @@ def validate_mesh_for_printer(
         fit["note"] = (
             "Too big for the bed as modelled, small enough lying on another face. "
             "The slicer gets the file as modelled; turn the part in its CAD file, "
-            "or import it (import_step_file) so Kiln can lay it down."
+            "or import it (`import_step_file`) so Kiln can lay it down."
         )
     return fit
 
