@@ -688,9 +688,9 @@ def level_of(printer_name: str | None, file_name: str | None = None) -> str:
     try:
         wanted = _stem(file_name) if file_name else ""
         record = _running(printer_name)
-        if isinstance(record, dict) and record.get("kept") == NONE:
-            if not wanted or _stem(record.get("file_name")) == wanted:
-                return NONE
+        if (isinstance(record, dict) and record.get("kept") == NONE
+                and (not wanted or _stem(record.get("file_name")) == wanted)):
+            return NONE
         with _lock:
             ended = _ended_not_kept.get(_slug(printer_name)) if printer_name else None
         if ended is not None and (not wanted or _stem(ended) == wanted):
@@ -719,9 +719,7 @@ def may_leave(row: dict[str, Any] | None = None, *, printer_name: str | None = N
             return False
         printer_name = printer_name or row.get("printer_name")
         file_name = file_name or row.get("file_name")
-    if printer_name and level_of(printer_name, file_name) != KEPT:
-        return False
-    return True
+    return not (printer_name and level_of(printer_name, file_name) != KEPT)
 
 
 def _hosted() -> bool:
@@ -778,9 +776,9 @@ def remove_kilns_own(path: str | None, roots: list[str] | tuple[str, ...], *, pr
 
 def picture_roots() -> tuple[str, ...]:
     """The folders Kiln saves plate pictures in."""
-    from kiln.output_paths import kiln_temp_dir
-
     import tempfile
+
+    from kiln.output_paths import kiln_temp_dir
 
     return (kiln_temp_dir(), tempfile.gettempdir())
 

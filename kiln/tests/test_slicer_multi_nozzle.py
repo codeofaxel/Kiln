@@ -2040,6 +2040,9 @@ class TestMultiMaterialPrintHeatsEachNozzleForItsOwn:
         monkeypatch.setattr(server, "_check_auth", lambda *a, **k: None)
         monkeypatch.setattr(server, "_refuse_undriven_multi_material", lambda *a, **k: None)
         monkeypatch.setattr(server, "_slices_for_several_nozzles", lambda *a, **k: several)
+        # No printer named, none resolved: the plate reads each material as
+        # _own() does, whatever printer an earlier test left registered.
+        monkeypatch.setattr(server, "_resolve_printer_profile_id", lambda *a, **k: None)
         handed: dict = {}
         monkeypatch.setattr(server, "run_reslice_and_print", lambda **kw: handed.update(kw) or {"success": True})
         reply = server.multi_material_print(

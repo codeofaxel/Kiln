@@ -24,9 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from kiln import plate_state as _plate_state
+from kiln import print_keeping
 from kiln.plate_state import pretty_job_name as _pretty_job_name
 from kiln.preview_evidence import name_stage_file
-from kiln import print_keeping
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_annotations import creates, destructive, read_only
 from kiln.tool_args import parse_json_object

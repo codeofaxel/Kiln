@@ -12697,7 +12697,6 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                     detect_identity_conflict,
                     resolve_adapter_model,
                 )
-
                 from kiln.printer_model_check import statement_line
 
                 conflict = detect_identity_conflict(verify_adapter)

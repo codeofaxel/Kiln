@@ -10,8 +10,6 @@ no manual imports needed.
 
 from __future__ import annotations
 
-from kiln import print_keeping  # noqa: E402
-
 import logging
 import threading
 from typing import Any
@@ -845,10 +843,6 @@ class _RecoveryToolsPlugin:
             ``cancel_split_plan(plan_id)``.
 
             Args:
-            keep_record: ``False`` only when the person asks for these prints not to be
-                kept ("print this privately", "don't keep a record of this"); never
-                suggest it.  Kiln then keeps nothing of them, or of the plan, once they
-                end.  Read with ``submit``.  Omit otherwise.
                 file_path: The part, as a mesh (STL, 3MF or OBJ).
                 copies: How many copies in all.
                 material: The filament (default ``"pla"``).
@@ -870,6 +864,10 @@ class _RecoveryToolsPlugin:
                     nozzle: the nozzle (1 for the first) each filament prints
                     from, one number per filament.  Every queued plate is
                     sliced with it.
+                keep_record: ``False`` only when the person asks for these prints
+                    not to be kept ("print this privately", "don't keep a record of
+                    this"); never suggest it.  Kiln then keeps nothing of them, or of
+                    the plan, once they end.  Read with ``submit``.  Omit otherwise.
             """
             import os
 

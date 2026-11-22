@@ -603,7 +603,7 @@ def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, 
     by_pair: dict[frozenset, dict[str, Any]] = {
         frozenset({names[i], names[j]}): entry for i, j, entry in entries["pairs"]
     }
-    flags = dict(zip(names, entries["hardware"]))
+    flags = dict(zip(names, entries["hardware"], strict=False))
 
     def entry_for(mat_a: str, mat_b: str) -> dict[str, Any] | None:
         entry = by_pair.get(frozenset({mat_a, mat_b}))

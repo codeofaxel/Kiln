@@ -14,10 +14,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from kiln.bench import AGENT_LEARN_LINE
 from kiln.cli_command import kiln_command
 from kiln.curve_resolution import AGENT_ADVICE
 from kiln.front_door import KEYLESS_MAKE_LINE
-from kiln.bench import AGENT_LEARN_LINE
 from kiln.tiers_and_terms import ORDERING_LINE
 
 

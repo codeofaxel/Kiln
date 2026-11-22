@@ -2227,10 +2227,9 @@ class PrinterAdapter(ABC):
     def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
         """Begin printing a file that already exists on the printer.
 
-        ``keep_record`` (popped here, never sent to the printer) is the print
-        door's word on how the print is kept (:mod:`kiln.print_keeping`):
-        ``False`` for a print the person asked not to keep, ``True`` to keep
-        it, absent to follow the account's choice.
+        ``keep_record`` (popped here, never sent to the printer) says how the
+        print is kept (:mod:`kiln.print_keeping`): ``False`` not kept,
+        ``True`` kept, absent the account's choice.
         """
         from kiln import print_keeping
 

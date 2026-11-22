@@ -85,8 +85,6 @@ from kiln.mcp_compat import (
     set_instructions,
     stamp_restart,
 )
-from kiln.print_keeping import call as print_keeping_call
-from kiln.print_keeping import reply_fields as print_keeping_reply
 from kiln.print_consent import (
     NOT_ASKED_CODE_COOLDOWN,
     NOT_ASKED_CODE_SHOWN,
@@ -115,6 +113,8 @@ from kiln.print_consent import (
     unasked_look_noted,
     why_not_asked,
 )
+from kiln.print_keeping import call as print_keeping_call
+from kiln.print_keeping import reply_fields as print_keeping_reply
 from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms, pay_methods, tax_note
 from kiln.quoted_text import fence
 from kiln.server_identity import SERVER_NAME, identity_kwargs
@@ -19087,12 +19087,12 @@ def print_plate_object(
     :param preview_token: Token from ``issue_preview_token`` proving the
         object was shown to the person before printing.  Required beside their
         go-ahead: a print is shown to its owner before it starts.
-
-    keep_record: ``False`` only when the person asks for this print not to be kept
-    ("print this privately", "don't keep a record of this"); never suggest it.  Kiln
-    then keeps nothing of the print once it ends, and the answer carries one line saying
-    so.  ``True`` keeps it, for a start a team's rule held (``TEAM_KEEPS_PRINTS``) after
-    the person agreed.  Omit otherwise: the print is kept the way the account says.
+    :param keep_record: ``False`` only when the person asks for this print not
+        to be kept ("print this privately", "don't keep a record of this");
+        never suggest it.  Kiln then keeps nothing of the print once it ends,
+        and the answer carries one line saying so.  ``True`` keeps it, for a
+        start a team's rule held (``TEAM_KEEPS_PRINTS``) after the person
+        agreed.  Omit otherwise: the print is kept the way the account says.
     """
     if err := _check_auth("print"):
         return err

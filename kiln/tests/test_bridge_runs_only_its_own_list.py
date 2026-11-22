@@ -436,6 +436,11 @@ _CARRIED_ON_PURPOSE = {
         "the web's model picker sends it only after the person has seen the model it replaces; "
         "the picker names a catalogue model, never a file or a bed"
     ),
+    ("slice_and_print", "keep_record"): (
+        "the person's own choice on the web's approve dialog: not to keep this print, or to keep "
+        "it when a team's rule asks; a value the server makes up is the separate item, print "
+        "approvals the server cannot forge"
+    ),
     ("slice_and_print", "print_authority"): (
         "the yes a relayed print rests on, read off the frame here and never passed to the tool; "
         "a yes the server cannot make up is the separate item, print approvals the server "
