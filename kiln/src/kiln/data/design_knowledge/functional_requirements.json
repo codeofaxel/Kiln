@@ -194,8 +194,7 @@
       ],
       "material_conditional": [
         "petg"
-      ],
-      "annealing_recommended": true
+      ]
     }
   },
   "flexibility_required": {

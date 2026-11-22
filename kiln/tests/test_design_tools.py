@@ -693,23 +693,25 @@ class TestGetMaterialDesignProfile:
 
 
 class TestGetPostProcessingGuide:
-    """Tests for get_post_processing_guide MCP tool."""
+    """Tests for get_post_processing_guide MCP tool.
 
-    @patch("kiln.design_intelligence.get_public_post_processing")
+    The guide is Kiln's finishing guide, asked through
+    ``kiln._pro_finishing_bridge`` (see test_finishing_served.py); these pin
+    the reply the door rebuilds from its answer."""
+
+    @patch("kiln._pro_finishing_bridge.guide")
     def test_happy_path(self, mock_fn, registered_tools):
-        mock_fn.return_value = SimpleNamespace(
-            material="pla",
-            techniques=[
-                {
-                    "name": "Sanding",
-                    "difficulty": "easy",
-                    "tools_needed": ["sandpaper"],
-                },
-            ],
-            paintability={"primer_needed": True},
-            strengthening=[{"method": "Annealing", "applicable": True}],
-            upgrade_hint="Ask one focused question for more detail.",
-        )
+        from kiln._pro_finishing_bridge import Asked
+
+        mock_fn.return_value = Asked(answer={
+            "success": True,
+            "status": "ok",
+            "material": "pla",
+            "available_goals": ["surface_finish", "paint", "strengthen"],
+            "techniques": [{"name": "Sanding", "difficulty": "easy", "safety_notes": "Wear a dust mask."}],
+            "paintability": {"available": True},
+            "strengthening": [{"method": "Annealing", "applicable": True}],
+        })
 
         result = registered_tools["get_post_processing_guide"]("pla")
 
@@ -730,19 +732,21 @@ class TestGetPostProcessingGuide:
             "strengthen",
         ]
         assert result["techniques"] == [
-            {"name": "Sanding", "difficulty": "easy", "safety_notes": None},
+            {"name": "Sanding", "difficulty": "easy", "safety_notes": "Wear a dust mask."},
         ]
-        mock_fn.assert_called_once_with("pla")
+        mock_fn.assert_called_once_with("pla", None)
 
-    @patch("kiln.design_intelligence.get_public_post_processing")
+    @patch("kiln._pro_finishing_bridge.guide")
     def test_goal_returns_only_requested_band(self, mock_fn, registered_tools):
-        mock_fn.return_value = SimpleNamespace(
-            material="pla",
-            techniques=[{"name": "Sanding", "difficulty": "easy"}],
-            paintability={"primer_needed": True, "paint_types": ["acrylic"]},
-            strengthening=[{"method": "Annealing", "applicable": True}],
-            upgrade_hint="",
-        )
+        from kiln._pro_finishing_bridge import Asked
+
+        mock_fn.return_value = Asked(answer={
+            "success": True,
+            "status": "ok",
+            "material": "pla",
+            "goal": "paint",
+            "answer": {"paintability": {"primer_needed": True, "paint_types": ["acrylic"]}},
+        })
 
         result = registered_tools["get_post_processing_guide"]("pla", "paint")
 
@@ -763,20 +767,19 @@ class TestGetPostProcessingGuide:
         }
         assert "techniques" not in result
         assert "strengthening" not in result
+        mock_fn.assert_called_once_with("pla", "paint")
 
-    @patch("kiln.design_intelligence.get_public_post_processing")
+    @patch("kiln._pro_finishing_bridge.guide")
     def test_unknown_material(self, mock_fn, registered_tools):
-        mock_fn.return_value = None
+        from kiln._pro_finishing_bridge import Asked
+
+        mock_fn.return_value = Asked(error="No post-processing data for this material.")
 
         result = registered_tools["get_post_processing_guide"]("unobtanium")
 
-        assert result["success"] is False
-        assert "unobtanium" in result["error"]
+        assert result == {"success": False, "error": "No post-processing data for this material."}
 
-    @patch(
-        "kiln.design_intelligence.get_public_post_processing",
-        side_effect=RuntimeError("boom"),
-    )
+    @patch("kiln._pro_finishing_bridge.guide", side_effect=RuntimeError("boom"))
     def test_exception(self, mock_fn, registered_tools):
         result = registered_tools["get_post_processing_guide"]("pla")
 

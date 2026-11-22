@@ -1170,7 +1170,27 @@ class _DesignToolsPlugin:
 
             Pass ``surface_finish``, ``paint``, ``strengthen``, or the name of
             one listed technique. Omitting ``goal`` returns a compact
-            compatibility overview rather than the complete guide.
+            compatibility overview rather than the complete guide.  Every
+            technique named carries its safety notes, and so does every way
+            of strengthening that carries a caution (annealing, where it is
+            suggested).  Each strengthening method says its effect in words.
+
+            Free on every plan with a Kiln account.  Below Kiln Business a
+            seat gets the full guide for a few distinct plastics a day; past
+            that the answer is ``general: true``: ``techniques`` and
+            ``strengthening_cautions``, each with its safety notes only, and
+            ``message`` saying so and when it renews.  Relay the safety notes
+            whole.
+
+            When Kiln's finishing guide cannot be had (offline, signed out, no
+            answer), the answer is ``basic: true``: ``techniques``, each finish
+            the plastic takes with its safety notes, and ``strengthening_cautions``, each
+            caution about strengthening it (only the one finish named, when
+            ``goal`` names one of them), or ``steps``, one general step with its
+            safety notes for a plastic not listed; and ``message`` saying why
+            the rest of the guide is missing and how to get it.  Relay the
+            safety notes whole and the rest as missing, never as this
+            plastic's full guide.
 
             Args:
                 material: Material ID (e.g. "pla", "abs", "petg", "nylon").
@@ -1178,101 +1198,22 @@ class _DesignToolsPlugin:
                     ``"strengthen"``, or the name of one technique from the
                     overview.  Omit for the compact overview.
             """
-            from kiln.design_intelligence import (
-                find_post_processing_technique as _find_technique,
-            )
-            from kiln.design_intelligence import (
-                get_public_post_processing as _get_pp,
-            )
+            from kiln import _pro_finishing_bridge as finishing
+            from kiln.design_intelligence import _upgrade_hint
 
             try:
-                guide = _get_pp(material)
-                if guide is None:
-                    return {
-                        "success": False,
-                        "error": f"No post-processing data for '{material}'.",
-                    }
-
-                # A technique is never named without how not to get hurt
-                # doing it, so the overview carries each safety note too.
-                technique_overview = [
-                    {
-                        "name": technique.get("name"),
-                        "difficulty": technique.get("difficulty"),
-                        "safety_notes": technique.get("safety_notes"),
-                    }
-                    for technique in guide.techniques
-                    if isinstance(technique, dict)
-                ]
-                strengthening_overview = [
-                    {
-                        "method": item.get("method"),
-                        "applicable": item.get("applicable"),
-                    }
-                    if isinstance(item, dict)
-                    else {"method": str(item), "applicable": None}
-                    for item in guide.strengthening
-                ]
-
-                if goal is None:
-                    return {
-                        "success": True,
-                        "material": guide.material,
-                        "available_goals": [
-                            "surface_finish",
-                            "paint",
-                            "strengthen",
-                        ],
-                        "techniques": technique_overview,
-                        "paintability": {
-                            "available": guide.paintability is not None,
-                        },
-                        "strengthening": strengthening_overview,
-                        "upgrade_hint": guide.upgrade_hint,
-                    }
-
-                normalized_goal = goal.strip().lower().replace("-", "_").replace(" ", "_")
-                if normalized_goal in {"surface", "finish", "finishing", "surface_finish"}:
-                    answer: Any = {"techniques": guide.techniques}
-                    resolved_goal = "surface_finish"
-                elif normalized_goal in {"paint", "painting", "coat", "coating"}:
-                    answer = {"paintability": guide.paintability}
-                    resolved_goal = "paint"
-                elif normalized_goal in {
-                    "strength",
-                    "strengthen",
-                    "strengthening",
-                    "anneal",
-                    "annealing",
-                }:
-                    answer = {"strengthening": guide.strengthening}
-                    resolved_goal = "strengthen"
-                else:
-                    match = _find_technique(guide.techniques, goal)
-                    if match is None:
-                        names = [
-                            str(item["name"])
-                            for item in technique_overview
-                            if item.get("name")
-                        ]
-                        return {
-                            "success": False,
-                            "error": (
-                                f"Kiln doesn't know the finishing goal '{goal}'. "
-                                "Use `surface_finish`, `paint`, `strengthen`, or one "
-                                f"of: {', '.join(names)}."
-                            ),
-                        }
-                    answer = {"technique": match}
-                    resolved_goal = str(match.get("name"))
-
-                return {
-                    "success": True,
-                    "material": guide.material,
-                    "goal": resolved_goal,
-                    "answer": answer,
-                    "upgrade_hint": guide.upgrade_hint,
-                }
+                refused = finishing.refusal_for(material, goal)
+                if refused is not None:
+                    return {"success": False, "error": refused}
+                asked = finishing.guide(material, goal)
+                if asked.answer is None:
+                    if asked.error is not None:
+                        return {"success": False, "error": asked.error}
+                    return finishing.basic_guide(asked.miss, material, goal)
+                reply = finishing.reply_from(asked.answer)
+                if not reply.get("general"):
+                    reply["upgrade_hint"] = _upgrade_hint("post_processing")
+                return reply
             except Exception as exc:
                 _logger.error("Post-processing guide failed: %s", exc, exc_info=True)
                 return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
@@ -1339,7 +1280,10 @@ class _DesignToolsPlugin:
 
             Call this FIRST when a user reports any print quality problem.
             It cross-references all knowledge sources so the agent doesn't
-            need to make multiple tool calls.
+            need to make multiple tool calls.  When Kiln's finishing guide
+            cannot be had (offline, signed out, no answer),
+            ``post_processing_tips`` holds one line saying why instead of
+            tips; relay it as missing, never as "no tip applies".
 
             Examples:
                 material="petg", symptom="stringing", printer="ender3"

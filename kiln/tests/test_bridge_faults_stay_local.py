@@ -202,6 +202,32 @@ def test_the_adaptive_slicing_settings(monkeypatch, caplog):
     _assert_kept_local(out, caplog)
 
 
+def test_the_finishing_guide(monkeypatch, caplog):
+    from kiln import _pro_finishing_bridge as bridge
+    from kiln.design_intelligence import get_print_diagnostic
+    from kiln.plugins.design_tools import plugin
+
+    _stub(monkeypatch, bridge.LOCAL_MODULE, finishing_for_the_wire=_raise)
+    tools: dict = {}
+
+    class _Mcp:
+        def tool(self, **_kw):
+            def keep(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return keep
+
+    plugin.register(_Mcp())
+    diagnostic = get_print_diagnostic("pla")
+    out = {"guide": tools["get_post_processing_guide"]("pla"), "tips": diagnostic.post_processing_tips}
+    assert out["guide"]["basic"] is True and out["guide"]["why"] == "unanswered"
+    # Read on a person's computer and on Kiln's servers alike: no "this computer".
+    assert out["guide"]["why_detail"] == "Kiln's finishing guide stopped"
+    assert len(out["tips"]) == 1 and "Kiln can't" in out["tips"][0]
+    _assert_kept_local(out, caplog)
+
+
 def test_the_pairing_check(monkeypatch, caplog):
     from kiln import _pro_material_pairing_bridge as bridge
     from kiln.design_intelligence import check_multi_material_compatibility

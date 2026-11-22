@@ -637,33 +637,6 @@ requires_troubleshooting_overlay = pytest.mark.skipif(
 )
 
 
-def _post_processing_overlay_loaded() -> bool:
-    """True when the post_processing overlay is merged in."""
-    try:
-        from kiln.design_intelligence import (
-            _reset_knowledge_base,
-            get_post_processing,
-        )
-        _reset_knowledge_base()
-        guide = get_post_processing("pla")
-        if guide is None or not guide.techniques:
-            return False
-        first = guide.techniques[0]
-        if "procedure" not in first:
-            return False
-    except Exception:
-        return False
-    return True
-
-
-_POST_PROCESSING_OVERLAY_PRESENT = _post_processing_overlay_loaded()
-
-requires_post_processing_overlay = pytest.mark.skipif(
-    not _POST_PROCESSING_OVERLAY_PRESENT,
-    reason="requires the kiln-pro overlay",
-)
-
-
 def _printer_intelligence_overlay_loaded() -> bool:
     """True when the printer_intelligence overlay is merged in."""
     try:

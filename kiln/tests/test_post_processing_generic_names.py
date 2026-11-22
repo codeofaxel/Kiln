@@ -1,28 +1,26 @@
-"""The post-processing table names each finish by what it is, not what it is sold as.
+"""The finishing guide names each finish by what it is, not what it is sold as.
 
-A tool list that says "a brush-on two-part epoxy coating that self-levels"
-tells a person what to look for in any shop, in any country; a retail product
-name tells them one shelf.  Four technique names used to carry a product in
-brackets or after "with", and a technique name is a lookup key, so an old
-spelling still resolves: the lookup matches on the technique's CORE (the
-bracketed tail, a "with ..." tail and the form word dropped) rather than on a
-table of old names, which would keep the products in this repo.
+A finish names its chemistry and form ("a brush-on two-part epoxy coating")
+rather than a retail product, and a finish name is a lookup key, so a
+spelling that carries a product in brackets or after "with", or lacks a form
+word, still resolves: the lookup matches on the name's CORE rather than on a
+table of old names, which would keep the products in this repo.  These pin
+the rule and that a miss (no answer from Kiln's servers) still resolves such
+a spelling to the finish and its safety note.
 """
 
 from __future__ import annotations
 
 import json
+import socket
+import sys
+from typing import Any
 
 import pytest
 
-from kiln.design_intelligence import (
-    _DATA_DIR,
-    find_post_processing_technique,
-    get_public_post_processing,
-    technique_core,
-)
+from kiln._pro_finishing_bridge import CAUTIONS_FILE, find_technique, technique_core
 
-# (material, a spelling of the kind the table used to carry, the name it carries now)
+# (material, a spelling of the kind a saved note may carry, the name it resolves to)
 _OLD_SPELLINGS = [
     ("pla", "Epoxy Coating (some product)", "Epoxy Coating"),
     ("nylon", "Dyeing with some product", "Dyeing"),
@@ -32,8 +30,16 @@ _OLD_SPELLINGS = [
 
 
 @pytest.fixture()
-def guide_tool():
-    tools: dict[str, object] = {}
+def offline_guide(monkeypatch):
+    import kiln.server as srv
+    from kiln.plugins.design_tools import plugin
+
+    def no_network(*_a, **_k):
+        raise socket.gaierror("no such host")
+
+    monkeypatch.setitem(sys.modules, "kiln_pro", None)
+    monkeypatch.setattr(srv, "_pro_api_call", no_network)
+    tools: dict[str, Any] = {}
 
     class _MCP:
         def tool(self, **_kwargs):
@@ -43,26 +49,27 @@ def guide_tool():
 
             return decorator
 
-    from kiln.plugins.design_tools import plugin
-
     plugin.register(_MCP())
     return tools["get_post_processing_guide"]
 
 
-@pytest.mark.parametrize(("material", "old", "new"), _OLD_SPELLINGS)
-def test_an_old_technique_spelling_still_answers_through_the_tool(guide_tool, material, old, new):
-    result = guide_tool(material, old)
+def _table() -> dict[str, Any]:
+    raw = json.loads(CAUTIONS_FILE.read_text(encoding="utf-8"))
+    return {k: v for k, v in raw.items() if not k.startswith("_")}
 
-    assert result["success"] is True, result
-    assert result["goal"] == new
-    technique = result["answer"]["technique"]
-    assert technique["name"] == new
-    assert str(technique.get("safety_notes") or "").strip()
+
+@pytest.mark.parametrize(("material", "old", "new"), _OLD_SPELLINGS)
+def test_an_old_spelling_still_names_the_finish_and_its_warning_offline(offline_guide, material, old, new):
+    out = offline_guide(material, old)
+
+    assert out["basic"] is True and out["why"] == "offline", out
+    assert [t["name"] for t in out["techniques"]] == [new]
+    assert out["techniques"][0]["safety_notes"].strip()
 
 
 def test_old_spellings_resolve_in_any_case():
-    techniques = get_public_post_processing("pla").techniques
-    found = find_post_processing_technique(techniques, "  epoxy COATING (anything at all) ")
+    techniques = _table()["pla"]["techniques"]
+    found = find_technique(techniques, "  epoxy COATING (anything at all) ")
     assert found is not None and found["name"] == "Epoxy Coating"
 
 
@@ -74,18 +81,15 @@ def test_the_core_rule():
     assert technique_core("") == ""
 
 
-def test_no_two_techniques_of_one_material_share_a_core():
-    """The core is the lookup key for an old spelling: two techniques with one
+def test_no_two_finishes_of_one_plastic_share_a_core():
+    """The core is the lookup key for an old spelling: two finishes with one
     core would make an old name ambiguous, and the lookup answers None."""
-    raw = json.loads((_DATA_DIR / "post_processing.json").read_text(encoding="utf-8"))
-    for key, record in raw.items():
-        if key.startswith("_"):
-            continue
+    for key, record in _table().items():
         cores = [technique_core(t["name"]) for t in record.get("techniques") or []]
         assert len(cores) == len(set(cores)), (key, sorted(cores))
 
 
 def test_an_ambiguous_old_spelling_answers_none_not_a_guess():
     rows = [{"name": "Dyeing"}, {"name": "Dyeing with a brush"}]
-    assert find_post_processing_technique(rows, "Dyeing with anything") is None
-    assert find_post_processing_technique(rows, "Dyeing with a brush")["name"] == "Dyeing with a brush"
+    assert find_technique(rows, "Dyeing with anything") is None
+    assert find_technique(rows, "Dyeing with a brush")["name"] == "Dyeing with a brush"
