@@ -748,6 +748,11 @@ class PrintabilityReport:
     # pieces float (:class:`PiecesAnalysis`).  ``None`` when the mesh's
     # pieces could not be read, and on reports built directly by a client.
     pieces: PiecesAnalysis | None = None
+    #: Set only when the signed-in plan includes Kiln Pro's check and it did
+    #: not come from Kiln's servers: why (:func:`kiln.served_answer.fields`),
+    #: and, the first time this session, ``note``, the sentence the verdict
+    #: carries (:mod:`kiln._pro_printability_bridge`).  ``None`` otherwise.
+    kiln_pro_check: dict[str, Any] | None = None
     #: Whether Kiln Pro tuned this report (:func:`_mark_tuned`).  A tuned
     #: report's reply keeps the verdict, every check's risk and reasons, and
     #: what to do; see :func:`_served`.
@@ -8498,9 +8503,97 @@ def analyze_printability(
             "plate_number": plate_number,
         }
         runner = _analysis_runner()
-        if runner is None:
-            return _analyze_printability_here(file_path, **kwargs)
-        return runner(_analyze_printability_here, file_path, **kwargs)
+        if runner is not None:
+            return runner(_analyze_printability_here, file_path, **kwargs)
+        report = _analyze_printability_here(file_path, **kwargs)
+        _with_servers_check(report, file_path, kwargs)
+        return report
+
+
+def _with_servers_check(report: PrintabilityReport, file_path: str, kwargs: dict[str, Any]) -> None:
+    """On an install whose signed-in plan includes Kiln Pro's check, *report*
+    takes Kiln's servers' reading of the same part
+    (:mod:`kiln._pro_printability_bridge`), or says why it could not.  Any
+    other install, and Kiln's servers themselves, leave *report* as made."""
+    from kiln import _pro_printability_bridge as bridge
+
+    build = kwargs.get("build_volume")
+    arguments = {
+        "material": kwargs.get("material"),
+        "printer_id": kwargs.get("printer_id"),
+        "nozzle_diameter": kwargs.get("nozzle_diameter"),
+        "layer_height": kwargs.get("layer_height"),
+        "max_overhang_angle": kwargs.get("max_overhang_angle"),
+        "plate_number": kwargs.get("plate_number"),
+    }
+    if build is not None:
+        arguments.update(build_volume_x=build[0], build_volume_y=build[1], build_volume_z=build[2])
+    served, miss = bridge.reading_or_miss(file_path, arguments)
+    if served is not None:
+        _take_servers_reading(report, served)
+    elif miss is not None:
+        from kiln import served_public
+        from kiln.served_answer import fields as miss_fields
+
+        said: dict[str, Any] = {"applied": False, **miss_fields(miss)}
+        # A call the servers already missed says so once by itself
+        # (:func:`kiln.served_public.say_once`); this one adds only why.
+        if not served_public.already_missed() and served_public.first_this_session("printability:kiln_pro_check"):
+            said["note"] = bridge.miss_note(miss)
+        report.kiln_pro_check = said
+
+
+def _same_kind(mine: Any, theirs: Any) -> bool:
+    """Whether a served value can stand in for this field's own: the same
+    plain kind (a number for a number, a list of sentences for a list)."""
+    if isinstance(mine, bool) or isinstance(theirs, bool):
+        return isinstance(mine, bool) and isinstance(theirs, bool)
+    if isinstance(mine, (int, float)) and isinstance(theirs, (int, float)):
+        return True
+    if isinstance(mine, str) and isinstance(theirs, str):
+        return True
+    if isinstance(mine, list) and isinstance(theirs, list):
+        return all(isinstance(v, str) for v in mine + theirs)
+    return False
+
+
+def _take_servers_reading(report: PrintabilityReport, served: dict[str, Any]) -> None:
+    """*report* with Kiln's servers' reading of each check, for the same part.
+
+    Each check takes the servers' plain values (risk, reasons, what to do)
+    where the reply carries them; the brim decision, ``printable`` and the
+    recommendations are the servers'; anything the reply leaves out stays as
+    measured here.  The physics floors keep the last word: a part that will
+    not print as it is here (:func:`stops`) still does not.
+    """
+    for name, check in _checks(report):
+        theirs = served.get(name)
+        if not isinstance(theirs, dict):
+            continue
+        for f in fields(check):
+            if f.name in check._WORKED_OUT or f.name == "tuned" or f.name not in theirs:
+                continue
+            if _same_kind(getattr(check, f.name), theirs[f.name]):
+                setattr(check, f.name, theirs[f.name])
+    adhesion = served.get("adhesion")
+    if isinstance(adhesion, dict):
+        with contextlib.suppress(TypeError, ValueError):
+            known = {f.name for f in fields(AdhesionRecommendation)}
+            report.adhesion = AdhesionRecommendation(**{k: v for k, v in adhesion.items() if k in known})
+    if isinstance(served.get("recommendations"), list) and all(isinstance(r, str) for r in served["recommendations"]):
+        report.recommendations = list(served["recommendations"])
+    if isinstance(served.get("enrichment"), dict):
+        report.enrichment = served["enrichment"]
+    if isinstance(served.get("printable"), bool) and not stops(report):
+        report.printable = served["printable"]
+        # The rating stays in the process; it is kept on the side of the
+        # served verdict so no gate reads a pass the servers did not give.
+        if report.printable:
+            report.score = max(report.score, _PRINTABLE_SCORE_MIN)
+        else:
+            report.score = min(report.score, _PRINTABLE_SCORE_MIN - 1)
+        report.grade = _score_to_grade(report.score)
+    _mark_tuned(report)
 
 
 def _analysis_runner() -> Callable[..., Any] | None:
@@ -10409,7 +10502,11 @@ def verdict(report: PrintabilityReport) -> tuple[str, str]:
     found = stops(report)
     if found:
         return "wont_print", f"Won't print as it is: {found[0]}"
-    notes = (footing(report), report.pieces.note if report.pieces is not None else "")
+    notes = (
+        footing(report),
+        report.pieces.note if report.pieces is not None else "",
+        (report.kiln_pro_check or {}).get("note", ""),
+    )
     reason = support_verdict(report)
     if reason:
         return "prints_with_supports", " ".join(filter(None, (f"Prints with supports ({reason}).", *notes)))

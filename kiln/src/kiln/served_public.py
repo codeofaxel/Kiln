@@ -165,13 +165,14 @@ def _file_text(value: str) -> str | None:
 
 
 def ask(
-    name: str, arguments: dict[str, Any], entry: dict[str, Any],
+    name: str, arguments: dict[str, Any], entry: dict[str, Any], *, timeout_s: float | None = None,
 ) -> tuple[dict[str, Any] | None, Any]:
     """Run *name* on Kiln's servers.  ``(answer, None)`` with every file it
     wrote saved here, or ``(None, miss)`` when it should run here instead:
     *miss* is the :class:`kiln.served_answer.Miss` to say, or ``None`` when
     there is nothing to say (the tool, run here, names a missing file
-    itself).  Blocking; never raises."""
+    itself).  *timeout_s* bounds the wait for the answer (default: the wait
+    a make gets).  Blocking; never raises."""
     import kiln.server as srv
     from kiln import served_makes
     from kiln.served_answer import SESSION_EXPIRED_CODE, Miss, classify_answer
@@ -196,7 +197,7 @@ def ask(
             kwargs["step_results"] = facts
         http: dict[str, Any] = {}
         answer = srv._pro_api_call(
-            name, _timeout=srv._SERVED_MAKE_WAIT_S, _http=http, **kwargs,
+            name, _timeout=timeout_s or srv._SERVED_MAKE_WAIT_S, _http=http, **kwargs,
         )
         if http.get("status") != 200:
             return None, classify_answer(answer) or Miss("unanswered", "KILN_API_HTTP_ERROR")
