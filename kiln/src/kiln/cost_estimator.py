@@ -264,6 +264,10 @@ class CostEstimate:
     #: ``default`` (at least one filament had neither, so it is priced as
     #: PLA and a warning says which).  ``None`` for a mesh estimate.
     material_source: str | None = None
+    #: What a sliced 3MF of several plates was priced as: ``"plate 2"`` for
+    #: the plate named, ``"all 3 plates"`` for every plate together.
+    #: ``None`` for any other file.
+    covers: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -332,6 +336,49 @@ def _comment_text(lines: list[str]) -> str:
     """Only the comment lines, joined: the slicer's own figures are all on
     them, and a plate's moves are 99% of its 8 MB."""
     return "\n".join(line.rstrip("\r\n") for line in lines if line.lstrip().startswith(";"))
+
+
+def _all_plates(priced: list[CostEstimate], name: str) -> CostEstimate:
+    """Every plate's estimate as one: each figure added up, filaments by
+    tool, and ``covers`` naming how many plates.  The time is left empty
+    when any plate states none."""
+    by_tool: dict[int, dict[str, Any]] = {}
+    for estimate in priced:
+        for entry in estimate.filaments:
+            tool = int(entry.get("tool", 0))
+            kept = by_tool.setdefault(tool, {**entry, "length_m": 0.0, "weight_g": 0.0, "cost_usd": 0.0})
+            for key, digits in (("length_m", 3), ("weight_g", 2), ("cost_usd", 4)):
+                kept[key] = round(kept[key] + float(entry.get(key) or 0.0), digits)
+    times = [e.estimated_time_seconds for e in priced]
+    warnings: list[str] = []
+    for estimate in priced:
+        warnings.extend(w for w in estimate.warnings if w not in warnings)
+    materials = list(dict.fromkeys(e.material for e in priced if e.material))
+    sources = {e.material_source for e in priced}
+    first = priced[0]
+    return CostEstimate(
+        file_name=name,
+        material=" + ".join(materials) if len(materials) > 1 else (materials[0] if materials else first.material),
+        filament_length_meters=round(sum(e.filament_length_meters for e in priced), 3),
+        filament_weight_grams=round(sum(e.filament_weight_grams for e in priced), 2),
+        filament_cost_usd=round(sum(e.filament_cost_usd for e in priced), 4),
+        estimated_time_seconds=None if any(t is None for t in times) else int(sum(times)),
+        electricity_cost_usd=round(sum(e.electricity_cost_usd for e in priced), 4),
+        electricity_rate_kwh=first.electricity_rate_kwh,
+        printer_wattage=first.printer_wattage,
+        total_cost_usd=round(sum(e.total_cost_usd for e in priced), 2),
+        warnings=warnings,
+        support_weight_grams=round(sum(e.support_weight_grams for e in priced), 2),
+        support_cost_usd=round(sum(e.support_cost_usd for e in priced), 4),
+        adhesion_weight_grams=round(sum(e.adhesion_weight_grams for e in priced), 2),
+        adhesion_cost_usd=round(sum(e.adhesion_cost_usd for e in priced), 4),
+        total_plastic_volume_mm3=round(sum(e.total_plastic_volume_mm3 for e in priced), 2),
+        infill_percent=first.infill_percent,
+        filament_source=first.filament_source if len({e.filament_source for e in priced}) == 1 else "3mf",
+        filaments=[by_tool[tool] for tool in sorted(by_tool)],
+        material_source="default" if "default" in sources else first.material_source,
+        covers=f"all {len(priced)} plates",
+    )
 
 
 def _slice_info_plate(root: Any, plate_number: int) -> Any:
@@ -566,6 +613,8 @@ class CostEstimator:
         material: str | None = None,
         electricity_rate: float = 0.12,
         printer_wattage: float = 200.0,
+        *,
+        plate_number: int | None = None,
     ) -> CostEstimate:
         """Estimate cost from a G-code or 3MF file on disk.
 
@@ -573,11 +622,27 @@ class CostEstimator:
         metadata inside the archive is used when available, which is more
         reliable than parsing the proprietary gcode within.
 
-        Each filament is priced as the material the file was sliced for
-        unless *material* names one, which then prices every filament.
+        A sliced 3MF of several plates is priced as plate *plate_number*
+        when one is named, else as every plate together; ``covers`` says
+        which.  Each filament is priced as the material the file was sliced
+        for unless *material* names one, which then prices every filament.
+
+        :raises ValueError: when the plate named is not in the file, or a
+            plate of the whole file cannot be read (no total is given then).
         """
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"G-code file not found: {file_path}")
+
+        if file_path.lower().endswith(".3mf"):
+            from kiln.gcode_metadata import plate_gcode_members
+
+            with UntrustedZipFile(file_path) as zf:
+                numbers = [number for number, _ in plate_gcode_members(zf)]
+            if len(numbers) > 1 or plate_number is not None:
+                return self._estimate_plates(
+                    file_path, numbers, plate_number,
+                    material=material, electricity_rate=electricity_rate, printer_wattage=printer_wattage,
+                )
 
         # Try 3MF metadata extraction first for .3mf files, then the G-code
         # the archive prints: a 3MF whose slice figures were never filled
@@ -604,6 +669,62 @@ class CostEstimator:
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
         )
+
+    def _estimate_one_plate(
+        self, file_path: str, plate_number: int, *, material: str | None,
+        electricity_rate: float, printer_wattage: float,
+    ) -> CostEstimate:
+        """Plate *plate_number* of a sliced 3MF, priced on its own.
+
+        :raises ValueError: when the plate cannot be read.
+        """
+        result = self._estimate_from_3mf_metadata(
+            file_path, material=material, electricity_rate=electricity_rate,
+            printer_wattage=printer_wattage, plate_number=plate_number,
+        )
+        if result is not None:
+            return result
+        return self.estimate_from_gcode(
+            lines=_sliced_3mf_gcode_lines(file_path, plate_number),
+            file_name=os.path.basename(file_path),
+            material=material,
+            electricity_rate=electricity_rate,
+            printer_wattage=printer_wattage,
+        )
+
+    def _estimate_plates(
+        self, file_path: str, numbers: list[int], plate_number: int | None, *, material: str | None,
+        electricity_rate: float, printer_wattage: float,
+    ) -> CostEstimate:
+        """Plate *plate_number* of a sliced 3MF, or every plate together."""
+        name = os.path.basename(file_path)
+        if plate_number is not None:
+            if plate_number not in numbers:
+                listed = ", ".join(str(n) for n in numbers) or "none"
+                raise ValueError(f"{name} has no sliced plate {plate_number}. Its plates: {listed}.")
+            one = self._estimate_one_plate(
+                file_path, plate_number, material=material,
+                electricity_rate=electricity_rate, printer_wattage=printer_wattage,
+            )
+            one.covers = f"plate {plate_number}" if len(numbers) > 1 else None
+            return one
+        priced: list[CostEstimate] = []
+        unread: list[int] = []
+        for number in numbers:
+            try:
+                priced.append(self._estimate_one_plate(
+                    file_path, number, material=material,
+                    electricity_rate=electricity_rate, printer_wattage=printer_wattage,
+                ))
+            except (OSError, ValueError):
+                unread.append(number)
+        if unread:
+            which = ", ".join(str(n) for n in unread)
+            raise ValueError(
+                f"Kiln could not read plate {which} of {name}, so it gives no total for all "
+                f"{len(numbers)} plates; name a plate to price that one."
+            )
+        return _all_plates(priced, name)
 
     def estimate_from_gcode(
         self,
@@ -898,13 +1019,15 @@ class CostEstimator:
         material: str | None = None,
         electricity_rate: float = 0.12,
         printer_wattage: float = 200.0,
+        plate_number: int | None = None,
     ) -> CostEstimate | None:
-        """Extract cost data from 3MF slicer metadata (slice_info.config).
+        """Extract cost data from 3MF slicer metadata (slice_info.config),
+        of plate *plate_number* when one is named.
 
         Returns ``None`` if the archive doesn't contain usable metadata,
         allowing the caller to fall back to gcode line parsing.
         """
-        found = self._slice_info_filaments(file_path, material)
+        found = self._slice_info_filaments(file_path, material, plate_number=plate_number)
         if found is None:
             return None
         pricing, est_time = found

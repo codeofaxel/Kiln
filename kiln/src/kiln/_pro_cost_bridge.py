@@ -41,11 +41,15 @@ here raises.
 from __future__ import annotations
 
 import base64
+import contextlib
 import gzip
 import logging
 import os
+import shutil
+import tempfile
 import time
 import zipfile
+from collections.abc import Iterator
 from typing import Any
 
 from kiln.served_answer import (
@@ -290,8 +294,15 @@ def attach_cost_intelligence(
     filament_count: int | None = None,
     filaments: list[dict[str, Any]] | None = None,
     estimated_time_seconds: int | None = None,
+    plate_number: int | None = None,
 ) -> None:
     """Ask for cost intelligence on *estimate* and attach what comes back.
+
+    For a sliced 3MF of several plates the question is about plate
+    *plate_number*, the plate the estimate priced, and only that plate's
+    G-code is read or sent.  With no plate named it is not asked: an
+    estimate of every plate together comes without it, and one sentence in
+    ``estimate["warnings"]`` says so.
 
     The one helper every door calls, after its estimate dict is built.  It
     asks only for a file of two or more filaments, or when *printer_id*
@@ -310,26 +321,89 @@ def attach_cost_intelligence(
         if (count < 2 and not printer_id) or not file_path:
             return
         seconds = estimated_time_seconds if estimated_time_seconds is not None else estimate.get("estimated_time_seconds")
-        answer = consult_print_cost(
-            str(file_path),
-            filaments=list(entries),
-            total_cost_usd=float(estimate.get("total_cost_usd") or 0.0),
-            estimated_time_seconds=seconds,
-            printer_id=printer_id or "",
-        )
+        plates = _plate_numbers(str(file_path))
+        if len(plates) > 1 and plate_number not in plates:
+            _say_without(
+                estimate,
+                f"it reads one plate at a time, so this estimate for all {len(plates)} plates comes without it; "
+                "name a plate to have it.",
+            )
+            return
+        with _plate_file(str(file_path), plate_number if len(plates) > 1 else None) as asked_path:
+            if asked_path is None:
+                _say_without(estimate, "Kiln could not read that plate, so this estimate comes without it.")
+                return
+            answer = consult_print_cost(
+                asked_path,
+                filaments=list(entries),
+                total_cost_usd=float(estimate.get("total_cost_usd") or 0.0),
+                estimated_time_seconds=seconds,
+                printer_id=printer_id or "",
+            )
         if answer is not None:
             estimate["cost_intelligence"] = answer
             return
         gap = unanswered()
-        message = gap["message"] if gap else "No answer came back, so this estimate comes without it."
-        estimate["cost_intelligence"] = None
-        warnings = estimate.get("warnings")
-        if not isinstance(warnings, list):
-            warnings = []
-            estimate["warnings"] = warnings
-        warnings.append(f"Kiln could not ask for cost intelligence: {message}")
+        _say_without(estimate, gap["message"] if gap else "No answer came back, so this estimate comes without it.")
     except Exception:  # noqa: BLE001 -- an estimate is never lost to this
         logger.debug("cost intelligence not attached", exc_info=True)
+
+
+def _say_without(estimate: dict[str, Any], message: str) -> None:
+    estimate["cost_intelligence"] = None
+    warnings = estimate.get("warnings")
+    if not isinstance(warnings, list):
+        warnings = []
+        estimate["warnings"] = warnings
+    warnings.append(f"Kiln could not ask for cost intelligence: {message}")
+
+
+def _plate_numbers(file_path: str) -> list[int]:
+    """The plates a sliced 3MF holds, ``[]`` for any other file."""
+    if not file_path.lower().endswith(".3mf"):
+        return []
+    try:
+        from kiln.gcode_metadata import plate_gcode_members
+
+        with UntrustedZipFile(file_path) as zf:
+            return [number for number, _ in plate_gcode_members(zf)]
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return []
+
+
+@contextlib.contextmanager
+def _plate_file(file_path: str, plate_number: int | None) -> Iterator[str | None]:
+    """*file_path* itself, or with *plate_number* named, that plate's G-code
+    alone as a file of its own (removed afterwards); ``None`` when the plate
+    cannot be read."""
+    if plate_number is None:
+        yield file_path
+        return
+    from kiln.gcode import _MAX_SCAN_BYTES
+    from kiln.gcode_metadata import plate_gcode_member, read_member_text
+    from kiln.output_paths import kiln_temp_dir
+
+    try:
+        with UntrustedZipFile(file_path) as zf:
+            member = plate_gcode_member(zf, plate_number)
+            text = read_member_text(zf, member, _MAX_SCAN_BYTES) if member else None
+    except (OSError, ValueError, zipfile.BadZipFile):
+        text = None
+    if text is None:
+        yield None
+        return
+    stem = os.path.basename(file_path)
+    for suffix in (".3mf", ".gcode"):
+        if stem.lower().endswith(suffix):
+            stem = stem[: -len(suffix)]
+    folder = tempfile.mkdtemp(dir=kiln_temp_dir())
+    path = os.path.join(folder, f"{stem}.plate{plate_number}.gcode")
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        yield path
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 __all__ = [

@@ -501,6 +501,7 @@ class _EstimateToolsPlugin:
             electricity_rate: float = 0.12,
             printer_wattage: float = 200.0,
             printer_id: str = "",
+            plate_number: int | None = None,
         ) -> dict:
             """Estimate the cost of a print job from a G-code file (already-sliced only).
 
@@ -530,6 +531,9 @@ class _EstimateToolsPlugin:
                 printer_wattage: Printer power consumption in watts (default 200).
                 printer_id: Optional registered printer the print is for;
                     passed on with the file when kiln-pro is asked.
+                plate_number: For a sliced 3MF of several plates, the plate to
+                    price (1 for the first).  Omit to price every plate
+                    together; ``covers`` then says "all N plates".
             """
             import kiln.server as _srv
 
@@ -539,11 +543,12 @@ class _EstimateToolsPlugin:
                     material=material or None,
                     electricity_rate=electricity_rate,
                     printer_wattage=printer_wattage,
+                    plate_number=plate_number,
                 )
                 data = estimate.to_dict()
                 from kiln._pro_cost_bridge import attach_cost_intelligence
 
-                attach_cost_intelligence(data, file_path, printer_id=printer_id or "")
+                attach_cost_intelligence(data, file_path, printer_id=printer_id or "", plate_number=plate_number)
                 # The slicer's time as the printer really prints it.
                 from kiln.learned_print_time import attach_learned_time
 

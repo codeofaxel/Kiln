@@ -8505,12 +8505,17 @@ def ingest_service_status_cmd(config_path: str | None, tail_lines: int, json_mod
 )
 @click.option("--electricity-rate", default=0.12, type=float, help="USD per kWh.")
 @click.option("--printer-wattage", default=200.0, type=float, help="Printer watts.")
+@click.option(
+    "--plate", "plate_number", default=None, type=click.IntRange(min=1),
+    help="For a sliced 3MF of several plates, the plate to price. Default: every plate together.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def cost(
     file_path: str,
     material: str | None,
     electricity_rate: float,
     printer_wattage: float,
+    plate_number: int | None,
     json_mode: bool,
 ) -> None:
     """Estimate print cost from a G-code file."""
@@ -8525,12 +8530,13 @@ def cost(
             material=material,
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
+            plate_number=plate_number,
         )
         data = estimate.to_dict()
         from kiln._pro_cost_bridge import attach_cost_intelligence
         from kiln.learned_print_time import attach_learned_time
 
-        attach_cost_intelligence(data, file_path)
+        attach_cost_intelligence(data, file_path, plate_number=plate_number)
         learned = attach_learned_time(data)
 
         if json_mode:
@@ -8545,6 +8551,8 @@ def cost(
             )
         else:
             click.echo(f"File:       {estimate.file_name}")
+            if estimate.covers:
+                click.echo(f"Priced:     {estimate.covers}")
             click.echo(f"Material:   {estimate.material}")
             click.echo(f"Filament:   {estimate.filament_length_meters:.2f} m ({estimate.filament_weight_grams:.1f} g)")
             click.echo(f"Filament $: ${estimate.filament_cost_usd:.2f}")
