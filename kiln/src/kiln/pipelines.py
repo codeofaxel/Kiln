@@ -924,7 +924,7 @@ def quick_print(
             return PipelineStep(
                 name="preflight",
                 success=False,
-                message=f"The preflight check didn't finish: {_plain_words.said(exc)}.",
+                message=f"The pre-print check didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 
@@ -1393,7 +1393,7 @@ def reslice_and_print(
             return PipelineStep(
                 name="preflight",
                 success=False,
-                message=f"The preflight check didn't finish: {_plain_words.said(exc)}.",
+                message=f"The pre-print check didn't finish: {_plain_words.said(exc)}.",
                 duration_seconds=time.time() - step_start,
             )
 

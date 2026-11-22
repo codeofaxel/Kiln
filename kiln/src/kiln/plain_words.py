@@ -171,6 +171,16 @@ def detail_of(exc: BaseException | None) -> str:
     return redact_for_report(f"{type(exc).__name__}: {raw}" if raw else type(exc).__name__)
 
 
+def missing_name(exc: BaseException | None) -> str:
+    """The name a lookup failure says is missing, set apart as a code name
+    (`` `b_mm` ``), for a door that reads a caller's fields and must say which
+    one it lacks; ``""`` for any other failure.  The key is a name the caller
+    sent or should send, never error text."""
+    if isinstance(exc, KeyError) and exc.args:
+        return f"`{exc.args[0]}`"
+    return ""
+
+
 def detail_field(exc: BaseException | None) -> dict[str, str]:
     """``{"detail": ...}`` for a reply whose sentence :func:`said` reworded,
     else ``{}``: a failure that already speaks plainly adds nothing, so a
@@ -206,6 +216,6 @@ def reworded(message: str, exc: BaseException | None) -> tuple[str, str | None]:
 
 
 __all__ = [
-    "CODE_NAME", "DETAIL_FIELD", "PERSON_FIELDS", "detail_field", "detail_of", "mark_code_names", "person_sentences",
-    "reworded", "said", "sentence", "technical_words", "unplain",
+    "CODE_NAME", "DETAIL_FIELD", "PERSON_FIELDS", "detail_field", "detail_of", "mark_code_names", "missing_name",
+    "person_sentences", "reworded", "said", "sentence", "technical_words", "unplain",
 ]

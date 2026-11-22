@@ -128,3 +128,11 @@ def test_a_lookup_failure_with_a_written_message_is_said_as_written():
 def test_the_english_none_is_not_mistaken_for_a_code_value():
     assert technical_words("None of the attempts worked.") == []
     assert technical_words("The layer height was None.") == ["a code value"]
+
+
+def test_a_missing_input_is_named_by_its_key():
+    from kiln.plain_words import missing_name
+
+    assert missing_name(KeyError("b_mm")) == "`b_mm`"
+    assert missing_name(ValueError("b_mm")) == ""
+    assert missing_name(None) == ""
