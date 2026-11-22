@@ -131,6 +131,30 @@ def set_speed(adapter: Any, percent: int) -> Any:
     return adapter.send_gcode([f"M220 S{percent}"])
 
 
+def floor_schedule(adapter: Any, schedule: Any) -> tuple[list[dict[str, int]], list[Any]]:
+    """*schedule* with each segment's speed-up lowered to what the running
+    print's file lets the nozzle melt on that segment's own layers
+    (:func:`kiln.live_speed_floor.judge`), and the judgements made.  Raises
+    :class:`ScheduleRefused` for a schedule that is not well formed."""
+    from kiln.live_speed_floor import covering, judge
+
+    presets = takes_presets(adapter)
+    out: list[dict[str, int]] = []
+    judgements: list[Any] = []
+    for segment in parse_segments(schedule):
+        percent = segment.speed_percent
+        if percent > 100:
+            preset = nearest_preset(percent) if presets else None
+            asked = PRESET_PERCENT[preset] if preset else percent
+            with covering(segment.from_layer, segment.to_layer):
+                verdict = judge(adapter, asked, preset=preset)
+            judgements.append(verdict)
+            if verdict.lowered:
+                percent = verdict.allowed
+        out.append({"from_layer": segment.from_layer, "to_layer": segment.to_layer, "speed_percent": percent})
+    return out, judgements
+
+
 def _identity(job: Any) -> Any:
     """What the printer is printing, as a comparable identity."""
     from kiln.printers import job_identity
@@ -166,9 +190,13 @@ def _tick(run: RunState, adapter: Any) -> bool:
     index = segment_for(run.segments, int(layer))
     if index is None or index == run.active_segment:
         return True
-    percent = run.segments[index].speed_percent
+    segment = run.segments[index]
+    percent = segment.speed_percent
     try:
-        verdict = set_speed(adapter, percent)
+        from kiln.live_speed_floor import covering
+
+        with covering(segment.from_layer, segment.to_layer):
+            verdict = set_speed(adapter, percent)
     except Exception as exc:  # noqa: BLE001 — said, and the next poll tries the next segment
         run.error = f"could not set {percent}% at layer {layer}: {type(exc).__name__}: {exc}"
         return True
@@ -234,6 +262,7 @@ __all__ = [
     "RunState",
     "ScheduleRefused",
     "Segment",
+    "floor_schedule",
     "nearest_preset",
     "parse_segments",
     "segment_for",
