@@ -79,8 +79,7 @@ class _MaterialInventoryToolsPlugin:
             colours.  With one printer set up, or with ``printer_name``, the
             answer is that printer's (what it has loaded, and the shelf) on
             every plan.  With several printers and none named, every
-            printer at once is Kiln Business
-            (https://kiln3d.com/pricing); a plan without it gets the
+            printer at once is Kiln Business; a plan without it gets the
             printers set up here and the question of which one, never a
             refusal.
 
@@ -353,7 +352,7 @@ class _MaterialInventoryToolsPlugin:
             set up, or with ``printer_name``, it says which jobs that
             printer's loaded spool can take, in order, on every plan.  With
             several printers and none named, picking a printer for each job
-            is Kiln Business (https://kiln3d.com/pricing); a plan without
+            is Kiln Business; a plan without
             it gets the printers set up here and the question of which
             one, never a refusal.
 
