@@ -237,7 +237,7 @@ def stand_in_fit(
 
 def _local_stand_ins(material_id: str, stand_ins: list[str], goal_id: str | None, version_id: str | None) -> Any:
     try:
-        from kiln_pro.print_fix.engine import stand_in_fit as engine_fit
+        from kiln_pro.print_fix.stand_in import stand_in_fit as engine_fit
     except ImportError:
         return _NOT_HERE
     try:
