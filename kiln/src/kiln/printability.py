@@ -752,7 +752,7 @@ class PrintabilityReport:
     #: not come from Kiln's servers: why (:func:`kiln.served_answer.fields`),
     #: and, the first time this session, ``note``, the sentence the verdict
     #: carries (:mod:`kiln._pro_printability_bridge`).  ``None`` otherwise.
-    kiln_pro_check: dict[str, Any] | None = None
+    plan_check: dict[str, Any] | None = None
     #: Whether Kiln Pro tuned this report (:func:`_mark_tuned`).  A tuned
     #: report's reply keeps the verdict, every check's risk and reasons, and
     #: what to do; see :func:`_served`.
@@ -8538,9 +8538,9 @@ def _with_servers_check(report: PrintabilityReport, file_path: str, kwargs: dict
         said: dict[str, Any] = {"applied": False, **miss_fields(miss)}
         # A call the servers already missed says so once by itself
         # (:func:`kiln.served_public.say_once`); this one adds only why.
-        if not served_public.already_missed() and served_public.first_this_session("printability:kiln_pro_check"):
+        if not served_public.already_missed() and served_public.first_this_session("printability:plan_check"):
             said["note"] = bridge.miss_note(miss)
-        report.kiln_pro_check = said
+        report.plan_check = said
 
 
 def _same_kind(mine: Any, theirs: Any) -> bool:
@@ -10505,7 +10505,7 @@ def verdict(report: PrintabilityReport) -> tuple[str, str]:
     notes = (
         footing(report),
         report.pieces.note if report.pieces is not None else "",
-        (report.kiln_pro_check or {}).get("note", ""),
+        (report.plan_check or {}).get("note", ""),
     )
     reason = support_verdict(report)
     if reason:

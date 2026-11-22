@@ -147,7 +147,7 @@ class TestAPlanThatIncludesTheCheck:
         result = _call("analyze_warping_risk", file_path=str(flat_nylon), material="pa")
         assert result["risk_level"] == servers.answer["report"]["warping"]["risk_level"]
         assert result["adhesion"]["brim_width_mm"] == THEIR_BRIM
-        assert "kiln_pro_check" not in result
+        assert "plan_check" not in result
         asked = _asks(servers)
         assert len(asked) == 1 and asked[0]["material"] == "pa"
         assert servers.uploads, "the part was not sent"
@@ -191,7 +191,7 @@ class TestEveryOtherPosture:
         result = _call("analyze_warping_risk", file_path=str(flat_nylon), material="pa")
         assert not _asks(servers)
         assert result["risk_level"] == before["warping"]["risk_level"]
-        assert "kiln_pro_check" not in result
+        assert "plan_check" not in result
         assert "Kiln Pro" not in result["printability_verdict_text"]
 
     def test_kiln_pro_in_the_process_asks_nothing(self, servers, flat_nylon, monkeypatch):
@@ -210,13 +210,13 @@ class TestEveryOtherPosture:
         servers.raises = OSError(51, "Network is unreachable")
         first = analyze_printability(str(flat_nylon), material="pa")
         assert first.warping.risk_level == before["warping"]["risk_level"]
-        assert first.kiln_pro_check["applied"] is False and first.kiln_pro_check["why"] in ("offline", "unanswered")
+        assert first.plan_check["applied"] is False and first.plan_check["why"] in ("offline", "unanswered")
         said = verdict_block(first)["printability_verdict_text"]
         assert "Kiln Pro's printability check" in said and "basic check" in said
-        assert first.to_dict()["kiln_pro_check"]["why"] == first.kiln_pro_check["why"]
+        assert first.to_dict()["plan_check"]["why"] == first.plan_check["why"]
         # Said once a session; the reason rides on every later report.
         second = analyze_printability(str(flat_nylon), material="pa")
-        assert "note" not in second.kiln_pro_check and second.kiln_pro_check["why"]
+        assert "note" not in second.plan_check and second.plan_check["why"]
         assert "Kiln Pro" not in verdict_block(second)["printability_verdict_text"]
 
     def test_a_refusal_keeps_the_check_made_here(self, servers, flat_nylon, monkeypatch):
@@ -226,5 +226,5 @@ class TestEveryOtherPosture:
         servers.status = 403
         servers.answer = {"success": False, "code": "FORBIDDEN", "error": "Not allowed."}
         report = analyze_printability(str(flat_nylon), material="pa")
-        assert report.kiln_pro_check["applied"] is False
-        assert report.kiln_pro_check["why"] in ("refused", "unanswered")
+        assert report.plan_check["applied"] is False
+        assert report.plan_check["why"] in ("refused", "unanswered")
