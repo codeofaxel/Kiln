@@ -165,6 +165,7 @@ class _EstimateToolsPlugin:
             soft_nozzle_confirmed: bool = False,
             mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
+            speed_by_height: list[dict[str, Any]] | str | None = None,
         ) -> dict:
             """Primary estimation tool — slice a 3D model and return time, filament, cost, and printability analysis.
 
@@ -183,6 +184,10 @@ class _EstimateToolsPlugin:
             filament will I use?" before committing to a print job.
 
             Args:
+                speed_by_height: The person's own speeds for height ranges of the part, only when they ask
+                    for them: a list like ``[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6,
+                    "speed_mm_s": 120}]`` (millimetres up from the plate; ``to_mm`` left out means to the
+                    top; one speed per range).  ``slice_model`` says what is read back and what is refused.
                 mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
                     with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
                     experiment). Only on their yes, each time; ``slice_model`` says what follows.
@@ -262,7 +267,9 @@ class _EstimateToolsPlugin:
                     printer_name=printer_name, placement=placement,
                     profile_path=effective_profile, auto_center=True,
                     material=material or None, plate_number=plate_number,
-                    **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                    **owner_asks(
+                        soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height,
+                    ),
                 )
                 if slice_err is not None:
                     return slice_err

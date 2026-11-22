@@ -5209,6 +5209,15 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
     ),
 )
 @click.option(
+    "--speed-by-height", "speed_by_height", default=None,
+    help=(
+        "Your own speeds for height ranges of the part, as JSON: "
+        '\'[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6, "speed_mm_s": 120}]\'. '
+        "Heights are mm up from the plate; to_mm left out means to the top. Your slicer applies "
+        "them, the sliced file is read back, and a range it did not apply refuses the slice."
+    ),
+)
+@click.option(
     "--mixed-nozzle-experiment", "mixed_nozzle_experiment", is_flag=True,
     help=(
         "The person says yes, for this print, to slicing for nozzles of different sizes at once, "
@@ -5252,6 +5261,7 @@ def slice(
     placement: str | None,
     plate_number: int | None,
     soft_nozzle_confirmed: bool,
+    speed_by_height: str | None,
     mixed_nozzle_experiment: bool,
     filament_map: str | None,
     json_mode: bool,
@@ -5352,6 +5362,17 @@ def slice(
             and len(parsed_ams_mapping) == copies
         )
 
+        if multicolor_mode and speed_by_height:
+            click.echo(
+                format_error(
+                    "--speed-by-height is not put into a plate of copies in different colours. "
+                    "Slice it without --ams-mapping, or without --speed-by-height.",
+                    code="SPEED_BY_HEIGHT_REFUSED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+
         # Multi-copy: use PrusaSlicer --duplicate or STL mesh duplication
         actual_input = input_file
         copy_strategy = None
@@ -5410,7 +5431,9 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
                 **fill_kwargs,
-                **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                **owner_asks(
+                    soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height,
+                ),
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,

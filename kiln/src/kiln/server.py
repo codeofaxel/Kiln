@@ -19511,6 +19511,7 @@ def design_to_gcode_pipeline(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    speed_by_height: list[dict[str, Any]] | str | None = None,
 ) -> dict:
     """End-to-end pipeline: description → template → STL → analysis → GCode.
 
@@ -19524,6 +19525,10 @@ def design_to_gcode_pipeline(
     :param goal_id: The saved goal's id from ``design_session``, so this
         make is recorded against the goal and checked against it. Empty
         when there is no goal.
+    :param speed_by_height: The person's own speeds for height ranges of the part, only when they
+        ask for them: a list like ``[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6,
+        "speed_mm_s": 120}]`` (millimetres up from the plate; ``to_mm`` left out means to the top;
+        one speed per range).  ``slice_model`` says what is read back and what is refused.
     :param mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
         ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only on
         their yes, each time; ``slice_model`` says what follows.
@@ -19562,7 +19567,9 @@ def design_to_gcode_pipeline(
             # ([x, y] in mm, a named region, or "keep"); omitted, an occupied
             # plate refuses the slice step.  Same gate as slice_model.
             placement=placement if placement is not None else "auto",
-            slice_asks=_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+            slice_asks=_owner_asks(
+                soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height,
+            ),
         )
         result_dict = {"success": result.success, **result.to_dict()}
         if result.success:
