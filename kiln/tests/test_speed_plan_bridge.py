@@ -74,8 +74,8 @@ class TestThePlanner:
     def _asked(self, monkeypatch, answer) -> list[dict[str, Any]]:
         asked: list[dict[str, Any]] = []
 
-        def local(fields):
-            asked.append(fields)
+        def local(fields, several=False):
+            asked.append({**fields, **({"several": True} if several else {})})
             return answer
 
         monkeypatch.setattr(bridge, "_local", local)
@@ -100,6 +100,30 @@ class TestThePlanner:
         bridge.planner(part, slicer_id="prusaslicer", ask={"material": "PLA"})(plain)
         assert asked[0]["carries_load"] == "yes" and "carries_load" not in asked[1]
 
+    def test_a_printer_that_is_one_of_several_asks_as_one_of_several(self, monkeypatch, part, plain):
+        answer = {"success": True, "status": "ok", "plans": [{"printer": "a", "ranges": [], "said": [], "planned": False}]}
+        asked = self._asked(monkeypatch, answer)
+        bridge.planner(part, slicer_id="prusaslicer", ask={"material": "PLA", "printer": "a", "fleet": ["a", "b"]})(plain)
+        bridge.planner(part, slicer_id="prusaslicer", ask={"material": "PLA", "printer": "a", "fleet": ["a"]})(plain)
+        bridge.planner(part, slicer_id="prusaslicer", ask={"material": "PLA", "printer": "a"})(plain)
+        assert [one.get("several", False) for one in asked] == [True, False, False]
+        assert bridge.read_ask({"by": "kiln", "fleet": ["a", "b"]}) == {"fleet": ["a", "b"]}
+
+    def test_the_wire_asked_is_the_one_for_several_only_when_there_are_several(self, monkeypatch, part, plain):
+        import kiln.server as server
+
+        called: list[str] = []
+
+        def api(tool, **_fields):
+            called.append(tool)
+            return {"success": True, "status": "ok", "plans": [{"printer": "a", "ranges": [], "said": [], "planned": False}]}
+
+        monkeypatch.setattr(bridge, "_engine", lambda: None)
+        monkeypatch.setattr(server, "_pro_api_call", api)
+        bridge.planner(part, slicer_id="prusaslicer", ask={"material": "PLA", "fleet": ["a", "b"]})(plain)
+        bridge.planner(part, slicer_id="prusaslicer", ask={"material": "PLA"})(plain)
+        assert called == [bridge.FLEET_WIRE_TOOL, bridge.WIRE_TOOL]
+
     @pytest.mark.parametrize(("miss", "says"), [
         (Miss("offline"), "this computer is offline"),
         (Miss("signed_out"), "signed out"),
@@ -108,7 +132,7 @@ class TestThePlanner:
     ])
     def test_no_answer_refuses_the_slice_and_says_which_of_the_four_it_was(self, monkeypatch, part, plain, miss, says):
         monkeypatch.setattr(bridge, "_engine", lambda: None)
-        monkeypatch.setattr(bridge, "_served", lambda fields: (None, miss))
+        monkeypatch.setattr(bridge, "_served", lambda fields, several=False: (None, miss))
         with pytest.raises(sbh.SpeedByHeightError) as refused:
             bridge.planner(part, slicer_id="prusaslicer", ask={"material": "PLA"})(plain)
         assert refused.value.code == bridge.NO_PLAN

@@ -19586,7 +19586,8 @@ def design_to_gcode_pipeline(
     :param speed_by_height: The person's own speeds for height ranges of the part, only when they
         ask for them: a list like ``[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6,
         "speed_mm_s": 120}]`` (millimetres up from the plate; ``to_mm`` left out means to the top;
-        one speed per range).  ``slice_model`` says what is read back and what is refused.
+        one speed per range), or ``"kiln"`` to have Kiln choose them from the part's shape (Kiln Pro).
+        ``slice_model`` says what is read back and what is refused.
     :param mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused with
         ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an experiment). Only on
         their yes, each time; ``slice_model`` says what follows.

@@ -36,8 +36,10 @@ logger = logging.getLogger(__name__)
 
 #: What a caller passes as ``speed_by_height`` to have Kiln choose.
 ASK = "kiln"
-#: The served tool that answers the plan.
+#: The served tool that answers the plan for one printer, and the one that
+#: answers it for a printer that is one of several the part is sliced for.
 WIRE_TOOL = "speed_plan"
+FLEET_WIRE_TOOL = "fleet_speed_plan"
 #: Where the same answer is read when kiln-pro IS installed here.
 LOCAL_MODULE = "kiln_pro.speed_plan.engine"
 #: What the sign-in sentence calls the answer asked for.
@@ -50,12 +52,16 @@ _NOT_HERE = object()
 
 def read_ask(wish: Any) -> dict[str, Any] | None:
     """*wish* as an ask for Kiln's own speeds (``"kiln"``, or ``{"by":
-    "kiln", ...}`` carrying the printer, the material and whether the part
-    carries load), or ``None`` when it is the person's own ranges."""
+    "kiln", ...}`` carrying the printer, the material, whether the part
+    carries load, and under ``fleet`` every printer the part is being sliced
+    for when there are several), or ``None`` when it is the person's own
+    ranges."""
     if isinstance(wish, str) and wish.strip().lower() == ASK:
         return {}
     if isinstance(wish, Mapping) and str(wish.get("by", "")).strip().lower() == ASK:
-        return {key: wish[key] for key in ("printer", "material", "carries_load") if wish.get(key) is not None}
+        return {
+            key: wish[key] for key in ("printer", "material", "carries_load", "fleet") if wish.get(key) is not None
+        }
     return None
 
 
@@ -160,7 +166,9 @@ def planner(
         fields: dict[str, Any] = {"part": part, "printers": [printer]}
         if ask.get("carries_load") is not None:
             fields["carries_load"] = "yes" if ask["carries_load"] in (True, "yes") else "no"
-        answer, miss = _ask(fields)
+        fleet = ask.get("fleet")
+        several = isinstance(fleet, (list, tuple)) and len(set(map(str, fleet))) > 1
+        answer, miss = _ask(fields, several=several)
         if miss is not None:
             raise SpeedByHeightError(_refusal(miss), code=NO_PLAN)
         plan = answer["plans"][0]
@@ -181,13 +189,13 @@ def _refusal(miss: Miss) -> str:
     )
 
 
-def _ask(fields: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss | None]:
-    local = _local(fields)
+def _ask(fields: dict[str, Any], *, several: bool = False) -> tuple[dict[str, Any] | None, Miss | None]:
+    local = _local(fields, several)
     if isinstance(local, Miss):
         return None, local
     if local is not _NOT_HERE:
         return _read(local)
-    return _served(fields)
+    return _served(fields, several)
 
 
 def _read(answer: Any) -> tuple[dict[str, Any] | None, Miss | None]:
@@ -211,17 +219,17 @@ def _engine() -> Any:
     return answer_for_caller
 
 
-def _local(fields: dict[str, Any]) -> Any:
+def _local(fields: dict[str, Any], several: bool = False) -> Any:
     answer = _engine()
     if answer is None:
         return _NOT_HERE
     try:
-        return answer(**fields)
+        return answer(**fields, several=several)
     except Exception as exc:  # noqa: BLE001 -- a local fault is a miss to word, never a traceback
         return local_fault(exc, where="Kiln's speeds by height")
 
 
-def _served(fields: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss | None]:
+def _served(fields: dict[str, Any], several: bool = False) -> tuple[dict[str, Any] | None, Miss | None]:
     try:
         from kiln.server import _pro_api_call
     except Exception as exc:  # noqa: BLE001 -- no served door on this install is a miss
@@ -229,11 +237,13 @@ def _served(fields: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss | None]
     try:
         # The person's own ask: this runs only when a slice is asked for
         # with Kiln's speeds, which is what this fetches.
-        answer = _pro_api_call(WIRE_TOOL, _asked_by_user=True, _feature=SIGN_IN_NAME, **fields)
+        answer = _pro_api_call(
+            FLEET_WIRE_TOOL if several else WIRE_TOOL, _asked_by_user=True, _feature=SIGN_IN_NAME, **fields,
+        )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
         logger.debug("speed plan not served", exc_info=True)
         return None, classify_transport_error(exc)
     return _read(answer)
 
 
-__all__ = ["ASK", "LOCAL_MODULE", "NO_PLAN", "WIRE_TOOL", "planner", "read_ask", "sliced_facts", "with_context"]
+__all__ = ["ASK", "FLEET_WIRE_TOOL", "LOCAL_MODULE", "NO_PLAN", "WIRE_TOOL", "planner", "read_ask", "sliced_facts", "with_context"]
