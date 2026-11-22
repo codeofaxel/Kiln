@@ -159,3 +159,20 @@ def test_an_archive_the_untrusted_reader_refuses_is_refused(two_plates, monkeypa
     # As if the archive unpacked to more than the reader allows (a zip bomb).
     monkeypatch.setitem(UntrustedZipFile.__init__.__kwdefaults__, "max_uncompressed_bytes", 64)
     _refused_unread(_Adapter(_setting(0.6)), two_plates)
+
+
+def test_an_unreadable_file_is_refused_in_kiln_s_words_not_the_reader_s(two_plates):
+    """A print file Kiln cannot open is refused in Kiln's own words; the
+    reader's error text goes in the refusal's detail, never in the sentence."""
+    from pathlib import Path
+
+    data = Path(two_plates).read_bytes()
+    Path(two_plates).write_bytes(data[: len(data) // 2])
+    printer = _Adapter(_setting(0.6))
+    result = printer.start_print(two_plates, plate_number=2)
+    assert result.success is False and result.code == pg.PLATE_NOT_IN_FILE
+    assert result.message.startswith(f"Kiln could not read {Path(two_plates).name}, so none of its checks")
+    for reader_words in ("zip", "Zip", "CRC", "Error", "("):
+        assert reader_words not in result.message
+    verdict = pg._printed_plate_verdict(two_plates, two_plates, 2)
+    assert verdict is not None and verdict["detail"]

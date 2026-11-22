@@ -99,7 +99,7 @@ TOOL = "tool"
 TERMINAL = "terminal"
 #: How to go past the cap, said once beside every cap, by door.
 GO_PAST = {
-    TOOL: "If you want the faster speed anyway, ask again with past_the_melt_limit set to true.",
+    TOOL: "If you want the faster speed anyway, ask again with `past_the_melt_limit` set to true.",
     TERMINAL: "If you want the faster speed anyway, run the same command again with --past-the-melt-limit.",
 }
 _PAST = (

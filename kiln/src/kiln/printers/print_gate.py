@@ -985,10 +985,10 @@ def _printed_plate_verdict(job_path: str, file_name: str, plate_number: int) -> 
         return {
             "ok": False, "blocked": True, "code": PLATE_NOT_IN_FILE,
             "reason": (
-                f"Kiln could not read {name} ({' '.join(str(exc).split())[:160]}), so none of its checks could "
-                "run and it was not started: the printer cannot be trusted with a file Kiln cannot read. "
-                "Slice or export it again."
+                f"Kiln could not read {name}, so none of its checks could run and it was not started: "
+                "the printer cannot be trusted with a file Kiln cannot read. Slice or export it again."
             ),
+            "detail": _plain_words.detail_of(exc),
         }
     if plate_number in plates:
         return None
