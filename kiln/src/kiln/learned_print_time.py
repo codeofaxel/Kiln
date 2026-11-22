@@ -87,23 +87,36 @@ class Pace:
 # ---------------------------------------------------------------------------
 
 
-def _sent_file_lines(file_name: str | None, plate_number: int | None = None) -> list[str] | None:
-    """The slicer's own lines of the plate a start printed, or ``None``.
-
-    Read from the G-code Kiln sliced or uploaded under *file_name*: the slice
-    ledger's file behind the printer-side name, else the copy this session
-    uploaded.  A sliced 3MF gives plate *plate_number*'s lines, and with no
-    plate named only a 3MF of one plate gives any
-    (:func:`kiln.file_metadata.printed_gcode_lines`).  Never raises.
-    """
+def sent_file_path(file_name: str | None) -> str | None:
+    """The file on this disk Kiln sent under the printer-side *file_name*:
+    the slice ledger's file behind the name, else the copy this session
+    uploaded.  ``None`` when Kiln did not send it.  Never raises."""
     if not file_name:
         return None
     try:
         from kiln._pro_cutter_bridge import local_sliced_path
-        from kiln.file_metadata import printed_gcode_lines
         from kiln.spool_usage import _uploaded_copy
 
-        path = local_sliced_path(file_name) or _uploaded_copy(file_name)
+        return local_sliced_path(file_name) or _uploaded_copy(file_name)
+    except Exception:  # noqa: BLE001 -- a name Kiln cannot place names nothing
+        logger.debug("no sent file found for %s", file_name, exc_info=True)
+        return None
+
+
+def _sent_file_lines(file_name: str | None, plate_number: int | None = None) -> list[str] | None:
+    """The slicer's own lines of the plate a start printed, or ``None``.
+
+    Read from the file Kiln sent (:func:`sent_file_path`).  A sliced 3MF gives
+    plate *plate_number*'s lines, and with no plate named only a 3MF of one
+    plate gives any (:func:`kiln.file_metadata.printed_gcode_lines`).  Never
+    raises.
+    """
+    if not file_name:
+        return None
+    try:
+        from kiln.file_metadata import printed_gcode_lines
+
+        path = sent_file_path(file_name)
         if not path:
             return None
         return printed_gcode_lines(path, plate_number) or None

@@ -1612,6 +1612,68 @@ def _wrap_not_as_sliced(cls: type) -> None:
         setattr(cls, action, _make(original, kind))
 
 
+def _floor_gcode(adapter: Any, commands: Any) -> Any:
+    from kiln.live_speed_floor import guard_gcode
+
+    return guard_gcode(adapter, commands)
+
+
+def _floor_preset(adapter: Any, profile: Any) -> Any:
+    from kiln.live_speed_floor import guard_preset
+
+    return guard_preset(adapter, profile)
+
+
+#: Adapter commands that change a running print's speed, by the floor that
+#: judges each (:mod:`kiln.live_speed_floor`).
+_LIVE_SPEED_COMMANDS: dict[str, Any] = {
+    "send_gcode": _floor_gcode,
+    "set_speed_profile": _floor_preset,
+}
+
+
+def _wrap_live_speed_floor(cls: type) -> None:
+    """Wrap *cls*'s own speed commands so a speed-up above what the running
+    print's file lets the nozzle melt is lowered before it is sent
+    (:mod:`kiln.live_speed_floor`).  Every door that changes a speed reaches
+    the printer through one of these."""
+    import functools
+
+    for action, guard in _LIVE_SPEED_COMMANDS.items():
+        original = cls.__dict__.get(action)
+        if (
+            original is None
+            or not callable(original)
+            or getattr(original, "_kiln_speed_floor_wrapped", False)
+            or getattr(original, "__isabstractmethod__", False)
+        ):
+            continue
+
+        def _make(original: Any, guard: Any) -> Any:
+            @functools.wraps(original)
+            def _floored(self, *args, **kwargs):
+                judged: Any = contextlib.nullcontext()
+                try:
+                    from kiln import live_speed_floor
+
+                    if args:
+                        args = (guard(self, args[0]), *args[1:])
+                    else:
+                        for key in ("commands", "profile"):
+                            if key in kwargs:
+                                kwargs[key] = guard(self, kwargs[key])
+                    judged = live_speed_floor.inside()
+                except Exception:  # noqa: BLE001 -- the floor never breaks a command
+                    pass
+                with judged:
+                    return original(self, *args, **kwargs)
+
+            _floored._kiln_speed_floor_wrapped = True  # type: ignore[attr-defined]
+            return _floored
+
+        setattr(cls, action, _make(original, guard))
+
+
 def _wrap_head_moves(cls: type) -> None:
     """Wrap *cls*'s own ``pause_print`` and ``cancel_print`` so a printer that says where its head is."""
     import functools
@@ -2137,6 +2199,7 @@ class PrinterAdapter(ABC):
         _wrap_emergency_reads_nothing(cls)
         _wrap_head_moves(cls)
         _wrap_not_as_sliced(cls)
+        _wrap_live_speed_floor(cls)
 
         # ------------------------------------------------------------------
         # ------------------------------------------------------------------

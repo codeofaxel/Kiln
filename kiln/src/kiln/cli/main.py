@@ -4919,14 +4919,19 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
             )
             sys.exit(1)
 
-        adapter.send_gcode(validation.commands)
+        from kiln import live_speed_floor
+
+        with live_speed_floor.collect() as floor:
+            adapter.send_gcode(validation.commands)
+        sent = live_speed_floor.guarded_lines(list(validation.commands), floor)
 
         data = {
-            "commands_sent": validation.commands,
+            "commands_sent": sent,
             "count": len(validation.commands),
         }
         if validation.warnings:
             data["warnings"] = validation.warnings
+        live_speed_floor.reply(data, floor, changed=live_speed_floor.changes_speed(validation.commands))
 
         click.echo(format_response("success", data=data, json_mode=json_mode))
     except click.ClickException:
@@ -14169,19 +14174,28 @@ def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
                     )
                 )
                 sys.exit(1)
-            verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
+            from kiln import live_speed_floor
+
+            with live_speed_floor.collect() as floor:
+                verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
+            asked = profile.strip().lower()
+            set_as = next((j.preset for j in floor if j.preset), asked)
             data = {
                 "action": "set_speed_profile",
-                "profile": profile.strip().lower(),
+                "profile": set_as,
                 **verdict.to_dict(),
             }
+            said = live_speed_floor.sentences(floor, changed=verdict.ok and asked != "standard")
+            live_speed_floor.reply(data, floor, changed=verdict.ok and asked != "standard")
             if json_mode:
                 click.echo(format_response("success", data=data, json_mode=True))
             else:
                 click.echo(
-                    f"Speed profile '{profile.strip().lower()}' "
+                    f"Speed profile '{set_as}' "
                     f"{'confirmed by the printer' if verdict.confirmed else 'sent, not yet confirmed'}."
                 )
+                for line in said:
+                    click.echo(line)
         else:
             # --- get speed profile ---
             if not hasattr(adapter, "get_speed_profile"):

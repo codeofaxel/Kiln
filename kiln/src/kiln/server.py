@@ -12258,10 +12258,16 @@ def set_speed_profile(
             answer says which (``preset``, ``percent_actual``).
         printer_name: Which printer.  Omit for the default printer.
 
-    Nothing here judges whether a speed suits THIS printer or THIS layer:
-    Kiln's served ``set_speed_percent`` and ``set_speed_schedule`` do that
-    and hand the checked value here.  Use ``printer_status()`` to see the
-    current speed profile in ``printer.speed_profile``.
+    A speed-up is held to what the running print's file lets the nozzle
+    melt: above that it is lowered (never below the sliced speed) and the
+    answer says so, with the numbers, in ``message`` and ``speed_floor``.
+    When that cannot be checked (Kiln did not send the file, or the
+    printer's melt limit is unknown) the speed is set as asked and the
+    answer says it was not checked.  A slow-down is never changed.  Which
+    speeds suit THIS printer is decided by Kiln's served
+    ``set_speed_percent`` and ``set_speed_schedule``, which hand the
+    checked value here.  Use ``printer_status()`` to see the current speed
+    profile in ``printer.speed_profile``.
 
     Branch on ``outcome`` — one field, three values, the same shape
     ``start_print`` uses for ``print_start``:
@@ -12305,13 +12311,17 @@ def _set_speed_preset(profile: str, printer_name: str | None) -> dict:
                 "pass percent instead.",
                 code="UNSUPPORTED",
             )
-        verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
+        from kiln import live_speed_floor
+
+        with live_speed_floor.collect() as floor:
+            verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
         _audit("set_speed_profile", "executed", details={"profile": profile, "printer": printer_name})
-        return {
-            "success": verdict.ok,
-            "profile": profile.strip().lower(),
-            **verdict.to_dict(),
-        }
+        asked = profile.strip().lower()
+        set_as = next((j.preset for j in floor if j.preset), asked)
+        out = {"success": verdict.ok, "profile": set_as, **verdict.to_dict()}
+        if set_as != asked:
+            out["profile_requested"] = asked
+        return live_speed_floor.reply(out, floor, changed=verdict.ok and asked != "standard")
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set speed profile: {exc}")
     except Exception as exc:
@@ -12335,20 +12345,26 @@ def _set_speed_percent(percent: Any, printer_name: str | None) -> dict:
             adapter, target_name = _resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _unknown_printer_error(printer_name, "set the speed on")
+        from kiln import live_speed_floor
         from kiln.speed_schedule_runner import PRESET_PERCENT, nearest_preset, set_speed, takes_presets
 
-        verdict = CommandVerdict.coerce(set_speed(adapter, percent), what="speed")
+        with live_speed_floor.collect() as floor:
+            verdict = CommandVerdict.coerce(set_speed(adapter, percent), what="speed")
         _audit("set_speed_profile", "executed", details={"percent": percent, "printer": target_name})
         out: dict[str, Any] = {"success": verdict.ok, "percent": percent, **verdict.to_dict()}
+        actual = next((j.allowed for j in floor if j.lowered), percent)
         if takes_presets(adapter):
-            preset = nearest_preset(percent)
+            preset = next((j.preset for j in floor if j.preset), nearest_preset(percent))
+            actual = PRESET_PERCENT[preset]
             out["preset"] = preset
-            out["percent_actual"] = PRESET_PERCENT[preset]
+            out["percent_actual"] = actual
             out["message"] = (
                 f"This printer takes only its presets: {percent}% was set as "
-                f"{preset} ({PRESET_PERCENT[preset]}%)."
+                f"{preset} ({actual}%)."
             )
-        return out
+        elif actual != percent:
+            out["percent_actual"] = actual
+        return live_speed_floor.reply(out, floor, changed=verdict.ok and percent != 100)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to set the speed: {exc}")
     except Exception as exc:
@@ -12379,8 +12395,11 @@ def run_speed_schedule(
     print, or on ``action="stop"`` (the printer stays at the last speed set).
     ``action="status"`` reports what has been applied so far.
 
-    Only the schedule's shape is checked here.  Which speeds suit this
-    printer and which layers a speed is unsafe on is decided by Kiln's
+    Here the schedule's shape is checked, and each segment's speed-up is
+    held to what the running print's file lets the nozzle melt on that
+    segment's layers: above that it is lowered (never below the sliced
+    speed) and the answer says so; when that cannot be checked the answer
+    says that too.  Which speeds suit this printer is decided by Kiln's
     served ``set_speed_schedule``, which hands the checked schedule here.
 
     Args:
@@ -12416,25 +12435,31 @@ def run_speed_schedule(
             _audit("run_speed_schedule", "stopped", details={"printer": target_name})
             return {"success": True, "active": False, **run.to_dict(),
                     "message": "Speed schedule stopped. The printer stays at the last speed set."}
+        try:
+            floored, floor = runner.floor_schedule(_adapter, schedule)
+        except runner.ScheduleRefused as exc:
+            return _error_dict(str(exc), code="VALIDATION_ERROR")
         if run is not None:
             runner.stop(run)
             _speed_schedule_runs.pop(target_name, None)
         try:
             started = runner.start(
-                schedule, lambda: _resolve_control_target(printer_name)[0], printer_name=target_name,
+                floored, lambda: _resolve_control_target(printer_name)[0], printer_name=target_name,
             )
         except runner.ScheduleRefused as exc:
             return _error_dict(str(exc), code="VALIDATION_ERROR")
         _speed_schedule_runs[target_name] = started
         _audit("run_speed_schedule", "started", details={"printer": target_name, "segments": len(started.segments)})
-        return {
+        from kiln import live_speed_floor
+
+        return live_speed_floor.reply({
             "success": True, "active": True, **started.to_dict(),
             "message": (
                 f"Speed schedule running on {target_name}: {len(started.segments)} segment(s), "
                 f"the layer checked every {runner.POLL_INTERVAL_S:g}s. It stops on its own when "
                 "the print ends or another print starts; run_speed_schedule(action=\"stop\") stops it."
             ),
-        }
+        }, floor, changed=any(seg["speed_percent"] != 100 for seg in floored) or any(j.lowered for j in floor))
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Speed schedule failed: {exc}")
     except Exception as exc:
@@ -13901,7 +13926,10 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 
     G-code is validated before sending.  Commands that exceed temperature
     limits or modify firmware settings are blocked.  Use ``validate_gcode``
-    to preview what would be allowed without actually sending.
+    to preview what would be allowed without actually sending.  A feedrate
+    override (``M220 S<n>``) above the sliced speed is held to what the
+    running print's file lets the nozzle melt; ``commands_sent`` and
+    ``speed_floor`` say what was sent.
 
     Raw G-code has no general read-back, so ``outcome`` here is
     ``"accepted"`` whenever the command was sent: the printer took the
@@ -14095,18 +14123,24 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
                 code="UNSUPPORTED",
             )
 
-        verdict = CommandVerdict.coerce(adapter.send_gcode(cmd_list), what="G-code")
+        from kiln import live_speed_floor
+
+        with live_speed_floor.collect() as floor:
+            verdict = CommandVerdict.coerce(adapter.send_gcode(cmd_list), what="G-code")
         _audit("send_gcode", "executed", details={"count": len(cmd_list)})
 
+        sent = live_speed_floor.guarded_lines(cmd_list, floor)
         result = {
             "success": verdict.ok,
-            "commands_sent": cmd_list,
+            "commands_sent": sent,
             "count": len(cmd_list),
             **verdict.to_dict(),
         }
         if validation.warnings:
             result["warnings"] = validation.warnings
-        return result
+        return live_speed_floor.reply(
+            result, floor, changed=verdict.ok and live_speed_floor.changes_speed(cmd_list),
+        )
 
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to send G-code: {exc}. Check that the printer is online and connected.")
