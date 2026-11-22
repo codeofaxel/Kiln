@@ -761,6 +761,11 @@ class KilnDB:
                 self._conn.execute(
                     f"ALTER TABLE print_outcomes ADD COLUMN {name} TEXT DEFAULT NULL"
                 )
+        # Which plate of the sent file the start printed (1 for a G-code
+        # file): NULL for a print started before this column.  Read by the
+        # live speed check for the print running now.  Kept on this computer.
+        if "plate_number" not in columns:
+            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN plate_number INTEGER DEFAULT NULL")
         # What a print ran with and how far it got (kiln.print_evidence):
         # each NULL when Kiln had no reading it could vouch for.
         for name, sql_type in self.PRINT_EVIDENCE_COLUMNS.items():
@@ -3436,6 +3441,44 @@ class KilnDB:
         Returns whether a row took it.
         """
         return self._set_print_time("estimated_seconds", job_id, seconds)
+
+    def set_outcome_plate(self, job_id: str, plate_number: int) -> bool:
+        """Write which plate the print *job_id* names printed, once.  Returns
+        whether a row took it."""
+        if not job_id or isinstance(plate_number, bool) or not isinstance(plate_number, int) or plate_number < 1:
+            return False
+        with self._write_lock:
+            cur = self._conn.execute(
+                "UPDATE print_outcomes SET plate_number = ? WHERE job_id = ? AND plate_number IS NULL",
+                (plate_number, job_id),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
+
+    def running_print(
+        self,
+        printer_names: list[str],
+        machine_fingerprint: str | None = None,
+    ) -> dict[str, Any] | None:
+        """The newest print Kiln started that is still open on this machine:
+        its job id, file name and the plate it printed, or ``None``."""
+        clauses = []
+        params: list[Any] = []
+        if machine_fingerprint:
+            clauses.append("machine_fingerprint = ?")
+            params.append(machine_fingerprint)
+        names = [n for n in printer_names if n]
+        if names:
+            clauses.append(f"printer_name IN ({', '.join('?' for _ in names)})")
+            params.extend(names)
+        if not clauses:
+            return None
+        row = self._conn.execute(
+            "SELECT job_id, file_name, plate_number FROM print_outcomes "
+            f"WHERE ({' OR '.join(clauses)}) AND outcome = 'pending' ORDER BY created_at DESC LIMIT 1",
+            params,
+        ).fetchone()
+        return dict(row) if row is not None else None
 
     def record_print_seconds(
         self, job_id: str, seconds: float, printer_names: list[str] | None = None,

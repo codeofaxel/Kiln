@@ -513,3 +513,78 @@ class TestGoingPast:
         _gcode_door(monkeypatch, printer)
         answer = server.send_gcode("M104 S999", past_the_melt_limit=True)
         assert answer["success"] is False and printer.sent == []
+
+
+# ---------------------------------------------------------------------------
+# The plate being printed
+# ---------------------------------------------------------------------------
+
+
+def _two_plates(tmp_path: Path) -> Path:
+    """A sliced 3MF whose plate 1 has headroom and whose plate 2 is at its limit."""
+    import zipfile
+
+    (tmp_path / "made").mkdir(exist_ok=True)
+    path = tmp_path / "made" / "two_plates.gcode.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("Metadata/plate_1.gcode", HEADROOM.read_text())
+        zf.writestr("Metadata/plate_2.gcode", NEAR_LIMIT.read_text())
+    return path
+
+
+def _started_on_plate(printer: _Fdm, file_name: str, plate: int) -> None:
+    """The record a start leaves: an open row, and the plate written on it."""
+    import time
+
+    from kiln.learned_print_time import note_start_estimate
+    from kiln.persistence import get_db
+    from kiln.printers.base import outcome_printer_name
+
+    job = f"{file_name}-job"
+    get_db().save_print_outcome({
+        "job_id": job, "printer_name": outcome_printer_name(printer), "file_name": file_name,
+        "outcome": "pending", "created_at": time.time(),
+    })
+    note_start_estimate(job, file_name, plate_number=plate)
+
+
+class TestThePlateBeingPrinted:
+    def test_the_plate_the_start_recorded_is_the_one_judged(self, sent_by_kiln, tmp_path, monkeypatch):
+        sent_by_kiln(_two_plates(tmp_path), name="two_plates.gcode.3mf")
+        printer = _Fdm(file_name="two_plates.gcode.3mf")
+        _doors(monkeypatch, printer)
+        _started_on_plate(printer, "two_plates.gcode.3mf", 2)
+        answer = server.set_speed_profile(percent=300)
+        assert printer.sent == ["M220 S100"]
+        assert "Kept at 100% instead of the 300% you asked for" in answer["message"]
+
+    def test_plate_one_recorded_is_judged_as_plate_one(self, sent_by_kiln, tmp_path, monkeypatch):
+        sent_by_kiln(_two_plates(tmp_path), name="two_plates.gcode.3mf")
+        printer = _Fdm(file_name="two_plates.gcode.3mf")
+        _doors(monkeypatch, printer)
+        _started_on_plate(printer, "two_plates.gcode.3mf", 1)
+        server.set_speed_profile(percent=300)
+        assert printer.sent == ["M220 S300"]
+
+    def test_several_plates_and_no_record_is_let_through_and_said_unchecked(
+        self, sent_by_kiln, tmp_path, monkeypatch,
+    ):
+        sent_by_kiln(_two_plates(tmp_path), name="two_plates.gcode.3mf")
+        printer = _Fdm(file_name="two_plates.gcode.3mf")
+        _doors(monkeypatch, printer)
+        answer = server.set_speed_profile(percent=300)
+        assert printer.sent == ["M220 S300"]
+        assert floor.PLATE_UNKNOWN in answer["message"] and "was set without checking" in answer["message"]
+        assert answer["speed_floor"][0]["checked"] is False
+
+    def test_the_start_writes_the_plate_it_printed_on_its_record(self, sent_by_kiln, tmp_path):
+        from kiln.persistence import get_db
+
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        printer.status = PrinterStatus.IDLE
+        assert printer.start_print("part.gcode").success
+        row = get_db()._conn.execute(
+            "SELECT plate_number FROM print_outcomes ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row is not None and row[0] == 1
