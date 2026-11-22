@@ -43,9 +43,10 @@ def plain_install(monkeypatch):
     srv._register_pro_tool_stubs(FastMCP("printer-notes-test"))
     monkeypatch.setitem(sys.modules, "kiln_pro", None)
     monkeypatch.setattr(served_public, "_said", set())
-    # No printer record or curated row another test left in this process:
-    # what an install that never reached Kiln's servers holds.
+    # No printer record and no curated rows, whatever another test left in
+    # this process: what an install that never reached Kiln's servers holds.
     monkeypatch.setattr(_pro_catalogue_bridge, "printer_record", lambda *a, **k: None)
+    monkeypatch.setattr(pi, "_overlay_for_caller", lambda: None)
     pi._reset_caches()
     for door in ("troubleshoot_printer", "check_printer_material_compatibility",
                  "check_printer_material_support", "get_material_recommendation"):
