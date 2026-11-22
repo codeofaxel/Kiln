@@ -233,3 +233,34 @@ def test_a_file_that_is_not_a_mesh_is_refused_in_words(tmp_path):
     path.write_bytes(b"")
     with pytest.raises(PartOutlinesError):
         outlines_by_height(str(path))
+
+
+class TestAReadIsBounded:
+    """A read holds bounded memory and time whatever the file, and says so
+    when a part is past what it reads."""
+
+    def test_a_part_cut_into_more_segments_than_the_budget_is_refused(self, tmp_path, monkeypatch):
+        from kiln import part_outlines
+
+        path = _save(tmp_path, _box((30, 20, 40), (0, 0, 0)))
+        monkeypatch.setattr(part_outlines, "MAX_SEGMENTS", 50)
+        with pytest.raises(PartOutlinesError, match="too detailed"):
+            outlines_by_height(path)
+
+    def test_reading_in_runs_gives_the_same_answer_as_reading_at_once(self, tmp_path, monkeypatch):
+        from kiln import part_outlines
+
+        tube = trimesh.creation.annulus(r_min=5.0, r_max=10.0, height=20.0, sections=64)
+        path = _save(tmp_path, tube, _box((4, 4, 30), (20, 0, 0)))
+        whole = outlines_by_height(path)
+        monkeypatch.setattr(part_outlines, "_SEGMENTS_AT_ONCE", 40)
+        assert outlines_by_height(path) == whole
+
+    def test_a_cut_too_crowded_to_search_is_said_to_be_unread(self, tmp_path, monkeypatch):
+        from kiln import part_outlines
+
+        pins = [_box((2, 2, 10), (4.0 * i, 0, 0)) for i in range(6)]
+        path = _save(tmp_path, *pins)
+        monkeypatch.setattr(part_outlines, "MAX_LOOPS_PER_CUT", 3)
+        level = min(outlines_by_height(path)["levels"], key=lambda one: abs(one["z_mm"] - 5.0))
+        assert level["unread"] is True and level["outlines"] == []

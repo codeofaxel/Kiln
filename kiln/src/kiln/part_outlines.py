@@ -46,6 +46,14 @@ MIN_STEP_MM = 0.5
 #: The most outlines one band reports, and the whole part.
 MAX_OUTLINES = 64
 MAX_PART_OUTLINES = 4000
+#: The most segment cuts one part may produce, and the most cut at once.
+#: A part past the first is refused as too detailed to read; the second
+#: bounds the memory one read holds whatever the part.
+MAX_SEGMENTS = 6_000_000
+_SEGMENTS_AT_ONCE = 500_000
+#: The most closed shapes one cut is searched for shapes inside others; a
+#: cut with more is said to be unread rather than searched.
+MAX_LOOPS_PER_CUT = 2000
 #: A shape smaller than this is not reported as an outline.
 MIN_AREA_MM2 = 0.3
 #: Where in its band each of a band's three cuts sits.
@@ -321,6 +329,8 @@ def _level(p1: Any, p2: Any) -> tuple[Any, bool]:
     label = _components(places, start, end)
     loop = label[start]
     loops = int(loop.max()) + 1
+    if loops > MAX_LOOPS_PER_CUT:
+        return none, True
     doubt = np.zeros(loops)
     np.maximum.at(doubt, loop, disagree)
     edge = np.bincount(loop, weights=length, minlength=loops)
@@ -467,6 +477,41 @@ def _outline(row: Any) -> dict[str, Any]:
     }
 
 
+def _read_cuts(triangles: Any, normals: Any, heights: Any) -> list[tuple[Any, bool]]:
+    """Every cut at *heights* read with :func:`_level`, in runs of planes
+    holding at most :data:`_SEGMENTS_AT_ONCE` segments.
+
+    :raises PartOutlinesError: past :data:`MAX_SEGMENTS` segments in all."""
+    import numpy as np
+
+    lowest, highest = triangles[:, :, 2].min(axis=1), triangles[:, :, 2].max(axis=1)
+    first = np.searchsorted(heights, lowest, side="right")
+    last = np.searchsorted(heights, highest, side="left")
+    spans = np.maximum(last - first, 0)
+    if int(spans.sum()) > MAX_SEGMENTS:
+        raise PartOutlinesError(
+            "this part is too detailed to read by height in reasonable time; simplify the mesh and try again"
+        )
+    # Segments each plane is cut into: a running sum over where spans start and stop.
+    change = np.zeros(len(heights) + 1, dtype=np.int64)
+    np.add.at(change, first[spans > 0], 1)
+    np.add.at(change, last[spans > 0], -1)
+    per_plane = np.cumsum(change)[:-1]
+    out: list[tuple[Any, bool]] = []
+    start = 0
+    while start < len(heights):
+        end, held = start, 0
+        while end < len(heights) and (end == start or held + per_plane[end] <= _SEGMENTS_AT_ONCE):
+            held += int(per_plane[end])
+            end += 1
+        near = (first < end) & (last > start)
+        p1, p2, plane = _cut(triangles[near], normals[near], heights[start:end])
+        bounds = np.searchsorted(plane, np.arange(end - start + 1))
+        out.extend(_level(p1[bounds[k]:bounds[k + 1]], p2[bounds[k]:bounds[k + 1]]) for k in range(end - start))
+        start = end
+    return out
+
+
 def outlines_by_height(path: str, *, levels: int = MAX_LEVELS) -> dict[str, Any]:
     """The outlines of the mesh at *path* in up to *levels* bands::
 
@@ -478,7 +523,8 @@ def outlines_by_height(path: str, *, levels: int = MAX_LEVELS) -> dict[str, Any]
     ``z_mm`` is the middle of the band.  When no band produced an outline,
     ``read`` is false and ``reason`` says why in words.
 
-    :raises PartOutlinesError: a file that holds no triangles Kiln can cut.
+    :raises PartOutlinesError: a file that holds no triangles Kiln can cut,
+        or one too detailed to read (:data:`MAX_SEGMENTS`).
     """
     import numpy as np
 
@@ -507,13 +553,12 @@ def outlines_by_height(path: str, *, levels: int = MAX_LEVELS) -> dict[str, Any]
     count = int(min(max(2, levels), max(2, math.ceil(height / MIN_STEP_MM))))
     step = height / count
     heights = np.array([low + (index + share) * step for index in range(count) for share in _CUTS])
-    p1, p2, plane = _cut(triangles, normals, heights)
-    bounds = np.searchsorted(plane, np.arange(len(heights) + 1))
+    per_cut = _read_cuts(triangles, normals, heights)
     bands = []
     for index in range(count):
         cuts, unread = [], False
         for k in range(index * len(_CUTS), (index + 1) * len(_CUTS)):
-            rows, missed = _level(p1[bounds[k]:bounds[k + 1]], p2[bounds[k]:bounds[k + 1]])
+            rows, missed = per_cut[k]
             cuts.append(rows)
             unread = unread or missed
         bands.append((_weakest(cuts), unread))
