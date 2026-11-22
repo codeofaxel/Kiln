@@ -23565,6 +23565,9 @@ def check_printer_material_support(
             "printer_id": report.printer_id,
             "materials": report.materials,
             "profile_source": report.resolved_from,
+            # The same, under the name the compatibility check uses, which an
+            # answer from Kiln's servers carries too.
+            "resolved_from": report.resolved_from,
         }
         if report.resolved_from == "default":
             # The generic profile answered, not this machine.  Say so -- an
