@@ -85,18 +85,26 @@ class _Servers:
         return _Up()
 
 
+def _public_files_alone(monkeypatch) -> None:
+    """No kiln-pro, and the knowledge base read again from the public files
+    alone, whatever an earlier test left loaded."""
+    from kiln import design_intelligence
+
+    monkeypatch.setitem(sys.modules, "kiln_pro", None)
+    monkeypatch.setattr(design_intelligence, "_load_pro_overlay_if_available", lambda _kind: None)
+    monkeypatch.setattr(design_intelligence, "_kb", None)
+
+
 @pytest.fixture
 def servers(monkeypatch, tmp_path):
     """A signed-in install with no kiln-pro, its notes read from the public
     files alone, and Kiln's servers behind it."""
     import httpx
 
-    from kiln import design_intelligence, material_limits, served_public
+    from kiln import material_limits, served_public
     from kiln.mcp_compat import FastMCP
 
-    monkeypatch.setitem(sys.modules, "kiln_pro", None)
-    # The knowledge base is read again without kiln-pro beside it.
-    monkeypatch.setattr(design_intelligence, "_kb", None)
+    _public_files_alone(monkeypatch)
     srv._register_pro_tool_stubs(FastMCP("design-notes-test"))
     monkeypatch.setenv("KILN_HOME", str(tmp_path / "kiln-home"))
     sign_in(monkeypatch, tmp_path)
@@ -207,8 +215,7 @@ def test_outside_a_missed_call_the_caution_is_worded_as_it_always_is(monkeypatch
     no note."""
     from kiln import design_intelligence
 
-    monkeypatch.setitem(sys.modules, "kiln_pro", None)
-    monkeypatch.setattr(design_intelligence, "_kb", None)
+    _public_files_alone(monkeypatch)
     worded: list[str] = []
 
     def shared(kind, what, **_kwargs):
