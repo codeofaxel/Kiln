@@ -2811,8 +2811,23 @@ def _consent_subject(tool_name: str, arguments: dict[str, Any]) -> str | None:
     return None
 
 
+def _file_plastic(file_path: str | None, wanted: list[Any] | None = None) -> str | None:
+    """The one plastic a sliced file names: its one filament's, else the one
+    its header states (:func:`kiln._pro_goal_material_bridge.material_printed`)."""
+    if wanted:
+        return getattr(wanted[0], "material", None) if len(wanted) == 1 else None
+    if not file_path:
+        return None
+    try:
+        from kiln._pro_goal_material_bridge import material_printed
+
+        return material_printed("", "", {"gcode": file_path}) or None
+    except Exception:  # noqa: BLE001 -- an unreadable file names no plastic
+        return None
+
+
 def _consent_filament_line(
-    tool_name: str, file_value: str, printer_name: str | None
+    tool_name: str, file_value: str, printer_name: str | None, arguments: dict[str, Any] | None = None,
 ) -> str | None:
     """The colour routing the person is approving, in one line — or None.
 
@@ -2821,10 +2836,13 @@ def _consent_filament_line(
     file whose filaments cannot be read gets no line rather than a guess;
     a colour nothing loaded can supply is said in capitals, because the
     yes being asked for would otherwise put the wrong colour on the part.
+    A file that names only its own plastic, with no material, colour or
+    tray named (*arguments*), says which spool it prints from
+    (:func:`kiln.ams_routing.first_spool_said`).
     Never raises: a dialog that fails to open beats one that lies.
     """
     try:
-        from kiln.ams_routing import loaded_trays, plan_ams_mapping, read_file_filaments
+        from kiln.ams_routing import first_spool_said, loaded_trays, plan_ams_mapping, read_file_filaments
 
         local = (
             file_value
@@ -2832,7 +2850,10 @@ def _consent_filament_line(
             else _local_copy_of(file_value)
         )
         wanted = read_file_filaments(local).filaments
-        if not wanted or not any(f.hex6 for f in wanted):
+        named = any((arguments or {}).get(k) for k in ("material", "ams_mapping", "color"))
+        plastic = _file_plastic(local, wanted) if not named and _asked_colour(local) is None else None
+        first_only = len(wanted) <= 1 and bool(plastic)
+        if not (first_only or any(f.hex6 for f in wanted)):
             return None
         adapter = _resolve_adapter(printer_name)
         if not hasattr(adapter, "get_ams_status"):
@@ -2840,6 +2861,8 @@ def _consent_filament_line(
         trays = loaded_trays(adapter.get_ams_status())
         if not trays:
             return None
+        if first_only and (not wanted or not wanted[0].hex6 or not plan_ams_mapping(wanted, trays).ok):
+            return first_spool_said(plastic, trays[0])
         plan = plan_ams_mapping(wanted, trays)
         if plan.ok:
             return plan.summary + (" (" + "; ".join(plan.warnings) + ")" if plan.warnings else "")
@@ -3005,7 +3028,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         extra={
             "material": arguments.get("material"),
             "printer model": arguments.get("printer_id"),
-            "filament slots": _consent_filament_line(tool_name, file_value, printer_name),
+            "filament slots": _consent_filament_line(tool_name, file_value, printer_name, arguments),
             # A plate of several colours Kiln sliced in one, for want of the
             # printer's maker's slicer: said as the fact it is.
             "colours": about.get("colours"),
@@ -9760,7 +9783,7 @@ def _door_spools(
         return {}, None
     decision = _resolve_use_ams(
         "auto", None, adapter, material=material, file_path=file_path, wanted=wanted,
-        goal=goal, sliced=False, noun=noun,
+        goal=goal, sliced=False, noun=noun, reslice=reslice is not None,
     )
     if not decision.get("blocked"):
         return decision, None
@@ -9781,6 +9804,7 @@ def _resolve_use_ams(
     goal: dict[str, Any] | None = None,
     sliced: bool = True,
     noun: str = "part",
+    reslice: bool = True,
 ) -> dict[str, Any]:
     """Resolve tri-state use_ams into a concrete routing decision.
 
@@ -9807,6 +9831,7 @@ def _resolve_use_ams(
     :param sliced: Whether the job is already sliced (the wording of a
         re-slice offer).
     :param noun: What one filament of a multi-filament job is called.
+    :param reslice: Whether the door can take a re-slice for another plastic.
     :returns: Dict with ``use_ams`` (bool), optional ``ams_mapping`` (list),
         optional ``warnings`` (list of human-readable strings), and — when
         the file's filaments were known — ``plan`` (see
@@ -10026,7 +10051,7 @@ def _resolve_use_ams(
             in_use = {m.get("slot") for m in plan.matches if m.get("slot") is not None}
             miss = spool_miss(
                 wanted, trays, plan=plan, names=[asked.name] if asked is not None else (),
-                sliced=sliced, free_slots=_empty_slots(ams_info), noun=noun,
+                sliced=sliced, free_slots=_empty_slots(ams_info), noun=noun, reslice=reslice,
                 judge=_stand_in_judge(goal, file_path),
                 on_record=spools_on_record(
                     [wanted[i] if i in plan.unmatched else None for i in range(len(wanted))],
@@ -10055,6 +10080,14 @@ def _resolve_use_ams(
     chosen = trays[0]
     if ams_mapping:
         chosen = next((t for t in trays if t.tray_id == ams_mapping[0]), chosen)
+    if not material and ams_mapping is None and asked is None and len(wanted or []) <= 1:
+        # A file that names only its own plastic, and nothing named here:
+        # it prints from the first spool loaded, and says which.
+        from kiln.ams_routing import first_spool_said
+
+        line = first_spool_said(_file_plastic(file_path, wanted), chosen)
+        if line:
+            warnings_out.append(line)
     if material and ams_mapping is None:
         matching = [t for t in trays if same_plastic(material, t.material)]
         if not matching:
@@ -10062,7 +10095,7 @@ def _resolve_use_ams(
 
             miss = spool_miss(
                 [_Filament(hex6=None, material=material)], trays, colour_counts=False, sliced=sliced,
-                judge=_stand_in_judge(goal, file_path),
+                judge=_stand_in_judge(goal, file_path), reslice=reslice,
             )
             if miss is not None:
                 return _spool_miss_decision(miss)

@@ -24,9 +24,11 @@ in one sentence and the refusal stands as it is.  Nothing here raises.
 
 The same door answers a print whose filament is not loaded
 (:func:`stand_in_fit`): whether each filament that is loaded suits the
-part's saved goal, asked only when the part has one and the plan includes
-Kiln Pro.  Below it, or with no goal, nothing is asked and the print door
-offers the loaded filament with its own hedge.
+part's saved goal, asked whenever the part has one.  Every plan is told when
+a loaded filament would be unsafe for what the part is for; whether the
+others suit it is Kiln Pro's, and a plan without it is told so once.  With
+no goal, nothing is asked and the print door offers the loaded filament with
+its own hedge.
 """
 
 from __future__ import annotations
@@ -161,6 +163,18 @@ _STAND_IN_MISS_WORDS = {
     "cannot": "check it",
     "wont": "offers the loaded filament without saying whether it suits the part",
 }
+#: Why nothing was checked, when no check could run.
+NO_GOAL = (
+    "Kiln has no saved goal for this part, so it doesn't say whether a loaded "
+    "filament suits what the part is for."
+)
+NO_NEEDS = (
+    "This part's saved goal doesn't say what it has to stand up to, so Kiln "
+    "doesn't say whether a loaded filament suits it."
+)
+#: What the plan that includes it adds, said once to a plan without it, the
+#: account's own sentence after it (:func:`kiln.account_plan.check_tier`).
+STAND_IN_PRO_ADDS = "Kiln can also check a swap like this against what your goal says the part is for."
 
 
 def stand_in_fit(
@@ -174,11 +188,13 @@ def stand_in_fit(
     """Whether each loaded filament in *stand_ins* suits the saved goal of
     the part being printed in place of *material_id*.
 
-    ``{"verdicts": {filament: {"suits": bool, "why": str | None}}}``, each
-    ``why`` a finished sentence; ``{"missed": "..."}`` when the plan includes
-    Kiln Pro and the answer did not come; ``None`` when the part has no goal
-    Kiln can name (by *goal_id*, the kept *version_id*, or the version
-    *job_path* is a print of) or the plan does not include Kiln Pro.  Never
+    ``{"verdicts": {filament: {"suits", "why", "offer", "ask"}}}``: ``suits``
+    True, False or ``None`` (not said), ``why`` a finished sentence, ``offer``
+    whether the filament is still offered, ``ask`` a question when ``why`` is
+    a condition.  Beside it, ``pro_adds`` (the line for a plan without Kiln
+    Pro, once) and ``missed`` (why nothing, or only part, was checked).  The
+    goal is named by *goal_id*, the kept *version_id*, or the version
+    *job_path* is a print of; ``None`` when there are no stand-ins.  Never
     raises.
     """
     if not material_id or not stand_ins:
@@ -191,12 +207,10 @@ def stand_in_fit(
         except Exception:  # noqa: BLE001 -- a version that cannot be read names no goal
             version_id = None
     if not (goal_id or version_id):
-        return None
+        return {"missed": NO_GOAL}
     local = _local_stand_ins(material_id, stand_ins, goal_id, version_id)
     if local is not _NOT_HERE:
         return local
-    if _plan_note(material_id) is not None:
-        return None
     try:
         from kiln.server import _pro_api_call
 
@@ -216,7 +230,9 @@ def stand_in_fit(
     miss = classify_answer(answer)
     if miss is not None:
         return _stand_in_missed(miss)
-    return _verdicts(answer.get("stand_ins") if answer.get("known") is True else None)
+    if answer.get("known") is not True:
+        return {"missed": NO_GOAL}
+    return _verdicts(answer.get("stand_ins"), answer.get("purpose_known"))
 
 
 def _local_stand_ins(material_id: str, stand_ins: list[str], goal_id: str | None, version_id: str | None) -> Any:
@@ -225,22 +241,55 @@ def _local_stand_ins(material_id: str, stand_ins: list[str], goal_id: str | None
     except ImportError:
         return _NOT_HERE
     try:
-        return _verdicts(engine_fit(material_id, stand_ins, goal_id=goal_id, version_id=version_id))
+        fit = engine_fit(material_id, stand_ins, goal_id=goal_id, version_id=version_id)
     except Exception as exc:  # noqa: BLE001 -- the print door offers with its own hedge
         logger.warning("kiln-pro stand-in check failed: %s", exc)
         return None
+    if not isinstance(fit, dict):
+        return {"missed": NO_GOAL}
+    return _verdicts(fit.get("rows"), fit.get("purpose_known"))
 
 
-def _verdicts(rows: Any) -> dict[str, Any] | None:
-    """``{"verdicts": ...}`` from the answer's rows, or ``None`` for none."""
+def _verdicts(rows: Any, purpose_known: Any) -> dict[str, Any] | None:
+    """The door's answer from the served rows, or ``None`` for none."""
     if not isinstance(rows, list):
         return None
-    verdicts = {
-        str(row["material"]): {"suits": row["suits"], "why": row.get("why") if isinstance(row.get("why"), str) else None}
-        for row in rows
-        if isinstance(row, dict) and isinstance(row.get("material"), str) and isinstance(row.get("suits"), bool)
-    }
-    return {"verdicts": verdicts} if verdicts else None
+    verdicts: dict[str, Any] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("material"), str):
+            continue
+        suits = row.get("suits")
+        verdicts[row["material"]] = {
+            "suits": suits if isinstance(suits, bool) else None,
+            "why": row.get("why") if isinstance(row.get("why"), str) else None,
+            "offer": row.get("offer") is not False,
+            **({"ask": row["ask"]} if isinstance(row.get("ask"), str) else {}),
+        }
+    if not verdicts:
+        return None
+    out: dict[str, Any] = {"verdicts": verdicts}
+    if purpose_known is not True:
+        out["missed"] = NO_NEEDS
+    elif any(v["suits"] is None and v["offer"] and not v["why"] for v in verdicts.values()):
+        note = _stand_in_plan_note()
+        if note:
+            out["pro_adds"] = note
+    return out
+
+
+def _stand_in_plan_note() -> str | None:
+    """:data:`STAND_IN_PRO_ADDS` and the account's own sentence, for a plan
+    without Kiln Pro; ``None`` when it is covered or cannot be read."""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        covered, why = check_tier(LicenseTier.PRO)
+    except Exception:  # noqa: BLE001 -- an unreadable plan is never a pitch
+        logger.debug("stand-in check: plan not read", exc_info=True)
+        return None
+    if covered:
+        return None
+    return f"{STAND_IN_PRO_ADDS} {why}".strip() if why else STAND_IN_PRO_ADDS
 
 
 def _stand_in_missed(miss: Miss | None) -> dict[str, Any] | None:
@@ -249,4 +298,7 @@ def _stand_in_missed(miss: Miss | None) -> dict[str, Any] | None:
     return {"missed": sentence(miss, feature="servers", then="ask to print again", **_STAND_IN_MISS_WORDS)}
 
 
-__all__ = ["LOCAL_MODULE", "PRO_ADDS", "WIRE_TOOL", "material_fix", "stand_in_fit"]
+__all__ = [
+    "LOCAL_MODULE", "NO_GOAL", "NO_NEEDS", "PRO_ADDS", "STAND_IN_PRO_ADDS", "WIRE_TOOL", "material_fix",
+    "stand_in_fit",
+]

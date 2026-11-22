@@ -28,6 +28,7 @@ __all__ = [
     "Tray",
     "advise_colours",
     "empty_slots",
+    "first_spool_said",
     "loaded_trays",
     "normalize_hex",
     "plan_ams_mapping",
@@ -596,25 +597,78 @@ def _option(action: str, *, tray: Tray | None = None, material: str | None = Non
     return out
 
 
-def _judged(judge: Judge | None, wanted: str | None, stand_ins: list[str]) -> tuple[dict[str, Any], str | None]:
-    """``({plastic: {"suits", "why"}}, missed)``; empty when nothing was asked."""
+@dataclass
+class _Check:
+    """What the goal check said about the loaded plastics."""
+
+    verdicts: dict[str, Any] = field(default_factory=dict)
+    missed: str | None = None
+    pro_adds: str | None = None
+
+    def of(self, material: str) -> dict[str, Any]:
+        verdict = self.verdicts.get(material)
+        return verdict if isinstance(verdict, dict) else {}
+
+    def unsafe(self, material: str) -> bool:
+        return self.of(material).get("offer") is False and bool(self.of(material).get("why"))
+
+    def fields(self, material: str) -> dict[str, Any]:
+        """The option fields the check adds for *material*."""
+        verdict = self.of(material)
+        out: dict[str, Any] = {}
+        if isinstance(verdict.get("suits"), bool):
+            out["suits_goal"] = verdict["suits"]
+        if verdict.get("why"):
+            out["why"] = verdict["why"]
+        if verdict.get("ask"):
+            out["ask"] = verdict["ask"]
+        if verdict and (verdict.get("why") or isinstance(verdict.get("suits"), bool)):
+            out["offered"] = verdict.get("offer") is not False
+        if self.missed:
+            out["goal_check_missed"] = self.missed
+        return out
+
+
+def _judged(judge: Judge | None, wanted: str | None, stand_ins: list[str]) -> _Check:
+    """The goal check's answer for *stand_ins*; empty when nothing was asked."""
     if judge is None or not wanted or not stand_ins:
-        return {}, None
+        return _Check()
     try:
         answer = judge(wanted, stand_ins) or {}
     except Exception:  # noqa: BLE001 -- an unanswered check offers with the hedge
-        return {}, None
+        return _Check()
     verdicts = answer.get("verdicts") if isinstance(answer.get("verdicts"), dict) else {}
     missed = answer.get("missed") if isinstance(answer.get("missed"), str) else None
-    return verdicts, missed
+    pro_adds = answer.get("pro_adds") if isinstance(answer.get("pro_adds"), str) else None
+    return _Check(verdicts, missed, pro_adds)
 
 
-def _fit(verdicts: dict[str, Any], material: str) -> dict[str, Any]:
-    """The option fields a goal check adds for *material*."""
-    verdict = verdicts.get(material)
-    if not isinstance(verdict, dict) or not isinstance(verdict.get("suits"), bool):
-        return {}
-    return {"suits_goal": verdict["suits"], **({"why": verdict["why"]} if verdict.get("why") else {})}
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def _steer(sliced: bool, plastic: str, why: str) -> str:
+    """The sentence for a loaded plastic that would be unsafe for the part."""
+    return f"{'Re-slicing' if sliced else 'Slicing'} for {plastic} isn't a good idea here: {why}."
+
+
+def _after_offer(check: _Check, offered: list[tuple[str, str]], verb: str) -> str:
+    """What follows an offer: why a judged plastic is worse, a guess and its
+    question, and the plan line once."""
+    said: list[str] = []
+    asked = False
+    for plastic, material in offered:
+        verdict = check.of(material)
+        if verdict.get("suits") is False and verdict.get("why"):
+            said.append(f"{_cap(verdict['why'])}, so {verb} it for {plastic} only if that's fine.")
+        elif verdict.get("suits") is None and verdict.get("why"):
+            said.append(f"{_cap(verdict['why'])}.")
+            if verdict.get("ask") and not asked:
+                said.append(verdict["ask"])
+                asked = True
+    if check.pro_adds and any(not check.of(m).get("why") and check.of(m).get("suits") is None for _p, m in offered):
+        said.append(check.pro_adds)
+    return "".join(f" {s}" for s in said)
 
 
 def spool_miss(
@@ -629,11 +683,13 @@ def spool_miss(
     noun: str = "part",
     judge: Judge | None = None,
     on_record: dict[int, str] | None = None,
+    reslice: bool = True,
 ) -> SpoolMiss | None:
     """The sentence and choices for *wanted* when no loaded spool fits, or ``None`` when one does.
 
     *names* are the colour words the person used; *sliced* whether the file is already sliced;
-    *on_record* the person's recorded spool for a filament, by its index.
+    *on_record* the person's recorded spool for a filament, by its index; *reslice* whether the
+    door can take a re-slice for another plastic.
     """
     trays = list(trays)
     if not wanted or not trays:
@@ -650,14 +706,14 @@ def spool_miss(
         return None
     shade = [t for t in _nearest(hex6, trays) if _close(hex6, t) and t.material != UNREAD_MATERIAL]
     if plastic:
-        return _colour_not_loaded(want, name, plastic, shade, sliced, judge)
+        return _colour_not_loaded(want, name, plastic, shade, sliced, judge if reslice else None, reslice)
     if shade:
-        return _colour_in_other_plastic(want, name, shade, sliced, judge)
-    return _plastic_not_loaded(want, name if hex6 else None, trays, sliced, judge)
+        return _colour_in_other_plastic(want, name, shade, sliced, judge if reslice else None, reslice)
+    return _plastic_not_loaded(want, name if hex6 else None, trays, sliced, judge if reslice else None, reslice)
 
 
 def _colour_not_loaded(want: Filament, name: str | None, plastic: list[Tray], other: list[Tray], sliced: bool,
-                       judge: Judge | None) -> SpoolMiss:
+                       judge: Judge | None, reslice: bool = True) -> SpoolMiss:
     near = _nearest(want.hex6, plastic)[0]
     shade = _colour_name(near.hex6)
     said = "another shade of " + shade if shade == name else shade
@@ -668,26 +724,29 @@ def _colour_not_loaded(want: Filament, name: str | None, plastic: list[Tray], ot
     else:
         message = f"This print wants {name}. No {name} spool is loaded: the closest is {said} {plastic_words(near.material)} in {near.where}."
     options = [_option("print_from_slot", tray=near, material=near.material, colour=shade, hex6=near.hex6)]
-    alt = other[0] if other and want.material else None
-    fit: dict[str, Any] = {}
+    alt = other[0] if other and want.material and reslice else None
+    check = _judged(judge, want.material, [alt.material]) if alt is not None else _Check()
     if alt is not None:
-        verdicts, missed = _judged(judge, want.material, [alt.material])
-        fit = {**_fit(verdicts, alt.material), **({"goal_check_missed": missed} if missed else {})}
-        options.append(_option("reslice_for", tray=alt, material=alt.material, colour=name, hex6=alt.hex6, **fit))
+        options.append(_option("reslice_for", tray=alt, material=alt.material, colour=name, hex6=alt.hex6,
+                               **check.fields(alt.material)))
+    verb = "re-slice" if sliced else "slice"
     choices = [f"Print it in {'that shade' if shade == name else shade}"]
-    if alt is not None and fit.get("suits_goal") is not False:
-        choices.append(f"{'re-slice' if sliced else 'slice'} it for the {name} {plastic_words(alt.material)} in {alt.where}")
+    offered = alt is not None and not check.unsafe(alt.material)
+    if offered:
+        choices.append(f"{verb} it for the {name} {plastic_words(alt.material)} in {alt.where}")
     message += f" {', '.join(choices)}, or load {name} first?"
+    if offered:
+        message += _after_offer(check, [(plastic_words(alt.material), alt.material)], verb)
     options.append(_option("load_spool", material=want.material, colour=name, hex6=want.hex6))
     return SpoolMiss("COLOR_NOT_LOADED", message, options)
 
 
 def _colour_in_other_plastic(want: Filament, name: str | None, shade: list[Tray], sliced: bool,
-                             judge: Judge | None) -> SpoolMiss:
+                             judge: Judge | None, reslice: bool = True) -> SpoolMiss:
     picks: dict[str, Tray] = {}
     for t in shade:
         picks.setdefault(plastic_words(t.material), t)
-    verdicts, missed = _judged(judge, want.material, [t.material for t in picks.values()])
+    check = _judged(judge, want.material, [t.material for t in picks.values()])
     kind = plastic_words(want.material)
     spools = _listed([f"{name} {p} in {t.where}" for p, t in picks.items()])
     first = (f"This print is set up for {name} {kind}, but the only {name} spool loaded is {spools}."
@@ -695,29 +754,30 @@ def _colour_in_other_plastic(want: Filament, name: str | None, shade: list[Tray]
     who = f"{next(iter(picks))} can't" if len(picks) == 1 else ("Neither can" if len(picks) == 2 else "None of them can")
     basis = "the file is sliced for" if sliced else "this print is set up for"
     first += f" {who} just stand in, because {basis} {kind}'s temperatures."
-    offered = [(p, t) for p, t in picks.items() if _fit(verdicts, t.material).get("suits_goal") is not False]
-    unfit = [_fit(verdicts, t.material).get("why") or f"{plastic_words(t.material)} doesn't suit what this part is for"
-             for t in picks.values() if _fit(verdicts, t.material).get("suits_goal") is False]
+    unsafe = [(p, t) for p, t in picks.items() if check.unsafe(t.material)]
+    offered = [(p, t) for p, t in picks.items() if reslice and (p, t) not in unsafe]
+    message = first + "".join(f" {_steer(sliced, p, check.of(t.material)['why'])}" for p, t in unsafe)
+    lead = "re-slice it" if sliced else "slice it"
+    instead = "" if sliced else " instead"
     if offered:
         asks = _listed([f"for {p} and print from {t.name or t.where}" for p, t in offered], "or")
-        lead = "re-slice it" if sliced else "slice it"
-        aside = f" ({unfit[0]})" if unfit else ""
-        message = (f"{first} Want me to {lead} {asks}{'' if sliced else ' instead'}{aside}? "
-                   f"Or load {name} {kind} and I'll start it as is.")
+        if all(check.of(t.material).get("suits") is False and check.of(t.material).get("why") for _p, t in offered):
+            whys = "".join(f" {_cap(check.of(t.material)['why'])}." for _p, t in offered)
+            message += f"{whys} Load {name} {kind}, or I can {lead} {asks}{instead} if that's fine."
+        else:
+            message += (f" Want me to {lead} {asks}{instead}? Or load {name} {kind} and I'll start it as is."
+                        + _after_offer(check, [(p, t.material) for p, t in offered], lead.split()[0]))
     else:
-        message = f"{first} {unfit[0]}, so I'd load {name} {kind} and start it as is."
-    reslices = [_option("reslice_for", tray=t, material=t.material, colour=name, hex6=t.hex6, **_fit(verdicts, t.material))
-                for t in picks.values()]
+        message += f" Load {name} {kind} and I'll start it as is."
+    reslices = [_option("reslice_for", tray=t, material=t.material, colour=name, hex6=t.hex6, **check.fields(t.material))
+                for t in picks.values()] if reslice else []
     load = _option("load_spool", material=want.material, colour=name, hex6=want.hex6)
     options = [*reslices, load] if offered else [load, *reslices]
-    if missed:
-        for o in reslices:
-            o["goal_check_missed"] = missed
     return SpoolMiss("AMS_MATERIAL_NOT_LOADED", message, options)
 
 
 def _plastic_not_loaded(want: Filament, name: str | None, trays: list[Tray], sliced: bool,
-                        judge: Judge | None) -> SpoolMiss:
+                        judge: Judge | None, reslice: bool = True) -> SpoolMiss:
     kind = plastic_words(want.material)
     needs = f"{name} {kind}" if name else kind
     first = f"This print needs {needs}, and none of your spools are {kind} (you have {_loaded_said(trays)})."
@@ -725,28 +785,48 @@ def _plastic_not_loaded(want: Filament, name: str | None, trays: list[Tray], sli
     for t in sorted(trays, key=lambda t: -1 if t.remain is None else -t.remain):
         if t.material != UNREAD_MATERIAL:
             stand_ins.setdefault(plastic_words(t.material), t)
-    verdicts, missed = _judged(judge, want.material, [t.material for t in stand_ins.values()])
-    fits = {p: _fit(verdicts, t.material) for p, t in stand_ins.items()}
-    offered = [p for p, f in fits.items() if f.get("suits_goal") is not False]
-    unfit = [f.get("why") or f"{p} doesn't suit what this part is for" for p, f in fits.items()
-             if f.get("suits_goal") is False]
+    if not reslice:
+        stand_ins = {}
+    check = _judged(judge, want.material, [t.material for t in stand_ins.values()])
+    unsafe = [p for p, t in stand_ins.items() if check.unsafe(t.material)]
+    offered = [(p, t.material) for p, t in stand_ins.items() if p not in unsafe]
+    verb = "re-slice" if sliced else "slice"
+    instead = "" if sliced else " instead"
+    message = first + "".join(f" {_steer(sliced, p, check.of(stand_ins[p].material)['why'])}" for p in unsafe)
     load = f"Load {_a(needs)} spool and I'll start it."
-    offer = f"Or I can {'re-slice' if sliced else 'slice'} it for {_listed(offered, 'or')}{'' if sliced else ' instead'}"
-    if offered and all(fits[p].get("suits_goal") for p in offered):
-        message = f"{first} {load} {offer}" + (f" ({unfit[0]})." if unfit else ".")
-    elif offered:
-        hedge = f"if {offered[0]} suits" if len(offered) == 1 else "if one of them suits"
-        message = f"{first} {load} {offer}, {hedge} what this part is for."
-    elif unfit:
-        message = f"{first} {unfit[0]}, so I'd load {_a(needs)} spool and start it as is."
+    verdicts = [check.of(m) for _p, m in offered]
+    if not offered:
+        message += f" {load}"
+    elif all(v.get("suits") is False and v.get("why") for v in verdicts):
+        whys = "".join(f" {_cap(v['why'])}." for v in verdicts)
+        message += f"{whys} Load {_a(needs)} spool, or I can {verb} it for {_listed([p for p, _m in offered], 'or')}{instead} if that's fine."
     else:
-        message = f"{first} {load}"
+        message += f" {load} Or I can {verb} it for {_listed([p for p, _m in offered], 'or')}{instead}"
+        unknown = [p for (p, _m), v in zip(offered, verdicts, strict=True) if v.get("suits") is None and not v.get("why")]
+        if unknown:
+            hedge = f"if {offered[0][0]} suits" if len(offered) == 1 else "if one of them suits"
+            message += f", {hedge} what this part is for."
+        else:
+            message += "."
+        message += _after_offer(check, offered, verb)
     options = [_option("load_spool", material=want.material, colour=name, hex6=want.hex6 if name else None)]
-    for p, t in stand_ins.items():
+    for t in stand_ins.values():
         options.append(_option("reslice_for", tray=t, material=t.material, colour=_colour_name(t.hex6) if t.hex6 else None,
-                               hex6=t.hex6, **fits[p],
-                               **({"goal_check_missed": missed} if missed else {})))
+                               hex6=t.hex6, **check.fields(t.material)))
     return SpoolMiss("AMS_MATERIAL_NOT_LOADED", message, options)
+
+
+def first_spool_said(file_material: str | None, tray: Tray) -> str | None:
+    """What a door says when a file that names only its own plastic prints from *tray*, the first spool loaded."""
+    if not file_material or str(file_material).upper() == UNREAD_MATERIAL:
+        return None
+    slot = tray.name or str(tray.slot + 1)
+    if same_plastic(file_material, tray.material) is True:
+        spool = _spool(_colour_name(tray.hex6) if tray.hex6 else None, tray.material)
+        return f"Printing from slot {slot}, {spool}: the first spool loaded."
+    return (f"This file was made for {plastic_words(file_material)}, but no plastic was named, so it would print "
+            f"from the first spool loaded: slot {slot}, which holds {plastic_words(tray.material)}. "
+            "If that's not what you want, cancel and tell me which slot to use.")
 
 
 def _parts_missing(wanted: list[Filament], trays: list[Tray], plan: AmsPlan, names: list[str | None],
