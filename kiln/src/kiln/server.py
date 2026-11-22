@@ -9628,12 +9628,13 @@ def _refuse_undriven_multi_material(
     )
 
 
-def _material_not_loaded(material: str, trays: list[Any], warnings: list[str]) -> dict[str, Any]:
-    """The blocked decision for a job whose plastic no loaded spool is."""
+def _material_not_loaded(wanted: str, trays: list[Any], warnings: list[str]) -> dict[str, Any]:
+    """The blocked decision for a job no loaded spool is the plastic of;
+    *wanted* names it ("PC", "teal PLA")."""
     loaded = ", ".join(t.label for t in trays)
     said = (
-        f"This print is for {material} and no loaded spool is {material}. Loaded: {loaded}. "
-        f"Load a {material} spool and call again, or pass an explicit ams_mapping to print "
+        f"This print needs {wanted} and no loaded spool is {wanted}. Loaded: {loaded}. "
+        f"Load a {wanted} spool and call again, or pass an explicit ams_mapping to print "
         "from a spool you choose."
     )
     logger.warning("AMS routing blocked: %s", said)
@@ -9909,6 +9910,11 @@ def _resolve_use_ams(
             if asked is not None:
                 decision["colour"] = _asked_colour_block(asked, "loaded", plan, trays)
             return decision
+        if asked is not None and len(wanted) == 1 and wanted[0].material and plan_ams_mapping(
+            [_Filament(hex6=wanted[0].hex6)], trays,
+        ).ok:
+            # The colour is loaded, in another plastic.
+            return _material_not_loaded(f"{asked.name} {wanted[0].material}", trays, plan.warnings)
         if asked is not None and len(wanted) == 1:
             # None of the loaded spools is the colour the part was asked for.
             # Held, with the nearest spool named: the person says "print it

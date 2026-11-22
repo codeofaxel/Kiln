@@ -162,7 +162,15 @@ class TestThePrintGate:
         assert out["blocked"] is True and out["ams_mapping"] is None
         assert out["code"] == "AMS_MATERIAL_NOT_LOADED"
         said = out["warnings"][0]
-        assert "is for PC" in said and "white PLA-CF in slot A1" in said and "Load a PC spool" in said
+        assert "needs PC" in said and "white PLA-CF in slot A1" in said and "Load a PC spool" in said
+
+    def test_the_asked_colour_loaded_in_another_plastic_is_said_as_that(self, tmp_path):
+        gcode = tmp_path / "part.gcode"
+        gcode.write_text("G28\n; filament_colour = #FFFFFF\n; filament_type = PLA\n")
+        dc.record(str(gcode), dc.ShownColour("teal", "#008080"))
+        out = _resolve(_ams(("PETG", "008080FF"), ("PLA", WHITE)), material="PLA", file_path=str(gcode))
+        assert out["blocked"] is True and out["code"] == "AMS_MATERIAL_NOT_LOADED"
+        assert "no loaded spool is teal PLA" in out["warnings"][0]
 
     def test_a_cf_pla_job_does_not_take_plain_pla(self):
         assert _resolve(_ams(("PLA", WHITE)), material="cf_pla")["blocked"] is True
