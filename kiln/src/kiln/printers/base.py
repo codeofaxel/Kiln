@@ -2307,6 +2307,18 @@ class PrinterAdapter(ABC):
         from kiln import print_keeping
 
         keep_record = print_keeping.requested(kwargs.pop("keep_record", None))
+        # The plate printed is worked out once, here: the gate, every reader
+        # and the printer's own command all read this value.
+        from kiln.printers.print_gate import PLATE_NUMBER_REFUSED, printed_plate_number
+
+        try:
+            plate_number = printed_plate_number(kwargs)
+        except ValueError as exc:
+            return CodedPrintResult(
+                success=False, message=str(exc), refused_before_send=True, code=PLATE_NUMBER_REFUSED,
+            )
+        if "plate_number" in kwargs:
+            kwargs = {**kwargs, "plate_number": plate_number}
         quiet_contract = _quiet_start_contract(file_name, kwargs)
         if quiet_contract is not None:
             from kiln.plate_state import quiet_start_flags

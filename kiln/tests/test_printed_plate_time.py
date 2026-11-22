@@ -60,10 +60,12 @@ def test_plate_ten_is_read_as_plate_ten_not_by_name_order(kiln_env):  # noqa: F8
 
 
 def test_a_plate_the_file_does_not_hold_writes_no_time(kiln_env):  # noqa: F811 -- the imported fixture
-    path = _project(kiln_env, {1: "1h 0m 0s", 2: "3h 0m 0s"})
-    _Adapter().start_print(path, plate_number=3)
+    from kiln.learned_print_time import slicer_seconds_for
 
-    assert _row()["estimated_seconds"] is None
+    path = _project(kiln_env, {1: "1h 0m 0s", 2: "3h 0m 0s"})
+
+    assert slicer_seconds_for(path, 3) is None
+    assert _Adapter().start_print(path, plate_number=3).success is False
 
 
 def test_with_no_plate_named_several_plates_give_no_ones_lines(tmp_path):

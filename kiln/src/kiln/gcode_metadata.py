@@ -136,30 +136,45 @@ def sliced_gcode_member(zf: zipfile.ZipFile) -> str | None:
     return (plates or names or [None])[0]
 
 
-#: A plate's G-code in a sliced 3MF, as Bambu Studio and OrcaSlicer name it.
-_PLATE_GCODE = re.compile(r"^metadata/plate_(\d+)\.gcode$", re.I)
+#: A plate's G-code in a sliced 3MF, spelled exactly as the printer asks
+#: for it (``Metadata/plate_2.gcode``): case as written, no leading zero.
+_PLATE_GCODE = re.compile(r"^Metadata/plate_([1-9]\d*)\.gcode$")
+
+#: Any member that could be taken for a plate's G-code: another case, a
+#: leading slash or zero.
+_PLATE_GCODE_LOOSE = re.compile(r"^/?metadata/plate_0*(\d+)\.gcode$", re.I)
 
 
 def plate_gcode_members(zf: zipfile.ZipFile) -> list[tuple[int, str]]:
     """Every plate's G-code a sliced 3MF carries, as ``(plate number,
-    member)`` in plate order.  An archive whose one G-code member is not
-    named for a plate holds it as plate 1; one holding several such members
-    and no plate names lists none, since which is which is not stated."""
-    names = [n for n in zf.namelist() if n.lower().endswith(".gcode")]
-    plates = sorted(
-        (int(m.group(1)), n) for n in names if (m := _PLATE_GCODE.match(n))
-    )
-    if plates:
-        return plates
-    return [(1, names[0])] if len(names) == 1 else []
+    member)`` in plate order, by the exact name the printer asks for.  A
+    plate that two members could answer to is left out
+    (:func:`plate_member_ambiguous`)."""
+    names = zf.namelist()
+    plates = sorted((int(m.group(1)), n) for n in names if (m := _PLATE_GCODE.match(n)))
+    return [(number, name) for number, name in plates if not plate_member_ambiguous(zf, number)]
+
+
+def plate_member_ambiguous(zf: zipfile.ZipFile, plate_number: int) -> bool:
+    """Whether more than one member of the archive could be taken for plate
+    *plate_number*'s G-code (``Metadata/plate_2.gcode`` beside
+    ``metadata/Plate_02.gcode``): which one prints cannot be told."""
+    found = 0
+    for name in zf.namelist():
+        m = _PLATE_GCODE_LOOSE.match(name)
+        if m is not None and int(m.group(1)) == plate_number:
+            found += 1
+    return found > 1
 
 
 def plate_gcode_member(zf: zipfile.ZipFile, plate_number: int | None) -> str | None:
     """The G-code a sliced 3MF prints for plate *plate_number*, or ``None``.
 
-    With no plate named, the archive's only plate; ``None`` when it holds
-    several (which one is printed is not known), when it lacks the plate
-    named, or when it holds no G-code.  Never another plate's, never all."""
+    The member is the one the printer asks for, by its exact name.  With no
+    plate named, the archive's only plate; ``None`` when it holds several
+    (which one is printed is not known), when it lacks the plate named or
+    two members could answer to it, or when it holds no G-code.  Never
+    another plate's, never all."""
     plates = plate_gcode_members(zf)
     if plate_number is None:
         return plates[0][1] if len(plates) == 1 else None

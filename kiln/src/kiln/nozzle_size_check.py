@@ -94,13 +94,15 @@ def _sizes_in(lines: list[str] | None) -> set[float]:
 def _plate_sizes(job_path: str, plate_number: int | None) -> list[set[float]]:
     """The nozzle sizes each plate that may print states, one set per plate.
 
-    With *plate_number* named, that plate alone (none when the file lacks
-    it).  With none named, every plate of a sliced 3MF: which one prints is
+    With *plate_number* named, that plate alone.  With none named, or one
+    the file does not hold, every plate of a sliced 3MF: which one prints is
     not known, so each is checked."""
-    from kiln.file_metadata import every_plate_gcode_lines, printed_gcode_lines
+    from kiln.file_metadata import every_plate_gcode_lines, plate_of_print, printed_gcode_lines
 
-    if plate_number is not None:
+    if plate_number is not None and plate_of_print(job_path, plate_number) is not None:
         return [_sizes_in(printed_gcode_lines(job_path, plate_number))]
+    # No plate named, or the one named is not one the file holds by the
+    # name the printer asks for: every plate is checked, never none.
     return [_sizes_in(lines) for lines in every_plate_gcode_lines(job_path) or []]
 
 

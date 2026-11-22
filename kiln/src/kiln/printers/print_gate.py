@@ -920,11 +920,68 @@ _CHUTE_MATCH_MM = 0.5
 _PAIRING_CODES = frozenset({NOZZLE_SIZE_MISMATCH, FILAMENT_SLOTS_CODE, CHUTE_MISMATCH_CODE, PRINTER_MODEL_MISMATCH})
 
 
-def _plate_number(kwargs: dict[str, Any]) -> int:
-    try:
-        return max(1, int(kwargs.get("plate_number") or 1))
-    except (TypeError, ValueError):
+#: The code a start carries when its plate number is not a plate number.
+PLATE_NUMBER_REFUSED = "PLATE_NUMBER_REFUSED"
+
+#: The code a start carries when the file holds no plate the printer would
+#: print under the number asked for, or two members that could be it.
+PLATE_NOT_IN_FILE = "PLATE_NOT_IN_FILE"
+
+
+def printed_plate_number(kwargs: dict[str, Any]) -> int:
+    """The plate a start prints: ``plate_number`` as given, 1 when none is.
+
+    The one resolution every gate, reader and printer command uses, so the
+    plate checked is the plate printed.
+
+    :raises ValueError: in plain words, for anything but a whole number from
+        1 up (a string, a float, zero, a negative, ``True``).
+    """
+    value = kwargs.get("plate_number")
+    if value is None:
         return 1
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            f"The plate to print has to be a whole number from 1 up, the plate's number as the slicer "
+            f"shows it; {value!r} is not one, so nothing was started."
+        )
+    return value
+
+
+def _plate_number(kwargs: dict[str, Any]) -> int:
+    return printed_plate_number(kwargs)
+
+
+def _printed_plate_verdict(job_path: str, file_name: str, plate_number: int) -> dict[str, Any] | None:
+    """A refusal when the sliced 3MF at *job_path* holds G-code but not the
+    member the printer asks for plate *plate_number*, or holds two members
+    that could answer to it; ``None`` for anything else.  The printer would
+    fail on a missing plate, or print a plate no check has read."""
+    if not str(job_path).lower().endswith(".3mf"):
+        return None
+    from kiln.gcode_metadata import plate_gcode_members, plate_member_ambiguous
+    from kiln.untrusted_zip import UntrustedZipFile
+
+    with UntrustedZipFile(job_path) as zf:
+        if not any(n.lower().endswith(".gcode") for n in zf.namelist()):
+            return None
+        ambiguous = plate_member_ambiguous(zf, plate_number)
+        plates = [number for number, _ in plate_gcode_members(zf)]
+    if plate_number in plates:
+        return None
+    name = os.path.basename(str(file_name))
+    if ambiguous:
+        reason = (
+            f"{name} holds more than one file that could be plate {plate_number}, so Kiln cannot tell which "
+            "one the printer would print; it was not started. Save the project again from its slicer."
+        )
+    else:
+        listed = ", ".join(str(n) for n in plates) or "none Kiln can read"
+        reason = (
+            f"{name} has no plate {plate_number} (its plates: {listed}), so the printer would have nothing "
+            "to print, or another plate than the one checked; it was not started. Name one of its plates."
+        )
+    return {"ok": False, "blocked": True, "code": PLATE_NOT_IN_FILE, "reason": reason}
 
 
 def _plate_colours(job_path: str, plate_number: int) -> list[str]:
@@ -1611,6 +1668,10 @@ def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any], *, keep: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Universal print-time backstop, called from ``PrinterAdapter.start_print``."""
+    try:
+        plate_number = printed_plate_number(kwargs)
+    except ValueError as exc:
+        return {"ok": False, "blocked": True, "code": PLATE_NUMBER_REFUSED, "reason": str(exc)}
     if _is_resume_print(file_name, kwargs, adapter=adapter):
         return None
 
@@ -1627,6 +1688,8 @@ def run_adapter_gate(
         except _ReadBackFailed as exc:
             return _read_back_refusal(file_name, printer_id, str(exc), override)
     inspected = job if job is not None else fetched
+    if inspected and (missing := _printed_plate_verdict(inspected, file_name, plate_number)):
+        return missing
     from kiln.hardware_stops import stage as _stage_hardware_plan
 
     _stage_hardware_plan(adapter, file_name, inspected)
