@@ -60,29 +60,6 @@ def technical_words(text: Any) -> list[str]:
     return [name for name, pattern in _PATTERNS if pattern.search(judged)]
 
 
-def person_sentences(reply: Any) -> list[tuple[str, str]]:
-    """``(field, sentence)`` for every person-facing sentence of *reply*:
-    its own fields, and ``error`` / ``remedy`` written as a block."""
-    if not isinstance(reply, dict):
-        return []
-    found: list[tuple[str, str]] = []
-    for field in PERSON_FIELDS:
-        value = reply.get(field)
-        if isinstance(value, str):
-            found.append((field, value))
-        elif isinstance(value, dict):
-            for inner in ("message", "error", "sentence"):
-                if isinstance(value.get(inner), str):
-                    found.append((f"{field}.{inner}", value[inner]))
-    return found
-
-
-def unplain(reply: Any) -> list[tuple[str, str, list[str]]]:
-    """``(field, sentence, kinds)`` for each person-facing sentence of
-    *reply* that carries technical words.  ``[]`` when it speaks plainly."""
-    return [(f, s, kinds) for f, s in person_sentences(reply) if (kinds := technical_words(s))]
-
-
 #: The kind a marked code name answers; every other kind is wording.
 CODE_NAME = "a code name"
 #: Python's own failures whose text is never a sentence, whatever words it
@@ -197,5 +174,5 @@ def reworded(message: str, exc: BaseException | None) -> tuple[str, str | None]:
 
 __all__ = [
     "CODE_NAME", "DETAIL_FIELD", "PERSON_FIELDS", "detail_field", "detail_of",
-    "person_sentences", "reworded", "said", "sentence", "technical_words", "unplain",
+    "reworded", "said", "sentence", "technical_words",
 ]

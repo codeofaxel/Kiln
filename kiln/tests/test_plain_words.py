@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from kiln.plain_words import said, technical_words, unplain
+from kiln.plain_words import said, technical_words
 from kiln.server import _error_dict
 
 
@@ -75,12 +75,6 @@ def test_said_gives_a_sentence_for_a_door_that_builds_its_own_reply():
     except KeyError as exc:
         assert said(exc) == "something went wrong inside Kiln (not something you did)"
     assert said(ValueError("That size is too large for the bed.")) == "That size is too large for the bed."
-
-
-def test_unplain_reads_every_field_a_person_reads():
-    reply = {"success": False, "error": {"message": "minkowski() has no analytic B-rep form"},
-             "remedy": {"message": "Try a simpler shape."}, "detail": "KeyError: 'x'"}
-    assert [field for field, _s, _k in unplain(reply)] == ["error.message"]
 
 
 def test_a_reply_gains_a_detail_only_when_its_sentence_was_reworded():
