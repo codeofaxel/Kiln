@@ -24,6 +24,7 @@ SMALL = b"solid one\nfacet normal 0 0 1\nendsolid one\n"
 BIG = b"solid two\n" + b"facet normal 1 0 0\n" * 40 + b"endsolid two\n"
 OTHER = b"solid three\nfacet normal 0 1 0\nendsolid three\n"
 LIMIT = len(BIG) - 1
+OFFER = {"said": "The account's own offer.", "tool": "simplify_mesh_model", "size_param": "max_megabytes"}
 MB = 1024 * 1024
 
 
@@ -34,8 +35,8 @@ def _sha(data: bytes) -> str:
 class _Account:
     """The cloud routes a push meets; every call is kept."""
 
-    def __init__(self, *, states_limit: bool = True) -> None:
-        self.states_limit = states_limit
+    def __init__(self, *, states_limit: bool = True, offers: bool = False) -> None:
+        self.states_limit, self.offers = states_limit, offers
         self.calls: list[tuple[str, str, object]] = []
         self.pushed: dict | None = None
 
@@ -45,6 +46,8 @@ class _Account:
             answer = {"stored": []}
             if self.states_limit and (body or {}).get("model_limit") is True:
                 answer["model_limit"] = {"max_bytes": LIMIT, "keeps_record": True}
+                if self.offers:
+                    answer["model_limit"]["offer"] = dict(OFFER)
             return answer
         if method == "PUT":
             if content is not None and len(content) > LIMIT:
@@ -170,3 +173,24 @@ def test_a_record_without_its_model_reads_as_kept_on_the_computer_that_made_it(h
     assert "version 2" in said and "53.1 MB" in said and "up to 50 MB" in said
     assert "kept on the computer it was made on" in said
     assert got["said_models"] == said
+
+
+def test_the_accounts_offer_is_said_once_with_the_one_call_that_does_it(lamp, monkeypatch):
+    monkeypatch.setattr(courier, "_request", _Account(offers=True))
+
+    pushed = courier.push("cloud_push_branch", "lamp")
+
+    (stayed,) = pushed["models_stayed_here"]
+    assert pushed["said_models"] == f"{stayed} {OFFER['said']}"
+    (offer,) = pushed["slim_offers"]
+    assert offer["tool"] == "simplify_mesh_model" and offer["needs_your_yes"] is True
+    assert offer["arguments"]["file_path"].endswith(".stl")
+    assert offer["arguments"]["max_megabytes"] == round(LIMIT / MB, 1)
+
+
+def test_an_account_that_makes_no_offer_gets_none_said(lamp, monkeypatch):
+    monkeypatch.setattr(courier, "_request", _Account())
+
+    pushed = courier.push("cloud_push_branch", "lamp")
+
+    assert "slim_offers" not in pushed

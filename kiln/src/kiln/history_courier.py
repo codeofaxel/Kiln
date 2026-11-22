@@ -1175,6 +1175,11 @@ def push(
         # and where its model is.
         out["models_stayed_here"] = _said_models_stayed(body, stayed)
         out["said_models"] = " ".join(out["models_stayed_here"])
+        offers = _slim_offers(stayed)
+        if offers:
+            # The account's offer of a slimmer copy, said once.
+            out["slim_offers"] = offers
+            out["said_models"] += " " + offers[0]["said"]
     # The numbers the account gave the versions it now holds, taken here;
     # the proven recipes are read after, so each goes to the account under
     # its version's number there.
@@ -1402,7 +1407,7 @@ def _carry_models(body: dict[str, Any], meshes: dict[str, Path]) -> None:
 def _send_models(
     tool: str, body: dict[str, Any], meshes: dict[str, Path], *, design_id: str = "",
     left_out: dict[str, Path] | None = None,
-) -> tuple[dict[str, Any] | None, dict[str, dict[str, str]] | None, dict[str, dict[str, int]]]:
+) -> tuple[dict[str, Any] | None, dict[str, dict[str, str]] | None, dict[str, dict[str, Any]]]:
     """Put each model a push uses in the person's account once, by fingerprint.
 
     Asks which of them the account keeps, sends only the missing ones, one a
@@ -1424,7 +1429,9 @@ def _send_models(
     pushed then).  *listed* is the account's notes, ``{sha256: {suffix:
     fingerprint}}``, or ``None`` when any answer listed none (or the models
     went inside *body*): then no note is carried.  *stayed* is ``{version_id:
-    {"bytes", "limit_bytes"}}`` for each version sent without its model.
+    {"bytes", "limit_bytes", "path", "offer"}}`` for each version sent
+    without its model: its size, the limit, where its file is, and the
+    account's offer of a slimmer copy when its answer made one.
     """
     shas: dict[str, str] = {}
     for version_id, mesh in meshes.items():
@@ -1442,6 +1449,7 @@ def _send_models(
     kept: set[str] = set()
     listed: dict[str, dict[str, str]] | None = {}
     limit = 0
+    offer: dict[str, str] = {}
     # Asked even with no model to send, when one was left out of this
     # computer's history: the answer states the account's limit.
     asks = range(0, max(len(wanted), 1 if left_out else 0), _MAX_FINGERPRINTS_ASKED)
@@ -1466,7 +1474,8 @@ def _send_models(
         batch = _notes_listed(answer)
         listed = None if batch is None or listed is None else {**listed, **batch}
         limit = _model_limit(answer) or limit
-    stayed: dict[str, dict[str, int]] = {}
+        offer = _slim_offer(answer) or offer
+    stayed: dict[str, dict[str, Any]] = {}
     for version_id, sha in shas.items():
         if sha in kept:
             continue
@@ -1476,7 +1485,7 @@ def _send_models(
             except OSError:
                 size = 0
             if size > limit:
-                stayed[version_id] = {"bytes": size, "limit_bytes": limit}
+                stayed[version_id] = {"bytes": size, "limit_bytes": limit, "path": str(meshes[version_id]), "offer": offer}
                 continue
         answer = _request(tool, "PUT", f"/api/cloud/meshes/{sha}", content=meshes[version_id].read_bytes())
         if answer.get("status") == "error":
@@ -1496,7 +1505,7 @@ def _send_models(
             size = path.stat().st_size
             if size > limit:
                 shas[version_id] = _file_sha256(path)
-                stayed[version_id] = {"bytes": size, "limit_bytes": limit}
+                stayed[version_id] = {"bytes": size, "limit_bytes": limit, "path": str(path), "offer": offer}
         except OSError:
             continue
     for version in body["versions"]:
@@ -1516,6 +1525,39 @@ def _model_limit(answer: dict[str, Any]) -> int:
         return 0
     most = said.get("max_bytes")
     return most if isinstance(most, int) and not isinstance(most, bool) and most > 0 else 0
+
+
+def _slim_offer(answer: dict[str, Any]) -> dict[str, str]:
+    """The offer the account makes for a model past its limit: its sentence,
+    the tool that does it and the parameter that names a size, each as the
+    account worded it; ``{}`` when its answer makes none."""
+    said = answer.get(_MODEL_LIMIT)
+    offer = said.get("offer") if isinstance(said, dict) else None
+    if not isinstance(offer, dict):
+        return {}
+    wanted = {key: offer.get(key) for key in ("said", "tool", "size_param")}
+    return wanted if all(isinstance(v, str) and v for v in wanted.values()) else {}
+
+
+def _slim_offers(stayed: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """The one call that makes a slimmer copy, for each model that stayed
+    here, when the account offered one.  Shown first, saved on a yes."""
+    offers = []
+    for version_id, fact in stayed.items():
+        offer = fact.get("offer") or {}
+        if not offer:
+            continue
+        offers.append({
+            "version_id": version_id,
+            "said": offer["said"],
+            "tool": offer["tool"],
+            "arguments": {
+                "file_path": fact["path"],
+                offer["size_param"]: round(fact["limit_bytes"] / (1024 * 1024), 1),
+            },
+            "needs_your_yes": True,
+        })
+    return offers
 
 
 def _megabytes(size: int) -> str:
