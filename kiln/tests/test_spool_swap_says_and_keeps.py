@@ -291,6 +291,20 @@ def _real_printer(reading: dict[str, Any], files: tuple[str, ...]) -> Any:
 
 
 class TestTheChoiceLandsOnThePartsHistory:
+    def test_the_third_choice_of_a_colour_miss_carries_the_part_and_its_plastic(self, monkeypatch, tmp_path):
+        from tests.test_spool_miss_says_and_offers import ORANGE, TestSliceAndPrint
+
+        _served(monkeypatch, plan_line=None, rows=[{"material": "PETG", "suits": True, "why": None, "offer": True}])
+        reading = _ams(("PLA", WHITE), ("PLA", ORANGE), ("PETG", RED))
+        out, printer, model = TestSliceAndPrint()._run(tmp_path, reading, types="PLA", asked="red", material="PLA",
+                                                       version_id="v-part", branch_id="b-main")
+        assert out["error"]["code"] == "COLOR_NOT_LOADED" and printer.started == []
+        assert "re-slice it for the red PETG in slot A3" in out["error"]["message"]
+        third = next(o for o in out["options"] if o["action"] == "reslice_for")
+        assert third["call"] == {"tool": "reprint_with_material", "arguments": {
+            "file_path": model, "material_id": "petg", "ams_mapping": [2], "version_id": "v-part",
+            "branch_id": "b-main", "in_place_of": "PLA", "chosen_by": "person"}}
+
     def test_a_re_slice_taken_from_start_print_is_kept_on_the_version_in_its_real_plastic(self, kiln_home):
         import kiln.server as srv
         from kiln.persistence import get_db
