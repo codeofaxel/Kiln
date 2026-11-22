@@ -27,6 +27,13 @@ plan away, nor to grant one: the last answer the account gave holds for
 :data:`PAID_PLAN_OFFLINE_GRACE_S`, and after that a paid plan reads as Free
 until the account answers again.  A sign-in the server has refused grants
 no paid plan at all (``kiln.auth_session.session_rejected``).
+
+A paid plan counts only as Kiln's servers stated it
+---------------------------------------------------
+The servers sign the plan they tell this computer (``kiln.plan_proof``).  A
+paid plan whose proof does not verify, names another account, or has run
+out reads as Free; so does an answer from anything that cannot sign.  The
+proof's own window is the offline allowance for a proven plan.
 """
 
 from __future__ import annotations
@@ -37,6 +44,14 @@ import logging
 import threading
 import time
 from typing import Any
+
+from kiln.plan_proof import (
+    PROOF_FIELD,
+    plan_is_proven,
+    proof_fields,
+    proof_present,
+    unproven_plan_still_honoured,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +171,12 @@ def _saved_plan(stored: dict, now: float) -> LicenseTier:
     plan = _as_tier(stored.get("tier"))
     if plan is LicenseTier.FREE:
         return plan
+    # A paid plan counts while the proof saved beside it verifies; the proof
+    # carries its own window.  A proof that does not verify never counts.
+    if plan_is_proven(stored, plan.value, now):
+        return plan
+    if proof_present(stored) or not unproven_plan_still_honoured(now):
+        return LicenseTier.FREE
     # A sign-in that carries no stamp cannot be timed, so it is asked about
     # (see ``get_tier``) but not expired: only a known age runs out.
     checked = _checked_at(stored)
@@ -257,6 +278,7 @@ def refresh_plan(*, min_interval_s: float = 0.0) -> LicenseTier:
         _last_ask_answered = answer is not None
         if answer is None:
             return _saved_plan(_read_tokens(), now)
+        stored: dict = {}
         try:
             # Re-read: the session resolver may have rotated the tokens.
             stored = _read_tokens()
@@ -264,6 +286,12 @@ def refresh_plan(*, min_interval_s: float = 0.0) -> LicenseTier:
                 stamp = int(time.time())
                 stored["tier"] = _as_tier(answer.get("tier")).value
                 stored["has_entitlement"] = bool(answer.get("has_entitlement"))
+                # The proof travels with the plan it proves; an answer with
+                # none leaves none behind.
+                stored.pop(PROOF_FIELD, None)
+                stored.update(proof_fields(answer))
+                if not str(stored.get("auth_uid") or "").strip() and answer.get("auth_uid"):
+                    stored["auth_uid"] = str(answer["auth_uid"])
                 # The paid plan this account had and no longer does, as the
                 # account says it: a refusal tells its owner the thing was
                 # part of that plan, never sells it to them again.
@@ -279,7 +307,9 @@ def refresh_plan(*, min_interval_s: float = 0.0) -> LicenseTier:
                 _write_tokens(stored)
         except Exception:  # noqa: BLE001 — unsaved is still answered
             logger.debug("account plan: could not save the answer", exc_info=True)
-        return _as_tier(answer.get("tier"))
+        # The plan is what the answer proves, read the way every later ask
+        # reads it: an answer that proves nothing raises nothing.
+        return _saved_plan(stored, time.time())
 
 
 def get_tier() -> LicenseTier:
@@ -298,10 +328,13 @@ def get_tier() -> LicenseTier:
             return LicenseTier.FREE
         plan = _saved_plan(stored, now)
         saved_tier = _as_tier(stored.get("tier"))
+        # A paid plan saved without a proof that verifies is asked about as
+        # soon as a Free one, so the account's proof arrives promptly.
         fresh_for = (
-            FREE_PLAN_FRESH_FOR_S
-            if saved_tier is LicenseTier.FREE
-            else PAID_PLAN_FRESH_FOR_S
+            PAID_PLAN_FRESH_FOR_S
+            if saved_tier is not LicenseTier.FREE
+            and plan_is_proven(stored, saved_tier.value, now)
+            else FREE_PLAN_FRESH_FOR_S
         )
         if now - _checked_at(stored) > fresh_for:
             return refresh_plan(min_interval_s=fresh_for)

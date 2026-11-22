@@ -970,6 +970,22 @@ def _isolate_saved_printers():
 
 
 @pytest.fixture(autouse=True)
+def _unproven_saved_plans_stay_honoured(monkeypatch):
+    """Keep a paid plan saved with no proof counting, whatever today's date.
+
+    Many tests write a paid plan into a sign-in file without a proof.  The
+    package honours such a plan only until a fixed date, so without this they
+    would all turn red on that day.  Tests of the proof itself set the date
+    back themselves (``tests/test_plan_proof.py``).
+    """
+    try:
+        import kiln.plan_proof as _plan_proof
+    except ImportError:
+        return
+    monkeypatch.setattr(_plan_proof, "UNPROVEN_PLAN_HONOURED_UNTIL", float("inf"))
+
+
+@pytest.fixture(autouse=True)
 def _bypass_license_tier(monkeypatch, tmp_path):
     """Ensure all tests run with tier checks bypassed by default.
 
