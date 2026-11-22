@@ -5,7 +5,7 @@
 # baseline:  present when the gate was added; listed, not judged.  The list
 #            only shrinks: a table leaves it when it is served instead, or
 #            when it earns a keep row.  A new table may not join it.
-baseline_count: 23
+baseline_count: 21
 keep:
   'gcode.py::_MATERIAL_TEMPS':
     door: the live-printer filament load, unload, purge and wipe commands
@@ -20,7 +20,6 @@ baseline:
   - 'ambient_safety.py::_ALIASES'
   - 'ambient_safety.py::_MATERIAL_THERMAL_PROFILES'
   - 'cli/main.py::_MATERIAL_ALIASES'
-  - 'cli/main.py::_MATERIAL_TEMPS'
   - 'cost_estimator.py::BUILTIN_MATERIALS'
   - 'data/design_knowledge/environment_compatibility.json::(top)'
   - 'data/design_knowledge/load_tables.json::(top)'
@@ -34,7 +33,6 @@ baseline:
   - 'design_reasoning.py::_MATERIAL_DEFAULTS'
   - 'emboss_generator.py::MATERIAL_DEPTHS'
   - 'materials.py::MATERIAL_TEMPS'
-  - 'materials.py::_MATERIAL_ALIASES'
   - 'printability.py::_UNVOUCHED_ON_A_STANDARD_BED'
   - 'printers/bambu_3mf.py::_TABLE_ROW_TO_BAMBU'
   - 'server.py::mat_aliases'

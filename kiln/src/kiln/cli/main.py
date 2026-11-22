@@ -3228,18 +3228,10 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
     Optionally validates a local G-code file with --file.
     Use --material to verify temperatures match the filament type.
     """
+    # The material ranges the live-printer G-code checks read, so the two
+    # never disagree: (tool_min, tool_max, bed_min, bed_max).
+    from kiln.gcode import _MATERIAL_TEMPS
     from kiln.printers.base import PrinterStatus
-
-    # Material temperature ranges (tool_min, tool_max, bed_min, bed_max)
-    _MATERIAL_TEMPS: dict[str, tuple] = {
-        "PLA": (180, 220, 40, 70),
-        "PETG": (220, 260, 60, 90),
-        "ABS": (230, 270, 90, 115),
-        "TPU": (210, 240, 30, 60),
-        "ASA": (230, 270, 90, 115),
-        "Nylon": (240, 280, 60, 80),
-        "PC": (260, 310, 90, 120),
-    }
 
     try:
         adapter = _get_adapter_from_ctx(ctx)
@@ -3314,7 +3306,7 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
                     and not (tool_min <= state.tool_temp_target <= tool_max)
                 ):
                     mat_warnings.append(
-                        f"Tool target ({state.tool_temp_target:.0f}C) outside {material} range ({tool_min}-{tool_max}C)"
+                        f"Tool target ({state.tool_temp_target:.0f}C) outside {material} range ({tool_min:g}-{tool_max:g}C)"
                     )
 
                 if (
@@ -3323,7 +3315,7 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
                     and not (bed_min <= state.bed_temp_target <= bed_max)
                 ):
                     mat_warnings.append(
-                        f"Bed target ({state.bed_temp_target:.0f}C) outside {material} range ({bed_min}-{bed_max}C)"
+                        f"Bed target ({state.bed_temp_target:.0f}C) outside {material} range ({bed_min:g}-{bed_max:g}C)"
                     )
 
                 mat_ok = len(mat_warnings) == 0
