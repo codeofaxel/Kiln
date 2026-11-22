@@ -1100,6 +1100,8 @@ def _planned(block: dict[str, Any], notes: Mapping[str, Any], said: list[str]) -
     """*block* as a slice whose ranges a planner chose: who chose them, what
     the planner says of the whole part, and its one question."""
     block["picked_by"] = PICKED_BY_KILN
+    block["headline"] = _headline(block)
+    said = [block["headline"], *said]
     lines = [str(line) for line in notes.get("said") or [] if line]
     if lines:
         block["notes"] = lines
@@ -1109,6 +1111,30 @@ def _planned(block: dict[str, Any], notes: Mapping[str, Any], said: list[str]) -
         lines = [*lines, str(ask["question"])]
     block["said"] = " ".join([*said, *lines]).strip()
     return block
+
+
+def _headline(block: Mapping[str, Any]) -> str:
+    """One line a person reads first: how many heights Kiln changed, which
+    way, and what it did to the slicer's time."""
+    ranges = [one for one in block.get("ranges") or [] if isinstance(one, Mapping)]
+    asked = [one.get("asked") or {} for one in ranges]
+    gentle = sum(1 for one in asked if "max_mm_s" in one or ("max_acceleration_mm_s2" in one and "percent" not in one))
+    quicker = sum(1 for one in asked if one.get("lines") == INSIDE_LINES)
+    if not ranges:
+        return "Kiln changed no speeds for this part."
+    parts = []
+    if gentle:
+        parts.append(f"{gentle} {'stretch' if gentle == 1 else 'stretches'} gently")
+    if quicker:
+        parts.append(f"{quicker} {'stretch' if quicker == 1 else 'stretches'} faster")
+    head = "Kiln prints " + " and ".join(parts) if parts else f"Kiln set speeds for {len(ranges)} heights"
+    with_wish, without = block.get("estimate_seconds"), block.get("estimate_without_seconds")
+    if isinstance(with_wish, int) and isinstance(without, int) and with_wish != without:
+        from kiln.generation.validation import _human_duration
+
+        change = "longer" if with_wish > without else "shorter"
+        head += f"; the print is about {_human_duration(float(abs(with_wish - without)))} {change}"
+    return head + "."
 
 
 def _noted(result: Any, block: dict[str, Any], out_file: str) -> Any:

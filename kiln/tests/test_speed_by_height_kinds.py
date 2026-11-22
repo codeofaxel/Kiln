@@ -206,7 +206,8 @@ class TestRangesAPlannerChose:
         assert block["picked_by"] == sbh.PICKED_BY_KILN and block["notes"] == ["One line about the whole part."]
         assert block["ask"]["question"] == "Does it carry load?"
         assert block["ranges"][0]["why"] == "Gentle. It can sway."
-        assert block["said"].startswith("4 mm to 8 mm: Gentle. It can sway. In the sliced file: applied.")
+        assert block["headline"] == "Kiln prints 1 stretch gently; the print is about 1m longer."
+        assert block["said"].startswith(block["headline"] + " 4 mm to 8 mm: Gentle. It can sway. In the sliced file: applied.")
         assert block["said"].endswith("One line about the whole part. Does it carry load?")
 
     def test_a_chosen_range_starts_and_ends_where_a_layer_does(self, tmp_path):
@@ -220,7 +221,8 @@ class TestRangesAPlannerChose:
         fake, result = _sliced(tmp_path, PLAIN, planner=plan)
         block = result.speed_by_height
         assert block["ranges"] == [] and block["picked_by"] == sbh.PICKED_BY_KILN
-        assert block["said"] == "This part is steady all the way up." and fake.options[-1] == ""
+        assert block["said"] == "Kiln changed no speeds for this part. This part is steady all the way up."
+        assert fake.options[-1] == ""
         assert block["estimate_seconds"] == block["estimate_without_seconds"] == 600
 
     def test_the_record_keeps_who_chose_and_the_sentence_says_so(self, tmp_path):
