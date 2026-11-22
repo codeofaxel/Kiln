@@ -307,6 +307,18 @@ def answer_or_missed(name: str, arguments: dict[str, Any]) -> tuple[dict[str, An
     return None, miss or Miss("unanswered")
 
 
+def missed_here() -> Any:
+    """The :class:`kiln.served_answer.Miss` this call is running for, when
+    it is the one Kiln's servers did not answer (:func:`here_after`), else
+    ``None``.  Asks nothing."""
+    held = _missed.get()
+    if held is _NOT_ASKED:
+        return None
+    from kiln.served_answer import Miss
+
+    return held or Miss("unanswered")
+
+
 def already_missed() -> bool:
     """Whether this call is one Kiln's servers were already asked for and did
     not answer (it is running inside :func:`here_after`), so nothing inside

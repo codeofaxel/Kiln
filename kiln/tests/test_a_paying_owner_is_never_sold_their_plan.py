@@ -239,7 +239,6 @@ def _say(door: str) -> str:
     from kiln.slicer_profiles import get_slicer_profile, slicer_profile_to_dict
 
     return {
-        "troubleshooting hint": lambda: _upgrade_hint("material_troubleshooting"),
         "post-processing hint": lambda: _upgrade_hint("post_processing"),
         "environment hint": lambda: _upgrade_hint("environment_compatibility"),
         "unestablished caution": lambda: unestablished_caution("load_tables", "No load figure was established here."),
@@ -266,7 +265,7 @@ PLAN_OF = {
     "window over two printers": "business",
 }
 DOORS = (
-    "troubleshooting hint", "post-processing hint", "environment hint", "unestablished caution",
+    "post-processing hint", "environment hint", "unestablished caution",
     "load-bearing warning", "load-bearing block", "bonding caveat", "edge finishing note",
     "decoration allowance", "slicer profile pointer", "spots beside a part", "always allow",
     "plan diagnostic", "chemical pointer", "QR code", "queue held to one printer", "window over two printers",
@@ -300,7 +299,6 @@ def test_a_door_sells_its_plan_only_to_someone_who_would_buy_it(caller, no_curat
 #: What a nudge beside an answer still says to someone whose plan includes
 #: what it points at: the caution, and nothing about the plan.
 STILL_SAID = {
-    "troubleshooting hint": "",
     "unestablished caution": "No load figure was established here.",
     "load-bearing warning": "doesn't account for cross-section shape",
     "load-bearing block": "This part looks load-bearing",

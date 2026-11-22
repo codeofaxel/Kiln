@@ -30,7 +30,6 @@ from kiln.design_intelligence import (
     _UPGRADE_HINT_ENVIRONMENT,
     _UPGRADE_HINT_POST_PROCESSING,
     _UPGRADE_HINT_TEMPLATES,
-    _UPGRADE_HINT_TROUBLESHOOTING,
     _engineering_overlay_loaded,
     _upgrade_hint,
     check_environment_compatibility,
@@ -65,7 +64,6 @@ class TestHintCopyHygiene:
     so a user (or MCP agent) reading the field can act on it directly."""
 
     @pytest.mark.parametrize("hint", [
-        _UPGRADE_HINT_TROUBLESHOOTING,
         _UPGRADE_HINT_POST_PROCESSING,
         _UPGRADE_HINT_ENVIRONMENT,
     ])
@@ -76,7 +74,6 @@ class TestHintCopyHygiene:
         )
 
     @pytest.mark.parametrize("hint", [
-        _UPGRADE_HINT_TROUBLESHOOTING,
         _UPGRADE_HINT_POST_PROCESSING,
         _UPGRADE_HINT_ENVIRONMENT,
     ])
@@ -87,7 +84,6 @@ class TestHintCopyHygiene:
         )
 
     @pytest.mark.parametrize("hint", [
-        _UPGRADE_HINT_TROUBLESHOOTING,
         _UPGRADE_HINT_POST_PROCESSING,
         _UPGRADE_HINT_ENVIRONMENT,
     ])
@@ -108,11 +104,17 @@ class TestFreeTierHintAttached:
     """When _engineering_overlay_loaded() returns False, every consumer
     tool attaches the corresponding upgrade_hint string."""
 
+    @patch("kiln.design_intelligence._kiln_pro_in_process", return_value=True)
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_troubleshoot_attaches_hint(self, _mock):
+    def test_troubleshooting_is_never_sold(self, _mock, _pro_here):
+        """No plan holds the fixes back (Kiln's servers give them to every
+        signed-in account), so a missing table is never an upgrade pitch.
+        An install without kiln-pro is told why instead
+        (TestPlainInstallTroubleshootingNote)."""
         result = troubleshoot_print_issue("pla")
         assert result is not None, "pla should resolve in the catalog"
-        assert result.upgrade_hint == _UPGRADE_HINT_TROUBLESHOOTING
+        assert result.upgrade_hint == ""
+        assert "pricing" not in str(result.to_dict())
 
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
     def test_post_processing_attaches_hint(self, _mock):
@@ -166,12 +168,13 @@ class TestToDictIncludesHint:
     missing field would silently strip the hint before it reaches the
     agent)."""
 
+    @patch("kiln.design_intelligence._kiln_pro_in_process", return_value=True)
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_troubleshoot_dict_carries_hint(self, _mock):
+    def test_troubleshoot_dict_carries_an_empty_hint(self, _mock, _pro_here):
         result = troubleshoot_print_issue("pla")
         d = result.to_dict()
         assert "upgrade_hint" in d
-        assert d["upgrade_hint"] == _UPGRADE_HINT_TROUBLESHOOTING
+        assert d["upgrade_hint"] == ""
 
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
     def test_post_processing_dict_carries_hint(self, _mock):
@@ -259,10 +262,6 @@ class TestHintNamesTheTierThatActuallyUnlocksIt:
         with _kiln_pro_says(None):
             assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
             assert (
-                _upgrade_hint("material_troubleshooting")
-                == _UPGRADE_HINT_TROUBLESHOOTING
-            )
-            assert (
                 _upgrade_hint("environment_compatibility") == _UPGRADE_HINT_ENVIRONMENT
             )
 
@@ -271,10 +270,6 @@ class TestHintNamesTheTierThatActuallyUnlocksIt:
         shipped yesterday."""
         with _kiln_pro_says(None, absent=True):
             assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
-            assert (
-                _upgrade_hint("material_troubleshooting")
-                == _UPGRADE_HINT_TROUBLESHOOTING
-            )
             assert (
                 _upgrade_hint("environment_compatibility") == _UPGRADE_HINT_ENVIRONMENT
             )
