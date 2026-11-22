@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import contextlib
 import errno
-import fcntl
 import os
 import shutil
 import subprocess
@@ -109,6 +108,8 @@ def _lift(stream: Any, opened: list[int]) -> Any:
     fd = stream if isinstance(stream, int) else stream.fileno()
     if fd > 2:
         return stream
+    import fcntl  # POSIX only, and only this path needs it: Windows imports the module without it
+
     copy = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 3)
     opened.append(copy)
     return copy
