@@ -487,6 +487,38 @@ def _refused_step(name: str, err: dict[str, Any], step_start: float) -> Pipeline
     )
 
 
+def _spool_step(
+    decision: dict[str, Any], step_start: float, *, model_path: str,
+    printer_name: str | None, material: str | None, identity: dict[str, str] | None = None,
+) -> PipelineStep:
+    """The start step for a print the loaded spools cannot supply: the gate's
+    sentence, and its choices carried out by ``run_reslice_and_print`` (a
+    slot) and ``reprint_with_material`` (another plastic, with *identity*)."""
+    from kiln.server import _mapping_of, _spool_calls, _swap_call
+
+    said = list(decision.get("warnings") or [])
+    data: dict[str, Any] = {"ams_plan": decision.get("plan"), "ams_warnings": said}
+    if decision.get("options"):
+        here = {"model_path": model_path, **({"printer_name": printer_name} if printer_name else {})}
+        data["code"] = decision.get("code")
+        data["options"] = _spool_calls(
+            decision["options"],
+            print_from=lambda o: {"tool": "run_reslice_and_print", "arguments": {
+                **here, **({"material": material} if material else {}), "ams_mapping": _mapping_of(o)}},
+            reslice=lambda o, asked: _swap_call(
+                o, asked, file_path=model_path,
+                here={"printer_name": printer_name} if printer_name else None, ids=identity,
+            ),
+        )
+    return PipelineStep(
+        name="start_print",
+        success=False,
+        message=" ".join(said) if decision.get("options") else "Not started: " + " ".join(said),
+        duration_seconds=time.time() - step_start,
+        data=data,
+    )
+
+
 def _start_refused_step(
     adapter: Any, step_start: float, *, file_name: str | None = None, local_path: str | None = None,
 ) -> PipelineStep | None:
@@ -971,12 +1003,8 @@ def quick_print(
             )
             ams_warnings = list(ams_decision.get("warnings") or [])
             if ams_decision.get("blocked"):
-                return PipelineStep(
-                    name="start_print",
-                    success=False,
-                    message="Not started: " + " ".join(ams_warnings),
-                    duration_seconds=time.time() - step_start,
-                    data={"ams_plan": ams_decision.get("plan"), "ams_warnings": ams_warnings},
+                return _spool_step(
+                    ams_decision, step_start, model_path=model_path, printer_name=printer_name, material=material,
                 )
             ams_selection = None
             if ams_decision.get("use_ams"):
@@ -1105,8 +1133,16 @@ def reslice_and_print(
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
     keep_record: bool | None = None,
+    identity: dict[str, str] | None = None,
+    in_place_of: str | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
+
+    ``identity`` (``version_id`` / ``design_id`` / ``branch_id``) names the
+    kept design the model is, so the print's record lands on that version's
+    history.  ``in_place_of`` is the plastic this print stands in for: kept
+    with *material* on the slice's own record
+    (:func:`kiln.print_lineage.note_material_swap`).
 
     ``soft_nozzle_confirmed`` is the owner's word to print anyway a slice
     refused with ``ABRASIVE_ON_SOFT_NOZZLE``; ``filament_map`` is the nozzle
@@ -1165,6 +1201,8 @@ def reslice_and_print(
     ctx: dict[str, Any] = {
         "signoff": signoff,
         "keep_record": keep_record if isinstance(keep_record, bool) else None,
+        "identity": {k: v.strip() for k, v in (identity or {}).items()
+                     if k in ("version_id", "design_id", "branch_id") and isinstance(v, str) and v.strip()},
         "effective_profile": profile_path,
         "gcode_path": None,
         "adapter": None,
@@ -1281,6 +1319,10 @@ def reslice_and_print(
             # The plate as sliced (a fill's merged copies), for the wrap's
             # preview tiles.
             ctx["stage_mesh_path"] = (step.data or {}).get("stage_mesh_path")
+            if step.success and in_place_of and material and ctx.get("gcode_path"):
+                from kiln.print_lineage import note_material_swap
+
+                note_material_swap(ctx["gcode_path"], {"asked": str(in_place_of), "used": str(material)})
             return step
         except Exception as exc:
             return PipelineStep(
@@ -1472,12 +1514,9 @@ def reslice_and_print(
                 )
                 ams_warnings = list(ams_decision.get("warnings") or [])
                 if ams_decision.get("blocked"):
-                    return PipelineStep(
-                        name="start_print",
-                        success=False,
-                        message="Not started: " + " ".join(ams_warnings),
-                        duration_seconds=time.time() - step_start,
-                        data={"ams_plan": ams_decision.get("plan"), "ams_warnings": ams_warnings},
+                    return _spool_step(
+                        ams_decision, step_start, model_path=model_path, printer_name=printer_name,
+                        material=material, identity=ctx.get("identity"),
                     )
                 if defer_multi_material_3mf and not ams_decision.get("plan"):
                     ams_decision = {"use_ams": False, "warnings": ams_warnings}
@@ -1496,6 +1535,7 @@ def reslice_and_print(
             )
             if isinstance(ctx.get("keep_record"), bool):
                 start_kwargs["keep_record"] = ctx["keep_record"]
+            start_kwargs.update(ctx.get("identity") or {})
             sent_at = time.monotonic()
             try:
                 print_result = adapter.start_print(remote_name, **start_kwargs)

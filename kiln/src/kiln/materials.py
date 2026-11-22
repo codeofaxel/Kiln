@@ -311,7 +311,9 @@ class MaterialTracker:
         expected_upper = expected_material.upper()
         loaded_upper = loaded.material_type.upper()
 
-        if expected_upper == loaded_upper:
+        from kiln.ams_routing import same_plastic
+
+        if expected_upper == loaded_upper or same_plastic(expected_material, loaded.material_type):
             return None
 
         warning = MaterialWarning(

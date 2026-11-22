@@ -691,12 +691,12 @@ class TestSmartReprint:
             os.unlink(tmp_path)
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    @patch("kiln.server.ams_status")
-    def test_ams_auto_detect_finds_slot(self, mock_ams, _auth):
+    @patch("kiln.server.reprint_with_material", return_value={"success": True})
+    @patch("kiln.server._resolve_adapter")
+    def test_ams_auto_detect_finds_slot(self, mock_adapter, mock_reprint, _auth):
         from kiln.server import smart_reprint
 
-        mock_ams.return_value = {
-            "success": True,
+        mock_adapter.return_value.get_ams_status.return_value = {
             "units": [{
                 "trays": [
                     {"slot": 0, "tray_type": "PLA", "tray_color": "000000FF", "remain": 80},
@@ -712,14 +712,12 @@ class TestSmartReprint:
                 material_id="petg",
                 auto_ams=True,
             )
-            # Check that AMS detection found slot 1
-            steps = result.get("smart_reprint_steps", [])
-            ams_step = next((s for s in steps if s.get("step") == "ams_detection"), None)
-            if ams_step:
-                assert ams_step["found"] is True
-                assert ams_step["slot"] == 1
         finally:
             os.unlink(tmp_path)
+        ams_step = next(s for s in result["smart_reprint_steps"] if s.get("step") == "ams_detection")
+        assert ams_step["found"] is True
+        assert ams_step["slot"] == 1
+        assert mock_reprint.call_args.kwargs["ams_mapping"] == "[1]"
 
 
 # ---------------------------------------------------------------------------

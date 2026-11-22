@@ -149,9 +149,9 @@ class TestTheResolverKeepsThePromise:
         block = got["colour"]
         assert block["outcome"] == "held"
         assert block["nearest"]  # the green spool, by the same matcher the gate uses
-        assert "No teal spool is loaded" in block["message"]
-        assert 'color="any"' in block["message"]
-        assert got["warnings"][0] == block["message"]
+        assert block["message"].startswith("This print wants teal PLA. You have PLA loaded, but no teal:")
+        assert got["warnings"] == [block["message"]]
+        assert [o["action"] for o in got["options"]] == ["print_from_slot", "load_spool"]
 
     def test_without_a_note_a_single_colour_file_still_prints_as_before(self, tmp_path):
         from kiln.server import _resolve_use_ams

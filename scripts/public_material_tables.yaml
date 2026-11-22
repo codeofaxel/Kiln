@@ -5,7 +5,7 @@
 # baseline:  present when the gate was added; listed, not judged.  The list
 #            only shrinks: a table leaves it when it is served instead, or
 #            when it earns a keep row.  A new table may not join it.
-baseline_count: 13
+baseline_count: 12
 keep:
   'gcode.py::_MATERIAL_TEMPS':
     door: the live-printer filament load, unload, purge and wipe commands
@@ -19,9 +19,6 @@ keep:
   'material_safety.py::_REFUSED_PAIRS':
     door: the multi-colour composer and the print doors that load several materials into one print
     why: with no server they must still refuse loading two plastics whose nozzle temperatures cannot share one print, a clog and failed-print floor
-  'server.py::mat_type_map':
-    door: the multi-material print door, choosing which loaded spool prints each material
-    why: maps catalogue ids to the filament type names the printer's own spool unit reports; a different vocabulary from the shared spelling map, and it carries no figure or judgement
   'printers/bambu_3mf.py::_TABLE_ROW_TO_BAMBU':
     door: writing a print file a Bambu printer accepts
     why: maps Kiln's filament rows to the closed set of filament type names a Bambu accepts; a different vocabulary from the shared spelling map, and it carries no figure or judgement
@@ -52,7 +49,6 @@ baseline:
   - 'data/printer_intelligence.json::default.materials'
   - 'materials.py::MATERIAL_TEMPS'
   - 'printability.py::_UNVOUCHED_ON_A_STANDARD_BED'
-  - 'server.py::mat_aliases'
   - 'support_assessment.py::MATERIAL_ALIASES'
 
 # Public tools that return a material's whole record, or most of a table, when

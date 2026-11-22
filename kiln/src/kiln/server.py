@@ -2812,8 +2812,23 @@ def _consent_subject(tool_name: str, arguments: dict[str, Any]) -> str | None:
     return None
 
 
+def _file_plastic(file_path: str | None, wanted: list[Any] | None = None) -> str | None:
+    """The one plastic a sliced file names: its one filament's, else the one
+    its header states (:func:`kiln._pro_goal_material_bridge.material_printed`)."""
+    if wanted:
+        return getattr(wanted[0], "material", None) if len(wanted) == 1 else None
+    if not file_path:
+        return None
+    try:
+        from kiln._pro_goal_material_bridge import material_printed
+
+        return material_printed("", "", {"gcode": file_path}) or None
+    except Exception:  # noqa: BLE001 -- an unreadable file names no plastic
+        return None
+
+
 def _consent_filament_line(
-    tool_name: str, file_value: str, printer_name: str | None
+    tool_name: str, file_value: str, printer_name: str | None, arguments: dict[str, Any] | None = None,
 ) -> str | None:
     """The colour routing the person is approving, in one line — or None.
 
@@ -2822,10 +2837,13 @@ def _consent_filament_line(
     file whose filaments cannot be read gets no line rather than a guess;
     a colour nothing loaded can supply is said in capitals, because the
     yes being asked for would otherwise put the wrong colour on the part.
+    A file that names only its own plastic, with no material, colour or
+    tray named (*arguments*), says which spool it prints from
+    (:func:`kiln.ams_routing.first_spool_said`).
     Never raises: a dialog that fails to open beats one that lies.
     """
     try:
-        from kiln.ams_routing import loaded_trays, plan_ams_mapping, read_file_filaments
+        from kiln.ams_routing import first_spool_said, loaded_trays, plan_ams_mapping, read_file_filaments
 
         local = (
             file_value
@@ -2833,7 +2851,10 @@ def _consent_filament_line(
             else _local_copy_of(file_value)
         )
         wanted = read_file_filaments(local).filaments
-        if not wanted or not any(f.hex6 for f in wanted):
+        named = any((arguments or {}).get(k) for k in ("material", "ams_mapping", "color"))
+        plastic = _file_plastic(local, wanted) if not named and _asked_colour(local) is None else None
+        first_only = len(wanted) <= 1 and bool(plastic)
+        if not (first_only or any(f.hex6 for f in wanted)):
             return None
         adapter = _resolve_adapter(printer_name)
         if not hasattr(adapter, "get_ams_status"):
@@ -2841,6 +2862,8 @@ def _consent_filament_line(
         trays = loaded_trays(adapter.get_ams_status())
         if not trays:
             return None
+        if first_only and (not wanted or not wanted[0].hex6 or not plan_ams_mapping(wanted, trays).ok):
+            return first_spool_said(plastic, trays[0])
         plan = plan_ams_mapping(wanted, trays)
         if plan.ok:
             return plan.summary + (" (" + "; ".join(plan.warnings) + ")" if plan.warnings else "")
@@ -3006,7 +3029,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         extra={
             "material": arguments.get("material"),
             "printer model": arguments.get("printer_id"),
-            "filament slots": _consent_filament_line(tool_name, file_value, printer_name),
+            "filament slots": _consent_filament_line(tool_name, file_value, printer_name, arguments),
             # A plate of several colours Kiln sliced in one, for want of the
             # printer's maker's slicer: said as the fact it is.
             "colours": about.get("colours"),
@@ -9640,6 +9663,204 @@ def _refuse_undriven_multi_material(
     )
 
 
+def _spool_miss_decision(miss: Any, *, plan: Any = None, colour: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The blocked decision for a print no loaded spool fits: one sentence
+    (:func:`kiln.ams_routing.spool_miss`) and the choices it offers."""
+    logger.warning("AMS routing blocked: %s", miss.message)
+    decision: dict[str, Any] = {
+        "use_ams": True,
+        "ams_mapping": None,
+        "warnings": [miss.message],
+        "selection": None,
+        "blocked": True,
+        "code": miss.code,
+        "options": list(miss.options),
+    }
+    if plan is not None:
+        decision["plan"] = plan.to_dict()
+    if colour is not None:
+        decision["colour"] = {**colour, "message": miss.message}
+    return decision
+
+
+def _stand_in_judge(goal: dict[str, Any] | None, file_path: str | None) -> Any:
+    """Asks whether each loaded plastic suits the saved goal of the part in
+    *file_path* (or the one *goal* names), through Kiln's servers."""
+
+    def judge(wanted: str, stand_ins: list[str]) -> dict[str, Any] | None:
+        from kiln._pro_print_fix_bridge import stand_in_fit
+
+        return stand_in_fit(
+            wanted, stand_ins,
+            goal_id=(goal or {}).get("goal_id"), version_id=(goal or {}).get("version_id"), job_path=file_path,
+        )
+
+    return judge
+
+
+def _spool_calls(
+    options: list[dict[str, Any]],
+    *,
+    print_from: Any = None,
+    reslice: Any = None,
+) -> list[dict[str, Any]]:
+    """*options* with the call that carries each one out, where the door has
+    one: *print_from* takes an option, *reslice* an option and the plastic
+    it stands in for (the one the print asked for), and each returns
+    ``{"tool", "arguments"}`` (and ``needs`` for an argument the door lacks)."""
+    asked = next((o.get("material") for o in options
+                  if o.get("action") == "load_spool" and o.get("part") is None and o.get("material")), None)
+    out: list[dict[str, Any]] = []
+    for option in options:
+        option = dict(option)
+        action = option.get("action")
+        if action == "print_from_slot" and print_from is not None:
+            call = print_from(option)
+        elif action == "reslice_for" and reslice is not None:
+            call = reslice(option, asked)
+        else:
+            call = None
+        if call:
+            option["call"] = call
+        out.append(option)
+    return out
+
+
+def _swap_call(
+    option: dict[str, Any],
+    asked: str | None,
+    *,
+    file_path: str | None,
+    here: dict[str, Any] | None = None,
+    ids: dict[str, Any] | None = None,
+    goal_id: str | None = None,
+) -> dict[str, Any]:
+    """The call that takes a re-slice choice: ``reprint_with_material``, the
+    one door for a print in another plastic, carrying the part's own
+    identity (*ids*: ``version_id`` / ``design_id`` / ``branch_id``; or
+    *goal_id*) and the plastic it stands in for (*asked*), so the print
+    lands on the part's history with both.  Without the model's path the
+    call says it needs one."""
+    args: dict[str, Any] = {**({"file_path": file_path} if file_path else {}), **(here or {}),
+                            "material_id": _material_arg(option)}
+    if option.get("tray_id") is not None:
+        args["ams_mapping"] = [option["tray_id"]]
+    args.update({k: v.strip() for k, v in (ids or {}).items()
+                 if k in ("version_id", "design_id", "branch_id") and isinstance(v, str) and v.strip()})
+    if goal_id:
+        args["goal_id"] = goal_id
+    if asked:
+        args["in_place_of"] = str(asked)
+    args["chosen_by"] = "person"
+    call: dict[str, Any] = {"tool": "reprint_with_material", "arguments": args}
+    if not file_path:
+        call["needs"] = {"file_path": "the model this file was sliced from"}
+    return call
+
+
+def _model_sliced_into(file_name: str | None) -> str | None:
+    """The model this computer sliced *file_name* from, when it is still on
+    this disk (the slice ledger, :func:`kiln.monitor_twin.sliced_entry_for`)."""
+    try:
+        from kiln.monitor_twin import sliced_entry_for
+
+        entry = sliced_entry_for(os.path.basename(file_name or "")) or {}
+    except Exception:  # noqa: BLE001 -- no ledger names no model
+        return None
+    for key in ("source", "input"):
+        path = entry.get(key)
+        if isinstance(path, str) and os.path.isfile(path):
+            return path
+    return None
+
+
+def _mapping_of(option: dict[str, Any]) -> list[int]:
+    """The tray ids an option prints from, in filament order."""
+    return list(option.get("mapping") or [option["tray_id"]])
+
+
+def _material_arg(option: dict[str, Any]) -> str:
+    """An option's plastic as the catalogue names it, for a door's material argument."""
+    word = str(option.get("material") or "")
+    try:
+        from kiln.catalog_keys import resolve_material_key
+        from kiln.design_intelligence import list_public_material_profiles
+
+        return resolve_material_key(word, [p.material_id for p in list_public_material_profiles()]) or word.lower()
+    except Exception:  # noqa: BLE001 -- the spool's own word still names it
+        return word.lower()
+
+
+def _spool_refusal(decision: dict[str, Any], *, prefix: str = "Not started: ", **calls: Any) -> dict[str, Any]:
+    """The error a door returns for a blocked spool decision, its choices
+    carrying the door's own calls; a sentence with choices stands alone."""
+    extra: dict[str, Any] = {"ams_plan": decision.get("plan"), "printed": False}
+    if decision.get("colour"):
+        extra["colour"] = decision["colour"]
+    if decision.get("options"):
+        extra["options"] = _spool_calls(decision["options"], **calls)
+    said = decision.get("warnings") or ["The loaded spools don't match this print."]
+    return _error_dict(
+        " ".join(said) if decision.get("options") else prefix + " ".join(said),
+        code=str(decision.get("code") or "AMS_COLOR_MISMATCH"),
+        retryable=False,
+        extra=extra,
+    )
+
+
+def _safety_refusal_first(materials: list[str | None], printer_id: str | None) -> bool:
+    """True when a slice-time safety refusal (an abrasive filament, a
+    filament the printer cannot melt) may apply to *materials*; it is said
+    before a spool refusal, so the door slices first."""
+    from kiln.material_safety import is_abrasive_filament
+    from kiln.printers.print_gate import material_temp_blocks
+
+    for material in materials:
+        if not material:
+            continue
+        if is_abrasive_filament(material) or (printer_id and material_temp_blocks(printer_id, material)):
+            return True
+    return False
+
+
+def _door_spools(
+    printer_name: str | None,
+    *,
+    material: str | None = None,
+    file_path: str | None = None,
+    wanted: list[Any] | None = None,
+    goal: dict[str, Any] | None = None,
+    printer_id: str | None = None,
+    print_from: Any = None,
+    reslice: Any = None,
+    noun: str = "part",
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The print gate's spool decision for a door's job, before it slices.
+
+    ``(decision, refusal)``: the decision :func:`_resolve_use_ams` makes for
+    the filaments the door names, and the error to return when it is
+    blocked, its choices carrying the door's calls (*print_from*,
+    *reslice*, see :func:`_spool_calls`).  ``({}, None)`` when no printer
+    resolves; the print step then answers on its own terms.  A job a
+    slice-time safety refusal may apply to is not refused here: the slice
+    says that first, and the print step says the spool sentence after it.
+    """
+    try:
+        adapter = _resolve_adapter(printer_name)
+    except Exception:  # noqa: BLE001 -- no printer to ask is not a refusal here
+        return {}, None
+    decision = _resolve_use_ams(
+        "auto", None, adapter, material=material, file_path=file_path, wanted=wanted,
+        goal=goal, sliced=False, noun=noun, reslice=reslice is not None,
+    )
+    if not decision.get("blocked"):
+        return decision, None
+    named = [material, *(getattr(f, "material", None) for f in (wanted or []))]
+    if decision.get("options") and _safety_refusal_first(named, printer_id):
+        return {}, None
+    return decision, _spool_refusal(decision, print_from=print_from, reslice=reslice)
+
+
 def _resolve_use_ams(
     use_ams: str | bool,
     ams_mapping: list[int] | None,
@@ -9648,16 +9869,21 @@ def _resolve_use_ams(
     *,
     file_path: str | None = None,
     wanted: list[Any] | None = None,
+    goal: dict[str, Any] | None = None,
+    sliced: bool = True,
+    noun: str = "part",
+    reslice: bool = True,
 ) -> dict[str, Any]:
     """Resolve tri-state use_ams into a concrete routing decision.
 
     :param use_ams: ``"auto"``, ``"true"``/``True``, or ``"false"``/``False``.
     :param ams_mapping: Explicit AMS mapping from the caller (may be None).
     :param adapter: Printer adapter to probe for AMS presence.
-    :param material: Optional material hint (e.g. ``"PLA"``).  When set,
-        auto-routing prefers a tray whose ``tray_type`` matches (case-
-        insensitive), falling back to the first loaded tray and
-        attaching a warning when no match is found.
+    :param material: The material the job is for (e.g. ``"PLA"``).  When
+        set, the tray is a loaded spool of that plastic
+        (:func:`kiln.ams_routing.same_plastic`); with none loaded the
+        decision comes back ``blocked`` (``AMS_MATERIAL_NOT_LOADED``) unless
+        the caller's own ``ams_mapping`` names the trays.
     :param file_path: A local copy of the file about to print.  When it
         declares its filaments (a sliced G-code, a Bambu ``.gcode.3mf``, a
         painted ``.3mf``), each one is matched to the loaded tray of the
@@ -9667,11 +9893,20 @@ def _resolve_use_ams(
         to whatever happens to sit in the next slot.
     :param wanted: The filaments themselves, when the caller already has
         them; overrides ``file_path``.
+    :param goal: ``goal_id`` / ``version_id`` naming the part's saved goal,
+        when the door knows it; a loaded plastic offered in place of the
+        job's is checked against it.
+    :param sliced: Whether the job is already sliced (the wording of a
+        re-slice offer).
+    :param noun: What one filament of a multi-filament job is called.
+    :param reslice: Whether the door can take a re-slice for another plastic.
     :returns: Dict with ``use_ams`` (bool), optional ``ams_mapping`` (list),
         optional ``warnings`` (list of human-readable strings), and — when
         the file's filaments were known — ``plan`` (see
         :class:`kiln.ams_routing.AmsPlan`) and ``blocked`` when routing
-        would put the wrong colour on the part.
+        would put the wrong colour on the part.  A blocked decision for a
+        spool that is not loaded carries one sentence and ``options``
+        (:func:`kiln.ams_routing.spool_miss`).
     """
     # Normalize string/bool input
     if isinstance(use_ams, bool):
@@ -9807,8 +10042,9 @@ def _resolve_use_ams(
     # spools (RFID capacity is only tracked on Bambu-branded spools with tag
     # readers), so requiring ``remain > 0`` would reject valid trays and
     # force a broken external-spool route.
+    from kiln.ams_routing import empty_slots as _empty_slots
     from kiln.ams_routing import loaded_trays as _loaded_trays
-    from kiln.ams_routing import plan_ams_mapping, read_file_filaments
+    from kiln.ams_routing import plan_ams_mapping, read_file_filaments, spool_miss
 
     trays = _loaded_trays(ams_info)
 
@@ -9869,61 +10105,76 @@ def _resolve_use_ams(
             if asked is not None:
                 decision["colour"] = _asked_colour_block(asked, "loaded", plan, trays)
             return decision
-        if asked is not None and len(wanted) == 1:
-            # None of the loaded spools is the colour the part was asked for.
-            # Held, with the nearest spool named: the person says "print it
-            # in that" (color="<that colour>") or loads the one they wanted.
-            block = _asked_colour_block(asked, "held", plan, trays)
-            logger.warning("colour hold: %s", block["message"])
-            return {
-                "use_ams": True,
-                "ams_mapping": None,
-                "warnings": [block["message"]] + plan.warnings,
-                "selection": None,
-                "plan": plan.to_dict(),
-                "blocked": True,
-                "code": "COLOR_NOT_LOADED",
-                "colour": block,
-            }
-        if len(wanted) >= 2:
-            # A partial mapping is a wrong print.  Say which colour is
-            # missing and stop; the caller decides what to do about it.
-            logger.warning("AMS colour routing blocked: %s", plan.summary)
-            load = _unsuppliable_colour_words(plan, wanted, trays, adapter=adapter)
-            return {
-                "use_ams": True,
-                "ams_mapping": None,
-                "warnings": [
-                    "This file needs "
-                    f"{len(wanted)} filaments and the loaded spools cannot "
-                    f"supply them all: {plan.summary}. {load} To print it "
-                    "with a substitute instead, pass an explicit ams_mapping."
-                ]
-                + plan.warnings,
-                "selection": None,
-                "plan": plan.to_dict(),
-                "blocked": True,
-            }
-        warnings_out.extend(plan.warnings)
+        if ams_mapping is not None and (asked is not None or len(wanted) >= 2):
+            # The person's own trays stand, said once.
+            warnings_out.append(
+                f"The loaded spools don't match this print ({plan.summary}); printing from the "
+                "trays ams_mapping names."
+            )
+        elif asked is not None and len(wanted) == 1 or len(wanted) >= 2:
+            # A spool that is not loaded: one sentence and its choices.  A
+            # missing colour is held for the person, never routed elsewhere.
+            from kiln.colour_availability import spools_on_record
 
-    # Material-aware tray selection when caller hints at the material.
+            in_use = {m.get("slot") for m in plan.matches if m.get("slot") is not None}
+            miss = spool_miss(
+                wanted, trays, plan=plan, names=[asked.name] if asked is not None else (),
+                sliced=sliced, free_slots=_empty_slots(ams_info), noun=noun, reslice=reslice,
+                judge=_stand_in_judge(goal, file_path),
+                on_record=spools_on_record(
+                    [wanted[i] if i in plan.unmatched else None for i in range(len(wanted))],
+                    loaded=[f"#{t.hex6}" for t in trays if t.tray_id in in_use and t.hex6],
+                ) if len(wanted) >= 2 else None,
+            )
+            if miss is not None:
+                colour = _asked_colour_block(asked, "held", plan, trays) if asked is not None else None
+                return _spool_miss_decision(miss, plan=plan, colour=colour)
+            return {
+                "use_ams": True,
+                "ams_mapping": None,
+                "warnings": [f"The loaded spools can't supply this print: {plan.summary}."],
+                "selection": None,
+                "plan": plan.to_dict(),
+                "blocked": True,
+            }
+        else:
+            warnings_out.extend(plan.warnings)
+
+    # The material the caller named decides the tray: the loaded spool of
+    # that plastic with the most left.  The caller's own ams_mapping stands.
+    from kiln.ams_routing import same_plastic
     from kiln.bambu_trays import describe_tray_id
 
-    chosen = None
-    if material:
-        mat_norm = material.strip().upper()
-        for tray in trays:
-            if tray.material.upper() == mat_norm:
-                chosen = tray
-                break
-        if chosen is None:
-            chosen = trays[0]
-            warnings_out.append(
-                f"No AMS tray matches material {material!r}; using "
-                f"{describe_tray_id(chosen.tray_id)} ({chosen.material}) instead."
+    chosen = trays[0]
+    if ams_mapping:
+        chosen = next((t for t in trays if t.tray_id == ams_mapping[0]), chosen)
+    if not material and ams_mapping is None and asked is None and len(wanted or []) <= 1:
+        # A file that names only its own plastic, and nothing named here:
+        # it prints from the first spool loaded, and says which.
+        from kiln.ams_routing import first_spool_said
+
+        line = first_spool_said(_file_plastic(file_path, wanted), chosen)
+        if line:
+            warnings_out.append(line)
+    if material and ams_mapping is None:
+        matching = [t for t in trays if same_plastic(material, t.material)]
+        if not matching:
+            from kiln.ams_routing import Filament as _Filament
+
+            miss = spool_miss(
+                [_Filament(hex6=None, material=material)], trays, colour_counts=False, sliced=sliced,
+                judge=_stand_in_judge(goal, file_path), reslice=reslice,
             )
-    else:
-        chosen = trays[0]
+            if miss is not None:
+                return _spool_miss_decision(miss)
+            return {"use_ams": True, "ams_mapping": None, "selection": None, "blocked": True,
+                    "code": "AMS_MATERIAL_NOT_LOADED", "warnings": [f"No loaded spool is {material}."]}
+        chosen = max(matching, key=lambda t: -1 if t.remain is None else t.remain)
+    elif material and same_plastic(material, chosen.material) is not True:
+        warnings_out.append(
+            f"{describe_tray_id(chosen.tray_id)} ({chosen.material}) is not {material!r}; "
+            "printing from it because ams_mapping names it."
+        )
 
     logger.info(
         "AMS auto-detect: routing to %s (%s) — %d loaded slot(s) available.",
@@ -10422,18 +10673,23 @@ def start_print(
         # local copy (when this session uploaded the file) says which
         # colours it wants, so the mapping is by colour, not by slot number.
         _ams_decision = _resolve_use_ams(
-            use_ams, ams_mapping, adapter, file_path=_local_copy_of(file_name)
+            use_ams, ams_mapping, adapter, file_path=_local_copy_of(file_name),
+            goal={"version_id": version_id} if isinstance(version_id, str) and version_id.strip() else None,
         )
         if _ams_decision.get("blocked"):
             _audit(
                 "start_print", "ams_routing_blocked",
                 details={"file": file_name, "plan": _ams_decision.get("plan")},
             )
-            return _error_dict(
-                " ".join(_ams_decision.get("warnings") or ["AMS routing blocked."]),
-                code="AMS_COLOR_MISMATCH",
-                retryable=False,
-                extra={"ams_plan": _ams_decision.get("plan")},
+            _here = {"file_name": file_name, **({"printer_name": printer_name} if printer_name else {})}
+            return _spool_refusal(
+                {"code": "AMS_COLOR_MISMATCH", **_ams_decision}, prefix="",
+                print_from=lambda o: {"tool": "start_print", "arguments": {**_here, "ams_mapping": _mapping_of(o)}},
+                reslice=lambda o, asked: _swap_call(
+                    o, asked, file_path=_model_sliced_into(file_name),
+                    here={"printer_name": printer_name} if printer_name else None,
+                    ids={"version_id": version_id, "design_id": design_id, "branch_id": branch_id},
+                ),
             )
         if _ams_decision["use_ams"]:
             print_kwargs["use_ams"] = True
@@ -20672,6 +20928,10 @@ def run_quick_print(
                     resp["ams_selection"] = _step.data["ams_selection"]
                 if "ams_warnings" in _step.data:
                     resp["ams_warnings"] = _step.data["ams_warnings"]
+                if "options" in _step.data and not result.success:
+                    # A spool that is not loaded: its code and the choices.
+                    resp["code"] = _step.data.get("code")
+                    resp["options"] = _step.data["options"]
                 if "what_you_will_see" in _step.data:
                     resp["what_you_will_see"] = _step.data["what_you_will_see"]
                 break
@@ -20698,6 +20958,10 @@ def run_reslice_and_print(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    version_id: str | None = None,
+    design_id: str | None = None,
+    branch_id: str | None = None,
+    in_place_of: str | None = None,
 ) -> dict:
     """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
 
@@ -20763,6 +21027,14 @@ def run_reslice_and_print(
         preview_token: Token from ``issue_preview_token`` proving this model
             was shown to the person before printing.  Required beside their
             go-ahead: a print is shown to its owner before it starts.
+        version_id: The kept design version the model is, when there is one,
+            so the print's record lands on that version's history (with
+            ``design_id`` / ``branch_id``, as ``start_print`` takes them).
+        design_id: The kept design the model belongs to.
+        branch_id: The design branch the version is on.
+        in_place_of: The plastic this print stands in for, when it is sliced
+            for a loaded one instead (a spool-swap choice): kept with
+            ``material`` on the print's own record.
     """
     if err := _check_auth("print"):
         return err
@@ -20827,6 +21099,8 @@ def run_reslice_and_print(
             skip_validation=skip_validation,
             signoff=signoff,
             placement=placement,
+            identity={"version_id": version_id, "design_id": design_id, "branch_id": branch_id},
+            in_place_of=in_place_of if isinstance(in_place_of, str) and in_place_of.strip() else None,
             **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
         )
         resp = {"success": result.success, **result.to_dict()}
@@ -20838,6 +21112,10 @@ def run_reslice_and_print(
                     resp["ams_selection"] = _step.data["ams_selection"]
                 if "ams_warnings" in _step.data:
                     resp["ams_warnings"] = _step.data["ams_warnings"]
+                if "options" in _step.data and not result.success:
+                    # A spool that is not loaded: its code and the choices.
+                    resp["code"] = _step.data.get("code")
+                    resp["options"] = _step.data["options"]
                 if "what_you_will_see" in _step.data:
                     resp["what_you_will_see"] = _step.data["what_you_will_see"]
                 break
@@ -23982,6 +24260,10 @@ def reprint_with_material(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    version_id: str | None = None,
+    design_id: str | None = None,
+    branch_id: str | None = None,
+    in_place_of: str = "",
 ) -> dict:
     """Reprint a model with a different material — the slice is set for it.
 
@@ -24045,6 +24327,14 @@ def reprint_with_material(
         chosen_by: Who picked this material: ``"person"`` when they named it,
             ``"agent"`` when you proposed it.  Kept with the goal's record;
             omitted, it is left unsaid.
+        version_id: The kept design version the model is, when there is one,
+            so the print lands on that version's history (with ``design_id``
+            and ``branch_id``).
+        design_id: The kept design the model belongs to.
+        branch_id: The design branch the version is on.
+        in_place_of: The plastic this reprint stands in for (the one asked
+            for, when it is not loaded): kept with ``material_id`` on the
+            print's own record.
     """
     if err := _check_auth("print"):
         return err
@@ -24092,6 +24382,10 @@ def reprint_with_material(
                 soft_nozzle_confirmed=soft_nozzle_confirmed is True,
                 mixed_nozzle_experiment=mixed_nozzle_experiment is True,
                 filament_map=filament_map or None,
+                version_id=version_id,
+                design_id=design_id,
+                branch_id=branch_id,
+                in_place_of=in_place_of or None,
             )
         goal_said = goal_ask.wait()
 
@@ -24174,9 +24468,10 @@ def smart_reprint(
             for the model file (e.g. ``'["/home/user/models"]'``).
         extra_overrides: Optional JSON string of additional slicer
             overrides (e.g. ``'{"fill_density": "30%"}'``).
-        auto_ams: If ``True`` (default), automatically detect AMS slot
-            for the target material. Set to ``False`` to skip AMS
-            detection (useful for non-Bambu printers).
+        auto_ams: If ``True`` (default), check before slicing that a spool
+            of the target material is loaded, and refuse
+            (``AMS_MATERIAL_NOT_LOADED``) when none is. ``False`` leaves the
+            check to the print step.
         goal_id: Optional saved-goal id from ``design_session``.  When
             omitted, the source model's intent sidecar (if any) is read
             and the saved goal's id is derived from its ``generator``
@@ -24306,106 +24601,29 @@ def smart_reprint(
             )
 
         # ---------------------------------------------------------------
-        # Step 2: AMS slot detection (Bambu printers)
+        # Step 2: the loaded spool this material prints from
         # ---------------------------------------------------------------
-        detected_ams_mapping: str | None = None
-        detected_use_ams: bool | None = None
         ams_slot_info: dict[str, Any] | None = None
+        gate_mapping: str | None = None
 
         if auto_ams:
-            try:
-                ams_result = ams_status()
-                if ams_result.get("success"):
-                    mat_lower = material_id.lower()
-                    # Map common material IDs to AMS tray_type strings
-                    mat_aliases: dict[str, list[str]] = {
-                        "pla": ["PLA"],
-                        "pla_plus": ["PLA", "PLA+", "PLA-S"],
-                        "pla_matte": ["PLA", "PLA-S"],
-                        "pla_tough": ["PLA", "PLA-S"],
-                        "silk_pla": ["PLA", "Silk PLA"],
-                        "wood_pla": ["PLA", "Wood PLA"],
-                        "cf_pla": ["PLA-CF", "PLA"],
-                        "petg": ["PETG"],
-                        "petg_hf": ["PETG", "PETG-HF"],
-                        "cf_petg": ["PETG-CF", "PETG"],
-                        "petg_cf": ["PETG-CF", "PETG"],
-                        "abs": ["ABS"],
-                        "asa": ["ASA"],
-                        "asa_plus": ["ASA"],
-                        "tpu": ["TPU"],
-                        "tpu_95a": ["TPU"],
-                        "tpu_85a": ["TPU"],
-                        "nylon": ["PA", "Nylon"],
-                        "cf_nylon": ["PA-CF", "PA"],
-                        "pa6_gf": ["PA6-GF", "PA"],
-                        "polycarbonate": ["PC"],
-                        "pc_abs": ["PC", "PC-ABS"],
-                        "hips": ["HIPS"],
-                        "pva": ["PVA"],
-                        "pet_cf": ["PET-CF"],
-                    }
-                    expected_types = mat_aliases.get(mat_lower, [mat_lower.upper()])
-
-                    # Scan AMS trays for a matching material.  ``slot`` is
-                    # the printer's own tray id (what ams_mapping takes);
-                    # ``name`` what Studio calls it.
-                    best_slot: int | None = None
-                    best_name: str | None = None
-                    best_remain: int = -1
-                    for tid, name, tray in _ams_tray_rows(ams_result):
-                        tray_type = (tray.get("tray_type") or "").strip()
-                        if tray_type in expected_types:
-                            remain = tray.get("remain") or 0
-                            if remain > best_remain:
-                                best_remain = remain
-                                best_slot = tid
-                                best_name = name
-                                # `remain` is a real reading only for an
-                                # RFID-tagged spool — AMS Lite reports a
-                                # placeholder, flagged by the adapter.
-                                remaining_known = bool(tray.get("remaining_known"))
-                                ams_slot_info = {
-                                    "slot": best_slot,
-                                    "name": best_name,
-                                    "tray_type": tray_type,
-                                    "color": tray.get("tray_color", ""),
-                                    "remain_pct": remain if remaining_known else None,
-                                }
-
-                    if best_slot is not None:
-                        detected_ams_mapping = _json.dumps([best_slot])
-                        detected_use_ams = True
-                        steps_log.append(
-                            {
-                                "step": "ams_detection",
-                                "found": True,
-                                "slot": best_slot,
-                                "name": best_name,
-                                "tray_type": ams_slot_info["tray_type"] if ams_slot_info else "",
-                                "remain_pct": ams_slot_info["remain_pct"] if ams_slot_info else None,
-                            }
-                        )
-                    else:
-                        steps_log.append(
-                            {
-                                "step": "ams_detection",
-                                "found": False,
-                                "note": (
-                                    f"No AMS tray with {material_id.upper()} found. "
-                                    "Printing without AMS mapping — load the material "
-                                    "in an AMS slot or use the external spool holder."
-                                ),
-                            }
-                        )
-            except Exception:
-                steps_log.append(
-                    {
-                        "step": "ams_detection",
-                        "found": False,
-                        "note": "AMS query failed (non-Bambu printer or not connected)",
-                    }
-                )
+            _here = {"printer_name": printer_name} if printer_name else {}
+            spools, refusal = _door_spools(
+                printer_name, material=material_id, file_path=found_path,
+                goal={"goal_id": goal_id} if goal_id else None, printer_id=printer_id,
+                print_from=lambda o: {"tool": "reprint_with_material", "arguments": {
+                    "file_path": found_path, "material_id": material_id, **_here, "ams_mapping": _mapping_of(o)}},
+                reslice=lambda o, asked: _swap_call(
+                    o, asked, file_path=found_path, here=_here, goal_id=goal_id or None,
+                ),
+            )
+            if refusal is not None:
+                refusal["smart_reprint_steps"] = steps_log
+                return refusal
+            ams_slot_info = spools.get("selection")
+            if spools.get("use_ams") and spools.get("ams_mapping"):
+                gate_mapping = _json.dumps(list(spools["ams_mapping"]))
+            steps_log.append({"step": "ams_detection", "found": ams_slot_info is not None, **(ams_slot_info or {})})
 
         # ---------------------------------------------------------------
         # Step 2.5: D2 — saved-goal carry-forward.
@@ -24448,8 +24666,8 @@ def smart_reprint(
             printer_name=printer_name,
             printer_id=printer_id,
             extra_overrides=extra_overrides,
-            use_ams=detected_use_ams,
-            ams_mapping=detected_ams_mapping,
+            use_ams=True if gate_mapping else None,
+            ams_mapping=gate_mapping,
             goal_id=resolved_brief_id or "",
             chosen_by=chosen_by,
             soft_nozzle_confirmed=soft_nozzle_confirmed is True,
@@ -24573,7 +24791,9 @@ def multi_material_print(
             are placed coincident).
         printer_name: Registered printer name in fleet.
         printer_id: Printer model ID for profile selection.
-        auto_ams: Auto-detect AMS slot mapping (default ``True``).
+        auto_ams: Match each filament to a loaded spool of its material and
+            colour before slicing (default ``True``); refused when one is not
+            loaded.
         extra_overrides: Optional JSON object of slicer overrides merged on
             top of the material settings (e.g.
             ``'{"fill_density": "30%"}'``).
@@ -24911,88 +25131,6 @@ def multi_material_print(
         if extra:
             merged_overrides.update(extra)
 
-        # Step 4: AMS slot mapping
-        ams_mapping_list: list[int] | None = None
-        use_ams_flag: bool | None = None
-        ams_info: list[dict[str, Any]] = []
-
-        if auto_ams:
-            try:
-                ams_result = ams_status()
-                if ams_result.get("success"):
-                    mat_type_map = {
-                        "pla": ["PLA"],
-                        "pla_plus": ["PLA", "PLA+"],
-                        "pla_matte": ["PLA"],
-                        "pla_tough": ["PLA"],
-                        "petg": ["PETG"],
-                        "petg_hf": ["PETG", "PETG-HF"],
-                        "cf_petg": ["PETG-CF"],
-                        "abs": ["ABS"],
-                        "asa": ["ASA"],
-                        "tpu": ["TPU"],
-                        "tpu_95a": ["TPU"],
-                        "tpu_85a": ["TPU"],
-                        "nylon": ["PA", "Nylon"],
-                    }
-
-                    def _normalize_hex(h: str) -> str:
-                        """Strip '#' and alpha, uppercase for comparison."""
-                        h = h.lstrip("#").upper()
-                        if len(h) == 8:
-                            h = h[:6]  # strip alpha channel
-                        return h
-
-                    # Sort filaments by index for deterministic mapping
-                    sorted_filaments = sorted(unique_filaments.items(), key=lambda kv: kv[1])
-
-                    mapping = []
-                    all_found = True
-                    for (mat_id, req_color), _fil_idx in sorted_filaments:
-                        expected = mat_type_map.get(mat_id, [mat_id.upper()])
-                        req_hex = _normalize_hex(req_color)
-                        found_slot: int | None = None
-                        found_name: str | None = None
-                        found_type = ""
-                        # Trays keyed by the printer's own id, so a spool on
-                        # unit B (or an AMS HT) is mapped as itself and two
-                        # units' slot 1 are never one entry.
-                        rows = _ams_tray_rows(ams_result)
-                        # First pass: match both material type AND color
-                        for tid, name, tray in rows:
-                            ttype = (tray.get("tray_type") or "").strip()
-                            tray_color = _normalize_hex(tray.get("tray_color") or tray.get("color") or "")
-                            if ttype in expected and tray_color == req_hex and tid not in mapping:
-                                found_slot, found_name, found_type = tid, name, ttype
-                                break
-                        # Fallback: match material type only (ignore color)
-                        if found_slot is None:
-                            for tid, name, tray in rows:
-                                ttype = (tray.get("tray_type") or "").strip()
-                                if ttype in expected and tid not in mapping:
-                                    found_slot, found_name, found_type = tid, name, ttype
-                                    break
-                        if found_slot is not None:
-                            mapping.append(found_slot)
-                            ams_info.append(
-                                {
-                                    "material": mat_id,
-                                    "color": req_color,
-                                    "slot": found_slot,
-                                    "name": found_name,
-                                    "tray_type": found_type,
-                                }
-                            )
-                        else:
-                            all_found = False
-                            break
-
-                    if all_found and mapping:
-                        ams_mapping_list = mapping
-                        use_ams_flag = True
-            except Exception as _ams_exc:
-                logger.debug("AMS query failed in multi_material_print: %s", _ams_exc)
-
         # Step 5: refuse honestly, or slice and print.  Per-object filament
         # assignment is only a print Kiln can make on a unit Kiln DRIVES;
         # anywhere else the objects would come out in one filament, and a
@@ -25004,6 +25142,56 @@ def multi_material_print(
             )
         ):
             return refusal
+        # The loaded spool each filament prints from, decided by the print
+        # gate from the materials and colours named here.
+        ams_mapping_list: list[int] | None = None
+        ams_info: list[dict[str, Any]] = []
+
+        if auto_ams:
+            from kiln.ams_routing import Filament as _Filament
+            from kiln.ams_routing import normalize_hex as _hex6
+
+            sorted_filaments = sorted(unique_filaments.items(), key=lambda kv: kv[1])
+            keys = [key for key, _idx in sorted_filaments]
+            # A colour the person gave is held to; one Kiln picked for the preview is not.
+            given = {(obj["material_id"].lower(), obj.get("color")) for obj in objects if obj.get("color")}
+            _here = {"printer_name": printer_name} if printer_name else {}
+
+            def _recoloured(option: dict[str, Any]) -> dict[str, Any] | None:
+                if option.get("part") is None:
+                    return None
+                key = keys[option["part"]]
+                return {"tool": "multi_material_print", "arguments": {**_here, "objects_json": [
+                    {**obj, "color": option["hex"]} if (obj["material_id"].lower(), built["color"]) == key else obj
+                    for obj, built in zip(objects, build_objects, strict=True)]}}
+
+            spools, refusal = _door_spools(
+                printer_name,
+                material=sorted_filaments[0][0][0] if len(sorted_filaments) == 1 else None,
+                wanted=[_Filament(hex6=_hex6(color) if (mat, color) in given else None, material=mat)
+                        for (mat, color), _idx in sorted_filaments],
+                printer_id=printer_id,
+                print_from=_recoloured,
+            )
+            if refusal is not None:
+                refusal["multi_material_3mf"] = output_3mf
+                return refusal
+            matches = (spools.get("plan") or {}).get("matches") or []
+            if spools.get("use_ams") and spools.get("ams_mapping") and len(matches) == len(sorted_filaments):
+                ams_mapping_list = list(spools["ams_mapping"])
+                ams_info = [
+                    {"material": mat, "color": color, "slot": m["slot"], "name": m["name"], "tray": m["tray"]}
+                    for ((mat, color), _idx), m in zip(sorted_filaments, matches, strict=True)
+                ]
+            elif spools.get("use_ams") and spools.get("ams_mapping") and spools.get("selection"):
+                ams_mapping_list = list(spools["ams_mapping"])
+                (mat, color), _idx = sorted_filaments[0]
+                picked = spools["selection"]
+                ams_info = [
+                    {"material": mat, "color": color, "slot": picked["slot"], "name": picked["name"],
+                     "tray_type": picked["type"]}
+                ]
+
         if not plate_cleared:
             # Built, not yet seen.  The CI bypass clears it here like any
             # other door; otherwise the plate goes back for preview.
@@ -25026,7 +25214,7 @@ def multi_material_print(
                 printer_id=printer_id,
                 overrides=_json.dumps(merged_overrides) if merged_overrides else None,
                 slicer_path=slicer_path,
-                use_ams=use_ams_flag,
+                use_ams=True if ams_mapping_list else None,
                 ams_mapping=_json.dumps(ams_mapping_list) if ams_mapping_list else None,
                 filament_map=filament_map or None,
                 soft_nozzle_confirmed=soft_nozzle_confirmed is True,
@@ -25053,13 +25241,10 @@ def multi_material_print(
             if compose_result.get("slicer_note"):
                 result["slicer_note"] = compose_result["slicer_note"]
             result.update(_composer_safety(compose_result))
-            # Warn when AMS mapping was not established
             if len(unique_filaments) > 1 and not ams_info:
                 result["ams_warning"] = (
-                    "No AMS slot mapping was established. Multi-material per-object "
-                    "assignment requires a Bambu printer with AMS, or a multi-extruder "
-                    "setup (e.g. Prusa XL tool changer). On single-extruder printers "
-                    "without AMS, all objects will print with the same filament."
+                    "No loaded spool was chosen for each filament before slicing; the print "
+                    "step routed them from the sliced file."
                 )
 
         return result
@@ -25211,11 +25396,13 @@ def multi_color_copies(
         tray id (``unit * 4 + slot`` on a chained unit, the unit id on an
         AMS HT; ``ams_status`` lists each tray's ``tray_id``).  E.g.
         ``[0, 1, 2, 3]`` for all 4 AMS Lite trays, ``[0, 5]`` for A1 and B2.
-    :param colors: Hex color strings per copy for slicer preview.
+    :param colors: Hex color strings per copy.
         E.g. ``["#FF0000", "#00FF00", "#0000FF", "#FFFF00"]``.
-        Auto-read from AMS if omitted.
-    :param material: Material type filter for AMS auto-detect
-        (default ``"PLA"``).  Only trays matching this type are used.
+        Auto-read from AMS if omitted.  Given without *ams_slots*, each
+        copy prints from the loaded spool of its colour, and the print is
+        refused when a colour is not loaded.
+    :param material: The material the copies print in (default ``"PLA"``).
+        Auto-detect uses only loaded spools of that plastic.
     :param spacing_mm: Gap between copies on the plate (default 10 mm).
         Copies are arranged side by side, centered on the plate.
     :param printer_id: Printer model ID for slicer profile selection and
@@ -25313,10 +25500,10 @@ def multi_color_copies(
                         "Kiln couldn't read the AMS. Give the slots yourself in `ams_slots`.",
                         code="AMS_ERROR",
                     )
-                mat_upper = material.upper().strip()
+                from kiln.ams_routing import same_plastic
+
                 for tid, name, tray in _ams_tray_rows(ams_result):
-                    ttype = (tray.get("tray_type") or "").strip().upper()
-                    if ttype == mat_upper or mat_upper in ttype:
+                    if same_plastic(material, tray.get("tray_type")):
                         color_hex = tray.get("tray_color", "000000FF")
                         # Convert RRGGBBAA to #RRGGBB
                         if len(color_hex) >= 6:
@@ -25330,11 +25517,23 @@ def multi_color_copies(
                 )
 
             if not resolved_slots:
-                return _error_dict(
-                    f"No AMS tray has {material} loaded. "
-                    f"Check the filament is loaded, or give the slots yourself in `ams_slots`.",
-                    code="NO_MATERIAL",
+                from kiln.ams_routing import Filament as _Filament
+                from kiln.ams_routing import loaded_trays as _loaded_trays
+                from kiln.ams_routing import spool_miss
+
+                miss = spool_miss(
+                    [_Filament(hex6=None, material=material)], _loaded_trays(ams_result),
+                    colour_counts=False, sliced=False, reslice=False,
                 )
+                if miss is None:
+                    return _error_dict(
+                        f"No spool is loaded. Load {material} spools, or name the trays yourself "
+                        "with ams_slots.",
+                        code="NO_MATERIAL",
+                    )
+                return _error_dict(miss.message, code="NO_MATERIAL", retryable=False, extra={
+                    "options": _spool_calls(miss.options),
+                })
 
         # Apply copies limit if specified
         if copies is not None:
@@ -25375,8 +25574,34 @@ def multi_color_copies(
             "#808080",
             "#C0C0C0",
         ]
+        asked_colours = list(colors[:n_copies]) if colors is not None and ams_slots is None else []
         while len(resolved_colors) < n_copies:
             resolved_colors.append(default_colors[len(resolved_colors) % len(default_colors)])
+        if asked_colours:
+            # Colours the person named: the print gate picks the loaded spool
+            # of each, or refuses.
+            from kiln.ams_routing import Filament as _Filament
+            from kiln.ams_routing import normalize_hex as _hex6
+
+            _copies = {"model_path": model_path, "copies": n_copies, "material": material,
+                       **({"printer_id": printer_id} if printer_id else {})}
+            spools, refusal = _door_spools(
+                None,
+                wanted=[
+                    _Filament(hex6=_hex6(asked_colours[i]) if i < len(asked_colours) else None, material=material)
+                    for i in range(n_copies)
+                ],
+                printer_id=printer_id,
+                noun="copy",
+                print_from=lambda o: {"tool": "multi_color_copies", "arguments": {
+                    **_copies, "ams_slots": _mapping_of(o)}} if o.get("mapping") else None,
+            )
+            if refusal is not None:
+                return refusal
+            matches = (spools.get("plan") or {}).get("matches") or []
+            if spools.get("ams_mapping") and len(matches) == n_copies:
+                resolved_slots = list(spools["ams_mapping"])
+                resolved_names = {m["slot"]: m["name"] for m in matches}
 
         # --- Arrange the copies and build the multi-color 3MF ---
         # Each copy is its own arrangement group, so the copies land side by
