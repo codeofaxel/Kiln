@@ -1162,10 +1162,13 @@ class _DesignToolsPlugin:
             technique named carries its safety notes.
 
             When Kiln's finishing guide cannot be had (offline, signed out, no
-            answer), the answer is ``basic: true``: one general step that
-            suits any plastic with its safety notes, and ``message`` saying
-            why the plastic's own steps are missing and how to get them.
-            Relay it as general, never as this plastic's guide.
+            answer), the answer is ``basic: true``: ``techniques``, each finish
+            the plastic takes with its safety notes (only the one named, when
+            ``goal`` names one of them), or ``steps``, one general step with its
+            safety notes for a plastic not listed; and ``message`` saying why
+            the rest of the guide is missing and how to get it.  Relay the
+            safety notes whole and the rest as missing, never as this
+            plastic's full guide.
 
             Args:
                 material: Material ID (e.g. "pla", "abs", "petg", "nylon").
@@ -1184,7 +1187,7 @@ class _DesignToolsPlugin:
                 if asked.answer is None:
                     if asked.error is not None:
                         return {"success": False, "error": asked.error}
-                    return finishing.basic_guide(asked.miss, material)
+                    return finishing.basic_guide(asked.miss, material, goal)
                 reply = finishing.reply_from(asked.answer)
                 reply["upgrade_hint"] = _upgrade_hint("post_processing")
                 return reply

@@ -71,6 +71,9 @@ REFERENCE_DATA_FILES: dict[str, str] = {
     "design_knowledge/environment_compatibility.json": (
         "service-environment guidance, keyed by environment"
     ),
+    "design_knowledge/finishing_cautions.json": (
+        "each plastic's finishes with their safety notes, keyed by material"
+    ),
     "design_knowledge/functional_requirements.json": (
         "requirement vocabulary, keyed by requirement"
     ),

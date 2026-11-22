@@ -13,6 +13,9 @@ keep:
   'catalog_keys.py::_MATERIAL_ABBREVIATIONS':
     door: every material lookup
     why: a spelling map from short names to catalogue ids; it carries no figure or judgement
+  'data/design_knowledge/finishing_cautions.json::(top)':
+    door: the finishing guide (get_post_processing_guide) when Kiln's servers cannot be reached or the install is signed out
+    why: it must still say the fire, fume, dust and skin warnings of each finish a plastic takes; it carries the finish names and those warnings only
   'material_safety.py::_REFUSED_PAIRS':
     door: the multi-colour composer and the print doors that load several materials into one print
     why: with no server they must still refuse loading two plastics whose nozzle temperatures cannot share one print, a clog and failed-print floor
