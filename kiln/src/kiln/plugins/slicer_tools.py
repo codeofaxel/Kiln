@@ -1958,6 +1958,13 @@ def _placed_slice(
     """
     from kiln.slicer import say_project_plate, take_project_plate
 
+    if slice_kwargs.get("speed_by_height") is not None:
+        from kiln._pro_speed_plan_bridge import with_context
+
+        # Speeds Kiln is asked to choose are chosen for this printer and material.
+        slice_kwargs["speed_by_height"] = with_context(
+            slice_kwargs["speed_by_height"], printer=effective_printer_id, material=material_id,
+        )
     taken = take_project_plate(input_path, plate_number, profile_path)
     if taken is not None:
         input_path = taken.path

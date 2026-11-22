@@ -2377,9 +2377,13 @@ def _slice_file(
     if ext not in _INPUT_EXTENSIONS:
         raise SlicerError(f"Unsupported input format '{ext}'. Supported: {', '.join(sorted(_INPUT_EXTENSIONS))}")
 
+    from kiln import _pro_speed_plan_bridge as _speed_plan
     from kiln import speed_by_height as _speed_by_height
 
-    speed_ranges = _speed_by_height.checked(speed_by_height)
+    # ``"kiln"`` asks Kiln to choose the ranges; anything else is the
+    # person's own.
+    kiln_ask = _speed_plan.read_ask(speed_by_height)
+    speed_ranges = [] if kiln_ask is not None else _speed_by_height.checked(speed_by_height)
 
     # A project of several plates is sliced one plate at a time: the plate
     # named is taken out as a file of its own, and that file is what every
@@ -2719,15 +2723,26 @@ def _slice_file(
             finally:
                 _unrecorded.reset(quiet)
 
+        from kiln.maker_slicer import is_slicer
+
+        slicer_id = next(
+            (name for name in ("bambu_studio", "orcaslicer", "prusaslicer") if is_slicer(name, slicer)),
+            "orcaslicer" if bambu else "prusaslicer",
+        )
         return _speed_by_height.sliced(
             speed_ranges,
             family=_speed_by_height.BAMBU if bambu else _speed_by_height.PRUSA,
             out_file=out_file, run=_run,
+            planner=None if kiln_ask is None else _speed_plan.planner(
+                sliced_input, slicer_id=slicer_id, ask={"material": material, **kiln_ask},
+            ),
+            eases_acceleration=slicer_id == "bambu_studio",
         )
 
     try:
         result = _say_left_out(say_project_plate(
-            _with_ranges() if speed_ranges else _decided(out_file, with_profile=slicer_profile), taken,
+            _with_ranges() if speed_ranges or kiln_ask is not None
+            else _decided(out_file, with_profile=slicer_profile), taken,
         ), left_out)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
