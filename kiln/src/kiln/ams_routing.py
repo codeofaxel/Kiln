@@ -30,6 +30,7 @@ __all__ = [
     "normalize_hex",
     "plan_ams_mapping",
     "read_file_filaments",
+    "same_plastic",
 ]
 
 MATCH_DELTA_E = 28.0
@@ -93,6 +94,8 @@ class Filament:
 
     @property
     def label(self) -> str:
+        if self.hex6 is None and self.material:
+            return self.material
         return _colour_name(self.hex6) + (f" {self.material}" if self.material else "")
 
 
@@ -287,6 +290,55 @@ def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
 
 
 # ---------------------------------------------------------------------------
+# Is this spool that plastic?
+# ---------------------------------------------------------------------------
+
+
+def _is_spool_type(word: str) -> bool:
+    """True when *word* spells a filament type a multi-material unit reports."""
+    from kiln.catalog_keys import same_material_spelling
+    from kiln.printers.bambu_3mf import BAMBU_FILAMENT_TYPES
+
+    return any(same_material_spelling(word, t) for t in BAMBU_FILAMENT_TYPES)
+
+
+def _reported_as(material: str) -> str | None:
+    """The filament type a spool of *material* is reported as, or ``None``
+    for a name with no one type in it ("PLA+" and "Silk PLA" load as PLA)."""
+    from kiln.catalog_keys import material_label
+    from kiln.printers.bambu_3mf import BAMBU_FILAMENT_TYPES, bambu_filament_type
+
+    label = material_label(material)
+    if not label:
+        return None
+    if _is_spool_type(label):
+        return label
+    named = {w for w in re.findall(r"[A-Z0-9]+", label.replace("NYLON", "PA")) if w in BAMBU_FILAMENT_TYPES}
+    typed = bambu_filament_type(label)
+    return typed if named == {typed.split("-")[0]} else None
+
+
+def same_plastic(wanted: str | None, loaded: str | None) -> bool | None:
+    """Whether the *loaded* spool is the plastic a job *wanted*.
+
+    ``True`` for one material under two spellings, or a spool of the type
+    *wanted* is loaded as; ``False`` when both are known and differ (``PLA``
+    is not ``PLA-CF``); ``None`` when either is blank, unread or no type.
+    """
+    from kiln.catalog_keys import same_material_spelling
+
+    a, b = str(wanted or "").strip(), str(loaded or "").strip()
+    if not a or not b or b.upper() == UNREAD_MATERIAL:
+        return None
+    if same_material_spelling(a, b):
+        return True
+    word = _reported_as(a)
+    if word is None or not _is_spool_type(b):
+        return None
+    return same_material_spelling(word, b)
+
+
+# ---------------------------------------------------------------------------
 # The plan
 # ---------------------------------------------------------------------------
 
@@ -349,18 +401,15 @@ def plan_ams_mapping(
 
     # Every (extruder, tray) pairing scored; None = not an acceptable match
     def _score(f: Filament, t: Tray) -> tuple[float, float | None, str | None] | None:
-        # An unread material on EITHER side is unjudgeable, not a disagreement
-        same_mat = (
-            f.material is None
-            or t.material.upper() == UNREAD_MATERIAL
-            or f.material.upper() == t.material.upper()
-        )
+        # An unstated material on the file's side is unjudgeable, as is an
+        # unread one on the tray's; a known disagreement is never a match.
+        same = True if f.material is None or t.material.upper() == UNREAD_MATERIAL else same_plastic(f.material, t.material)
+        if same is False:
+            return None
         if f.hex6 is None:
-            return (tolerance, None, None) if same_mat else None
+            return (tolerance, None, None) if same else None
         if t.hex6 is None:
-            if not same_mat:
-                return None
-            if t.material.upper() == UNREAD_MATERIAL:
+            if not same or t.material.upper() == UNREAD_MATERIAL:
                 return None
             return (
                 2 * tolerance + 1.0,
@@ -370,7 +419,7 @@ def plan_ams_mapping(
         de = _delta_e(f.hex6, t.hex6)
         if de > tolerance:
             return None
-        if not same_mat:
+        if same is None:
             return (
                 de + tolerance,
                 de,
@@ -420,10 +469,13 @@ def plan_ams_mapping(
                 cands = [(t, _delta_e(f.hex6, t.hex6)) for t in trays if t.hex6]
                 if cands:
                     nearest = min(cands, key=lambda c: c[1])
-            why = (
-                f"no loaded spool is close to {f.label}"
-                + (f" (nearest: {nearest[0].label}, ΔE {nearest[1]:.0f})" if nearest else "")
-            )
+            if f.material and not any(same_plastic(f.material, t.material) is not False for t in trays):
+                why = f"no loaded spool is {f.material}"
+            else:
+                why = (
+                    f"no loaded spool is close to {f.label}"
+                    + (f" (nearest: {nearest[0].label}, ΔE {nearest[1]:.0f})" if nearest else "")
+                )
             plan.matches.append(
                 {"extruder": i, "wanted": f.label, "slot": None, "name": None, "tray": None,
                  "delta_e": None, "exact": False, "warning": why}

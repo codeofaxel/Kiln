@@ -266,8 +266,14 @@ class TestPlanAmsMapping:
         assert plan.ok
         assert plan.mapping == [1, 0]
 
-    def test_material_mismatch_matches_with_a_warning(self):
+    def test_material_mismatch_is_not_a_match(self):
         plan = plan_ams_mapping([Filament("F72323", "PETG")], _trays("F72323", material="PLA"))
+        assert not plan.ok
+        assert plan.unmatched == [0]
+        assert plan.warnings == ["no loaded spool is PETG"]
+
+    def test_a_word_that_names_no_type_still_matches_on_colour_with_a_warning(self):
+        plan = plan_ams_mapping([Filament("F72323", "FLEX")], _trays("F72323", material="TPU"))
         assert plan.ok
         assert any("material differs" in w for w in plan.warnings)
 
