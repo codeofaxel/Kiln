@@ -1612,11 +1612,23 @@ def _wrap_not_as_sliced(cls: type) -> None:
         setattr(cls, action, _make(original, kind))
 
 
+def _floor_gcode(adapter: Any, commands: Any) -> Any:
+    from kiln.live_speed_floor import guard_gcode
+
+    return guard_gcode(adapter, commands)
+
+
+def _floor_preset(adapter: Any, profile: Any) -> Any:
+    from kiln.live_speed_floor import guard_preset
+
+    return guard_preset(adapter, profile)
+
+
 #: Adapter commands that change a running print's speed, by the floor that
 #: judges each (:mod:`kiln.live_speed_floor`).
-_LIVE_SPEED_COMMANDS: dict[str, str] = {
-    "send_gcode": "guard_gcode",
-    "set_speed_profile": "guard_preset",
+_LIVE_SPEED_COMMANDS: dict[str, Any] = {
+    "send_gcode": _floor_gcode,
+    "set_speed_profile": _floor_preset,
 }
 
 
@@ -1637,7 +1649,7 @@ def _wrap_live_speed_floor(cls: type) -> None:
         ):
             continue
 
-        def _make(original: Any, guard: str) -> Any:
+        def _make(original: Any, guard: Any) -> Any:
             @functools.wraps(original)
             def _floored(self, *args, **kwargs):
                 judged: Any = contextlib.nullcontext()
@@ -1645,11 +1657,11 @@ def _wrap_live_speed_floor(cls: type) -> None:
                     from kiln import live_speed_floor
 
                     if args:
-                        args = (getattr(live_speed_floor, guard)(self, args[0]), *args[1:])
+                        args = (guard(self, args[0]), *args[1:])
                     else:
                         for key in ("commands", "profile"):
                             if key in kwargs:
-                                kwargs[key] = getattr(live_speed_floor, guard)(self, kwargs[key])
+                                kwargs[key] = guard(self, kwargs[key])
                     judged = live_speed_floor.inside()
                 except Exception:  # noqa: BLE001 -- the floor never breaks a command
                     pass
