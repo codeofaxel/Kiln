@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from kiln.plain_words import mark_code_names, said, technical_words, unplain
+from kiln.plain_words import said, technical_words, unplain
 from kiln.server import _error_dict
 
 
@@ -54,12 +54,10 @@ def test_a_refusal_kiln_wrote_is_left_as_written():
     assert "detail" not in error
 
 
-def test_a_code_name_is_set_apart_and_a_path_is_left_alone():
+def test_a_sentence_kiln_wrote_is_passed_on_as_written():
     error = _answer(_raise(ValueError("layer_height must be above 0")))
-    # A sentence Kiln wrote is passed on as written; marking is the author's.
+    # Marking a code name is the author's job, never applied to a finished sentence.
     assert error["message"] == "Export failed: layer_height must be above 0"
-    marked = mark_code_names("Pass the design_id from /tmp/my_folder/a_b.stl or `goal_id`, not kiln_pro.x")
-    assert marked == "Pass the `design_id` from /tmp/my_folder/a_b.stl or `goal_id`, not kiln_pro.x"
 
 
 def test_the_detail_carries_no_home_folder_name():
@@ -129,10 +127,3 @@ def test_the_english_none_is_not_mistaken_for_a_code_value():
     assert technical_words("None of the attempts worked.") == []
     assert technical_words("The layer height was None.") == ["a code value"]
 
-
-def test_a_missing_input_is_named_by_its_key():
-    from kiln.plain_words import missing_name
-
-    assert missing_name(KeyError("b_mm")) == "`b_mm`"
-    assert missing_name(ValueError("b_mm")) == ""
-    assert missing_name(None) == ""
