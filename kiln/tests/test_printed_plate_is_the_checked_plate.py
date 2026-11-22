@@ -119,3 +119,43 @@ def test_the_bambu_command_is_never_sent_for_an_odd_spelling(adapter_with_mqtt):
     adapter = adapter_with_mqtt
     result = adapter.start_print("model.3mf", plate_number="02")
     assert result.success is False and not adapter._mqtt_client.publish.called
+
+
+# ---------------------------------------------------------------------------
+# A file the gate cannot read is refused, never passed unchecked
+# ---------------------------------------------------------------------------
+
+
+def _refused_unread(printer, path, plate=2):
+    result = printer.start_print(path, plate_number=plate)
+    assert result.success is False and printer.impl_calls == []
+    assert result.code == pg.PLATE_NOT_IN_FILE and "could not read" in result.message
+
+
+def test_a_truncated_archive_is_refused(two_plates):
+    from pathlib import Path
+
+    data = Path(two_plates).read_bytes()
+    Path(two_plates).write_bytes(data[: len(data) // 2])
+    _refused_unread(_Adapter(_setting(0.6)), two_plates)
+
+
+def test_a_plate_that_cannot_be_read_is_refused(tmp_path):
+    path = tmp_path / "two.gcode.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
+        zf.writestr("Metadata/plate_1.gcode", _plate("0.6"))
+        zf.writestr("Metadata/plate_2.gcode", _plate("0.6"))
+    data = bytearray(path.read_bytes())
+    # Change one byte of plate 2's stored G-code: it no longer matches its checksum.
+    at = data.rindex(b"G1 X10 Y10 E1")
+    data[at] = ord("X")
+    path.write_bytes(bytes(data))
+    _refused_unread(_Adapter(_setting(0.6)), str(path))
+
+
+def test_an_archive_the_untrusted_reader_refuses_is_refused(two_plates, monkeypatch):
+    from kiln.untrusted_zip import UntrustedZipFile
+
+    # As if the archive unpacked to more than the reader allows (a zip bomb).
+    monkeypatch.setitem(UntrustedZipFile.__init__.__kwdefaults__, "max_uncompressed_bytes", 64)
+    _refused_unread(_Adapter(_setting(0.6)), two_plates)

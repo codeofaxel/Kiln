@@ -955,21 +955,38 @@ def _plate_number(kwargs: dict[str, Any]) -> int:
 def _printed_plate_verdict(job_path: str, file_name: str, plate_number: int) -> dict[str, Any] | None:
     """A refusal when the sliced 3MF at *job_path* holds G-code but not the
     member the printer asks for plate *plate_number*, or holds two members
-    that could answer to it; ``None`` for anything else.  The printer would
-    fail on a missing plate, or print a plate no check has read."""
+    that could answer to it, or cannot be opened or that plate read;
+    ``None`` for anything else.  The printer would fail on a missing plate,
+    or print a plate no check has read."""
     if not str(job_path).lower().endswith(".3mf"):
         return None
-    from kiln.gcode_metadata import plate_gcode_members, plate_member_ambiguous
+    from kiln.gcode import _MAX_SCAN_BYTES
+    from kiln.gcode_metadata import plate_gcode_member, plate_gcode_members, plate_member_ambiguous, read_member_text
     from kiln.untrusted_zip import UntrustedZipFile
 
-    with UntrustedZipFile(job_path) as zf:
-        if not any(n.lower().endswith(".gcode") for n in zf.namelist()):
-            return None
-        ambiguous = plate_member_ambiguous(zf, plate_number)
-        plates = [number for number, _ in plate_gcode_members(zf)]
+    name = os.path.basename(str(file_name))
+    try:
+        with UntrustedZipFile(job_path) as zf:
+            if not any(n.lower().endswith(".gcode") for n in zf.namelist()):
+                return None
+            ambiguous = plate_member_ambiguous(zf, plate_number)
+            plates = [number for number, _ in plate_gcode_members(zf)]
+            member = plate_gcode_member(zf, plate_number)
+            if member is not None:
+                # Every check after this one reads this plate: it has to be readable.
+                read_member_text(zf, member, _MAX_SCAN_BYTES)
+    except Exception as exc:  # noqa: BLE001 -- an archive Kiln cannot read is never passed unchecked
+        _logger.debug("print_gate: %s could not be read as a print file", name, exc_info=True)
+        return {
+            "ok": False, "blocked": True, "code": PLATE_NOT_IN_FILE,
+            "reason": (
+                f"Kiln could not read {name} ({' '.join(str(exc).split())[:160]}), so none of its checks could "
+                "run and it was not started: the printer cannot be trusted with a file Kiln cannot read. "
+                "Slice or export it again."
+            ),
+        }
     if plate_number in plates:
         return None
-    name = os.path.basename(str(file_name))
     if ambiguous:
         reason = (
             f"{name} holds more than one file that could be plate {plate_number}, so Kiln cannot tell which "
