@@ -2875,13 +2875,13 @@ def _slice_decided(
             slic3r_input = joined_copy
         if several is not None:
             slic3r_input, slicer_profile = _stand_the_tower(slic3r_input, slicer_profile, input_abs, parts_dir)
-    if prepare is not None:
-        if parts_dir is None:
-            parts_dir = tempfile.mkdtemp(prefix="kiln_prusa_parts_")
-        prepared_dir = os.path.join(parts_dir, "prepared")
-        os.makedirs(prepared_dir, exist_ok=True)
-        slic3r_input = prepare(slic3r_input, prepared_dir)
+    if prepare is not None and parts_dir is None:
+        parts_dir = tempfile.mkdtemp(prefix="kiln_prusa_parts_")
     try:
+        if prepare is not None:
+            prepared_dir = os.path.join(parts_dir, "prepared")
+            os.makedirs(prepared_dir, exist_ok=True)
+            slic3r_input = prepare(slic3r_input, prepared_dir)
         result = _slice_with_slic3r(
             slicer,
             input_abs,
