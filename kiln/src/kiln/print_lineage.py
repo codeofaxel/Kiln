@@ -14,6 +14,8 @@ Contract
 * :func:`note_soft_nozzle` is called when the owner said to print an
   abrasive filament through a nozzle that is not wear-resistant, so the
   record keeps who said so, when, and which filament and nozzle.
+* :func:`note_material_swap` is called when a print is sliced for a loaded
+  plastic in place of the one asked for, so the record keeps both.
 * :func:`resolve` is the ONE answer to "what is this print file a print of".
   It is called at the print-start chokepoint
   (``kiln.auto_record_hook.print_identity_at_start``, reached only from
@@ -366,6 +368,15 @@ def note_one_nozzle(output_path: str | None, one_nozzle: dict[str, Any] | None) 
     return _note_on_record(output_path, "one_nozzle", one_nozzle)
 
 
+def note_material_swap(output_path: str | None, swap: dict[str, Any] | None) -> bool:
+    """Keep, on the record of the sliced file at *output_path*, that it was
+    sliced for one plastic in place of another (``asked``, ``used``):
+    ``material_swap`` on the record and in every answer about a print of
+    that file (:func:`resolve`).  ``False`` when the file has no record.
+    Never raises."""
+    return _note_on_record(output_path, "material_swap", swap)
+
+
 def _note_on_record(output_path: str | None, key: str, value: dict[str, Any] | None) -> bool:
     if not output_path or not isinstance(value, dict) or _hosted():
         return False
@@ -517,6 +528,7 @@ def _answer(record: dict[str, Any], matched_by: str) -> dict[str, Any]:
         "soft_nozzle": record.get("soft_nozzle") if isinstance(record.get("soft_nozzle"), dict) else None,
         **({"sliced_with": record["sliced_with"]} if isinstance(record.get("sliced_with"), dict) else {}),
         **({"one_nozzle": record["one_nozzle"]} if isinstance(record.get("one_nozzle"), dict) else {}),
+        **({"material_swap": record["material_swap"]} if isinstance(record.get("material_swap"), dict) else {}),
     }
 
 

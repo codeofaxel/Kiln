@@ -4446,8 +4446,11 @@ class _SlicerToolsPlugin:
                             if o.get("mapping") else
                             {"tool": "slice_and_print", "arguments": {**_here, **_mat, "color": o["hex"]}}
                         ),
-                        reslice=lambda o: {"tool": "slice_and_print", "arguments": {
-                            **_here, "material": _srv._material_arg(o)}},
+                        reslice=lambda o, asked: _srv._swap_call(
+                            o, asked, file_path=_multicolor_source,
+                            here={"printer_name": printer_name} if printer_name else None,
+                            ids={"version_id": version_id, "design_id": design_id, "branch_id": branch_id},
+                        ),
                     )
                 # Refuse to silent-route when AMS state is ambiguous
                 # (hardware bits say AMS present but no tray state, or

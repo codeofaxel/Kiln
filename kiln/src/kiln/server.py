@@ -9693,17 +9693,73 @@ def _spool_calls(
     reslice: Any = None,
 ) -> list[dict[str, Any]]:
     """*options* with the call that carries each one out, where the door has
-    one: *print_from* and *reslice* each take an option and return
+    one: *print_from* takes an option, *reslice* an option and the plastic
+    it stands in for (the one the print asked for), and each returns
     ``{"tool", "arguments"}`` (and ``needs`` for an argument the door lacks)."""
+    asked = next((o.get("material") for o in options
+                  if o.get("action") == "load_spool" and o.get("part") is None and o.get("material")), None)
     out: list[dict[str, Any]] = []
     for option in options:
         option = dict(option)
-        make = {"print_from_slot": print_from, "reslice_for": reslice}.get(option.get("action"))
-        call = make(option) if make is not None else None
+        action = option.get("action")
+        if action == "print_from_slot" and print_from is not None:
+            call = print_from(option)
+        elif action == "reslice_for" and reslice is not None:
+            call = reslice(option, asked)
+        else:
+            call = None
         if call:
             option["call"] = call
         out.append(option)
     return out
+
+
+def _swap_call(
+    option: dict[str, Any],
+    asked: str | None,
+    *,
+    file_path: str | None,
+    here: dict[str, Any] | None = None,
+    ids: dict[str, Any] | None = None,
+    goal_id: str | None = None,
+) -> dict[str, Any]:
+    """The call that takes a re-slice choice: ``reprint_with_material``, the
+    one door for a print in another plastic, carrying the part's own
+    identity (*ids*: ``version_id`` / ``design_id`` / ``branch_id``; or
+    *goal_id*) and the plastic it stands in for (*asked*), so the print
+    lands on the part's history with both.  Without the model's path the
+    call says it needs one."""
+    args: dict[str, Any] = {**({"file_path": file_path} if file_path else {}), **(here or {}),
+                            "material_id": _material_arg(option)}
+    if option.get("tray_id") is not None:
+        args["ams_mapping"] = [option["tray_id"]]
+    args.update({k: v.strip() for k, v in (ids or {}).items()
+                 if k in ("version_id", "design_id", "branch_id") and isinstance(v, str) and v.strip()})
+    if goal_id:
+        args["goal_id"] = goal_id
+    if asked:
+        args["in_place_of"] = str(asked)
+    args["chosen_by"] = "person"
+    call: dict[str, Any] = {"tool": "reprint_with_material", "arguments": args}
+    if not file_path:
+        call["needs"] = {"file_path": "the model this file was sliced from"}
+    return call
+
+
+def _model_sliced_into(file_name: str | None) -> str | None:
+    """The model this computer sliced *file_name* from, when it is still on
+    this disk (the slice ledger, :func:`kiln.monitor_twin.sliced_entry_for`)."""
+    try:
+        from kiln.monitor_twin import sliced_entry_for
+
+        entry = sliced_entry_for(os.path.basename(file_name or "")) or {}
+    except Exception:  # noqa: BLE001 -- no ledger names no model
+        return None
+    for key in ("source", "input"):
+        path = entry.get(key)
+        if isinstance(path, str) and os.path.isfile(path):
+            return path
+    return None
 
 
 def _mapping_of(option: dict[str, Any]) -> list[int]:
@@ -10617,14 +10673,11 @@ def start_print(
             return _spool_refusal(
                 {"code": "AMS_COLOR_MISMATCH", **_ams_decision}, prefix="",
                 print_from=lambda o: {"tool": "start_print", "arguments": {**_here, "ams_mapping": _mapping_of(o)}},
-                reslice=lambda o: {
-                    "tool": "run_reslice_and_print",
-                    "arguments": {
-                        **({"printer_name": printer_name} if printer_name else {}), "material": _material_arg(o),
-                        **({"ams_mapping": [o["tray_id"]]} if o.get("tray_id") is not None else {}),
-                    },
-                    "needs": {"model_path": "the model this file was sliced from"},
-                },
+                reslice=lambda o, asked: _swap_call(
+                    o, asked, file_path=_model_sliced_into(file_name),
+                    here={"printer_name": printer_name} if printer_name else None,
+                    ids={"version_id": version_id, "design_id": design_id, "branch_id": branch_id},
+                ),
             )
         if _ams_decision["use_ams"]:
             print_kwargs["use_ams"] = True
@@ -20730,6 +20783,10 @@ def run_reslice_and_print(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    version_id: str | None = None,
+    design_id: str | None = None,
+    branch_id: str | None = None,
+    in_place_of: str | None = None,
 ) -> dict:
     """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
 
@@ -20795,6 +20852,14 @@ def run_reslice_and_print(
         preview_token: Token from ``issue_preview_token`` proving this model
             was shown to the person before printing.  Required beside their
             go-ahead: a print is shown to its owner before it starts.
+        version_id: The kept design version the model is, when there is one,
+            so the print's record lands on that version's history (with
+            ``design_id`` / ``branch_id``, as ``start_print`` takes them).
+        design_id: The kept design the model belongs to.
+        branch_id: The design branch the version is on.
+        in_place_of: The plastic this print stands in for, when it is sliced
+            for a loaded one instead (a spool-swap choice): kept with
+            ``material`` on the print's own record.
     """
     if err := _check_auth("print"):
         return err
@@ -20859,6 +20924,8 @@ def run_reslice_and_print(
             skip_validation=skip_validation,
             signoff=signoff,
             placement=placement,
+            identity={"version_id": version_id, "design_id": design_id, "branch_id": branch_id},
+            in_place_of=in_place_of if isinstance(in_place_of, str) and in_place_of.strip() else None,
             **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
         )
         resp = {"success": result.success, **result.to_dict()}
@@ -24006,6 +24073,10 @@ def reprint_with_material(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
+    version_id: str | None = None,
+    design_id: str | None = None,
+    branch_id: str | None = None,
+    in_place_of: str = "",
 ) -> dict:
     """Reprint a model with a different material — the slice is set for it.
 
@@ -24069,6 +24140,14 @@ def reprint_with_material(
         chosen_by: Who picked this material: ``"person"`` when they named it,
             ``"agent"`` when you proposed it.  Kept with the goal's record;
             omitted, it is left unsaid.
+        version_id: The kept design version the model is, when there is one,
+            so the print lands on that version's history (with ``design_id``
+            and ``branch_id``).
+        design_id: The kept design the model belongs to.
+        branch_id: The design branch the version is on.
+        in_place_of: The plastic this reprint stands in for (the one asked
+            for, when it is not loaded): kept with ``material_id`` on the
+            print's own record.
     """
     if err := _check_auth("print"):
         return err
@@ -24116,6 +24195,10 @@ def reprint_with_material(
                 soft_nozzle_confirmed=soft_nozzle_confirmed is True,
                 mixed_nozzle_experiment=mixed_nozzle_experiment is True,
                 filament_map=filament_map or None,
+                version_id=version_id,
+                design_id=design_id,
+                branch_id=branch_id,
+                in_place_of=in_place_of or None,
             )
         goal_said = goal_ask.wait()
 
@@ -24343,8 +24426,9 @@ def smart_reprint(
                 goal={"goal_id": goal_id} if goal_id else None, printer_id=printer_id,
                 print_from=lambda o: {"tool": "reprint_with_material", "arguments": {
                     "file_path": found_path, "material_id": material_id, **_here, "ams_mapping": _mapping_of(o)}},
-                reslice=lambda o: {"tool": "smart_reprint", "arguments": {
-                    "file_name": file_name, "material_id": _material_arg(o), **_here}},
+                reslice=lambda o, asked: _swap_call(
+                    o, asked, file_path=found_path, here=_here, goal_id=goal_id or None,
+                ),
             )
             if refusal is not None:
                 refusal["smart_reprint_steps"] = steps_log
@@ -24901,8 +24985,6 @@ def multi_material_print(
                         for (mat, color), _idx in sorted_filaments],
                 printer_id=printer_id,
                 print_from=_recoloured,
-                reslice=lambda o: {"tool": "multi_material_print", "arguments": {**_here, "objects_json": [
-                    {**obj, "material_id": _material_arg(o)} for obj in objects]}},
             )
             if refusal is not None:
                 refusal["multi_material_3mf"] = output_3mf
@@ -25255,7 +25337,7 @@ def multi_color_copies(
 
                 miss = spool_miss(
                     [_Filament(hex6=None, material=material)], _loaded_trays(ams_result),
-                    colour_counts=False, sliced=False,
+                    colour_counts=False, sliced=False, reslice=False,
                 )
                 if miss is None:
                     return _error_dict(
@@ -25263,11 +25345,8 @@ def multi_color_copies(
                         "with ams_slots.",
                         code="NO_MATERIAL",
                     )
-                _copies = {"model_path": model_path, **({"copies": copies} if copies else {}),
-                           **({"printer_id": printer_id} if printer_id else {})}
                 return _error_dict(miss.message, code="NO_MATERIAL", retryable=False, extra={
-                    "options": _spool_calls(miss.options, reslice=lambda o: {
-                        "tool": "multi_color_copies", "arguments": {**_copies, "material": _material_arg(o)}}),
+                    "options": _spool_calls(miss.options),
                 })
 
         # Apply copies limit if specified
@@ -25330,8 +25409,6 @@ def multi_color_copies(
                 noun="copy",
                 print_from=lambda o: {"tool": "multi_color_copies", "arguments": {
                     **_copies, "ams_slots": _mapping_of(o)}} if o.get("mapping") else None,
-                reslice=lambda o: {"tool": "multi_color_copies", "arguments": {
-                    **_copies, "colors": list(colors or []), "material": _material_arg(o)}},
             )
             if refusal is not None:
                 return refusal
