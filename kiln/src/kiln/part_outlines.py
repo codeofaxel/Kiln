@@ -38,7 +38,10 @@ it.  Nothing is judged here and nothing is kept.
 from __future__ import annotations
 
 import math
+import os
 from typing import Any
+
+from kiln import plain_words as _plain_words
 
 #: The most bands a part is split into, and the thinnest a band is.
 MAX_LEVELS = 160
@@ -533,7 +536,9 @@ def outlines_by_height(path: str, *, levels: int = MAX_LEVELS) -> dict[str, Any]
     try:
         triangles = np.asarray(load_mesh_triangles(path), dtype=np.float64)
     except Exception as exc:  # noqa: BLE001 -- any unreadable file is one refusal
-        raise PartOutlinesError(f"{path} could not be read as a mesh: {exc}") from exc
+        raise PartOutlinesError(
+            f"{os.path.basename(str(path))} could not be read as a mesh: {_plain_words.said(exc)}"
+        ) from exc
     if triangles.ndim != 3 or len(triangles) == 0:
         raise PartOutlinesError(f"{path} holds no triangles.")
     with np.errstate(invalid="ignore", over="ignore"):

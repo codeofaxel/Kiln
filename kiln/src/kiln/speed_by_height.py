@@ -1010,7 +1010,7 @@ def sliced(
             if band.max_acceleration is not None and not eases_acceleration:
                 raise SpeedByHeightError(
                     f"The range {band.span()} asks for gentler acceleration, and this slicer cannot hold "
-                    "acceleration by height. Bambu Studio can. Take max_acceleration_mm_s2 out, or slice with "
+                    "acceleration by height. Bambu Studio can. Take `max_acceleration_mm_s2` out, or slice with "
                     "Bambu Studio.",
                     code="SPEED_BY_HEIGHT_NO_ACCELERATION",
                 )

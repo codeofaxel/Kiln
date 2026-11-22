@@ -30,6 +30,7 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.served_answer import Miss, classify_answer, classify_transport_error, local_fault
 
 logger = logging.getLogger(__name__)
@@ -158,7 +159,7 @@ def planner(
             part = outlines_by_height(mesh_path)
         except PartOutlinesError as exc:
             raise SpeedByHeightError(
-                f"Kiln could not read this part's shape, so it chose no speeds and nothing was sliced: {exc}",
+                f"Kiln could not read this part's shape, so it chose no speeds and nothing was sliced: {_plain_words.said(exc)}",
                 code=NO_PLAN,
             ) from exc
         facts = sliced_facts(part, plain)
