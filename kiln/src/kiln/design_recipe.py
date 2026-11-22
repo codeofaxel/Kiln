@@ -543,6 +543,6 @@ def list_recipe_versions(directory: str) -> list[dict[str, Any]]:
                     entry["print_time"] = print_time
                 results.append(entry)
             except Exception:  # noqa: BLE001
-                results.append({"path": path, "error": "failed to parse"})
+                results.append({"path": path, "error": "Kiln couldn't read this version's record."})
     results.sort(key=lambda r: r["version"] if isinstance(r.get("version"), int) else 0)
     return results

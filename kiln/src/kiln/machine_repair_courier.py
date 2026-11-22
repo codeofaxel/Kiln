@@ -363,7 +363,7 @@ def answer_question(question_id: str, *, same: bool, db: Any = None, registry: A
     qid = str(question_id or "").strip()
     if not _QUESTION_ID.match(qid):
         return {"status": "error", "success": False, "code": "QUESTION_UNKNOWN",
-                "error": "That is not one of the questions your account asked; set_machine_repair lists them."}
+                "error": "That is not one of the questions your account asked; `set_machine_repair` lists them."}
     if not _enabled():
         return {"status": "error", "success": False, "code": "REPAIR_COURIER_OFF", "why": "switched_off",
                 "error": "Syncing a printer's repair record with your account is switched off here "

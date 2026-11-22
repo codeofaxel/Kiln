@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import destructive
 
 _logger = logging.getLogger(__name__)
@@ -63,8 +64,9 @@ class _ImportMotionToolsPlugin:
                     _logger.warning("motion_for_imports: the choice was not kept", exc_info=True)
                     return {
                         "success": False,
-                        "error": f"Kiln could not keep that choice on this computer ({exc}). Nothing changed.",
+                        "error": f"Kiln could not keep that choice on this computer ({_plain_words.said(exc)}). Nothing changed.",
                         "code": "NOT_KEPT",
+                        **_plain_words.detail_field(exc),
                     }
             return {"success": True, **import_motion.state()}
 

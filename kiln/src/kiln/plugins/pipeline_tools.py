@@ -106,7 +106,7 @@ class _PipelineToolsPlugin:
                 )
             if ex.state != _srv._PipelineState.RUNNING:
                 return _srv._error_dict(
-                    f"Cannot pause: pipeline state is {ex.state.value}",
+                    f"Kiln can't pause this pipeline: it is {ex.state.value}.",
                     code="INVALID_STATE",
                 )
             ex.pause()
@@ -135,7 +135,7 @@ class _PipelineToolsPlugin:
                 )
             if ex.state != _srv._PipelineState.PAUSED:
                 return _srv._error_dict(
-                    f"Cannot resume: pipeline state is {ex.state.value}",
+                    f"Kiln can't resume this pipeline: it is {ex.state.value}.",
                     code="INVALID_STATE",
                 )
             result = ex.resume()
@@ -165,7 +165,7 @@ class _PipelineToolsPlugin:
                 )
             if ex.state in (_srv._PipelineState.COMPLETED, _srv._PipelineState.ABORTED):
                 return _srv._error_dict(
-                    f"Cannot abort: pipeline state is {ex.state.value}",
+                    f"Kiln can't stop this pipeline: it is {ex.state.value}.",
                     code="INVALID_STATE",
                 )
             result = ex.abort()
@@ -196,7 +196,7 @@ class _PipelineToolsPlugin:
                 )
             if ex.state not in (_srv._PipelineState.FAILED, _srv._PipelineState.PAUSED):
                 return _srv._error_dict(
-                    f"Cannot retry: pipeline state is {ex.state.value} (must be failed or paused)",
+                    f"Kiln can't retry this pipeline: it is {ex.state.value}, and only a failed or paused one can be retried.",
                     code="INVALID_STATE",
                 )
             result = ex.retry_step(step_index)

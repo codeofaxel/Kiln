@@ -46,6 +46,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.persistence import _retry_on_locked
 
 logger = logging.getLogger(__name__)
@@ -570,7 +571,7 @@ def contribute(
         return {"queued": newly}
     except Exception as exc:  # noqa: BLE001 — contribution must never break the caller
         logger.debug("community contribute failed (non-fatal): %s", exc)
-        return {"queued": False, "error": str(exc)}
+        return {"queued": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 # ---------------------------------------------------------------------------

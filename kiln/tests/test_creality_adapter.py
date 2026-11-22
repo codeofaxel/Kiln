@@ -68,7 +68,7 @@ class TestCrealityAdapter:
         with patch(
             "kiln.printers.creality.requests.get",
             side_effect=requests.ConnectionError("refused"),
-        ), pytest.raises(PrinterError, match="http://<ip>:7125"):
+        ), pytest.raises(PrinterError, match=":7125 on the end"):
             CrealityAdapter("k1-max.local", timeout=5, retries=1)
 
     def test_serial_path_gets_clear_error(self) -> None:

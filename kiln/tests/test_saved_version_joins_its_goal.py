@@ -360,3 +360,66 @@ def test_with_kiln_pro_installed_a_save_sends_nothing(library, servers, tmp_path
     assert out["ok"] is True, out
     assert s.asks == [] and s.uploads == []
     assert SAVED_GOAL_KEY not in out and library.history == []
+
+
+# ---------------------------------------------------------------------------
+# The saved version's own slice goes with it, as numbers
+# ---------------------------------------------------------------------------
+
+
+def _sliced_with_a_wish(tmp_path: Path, *, wish: dict | None) -> str:
+    """A G-code file 4 mm tall that this computer's record says it sliced,
+    with *wish* noted on that record when given."""
+    from kiln import print_lineage
+    from tests.test_speed_by_height import _layers, _stepped_part, _synthetic
+
+    part = _stepped_part(tmp_path / "sliced_part.stl")
+    gcode = _synthetic(tmp_path / "sliced_part.gcode", dict.fromkeys(_layers(0.2, 4.0), 60.0))
+    assert print_lineage.record_slice(part, gcode) is not None
+    if wish is not None:
+        assert print_lineage.note_speed_by_height(gcode, wish) is True
+    print_lineage.flush()
+    return gcode
+
+
+_A_WISH = {
+    "ranges": [{"from_mm": 0.0, "to_mm": 2.0, "asked": {"percent": 50.0}, "outcome": "applied", "fastest_mm_s": 30.0}],
+    "estimate_seconds": 720,
+    "estimate_without_seconds": 600,
+}
+_REMEMBERED = "This goal keeps your speeds by height: 0 mm to 2 mm at 50%."
+
+
+def test_a_saved_version_sends_its_slice_and_the_reply_says_what_the_goal_kept(
+    plain_install, library, servers, tmp_path,
+):
+    s = servers({**_joined(plays=False), "remembered_speeds": _REMEMBERED})
+    gcode = _sliced_with_a_wish(tmp_path, wish=_A_WISH)
+    handed = _model(tmp_path / "work", "vase.stl", pieces=1)
+    out = _save(design_id="vase", scad_source="cube(10);", stl_path=handed, goal_id="goal-1", gcode_path=gcode)
+
+    sent = _joins(s)[0]["made_with"]
+    assert sent["slice"] == {"top_mm": 4.0, "speed_by_height": _A_WISH}
+    assert str(tmp_path) not in json.dumps(sent) and "sliced_part" not in json.dumps(sent["slice"])
+    assert out["remembered_speeds"] == _REMEMBERED
+
+
+def test_a_slice_with_no_speeds_of_its_own_sends_only_its_height(plain_install, library, servers, tmp_path):
+    s = servers(_joined(plays=False))
+    gcode = _sliced_with_a_wish(tmp_path, wish=None)
+    handed = _model(tmp_path / "work", "vase.stl", pieces=1)
+    out = _save(design_id="vase", scad_source="cube(10);", stl_path=handed, goal_id="goal-1", gcode_path=gcode)
+    assert _joins(s)[0]["made_with"]["slice"] == {"top_mm": 4.0}
+    assert "remembered_speeds" not in out
+
+
+def test_speeds_a_caller_hands_in_are_never_sent_as_the_slices(plain_install, library, servers, tmp_path):
+    s = servers(_joined(plays=False))
+    gcode = _sliced_with_a_wish(tmp_path, wish=None)
+    handed = _model(tmp_path / "work", "vase.stl", pieces=1)
+    forged = {"ranges": [{"from_mm": 0, "to_mm": 9, "asked": {"speed_mm_s": 1}, "outcome": "applied"}]}
+    _save(
+        design_id="vase", scad_source="cube(10);", stl_path=handed, goal_id="goal-1", gcode_path=gcode,
+        provenance={"speed_by_height": forged},
+    )
+    assert "speed_by_height" not in _joins(s)[0]["made_with"]["slice"]

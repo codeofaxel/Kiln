@@ -11,7 +11,8 @@ speed schedule and a raw feedrate command are all judged by the same rule.
 The rule, for a request above the sliced speed (100%):
 
 * Read the file Kiln sent for the print running now
-  (:func:`kiln.learned_print_time.sent_file_path`), and the most plastic per
+  (:func:`kiln.learned_print_time.sent_file_path`) -- for a sliced 3MF the
+  plate its start recorded -- and the most plastic per
   second each of its layers commands at the sliced speed (filament length
   per millimetre of move, times the move's feed, times the filament's
   cross-section from the diameter the file states).
@@ -36,8 +37,10 @@ says so.
 
 A slow-down (100% or less) is never judged and never changed.  Anything the
 check cannot read -- no running print, a file Kiln did not send, a file
-that does not state its filament diameter, a printer with no known limit --
-lets the request through unchanged, and the reply says it was not checked.
+that does not state its filament diameter, a printer with no known limit,
+a 3MF of several plates whose printed plate no start recorded (never one
+plate taken for another) -- lets the request through unchanged, and the
+reply says it was not checked.
 
 Never raises into a command.
 """
@@ -96,7 +99,7 @@ TOOL = "tool"
 TERMINAL = "terminal"
 #: How to go past the cap, said once beside every cap, by door.
 GO_PAST = {
-    TOOL: "If you want the faster speed anyway, ask again with past_the_melt_limit set to true.",
+    TOOL: "If you want the faster speed anyway, ask again with `past_the_melt_limit` set to true.",
     TERMINAL: "If you want the faster speed anyway, run the same command again with --past-the-melt-limit.",
 }
 _PAST = (
@@ -120,6 +123,9 @@ NOT_SENT_BY_KILN = "Kiln did not send this print's file, so it cannot read what 
 FILE_UNREADABLE = "the print's file could not be read"
 NO_DIAMETER = "the print's file does not say its filament diameter"
 NO_LIMIT = "Kiln does not know this printer's melt limit"
+PLATE_UNKNOWN = (
+    "the print's file holds several plates and Kiln does not know which one is printing"
+)
 
 #: Presets a printer that only takes presets offers, by percent.
 _PRESETS = ((50, "silent"), (100, "standard"), (124, "sport"), (166, "ludicrous"))
@@ -265,33 +271,61 @@ def read_flow(lines: Any) -> FileFlow:
     )
 
 
+def _printed_member(zf: Any, plate: int | None) -> str | None:
+    """The member of a sliced 3MF that prints plate *plate*: by the plate's
+    own name when the archive names its plates (with no plate given, only an
+    archive of one plate answers), else its one G-code."""
+    from kiln.gcode_metadata import plate_gcode_member, plate_gcode_members, sliced_gcode_member
+
+    if plate_gcode_members(zf):
+        return plate_gcode_member(zf, plate)
+    return sliced_gcode_member(zf)
+
+
+def plates_in(path: str) -> int:
+    """How many plates the sliced 3MF at *path* names (0 for any other file,
+    or one that cannot be read).  Never raises."""
+    if not str(path).lower().endswith(".3mf"):
+        return 0
+    try:
+        from kiln.gcode_metadata import plate_gcode_members
+        from kiln.untrusted_zip import UntrustedZipFile
+
+        with UntrustedZipFile(path) as zf:
+            return len(plate_gcode_members(zf))
+    except Exception:  # noqa: BLE001 -- an unreadable file names no plates
+        return 0
+
+
 @lru_cache(maxsize=8)
-def _flow_of(path: str, size: int, mtime_ns: int) -> FileFlow | None:
-    """:func:`read_flow` of the G-code *path* prints, cached by its bytes' stamp."""
+def _flow_of(path: str, size: int, mtime_ns: int, plate: int | None) -> FileFlow | None:
+    """:func:`read_flow` of the G-code *path* prints (plate *plate* of a
+    sliced 3MF), cached by its bytes' stamp."""
     lower = path.lower()
     if lower.endswith((".gcode", ".gco", ".g")):
         with open(path, encoding="utf-8", errors="replace") as handle:
             return read_flow(handle)
     if lower.endswith(".3mf"):
-        from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+        from kiln.gcode_metadata import read_member_text
         from kiln.untrusted_zip import UntrustedZipFile
 
         with UntrustedZipFile(path) as zf:
-            member = sliced_gcode_member(zf)
+            member = _printed_member(zf, plate)
             if member is None:
                 return None
             return read_flow(read_member_text(zf, member, MAX_FILE_BYTES).splitlines())
     return None
 
 
-def flow_of_file(path: str) -> FileFlow | None:
-    """The plastic the file at *path* asks for, or ``None`` when it prints no
-    G-code Kiln can read.  Never raises."""
+def flow_of_file(path: str, plate: int | None = None) -> FileFlow | None:
+    """The plastic the file at *path* asks for (plate *plate* of a sliced
+    3MF; with no plate named, only a 3MF of one plate), or ``None`` when it
+    prints no G-code Kiln can read.  Never raises."""
     try:
         st = os.stat(path)
         if st.st_size > MAX_FILE_BYTES:
             return None
-        return _flow_of(path, st.st_size, st.st_mtime_ns)
+        return _flow_of(path, st.st_size, st.st_mtime_ns, plate)
     except Exception:  # noqa: BLE001 -- an unreadable file is not checked
         logger.debug("flow not read from %s", os.path.basename(str(path)), exc_info=True)
         return None
@@ -350,7 +384,7 @@ _collected: contextvars.ContextVar[list[Judgement] | None] = contextvars.Context
 
 
 @contextlib.contextmanager
-def covering(from_layer: int, to_layer: int) -> Iterator[None]:
+def judging_layers(from_layer: int, to_layer: int) -> Iterator[None]:
     """A speed sent inside this block lasts for layers *from_layer* to
     *to_layer* only (a speed schedule's segment), so only those are judged."""
     token = _covering.set((int(from_layer), int(to_layer)))
@@ -412,20 +446,23 @@ def _label(percent: int, preset: str | None) -> str:
     return f"{preset} ({percent}%)" if preset else f"{percent}%"
 
 
-def _running_file(adapter: Any) -> tuple[str | None, str | None, Any]:
-    """``(path, why_not, job)`` for the print running now on *adapter*."""
+def _running_file(adapter: Any) -> tuple[str | None, str | None, Any, int | None]:
+    """``(path, why_not, job, plate)`` for the print running now on
+    *adapter*: the file Kiln sent for it and the plate its start recorded
+    (``None`` when no start of this file recorded one)."""
     from kiln.printers.base import PrinterStatus
 
     state = adapter.get_state()
     status = getattr(state, "effective_state", None) or getattr(state, "state", None)
     if status not in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
-        return None, NOTHING_PRINTING, None
+        return None, NOTHING_PRINTING, None, None
     job = None
     with contextlib.suppress(Exception):
         job = adapter.get_job()
     from kiln.learned_print_time import sent_file_path
 
     names = [getattr(job, "file_name", None)]
+    running: dict[str, Any] | None = None
     with contextlib.suppress(Exception):
         from kiln.learned_print_time import _machine
         from kiln.persistence import get_db
@@ -433,14 +470,16 @@ def _running_file(adapter: Any) -> tuple[str | None, str | None, Any]:
 
         printer = outcome_printer_name(adapter)
         if printer:
-            running = get_db().running_print_estimate(*_machine(printer))
+            running = get_db().running_print(*_machine(printer))
             if running:
                 names.append(running.get("file_name"))
+    recorded = sent_file_path(running.get("file_name")) if running and running.get("file_name") else None
     for name in names:
         path = sent_file_path(name) if name else None
         if path and os.path.isfile(path):
-            return path, None, job
-    return None, NOT_SENT_BY_KILN, job
+            plate = running.get("plate_number") if running and recorded == path else None
+            return path, None, job, plate if isinstance(plate, int) else None
+    return None, NOT_SENT_BY_KILN, job, None
 
 
 def _melt_limit(adapter: Any, flow: FileFlow) -> tuple[float, str] | None:
@@ -491,13 +530,15 @@ def judge(adapter: Any, percent: int, *, preset: str | None = None) -> Judgement
         )
 
     try:
-        path, why_not, job = _running_file(adapter)
+        path, why_not, job, plate = _running_file(adapter)
     except Exception:  # noqa: BLE001 -- a printer that cannot be read is not checked
         logger.debug("running print not read for the speed floor", exc_info=True)
         return unchecked(FILE_UNREADABLE)
     if path is None:
         return unchecked(why_not or NOT_SENT_BY_KILN)
-    flow = flow_of_file(path)
+    if plate is None and plates_in(path) > 1:
+        return unchecked(PLATE_UNKNOWN)
+    flow = flow_of_file(path, plate)
     if flow is None or not flow.layers:
         return unchecked(FILE_UNREADABLE)
     if not flow.diameter:
@@ -675,6 +716,6 @@ def reply(
 
 __all__ = [
     "ACCELERATION_UNBOUNDED", "FASTER_FAILS", "FileFlow", "GO_PAST", "Judgement", "MIN_MOVE_MM", "SLICED",
-    "SLICE_IT_NEXT_TIME", "TERMINAL", "TOOL", "WHOLE_FILE", "changes_speed", "past_the_melt_limit", "collect", "covering", "guarded_lines", "inside", "flow_of_file", "guard_gcode", "guard_preset", "judge", "read_flow",
+    "SLICE_IT_NEXT_TIME", "TERMINAL", "TOOL", "WHOLE_FILE", "changes_speed", "past_the_melt_limit", "collect", "judging_layers", "guarded_lines", "inside", "flow_of_file", "guard_gcode", "guard_preset", "judge", "read_flow",
     "reply", "sentences",
 ]

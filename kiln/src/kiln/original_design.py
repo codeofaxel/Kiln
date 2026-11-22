@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.auto_orient import describe_orientation_change, find_optimal_orientation, worth_turning
 from kiln.design_intelligence import (
     get_design_constraints,
@@ -318,9 +319,9 @@ def _resolve_original_design_provider(
 
     if normalized == "openscad":
         raise GenerationError(
-            "OpenSCAD is a compile-only backend here, not an idea-to-design backend. "
-            "Use provider='gemini' for natural-language original design, or use "
-            "generate_model with explicit OpenSCAD code.",
+            "OpenSCAD only builds code it's given; it doesn't design from a description. "
+            "Use `provider='gemini'` to design from words, or `generate_model` with "
+            "your own OpenSCAD code.",
             code="INVALID_PROVIDER_INPUT",
         )
 
@@ -333,9 +334,9 @@ def _resolve_original_design_provider(
 
     if _looks_like_openscad_code(requirements_text):
         raise GenerationError(
-            "generate_model_with_provider expects natural-language requirements, not "
-            "raw OpenSCAD code. Use generate_model(provider='openscad') for direct "
-            "code compilation.",
+            "`generate_model_with_provider` expects natural-language requirements, not "
+            "raw OpenSCAD code. Use `generate_model(provider='openscad')` to compile "
+            "code directly.",
             code="INVALID_INPUT",
         )
 
@@ -364,12 +365,12 @@ def _resolve_original_design_provider(
         try:
             return candidate, _instantiate_generation_provider(candidate), reason
         except (GenerationAuthError, GenerationError) as exc:
-            errors.append(f"{candidate}: {exc}")
+            errors.append(f"{candidate}: {_plain_words.said(exc)}")
 
     raise GenerationError(
         "No cloud generation backend is configured — and you don't need one. "
         "Default path for a custom object: write the OpenSCAD yourself and "
-        "compile it locally with compile_scad — free, no API key, no signup. "
+        "compile it locally with `compile_scad` — free, no API key, no signup. "
         "Only reach for cloud text-to-3D (Gemini/Meshy/Tripo3D/Stability, each "
         "needs the user's OWN API key) if the user explicitly asks, or wants an "
         "organic / photo-based shape OpenSCAD can't easily reach. Do NOT ask the "

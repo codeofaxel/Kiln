@@ -49,6 +49,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln import run_program
 
 try:
@@ -200,16 +201,16 @@ class CredentialStore:
         try:
             parts = shlex.split(cmd)
             if not parts:
-                raise CredentialStoreError(f"{_MASTER_KEY_COMMAND_ENV} is set but empty after parsing")
+                raise CredentialStoreError(f"`{_MASTER_KEY_COMMAND_ENV}` is set, but it's empty.")
             output = run_program.check_output(parts, text=True, stderr=subprocess.STDOUT)
             key = output.strip()
             if not key:
-                raise CredentialStoreError(f"{_MASTER_KEY_COMMAND_ENV} produced an empty key")
+                raise CredentialStoreError(f"The command in {_MASTER_KEY_COMMAND_ENV} gave back an empty key.")
             return key
         except CredentialStoreError:
             raise
         except Exception as exc:
-            raise CredentialStoreError(f"Failed to resolve master key via {_MASTER_KEY_COMMAND_ENV}: {exc}") from exc
+            raise CredentialStoreError(f"Kiln couldn't get its master key from the command in {_MASTER_KEY_COMMAND_ENV}: {_plain_words.said(exc)}.") from exc
 
     @staticmethod
     def _read_master_key_file(path: str) -> str | None:
@@ -220,7 +221,7 @@ class CredentialStore:
             with open(path, encoding="utf-8") as fh:
                 key = fh.read().strip()
         except OSError as exc:
-            raise CredentialStoreError(f"Failed to read master key file {path}: {exc}") from exc
+            raise CredentialStoreError(f"Kiln couldn't read the master key file {path}: {_plain_words.said(exc)}.") from exc
         return key or None
 
     @staticmethod
@@ -265,10 +266,10 @@ class CredentialStore:
 
         if not CredentialStore._env_truthy(_ALLOW_FILE_MASTER_KEY_ENV, default=False):
             raise CredentialStoreError(
-                "No master key configured. Set one of: constructor master_key, "
-                "KILN_MASTER_KEY, KILN_MASTER_KEY_COMMAND, or KILN_MASTER_KEY_FILE. "
-                f"Auto-generating {key_path} is disabled by default; set "
-                f"{_ALLOW_FILE_MASTER_KEY_ENV}=1 to opt in."
+                "Kiln has no master key to protect saved credentials. Set "
+                "`KILN_MASTER_KEY`, `KILN_MASTER_KEY_COMMAND` or `KILN_MASTER_KEY_FILE`, "
+                f"or pass `master_key`. Kiln makes {key_path} itself only when "
+                f"`{_ALLOW_FILE_MASTER_KEY_ENV}=1` is set."
             )
 
         os.makedirs(os.path.dirname(key_path), exist_ok=True)

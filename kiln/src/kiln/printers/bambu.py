@@ -23,6 +23,7 @@ from typing import Any, ClassVar
 
 import paho.mqtt.client as mqtt
 
+from kiln import plain_words as _plain_words
 from kiln.bambu_trays import EXTERNAL_SPOOL_TRAY as _EXTERNAL_SPOOL_TRAY
 from kiln.bambu_trays import NO_TRAY as _NO_TRAY
 from kiln.bambu_trays import TrayRef as _TrayRef
@@ -1536,11 +1537,12 @@ class BambuAdapter(PrinterAdapter):
             return
         if not cert_bytes:
             raise PrinterError(
-                f"{transport} TLS handshake for {self._host} did not expose a peer certificate. "
-                "This can happen if a firewall or proxy is intercepting TLS traffic.\n"
-                "  1) Check that no network proxy is between Kiln and the printer\n"
-                "  2) Try setting KILN_BAMBU_TLS_MODE=insecure temporarily to confirm\n"
-                "Retry with `get_state()`."
+                f"The printer at {self._host} didn't show its security certificate when Kiln connected. "
+                "A firewall or proxy may be intercepting the connection.\n"
+                "  1) Check that no network proxy sits between this computer and the printer\n"
+                "  2) To confirm, set `KILN_BAMBU_TLS_MODE=insecure` for a moment\n"
+                "Then check `printer_status` again.",
+                detail=f"{transport} TLS handshake exposed no peer certificate",
             )
         actual_fp = hashlib.sha256(cert_bytes).hexdigest()
         self._enforce_pin_policy(actual_fp, transport=transport)
@@ -1823,23 +1825,24 @@ class BambuAdapter(PrinterAdapter):
                     ) from exc
                 exc_lower = str(exc).lower()
                 if isinstance(exc, ConnectionRefusedError) or "connection refused" in exc_lower:
-                    detail = (
-                        f"MQTT connection to {self._host}:{_MQTT_PORT} refused. "
-                        "Printer may be powered off or MQTT port 8883 is blocked.\n"
-                        "  1) Check that the printer is powered on\n"
-                        "  2) Check that no firewall is blocking port 8883\n"
+                    words = (
+                        f"The printer at {self._host} refused Kiln's connection. It may be off, "
+                        f"or a firewall may be blocking port {_MQTT_PORT}.\n"
+                        "  1) Check that the printer is on\n"
+                        f"  2) Check that no firewall blocks port {_MQTT_PORT}\n"
                     )
                 elif isinstance(exc, OSError) or "errno" in exc_lower:
-                    detail = (
-                        f"Network error connecting MQTT to {self._host}:{_MQTT_PORT}: {exc}\n"
-                        "  1) Check that the printer is on the same network\n"
-                        "  2) Check router/firewall settings\n"
+                    words = (
+                        f"Kiln couldn't reach the printer at {self._host}: {_plain_words.said(exc)}.\n"
+                        "  1) Check that the printer is on the same network as this computer\n"
+                        "  2) Check the router or firewall settings\n"
                     )
                 else:
-                    detail = f"Failed to connect MQTT to {self._host}:{_MQTT_PORT}: {exc}\n"
+                    words = f"Kiln couldn't connect to the printer at {self._host}: {_plain_words.said(exc)}.\n"
                 raise PrinterError(
-                    detail + "Retry with `get_state()` to check printer reachability.",
+                    words + "Then check `printer_status` again.",
                     cause=exc,
+                    detail=f"MQTT connect to {self._host}:{_MQTT_PORT}: {exc}",
                 ) from exc
 
     def _on_connect(
@@ -2256,9 +2259,8 @@ class BambuAdapter(PrinterAdapter):
         if client is None and (c is None or not c.is_connected()):
             self._mark_mqtt_dropped()
             raise PrinterError(
-                "MQTT command not sent: the client is not connected to "
-                f"{self._host}. The command was NOT delivered. "
-                "Retry with `get_state()` to re-establish the connection."
+                f"Kiln isn't connected to the printer at {self._host}, so the command was not sent. "
+                "Check `printer_status` to reconnect, then try again."
             )
         try:
             info = c.publish(
@@ -2269,9 +2271,8 @@ class BambuAdapter(PrinterAdapter):
             # QoS 0 is fire-and-forget — no PUBACK to wait for
         except Exception as exc:
             raise PrinterError(
-                f"Failed to publish MQTT command: {exc}\n"
-                "MQTT session may have dropped. "
-                "Retry with `get_state()` to re-establish the connection.",
+                f"Kiln couldn't send the command to the printer: {_plain_words.said(exc)}. "
+                "The connection may have dropped; check `printer_status`, then try again.",
                 cause=exc,
             ) from exc
         rc = getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS)
@@ -2279,9 +2280,9 @@ class BambuAdapter(PrinterAdapter):
             if rc == mqtt.MQTT_ERR_NO_CONN:
                 self._mark_mqtt_dropped()
             raise PrinterError(
-                f"MQTT publish refused: {mqtt.error_string(rc)} (rc={int(rc)}). "
-                "The command was NOT delivered to the printer. "
-                "Retry with `get_state()` to re-establish the connection."
+                "The printer connection turned the command away, so it was not sent. "
+                "Check `printer_status` to reconnect, then try again.",
+                detail=f"MQTT publish refused: {mqtt.error_string(rc)} (rc={int(rc)})",
             )
 
     def _mark_mqtt_dropped(self) -> None:
@@ -2659,22 +2660,22 @@ class BambuAdapter(PrinterAdapter):
                 ) from exc
             exc_lower = str(exc).lower()
             if "530" in exc_lower or "login" in exc_lower or "auth" in exc_lower:
-                detail = (
-                    f"FTPS authentication to {self._host}:{_FTPS_PORT} failed. "
-                    "Access code may be wrong or stale.\n"
+                words = (
+                    "The printer turned down Kiln's access code. It may be wrong or out of date.\n"
                     f"  1) Find the current access code {_ACCESS_CODE_WHERE}\n"
-                    "  2) Toggle LAN Only Mode off/on to regenerate the code\n"
+                    "  2) Turn LAN Only Mode off and on again to make a new code\n"
                 )
             elif isinstance(exc, ConnectionRefusedError) or "connection refused" in exc_lower:
-                detail = (
-                    f"FTPS connection to {self._host}:{_FTPS_PORT} refused. "
-                    "Printer may be powered off or port 990 is blocked.\n"
+                words = (
+                    f"The printer at {self._host} refused Kiln's file connection. It may be off, "
+                    f"or a firewall may be blocking port {_FTPS_PORT}.\n"
                 )
             else:
-                detail = f"FTPS connection to {self._host}:{_FTPS_PORT} failed: {exc}\n"
+                words = f"Kiln couldn't open a file connection to the printer at {self._host}: {_plain_words.said(exc)}.\n"
             raise PrinterError(
-                detail + "Retry with `upload_file()` or check reachability with `get_state()`.",
+                words + "Try again, or check the connection with `printer_status`.",
                 cause=exc,
+                detail=f"FTPS connect to {self._host}:{_FTPS_PORT}: {exc}",
             ) from exc
 
     # ------------------------------------------------------------------
@@ -3052,9 +3053,9 @@ class BambuAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Failed to list files via FTPS: {exc}\n"
-                "If you just formatted the SD card, the /model/ directory may need to be recreated.\n"
-                "Retry with `list_files()`. If persistent, check FTPS connectivity with `get_state()`.",
+                f"Kiln couldn't list the printer's files: {_plain_words.said(exc)}. "
+                "If the SD card was just formatted, its model folder may need to be made again. "
+                "Try `printer_files` again; if it keeps failing, check the connection with `printer_status`.",
                 cause=exc,
             ) from exc
         finally:
@@ -3203,30 +3204,28 @@ class BambuAdapter(PrinterAdapter):
             return UploadResult(
                 success=True,
                 file_name=filename,
-                message=f"Uploaded {fence(filename)} to {storage_path}/ on Bambu printer via FTPS.",
+                message=f"Sent {fence(filename)} to the printer ({storage_path}/).",
             )
         except PermissionError as exc:
             raise PrinterError(
-                f"Permission denied reading file: {abs_path}",
+                f"Kiln isn't allowed to read {abs_path} on this computer.",
                 cause=exc,
             ) from exc
         except Exception as exc:
             exc_lower = str(exc).lower()
             if "550" in exc_lower or "no such file" in exc_lower:
-                detail = (
-                    f"FTPS upload failed — storage path may not exist: {exc}\n"
-                    "Try reformatting the SD card on the printer touchscreen.\n"
+                words = (
+                    f"The printer's storage folder may be missing ({_plain_words.said(exc)}).\n"
+                    "Try reformatting the SD card on the printer's touchscreen.\n"
                 )
             elif "timed out" in exc_lower or isinstance(exc, TimeoutError):
-                detail = (
-                    f"FTPS upload timed out: {exc}\n"
-                    "Connection dropped during upload — check network stability.\n"
-                )
+                words = "The upload timed out: the connection dropped partway. Check the network.\n"
             else:
-                detail = f"FTPS upload failed: {exc}\n"
+                words = f"The upload didn't finish: {_plain_words.said(exc)}.\n"
             raise PrinterError(
-                detail + "Retry with `upload_file()`.",
+                words + "Then try `upload_file` again.",
                 cause=exc,
+                detail=f"FTPS upload: {exc}",
             ) from exc
         finally:
             try:
@@ -3893,7 +3892,7 @@ class BambuAdapter(PrinterAdapter):
                     success=True,
                     message=(
                         f"Print command accepted for {basename}. Printer is "
-                        f"preparing (state: {current_state}). Use printer_status() "
+                        f"preparing (state: {current_state}). Use `printer_status` "
                         f"to monitor — print has not yet confirmed running.{warn_suffix}"
                     ),
                 )
@@ -3907,7 +3906,7 @@ class BambuAdapter(PrinterAdapter):
                 success=True,
                 message=(
                     f"Print command accepted for {basename}. Printer is "
-                    f"preparing (state: {result_state}). Use printer_status() "
+                    f"preparing (state: {result_state}). Use `printer_status` "
                     f"to monitor — print has not yet confirmed running.{warn_suffix}"
                 ),
             )
@@ -4091,7 +4090,7 @@ class BambuAdapter(PrinterAdapter):
         return PrintResult(
             success=True,
             message=(
-                "Sent the error acknowledgement. Re-read printer_status to "
+                "Sent the error acknowledgement. Re-read `printer_status` to "
                 "confirm. If the printer is still refusing prints, give it a "
                 "minute — a fault from cancelling during bed levelling often "
                 "clears on its own — and power-cycle only if it persists."
@@ -4159,7 +4158,7 @@ class BambuAdapter(PrinterAdapter):
             success=True,
             message=(
                 f"Started {description} on Bambu printer. "
-                f"This takes 2-5 minutes. Use printer_status() to monitor — "
+                f"This takes 2-5 minutes. Use `printer_status` to monitor — "
                 f"printer will return to idle when complete."
             ),
         )
@@ -4271,11 +4270,11 @@ class BambuAdapter(PrinterAdapter):
     def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
         """Abandon one or more plate objects during a live multi-object print."""
         if not object_ids:
-            raise PrinterError("skip_objects requires at least one object id.")
+            raise PrinterError("`skip_objects` requires at least one object id.")
         try:
             ids = [int(x) for x in object_ids]
         except (TypeError, ValueError) as exc:
-            raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
+            raise PrinterError("The objects to skip must be given as whole-number ids.") from exc
         sent = self._stamp_before_send("s_obj")
         self._publish_command(
             {
@@ -4361,9 +4360,9 @@ class BambuAdapter(PrinterAdapter):
         try:
             pct = int(percent)
         except (TypeError, ValueError) as exc:
-            raise PrinterError(f"set_fan: percent must be an integer 0-100 ({exc}).") from exc
+            raise PrinterError("The fan speed must be a whole-number percent from 0 to 100.") from exc
         if not 0 <= pct <= 100:
-            raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
+            raise PrinterError(f"The fan speed must be a percent from 0 to 100, not {pct}.")
         speed = round(pct / 100 * 255)
         wire = f"M106 P{index} S{speed}"
         sent = self._stamp_before_send(_FAN_INDEX_TO_FIELD[index])
@@ -4984,9 +4983,9 @@ class BambuAdapter(PrinterAdapter):
                     )
             if time.monotonic() >= deadline:
                 next_read = (
-                    f"ams_status: tray_now == {expect_tray} means the "
-                    f"{plan.action} finished; printer_status: a non-zero "
-                    "print_error is the fault it raised."
+                    f"`ams_status`: `tray_now` == {expect_tray} means the "
+                    f"{plan.action} finished; `printer_status`: a non-zero "
+                    "`print_error` is the fault it raised."
                 )
                 return FilamentOpResult(
                     success=False,
@@ -4994,7 +4993,7 @@ class BambuAdapter(PrinterAdapter):
                     message=(
                         f"The {plan.action} command was sent, but within "
                         f"{wait_seconds:g}s the AMS never reported "
-                        f"tray_now={expect_tray} (last seen {last_now!r}) and "
+                        f"tray {expect_tray} in use (last it showed {last_now!r}) and "
                         "raised no fault. The printer is most likely still "
                         "working through its routine, or it is waiting on the "
                         f"screen. Do not send the {plan.action} again: read "
@@ -5043,8 +5042,8 @@ class BambuAdapter(PrinterAdapter):
             raise PrinterError(
                 f"{_describe_tray_id(plan.slot)} is not a tray this printer can load: "
                 "a chained unit's trays are 0-15 (unit B starts at 4), an AMS HT is "
-                "128-135, and 254 is the external spool. Use ams_status to see which "
-                "trays exist, or unload_filament to unload."
+                "128-135, and 254 is the external spool. Use `ams_status` to see which "
+                "trays exist, or `unload_filament` to unload."
             )
         else:
             target = ref.tray_id
@@ -5052,7 +5051,7 @@ class BambuAdapter(PrinterAdapter):
             if tray is None:
                 raise PrinterError(
                     f"AMS {_describe_tray_id(target)} is not present in the AMS report. "
-                    "Use ams_status to see which trays exist."
+                    "Use `ams_status` to see which trays exist."
                 )
             if not tray.get("tray_type"):
                 raise PrinterError(
@@ -5194,7 +5193,7 @@ class BambuAdapter(PrinterAdapter):
         if (step is not None or plan_only) and not steps:
             raise PrinterError(
                 f"The wipe plan for {self._model_name()} describes no steps, so it runs whole or not at all; "
-                "call again without step / plan_only."
+                "call again without step / `plan_only`."
             )
         only = doc.get("step_mode_only") if isinstance(doc.get("step_mode_only"), dict) else None
         if only and step is None and not plan_only:
@@ -5379,8 +5378,8 @@ class BambuAdapter(PrinterAdapter):
                 ftp.retrbinary(f"RETR {path}", _take)
             except Exception as exc:
                 raise PrinterError(
-                    f"Could not read {file_name} back from the printer over FTPS: {exc}. "
-                    "Use `list_files()` to check the file is there.",
+                    f"Kiln couldn't read {file_name} back from the printer: {_plain_words.said(exc)}. "
+                    "Use `printer_files` to check the file is there.",
                     cause=exc,
                 ) from exc
             if too_big:
@@ -5415,9 +5414,8 @@ class BambuAdapter(PrinterAdapter):
             return True
         except Exception as exc:
             raise PrinterError(
-                f"Failed to delete {file_path} via FTPS: {exc}\n"
-                "File may not exist or the path may be wrong. "
-                "Use `list_files()` to verify the file exists before retrying `delete_file()`.",
+                f"Kiln couldn't delete {file_path} from the printer: {_plain_words.said(exc)}. "
+                "The file may not be there; check its name with `printer_files`, then try again.",
                 cause=exc,
             ) from exc
         finally:
@@ -5520,7 +5518,7 @@ class BambuAdapter(PrinterAdapter):
         try:
             return self._capture_rtsps_frame(program)
         except PrinterError as exc:
-            raise self._camera_failure(str(exc), code="CAMERA_UNREACHABLE", detail=exc.detail) from exc
+            raise self._camera_failure(_plain_words.sentence(exc), code="CAMERA_UNREACHABLE", detail=exc.detail) from exc
 
     def _camera_auth_packet(self) -> bytes:
         """The 80-byte camera auth packet for this printer's access code."""

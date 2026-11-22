@@ -78,8 +78,8 @@ class TestPreflight:
         monkeypatch.setattr(ender, "get_state", _boom)
         pf = _tool(srv.preflight_check)(printer_name="ender")
         assert pf["error"]["message"] == (
-            "Failed to run preflight check: socket closed. "
-            "Check that the printer is online and KILN_PRINTER_HOST is correct."
+            "Kiln couldn't run the pre-print check: socket closed. "
+            "Check that the printer is online and that `KILN_PRINTER_HOST` is right."
         )
         assert pf["error"]["code"] == "ERROR"
         assert "refusal" not in pf

@@ -30,6 +30,7 @@ from typing import Any
 
 import click
 
+from kiln import plain_words as _plain_words
 from kiln import run_program
 from kiln._pro_order_bridge import ServedRefusal as _ServedOrderRefusal
 from kiln.auto_record_hook import note_cancel_requested
@@ -783,7 +784,7 @@ def _get_adapter_from_ctx(ctx: click.Context):
     try:
         cfg = load_printer_config(printer_name)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_plain_words.sentence(exc)) from exc
 
     ok, err = validate_printer_config(cfg)
     if not ok:
@@ -1003,7 +1004,7 @@ def _load_fleet_adapters(printer_filter: str | None = None) -> tuple[dict[str, A
                 continue
             adapters[name] = _make_adapter(cfg)
         except Exception as exc:
-            errors.append(f"{name}: {exc}")
+            errors.append(f"{name}: {_plain_words.said(exc)}")
     return adapters, errors
 
 
@@ -1056,7 +1057,7 @@ def _route_printer_for_job(
         # a plate with no room, a machine marked needs repair) is an answer,
         # not a fault: the fallback below must not route around it.
         if isinstance(getattr(exc, "per_machine", None), dict):
-            return None, None, f"{exc}. Nothing was routed."
+            return None, None, f"{_plain_words.said(exc)}. Nothing was routed."
         # Deterministic fallback: prefer lowest queue depth, then idle.
         ranked = sorted(
             candidates,
@@ -1067,7 +1068,7 @@ def _route_printer_for_job(
             ),
         )
         if not ranked:
-            return None, None, f"Routing failed: {exc}"
+            return None, None, f"Routing failed: {_plain_words.said(exc)}"
         return str(ranked[0]["printer_id"]), None, None
 
 
@@ -1527,7 +1528,7 @@ def _run_prusa_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
             )
             root_ok = True
         except Exception as exc:
-            summary["storage_roots"][root] = {"ok": False, "error": str(exc)}
+            summary["storage_roots"][root] = {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             checks.append(
                 {
                     "name": f"storage_{root}",
@@ -1724,7 +1725,7 @@ class _DidYouMeanGroup(click.Group):
                     )
                     if word_matches and word_matches[0] not in matches:
                         hint += f"\n  (Hint: try 'kiln {word_matches[0]}')"
-                raise click.UsageError(str(exc) + hint) from None
+                raise click.UsageError(_plain_words.sentence(exc) + hint) from None
             raise
 
 
@@ -2171,7 +2172,7 @@ def _saved_printer(ctx: click.Context, printer: str | None) -> tuple[Any, str | 
     try:
         cfg = load_printer_config(aimed)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_plain_words.sentence(exc)) from exc
     name = None
     if not os.environ.get("KILN_PRINTER_HOST"):
         raw = _read_config_file(get_config_path()) or {}
@@ -2326,7 +2327,7 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     except OSError as exc:
         click.echo(
             format_error(
-                f"Network discovery failed: {exc}. Check network connectivity and try 'kiln discover --method http_probe'.",
+                f"Network discovery failed: {_plain_words.said(exc)}. Check network connectivity and try 'kiln discover --method http_probe'.",
                 code="DISCOVERY_ERROR",
                 json_mode=json_mode,
             )
@@ -2335,7 +2336,7 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     except Exception as exc:
         click.echo(
             format_error(
-                f"Network discovery failed: {exc}. Check network connectivity and try 'kiln discover --method http_probe'.",
+                f"Network discovery failed: {_plain_words.said(exc)}. Check network connectivity and try 'kiln discover --method http_probe'.",
                 code="DISCOVERY_ERROR",
                 json_mode=json_mode,
             )
@@ -2491,7 +2492,7 @@ def auth(
             try:
                 validate_external_camera_url(_url, what=_label)
             except ValueError as exc:
-                raise click.UsageError(str(exc)) from exc
+                raise click.UsageError(_plain_words.sentence(exc)) from exc
     try:
         # The save reads the id the printer reports for itself once the
         # address answers, so a printer that moved is matched to its saved
@@ -2708,11 +2709,11 @@ def auth(
                 )
             click.echo("Creality connectivity check passed. Run: kiln doctor-creality for full diagnostics.")
     except PrinterNameTaken as exc:
-        raise click.UsageError(str(exc)) from exc
+        raise click.UsageError(_plain_words.sentence(exc)) from exc
     except OSError as exc:
         click.echo(
             format_error(
-                f"Failed to save printer credentials: {exc}. Check file permissions on ~/.kiln/",
+                f"Failed to save printer credentials: {_plain_words.said(exc)}. Check file permissions on ~/.kiln/",
                 json_mode=json_mode,
             )
         )
@@ -2720,7 +2721,7 @@ def auth(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to save printer credentials: {exc}",
+                f"Failed to save printer credentials: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -2827,7 +2828,7 @@ def status(ctx: click.Context, json_mode: bool) -> None:
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to get printer status: {exc}. Verify the printer is online and credentials are correct.",
+                f"Failed to get printer status: {_plain_words.said(exc)}. Verify the printer is online and credentials are correct.",
                 json_mode=json_mode,
             )
         )
@@ -2835,7 +2836,7 @@ def status(ctx: click.Context, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to get printer status: {exc}",
+                f"Failed to get printer status: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -2972,7 +2973,7 @@ def report(
     try:
         adapter = _get_adapter_from_ctx(ctx)
     except (click.ClickException, PrinterError, Exception) as exc:
-        click.echo(format_error(f"Failed to connect: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to connect: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
     while True:
@@ -3024,10 +3025,10 @@ def report(
                     camera_addon_block = _camera_addon_block(snap_exc)
                     if camera_addon_block is not None:
                         snapshot_line = (
-                            f"{snap_exc} {_CAMERA_ADDON_COMMAND.format(command=camera_addon_block['command'])}"
+                            f"{_plain_words.said(snap_exc)} {_CAMERA_ADDON_COMMAND.format(command=camera_addon_block['command'])}"
                         )
                     else:
-                        snapshot_line = f"Snapshot capture failed: {snap_exc}"
+                        snapshot_line = f"Snapshot capture failed: {_plain_words.said(snap_exc)}"
 
             comment = _generate_print_comment_cli(
                 state_str,
@@ -3120,11 +3121,11 @@ def report(
                 click.echo("\n".join(lines))
 
         except PrinterError as exc:
-            click.echo(format_error(f"Monitor failed: {exc}", json_mode=json_mode))
+            click.echo(format_error(f"Monitor failed: {_plain_words.said(exc)}", json_mode=json_mode))
             if repeat <= 0:
                 sys.exit(1)
         except Exception as exc:
-            click.echo(format_error(f"Monitor failed: {exc}", json_mode=json_mode))
+            click.echo(format_error(f"Monitor failed: {_plain_words.said(exc)}", json_mode=json_mode))
             if repeat <= 0:
                 sys.exit(1)
 
@@ -3155,7 +3156,7 @@ def files(ctx: click.Context, json_mode: bool) -> None:
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to list printer files: {exc}. Verify the printer is online.",
+                f"Failed to list printer files: {_plain_words.said(exc)}. Verify the printer is online.",
                 json_mode=json_mode,
             )
         )
@@ -3163,7 +3164,7 @@ def files(ctx: click.Context, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to list printer files: {exc}",
+                f"Failed to list printer files: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -3190,7 +3191,7 @@ def upload(ctx: click.Context, file_path: str, json_mode: bool) -> None:
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to upload file '{file_path}': {exc}",
+                f"Failed to upload file '{file_path}': {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -3198,7 +3199,7 @@ def upload(ctx: click.Context, file_path: str, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to upload file '{file_path}': {exc}",
+                f"Failed to upload file '{file_path}': {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -3833,7 +3834,7 @@ def print_cmd(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Print operation failed: {exc}",
+                f"Print operation failed: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -3864,7 +3865,7 @@ def cancel(ctx: click.Context, json_mode: bool) -> None:
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to cancel print: {exc}. Is a print currently running?",
+                f"Failed to cancel print: {_plain_words.said(exc)}. Is a print currently running?",
                 json_mode=json_mode,
             )
         )
@@ -3872,7 +3873,7 @@ def cancel(ctx: click.Context, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to cancel print: {exc}",
+                f"Failed to cancel print: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -3902,7 +3903,7 @@ def calibrate(ctx: click.Context, json_mode: bool, options: tuple[str, ...]) -> 
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to run calibration: {exc}. Is the printer idle?",
+                f"Failed to run calibration: {_plain_words.said(exc)}. Is the printer idle?",
                 json_mode=json_mode,
             )
         )
@@ -3910,7 +3911,7 @@ def calibrate(ctx: click.Context, json_mode: bool, options: tuple[str, ...]) -> 
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to run calibration: {exc}",
+                f"Failed to run calibration: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -3931,7 +3932,7 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to pause print: {exc}. Is a print currently running?",
+                f"Failed to pause print: {_plain_words.said(exc)}. Is a print currently running?",
                 json_mode=json_mode,
             )
         )
@@ -3939,7 +3940,7 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to pause print: {exc}",
+                f"Failed to pause print: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -4004,7 +4005,7 @@ def resume(ctx: click.Context, json_mode: bool, force: bool, hardware_confirmed:
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to resume print: {exc}. Is the print currently paused?",
+                f"Failed to resume print: {_plain_words.said(exc)}. Is the print currently paused?",
                 json_mode=json_mode,
             )
         )
@@ -4012,7 +4013,7 @@ def resume(ctx: click.Context, json_mode: bool, force: bool, hardware_confirmed:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to resume print: {exc}",
+                f"Failed to resume print: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -4094,7 +4095,7 @@ def emergency_stop_cmd(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to execute emergency stop: {exc}",
+                f"Failed to execute emergency stop: {_plain_words.said(exc)}",
                 code="EMERGENCY_STOP_FAILED",
                 json_mode=json_mode,
             )
@@ -4146,7 +4147,7 @@ def emergency_status_cmd(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to read emergency status: {exc}",
+                f"Failed to read emergency status: {_plain_words.said(exc)}",
                 code="EMERGENCY_STATUS_FAILED",
                 json_mode=json_mode,
             )
@@ -4195,7 +4196,7 @@ def emergency_clear_cmd(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to clear emergency latch: {exc}",
+                f"Failed to clear emergency latch: {_plain_words.said(exc)}",
                 code="EMERGENCY_CLEAR_FAILED",
                 json_mode=json_mode,
             )
@@ -4299,7 +4300,7 @@ def temp(
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to set temperature: {exc}. Verify the printer is online and idle.",
+                f"Failed to set temperature: {_plain_words.said(exc)}. Verify the printer is online and idle.",
                 json_mode=json_mode,
             )
         )
@@ -4307,7 +4308,7 @@ def temp(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to set temperature: {exc}",
+                f"Failed to set temperature: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -4352,7 +4353,7 @@ def fan(node: str, percent: int, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to set fan: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to set fan: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4373,7 +4374,7 @@ def light(node: str, mode: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to set printer light: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to set printer light: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4471,7 +4472,7 @@ def filament_load(slot, material, temperature, length_mm, wait_seconds, keep_hot
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to load filament: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to load filament: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4498,7 +4499,7 @@ def filament_unload(material, temperature, length_mm, wait_seconds, keep_hot, pr
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to unload filament: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to unload filament: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4526,7 +4527,7 @@ def filament_purge(length_mm, material, temperature, slot, wait_seconds, keep_ho
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to purge filament: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to purge filament: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4557,7 +4558,7 @@ def filament_wipe(material, temperature, slot, wait_seconds, keep_hot, plate_cle
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to wipe the nozzle: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to wipe the nozzle: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4595,7 +4596,7 @@ def home_cmd(axes, wait_seconds, step, plan_only, plate_clear, printer_name, jso
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to home: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to home: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4635,7 +4636,7 @@ def park_cmd(wait_seconds, step, plan_only, plate_clear, printer_name, json_mode
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to park: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to park: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4676,7 +4677,7 @@ def plate_status_cmd(printer_name, json_mode) -> None:
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to read the plate record: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to read the plate record: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4709,7 +4710,7 @@ def plate_clear_cmd(note, printer_name, json_mode) -> None:
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to record the plate as clear: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to record the plate as clear: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4759,7 +4760,7 @@ def repair_guide_cmd(topic, hms_code, step, plan_only, power_off_confirmed, prin
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to read the repair guide: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to read the repair guide: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4824,7 +4825,7 @@ def machine_repair_cmd(machine_name: str, status: str | None, kind: str | None, 
                         if synced.get("questions"):
                             result["questions"] = synced["questions"]
                 except Exception as exc:  # noqa: BLE001 -- the account is a copy; the record is here
-                    result["account"] = {"synced": False, "why": "not_reached", "error": str(exc)}
+                    result["account"] = {"synced": False, "why": "not_reached", "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
         except RepairRefused as exc:
             click.echo(format_error(exc.message, code=exc.code, json_mode=json_mode))
             sys.exit(1)
@@ -4834,7 +4835,7 @@ def machine_repair_cmd(machine_name: str, status: str | None, kind: str | None, 
     except SystemExit:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to record the printer's repair: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to record the printer's repair: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4874,7 +4875,7 @@ def emergency_trip_cmd(
     except click.ClickException:
         raise
     except Exception as exc:
-        click.echo(format_error(f"Failed to record emergency trip: {exc}", json_mode=json_mode))
+        click.echo(format_error(f"Failed to record emergency trip: {_plain_words.said(exc)}", json_mode=json_mode))
         sys.exit(1)
 
 
@@ -4945,7 +4946,7 @@ def gcode(ctx: click.Context, commands: tuple, past_the_melt_limit: bool, json_m
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to send G-code: {exc}. Verify the printer is online and ready.",
+                f"Failed to send G-code: {_plain_words.said(exc)}. Verify the printer is online and ready.",
                 json_mode=json_mode,
             )
         )
@@ -4953,7 +4954,7 @@ def gcode(ctx: click.Context, commands: tuple, past_the_melt_limit: bool, json_m
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to send G-code: {exc}",
+                f"Failed to send G-code: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -4981,7 +4982,7 @@ def use(name: str) -> None:
         set_active_printer(name)
         click.echo(f"Active printer set to '{name}'.")
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_plain_words.sentence(exc)) from exc
 
 
 @cli.command("set-model")
@@ -5093,7 +5094,7 @@ def remove(name: str) -> None:
         remove_printer(name)
         click.echo(f"Removed printer '{name}'.")
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_plain_words.sentence(exc)) from exc
 
 
 @cli.command("rename-printer")
@@ -5598,7 +5599,7 @@ def slice(
                         )
                     else:
                         message = (
-                            f"Kiln could not write the file for a start beside what is on the plate ({exc}), so it "
+                            f"Kiln could not write the file for a start beside what is on the plate ({_plain_words.said(exc)}), so it "
                             "won't upload one. Clear the plate and say so, then slice and print the ordinary way."
                             + why
                         )
@@ -5606,7 +5607,7 @@ def slice(
                     sys.exit(1)
                 logger.warning("Bambu 3MF wrapping failed: %s", exc)
                 if not json_mode:
-                    click.echo(f"Warning: Bambu 3MF wrapping failed ({exc}), uploading raw gcode")
+                    click.echo(f"Warning: Bambu 3MF wrapping failed ({_plain_words.said(exc)}), uploading raw gcode")
 
         # A plate that still holds the last print is never started onto:
         # the file's own start sequence crosses the plate.  Refused before
@@ -6354,7 +6355,7 @@ def history(limit: int, filter_status: str | None, json_mode: bool) -> None:
     except OSError as exc:
         click.echo(
             format_error(
-                f"Failed to read print history: {exc}. Check database at ~/.kiln/kiln.db",
+                f"Failed to read print history: {_plain_words.said(exc)}. Check database at ~/.kiln/kiln.db",
                 json_mode=json_mode,
             )
         )
@@ -6362,7 +6363,7 @@ def history(limit: int, filter_status: str | None, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to read print history: {exc}",
+                f"Failed to read print history: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -6418,10 +6419,14 @@ def _get_fulfillment_provider(service: Any) -> Any:
     """
     try:
         return service.get_provider()
-    except (KeyError, RuntimeError, ValueError) as exc:
+    except KeyError as exc:  # the setting itself is missing
         raise click.ClickException(
-            f"Fulfillment provider not configured: {exc}. "
-            "Set KILN_FULFILLMENT_PROVIDER and the matching API key env var."
+            "No print service is set up. Set `KILN_FULFILLMENT_PROVIDER` and that service's API key."
+        ) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise click.ClickException(
+            f"The print service isn't set up right: {_plain_words.said(exc)}. "
+            "Set `KILN_FULFILLMENT_PROVIDER` and that service's API key."
         ) from exc
 
 
@@ -6498,7 +6503,7 @@ def order_materials(json_mode: bool) -> None:
     except FulfillmentError as exc:
         click.echo(
             format_error(
-                f"Failed to list fulfillment materials: {exc}",
+                f"Failed to list fulfillment materials: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -6506,7 +6511,7 @@ def order_materials(json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to list fulfillment materials: {exc}",
+                f"Failed to list fulfillment materials: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -6609,7 +6614,7 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, as_s
     except FulfillmentError as exc:
         click.echo(
             format_error(
-                f"Quote request failed: {exc}. Verify the material ID with 'kiln order materials'.",
+                f"Quote request failed: {_plain_words.said(exc)}. Verify the material ID with 'kiln order materials'.",
                 json_mode=json_mode,
             )
         )
@@ -6617,7 +6622,7 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, as_s
     except Exception as exc:
         click.echo(
             format_error(
-                f"Quote request failed: {exc}",
+                f"Quote request failed: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -6703,7 +6708,7 @@ def _save_shipping_profile_from_cli(
         save_shipping_profile(profile_name, shipping_address)
     except ValueError as exc:
         if "already exists" not in str(exc):
-            raise click.ClickException(str(exc)) from exc
+            raise click.ClickException(_plain_words.sentence(exc)) from exc
         if not click.confirm(
             f"Shipping profile '{profile_name}' already exists. Replace it?",
             default=False,
@@ -6775,7 +6780,7 @@ def _order_fee_tools() -> tuple[Any, Any, type[Exception]]:
         ledger = BillingLedger(db=get_db())
     except Exception as exc:
         raise click.ClickException(
-            f"Kiln couldn't open its fee ledger ({exc}), so the order was not "
+            f"Kiln couldn't open its record of fees ({_plain_words.said(exc)}), so the order was not "
             "placed and nothing was sent to the print service."
         ) from exc
     return ledger, PaymentManager, PaymentError
@@ -6858,7 +6863,7 @@ def _settle_order_fee(
         logger.warning("Order %s was placed but its fee was not recorded: %s", result.order_id, exc)
         order_data.setdefault("payment", {"status": "not_recorded"})
         order_data.setdefault("warnings", []).append(
-            f"Order {result.order_id} was placed, but Kiln couldn't finish recording its fee ({exc}). "
+            f"Order {result.order_id} was placed, but Kiln couldn't finish recording its fee ({_plain_words.said(exc)}). "
             f"Don't place it again; check it with: kiln order status {result.order_id}"
         )
 
@@ -7007,7 +7012,7 @@ def order_place(
             sys.exit(1)
         click.echo(
             format_error(
-                f"Failed to place order: {exc}. Verify the quote ID from 'kiln order quote'.",
+                f"Failed to place order: {_plain_words.said(exc)}. Verify the quote ID from 'kiln order quote'.",
                 json_mode=json_mode,
             )
         )
@@ -7015,7 +7020,7 @@ def order_place(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to place order: {exc}",
+                f"Failed to place order: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7063,7 +7068,7 @@ def order_status(order_id: str, json_mode: bool) -> None:
     except FulfillmentError as exc:
         click.echo(
             format_error(
-                f"Failed to get order status for {order_id!r}: {exc}",
+                f"Failed to get order status for {order_id!r}: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7071,7 +7076,7 @@ def order_status(order_id: str, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to get order status for {order_id!r}: {exc}",
+                f"Failed to get order status for {order_id!r}: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7100,7 +7105,7 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
             sys.exit(1)
         click.echo(
             format_error(
-                f"Failed to cancel order {order_id!r}: {exc}. The order may no longer be cancellable.",
+                f"Failed to cancel order {order_id!r}: {_plain_words.said(exc)}. The order may no longer be cancellable.",
                 json_mode=json_mode,
             )
         )
@@ -7108,7 +7113,7 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to cancel order {order_id!r}: {exc}",
+                f"Failed to cancel order {order_id!r}: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7463,7 +7468,7 @@ def queue_submit_cmd(
     except ValueError as exc:
         click.echo(
             format_error(
-                f"Failed to submit job for '{file}': {exc}. Use 'kiln files' to list available files.",
+                f"Failed to submit job for '{file}': {_plain_words.said(exc)}. Use 'kiln files' to list available files.",
                 json_mode=json_mode,
             )
         )
@@ -7471,7 +7476,7 @@ def queue_submit_cmd(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to submit job for '{file}': {exc}",
+                f"Failed to submit job for '{file}': {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7504,7 +7509,7 @@ def queue_status_cmd(job_id: str, json_mode: bool) -> None:
     except ValueError as exc:
         click.echo(
             format_error(
-                f"Failed to get job status for {job_id!r}: {exc}",
+                f"Failed to get job status for {job_id!r}: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7512,7 +7517,7 @@ def queue_status_cmd(job_id: str, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to get job status for {job_id!r}: {exc}",
+                f"Failed to get job status for {job_id!r}: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7559,7 +7564,7 @@ def queue_list_cmd(filter_status: str | None, limit: int, json_mode: bool) -> No
     except ValueError as exc:
         click.echo(
             format_error(
-                f"Failed to list queue: {exc}",
+                f"Failed to list queue: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7567,7 +7572,7 @@ def queue_list_cmd(filter_status: str | None, limit: int, json_mode: bool) -> No
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to list queue: {exc}",
+                f"Failed to list queue: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7601,7 +7606,7 @@ def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
     except ValueError as exc:
         click.echo(
             format_error(
-                f"Failed to cancel job {job_id!r}: {exc}. Only queued or running jobs can be cancelled.",
+                f"Failed to cancel job {job_id!r}: {_plain_words.said(exc)}. Only queued or running jobs can be cancelled.",
                 json_mode=json_mode,
             )
         )
@@ -7609,7 +7614,7 @@ def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to cancel job {job_id!r}: {exc}",
+                f"Failed to cancel job {job_id!r}: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7657,7 +7662,7 @@ def queue_clear_cmd(printer: str | None, dry_run: bool, json_mode: bool) -> None
     except ValueError as exc:
         click.echo(
             format_error(
-                f"Failed to clear the queue: {exc}",
+                f"Failed to clear the queue: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7665,7 +7670,7 @@ def queue_clear_cmd(printer: str | None, dry_run: bool, json_mode: bool) -> None
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to clear the queue: {exc}",
+                f"Failed to clear the queue: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -7822,7 +7827,7 @@ def ingest_watch_cmd(
                 state = adapter.get_state()
                 status = str(getattr(getattr(state, "state", None), "value", "unknown")).lower()
             except Exception as exc:
-                errors.append(f"{printer_name}: state check failed ({exc})")
+                errors.append(f"{printer_name}: state check failed ({_plain_words.said(exc)})")
                 continue
 
             if status != "idle":
@@ -7897,7 +7902,7 @@ def ingest_watch_cmd(
                     click.echo(f"Dispatched: {local_path.name} -> {printer_name}")
             except Exception as exc:
                 queue_items.popleft()
-                errors.append(f"{printer_name}: dispatch failed for {local_path.name} ({exc})")
+                errors.append(f"{printer_name}: dispatch failed for {local_path.name} ({_plain_words.said(exc)})")
 
     def _enqueue_detected(paths: list[Path]) -> None:
         for path in paths:
@@ -7953,7 +7958,7 @@ def ingest_watch_cmd(
                 min_stable_seconds=max(0.0, float(min_stable_seconds)),
             )
         except Exception as exc:
-            errors.append(f"scan: {exc}")
+            errors.append(f"scan: {_plain_words.said(exc)}")
             return []
         _enqueue_detected(detected)
         _dispatch_pending()
@@ -7961,7 +7966,7 @@ def ingest_watch_cmd(
             try:
                 _save_ingest_seen_state(state_path, watch_path, seen)
             except Exception as exc:
-                errors.append(f"state: {exc}")
+                errors.append(f"state: {_plain_words.said(exc)}")
         return detected
 
     if not json_mode:
@@ -8144,7 +8149,7 @@ def ingest_service_install_cmd(
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to write service config: {exc}",
+                f"Failed to write service config: {_plain_words.said(exc)}",
                 code="SERVICE_INSTALL_FAILED",
                 json_mode=json_mode,
             )
@@ -8289,7 +8294,7 @@ def ingest_service_start_cmd(config_path: str | None, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to launch ingest service: {exc}",
+                f"Failed to launch ingest service: {_plain_words.said(exc)}",
                 code="SERVICE_START_FAILED",
                 json_mode=json_mode,
             )
@@ -8400,7 +8405,7 @@ def ingest_service_stop_cmd(config_path: str | None, timeout: float, json_mode: 
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to signal ingest service pid {pid}: {exc}",
+                f"Failed to signal ingest service pid {pid}: {_plain_words.said(exc)}",
                 code="SERVICE_STOP_FAILED",
                 json_mode=json_mode,
             )
@@ -8421,7 +8426,7 @@ def ingest_service_stop_cmd(config_path: str | None, timeout: float, json_mode: 
         except Exception as exc:
             click.echo(
                 format_error(
-                    f"Failed to force-stop ingest service pid {pid}: {exc}",
+                    f"Failed to force-stop ingest service pid {pid}: {_plain_words.said(exc)}",
                     code="SERVICE_STOP_FAILED",
                     json_mode=json_mode,
                 )
@@ -8824,9 +8829,9 @@ def compare_cost(
         attach_learned_time(local)
         result["local"] = {"available": True, "estimate": local}
     except ValueError as exc:
-        result["local"] = {"available": False, "error": str(exc)}
+        result["local"] = {"available": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
-        result["local"] = {"available": False, "error": str(exc)}
+        result["local"] = {"available": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
     # Fulfillment quote (optional): the order service kiln-pro installs, else
     # the one that quotes through Kiln's servers.
@@ -8907,9 +8912,9 @@ def compare_cost(
             if priced.pose:
                 result["fulfillment"]["pose"] = priced.block()
         except FulfillmentError as exc:
-            result["fulfillment"] = {"available": False, "error": str(exc)}
+            result["fulfillment"] = {"available": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
         except Exception as exc:
-            result["fulfillment"] = {"available": False, "error": str(exc)}
+            result["fulfillment"] = {"available": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     else:
         result["fulfillment"] = {"available": False, "error": "No --fulfillment-material specified"}
 
@@ -9962,10 +9967,10 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
 
             discovered = discover_printers(timeout=discovery_timeout)
         except OSError as exc:
-            click.echo(click.style(f"  Discovery failed: {exc}", fg="yellow"))
+            click.echo(click.style(f"  Discovery failed: {_plain_words.said(exc)}", fg="yellow"))
             click.echo("  Continuing with manual entry.\n")
         except Exception as exc:
-            click.echo(click.style(f"  Discovery failed: {exc}", fg="yellow"))
+            click.echo(click.style(f"  Discovery failed: {_plain_words.said(exc)}", fg="yellow"))
             click.echo("  Continuing with manual entry.\n")
 
         if discovered:
@@ -10140,7 +10145,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 else:
                     click.echo(click.style("  AMS reachable, but no loaded trays were reported.", fg="yellow"))
             except Exception as exc:
-                click.echo(click.style(f"  AMS check failed: {exc}", fg="yellow"))
+                click.echo(click.style(f"  AMS check failed: {_plain_words.said(exc)}", fg="yellow"))
         # The printer answered; now, without a frame, does its camera?
         from kiln.camera_check import camera_setup_line
 
@@ -10152,14 +10157,14 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo(click.style(f"  Connection not tested: {why}", fg="yellow"))
             click.echo("  The printer is saved anyway.")
         else:
-            click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
+            click.echo(click.style(f"  Connection test failed: {_plain_words.said(exc)}", fg="yellow"))
             click.echo(
                 f"  The printer is saved anyway but may need correct credentials.\n"
                 f"  Update with: kiln auth --name {name} --host {host} "
                 f"--type {printer_type} --api-key <key>"
             )
     except Exception as exc:
-        click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
+        click.echo(click.style(f"  Connection test failed: {_plain_words.said(exc)}", fg="yellow"))
         click.echo(
             f"  The printer is saved anyway but may need correct credentials.\n"
             f"  Update with: kiln auth --name {name} --host {host} "
@@ -10189,7 +10194,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 break
             except PrinterNameTaken as exc:
                 # Everything else is in hand, so ask only for another name.
-                click.echo(click.style(f"  {exc}", fg="yellow"))
+                click.echo(click.style(f"  {_plain_words.said(exc)}", fg="yellow"))
                 name = click.prompt("  Friendly name for this printer", default=exc.suggested_name)
                 name = name.strip().lower().replace(" ", "-")
         click.echo(f"  Saved printer '{name}' to {saved.path}")
@@ -10201,10 +10206,10 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if nozzles_line:
             click.echo(f"  {nozzles_line}")
     except OSError as exc:
-        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
+        click.echo(click.style(f"  Failed to save config: {_plain_words.said(exc)}", fg="red"))
         sys.exit(1)
     except Exception as exc:
-        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
+        click.echo(click.style(f"  Failed to save config: {_plain_words.said(exc)}", fg="red"))
         sys.exit(1)
 
     # -- Auto-print safety preferences -------------------------------------
@@ -10334,13 +10339,13 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
             "printers": [{"name": p.name, "host": p.host, "type": p.printer_type} for p in discovered],
         }
     except OSError as exc:
-        results["discover"] = {"count": 0, "error": str(exc)}
+        results["discover"] = {"count": 0, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
         if not json_mode:
-            click.echo(click.style(f"    Discovery failed: {exc}", fg="yellow"))
+            click.echo(click.style(f"    Discovery failed: {_plain_words.said(exc)}", fg="yellow"))
     except Exception as exc:
-        results["discover"] = {"count": 0, "error": str(exc)}
+        results["discover"] = {"count": 0, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
         if not json_mode:
-            click.echo(click.style(f"    Discovery failed: {exc}", fg="yellow"))
+            click.echo(click.style(f"    Discovery failed: {_plain_words.said(exc)}", fg="yellow"))
 
     if not json_mode:
         if discovered:
@@ -10478,9 +10483,9 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         if _camera_line and not json_mode:
             click.echo(f"    {_camera_line}")
     except ValueError as exc:
-        results["status"] = {"error": str(exc), "connected": False}
+        results["status"] = {"error": _plain_words.sentence(exc), "connected": False, **_plain_words.detail_field(exc)}
         if not json_mode:
-            click.echo(f"    No printer configured: {exc}")
+            click.echo(f"    No printer configured: {_plain_words.said(exc)}")
     except PrinterError as exc:
         if why := _engaged_elsewhere(exc):
             # Not a failure: the rule did not let Kiln look.  ``connected`` is
@@ -10489,13 +10494,13 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
             if not json_mode:
                 click.echo(click.style(f"    Status not checked: {why}", fg="yellow"))
         else:
-            results["status"] = {"error": str(exc), "connected": False}
+            results["status"] = {"error": _plain_words.sentence(exc), "connected": False, **_plain_words.detail_field(exc)}
             if not json_mode:
-                click.echo(click.style(f"    Status check failed: {exc}", fg="yellow"))
+                click.echo(click.style(f"    Status check failed: {_plain_words.said(exc)}", fg="yellow"))
     except Exception as exc:
-        results["status"] = {"error": str(exc), "connected": False}
+        results["status"] = {"error": _plain_words.sentence(exc), "connected": False, **_plain_words.detail_field(exc)}
         if not json_mode:
-            click.echo(click.style(f"    Status check failed: {exc}", fg="yellow"))
+            click.echo(click.style(f"    Status check failed: {_plain_words.said(exc)}", fg="yellow"))
 
     # -- Summary -----------------------------------------------------------
     if json_mode:
@@ -10732,9 +10737,9 @@ def agent(model: str, tier: str | None, base_url: str) -> None:
             click.echo(f"\nAgent> {result.response}\n")
             click.echo(f"  ({result.tool_calls_made} tool calls, {result.turns} turns)\n")
         except RuntimeError as exc:
-            click.echo(f"\nAgent error: {exc}\n")
+            click.echo(f"\nAgent error: {_plain_words.said(exc)}\n")
         except Exception as exc:
-            click.echo(f"\nAgent error: {exc}\n")
+            click.echo(f"\nAgent error: {_plain_words.said(exc)}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -10838,7 +10843,7 @@ def generate(
                     except Exception as exc:
                         logger.debug("Preview render failed for %s: %s", result.local_path, exc)
                         if not json_mode:
-                            click.echo(click.style(f"Preview unavailable: {exc}", fg="yellow"))
+                            click.echo(click.style(f"Preview unavailable: {_plain_words.said(exc)}", fg="yellow"))
 
                 if json_mode:
                     import json
@@ -10929,7 +10934,7 @@ def generate(
                     except Exception as exc:
                         logger.debug("Preview render failed for %s: %s", result.local_path, exc)
                         if not json_mode:
-                            click.echo(click.style(f"Preview unavailable: {exc}", fg="yellow"))
+                            click.echo(click.style(f"Preview unavailable: {_plain_words.said(exc)}", fg="yellow"))
 
                 if json_mode:
                     import json
@@ -11305,7 +11310,7 @@ def generate_and_print_cmd(
             except Exception as exc:
                 logger.debug("Preview render failed for %s: %s", result.local_path, exc)
                 if not json_mode:
-                    click.echo(click.style(f"Preview unavailable: {exc}", fg="yellow"))
+                    click.echo(click.style(f"Preview unavailable: {_plain_words.said(exc)}", fg="yellow"))
 
         # --- Step 3: Slice ---
         plan = _resolve_slice_plan(
@@ -11678,7 +11683,7 @@ def local_first_cmd(apply: bool, write_env: bool, json_mode: bool) -> None:
             else:
                 applied.append("cloud_sync_already_disabled")
         except Exception as exc:
-            errors.append(f"Failed to disable cloud sync config: {exc}")
+            errors.append(f"Failed to disable cloud sync config: {_plain_words.said(exc)}")
 
     if write_env:
         try:
@@ -11691,7 +11696,7 @@ def local_first_cmd(apply: bool, write_env: bool, json_mode: bool) -> None:
             env_path.write_text("\n".join(header + export_lines) + "\n", encoding="utf-8")
             env_file_path = str(env_path)
         except Exception as exc:
-            errors.append(f"Failed to write local-first env file: {exc}")
+            errors.append(f"Failed to write local-first env file: {_plain_words.said(exc)}")
 
     active_cloud_vars = [
         name for name in ("KILN_OPENROUTER_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY") if os.environ.get(name)
@@ -12198,7 +12203,7 @@ def trim(open_sessions: int | None, assume_yes: bool, force: bool, json_mode: bo
 
     plan = plan_trim(open_sessions=open_sessions)
     if plan["scanned"] is None:
-        click.echo("Cannot read the process table on this platform.", err=True)
+        click.echo("Kiln can't list the running programs on this operating system.", err=True)
         raise SystemExit(1)
 
     if not plan["candidates"]:
@@ -12271,7 +12276,7 @@ def _station_verdicts(adapter: Any) -> tuple[dict[str, Any] | None, dict[str, tu
         try:
             ok, why = adapter._station_supports(station, capability)
         except Exception as exc:  # noqa: BLE001 -- a gate fault is a refusal, never a promise
-            ok, why = False, f"the motion gate could not be read: {exc}"
+            ok, why = False, f"the motion gate could not be read: {_plain_words.said(exc)}"
         verdicts[capability] = (bool(ok), str(why).rstrip(". "))
     return station, verdicts
 
@@ -14141,7 +14146,7 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to get AMS status: {exc}. Verify the printer is online.",
+                f"Failed to get AMS status: {_plain_words.said(exc)}. Verify the printer is online.",
                 json_mode=json_mode,
             )
         )
@@ -14149,7 +14154,7 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to get AMS status: {exc}",
+                f"Failed to get AMS status: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -14232,7 +14237,7 @@ def speed(ctx: click.Context, profile: str | None, past_the_melt_limit: bool, js
     except PrinterError as exc:
         click.echo(
             format_error(
-                f"Failed to manage speed profile: {exc}. Verify the printer is online.",
+                f"Failed to manage speed profile: {_plain_words.said(exc)}. Verify the printer is online.",
                 json_mode=json_mode,
             )
         )
@@ -14240,7 +14245,7 @@ def speed(ctx: click.Context, profile: str | None, past_the_melt_limit: bool, js
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to manage speed profile: {exc}",
+                f"Failed to manage speed profile: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -14412,7 +14417,7 @@ def health(ctx: click.Context, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to check system health: {exc}",
+                f"Failed to check system health: {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -14470,7 +14475,7 @@ def preview(file_path: str, open: bool, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Failed to preview '{file_path}': {exc}",
+                f"Failed to preview '{file_path}': {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -14516,7 +14521,7 @@ def validate(file_path: str, json_mode: bool) -> None:
     except ValueError as exc:
         click.echo(
             format_error(
-                f"Validation failed for '{file_path}': {exc}",
+                f"Validation failed for '{file_path}': {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -14524,7 +14529,7 @@ def validate(file_path: str, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Validation failed for '{file_path}': {exc}",
+                f"Validation failed for '{file_path}': {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -14572,7 +14577,7 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
     except ValueError as exc:
         click.echo(
             format_error(
-                f"Repair failed for '{file_path}': {exc}",
+                f"Repair failed for '{file_path}': {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )
@@ -14580,7 +14585,7 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(
             format_error(
-                f"Repair failed for '{file_path}': {exc}",
+                f"Repair failed for '{file_path}': {_plain_words.said(exc)}",
                 json_mode=json_mode,
             )
         )

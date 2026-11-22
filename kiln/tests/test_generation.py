@@ -375,7 +375,7 @@ class TestMeshyProvider:
             body=requests_lib.ConnectionError("refused"),
         )
         p = MeshyProvider(api_key="test-key")
-        with pytest.raises(GenerationError, match="Could not connect") as exc_info:
+        with pytest.raises(GenerationError, match="couldn't reach Meshy") as exc_info:
             p.generate("a vase")
         assert exc_info.value.code == "CONNECTION_ERROR"
 

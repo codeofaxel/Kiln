@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import read_only
 
 _logger = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ def analyze_model_geometry(
         }
     except Exception as exc:
         _logger.exception("Error in analyze_model_geometry")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 def get_material_slicing_profile(
@@ -135,7 +136,7 @@ def get_material_slicing_profile(
         }
     except Exception as exc:
         _logger.exception("Error in get_material_slicing_profile")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 def generate_adaptive_slicing_plan(
@@ -220,10 +221,10 @@ def generate_adaptive_slicing_plan(
             **bridge.basic(miss, material, "plan"),
         }
     except AdaptiveSlicerError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Error in generate_adaptive_slicing_plan")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 def export_adaptive_slicer_config(
@@ -297,7 +298,7 @@ def export_adaptive_slicer_config(
         return out
     except Exception as exc:
         _logger.exception("Error in export_adaptive_slicer_config")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 def estimate_adaptive_time_savings(
@@ -356,7 +357,7 @@ def estimate_adaptive_time_savings(
         return out
     except Exception as exc:
         _logger.exception("Error in estimate_adaptive_time_savings")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 def quick_adaptive_plan(
@@ -439,10 +440,10 @@ def quick_adaptive_plan(
             **bridge.basic(miss, material, "plan"),
         }
     except AdaptiveSlicerError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Error in quick_adaptive_plan")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 def list_supported_materials() -> dict:
@@ -487,7 +488,7 @@ def list_supported_materials() -> dict:
         }
     except Exception as exc:
         _logger.exception("Error in list_supported_materials")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 def get_adaptive_plan_summary(plan_data: dict[str, Any]) -> dict:
@@ -552,7 +553,7 @@ def get_adaptive_plan_summary(plan_data: dict[str, Any]) -> dict:
         return out
     except Exception as exc:
         _logger.exception("Error in get_adaptive_plan_summary")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 # ---------------------------------------------------------------------------

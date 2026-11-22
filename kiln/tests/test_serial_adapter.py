@@ -285,7 +285,7 @@ class TestConnectionManagement:
             side_effect=_FakeSerialException("some other error"),
         )
 
-        with pytest.raises(PrinterError, match="Failed to open serial port"):
+        with pytest.raises(PrinterError, match="couldn't open the serial port"):
             with patch.object(SerialPrinterAdapter, "_wait_for_startup"):
                 SerialPrinterAdapter(port="/dev/ttyUSB0")
 
@@ -378,7 +378,7 @@ class TestSendCommand:
         mock_ser.write.side_effect = OSError("write failed")
         adapter = _build_adapter(mock_ser)
 
-        with pytest.raises(PrinterError, match="Failed to send"):
+        with pytest.raises(PrinterError, match="couldn't send the command"):
             adapter._send_command("G28")
         assert adapter._connected is False
 
@@ -387,7 +387,7 @@ class TestSendCommand:
         mock_ser.readline.side_effect = OSError("read failed")
         adapter = _build_adapter(mock_ser)
 
-        with pytest.raises(PrinterError, match="Serial read error"):
+        with pytest.raises(PrinterError, match="couldn't read the printer's answer"):
             adapter._send_command("G28")
         assert adapter._connected is False
 
@@ -952,7 +952,7 @@ class TestSetToolTemp:
     def test_over_max_temp_raises(self):
         mock_ser = _make_mock_serial()
         adapter = _build_adapter(mock_ser)
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             adapter.set_tool_temp(350.0)
 
 
@@ -980,7 +980,7 @@ class TestSetBedTemp:
     def test_over_max_temp_raises(self):
         mock_ser = _make_mock_serial()
         adapter = _build_adapter(mock_ser)
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             adapter.set_bed_temp(200.0)
 
 
@@ -1137,7 +1137,7 @@ class TestFirmwareResumePrint:
 
     def test_z_height_zero_raises(self):
         adapter = self._make_resume_adapter()
-        with pytest.raises(PrinterError, match="z_height_mm must be > 0"):
+        with pytest.raises(PrinterError, match="`z_height_mm` must be above 0"):
             adapter.firmware_resume_print(
                 z_height_mm=0.0,
                 hotend_temp_c=200.0,
@@ -1147,7 +1147,7 @@ class TestFirmwareResumePrint:
 
     def test_negative_z_height_raises(self):
         adapter = self._make_resume_adapter()
-        with pytest.raises(PrinterError, match="z_height_mm must be > 0"):
+        with pytest.raises(PrinterError, match="`z_height_mm` must be above 0"):
             adapter.firmware_resume_print(
                 z_height_mm=-1.0,
                 hotend_temp_c=200.0,
@@ -1167,7 +1167,7 @@ class TestFirmwareResumePrint:
 
     def test_hotend_over_max_raises(self):
         adapter = self._make_resume_adapter()
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             adapter.firmware_resume_print(
                 z_height_mm=5.0,
                 hotend_temp_c=350.0,
@@ -1177,7 +1177,7 @@ class TestFirmwareResumePrint:
 
     def test_bed_over_max_raises(self):
         adapter = self._make_resume_adapter()
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             adapter.firmware_resume_print(
                 z_height_mm=5.0,
                 hotend_temp_c=200.0,
@@ -1187,7 +1187,7 @@ class TestFirmwareResumePrint:
 
     def test_negative_prime_length_raises(self):
         adapter = self._make_resume_adapter()
-        with pytest.raises(PrinterError, match="prime_length_mm must be >= 0"):
+        with pytest.raises(PrinterError, match="`prime_length_mm` must be 0 or more"):
             adapter.firmware_resume_print(
                 z_height_mm=5.0,
                 hotend_temp_c=200.0,
@@ -1198,7 +1198,7 @@ class TestFirmwareResumePrint:
 
     def test_z_clearance_out_of_range_raises(self):
         adapter = self._make_resume_adapter()
-        with pytest.raises(PrinterError, match="z_clearance_mm must be > 0 and <= 10"):
+        with pytest.raises(PrinterError, match="`z_clearance_mm` must be above 0 and at most 10"):
             adapter.firmware_resume_print(
                 z_height_mm=5.0,
                 hotend_temp_c=200.0,
@@ -1209,7 +1209,7 @@ class TestFirmwareResumePrint:
 
     def test_z_clearance_zero_raises(self):
         adapter = self._make_resume_adapter()
-        with pytest.raises(PrinterError, match="z_clearance_mm must be > 0 and <= 10"):
+        with pytest.raises(PrinterError, match="`z_clearance_mm` must be above 0 and at most 10"):
             adapter.firmware_resume_print(
                 z_height_mm=5.0,
                 hotend_temp_c=200.0,
@@ -1268,14 +1268,14 @@ class TestPrinterErrorWrapping:
         mock_ser = _make_mock_serial()
         mock_ser.write.side_effect = OSError("broken pipe")
         adapter = _build_adapter(mock_ser)
-        with pytest.raises(PrinterError, match="Failed to send"):
+        with pytest.raises(PrinterError, match="couldn't send the command"):
             adapter._send_command("G28")
 
     def test_serial_read_error_wrapped(self):
         mock_ser = _make_mock_serial()
         mock_ser.readline.side_effect = OSError("device disconnected")
         adapter = _build_adapter(mock_ser)
-        with pytest.raises(PrinterError, match="Serial read error"):
+        with pytest.raises(PrinterError, match="couldn't read the printer's answer"):
             adapter._send_command("G28")
 
     def test_connect_os_error_wrapped(self):
@@ -1658,7 +1658,7 @@ class TestUploadEdgeCases:
                 temp_path = f.name
 
             try:
-                with pytest.raises(PrinterError, match="Failed to start SD write"):
+                with pytest.raises(PrinterError, match="couldn't start writing"):
                     adapter.upload_file(temp_path)
             finally:
                 os.unlink(temp_path)

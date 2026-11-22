@@ -22,6 +22,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 _logger = logging.getLogger(__name__)
 
 
@@ -274,7 +276,7 @@ def run_validation_pipeline(
                     {k: v for k, v in repair_stats.items() if k != "path"},
                 )
             except Exception as exc:
-                errors.append(f"Basic repair failed: {exc}")
+                errors.append(f"Basic repair failed: {_plain_words.said(exc)}")
                 _logger.error("Basic repair failed: %s", exc, exc_info=True)
 
             # Re-validate after basic repair
@@ -300,7 +302,7 @@ def run_validation_pipeline(
                         {k: v for k, v in adv_stats.items() if k != "path"},
                     )
                 except Exception as exc:
-                    errors.append(f"Advanced repair failed: {exc}")
+                    errors.append(f"Advanced repair failed: {_plain_words.said(exc)}")
                     _logger.error("Advanced repair failed: %s", exc, exc_info=True)
 
                 # Re-validate after advanced repair
@@ -388,7 +390,7 @@ def run_validation_pipeline(
             )
             _logger.warning("kiln.printability not importable — skipping analysis")
         except Exception as exc:
-            errors.append(f"Printability analysis failed: {exc}")
+            errors.append(f"Printability analysis failed: {_plain_words.said(exc)}")
             _logger.error("Printability analysis failed: %s", exc, exc_info=True)
 
         # The placement faults, read once from the mesh for the warnings
@@ -443,7 +445,7 @@ def run_validation_pipeline(
                     else:
                         _logger.info("Mesh already fits — no scaling needed.")
                 except Exception as exc:
-                    errors.append(f"Auto-scale failed: {exc}")
+                    errors.append(f"Auto-scale failed: {_plain_words.said(exc)}")
                     fits_build_volume = False
                     _logger.error("Auto-scale failed: %s", exc, exc_info=True)
             else:

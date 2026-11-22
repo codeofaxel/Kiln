@@ -42,6 +42,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.auto_record_hook import note_cancel_requested
 from kiln.events import Event, EventBus, EventType
 
@@ -460,7 +461,7 @@ class EmergencyCoordinator:
                 timestamp=now,
                 actions_taken=[],
                 gcode_sent=[],
-                error=f"Not stopped by Kiln: {exc}",
+                error=f"Not stopped by Kiln: {_plain_words.said(exc)}.",
             )
             with self._lock:
                 self._stop_history.append(record)
@@ -469,7 +470,7 @@ class EmergencyCoordinator:
             # Even if G-code delivery fails, we still record the stop
             # and mark the printer as stopped — the physical state is
             # indeterminate and must be treated as halted.
-            error = f"G-code delivery failed: {exc}"
+            error = f"G-code delivery failed: {_plain_words.said(exc)}"
             actions = list(_FDM_EMERGENCY_ACTIONS)
             logger.error(
                 "Failed to deliver emergency G-code to %s: %s",
@@ -626,7 +627,7 @@ class EmergencyCoordinator:
                 reason=reason,
                 timestamp=time.time(),
                 error=(
-                    f"Kiln's emergency stop for this printer failed ({exc}). Stop it at "
+                    f"Kiln's emergency stop for this printer failed ({_plain_words.said(exc)}). Stop it at "
                     "the machine now, with its own screen or its power switch."
                 ),
             )
@@ -801,7 +802,7 @@ class EmergencyCoordinator:
                 "cleared": False,
                 "reason": "invalid_printer_id",
                 "status": None,
-                "message": "printer_id is required",
+                "message": "Name the printer (`printer_id`).",
             }
 
         actor = (acknowledged_by or "").strip() or "operator"

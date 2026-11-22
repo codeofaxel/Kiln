@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.quoted_text import fence
 from kiln.tool_annotations import read_only
 
@@ -158,7 +159,7 @@ class _MaterialToolsPlugin:
                 )
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Could not connect to printer: {exc}",
+                    f"Kiln couldn't connect to the printer: {_plain_words.said(exc)}.",
                     code="CONNECTION_ERROR",
                 )
 
@@ -174,13 +175,13 @@ class _MaterialToolsPlugin:
                 ams = adapter.get_ams_status()
             except PrinterError as exc:
                 return _srv._error_dict(
-                    f"Failed to query AMS status: {exc}",
+                    f"Kiln couldn't read the AMS status: {_plain_words.said(exc)}.",
                     code="PRINTER_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error querying AMS status")
                 return _srv._error_dict(
-                    f"Unexpected error querying AMS status: {exc}",
+                    f"Kiln couldn't read the AMS status: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -247,8 +248,8 @@ class _MaterialToolsPlugin:
                     "message": (
                         "AMS trays are loaded, but the printer did not report "
                         "a current slot. A1/AMS Lite firmware can report "
-                        "tray_now=255 in this state; pass an explicit "
-                        "ams_mapping to start_print when color matters."
+                        "`tray_now=255` in this state; pass an explicit "
+                        "`ams_mapping` to `start_print` when color matters."
                     ),
                 }
                 if colors:
@@ -270,7 +271,7 @@ class _MaterialToolsPlugin:
                     "success": True,
                     "material": "unknown",
                     "source": "unknown",
-                    "message": f"Could not parse AMS tray index: {tray_now!r}.",
+                    "message": f"The AMS reported a tray number Kiln doesn't understand: {tray_now!r}.",
                 }
 
             unit_index, tray_index = active
@@ -391,7 +392,7 @@ class _MaterialToolsPlugin:
                 )
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Could not resolve printer adapter: {exc}",
+                    f"Kiln couldn't find how to talk to this printer: {_plain_words.said(exc)}.",
                     code="CONNECTION_ERROR",
                 )
 
@@ -473,12 +474,12 @@ class _MaterialToolsPlugin:
                 if refusal_in_flight(exc) is not None:
                     # Kiln declined to read this printer: that is not a
                     # health finding about it, and "critical" would say it is.
-                    return _srv._error_dict(str(exc))
+                    return _srv._error_dict(_plain_words.sentence(exc))
                 checks["printer_connected"] = {
                     "status": "critical",
                     "detail": f"Failed to read printer state: {exc}",
                 }
-                anomalies.append(f"Could not read printer state: {exc}")
+                anomalies.append(f"Could not read printer state: {_plain_words.said(exc)}")
 
             # ------------------------------------------------------------------
             # 3. Job progress

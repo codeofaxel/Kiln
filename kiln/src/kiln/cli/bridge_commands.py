@@ -44,6 +44,7 @@ from typing import NamedTuple
 
 import click
 
+from kiln import plain_words as _plain_words
 from kiln import run_program
 from kiln.bridge_client import (
     REFUSAL_TOOLS_UNAVAILABLE,
@@ -680,7 +681,7 @@ def _install_service() -> tuple[bool, str]:
         try:
             _spawn_supervised_bridge()  # parity: enable starts it NOW, not just at login
         except OSError as exc:
-            return False, f"installed for login, but starting now failed: {exc}"
+            return False, f"installed for login, but starting now failed: {_plain_words.said(exc)}"
         return True, ""
     return False, "unsupported-platform"
 
@@ -871,7 +872,7 @@ def _offer_first_printer() -> None:
             **extras,
         )
     except Exception as exc:
-        click.echo(click.style(f"  Couldn't save that printer: {exc}", fg="yellow"))
+        click.echo(click.style(f"  Couldn't save that printer: {_plain_words.said(exc)}", fg="yellow"))
         click.echo(_MANUAL_SETUP_HINT)
         return
     click.echo(

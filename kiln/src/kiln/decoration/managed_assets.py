@@ -108,8 +108,8 @@ def describe_managed_asset(content: str | None) -> dict[str, Any] | None:
             f"preset), carved here with the parameters you passed rather "
             f"than the ones the preset recorded. To apply the preset "
             f"itself — its own depth, surface selection and mode — call "
-            f"apply_decoration_preset(preset_id="
-            f"{lineage.get('preset_id')!r}, host_mesh_path=...). Describe "
+            f"`apply_decoration_preset(preset_id="
+            f"{lineage.get('preset_id')!r}, host_mesh_path=...)`. Describe "
             f"this result as the preset's settings only if you passed them."
         )
         drift = lineage.get("recorded_settings") or {}
@@ -120,7 +120,7 @@ def describe_managed_asset(content: str | None) -> dict[str, Any] | None:
             "This file is a managed decoration asset — the stored artwork "
             "of a saved decoration preset, which also recorded a depth, "
             "mode and surface selection not used by this call. Prefer the "
-            "preset-apply tool (apply_decoration_preset) over carving the "
+            "preset-apply tool (`apply_decoration_preset`) over carving the "
             "raw asset, and do not describe this result as the preset's "
             "recorded settings."
         )

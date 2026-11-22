@@ -15,6 +15,7 @@ import logging
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -102,10 +103,10 @@ class _IntelligenceToolsPlugin:
             except FileNotFoundError:
                 return _srv._error_dict(f"File not found: {file_path}", code="NOT_FOUND")
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in fingerprint_model")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=creates("Record print DNA"))
         def record_print_dna(
@@ -197,10 +198,10 @@ class _IntelligenceToolsPlugin:
                     "material": material,
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in record_print_dna")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Predict print settings"))
         def predict_print_settings(
@@ -256,7 +257,7 @@ class _IntelligenceToolsPlugin:
                 return {"success": True, "prediction": prediction.to_dict()}
             except Exception as exc:
                 _logger.exception("Unexpected error in predict_print_settings")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Find similar prints"))
         def find_similar_prints(
@@ -316,7 +317,7 @@ class _IntelligenceToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in find_similar_prints")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Model print history"))
         def get_model_print_history(
@@ -376,7 +377,7 @@ class _IntelligenceToolsPlugin:
                             geometric_signature_v2 or fp.geometric_signature_v2
                         )
                     except Exception as exc:
-                        unread_file_reason = str(exc)
+                        unread_file_reason = _plain_words.said(exc)
                         _logger.debug(
                             "could not fingerprint %s; using supplied identity",
                             model_path,
@@ -390,13 +391,13 @@ class _IntelligenceToolsPlugin:
                     # at fails on the same file for the same reason.
                     if unread_file_reason:
                         return _srv._error_dict(
-                            f"Could not read a model from {model_path}: "
+                            f"Kiln couldn't read a model from {model_path}: "
                             f"{unread_file_reason}",
                             code="UNREADABLE_INPUT",
                         )
                     return _srv._error_dict(
-                        "Name the model: pass model_path (best), or a "
-                        "file_hash / geometric_signature from fingerprint_model.",
+                        "Name the model: pass `model_path` (best), or a "
+                        "`file_hash` / `geometric_signature` from `fingerprint_model`.",
                         code="VALIDATION_ERROR",
                     )
 
@@ -430,7 +431,7 @@ class _IntelligenceToolsPlugin:
                 if identified == "file":
                     result["note"] = (
                         "Matched on the file only, so this covers this exact "
-                        "file and not the design. Pass model_path for the "
+                        "file and not the design. Pass `model_path` for the "
                         "part's full history."
                     )
                 from kiln.store_scope import PRINT_DNA, scoped_store_response
@@ -448,7 +449,7 @@ class _IntelligenceToolsPlugin:
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in get_model_print_history")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=destructive("Share a print to the community"))
         def contribute_community_print(
@@ -550,10 +551,10 @@ class _IntelligenceToolsPlugin:
                     "outcome": outcome,
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in contribute_community_print")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Community insight"))
         def get_community_insight(
@@ -628,7 +629,7 @@ class _IntelligenceToolsPlugin:
                 return result
             except Exception as exc:
                 _logger.exception("Unexpected error in get_community_insight")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Community statistics"))
         def community_stats() -> dict:
@@ -683,7 +684,7 @@ class _IntelligenceToolsPlugin:
                 return result
             except Exception as exc:
                 _logger.exception("Unexpected error in community_stats")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Recommend material"))
         def recommend_material(
@@ -811,7 +812,7 @@ class _IntelligenceToolsPlugin:
                 except RequestRefused as refusal:
                     # Kiln's material recommendation could not read the
                     # request: its ruling on the input, said as one.
-                    return _srv._error_dict(str(refusal), code="VALIDATION_ERROR")
+                    return _srv._error_dict(_plain_words.sentence(refusal), code="VALIDATION_ERROR")
                 if isinstance(rec, BasicMaterials):
                     # No pick: the plastics this printer can melt (or the
                     # materials on hand, when asked), and why.
@@ -834,7 +835,7 @@ class _IntelligenceToolsPlugin:
                 return response
             except Exception as exc:
                 _logger.exception("Unexpected error in recommend_material")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("List available materials"))
         def list_available_materials() -> dict:
@@ -854,7 +855,7 @@ class _IntelligenceToolsPlugin:
                 return material_list()
             except Exception as exc:
                 _logger.exception("Unexpected error in list_available_materials")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         _logger.debug("Registered print intelligence tools")
 

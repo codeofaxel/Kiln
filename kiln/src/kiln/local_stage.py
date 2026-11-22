@@ -69,6 +69,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.mcp_compat import (
     capture_request_context,
     client_capabilities,
@@ -1106,7 +1107,7 @@ def _register_payload_verb(mcp: Any) -> bool:
             try:
                 payload = _payload_for_mesh(mesh)
             except Exception as exc:  # noqa: BLE001
-                return {"success": False, "error": f"Could not read that mesh: {exc}"}
+                return {"success": False, "error": f"Kiln couldn't read that model: {_plain_words.said(exc)}.", **_plain_words.detail_field(exc)}
             # The panel fetched this geometry: the strongest evidence the
             # stage showed it.  Recorded by this door, for the print gate.
             from kiln.preview_evidence import record as _record_evidence
@@ -1140,7 +1141,7 @@ def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
             """
             mesh = _write_test_cube()
             if mesh is None:
-                return {"success": False, "error": "Could not write the test cube."}
+                return {"success": False, "error": "Kiln couldn't write the test cube."}
             return {
                 "success": True,
                 "stl_path": mesh,
@@ -1402,7 +1403,7 @@ def _shown(
     if link_pending:
         reason = (
             f"{base}, and the browser link is still uploading — it rides the "
-            "next result for this file, or call visualize_model for it"
+            "next result for this file, or call `visualize_model` for it"
         )
         return {"door": "none", "file": file, "reason": reason}
     refusal = last_refusal(mesh) if mesh else None
@@ -1426,7 +1427,7 @@ def _shown(
         reason = (
             f"{base}, and Kiln's 3D view — a model you can turn over in the "
             f"browser — comes with a free Kiln sign-in; {state}. For a still "
-            "picture now, call visualize_model."
+            "picture now, call `visualize_model`."
         )
         return {
             "door": "none", "file": file, "reason": reason,
@@ -1434,7 +1435,7 @@ def _shown(
         }
     reason = (
         f"{base}, and no browser link could be issued: "
-        f"{refusal_sentence(refusal)}. For a still picture, call visualize_model."
+        f"{refusal_sentence(refusal)}. For a still picture, call `visualize_model`."
     )
     return {"door": "none", "file": file, "reason": reason}
 

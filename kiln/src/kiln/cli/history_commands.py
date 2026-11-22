@@ -51,7 +51,7 @@ def _finish(answer: dict[str, Any], json_mode: bool, say: Callable[[dict[str, An
     failed = not isinstance(answer, dict) or answer.get("status") == "error" or answer.get("success") is False
     if failed:
         if not json_mode:
-            click.echo(f"ERROR: {_shown(answer.get('error') or 'Kiln could not do that.', lines=True)}", err=True)
+            click.echo(f"{_shown(answer.get('error') or 'Kiln could not do that.', lines=True)}", err=True)
         sys.exit(1)
     if not json_mode:
         click.echo(say(answer))
@@ -113,7 +113,7 @@ def branch_create(
         finally:
             vault.close()
         if not base_version_id:
-            click.echo(f"ERROR: {design_id} has no branch {from_branch} with a version on this computer.", err=True)
+            click.echo(f"{design_id} has no branch {from_branch} with a version on this computer.", err=True)
             sys.exit(1)
     answer = _served(
         "create_design_branch",
@@ -292,7 +292,7 @@ def cloud_push(design_id: str, branch_id: str | None, make_room: str | None, jso
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
-            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
+            click.echo("Run again with `--make-room <design_id>` to archive one of them.", err=True)
         sys.exit(1)
     _finish(answer, json_mode, lambda a: _with_recipes(
         _shown(a["said"]) if a.get("kept_as") else f"Pushed {design_id} to your Kiln account.", a, sent=True,
@@ -750,7 +750,7 @@ def fork_command(address: str, to_propose: bool, make_room: str | None, json_mod
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
-            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
+            click.echo("Run again with `--make-room <design_id>` to archive one of them.", err=True)
         sys.exit(1)
 
     def say(a: dict[str, Any]) -> str:
@@ -821,7 +821,7 @@ def design_keep(design_id: str, make_room: str | None, json_mode: bool) -> None:
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
-            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
+            click.echo("Run again with `--make-room <design_id>` to archive one of them.", err=True)
         sys.exit(1)
 
     def say(a: dict[str, Any]) -> str:

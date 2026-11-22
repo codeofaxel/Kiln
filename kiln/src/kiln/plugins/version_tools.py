@@ -19,6 +19,7 @@ import logging
 from contextlib import ExitStack
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.errors import HostedUnavailableError
 from kiln.tool_annotations import creates, destructive, read_only
 from kiln.version_numbers import numbers_lock
@@ -537,10 +538,10 @@ class _VersionToolsPlugin:
                 except ImportError:
                     return result
             except HostedUnavailableError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("save_design_version failed")
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             finally:
                 saving.close()
 
@@ -579,10 +580,10 @@ class _VersionToolsPlugin:
                     filters={"design_id": design_id, "limit": limit},
                 )
             except HostedUnavailableError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("list_design_versions failed")
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Diff design versions"))
         def diff_design_versions(version_id_a: str, version_id_b: str) -> dict:
@@ -633,12 +634,12 @@ class _VersionToolsPlugin:
                     result["print_time_change"] = change
                 return result
             except HostedUnavailableError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("diff_design_versions failed")
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=destructive("Roll back a design"))
         def rollback_design_version(design_id: str, to_version_id: str) -> dict:
@@ -763,12 +764,12 @@ class _VersionToolsPlugin:
                 except ImportError:
                     return result
             except HostedUnavailableError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("rollback_design_version failed")
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             finally:
                 saving.close()
 
@@ -823,12 +824,12 @@ class _VersionToolsPlugin:
                     result["version"]["sliced_speeds"] = sliced_speeds
                 return result
             except HostedUnavailableError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("get_design_version failed")
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Search design versions"))
         def search_design_versions(query: str, limit: int = 10) -> dict:
@@ -930,10 +931,10 @@ class _VersionToolsPlugin:
                     filters={"query": query, "limit": limit},
                 )
             except HostedUnavailableError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("search_design_versions failed")
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=destructive("Keep a design on this computer"))
         def lock_design(design_id: str, locked: bool = True) -> dict:
@@ -969,12 +970,12 @@ class _VersionToolsPlugin:
                     return {"ok": False, **answer}
                 return answer
             except HostedUnavailableError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("lock_design failed")
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
 def _parse_version_ref(

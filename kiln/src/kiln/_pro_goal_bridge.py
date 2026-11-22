@@ -80,6 +80,14 @@ QUESTION_KEY = "open_question"
 #: goal's answer is worded for a version.  A join without it is a make.
 JOINS_AS_KEY = "joins_as"
 SAVED_VERSION = "saved_version"
+#: Said in ``made_with`` by a saved version that names its sliced file: how
+#: tall it prints and, when this computer's record of that slice kept any,
+#: the person's own speed ranges.  Numbers and the record's words only.
+SLICE_KEY = "slice"
+#: The goal's one sentence about the speed ranges it keeps, carried as sent.
+REMEMBERED_SPEEDS_KEY = "remembered_speeds"
+#: A sliced file read for its height: G-code text, never an archive.
+_GCODE_SUFFIXES = (".gcode", ".gco", ".g")
 #: Where a make's envelope keeps its file, when the door did not hand it.
 _MESH_KEYS = ("local_path", "stl_path", "output_path", "path", "best_result_path", "produced_file")
 
@@ -112,13 +120,13 @@ def _fingerprint(mesh: str) -> str:
 
 def _made_with(
     envelope: dict[str, Any], mesh: str, *, asked: str = "", fingerprint: bool = False,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """What the goal is told about the model: the name it is kept under
     here, the version it already is (a design version, a job), and where it
     came from, read from the note Kiln left beside it.  *asked* is what the
     person asked a generator for, sent only when the model opens a goal.
     With *fingerprint* the model's sha256 goes in place of the model."""
-    out: dict[str, str] = {"file_name": os.path.basename(mesh)}
+    out: dict[str, Any] = {"file_name": os.path.basename(mesh)}
     if fingerprint:
         sha = _fingerprint(mesh)
         if sha:
@@ -164,8 +172,9 @@ def join(
     fingerprint goes (a goal Kiln opened on its own holds no pictures to
     compare it with).  *saved* is a design version saved on this computer
     rather than a make: the ask says so (:data:`JOINS_AS_KEY`), so the goal
-    words its answer for a version; a miss is worded for the version, and a
-    signed-out miss is said once per session with what signing in adds.
+    words its answer for a version, and the version's own slice goes with it
+    (:data:`SLICE_KEY`); a miss is worded for the version, and a signed-out
+    miss is said once per session with what signing in adds.
 
     Sets ``envelope["saved_goal"]`` -- what the servers recorded, or why
     nothing was -- and, when the goal holds a picture, the comparison under
@@ -187,6 +196,9 @@ def join(
     made_with = _made_with(envelope, mesh, fingerprint=not send_file)
     if saved:
         made_with[JOINS_AS_KEY] = SAVED_VERSION
+        sliced = _saved_slice(envelope)
+        if sliced:
+            made_with[SLICE_KEY] = sliced
     answer, miss = _ask(brief_id, mesh, made_with, asked_by_user, send_file=send_file, motion=motion)
     if miss is not None:
         _say_miss(brief_id, envelope, miss, saved=saved)
@@ -222,6 +234,36 @@ def join(
         held = envelope.get(REFERENCE_KEY)
         if not isinstance(held, dict) or held.get("status") == _not_compared_status():
             envelope[REFERENCE_KEY] = compared
+
+
+def _saved_slice(envelope: dict[str, Any]) -> dict[str, Any] | None:
+    """The saved version's own slice, as this computer states it: how tall
+    the G-code the save named prints (``top_mm``), and the speed ranges the
+    version's kept record holds (``speed_by_height``, Kiln's record of that
+    slice, never a caller's).  ``None`` when the save named no sliced file
+    and keeps no ranges.  Never raises."""
+    try:
+        from kiln import tool_context
+        from kiln.speed_by_height import RECORD_KEY, kept_form, read_gcode
+
+        block: dict[str, Any] = {}
+        gcode = tool_context.current_tool_arguments().get("gcode_path")
+        if isinstance(gcode, str) and gcode.lower().endswith(_GCODE_SUFFIXES) and os.path.isfile(gcode):
+            try:
+                layers = read_gcode(gcode).layers
+            except Exception:  # noqa: BLE001 -- an unreadable file states no height
+                layers = []
+            if layers:
+                block["top_mm"] = float(layers[-1].z)
+        version = envelope.get("version")
+        provenance = version.get("provenance") if isinstance(version, dict) else None
+        wish = kept_form(provenance.get(RECORD_KEY)) if isinstance(provenance, dict) else None
+        if wish:
+            block["speed_by_height"] = wish
+        return block or None
+    except Exception:  # noqa: BLE001 -- the join goes without it
+        logger.debug("saved slice not read", exc_info=True)
+        return None
 
 
 def join_saved(envelope: dict[str, Any], brief_id: str, kept_path: str) -> None:
@@ -360,10 +402,11 @@ def _carry_motion(answer: dict[str, Any], envelope: dict[str, Any], mesh: str) -
 
 
 def _carry_notes(answer: dict[str, Any], envelope: dict[str, Any]) -> None:
-    """Put the goal's safety notes, the person's own notes and the open
-    question into the make's reply, as the servers sent them: each list
-    under its own key, sentences added once each, and a question only
-    where the reply holds none."""
+    """Put the goal's safety notes, the person's own notes, the open
+    question and the goal's sentence about the speed ranges it keeps
+    (:data:`REMEMBERED_SPEEDS_KEY`) into the make's reply, as the servers
+    sent them: each list under its own key, sentences added once each, and a
+    question or sentence only where the reply holds none."""
     for key in (SAFETY_NOTES_KEY, OWNER_NOTES_KEY):
         notes = answer.get(key)
         if isinstance(notes, list):
@@ -380,6 +423,9 @@ def _carry_notes(answer: dict[str, Any], envelope: dict[str, Any]) -> None:
         and QUESTION_KEY not in envelope
     ):
         envelope[QUESTION_KEY] = dict(question)
+    remembered = answer.get(REMEMBERED_SPEEDS_KEY)
+    if isinstance(remembered, str) and remembered and REMEMBERED_SPEEDS_KEY not in envelope:
+        envelope[REMEMBERED_SPEEDS_KEY] = remembered
 
 
 def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
@@ -541,7 +587,7 @@ def _not_compared_status() -> str:
 
 
 def _ask(
-    brief_id: str, mesh: str, made_with: dict[str, str], asked_by_user: bool, *, send_file: bool = True,
+    brief_id: str, mesh: str, made_with: dict[str, Any], asked_by_user: bool, *, send_file: bool = True,
     timeout: float = CONSULT_TIMEOUT_S, motion: Any = None,
 ) -> tuple[dict[str, Any], Any]:
     """``(answer, None)`` from the servers, or ``({}, miss)``.  An empty

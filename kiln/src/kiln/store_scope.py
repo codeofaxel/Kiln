@@ -752,14 +752,14 @@ def scoped_store_response(
             response["incomplete"] = True
             response["warning"] = scope["summary"]
         return response
-    except Exception as exc:  # noqa: BLE001 — a broken disclosure is not silence
+    except Exception:  # noqa: BLE001 — a broken disclosure is not silence
         _logger.exception("store scope disclosure failed for store=%s", store.id)
         response["scope"] = {
             "complete": False,
             "store": store.to_dict(),
             "summary": (
-                f"Scope could not be determined ({type(exc).__name__}); treat "
-                "this list as possibly incomplete."
+                "Kiln couldn't confirm this list covers everything, so treat it "
+                "as possibly incomplete."
             ),
         }
         response["incomplete"] = True

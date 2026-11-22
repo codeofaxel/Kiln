@@ -199,7 +199,7 @@ class TestGLBParsing:
 
         errors: list[str] = []
         _parse_glb(path, errors)
-        assert any("magic" in e.lower() or "valid" in e.lower() for e in errors)
+        assert any("isn't a GLB file" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -559,7 +559,7 @@ class TestOpenSCADRenderPreview:
     def test_render_preview_unsupported_format(self, mock_find):
         provider = OpenSCADProvider(binary_path="/usr/bin/openscad")
 
-        with pytest.raises(GenerationError, match="Cannot render preview"):
+        with pytest.raises(GenerationError, match="can't draw a preview"):
             provider.render_preview("/tmp/model.obj")
 
     @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
@@ -3242,7 +3242,7 @@ class TestRepairErrorPaths:
         with open(bad, "wb") as fh:
             fh.write(b"not a valid stl at all")
 
-        with pytest.raises(ValueError, match="Failed to parse"):
+        with pytest.raises(ValueError, match="couldn't read the STL"):
             repair_stl(bad)
 
     def test_export_3mf_empty_geometry_raises(self, tmp_path):

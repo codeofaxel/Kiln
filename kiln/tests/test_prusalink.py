@@ -103,9 +103,9 @@ class TestRequestErrors:
                 a._request("POST", "/api/v1/files/usb/WHISTL~1.GCO")
 
         message = str(exc_info.value)
-        assert "HTTP 403" in message
-        assert "/api/v1/files/usb/WHISTL~1.GCO" in message
-        assert "8.3" in message
+        assert "HTTP 403" in exc_info.value.detail
+        assert "/api/v1/files/usb/WHISTL~1.GCO" in exc_info.value.detail
+        assert "short name" in message
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ class TestListFiles:
         local_403.text = "Forbidden"
 
         with patch.object(a._session, "request", side_effect=[usb_404, local_403]):
-            with pytest.raises(PrinterError, match="Unable to list files from Prusa Link storage roots"):
+            with pytest.raises(PrinterError, match="Kiln couldn't list the files from Prusa Link storage roots"):
                 a.list_files()
 
     def test_list_files_empty(self):
@@ -594,7 +594,7 @@ class TestRetryLogic:
         resp = _mock_response(status_code=404, ok=False)
         resp.text = "Not Found"
         with patch.object(a._session, "request", return_value=resp):
-            with pytest.raises(PrinterError, match="HTTP 404"):
+            with pytest.raises(PrinterError, match="doesn't offer what Kiln asked for"):
                 a._get_json("/api/v1/nonexistent")
 
 
@@ -788,7 +788,7 @@ class TestBadApiKeyOnRaspberryPiPrusaLink:
             a._request("GET", "/api/v1/status")
 
         message = str(exc_info.value)
-        assert "Bad X-Api-Key" in message
+        assert "refused the API key" in message
         assert "API key" in message
         assert "web page" in message
         assert "permissions" not in message
@@ -803,8 +803,8 @@ class TestBadApiKeyOnRaspberryPiPrusaLink:
             a._request("POST", "/api/v1/files/usb/WHISTL~1.GCO")
 
         message = str(exc_info.value)
-        assert "8.3" not in message
-        assert "Bad X-Api-Key" in message
+        assert "short name" not in message
+        assert "refused the API key" in message
 
     def test_list_files_does_not_fall_back_across_roots_on_a_bad_key(self):
         a = _adapter()
@@ -814,7 +814,7 @@ class TestBadApiKeyOnRaspberryPiPrusaLink:
         ):
             a.list_files()
 
-        assert "Bad X-Api-Key" in str(exc_info.value)
+        assert "refused the API key" in str(exc_info.value)
         assert "storage roots" not in str(exc_info.value)
         assert req.call_count == 1, "a refused key is the same on every root; stop at the first"
 

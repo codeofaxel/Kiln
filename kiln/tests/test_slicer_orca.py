@@ -840,7 +840,7 @@ class TestAPlateOrcaWillNotMoveIsRefusedInPlainWords:
         fake = SimpleNamespace(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
         with patch("kiln.slicer.find_slicer", return_value=fake), \
              patch("kiln.slicer.run_program.run", return_value=_completed(206, stderr="no object is fully inside the print volume")), \
-             pytest.raises(SlicerError, match="exited with code 206"):
+             pytest.raises(SlicerError, match="It said: no object is fully inside the print volume"):
             slice_file(_write_cube(str(tmp_path / "cube.stl")), output_dir=str(tmp_path / "out"))
 
 

@@ -15,6 +15,7 @@ import os
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.printer_setup import AGENT_REMEDY
 from kiln.tiers_and_terms import NO_REVERSE_ENGINEERING_LINE
 from kiln.tool_annotations import destructive, read_only
@@ -48,7 +49,7 @@ def _add_addon(addon: str, *, confirm: bool) -> dict[str, Any]:
         result = camera_addon.install(confirm=confirm)
     except Exception as exc:  # noqa: BLE001 -- never surface a raw traceback
         _logger.exception("Unexpected error adding the camera add-on")
-        return _srv._error_dict(f"Unexpected error in upgrade_kiln: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Kiln couldn't update itself: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
     answered = bool(result.get("ok")) or result.get("status") == "needs_confirmation"
     return {"success": answered, **result}
 
@@ -155,7 +156,7 @@ class _UtilityToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in get_session_log")
                 return _srv._error_dict(
-                    f"Unexpected error in get_session_log: {exc}",
+                    f"Kiln couldn't read the session log: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -213,7 +214,8 @@ class _UtilityToolsPlugin:
                 from kiln import self_update
             except Exception as exc:  # noqa: BLE001
                 return _srv._error_dict(
-                    f"Upgrade is unavailable in this build: {exc}",
+                    f"Kiln couldn't start its updater: {_plain_words.said(exc)}. You can update it yourself "
+                    "with `pip install --upgrade kiln3d`.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -236,7 +238,7 @@ class _UtilityToolsPlugin:
                         "Want me to update Kiln for you now? It takes a few "
                         "seconds, then one quick restart at a safe moment (not "
                         "mid-print) and I'll pick up right where we left off. "
-                        "Confirm and I'll run it (upgrade_kiln with confirm=true)."
+                        "Confirm and I'll run it (`upgrade_kiln` with `confirm=true`)."
                     ),
                 }
 
@@ -262,8 +264,8 @@ class _UtilityToolsPlugin:
                 _logger.exception("Unexpected error in upgrade_kiln")
                 _stage("upgrade_failed")
                 return _srv._error_dict(
-                    f"Update failed unexpectedly: {exc}. You can run it yourself: "
-                    f"{self_update.UPGRADE_COMMAND}",
+                    f"The update didn't finish: {_plain_words.said(exc)}. You can run it yourself: "
+                    f"`{self_update.UPGRADE_COMMAND}`",
                     code="INTERNAL_ERROR",
                 )
             # A mid-print defer is neither a yes nor a no — the user was
@@ -336,7 +338,7 @@ class _UtilityToolsPlugin:
                     return {
                         "success": False,
                         "status": "unavailable",
-                        "message": "Cannot read the process table on this platform.",
+                        "message": "Kiln can't read the process table on this platform.",
                     }
                 printing = printing_now()
                 if not plan["candidates"]:
@@ -566,21 +568,21 @@ class _UtilityToolsPlugin:
                 safety_profile_info["gates_active"] = not names_no_printer(_model)
                 if _model is None:
                     safety_profile_info["hint"] = (
-                        "printer_model is NOT configured, so Kiln can't check "
+                        "`printer_model` is NOT configured, so Kiln can't check "
                         "that prints fit the bed or stay within safe temperatures "
                         "— those checks are skipped and an unsafe print can reach "
                         "the printer. " + AGENT_REMEDY
                     )
                 elif names_no_printer(_model):
                     safety_profile_info["hint"] = (
-                        f"printer_model is {_model!r}, which names no particular printer, so "
+                        f"`printer_model` is {_model!r}, which names no particular printer, so "
                         "Kiln holds it to generic limits and has no bed of its own for it. "
                         "Ask the user which printer it is (its make and model) and call "
-                        "`set_printer_model` with printer_make; Kiln reads a Klipper printer's "
+                        "`set_printer_model` with `printer_make`; Kiln reads a Klipper printer's "
                         "bed from its own configuration when a print starts."
                     )
             except Exception as exc:
-                safety_profile_info["hint"] = f"resolver error: {exc}"
+                safety_profile_info["hint"] = f"resolver error: {_plain_words.said(exc)}."
 
             # Non-blocking update nudge — cached PyPI check, None when current.
             try:
@@ -1369,7 +1371,7 @@ class _UtilityToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in get_skill_manifest")
                 return _srv._error_dict(
-                    f"Failed to generate manifest: {exc}", code="INTERNAL_ERROR"
+                    f"Kiln couldn't generate the manifest: {_plain_words.said(exc)}.", code="INTERNAL_ERROR"
                 )
 
         # ------------------------------------------------------------------
@@ -1400,7 +1402,7 @@ class _UtilityToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in verify_audit_integrity")
                 return _srv._error_dict(
-                    f"Unexpected error in verify_audit_integrity: {exc}",
+                    f"Kiln couldn't check the audit log: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -1446,12 +1448,12 @@ class _UtilityToolsPlugin:
                 }
             except BackupError as exc:
                 return _srv._error_dict(
-                    f"Failed to back up database: {exc}", code="BACKUP_ERROR"
+                    f"Kiln couldn't back up the database: {_plain_words.said(exc)}.", code="BACKUP_ERROR"
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in backup_database")
                 return _srv._error_dict(
-                    f"Unexpected error in backup_database: {exc}",
+                    f"Kiln couldn't back up its records: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

@@ -583,9 +583,8 @@ def _require_person() -> None:
     _require_not_hosted()
     if not person_at_terminal():
         raise NotAPerson(
-            "a standing window is opened by a person at a terminal (stdin and stdout "
-            "both a TTY) or through the host's approval dialog; nothing else can open "
-            "or extend one"
+            "Only a person can open a standing window: at a terminal, or through the "
+            "app's approval dialog. Nothing else can open or extend one."
         )
 
 

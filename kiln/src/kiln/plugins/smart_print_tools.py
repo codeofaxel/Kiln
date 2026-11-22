@@ -14,6 +14,7 @@ import os
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln import print_keeping
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_annotations import destructive
@@ -173,7 +174,7 @@ class _SmartPrintToolsPlugin:
                 adapter = _srv._resolve_adapter(printer_name)
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Could not connect to printer: {exc}",
+                    f"Kiln couldn't connect to the printer: {_plain_words.said(exc)}.",
                     code="PRINTER_UNAVAILABLE",
                 )
 
@@ -352,13 +353,13 @@ class _SmartPrintToolsPlugin:
                 )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Slicer not found: {exc}. "
-                    "Ensure PrusaSlicer or OrcaSlicer is installed.",
+                    f"Kiln couldn't find a slicer: {_plain_words.said(exc)}. "
+                    "Install PrusaSlicer or OrcaSlicer.",
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
                 return _srv._error_dict(
-                    f"Slicing failed: {exc}", code=getattr(exc, "code", "SLICER_ERROR")
+                    f"Kiln couldn't slice the model: {_plain_words.said(exc)}.", code=getattr(exc, "code", "SLICER_ERROR")
                 )
             except FileNotFoundError as exc:
                 return _srv._error_dict(
@@ -438,7 +439,7 @@ class _SmartPrintToolsPlugin:
                 upload_result = adapter.upload_file(upload_path)
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Upload failed: {exc}", code="UPLOAD_ERROR"
+                    f"The upload didn't finish: {exc}", code="UPLOAD_ERROR"
                 )
 
             file_name = upload_result.file_name or os.path.basename(upload_path)
@@ -482,7 +483,7 @@ class _SmartPrintToolsPlugin:
                 print_result = adapter.start_print(file_name, **start_kwargs)
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Failed to start print: {exc}", code="PRINT_ERROR"
+                    f"Kiln couldn't start the print: {exc}", code="PRINT_ERROR"
                 )
 
             _srv._note_print_started(adapter, print_result)

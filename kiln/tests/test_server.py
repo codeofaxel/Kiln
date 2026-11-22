@@ -3517,7 +3517,7 @@ class TestWrapGcodeAs3mf:
 
         result = wrap_gcode_as_3mf(gcode_path="/tmp/missing.gcode")
         assert result["success"] is False
-        assert "not found" in result["error"]["message"].lower()
+        assert "couldn't find that g-code file" in result["error"]["message"].lower()
 
     @patch("kiln.server._get_adapter")
     def test_invalid_gcode(self, mock_get_adapter):
@@ -3529,7 +3529,7 @@ class TestWrapGcodeAs3mf:
 
         result = wrap_gcode_as_3mf(gcode_path="/tmp/bad.gcode")
         assert result["success"] is False
-        assert "Invalid G-code" in result["error"]["message"]
+        assert "can't use this G-code" in result["error"]["message"]
 
     @patch("kiln.server._get_adapter")
     def test_printer_error(self, mock_get_adapter):

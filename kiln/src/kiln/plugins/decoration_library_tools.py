@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def _not_found_error(name: str) -> dict[str, Any]:
         return {"success": False, "error": hint}
     return {
         "success": False,
-        "error": f"Decoration not found: {name!r}. Use list_decorations to see available.",
+        "error": f"Kiln has no decoration called {name!r}. `list_decorations` lists the ones you have.",
     }
 
 
@@ -235,7 +236,7 @@ class _DecorationLibraryPlugin:
             except UnknownTextFontError as exc:
                 return _srv._unknown_font_error(exc)
             except ValueError as exc:  # what the call asked for cannot make a decoration
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
 
             from kiln.decoration_library import _decoration_dir
 
@@ -456,7 +457,8 @@ class _DecorationLibraryPlugin:
                 _logger.debug("decorate_surface failed: %s", exc)
                 return {
                     "success": False,
-                    "error": f"Failed to apply decoration: {exc}",
+                    "error": f"Kiln couldn't apply the decoration: {_plain_words.said(exc)}.",
+                    **_plain_words.detail_field(exc),
                 }
 
             if isinstance(result, dict):
@@ -525,7 +527,8 @@ class _DecorationLibraryPlugin:
                 _logger.debug("decoration_quota_status failed: %s", exc)
                 return {
                     "success": False,
-                    "error": f"Failed to check decoration quota: {exc}",
+                    "error": f"Kiln couldn't check the decoration quota: {_plain_words.said(exc)}.",
+                    **_plain_words.detail_field(exc),
                 }
 
         # ------------------------------------------------------------------
@@ -573,7 +576,7 @@ class _DecorationLibraryPlugin:
             except bridge.MemoryUnavailable as miss:
                 return _memory_refusal("record_decoration_success", miss.answer)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc), "code": "VALIDATION_ERROR"}
+                return {"status": "error", "error": _plain_words.sentence(exc), "code": "VALIDATION_ERROR", **_plain_words.detail_field(exc)}
             return {
                 "status": "success",
                 "decoration": dec.to_dict(),
@@ -622,9 +625,9 @@ class _DecorationLibraryPlugin:
             except bridge.MemoryUnavailable as miss:
                 return _memory_refusal("iterate_decoration", miss.answer)
             except FileNotFoundError as exc:
-                return {"status": "error", "error": str(exc), "code": "FILE_NOT_FOUND"}
+                return {"status": "error", "error": _plain_words.sentence(exc), "code": "FILE_NOT_FOUND", **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"status": "error", "error": str(exc), "code": "VALIDATION_ERROR"}
+                return {"status": "error", "error": _plain_words.sentence(exc), "code": "VALIDATION_ERROR", **_plain_words.detail_field(exc)}
             return {
                 "status": "success",
                 "decoration": dec.to_dict(),
@@ -654,7 +657,7 @@ class _DecorationLibraryPlugin:
             except bridge.MemoryUnavailable as miss:
                 return _memory_refusal("decoration_history", miss.answer)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc), "code": "VALIDATION_ERROR"}
+                return {"status": "error", "error": _plain_words.sentence(exc), "code": "VALIDATION_ERROR", **_plain_words.detail_field(exc)}
             return {
                 "status": "success",
                 "name": name,
@@ -685,7 +688,7 @@ class _DecorationLibraryPlugin:
             except bridge.MemoryUnavailable as miss:
                 return _memory_refusal("rollback_decoration", miss.answer)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc), "code": "VALIDATION_ERROR"}
+                return {"status": "error", "error": _plain_words.sentence(exc), "code": "VALIDATION_ERROR", **_plain_words.detail_field(exc)}
             return {
                 "status": "success",
                 "decoration": dec.to_dict(),

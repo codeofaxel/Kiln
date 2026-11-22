@@ -109,7 +109,7 @@ class TestStartRecord:
         assert engine.get_record(rec.part_id) is rec
 
     def test_empty_printer_id_raises(self, engine):
-        with pytest.raises(TraceabilityError, match="printer_id must not be empty"):
+        with pytest.raises(TraceabilityError, match="`printer_id` can't be empty"):
             engine.start_record(
                 printer_id="",
                 file_name="test.gcode",
@@ -119,7 +119,7 @@ class TestStartRecord:
             )
 
     def test_empty_file_name_raises(self, engine):
-        with pytest.raises(TraceabilityError, match="file_name must not be empty"):
+        with pytest.raises(TraceabilityError, match="`file_name` can't be empty"):
             engine.start_record(
                 printer_id="p1",
                 file_name="",
@@ -129,7 +129,7 @@ class TestStartRecord:
             )
 
     def test_empty_file_hash_raises(self, engine):
-        with pytest.raises(TraceabilityError, match="file_hash must not be empty"):
+        with pytest.raises(TraceabilityError, match="`file_hash` can't be empty"):
             engine.start_record(
                 printer_id="p1",
                 file_name="test.gcode",
@@ -149,7 +149,7 @@ class TestStartRecord:
             )
 
     def test_empty_safety_profile_version_raises(self, engine):
-        with pytest.raises(TraceabilityError, match="safety_profile_version must not be empty"):
+        with pytest.raises(TraceabilityError, match="`safety_profile_version` can't be empty"):
             engine.start_record(
                 printer_id="p1",
                 file_name="test.gcode",
@@ -197,17 +197,17 @@ class TestCompleteRecord:
         assert updated.status == "cancelled"
 
     def test_unknown_part_id_raises(self, engine):
-        with pytest.raises(TraceabilityError, match="No record found"):
+        with pytest.raises(TraceabilityError, match="has no record of the part"):
             engine.complete_record("nonexistent-id", status="completed")
 
     def test_invalid_status_raises(self, engine):
         rec = _make_record(engine)
-        with pytest.raises(TraceabilityError, match="Invalid status"):
+        with pytest.raises(TraceabilityError, match="doesn't know the status"):
             engine.complete_record(rec.part_id, status="exploded")
 
     def test_printing_status_on_complete_raises(self, engine):
         rec = _make_record(engine)
-        with pytest.raises(TraceabilityError, match="Cannot complete"):
+        with pytest.raises(TraceabilityError, match="A finished record can't have the status"):
             engine.complete_record(rec.part_id, status="printing")
 
 
@@ -315,7 +315,7 @@ class TestExportComplianceReport:
         assert report["total"] == 2
 
     def test_report_unknown_part_raises(self, engine):
-        with pytest.raises(TraceabilityError, match="no record for part_id"):
+        with pytest.raises(TraceabilityError, match="no record of the part"):
             engine.export_compliance_report(["unknown-id"])
 
     def test_report_empty_list(self, engine):

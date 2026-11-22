@@ -514,7 +514,8 @@ class TestServerDegradations:
 
         assert counts["available"] is False
         assert counts["imported"] == 0
-        assert "404" in (counts["error"] or "")
+        assert "404" in (counts["detail"] or "")
+        assert "404" not in (counts["error"] or "")
         assert _outcomes() == []
 
     def test_server_error_is_a_noop(self, tmp_kiln_env) -> None:

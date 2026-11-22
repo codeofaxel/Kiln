@@ -111,6 +111,7 @@ import re
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.mcp_compat import (
     result_is_error,
     result_structured_content,
@@ -401,7 +402,7 @@ def _camera_frame(printer_name: str | None, status: dict | None) -> tuple[str | 
         if waiting:
             return None, waiting
         # The camera's own reason (liveview off, not a picture) is the note.
-        return None, f"camera unavailable: {exc}" if str(exc) else "camera unavailable"
+        return None, f"camera unavailable: {_plain_words.said(exc)}" if str(exc) else "camera unavailable"
 
 
 def _addon_note(exc: BaseException) -> str | None:
@@ -726,7 +727,7 @@ def _control(action: str | None, printer_name: str | None) -> dict[str, Any]:
         out = getattr(_srv, tool)(**kwargs)
     except Exception as exc:  # noqa: BLE001 — the refusal's own words, never a raise into the host
         return {"status": "refused", "action": action,
-                "failure": {"code": "CONTROL_ERROR", "message": str(exc)}}
+                "failure": {"code": "CONTROL_ERROR", "message": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}}
     if isinstance(out, dict) and out.get("confirmation_required"):
         # cancel_print under KILN_CONFIRM_MODE answers with a token for
         # confirm_action, and nothing in the panel can call that: the

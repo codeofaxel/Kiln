@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
 from kiln.mesh_errors import UnreadableMeshError
 
@@ -2431,8 +2432,9 @@ def apply_reinforcements(
             )
             skipped.append({
                 "type": rec.reinforcement_type,
-                "reason": f"Application failed: {exc}",
+                "reason": f"Application failed: {_plain_words.said(exc)}",
                 "addresses": rec.addresses_risk,
+                **_plain_words.detail_field(exc),
             })
 
     # Step 3: Copy result to output path
@@ -2565,7 +2567,7 @@ def _apply_thicken(
 
         return thicken_part(part_path, amount_mm=amount_mm, output_path=str(Path(work_dir) / "thickened.stl"))
     except Exception as exc:  # noqa: BLE001 -- a reinforcement that cannot run is skipped, and says why
-        return {"success": False, "message": f"Wall thickening could not run: {exc}"}
+        return {"success": False, "message": f"Kiln couldn't thicken the walls: {_plain_words.said(exc)}.", **_plain_words.detail_field(exc)}
 
 
 def _apply_edge_finish(
@@ -2594,7 +2596,7 @@ def _apply_edge_finish(
             output_path=str(Path(work_dir) / f"{kind}ed.stl"), choose=choose, **printer,
         )
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": f"Edge finishing could not run: {exc}"}
+        return {"success": False, "message": f"Kiln couldn't finish the edges: {_plain_words.said(exc)}.", **_plain_words.detail_field(exc)}
     if reply.get("code") == NOTHING_FINISHED and not reply.get("edges", {}).get("left_sharp"):
         verb = "round" if kind == "fillet" else "bevel"
         reply["message"] = (
@@ -2640,7 +2642,7 @@ def _base_reply(path: str | None) -> dict[str, Any]:
     """:func:`_apply_base`'s result in the shape every whole-part edit replies in."""
     if path:
         return {"success": True, "path": path}
-    return {"success": False, "message": "Could not generate base (OpenSCAD not available)"}
+    return {"success": False, "message": "Kiln couldn't make the base shape: OpenSCAD isn't installed."}
 
 
 def _apply_base(
@@ -3694,7 +3696,7 @@ def estimate_weight(
     # Parse triangles
     triangles, _verts = _parse_stl_for_analysis(file_path)
     if not triangles:
-        raise UnreadableMeshError(f"Could not parse triangles from {file_path}")
+        raise UnreadableMeshError(f"Kiln couldn't read the model in {file_path}.")
 
     # Compute signed volume via divergence theorem
     total_volume = 0.0
@@ -3902,7 +3904,7 @@ def design_to_gcode(
         result.stl_file = str(stl_path)
         result.steps_completed.append("stl_rendering")
     except Exception as exc:
-        result.errors.append(f"STL rendering failed: {exc}")
+        result.errors.append(f"STL rendering failed: {_plain_words.said(exc)}")
         return result
 
     # Step 3: Structural risk analysis
@@ -3911,7 +3913,7 @@ def design_to_gcode(
         result.structural_risks = len(risks)
         result.steps_completed.append("structural_analysis")
     except Exception as exc:
-        result.errors.append(f"Structural analysis failed: {exc}")
+        result.errors.append(f"Structural analysis failed: {_plain_words.said(exc)}")
         # Non-fatal — continue
 
     # Step 4: Weight estimation
@@ -3924,7 +3926,7 @@ def design_to_gcode(
         result.weight_estimate_g = weight.estimated_weight_g
         result.steps_completed.append("weight_estimation")
     except Exception as exc:
-        result.errors.append(f"Weight estimation failed: {exc}")
+        result.errors.append(f"Weight estimation failed: {_plain_words.said(exc)}")
 
     # Step 5: Slice to G-code
     #
@@ -3962,7 +3964,7 @@ def design_to_gcode(
             "No slicer installed — install PrusaSlicer or OrcaSlicer to get G-code."
         )
     except Exception as exc:
-        result.errors.append(f"Slicing failed: {exc}")
+        result.errors.append(f"Slicing failed: {_plain_words.said(exc)}")
 
     result.success = bool(result.stl_file)
     return result
@@ -4150,7 +4152,7 @@ def cross_section_at_plane(
 
     triangles, _verts = _parse_stl_for_analysis(file_path)
     if not triangles:
-        raise UnreadableMeshError(f"Could not parse triangles from {file_path}")
+        raise UnreadableMeshError(f"Kiln couldn't read the model in {file_path}.")
 
     bbox = _bounding_box(_verts)
 

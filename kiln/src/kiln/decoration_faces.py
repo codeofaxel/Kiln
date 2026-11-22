@@ -65,6 +65,8 @@ from typing import Any
 
 import numpy as np
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 #: Sidecar schema version — bump on breaking layout changes.
@@ -908,7 +910,7 @@ def load_decoration_faces(
         with open(sidecar, encoding="utf-8") as fh:
             record = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        return None, f"decoration face record unreadable: {exc}"
+        return None, f"decoration face record unreadable: {_plain_words.said(exc)}"
     if not isinstance(record, dict) or not isinstance(
         record.get("face_indices"), list
     ):

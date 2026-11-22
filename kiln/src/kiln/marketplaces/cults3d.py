@@ -21,6 +21,7 @@ from typing import Any
 
 import requests
 
+from kiln import plain_words as _plain_words
 from kiln.marketplaces.base import (
     MarketplaceAdapter,
     MarketplaceAuthError,
@@ -69,7 +70,7 @@ class Cults3DAdapter(MarketplaceAdapter):
         if not self._username or not self._api_key:
             raise MarketplaceAuthError(
                 "Cults3D credentials are required.  Set KILN_CULTS3D_USERNAME "
-                "and KILN_CULTS3D_API_KEY, or pass username= and api_key=."
+                "and KILN_CULTS3D_API_KEY, or pass `username` and `api_key`."
             )
         self._graphql_url = graphql_url
         self._session = session or requests.Session()
@@ -114,11 +115,11 @@ class Cults3DAdapter(MarketplaceAdapter):
             )
         except requests.ConnectionError as exc:
             raise MarketplaceError(
-                f"Connection to Cults3D failed: {exc}",
+                f"Kiln couldn't reach Cults3D: {_plain_words.said(exc)}.",
             ) from exc
         except requests.Timeout as exc:
             raise MarketplaceError(
-                f"Cults3D request timed out: {exc}",
+                "Cults3D took too long to answer. Try again in a moment.",
             ) from exc
 
         if resp.status_code == 401:

@@ -605,7 +605,7 @@ def ensure_profile_supports(
 
     if profile and not os.path.isfile(profile):
         return profile, SliceSupports(
-            enabled=False, decided_by=DECIDED_NOT_CHECKED, reason="not checked: the profile names no file",
+            enabled=False, decided_by=DECIDED_NOT_CHECKED, reason="not checked, because the profile file wasn't found",
         )
 
     settings: dict[str, str] = {}
@@ -617,19 +617,19 @@ def ensure_profile_supports(
             logger.debug("Profile %s could not be read; handed on untouched", profile, exc_info=True)
             return profile, SliceSupports(
                 enabled=False, decided_by=DECIDED_NOT_CHECKED,
-                reason="not checked: the profile could not be read",
+                reason="not checked, because the profile file couldn't be read",
             )
 
     if profile and not origin.kiln:
         # The caller's own file: every value in it is theirs.
         return profile, SliceSupports(
             enabled=settings.get(SUPPORT_KEY, "0").strip() == "1",
-            decided_by=DECIDED_STATED, reason="the profile is the caller's own",
+            decided_by=DECIDED_STATED, reason="your own profile decides",
         )
     if SUPPORT_KEY in origin.stated:
         return profile, SliceSupports(
             enabled=settings.get(SUPPORT_KEY, "0").strip() == "1",
-            decided_by=DECIDED_STATED, reason="the caller stated support_material",
+            decided_by=DECIDED_STATED, reason="you set `support_material`",
         )
 
     nozzle = _first_number(settings.get("nozzle_diameter"))

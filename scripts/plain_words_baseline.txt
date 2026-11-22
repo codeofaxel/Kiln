@@ -1,0 +1,2 @@
+# Sentences a person is shown with technical words or raw error text,
+# frozen to shrink: fix one and delete its line.  scripts/audit_plain_words.py

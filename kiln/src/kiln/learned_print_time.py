@@ -146,8 +146,8 @@ def slicer_seconds_for(file_name: str | None, plate_number: int | None = None) -
 
 
 def note_start_estimate(job_id: str | None, file_name: str | None, plate_number: int | None = None) -> None:
-    """Write what the printed plate says onto the outcome row a start just
-    opened: the slicer's time for it, which slicer made it, and a one-way
+    """Write the plate a start printed, and what that plate says, onto the
+    outcome row the start just opened: the slicer's time for it, which slicer made it, and a one-way
     code of the settings it was sliced with
     (:func:`kiln.print_evidence.settings_code`).
 
@@ -163,6 +163,8 @@ def note_start_estimate(job_id: str | None, file_name: str | None, plate_number:
         from kiln.gcode import slicer_made_by
         from kiln.persistence import get_db
 
+        if plate_number is not None:
+            get_db().set_outcome_plate(job_id, plate_number)
         lines = _sent_file_lines(file_name, plate_number)
         if not lines:
             return

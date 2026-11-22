@@ -677,14 +677,14 @@ class TestBambuAdapterListFiles:
     def test_ftp_connection_error(self, adapter_with_mqtt: BambuAdapter) -> None:
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection refused")
-            with pytest.raises(PrinterError, match="FTPS connection"):
+            with pytest.raises(PrinterError, match="file connection"):
                 adapter_with_mqtt.list_files()
 
     def test_ftp_mlsd_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         mock_ftp_class.mlsd.side_effect = Exception("MLSD failed")
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
-                pytest.raises(PrinterError, match="Failed to list files"):
+                pytest.raises(PrinterError, match="couldn't list the printer's files"):
             adapter_with_mqtt.list_files()
 
     def test_mlsd_502_falls_back_to_nlst(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
@@ -730,7 +730,7 @@ class TestBambuAdapterListFiles:
         mock_ftp_class.mlsd.side_effect = ftplib.error_perm("550 Permission denied")
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
-                pytest.raises(PrinterError, match="Failed to list files"):
+                pytest.raises(PrinterError, match="couldn't list the printer's files"):
             adapter_with_mqtt.list_files()
 
     def test_nlst_skips_dot_entries(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
@@ -870,7 +870,7 @@ class TestListFilesNlstFallback:
         mock_ftp_class.retrlines.side_effect = _ftplib.error_perm("530 Not logged in")
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
-                pytest.raises(PrinterError, match="Failed to list files"):
+                pytest.raises(PrinterError, match="couldn't list the printer's files"):
             adapter_with_mqtt.list_files()
 
 
@@ -912,7 +912,7 @@ class TestBambuAdapterUploadFile:
         assert isinstance(result, UploadResult)
         assert result.success is True
         assert result.file_name == "test.3mf"
-        assert "Uploaded" in result.message
+        assert result.message.startswith("Sent")
         mock_ftp_class.storbinary.assert_called_once()
 
     def test_file_not_found(self, adapter_with_mqtt: BambuAdapter) -> None:
@@ -925,7 +925,7 @@ class TestBambuAdapterUploadFile:
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection refused")
-            with pytest.raises(PrinterError, match="FTPS connection"):
+            with pytest.raises(PrinterError, match="file connection"):
                 adapter_with_mqtt.upload_file(str(test_file))
 
     def test_ftp_upload_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
@@ -934,7 +934,7 @@ class TestBambuAdapterUploadFile:
         mock_ftp_class.storbinary.side_effect = Exception("Upload failed")
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
-                pytest.raises(PrinterError, match="FTPS upload failed"):
+                pytest.raises(PrinterError, match="The upload didn't finish"):
             adapter_with_mqtt.upload_file(str(test_file))
 
     def test_permission_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
@@ -950,7 +950,7 @@ class TestBambuAdapterUploadFile:
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
                 mock.patch("builtins.open", side_effect=selective_open), \
-                pytest.raises(PrinterError, match="Permission denied"):
+                pytest.raises(PrinterError, match="isn't allowed to read"):
             adapter_with_mqtt.upload_file(str(test_file))
 
     def test_ftp_quit_called_on_success(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
@@ -1336,7 +1336,7 @@ class TestBambuAdapterTemperature:
 
         floor = get_profile("default").max_hotend_temp
         assert adapter_with_mqtt.set_tool_temp(floor).ok
-        with pytest.raises(PrinterError, match="has not been told this printer's model"):
+        with pytest.raises(PrinterError, match="hasn't been told this printer's model"):
             adapter_with_mqtt.set_tool_temp(floor + 1)
 
     def test_the_adapter_net_still_binds_above_a_hotter_profile(
@@ -1347,7 +1347,7 @@ class TestBambuAdapterTemperature:
         # (the session's synthetic 500 C row) is still clamped there.
         adapter_with_mqtt.set_safety_profile("kilntest_hot")
         assert adapter_with_mqtt.set_tool_temp(350.0).ok
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             adapter_with_mqtt.set_tool_temp(351.0)
 
     def test_bound_profile_lets_each_model_reach_its_rating(
@@ -1359,7 +1359,7 @@ class TestBambuAdapterTemperature:
         # kiln-pro).  On the session's synthetic 320 C row:
         adapter_with_mqtt.set_safety_profile("kilntest_enclosed")
         assert adapter_with_mqtt.set_tool_temp(320.0).ok
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             adapter_with_mqtt.set_tool_temp(321.0)
 
     def test_bound_profile_still_tightens_below_the_net(
@@ -1369,7 +1369,7 @@ class TestBambuAdapterTemperature:
         # still caps at 300 even though the net is now 350.
         adapter_with_mqtt.set_safety_profile("kilntest_open")
         assert adapter_with_mqtt.set_tool_temp(300.0).ok
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             adapter_with_mqtt.set_tool_temp(320.0)
 
 
@@ -1427,14 +1427,14 @@ class TestBambuAdapterDeleteFile:
     def test_ftp_connection_error(self, adapter_with_mqtt: BambuAdapter) -> None:
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection refused")
-            with pytest.raises(PrinterError, match="FTPS connection"):
+            with pytest.raises(PrinterError, match="file connection"):
                 adapter_with_mqtt.delete_file("/sdcard/file.3mf")
 
     def test_ftp_delete_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         mock_ftp_class.delete.side_effect = Exception("File not found")
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
-                pytest.raises(PrinterError, match="Failed to delete"):
+                pytest.raises(PrinterError, match="couldn't delete"):
             adapter_with_mqtt.delete_file("/sdcard/nonexistent.3mf")
 
     def test_ftp_quit_called(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
@@ -1560,7 +1560,7 @@ class TestBambuAdapterMQTTInternals:
     def test_publish_command_raises_on_failure(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._mqtt_client.publish.side_effect = Exception("Publish failed")
 
-        with pytest.raises(PrinterError, match="Failed to publish"):
+        with pytest.raises(PrinterError, match="couldn't send the command"):
             adapter_with_mqtt._publish_command({"test": "data"})
 
     def test_on_message_updates_status(self) -> None:
@@ -1654,7 +1654,7 @@ class TestBambuAdapterFTPSInternals:
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection failed")
-            with pytest.raises(PrinterError, match="FTPS connection"):
+            with pytest.raises(PrinterError, match="file connection"):
                 adapter._ftp_connect()
 
     def test_ftp_connect_pins_cert_on_first_use(

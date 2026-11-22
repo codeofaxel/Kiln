@@ -71,6 +71,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.asset_store import _COMPANION_SUFFIXES
 from kiln.slicer_layer import keep_on_record
 
@@ -1156,7 +1157,7 @@ class HistoryVault:
         except NumbersBusy as exc:
             raise NumbersNotTaken("another save of this design was running") from exc
         except (ValueError, OSError) as exc:
-            raise NumbersNotTaken(str(exc)) from exc
+            raise NumbersNotTaken(_plain_words.sentence(exc)) from exc
 
     def _settle_arrivals(self, design_id: str, answer: dict[str, Any]) -> dict[str, dict[str, int]]:
         """:func:`kiln.version_numbers.settle_arrivals` for *answer*, over

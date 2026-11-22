@@ -31,6 +31,8 @@ from dataclasses import dataclass
 
 import requests
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 #: The name OctoPrint shows the person on its Allow / Deny prompt.
@@ -106,7 +108,7 @@ def start(host: str, *, session: requests.Session | None = None) -> KeyRequest:
     try:
         response = http.post(f"{url}{_REQUEST_PATH}", json={"app": APP_NAME}, timeout=_HTTP_TIMEOUT_S)
     except requests.RequestException as exc:
-        raise AppKeyError(f"Could not reach OctoPrint at {url}: {exc}") from exc
+        raise AppKeyError(f"Kiln couldn't reach OctoPrint at {url}: {_plain_words.said(exc)}.") from exc
     if response.status_code == 429:
         raise AppKeyError(
             "OctoPrint allows only a few key requests a minute and refused this one. "

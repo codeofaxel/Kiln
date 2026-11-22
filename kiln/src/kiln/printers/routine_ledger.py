@@ -310,7 +310,7 @@ def describe_stranded_cooldown(adapter: Any, state: Any) -> dict[str, Any] | Non
     shown = "unknown" if reading is None else f"{float(reading):g} °C"
     from kiln.cli_command import kiln_command
 
-    yourself = f"To turn it off now: set_fan with percent 0 (or `{kiln_command('fan --percent', '0')}`)."
+    yourself = f"To turn it off now: `set_fan` with `percent` 0 (or `{kiln_command('fan --percent', '0')}`)."
     if reading is None or float(reading) > handoff:
         return {
             "status": "cooling",

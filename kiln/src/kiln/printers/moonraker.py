@@ -15,6 +15,7 @@ import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
+from kiln import plain_words as _plain_words
 from kiln.printers.base import (
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
@@ -91,6 +92,17 @@ _FILAMENT_SENSOR_TYPES: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _printer_words(response: Any) -> str:
+    """Klipper's own reason for refusing a request (``{"error": {"message": ...}}``),
+    as a sentence, or ``""`` when the reply carries none."""
+    try:
+        message = _safe_get(response.json(), "error", "message", default="")
+    except ValueError:
+        return ""
+    message = message.strip()[:300] if isinstance(message, str) else ""
+    return message if not message or message.endswith((".", "!", "?")) else message + "."
 
 
 def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
@@ -664,47 +676,45 @@ class MoonrakerAdapter(PrinterAdapter):
                         body += " (truncated)"
                     sc = response.status_code
                     if sc == 401:
-                        hint = " API key may be invalid. Check KILN_PRINTER_API_KEY or Moonraker auth config. Retry with `get_state()`."
+                        said = "Moonraker didn't accept the API key. Check `KILN_PRINTER_API_KEY`, or Moonraker's sign-in settings."
                     elif sc == 403:
-                        hint = " Insufficient permissions. Check Moonraker's authorization config. Retry with `get_state()`."
+                        said = "Moonraker doesn't allow this request. Check Moonraker's permission settings."
                     elif sc == 404:
-                        hint = " Resource not found — the endpoint or file may not exist. Verify with `list_files()`."
+                        said = "Moonraker doesn't have what Kiln asked for; the file may not be there. Check with `printer_files`."
                     elif sc == 409:
-                        hint = " Conflict — printer may be busy with another operation. Check `get_state()` first."
+                        said = "The printer is busy with something else. Wait a moment and try again."
+                    elif printer_said := _printer_words(response):
+                        said = (f"Moonraker ran into a problem of its own: {printer_said}" if sc >= 500
+                                else f"The printer refused it: {printer_said}")
                     else:
-                        hint = " Retry with `get_state()` to check printer status."
-                    raise PrinterError(
-                        f"Moonraker returned HTTP {sc} for {method} {path}: {body}.{hint}",
-                    )
+                        said = "Moonraker didn't complete the request. Check `printer_status`, then try again."
+                    raise PrinterError(said, detail=f"HTTP {sc} on {method} {path}: {body}")
 
                 # Retryable HTTP status -- fall through to backoff.
                 last_exc = PrinterError(
-                    f"Moonraker returned HTTP {response.status_code} "
-                    f"for {method} {path} "
-                    f"(attempt {attempt + 1}/{self._retries}). "
-                    f"Moonraker backend may be unavailable — check that the service is running. "
-                    f"Retry with `get_state()`."
+                    "Moonraker isn't answering right now. Check that it's running, then try again.",
+                    detail=f"HTTP {response.status_code} on {method} {path} (try {attempt + 1} of {self._retries})",
                 )
 
             except Timeout as exc:
                 last_exc = PrinterError(
-                    f"{method} {path} timed out after {self._timeout}s. "
-                    f"Printer may be offline or overloaded. "
-                    f"(attempt {attempt + 1}/{self._retries})",
+                    f"The printer took longer than {self._timeout:g}s to answer. It may be off or busy.",
                     cause=exc,
+                    detail=f"{method} {path} (try {attempt + 1} of {self._retries})",
                 )
             except ReqConnectionError as exc:
                 last_exc = PrinterError(
-                    f"Could not connect to Moonraker at {self._host} (attempt {attempt + 1}/{self._retries})",
+                    f"Kiln couldn't reach Moonraker at {self._host}.",
                     cause=exc,
+                    detail=f"try {attempt + 1} of {self._retries}",
                 )
             except RequestException as exc:
                 # Non-transient request errors -- raise immediately.
                 raise PrinterError(
-                    f"Request error for {method} {path}: {exc}. "
-                    f"Cannot reach Moonraker at {self._host}. Check network and that Moonraker is running. "
-                    f"Retry with `get_state()`.",
+                    f"Kiln couldn't reach Moonraker at {self._host}: {_plain_words.said(exc)}. "
+                    "Check the network, and that Moonraker is running.",
                     cause=exc,
+                    detail=f"{method} {path}",
                 ) from exc
 
             # Exponential backoff: 1 s, 2 s, 4 s, ...
@@ -731,8 +741,9 @@ class MoonrakerAdapter(PrinterAdapter):
             return response.json()  # type: ignore[no-any-return]
         except ValueError as exc:
             raise PrinterError(
-                f"Invalid JSON in response from GET {path}",
+                "The printer sent back a reply Kiln couldn't read.",
                 cause=exc,
+                detail=f"invalid JSON from GET {path}",
             ) from exc
 
     def _post(
@@ -1088,7 +1099,7 @@ class MoonrakerAdapter(PrinterAdapter):
         return PrintResult(
             success=True,
             message=(
-                "Sent FIRMWARE_RESTART. Re-read printer_status to confirm "
+                "Sent FIRMWARE_RESTART. Re-read `printer_status` to confirm "
                 "Klipper came back ready."
             ),
         )
@@ -1157,7 +1168,7 @@ class MoonrakerAdapter(PrinterAdapter):
         """Abandon named objects on a live Klipper multi-object print."""
         names = [str(n).strip() for n in (object_names or []) if str(n).strip()]
         if not names:
-            raise PrinterError("skip_objects requires at least one object name.")
+            raise PrinterError("`skip_objects` requires at least one object name.")
         return self.send_gcode([f"EXCLUDE_OBJECT NAME={n}" for n in names])
 
     # ------------------------------------------------------------------
@@ -1290,7 +1301,10 @@ class MoonrakerAdapter(PrinterAdapter):
         try:
             data = self._get_json("/printer/objects/query", params={"extruder": ""})
         except PrinterError as exc:
-            return None if "404" in str(exc) else (f"could not read the extruder object ({exc})", "moonraker_query_failed")
+            cause = f"{exc} {getattr(exc, 'detail', '') or ''}"
+            if "404" in cause:
+                return None
+            return f"could not read the extruder object ({_plain_words.said(exc)})", "moonraker_query_failed"
         ext = _safe_get(data, "result", "status", "extruder", default={}) or {}
         if ext.get("can_extrude") is False:
             temp = ext.get("temperature")
@@ -1309,7 +1323,7 @@ class MoonrakerAdapter(PrinterAdapter):
         except PrinterError as exc:
             return FilamentOpResult(
                 success=False, action=plan.action,
-                message=f"Could not set the hotend to {plan.temperature:g}°C: {exc}",
+                message=f"Kiln couldn't set the hotend to {plan.temperature:g}°C: {_plain_words.said(exc)}.",
                 extrusion_verified=False, verification_source="heater_command_rejected",
                 error_hint=str(exc), slot=plan.slot, material=plan.material,
                 temperature=plan.temperature,
@@ -1332,7 +1346,7 @@ class MoonrakerAdapter(PrinterAdapter):
         except PrinterError as exc:
             return FilamentOpResult(
                 success=False, action=plan.action,
-                message=f"Klipper rejected {macro}: {exc}",
+                message=f"Klipper rejected {macro}: {_plain_words.said(exc)}.",
                 extrusion_verified=False, verification_source="firmware_rejected_move",
                 error_hint=str(exc), slot=plan.slot, material=plan.material,
                 temperature=plan.temperature, details={"macro": macro},
@@ -1473,18 +1487,17 @@ class MoonrakerAdapter(PrinterAdapter):
             ) from exc
         except ReqConnectionError as exc:
             raise PrinterError(
-                "Webcam snapshot failed: could not connect. Check that the "
-                "webcam is configured and the printer is online."
+                "Kiln couldn't get a picture from the webcam: it couldn't connect. Check that the "
+                "webcam is set up and the printer is online."
             ) from exc
         except RequestException as exc:
             raise PrinterError(
-                f"Webcam snapshot failed: {exc}. "
-                "Check webcam configuration in Moonraker. Retry with `get_snapshot()`.",
+                f"Kiln couldn't get a picture from the webcam: {_plain_words.said(exc)}. "
+                "Check the webcam's setup in Moonraker.",
             ) from exc
         except Exception as exc:
             raise PrinterError(
-                f"Webcam snapshot failed unexpectedly: {exc}. "
-                "Retry with `get_snapshot()`.",
+                f"Kiln couldn't get a picture from the webcam: {_plain_words.said(exc)}.",
             ) from exc
 
     # ------------------------------------------------------------------
@@ -1609,7 +1622,7 @@ class MoonrakerAdapter(PrinterAdapter):
         except PrinterError:
             raise
         except Exception as exc:  # pragma: no cover - defensive
-            raise PrinterError(f"objects/list failed: {exc}") from exc
+            raise PrinterError(f"objects/list failed: {_plain_words.said(exc)}.") from exc
         objects = _safe_get(listing, "result", "objects", default=None)
         if not isinstance(objects, list):
             # Moonraker answered in a shape this probe does not understand
@@ -1765,7 +1778,7 @@ class MoonrakerAdapter(PrinterAdapter):
         try:
             state = self.get_state()
             if state.effective_state == PrinterStatus.PRINTING:
-                raise PrinterError("Cannot update firmware while printing. Wait for the current print to finish.")
+                raise PrinterError("Kiln can't update the firmware while printing. Wait for the current print to finish.")
         except PrinterError:
             raise
         except Exception as exc:
@@ -1783,7 +1796,7 @@ class MoonrakerAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware update failed: {exc}. "
+                f"The firmware update didn't finish: {_plain_words.said(exc)}. "
                 "Check Moonraker logs for details. Retry with `update_machine_firmware`.",
                 cause=exc,
             ) from exc
@@ -1809,7 +1822,7 @@ class MoonrakerAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware rollback failed: {exc}. "
+                f"The firmware rollback didn't finish: {_plain_words.said(exc)}. "
                 "Check Moonraker logs for details. Retry with `roll_back_machine_firmware`.",
                 cause=exc,
             ) from exc

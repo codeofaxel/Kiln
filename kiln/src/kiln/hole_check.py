@@ -16,6 +16,7 @@ import os
 import sys
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.child_interpreter import MEMORY, TIME_LIMIT
 
 #: The allowance, in MB.  Unset or not a positive number: no limit.
@@ -148,7 +149,7 @@ def find_holes(file_path: str, *, diagnostics: dict[str, int] | None = None) -> 
             max_memory_mb=allowed,
         )
     except ChildOverMemory as exc:
-        raise HoleCheckStopped(str(exc), cause=MEMORY, held_mb=exc.held_mb, allowed_mb=exc.allowed_mb) from exc
+        raise HoleCheckStopped(_plain_words.sentence(exc), cause=MEMORY, held_mb=exc.held_mb, allowed_mb=exc.allowed_mb) from exc
     except HoleCheckStopped as exc:
         # A time limit, a crash or a refusal arrives as HoleCheckStopped
         # already, its cause set where run_in_child raised it; the time
@@ -156,9 +157,9 @@ def find_holes(file_path: str, *, diagnostics: dict[str, int] | None = None) -> 
         if exc.cause == TIME_LIMIT:
             exc.time_limit_s = limit
         raise
-    if "error" in answer:
+    if "failed_as" in answer:
         kinds = {"ValueError": ValueError, "FileNotFoundError": FileNotFoundError}
-        raise kinds.get(answer["error"], OSError)(answer["message"])
+        raise kinds.get(answer["failed_as"], OSError)(answer["text"])
     if diagnostics is not None:
         for key, count in answer["diagnostics"].items():
             diagnostics[key] = diagnostics.get(key, 0) + count
@@ -172,7 +173,9 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
     try:
         holes = detect_holes(request["path"], diagnostics=diagnostics)
     except (ValueError, OSError) as exc:
-        return {"error": type(exc).__name__, "message": str(exc)}
+        # The failure crosses back to the parent as it was raised there; the
+        # door that catches it says it to the person.
+        return {"failed_as": type(exc).__name__, "text": str(exc)}
     return {"holes": holes, "diagnostics": diagnostics}
 
 

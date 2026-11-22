@@ -98,7 +98,7 @@ class Tripo3DProvider(GenerationProvider):
         self._api_key = api_key or os.environ.get("KILN_TRIPO3D_API_KEY", "")
         if not self._api_key:
             raise GenerationAuthError(
-                "Tripo3D API key required.  Set KILN_TRIPO3D_API_KEY or pass api_key.",
+                "Tripo3D API key required.  Set KILN_TRIPO3D_API_KEY or pass `api_key`.",
                 code="AUTH_REQUIRED",
             )
         self._model = model or os.environ.get("KILN_TRIPO3D_MODEL", "").strip() or _DEFAULT_MODEL
@@ -317,7 +317,7 @@ class Tripo3DProvider(GenerationProvider):
                 )
             except requests.ConnectionError:
                 raise GenerationError(
-                    "Could not connect to Tripo3D API.",
+                    "Kiln couldn't reach Tripo3D.",
                     code="CONNECTION_ERROR",
                 ) from None
             except requests.Timeout:
@@ -360,7 +360,7 @@ class Tripo3DProvider(GenerationProvider):
             payload = None
         if not isinstance(payload, dict):
             raise GenerationError(
-                "Tripo3D API returned a response that is not a JSON object.",
+                "Tripo3D sent back a reply Kiln couldn't read.",
                 code="INVALID_RESPONSE",
             )
 

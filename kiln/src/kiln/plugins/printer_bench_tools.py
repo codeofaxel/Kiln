@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import bench
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import destructive
 
 _logger = logging.getLogger(__name__)
@@ -394,7 +395,7 @@ def _door(name: str, printer_name: str) -> dict[str, Any]:
     try:
         out = fn(printer_name=printer_name)
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     return out if isinstance(out, dict) else {"success": bool(out)}
 
 
@@ -686,7 +687,7 @@ def printer_bench(
             if not printer_id:
                 return _srv._error_dict(
                     f"{target_name} was registered without a printer model, so Kiln cannot tell what its record lacks; "
-                    "register it with printer_model set.", code="BENCH_NO_MODEL")
+                    "register it with `printer_model` set.", code="BENCH_NO_MODEL")
             blanks, verdict = bench.blanks_for(adapter, printer_id)
             if verdict is None:
                 return _srv._error_dict(
@@ -741,7 +742,7 @@ def printer_bench(
         return _with_pictures(_advance(session, adapter, answer, gcode_paths))
     except Exception as exc:  # noqa: BLE001
         _logger.exception("Unexpected error in printer_bench")
-        return _srv._error_dict(f"Unexpected error in the bench session: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"The bench session didn't finish: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 def _advance(session: dict[str, Any], adapter: Any, answer: Any,
@@ -764,7 +765,7 @@ def _advance(session: dict[str, Any], adapter: Any, answer: Any,
             bench.count("later", MOTION)
             _end_session(session)
             return {"success": True, "step": "later", "printer_name": name, "ask": "",
-                    "message": "No problem. Call printer_bench whenever you have a few minutes; Kiln won't bring it up again on its own."}
+                    "message": "No problem. Call `printer_bench` whenever you have a few minutes; Kiln won't bring it up again on its own."}
         if _is_no(answer):
             bench.note_offer(session["unit"], answer="declined")
             bench.count("declined", MOTION)
@@ -1329,7 +1330,7 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
             bench.count("later", LIMITS)
             _end_session(session)
             return {"success": True, "step": "later", "lesson": LIMITS, "printer_name": name, "ask": "",
-                    "message": ("No problem. Call printer_bench with lesson=\"limits\" whenever you have time for "
+                    "message": ("No problem. Call `printer_bench` with `lesson=\"limits\"` whenever you have time for "
                                 "a test print; Kiln won't bring it up again on its own.")}
         if _is_no(answer):
             bench.note_offer(_limits_key(session["unit"]), answer="declined")

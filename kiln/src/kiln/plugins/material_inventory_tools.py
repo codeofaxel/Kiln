@@ -68,7 +68,7 @@ class _MaterialInventoryToolsPlugin:
                 return answer
             except Exception as exc:
                 _logger.exception("Unexpected error in %s", tool)
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't finish this: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Material on hand"))
         def material_on_hand(printer_name: str | None = None) -> dict:
@@ -125,7 +125,7 @@ class _MaterialInventoryToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in get_material_consumption_history")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't finish this: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Forecast material use"))
         def forecast_material_consumption(
@@ -156,7 +156,7 @@ class _MaterialInventoryToolsPlugin:
                 return {"success": True, "forecast": forecast}
             except Exception as exc:
                 _logger.exception("Unexpected error in forecast_material_consumption")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't finish this: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Check material on hand"))
         def check_material_sufficiency(
@@ -257,7 +257,7 @@ class _MaterialInventoryToolsPlugin:
                 return {"success": True, "check": payload}
             except Exception as exc:
                 _logger.exception("Unexpected error in check_material_sufficiency")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't finish this: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Restock suggestions"))
         def get_restock_suggestions() -> dict:
@@ -283,7 +283,7 @@ class _MaterialInventoryToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in get_restock_suggestions")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't finish this: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Find printers with a material"))
         def find_printers_with_material(
@@ -321,7 +321,7 @@ class _MaterialInventoryToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in find_printers_with_material")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't finish this: {exc}", code="INTERNAL_ERROR")
 
         def _assign(tool: str, jobs: list[dict[str, Any]], printer_name: str | None) -> dict:
             """Which printer takes each job, for the door *tool*."""
@@ -342,7 +342,7 @@ class _MaterialInventoryToolsPlugin:
                 return answer
             except Exception as exc:
                 _logger.exception("Unexpected error in %s", tool)
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't finish this: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Assign jobs"))
         def assign_jobs(jobs: list[dict[str, Any]], printer_name: str | None = None) -> dict:
@@ -407,7 +407,7 @@ class _MaterialInventoryToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in suggest_spool_swaps")
-                return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't finish this: {exc}", code="INTERNAL_ERROR")
 
         _logger.debug("Registered material inventory tools")
 

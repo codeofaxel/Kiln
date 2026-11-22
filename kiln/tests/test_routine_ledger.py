@@ -213,7 +213,7 @@ class TestAReadReportsAStrandedCoolDownAndSendsNothing:
         ledger.note_cooldown(key, fan_off="M106 S0", handoff_c=140)
         before = ledger._marker_path().read_bytes()
         block = ledger.describe_stranded_cooldown(adapter, self._state(70.8))
-        assert block["status"] == "fan_left_on" and "set_fan with percent 0" in block["note"]
+        assert block["status"] == "fan_left_on" and "`set_fan` with `percent` 0" in block["note"]
         assert adapter.gcode == []
         assert ledger._marker_path().read_bytes() == before
 

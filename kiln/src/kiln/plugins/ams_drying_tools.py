@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import destructive
 
 _logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ def ams_filament_drying(
         return _srv._unknown_printer_error(printer_name, "run the AMS dryer on")
     except Exception as exc:  # noqa: BLE001 -- the registry raises varied connection errors
         suffix = f" ({printer_name})" if printer_name else ""
-        return _srv._error_dict(f"No printer connected{suffix}: {exc}", code="PRINTER_OFFLINE")
+        return _srv._error_dict(f"No printer connected{suffix}: {_plain_words.said(exc)}.", code="PRINTER_OFFLINE")
     if "bambu" not in type(adapter).__name__.lower() or not hasattr(adapter, "publish_print_command"):
         return _srv._error_dict(
             "AMS filament drying is only available on Bambu printers with an AMS 2 Pro / AMS HT.",
@@ -132,14 +133,14 @@ def ams_filament_drying(
         try:
             command = EmergencyCoordinator._build_ams_stop_command(int(ams_id))
         except (TypeError, ValueError):
-            return _srv._error_dict(f"ams_id must be an integer, got {ams_id!r}.", code="INVALID_DRYING_COMMAND")
+            return _srv._error_dict(f"`ams_id` must be a whole number, not {ams_id!r}.", code="INVALID_DRYING_COMMAND")
 
     from kiln.printers.command_verdict import CommandVerdict
 
     try:
         sent = adapter.publish_print_command("ams_filament_drying", command)
     except Exception as exc:  # noqa: BLE001 -- the adapter raises varied transport errors
-        return _srv._error_dict(f"Failed to send the drying command: {exc}", code="DISPATCH_FAILED")
+        return _srv._error_dict(f"Kiln couldn't send the drying command: {_plain_words.said(exc)}.", code="DISPATCH_FAILED")
     outcome = CommandVerdict.coerce(sent, what="drying command").to_dict()
 
     from kiln.tiers_and_terms import claim_once

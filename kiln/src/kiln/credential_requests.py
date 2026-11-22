@@ -24,6 +24,7 @@ import click
 import requests
 
 from kiln import octoprint_appkeys
+from kiln import plain_words as _plain_words
 from kiln.printer_backends import ConnectionNeed
 
 
@@ -37,7 +38,7 @@ def _octoprint_in_terminal(host: str) -> str | None:
     try:
         request = octoprint_appkeys.start(host)
     except octoprint_appkeys.AppKeyError as exc:
-        click.echo(f"  {exc}")
+        click.echo(f"  {_plain_words.said(exc)}")
         return None
     click.echo(f"  Now {octoprint_appkeys.how_to_approve(request)}.")
     click.echo("  Waiting for OctoPrint (Ctrl+C to paste a key instead) ", nl=False)

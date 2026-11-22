@@ -267,11 +267,11 @@ def _validate_display_name(value: str) -> None:
     :raises ReputationValidationError: If validation fails.
     """
     if not isinstance(value, str) or not value.strip():
-        raise ReputationValidationError("display_name must be a non-empty string")
+        raise ReputationValidationError("The `display_name` can't be empty.")
     if len(value) > _MAX_DISPLAY_NAME_LEN:
-        raise ReputationValidationError(f"display_name exceeds max length of {_MAX_DISPLAY_NAME_LEN} characters")
+        raise ReputationValidationError(f"The `display_name` can be at most {_MAX_DISPLAY_NAME_LEN} characters.")
     if _CONTROL_CHAR_RE.search(value):
-        raise ReputationValidationError("display_name contains control characters")
+        raise ReputationValidationError("The `display_name` can't contain line breaks, tabs or other invisible characters.")
 
 
 def _validate_score(value: int, field_name: str) -> None:
@@ -297,13 +297,13 @@ def _validate_feedback(feedback: OrderFeedback) -> None:
     _validate_score(feedback.communication_score, "communication_score")
 
     if not isinstance(feedback.on_time, bool):
-        raise ReputationValidationError("on_time must be a boolean")
+        raise ReputationValidationError("`on_time` must be true or false.")
     if not isinstance(feedback.would_recommend, bool):
-        raise ReputationValidationError("would_recommend must be a boolean")
+        raise ReputationValidationError("`would_recommend` must be true or false.")
 
     if feedback.comment is not None:
         if not isinstance(feedback.comment, str):
-            raise ReputationValidationError("comment must be a string or None")
+            raise ReputationValidationError("`comment` must be text.")
         if len(feedback.comment) > _MAX_COMMENT_LEN:
             raise ReputationValidationError(f"comment exceeds max length of {_MAX_COMMENT_LEN} characters")
         if _CONTROL_CHAR_RE.search(feedback.comment):
@@ -382,11 +382,11 @@ class ReputationEngine:
         :raises ReputationValidationError: If print_time_s is invalid.
         """
         if not isinstance(print_time_s, (int, float)):
-            raise ReputationValidationError("print_time_s must be a number")
+            raise ReputationValidationError("The `print_time_s` must be a number of seconds.")
         if print_time_s < 0:
-            raise ReputationValidationError("print_time_s must be >= 0")
+            raise ReputationValidationError("The `print_time_s` can't be negative.")
         if not isinstance(success, bool):
-            raise ReputationValidationError("success must be a boolean")
+            raise ReputationValidationError("Set `success` to `true` or `false`.")
 
         with self._lock:
             profile = self._operators.get(operator_id)

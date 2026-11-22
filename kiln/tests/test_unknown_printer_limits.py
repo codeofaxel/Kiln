@@ -65,12 +65,12 @@ class _Adapter:
 class TestAnAdapterWithNoModelBound:
     def test_the_hotend_is_held_to_the_floor_not_the_adapters_literal(self):
         a = _Adapter()
-        with pytest.raises(PrinterError, match="has not been told this printer's model"):
+        with pytest.raises(PrinterError, match="hasn't been told this printer's model"):
             a._validate_temp(260.0, 300.0, "Hotend")
 
     def test_the_bed_is_held_to_the_floor_too(self):
         a = _Adapter()
-        with pytest.raises(PrinterError, match="has not been told this printer's model"):
+        with pytest.raises(PrinterError, match="hasn't been told this printer's model"):
             a._validate_temp(100.0, 130.0, "Bed")
 
     def test_the_refusal_names_the_fix(self):
@@ -87,7 +87,7 @@ class TestAnAdapterWithNoModelBound:
         a = _Adapter()
         a._safety_profile_id = CURATED
         a._validate_temp(300.0, 300.0, "Hotend")
-        with pytest.raises(PrinterError, match="exceeds safety limit"):
+        with pytest.raises(PrinterError, match=r"is above .*safety limit"):
             a._validate_temp(301.0, 350.0, "Hotend")
 
     def test_the_adapters_own_literal_still_binds_below_the_profile(self):

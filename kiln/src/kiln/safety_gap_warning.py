@@ -77,7 +77,7 @@ def safety_gap_warning() -> dict[str, Any] | None:
             "code": "PRINTER_MODEL_NOT_SET",
             "severity": "warning",
             "message": (
-                "printer_model is not set in ~/.kiln/config.yaml, so Kiln "
+                "`printer_model` is not set in ~/.kiln/config.yaml, so Kiln "
                 "can't check that prints fit the bed or stay within safe "
                 "temperatures — those checks are skipped and an unsafe "
                 "print could reach the printer."

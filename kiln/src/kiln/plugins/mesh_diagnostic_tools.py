@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import read_only
 
 _logger = logging.getLogger(__name__)
@@ -98,19 +99,19 @@ class _MeshDiagnosticToolsPlugin:
 
             except ImportError as exc:
                 return _srv._error_dict(
-                    str(exc),
+                    _plain_words.sentence(exc),
                     code="MISSING_DEPENDENCY",
                     retryable=False,
                 )
             except ValueError as exc:
                 return _srv._error_dict(
-                    f"Failed to diagnose mesh: {exc}",
+                    f"Kiln couldn't diagnose the mesh: {_plain_words.said(exc)}.",
                     code="VALIDATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in diagnose_mesh")
                 return _srv._error_dict(
-                    f"Unexpected error in diagnose_mesh: {exc}",
+                    f"Kiln couldn't check the model for problems: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

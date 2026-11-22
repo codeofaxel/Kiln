@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tiers_and_terms import signin_hint_fields
 from kiln.tool_annotations import read_only
 
@@ -217,7 +218,7 @@ class _ConsumerToolsPlugin:
                     }
                 except Exception as exc:
                     return _error_dict(
-                        f"Preview failed: {exc}",
+                        f"Kiln couldn't make the preview: {_plain_words.said(exc)}.",
                         code="PREVIEW_ERROR",
                     )
 
@@ -231,7 +232,7 @@ class _ConsumerToolsPlugin:
                 )
                 return {"success": True, "tax": result.to_dict()}
             except Exception as exc:
-                return _error_dict(f"Tax calculation failed: {exc}")
+                return _error_dict(f"Kiln couldn't work out the tax: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=read_only("List tax regions"))
         def tax_jurisdictions() -> dict:
@@ -258,7 +259,7 @@ class _ConsumerToolsPlugin:
                     "count": len(jurisdictions),
                 }
             except Exception as exc:
-                return _error_dict(f"Failed to list jurisdictions: {exc}")
+                return _error_dict(f"Kiln couldn't list the tax regions: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=read_only("Look up a tax region"))
         def tax_jurisdiction_lookup(code: str) -> dict:
@@ -280,11 +281,11 @@ class _ConsumerToolsPlugin:
                 jur = calc.get_jurisdiction(code)
                 if jur is None:
                     return _error_dict(
-                        f"Unknown jurisdiction: {code}. Use tax_jurisdictions to see all supported codes."
+                        f"Kiln doesn't know the tax region {code}. `tax_jurisdictions` lists the ones it knows."
                     )
                 return {"success": True, "jurisdiction": jur.to_dict()}
             except Exception as exc:
-                return _error_dict(f"Jurisdiction lookup failed: {exc}")
+                return _error_dict(f"Kiln couldn't look up the tax region: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=read_only("Donation info"))
         def donate_info() -> dict:
@@ -304,7 +305,7 @@ class _ConsumerToolsPlugin:
                 return {"success": True, **get_donation_info()}
             except Exception as exc:
                 _logger.exception("Unexpected error in donate_info")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Onboarding without a printer"))
         def consumer_onboarding() -> dict:
@@ -325,7 +326,7 @@ class _ConsumerToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in consumer_onboarding")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Validate shipping address"))
         def validate_shipping_address(
@@ -368,7 +369,7 @@ class _ConsumerToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in validate_shipping_address")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Suggest material for an order"))
         def suggest_material_for_order(
@@ -421,10 +422,10 @@ class _ConsumerToolsPlugin:
                     "recommendation": guide.to_dict(),
                 }
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_INPUT")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_INPUT")
             except Exception as exc:
                 _logger.exception("Unexpected error in suggest_material_for_order")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Estimate order price"))
         def estimate_price(
@@ -470,10 +471,10 @@ class _ConsumerToolsPlugin:
                     "estimate": result.to_dict(),
                 }
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_INPUT")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_INPUT")
             except Exception as exc:
                 _logger.exception("Unexpected error in estimate_price")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Estimate order timeline"))
         def estimate_timeline(
@@ -511,7 +512,7 @@ class _ConsumerToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in estimate_timeline")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("List shipping countries"))
         def supported_shipping_countries() -> dict:
@@ -532,7 +533,7 @@ class _ConsumerToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in supported_shipping_countries")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         _logger.debug("Registered consumer-facing tools")
 

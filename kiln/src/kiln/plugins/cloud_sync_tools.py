@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import destructive, read_only
 
 if TYPE_CHECKING:
@@ -53,7 +54,7 @@ class _CloudSyncToolsPlugin:
                 return {"success": True, **result}
             except Exception as exc:
                 logger.exception("Unexpected error in cloud_sync_now")
-                return _srv._error_dict(f"Unexpected error in cloud_sync_now: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't sync with the cloud: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=destructive("Configure cloud sync", open_world=True))
         @_srv.requires_tier(_srv.LicenseTier.PRO)
@@ -89,7 +90,7 @@ class _CloudSyncToolsPlugin:
                 return {"success": True, "config": config.to_dict()}
             except Exception as exc:
                 logger.exception("Unexpected error in cloud_sync_configure")
-                return _srv._error_dict(f"Unexpected error in cloud_sync_configure: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't set up cloud sync: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
 
 plugin = _CloudSyncToolsPlugin()

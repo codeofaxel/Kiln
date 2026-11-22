@@ -266,7 +266,7 @@ def _http_post(
         )
     except requests.exceptions.ConnectionError as exc:
         raise _ApiUnavailable(
-            f"Could not reach Kiln API at {_api_base()} — is the server up?"
+            f"Kiln couldn't reach its servers at {_api_base()}. Check your connection and try again."
         ) from exc
     except requests.exceptions.Timeout as exc:
         raise _ApiUnavailable(
@@ -278,8 +278,7 @@ def _http_post(
         # Windows), a protocol hiccup -- is the same kind of passing
         # trouble, and must never surface as a raw traceback mid-poll.
         raise _ApiUnavailable(
-            f"Connection to {_api_base()} dropped mid-request "
-            f"({exc.__class__.__name__})."
+            f"The connection to {_api_base()} dropped before Kiln got an answer."
         ) from exc
 
     if bearer and resp.status_code == 401:
@@ -289,8 +288,8 @@ def _http_post(
         # continue to signal success/failure via the JSON body — hiding
         # that under a blanket 401 branch would break the login flow.
         raise click.ClickException(
-            "Your session is not accepted by the Kiln API (HTTP 401). "
-            "Run `kiln signin` to refresh, then retry."
+            "Kiln's servers didn't accept your sign-in. "
+            "Run `kiln signin` to sign in again, then retry."
         )
     if resp.status_code >= 500:
         raise _ApiUnavailable(
@@ -301,7 +300,7 @@ def _http_post(
         return resp.json()
     except ValueError as exc:
         raise click.ClickException(
-            f"Kiln API returned non-JSON for {path}: {resp.text[:200]}"
+            "Kiln's servers sent back a reply Kiln couldn't read. Try again in a moment."
         ) from exc
 
 
@@ -317,7 +316,7 @@ def _http_get(path: str, *, bearer: str | None = None, timeout: float = 10.0) ->
     try:
         resp = requests.get(f"{_api_base()}{path}", headers=headers, timeout=timeout)
     except requests.exceptions.ConnectionError as exc:
-        raise click.ClickException(f"Could not reach {_api_base()}.") from exc
+        raise click.ClickException(f"Kiln couldn't reach {_api_base()}.") from exc
     try:
         return resp.status_code, resp.json()
     except ValueError:
@@ -489,7 +488,7 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
                     click.echo("\r" + " " * 60 + "\r", nl=False, err=True)
                 _record_signin_stage("poll_unreachable")
                 raise click.ClickException(
-                    "Could not reach Kiln's servers for about two minutes, so this "
+                    "Kiln couldn't reach Kiln's servers for about two minutes, so this "
                     "sign-in was abandoned. Check your connection and run "
                     "`kiln signin` again."
                 ) from exc
@@ -1081,10 +1080,10 @@ def auth_pair(code: str, client: str | None) -> None:
     auth_uid = str(resp.get("auth_uid") or "")
     if not access_token:
         raise click.ClickException(
-            "Pairing claim succeeded but the server response carried no "
-            "access_token.  Nothing was written locally.  This is a "
-            "server-side bug — please retry with a fresh code from "
-            "app.kiln3d.com/connect, and if it persists: adam@kiln3d.com."
+            "Pairing went through, but Kiln's servers didn't send back a "
+            "sign-in, so nothing was saved on this computer.  The problem is "
+            "on Kiln's side: get a fresh code from app.kiln3d.com/connect and "
+            "try again, and if it happens again, email adam@kiln3d.com."
         )
 
     email = str(resp.get("email") or "")
@@ -1114,11 +1113,9 @@ def auth_pair(code: str, client: str | None) -> None:
         smoke_status = 0  # network / unexpected — skip the warning
     if smoke_status == 401:
         click.echo(
-            "  ⚠ Tokens written, but /api/auth/whoami rejected them "
-            "(HTTP 401).  Tools may still work if the gate accepts this "
-            "token shape — verify with a real call.  If every tool "
-            "fails: adam@kiln3d.com (server-side issuer/validator "
-            "mismatch).",
+            "  ⚠ You're signed in, but Kiln's servers didn't accept the "
+            "new sign-in when Kiln checked it.  Tools may still work, so "
+            "try one.  If every tool fails, email adam@kiln3d.com.",
             err=True,
         )
     elif smoke_status and smoke_status >= 400:

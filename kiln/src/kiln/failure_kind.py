@@ -24,11 +24,15 @@ module is the one reading of it, asked by :func:`kiln.server._error_dict`:
 A cause the exception names (``raise ... from``, a ``PrinterError``'s
 ``cause``) is followed when the outer exception says neither, so an adapter
 that re-wraps a timeout is still read as a timeout.
+
+:func:`in_words` says the same reading to a person: what went wrong, as a
+clause in everyday words, for a failure whose own text is Python's.
 """
 
 from __future__ import annotations
 
 import errno
+import re
 import struct
 import zipfile
 from collections.abc import Iterator
@@ -131,3 +135,81 @@ def refusal_code(exc: BaseException | None) -> str | None:
         if isinstance(link, UnreadableMeshError):
             return "UNREADABLE_INPUT"
     return None
+
+
+#: Raised by a mistake in Kiln's own code, never by what the person did.
+_KILN_FAULTS: tuple[type[BaseException], ...] = (
+    KeyError, IndexError, AttributeError, AssertionError, NameError, RecursionError, NotImplementedError,
+    ArithmeticError,
+)
+#: Said for a failure nothing else here names, and for Kiln's own faults.
+INSIDE_KILN = "something went wrong inside Kiln (not something you did)"
+
+
+#: A web service's answer named in a failure's text ("HTTP 401", "status
+#: 503", "404 Client Error"), by what it means for the person.
+_HTTP_STATUS = re.compile(r"\b(?:HTTP|status)[ :]*([1-5]\d\d)\b|\b([45]\d\d) (?:Client|Server) Error\b", re.IGNORECASE)
+
+
+def _status_in_words(code: int) -> str | None:
+    if code in (401, 403):
+        return "the other service didn't accept Kiln's sign-in"
+    if code == 404:
+        return "what was asked for wasn't found"
+    if code in (408, 504):
+        return "it took too long to answer"
+    if code == 429:
+        return "too many requests went out at once; try again shortly"
+    if 400 <= code < 500:
+        return "the other service didn't accept the request"
+    if 500 <= code < 600:
+        return "the other service had a problem on its side"
+    return None
+
+
+def _one_in_words(exc: BaseException) -> str | None:
+    name = type(exc).__name__
+    status = _HTTP_STATUS.search(str(exc))
+    if status is not None:
+        said = _status_in_words(int(status.group(1) or status.group(2)))
+        if said is not None:
+            return said
+    if isinstance(exc, FileNotFoundError):
+        return "the file wasn't found"
+    if isinstance(exc, (NotADirectoryError, IsADirectoryError)):
+        return "that path isn't a file"
+    if isinstance(exc, PermissionError):
+        return "Kiln isn't allowed to open that file or folder"
+    if isinstance(exc, FileExistsError):
+        return "a file with that name is already there"
+    if isinstance(exc, TimeoutError) or name in ("TimeoutExpired", "Timeout", "ReadTimeout", "ConnectTimeout"):
+        return "it took too long to answer"
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        return "the disk is full"
+    if _is_transient(exc):
+        return "the connection didn't go through"
+    if isinstance(exc, (zipfile.BadZipFile, struct.error)):
+        return "the file is damaged, or isn't the kind of file its name says"
+    if name == "JSONDecodeError" or isinstance(exc, UnicodeError):
+        return "the file or reply couldn't be read"
+    if isinstance(exc, MemoryError):
+        return "it needs more memory than this computer has free"
+    if isinstance(exc, ImportError):
+        return "a piece Kiln needs isn't installed"
+    if name == "CalledProcessError":
+        return "a program Kiln runs stopped with an error"
+    if type(exc) in _KILN_FAULTS:
+        return INSIDE_KILN
+    return None
+
+
+def in_words(exc: BaseException | None) -> str:
+    """What went wrong, as a clause a person reads ("the file wasn't
+    found"), from the exception or the first cause that says."""
+    for link in _chain(exc):
+        said = _one_in_words(link)
+        if said is not None:
+            return said
+    if isinstance(exc, _VALUE_ERRORS):
+        return "a value it was given can't be used"
+    return INSIDE_KILN

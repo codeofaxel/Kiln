@@ -394,15 +394,15 @@ class TestCallerTextIsBounded:
         answers.append(MISSES["signed_out"])
         regions = [{"region_type": "bulk", "z_start_mm": self.LONG}]
         out = doors.generate_adaptive_slicing_plan(regions, "PLA", 10.0, nozzle_diameter_mm=0.4)
-        assert out["success"] is False and out["error"].startswith("could not convert string to float: 'xxx")
-        assert len(out["error"]) <= len("could not convert string to float: ") + 64
+        assert out["success"] is False and out["error"].startswith("Each value in a region must be a number; 'xxx")
+        assert len(out["error"]) <= len("Each value in a region must be a number; ") + 64 + len(" isn't one.")
 
     def test_a_short_region_value_still_reads_as_before(self, served):
         _, answers = served
         answers.append(MISSES["signed_out"])
         regions = [{"region_type": "bulk", "z_start_mm": "abc"}]
         out = doors.generate_adaptive_slicing_plan(regions, "PLA", 10.0, nozzle_diameter_mm=0.4)
-        assert out == {"success": False, "error": "could not convert string to float: 'abc'"}
+        assert out == {"success": False, "error": "Each value in a region must be a number; 'abc' isn't one."}
 
 
 # ---------------------------------------------------------------------------

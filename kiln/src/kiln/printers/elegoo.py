@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 import requests
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 from kiln.printers.base import (
     STALE_STATE_WARN_AGE,
@@ -410,7 +411,7 @@ class ElegooAdapter(PrinterAdapter):
             except Exception as exc:
                 self._backoff.record_failure()
                 raise PrinterError(
-                    f"Failed to connect WebSocket to {self._host}:{_WS_PORT}: {exc}\n"
+                    f"Kiln couldn't reach the printer at {self._host}:{_WS_PORT}: {_plain_words.said(exc)}\n"
                     "  Checklist:\n"
                     "  1) Printer is powered on and on the same network\n"
                     "  2) Port 3030 is not blocked by a firewall\n"
@@ -552,7 +553,7 @@ class ElegooAdapter(PrinterAdapter):
             with self._pending_lock:
                 self._pending.pop(request_id, None)
             raise PrinterError(
-                f"Failed to send SDCP command {cmd}: {exc}",
+                f"Kiln couldn't send the command {cmd} to the printer: {_plain_words.said(exc)}.",
                 cause=exc,
             ) from exc
 
@@ -844,8 +845,7 @@ class ElegooAdapter(PrinterAdapter):
                         return UploadResult(
                             success=False,
                             file_name=filename,
-                            message=f"SDCP V3 upload lost connection at chunk {chunk_num} "
-                                    f"(offset {offset}): {exc}",
+                            message=f"The upload lost its connection partway through: {_plain_words.said(exc)}.",
                         )
 
                     try:
@@ -875,7 +875,7 @@ class ElegooAdapter(PrinterAdapter):
                     logger.debug("SDCP V3 upload: chunk %d OK  (%d%%)", chunk_num, pct)
 
         except OSError as exc:
-            raise PrinterError(f"SDCP V3 upload I/O error: {exc}", cause=exc) from exc
+            raise PrinterError(f"The upload didn't finish: {_plain_words.said(exc)}.", cause=exc) from exc
 
         logger.info("SDCP V3 upload complete: %s", filename)
         return UploadResult(
@@ -942,7 +942,7 @@ class ElegooAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Upload failed: {exc}",
+                f"The upload didn't finish: {_plain_words.said(exc)}.",
                 cause=exc,
             ) from exc
         finally:
@@ -1099,9 +1099,9 @@ class ElegooAdapter(PrinterAdapter):
         try:
             pct = int(percent)
         except (TypeError, ValueError) as exc:
-            raise PrinterError(f"set_fan: percent must be an integer 0-100 ({exc}).") from exc
+            raise PrinterError("The fan speed must be a whole-number percent from 0 to 100.") from exc
         if not 0 <= pct <= 100:
-            raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
+            raise PrinterError(f"The fan speed must be a percent from 0 to 100, not {pct}.")
 
         machine_name = self._resolve_machine_name()
         if not any(s in machine_name.lower() for s in _FDM_MACHINE_NAME_SUBSTRINGS):
@@ -1168,7 +1168,7 @@ class ElegooAdapter(PrinterAdapter):
         try:
             resp = self._send_command(_CMD_CAMERA_STREAM, {"Enable": 1}, timeout=5.0)
         except PrinterError as exc:
-            self._last_video_refusal = f"The printer did not answer the video request: {exc}"
+            self._last_video_refusal = f"The printer did not answer the video request: {_plain_words.said(exc)}"
             return None
         data = resp.get("Data") if isinstance(resp, dict) else None
         if not isinstance(data, dict):

@@ -37,6 +37,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln import run_program
 from kiln.cli_command import kiln_command
 
@@ -1638,8 +1639,9 @@ def _parse_kiln_result(
             # the helper script's own and tell a person nothing.
             stderr = stderr.splitlines()[-1].strip()
         stderr = stderr[:500]
+        logger.warning("%s exited with code %s", backend_name, result.returncode)
         raise StepImportError(
-            f"{backend_name} conversion failed (exit {result.returncode}): {stderr}"
+            f"{backend_name} couldn't convert the file." + (f" It said: {stderr}" if stderr else "")
         )
 
     for line in (result.stdout or "").splitlines():
@@ -1648,18 +1650,18 @@ def _parse_kiln_result(
                 data = json.loads(line[len("KILN_RESULT:"):])
             except json.JSONDecodeError as exc:
                 raise StepImportError(
-                    f"{backend_name} produced malformed result JSON: {exc}"
+                    f"{backend_name} sent back a result Kiln couldn't read."
                 ) from exc
             if "outputs" not in data or "body_count" not in data:
+                logger.warning("%s result without outputs/body_count: %r", backend_name, data)
                 raise StepImportError(
-                    f"{backend_name} result missing required keys "
-                    f"('outputs', 'body_count'): {data!r}"
+                    f"{backend_name} sent back a result without the parts Kiln needs."
                 )
             return data
 
+    said = _own_output(result.stdout)[:300]
     raise StepImportError(
-        f"{backend_name} conversion produced no result. "
-        f"stdout: {_own_output(result.stdout)[:300]}"
+        f"{backend_name} finished without sending back a result." + (f" It said: {said}" if said else "")
     )
 
 
@@ -2039,7 +2041,7 @@ def read_exact_geometry(path: str) -> ExactGeometry:
             Path(path).read_bytes() + _EXACT_PAYLOAD_VERSION.encode()
         ).hexdigest()
     except OSError as exc:
-        return _exact_unavailable(f"Could not read that file: {exc}")
+        return _exact_unavailable(f"Could not read that file: {_plain_words.said(exc)}")
 
     cache_dir = _conversion_cache_dir()
     cached = cache_dir / f"{key}.exact.json"
@@ -2066,7 +2068,7 @@ def read_exact_geometry(path: str) -> ExactGeometry:
             "can do this — try a single part."
         )
     except OSError as exc:  # noqa: BLE001 — a spawn failure is not fatal here
-        return _exact_unavailable(f"Could not start the CAD kernel: {exc}")
+        return _exact_unavailable(f"Could not start the CAD kernel: {_plain_words.said(exc)}")
     finally:
         with contextlib.suppress(OSError):
             os.unlink(script_path)
@@ -2113,8 +2115,9 @@ def _parse_kiln_exact_result(
     """
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()[:300]
+        logger.warning("CAD reader refused the file: %s", stderr or "no detail given")
         raise StepImportError(
-            f"The CAD kernel could not read this file: {stderr or 'no detail given'}"
+            "Kiln's CAD reader couldn't open this file. It may be damaged, or not a CAD (STEP) file."
         )
     for line in (result.stdout or "").splitlines():
         if line.startswith("KILN_RESULT:"):
@@ -2122,14 +2125,14 @@ def _parse_kiln_exact_result(
                 data = json.loads(line[len("KILN_RESULT:"):])
             except json.JSONDecodeError as exc:
                 raise StepImportError(
-                    f"The CAD kernel produced an unreadable measurement: {exc}"
+                    "Kiln's CAD reader sent back a measurement Kiln couldn't read."
                 ) from exc
             if not isinstance(data, dict):
                 raise StepImportError(
-                    "The CAD kernel produced an unreadable measurement."
+                    "Kiln's CAD reader sent back a measurement Kiln couldn't read."
                 )
             return data
-    raise StepImportError("The CAD kernel produced no measurement.")
+    raise StepImportError("Kiln's CAD reader sent back no measurement.")
 
 
 def _exact_from_payload(data: dict[str, Any] | None) -> ExactGeometry | None:
@@ -2602,7 +2605,7 @@ def _parts_via_chain(
         try:
             return run()
         except Exception as exc:  # noqa: BLE001 -- the next converter gets the file
-            failures.append(f"{label} failed ({exc})")
+            failures.append(f"{label} failed ({_plain_words.said(exc)})")
             warnings.append(f"{label} failed ({exc}), trying next backend")
             logger.warning("%s backend failed: %s", label, exc)
             return None
@@ -3137,14 +3140,14 @@ def resolve_mesh_input(
             path, output_dir=output_dir, with_record=True
         )
     except NoBackendError as exc:
-        refusal = _error_dict(str(exc), code="NO_BACKEND")
+        refusal = _error_dict(_plain_words.sentence(exc), code="NO_BACKEND")
         # Structured remedy: tells the agent whether the user can fix this
         # themselves (install a converter) or is on a hosted server.
         refusal["remedy"] = exc.remedy
         return path, None, refusal
     except Exception as exc:  # noqa: BLE001 — a bad CAD file is user input
         return path, None, _error_dict(
-            f"Could not read that CAD file: {exc}",
+            f"Kiln couldn't read that CAD file: {_plain_words.said(exc)}.",
             code="STEP_CONVERSION_FAILED",
         )
     return mesh_path, conversion, None

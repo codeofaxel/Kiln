@@ -87,7 +87,7 @@ class TestAddAssemblyPart:
         )
 
         assert result["success"] is False
-        assert "Invalid assembly JSON" in result["error"]
+        assert "couldn't read the assembly description" in result["error"]
 
     @patch("kiln.assembly.AssemblyPart")
     @patch("kiln.assembly.Assembly.from_dict")
@@ -169,7 +169,7 @@ class TestAddAssemblyInterface:
         )
 
         assert result["success"] is False
-        assert "Invalid assembly JSON" in result["error"]
+        assert "couldn't read the assembly description" in result["error"]
 
     def test_fastener_json_string_round_trips(self, assembly_tools):
         result = assembly_tools["add_assembly_interface"](
@@ -226,7 +226,7 @@ class TestAddAssemblyInterface:
         )
 
         assert result["success"] is False
-        assert "Invalid fastener JSON" in result["error"]
+        assert "couldn't read `fastener`" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ class TestCheckAssemblyClearances:
         )
 
         assert result["success"] is False
-        assert "Invalid assembly JSON" in result["error"]
+        assert "couldn't read the assembly description" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +290,7 @@ class TestComposeAssemblyParts:
         )
 
         assert result["success"] is False
-        assert "Invalid assembly JSON" in result["error"]
+        assert "couldn't read the assembly description" in result["error"]
 
 
 # ---------------------------------------------------------------------------

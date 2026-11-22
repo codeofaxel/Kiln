@@ -60,7 +60,7 @@ class StabilityProvider(GenerationProvider):
         self._api_key = api_key or os.environ.get("KILN_STABILITY_API_KEY", "")
         if not self._api_key:
             raise GenerationAuthError(
-                "Stability API key required.  Set KILN_STABILITY_API_KEY or pass api_key.",
+                "Stability API key required.  Set KILN_STABILITY_API_KEY or pass `api_key`.",
                 code="AUTH_REQUIRED",
             )
         self._timeout = timeout
@@ -245,7 +245,7 @@ class StabilityProvider(GenerationProvider):
                 )
             except requests.ConnectionError:
                 raise GenerationError(
-                    "Could not connect to Stability AI API.",
+                    "Kiln couldn't reach Stability AI.",
                     code="CONNECTION_ERROR",
                 ) from None
             except requests.Timeout:

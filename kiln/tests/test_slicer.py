@@ -170,7 +170,7 @@ class TestSliceFile:
                 path="/usr/bin/prusa-slicer", name="prusa-slicer"
             )
             with patch("subprocess.run", return_value=mock_run):
-                with pytest.raises(SlicerError, match="exited with code 1"):
+                with pytest.raises(SlicerError, match="stopped with an error and made no file"):
                     slice_file(str(stl))
 
     def test_timeout(self, tmp_path):
@@ -511,20 +511,20 @@ class TestCrashAfterFinishing:
         assert "verified complete" in result.message
 
     def test_signal_death_with_truncated_output_still_fails(self, tmp_path):
-        with pytest.raises(SlicerError, match="exited with code -11"):
+        with pytest.raises(SlicerError, match="crashed and made no file"):
             self._run(tmp_path, -11, "G1 X1\nG1 X2\n")  # no footer — died mid-write
 
     def test_error_exit_never_salvages_even_with_complete_output(self, tmp_path):
         """A REPORTED error is the slicer telling us something went wrong —
         a complete-looking file does not overrule it."""
-        with pytest.raises(SlicerError, match="exited with code 1"):
+        with pytest.raises(SlicerError, match="stopped with an error and made no file"):
             self._run(
                 tmp_path, 1,
                 "G1 X1\n; filament used [mm] = 100.00\n",
             )
 
     def test_signal_death_with_no_output_still_fails(self, tmp_path):
-        with pytest.raises(SlicerError, match="exited with code -11"):
+        with pytest.raises(SlicerError, match="crashed and made no file"):
             self._run(tmp_path, -11, None)
 
     def test_stale_gcode_from_a_previous_run_is_not_salvaged(self, tmp_path):
@@ -533,7 +533,7 @@ class TestCrashAfterFinishing:
         Salvaging that file returns the PREVIOUS model's toolpath with
         success=True — and that path feeds start_print, so the failure
         mode is a real print of the wrong geometry."""
-        with pytest.raises(SlicerError, match="exited with code -11"):
+        with pytest.raises(SlicerError, match="crashed and made no file"):
             self._run(
                 tmp_path, -11, None,
                 stale_body="G1 X9\n; filament used [mm] = 99.00\n; end\n",

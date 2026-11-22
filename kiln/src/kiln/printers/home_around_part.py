@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
@@ -463,7 +464,7 @@ def home_around_part(adapter: Any, *, refusal: dict[str, Any] | None = None) -> 
     except Exception as exc:  # noqa: BLE001 -- the door's own refusal, in its own words
         return _audit(adapter, _answer(
             "HOME_AROUND_PART_HOME_REFUSED",
-            f"the printer's own homing door refused: {exc}",
+            f"the printer's own homing door refused: {_plain_words.said(exc)}",
             plan_id=plan_id, press=press, part=part,
         ))
     if getattr(result, "success", False) is not True:
@@ -490,7 +491,7 @@ def home_around_part(adapter: Any, *, refusal: dict[str, Any] | None = None) -> 
         return _audit(adapter, _answer(
             "HOME_AROUND_PART_HOMED_READ_FAILED",
             f"the homing ran, but which axes are homed could not be read back from the printer "
-            f"({exc}); nothing is started on a read that did not answer.",
+            f"({_plain_words.said(exc)}); nothing is started on a read that did not answer.",
             plan_id=plan_id, press=press, part=part, sent=sent,
         ))
     evidence = {

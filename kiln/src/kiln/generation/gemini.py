@@ -44,6 +44,7 @@ from typing import Any
 
 import requests
 
+from kiln import plain_words as _plain_words
 from kiln.curve_resolution import AGENT_ADVICE, apply_rule
 from kiln.generation.base import (
     GenerationAuthError,
@@ -470,7 +471,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
         self._api_key = api_key or os.environ.get("KILN_GEMINI_API_KEY", "")
         if not self._api_key:
             raise GenerationAuthError(
-                "Gemini API key required.  Set KILN_GEMINI_API_KEY or pass api_key.",
+                "Gemini API key required.  Set KILN_GEMINI_API_KEY or pass `api_key`.",
                 code="AUTH_REQUIRED",
             )
         self._model = model
@@ -587,7 +588,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 progress=0,
                 created_at=time.time(),
                 format=format,
-                error=f"Gemini API call failed: {exc}",
+                error=f"The request to Gemini didn't go through: {_plain_words.said(exc)}.",
             )
             records.put(JobRecord.from_job(job))
             return job
@@ -1028,7 +1029,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
             if last_error:
                 raise last_error
             raise GenerationError(
-                "All Gemini models failed.",
+                "None of the Gemini models Kiln tried could make it.",
                 code="ALL_MODELS_FAILED",
             )
 
@@ -1165,7 +1166,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
                     return job
                 except OSError as exc:
                     raise GenerationError(
-                        f"Failed to run OpenSCAD: {exc}",
+                        f"Kiln couldn't run OpenSCAD: {_plain_words.said(exc)}.",
                         code="OPENSCAD_EXEC_ERROR",
                     ) from exc
             finally:
@@ -1258,7 +1259,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 )
             except requests.ConnectionError:
                 raise GenerationError(
-                    "Could not connect to Gemini API.",
+                    "Kiln couldn't reach Gemini.",
                     code="CONNECTION_ERROR",
                 ) from None
             except requests.Timeout:

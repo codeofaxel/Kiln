@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.daily_stats import counts_outside_service, record_marketplace_use
 
 _logger = logging.getLogger(__name__)
@@ -335,7 +336,8 @@ def _verify_download(
 
     if expected_sha256 is not None and digest != expected_sha256.lower():
         raise MarketplaceError(
-            f"SHA-256 mismatch for {path.name}: expected {expected_sha256.lower()}, got {digest}",
+            f"{path.name} didn't download intact (its fingerprint doesn't match the one the "
+            "site gave), so Kiln won't use it.",
         )
 
 
@@ -477,7 +479,7 @@ def resumable_download(
             )
             if attempt == max_retries - 1:
                 raise MarketplaceError(
-                    f"Download failed after {max_retries} attempts: {exc}",
+                    f"The download didn't finish after {max_retries} tries: {_plain_words.said(exc)}.",
                 ) from exc
 
-    raise MarketplaceError("Download failed: no data received.")
+    raise MarketplaceError("The download didn't finish: no data received.")

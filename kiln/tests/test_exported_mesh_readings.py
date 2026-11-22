@@ -287,4 +287,6 @@ class TestASliceOfAMeterFileSaysWhy:
         with pytest.raises(SlicerError) as refused:
             slice_file(cube, output_dir=str(tmp_path))
 
-        assert str(refused.value).startswith("Slicer exited with code 1")
+        said = str(refused.value)
+        assert said.startswith("The slicer stopped with an error and made no file.")
+        assert "No layers were detected" in said

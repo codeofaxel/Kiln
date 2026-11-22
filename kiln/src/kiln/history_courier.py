@@ -78,6 +78,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
@@ -1397,7 +1398,7 @@ def _send_models(
             return _refused(
                 tool, "MODEL_UNREADABLE",
                 f"Kiln could not read the model of version {version_id} on this computer "
-                f"({exc}), so nothing was pushed.",
+                f"({_plain_words.said(exc)}), so nothing was pushed.",
             ), None
     from kiln import design_tie
 
@@ -1608,7 +1609,7 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any, *, doing: str) 
         except NumbersNotTaken as exc:
             # Nothing was laid down: a pulled version is never filed beside a
             # version here that still holds its number.
-            return {"status": "error", "code": "NUMBERS_NOT_TAKEN", "error": str(exc), "design_id": design_id}
+            return {"status": "error", "code": "NUMBERS_NOT_TAKEN", "error": _plain_words.sentence(exc), "design_id": design_id, **_plain_words.detail_field(exc)}
         tie = design_tie.keep(verdict)
         notes = _bring_notes(tool, answer, carried, vault)
         recipes = _bring_recipes(tool, design_id, vault)

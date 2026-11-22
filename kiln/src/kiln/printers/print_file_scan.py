@@ -10,6 +10,7 @@ import zipfile
 from collections.abc import Iterator
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.gcode import _MAX_SCAN_BYTES, GCodeDialect, GCodeValidationResult, scan_gcode_file
 
 #: The code every refusal from this scan carries, at every door.
@@ -124,7 +125,7 @@ def scan_print_file(
     try:
         zf = UntrustedZipFile(path)
     except UntrustedArchiveError as exc:
-        return _unreadable(f"Kiln could not read the plate inside this file ({exc}), so it was not checked")
+        return _unreadable(f"Kiln could not read the plate inside this file ({_plain_words.said(exc)}), so it was not checked")
     except (zipfile.BadZipFile, ValueError):
         return None  # not an archive at all: no plate to scan
     scanned: list[tuple[int, GCodeValidationResult]] = []

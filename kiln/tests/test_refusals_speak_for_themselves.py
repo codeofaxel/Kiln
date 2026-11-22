@@ -523,8 +523,8 @@ class TestEverythingElseKeepsTodaysWords:
         assert answer["error"] == {
             "code": "ERROR",
             "message": (
-                "Failed to set temperature: socket closed. "
-                "Check that the printer is online and KILN_PRINTER_HOST is correct."
+                "Kiln couldn't set the temperature: socket closed. "
+                "Check that the printer is online and that `KILN_PRINTER_HOST` is right."
             ),
             "retryable": True,
         }

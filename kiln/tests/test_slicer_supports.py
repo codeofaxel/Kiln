@@ -176,8 +176,8 @@ class TestWhoseDecision:
             derived, decision = ensure_profile_supports(profile, part, material="PLA")
         engine.assert_not_called()
         assert derived == profile
-        assert decision == SliceSupports(False, DECIDED_STATED, "the caller stated support_material")
-        assert decision.note == "supports off, as stated (the caller stated support_material)"
+        assert decision == SliceSupports(False, DECIDED_STATED, "you set `support_material`")
+        assert decision.note == "supports off, as stated (you set `support_material`)"
 
     def test_a_stated_on_is_read_as_on(self, part: str):
         profile = resolve_slicer_profile("bambu_a1", overrides={SUPPORT_KEY: "1"})
@@ -191,7 +191,7 @@ class TestWhoseDecision:
             derived, decision = ensure_profile_supports(str(own), part, material="PLA")
         engine.assert_not_called()
         assert derived == str(own)
-        assert decision.enabled and decision.reason == "the profile is the caller's own"
+        assert decision.enabled and decision.reason == "your own profile decides"
 
     def test_the_callers_own_profile_saying_nothing_means_off(self, part: str, tmp_path: Path):
         own = tmp_path / "mine.ini"
@@ -347,15 +347,15 @@ class TestTheFileIsTheWitness:
     def test_a_stated_on_the_slicer_ignored_is_said_in_the_callers_words(self, tmp_path: Path):
         from kiln.slicer_supports import witnessed
 
-        stated = SliceSupports(True, DECIDED_STATED, "the caller stated support_material")
+        stated = SliceSupports(True, DECIDED_STATED, "you set `support_material`")
         got = witnessed(stated, self._gcode(tmp_path, ";TYPE:Perimeter"))
         assert not got.enabled
-        assert got.note == "supports asked for, but the slicer placed none (the caller stated support_material)"
+        assert got.note == "supports asked for, but the slicer placed none (you set `support_material`)"
 
     def test_off_and_not_checked_are_never_second_guessed(self, tmp_path: Path):
         from kiln.slicer_supports import witnessed
 
-        off = SliceSupports(False, DECIDED_STATED, "the caller stated support_material")
+        off = SliceSupports(False, DECIDED_STATED, "you set `support_material`")
         assert witnessed(off, self._gcode(tmp_path, ";TYPE:Support material")) is off
         assert witnessed(off, None) is off
 

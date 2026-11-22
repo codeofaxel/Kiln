@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
+from kiln import plain_words as _plain_words
 from kiln import run_program
 from kiln.cli_command import kiln_command
 from kiln.printer_backends import need_where
@@ -1018,7 +1019,7 @@ def diagnose_read_failure(
                 "The printer is powered on and answering, but it allows only "
                 f"a few connections at once and they are taken. {held}"
                 "Closing the leftover servers frees them — run "
-                f"trim_serve_processes (terminal: `{kiln_command('trim')}`). Power-cycling "
+                f"`trim_serve_processes` (terminal: `{kiln_command('trim')}`). Power-cycling "
                 "the printer will not help, and closing Bambu Studio or the "
                 "Handy app frees a slot too."
             ),
@@ -2102,7 +2103,7 @@ class PrinterAdapter(ABC):
                     file_path = _preflight_upload_or_raise(self, file_path)
                 except _UnsafeUpload as exc:
                     from kiln.printers import PrinterError
-                    raise PrinterError(str(exc), code=exc.code) from None
+                    raise PrinterError(_plain_words.sentence(exc), code=exc.code) from None
                 if refusal := _incomplete_upload_reason(self, file_path):
                     from kiln.printers import PrinterError
                     raise PrinterError(refusal)
@@ -2378,7 +2379,7 @@ class PrinterAdapter(ABC):
             plate_number = printed_plate_number(kwargs)
         except ValueError as exc:
             return CodedPrintResult(
-                success=False, message=str(exc), refused_before_send=True, code=PLATE_NUMBER_REFUSED,
+                success=False, message=_plain_words.sentence(exc), refused_before_send=True, code=PLATE_NUMBER_REFUSED,
             )
         if "plate_number" in kwargs:
             kwargs = {**kwargs, "plate_number": plate_number}
@@ -2852,7 +2853,7 @@ class PrinterAdapter(ABC):
                 "to resume — but Kiln has not seen it advance a layer or a "
                 "percent yet, so it cannot confirm that. If the printer's own "
                 "screen says paused, the reported state is wrong: use "
-                "resume_print(force=True) to send the resume anyway."
+                "`resume_print(force=True)` to send the resume anyway."
             ),
         )
 
@@ -2881,10 +2882,8 @@ class PrinterAdapter(ABC):
         return PrintResult(
             success=False,
             message=(
-                f"{self.name} has no known way to clear a firmware error from "
-                "Kiln. Clear it on the printer's own screen or power-cycle it. "
-                "See scripts/adapter_conformance.yaml for what each backend "
-                "declares."
+                f"Kiln has no way to clear a firmware error on {self.name}. Clear "
+                "it on the printer's own screen, or turn the printer off and on."
             ),
         )
 
@@ -2922,12 +2921,12 @@ class PrinterAdapter(ABC):
         if target > max_temp:
             if not self._safety_profile_id:
                 raise PrinterError(
-                    f"{heater} temperature {target}°C exceeds safety limit ({max_temp:g}°C) -- the generic "
-                    "floor, because Kiln has not been told this printer's model. Set printer_model to a "
+                    f"{target}°C for the {heater.lower()} is above the {max_temp:g}°C safety limit. That is "
+                    "Kiln's general limit, because Kiln hasn't been told this printer's model. Set `printer_model` to a "
                     "printer Kiln knows, or have the maker's limits confirmed by the person "
-                    "(add_safety_profile)."
+                    "(`add_safety_profile`)."
                 )
-            raise PrinterError(f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C).")
+            raise PrinterError(f"{target}°C for the {heater.lower()} is above this printer's {max_temp:g}°C safety limit.")
 
 
     _MAX_HOTEND_C: float = _DEFAULT_MAX_HOTEND_C
@@ -3127,13 +3126,13 @@ class PrinterAdapter(ABC):
             except (TypeError, ValueError) as exc:
                 raise PrinterError(f"slot must be an integer tray id, got {slot!r}.") from exc
             if slot < 0:
-                raise PrinterError(f"slot must be >= 0, got {slot}.")
+                raise PrinterError(f"The slot must be 0 or more, not {slot}.")
 
         if length_mm is not None:
             try:
                 length_mm = float(length_mm)
             except (TypeError, ValueError) as exc:
-                raise PrinterError(f"length_mm must be a number, got {length_mm!r}.") from exc
+                raise PrinterError(f"`length_mm` must be a number, not {length_mm!r}.") from exc
             if action == "purge" and not 1.0 <= length_mm <= MAX_PURGE_LENGTH_MM:
                 raise PrinterError(
                     f"Purge length {length_mm:g} mm is outside 1–{MAX_PURGE_LENGTH_MM:g} mm. "
@@ -3150,8 +3149,8 @@ class PrinterAdapter(ABC):
             state = self.get_state()
         except PrinterError as exc:
             raise PrinterError(
-                f"Cannot {action} {what}: the printer did not answer a status "
-                f"request ({exc})."
+                f"Kiln can't {action} {what}: the printer did not answer a status "
+                f"request ({_plain_words.said(exc)})."
             ) from exc
         if state.effective_state == PrinterStatus.PRINTING:
             raise PrinterError(
@@ -3168,7 +3167,7 @@ class PrinterAdapter(ABC):
                 temperature_source = f"midpoint of {window[2]}"
             else:
                 raise PrinterError(
-                    f"Cannot {action} {what}: no temperature. Pass "
+                    f"Kiln can't {action} {what}: no temperature. Pass "
                     "temperature=, or name the material (or the spool slot on "
                     "a multi-material unit) so Kiln can look one up."
                 )
@@ -3176,7 +3175,7 @@ class PrinterAdapter(ABC):
             try:
                 temperature = float(temperature)
             except (TypeError, ValueError) as exc:
-                raise PrinterError(f"temperature must be a number, got {temperature!r}.") from exc
+                raise PrinterError(f"The temperature must be a number, not {temperature!r}.") from exc
             temperature_source = "caller"
 
         # Per-printer ceiling (safety profile tightens the adapter fallback).
@@ -3724,7 +3723,7 @@ class PrinterAdapter(ABC):
             missing = ", ".join(sorted(wanted - homed))
             verified = (
                 f"The firmware reports {', '.join(sorted(homed)) or 'no axis'} homed and "
-                f"not {missing} -- read printer_status again; the routine may still be running."
+                f"not {missing} -- read `printer_status` again; the routine may still be running."
             )
         else:
             outcome, source = "accepted", "not_read_back"
@@ -4032,7 +4031,7 @@ class PrinterAdapter(ABC):
                     action=plan.action,
                     message=(
                         f"The printer rejected the move to the purge station: "
-                        f"{exc}. Nothing was heated or extruded."
+                        f"{_plain_words.said(exc)}. Nothing was heated or extruded."
                     ),
                     extrusion_verified=False,
                     verification_source="firmware_rejected_move",
@@ -4050,7 +4049,7 @@ class PrinterAdapter(ABC):
             return FilamentOpResult(
                 success=False,
                 action=plan.action,
-                message=f"Could not set the hotend to {target:g}°C: {exc}{still_parked}",
+                message=f"Kiln couldn't set the hotend to {target:g}°C: {_plain_words.said(exc)}{still_parked}",
                 extrusion_verified=False,
                 verification_source="heater_command_rejected",
                 error_hint=str(exc),
@@ -4105,7 +4104,7 @@ class PrinterAdapter(ABC):
             return FilamentOpResult(
                 success=False,
                 action=plan.action,
-                message=f"The printer rejected the {plan.action} move: {exc}{still_parked}",
+                message=f"The printer rejected the {plan.action} move: {_plain_words.said(exc)}{still_parked}",
                 extrusion_verified=False,
                 verification_source="firmware_rejected_move",
                 error_hint=str(exc),
@@ -4153,14 +4152,14 @@ class PrinterAdapter(ABC):
         """*commands* as a list of whole G-code lines, or a loud refusal."""
         if isinstance(commands, str):
             raise PrinterError(
-                "send_gcode takes a LIST of G-code lines, not a string: "
+                "`send_gcode` takes a LIST of G-code lines, not a string: "
                 f"{commands!r} would be sent one character at a time. "
                 f"Pass [{commands!r}] instead."
             )
         lines = [str(c) for c in commands]
         if any("\n" in line for line in lines):
             raise PrinterError(
-                "send_gcode: each list item must be ONE G-code line; "
+                "`send_gcode`: each list item must be ONE G-code line; "
                 "split embedded newlines into separate items."
             )
         return lines
@@ -4179,9 +4178,9 @@ class PrinterAdapter(ABC):
         try:
             pct = int(percent)
         except (TypeError, ValueError) as exc:
-            raise PrinterError(f"set_fan: percent must be an integer 0-100 ({exc}).") from exc
+            raise PrinterError("The fan speed must be a whole-number percent from 0 to 100.") from exc
         if not 0 <= pct <= 100:
-            raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
+            raise PrinterError(f"The fan speed must be a percent from 0 to 100, not {pct}.")
         return round(pct / 100 * 255)
 
 

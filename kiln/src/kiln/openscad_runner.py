@@ -65,6 +65,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln import run_program
 from kiln.scad_main import runnable_inputs
 from kiln.scad_reads import LIBRARIES
@@ -257,7 +258,7 @@ def _source_refusal(
             if refusal is not None:
                 return refusal, list(argv), _remove(copies)
     except OSError as exc:
-        return f"Kiln could not hold this source to check it ({exc}), so it was not compiled.", list(argv), _remove(copies)
+        return f"Kiln could not hold this source to check it ({_plain_words.said(exc)}), so it was not compiled.", list(argv), _remove(copies)
     return None, out, copies
 
 

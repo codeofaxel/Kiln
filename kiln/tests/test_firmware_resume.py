@@ -204,7 +204,7 @@ class TestFirmwareResumePrint:
 
     def test_z_height_zero_raises(self, adapter):
         """z_height_mm == 0 raises PrinterError."""
-        with pytest.raises(PrinterError, match="z_height_mm must be > 0"):
+        with pytest.raises(PrinterError, match="`z_height_mm` must be above 0"):
             adapter.firmware_resume_print(
                 z_height_mm=0.0,
                 hotend_temp_c=200.0,
@@ -214,7 +214,7 @@ class TestFirmwareResumePrint:
 
     def test_z_height_negative_raises(self, adapter):
         """z_height_mm < 0 raises PrinterError."""
-        with pytest.raises(PrinterError, match="z_height_mm must be > 0"):
+        with pytest.raises(PrinterError, match="`z_height_mm` must be above 0"):
             adapter.firmware_resume_print(
                 z_height_mm=-5.0,
                 hotend_temp_c=200.0,
@@ -228,7 +228,7 @@ class TestFirmwareResumePrint:
 
     def test_z_clearance_too_large_raises(self, adapter):
         """z_clearance_mm > 10 raises PrinterError."""
-        with pytest.raises(PrinterError, match="z_clearance_mm must be > 0 and <= 10"):
+        with pytest.raises(PrinterError, match="`z_clearance_mm` must be above 0 and at most 10"):
             adapter.firmware_resume_print(
                 z_height_mm=10.0,
                 hotend_temp_c=200.0,
@@ -239,7 +239,7 @@ class TestFirmwareResumePrint:
 
     def test_z_clearance_zero_raises(self, adapter):
         """z_clearance_mm == 0 raises PrinterError."""
-        with pytest.raises(PrinterError, match="z_clearance_mm must be > 0 and <= 10"):
+        with pytest.raises(PrinterError, match="`z_clearance_mm` must be above 0 and at most 10"):
             adapter.firmware_resume_print(
                 z_height_mm=10.0,
                 hotend_temp_c=200.0,
@@ -250,7 +250,7 @@ class TestFirmwareResumePrint:
 
     def test_z_clearance_negative_raises(self, adapter):
         """z_clearance_mm < 0 raises PrinterError."""
-        with pytest.raises(PrinterError, match="z_clearance_mm must be > 0 and <= 10"):
+        with pytest.raises(PrinterError, match="`z_clearance_mm` must be above 0 and at most 10"):
             adapter.firmware_resume_print(
                 z_height_mm=10.0,
                 hotend_temp_c=200.0,
@@ -265,7 +265,7 @@ class TestFirmwareResumePrint:
 
     def test_negative_prime_length_raises(self, adapter):
         """prime_length_mm < 0 raises PrinterError."""
-        with pytest.raises(PrinterError, match="prime_length_mm must be >= 0"):
+        with pytest.raises(PrinterError, match="`prime_length_mm` must be 0 or more"):
             adapter.firmware_resume_print(
                 z_height_mm=10.0,
                 hotend_temp_c=200.0,
@@ -451,13 +451,14 @@ class TestFirmwareResumePrint:
             status=409,
         )
 
-        with pytest.raises(PrinterError, match="409"):
+        with pytest.raises(PrinterError, match="can't do that right now") as caught:
             adapter.firmware_resume_print(
                 z_height_mm=10.0,
                 hotend_temp_c=200.0,
                 bed_temp_c=60.0,
                 file_name="test.gcode",
             )
+        assert "HTTP 409" in caught.value.detail
 
     @responses.activate
     def test_gcode_send_500_raises(self, adapter):
@@ -469,13 +470,14 @@ class TestFirmwareResumePrint:
             status=500,
         )
 
-        with pytest.raises(PrinterError, match="500"):
+        with pytest.raises(PrinterError, match="ran into a problem of its own") as caught:
             adapter.firmware_resume_print(
                 z_height_mm=10.0,
                 hotend_temp_c=200.0,
                 bed_temp_c=60.0,
                 file_name="test.gcode",
             )
+        assert "HTTP 500" in caught.value.detail
 
     # ------------------------------------------------------------------
     # Custom prime length and Z clearance

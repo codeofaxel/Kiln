@@ -36,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.marketplaces.base import (
     MarketplaceAdapter,
     MarketplaceAuthError,
@@ -357,7 +358,7 @@ class MarketplaceRegistry:
                         )
                         self._health.record_failure(
                             adapter.name,
-                            error=str(exc),
+                            error=_plain_words.sentence(exc),
                         )
                         failed.append(adapter.name)
 

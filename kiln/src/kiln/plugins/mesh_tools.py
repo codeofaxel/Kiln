@@ -17,6 +17,7 @@ import logging
 import os
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -113,9 +114,9 @@ def _finish_edges_tool(kind: str, file_path: str, size_mm: float, **options: Any
             plan_only=bool(options.get("plan_only")),
         )
     except ValueError as exc:
-        return _error_dict(f"{what} failed: {exc}", code="INVALID_ARGS")
+        return _error_dict(f"Kiln couldn't add the {what.lower()}: {_plain_words.said(exc)}.", code="INVALID_ARGS")
     except Exception as exc:
-        return _error_dict(f"{what} failed: {exc}")
+        return _error_dict(f"Kiln couldn't add the {what.lower()}: {_plain_words.said(exc)}.")
     if not reply.get("success"):
         return _error_dict(
             reply["message"], code=reply["code"], extra={k: reply[k] for k in _EDGE_REFUSAL_KEYS if k in reply},
@@ -191,7 +192,7 @@ class _MeshToolsPlugin:
                 }
             except Exception as exc:
                 logger.exception("Unexpected error in validate_generated_mesh")
-                return _error_dict(f"Unexpected error in validate_generated_mesh: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't check the model that was made: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ---------------------------------------------------------------
         # Mesh scaling
@@ -283,10 +284,10 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_INPUT")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_INPUT")
             except Exception as exc:
                 logger.exception("Unexpected error in rescale_model")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(_plain_words.sentence(exc), code="INTERNAL_ERROR")
 
         # ---------------------------------------------------------------
         # Mesh analysis
@@ -362,7 +363,7 @@ class _MeshToolsPlugin:
                             "converted mesh."
                         )
                     return _error_dict(
-                        f"Could not read a mesh from this file: {reason}",
+                        f"Kiln couldn't read a mesh from this file: {reason}",
                         code="UNREADABLE_INPUT",
                     )
                 out = {"success": True, **result.to_dict()}
@@ -376,7 +377,7 @@ class _MeshToolsPlugin:
                     out["body_pairs"] = measure_body_pairs(file_path)
                 return out
             except Exception as exc:
-                return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")
+                return _error_dict(f"Kiln couldn't analyze the model: {_plain_words.said(exc)}.", code="ANALYSIS_ERROR")
 
         @mcp.tool(annotations=read_only("Detect mesh pockets"))
         def detect_mesh_pockets(
@@ -403,7 +404,7 @@ class _MeshToolsPlugin:
                 result = _detect(file_path, min_depth_mm=min_depth_mm)
                 return {"success": True, **result}
             except Exception as exc:
-                return _error_dict(f"Pocket detection failed: {exc}", code="DETECT_ERROR")
+                return _error_dict(f"Kiln couldn't find the pockets: {_plain_words.said(exc)}.", code="DETECT_ERROR")
 
         @mcp.tool(annotations=read_only("Analyze non-manifold edges"))
         def analyze_non_manifold_edges(file_path: str) -> dict:
@@ -453,7 +454,7 @@ class _MeshToolsPlugin:
                 # parse on the second attempt either, and the old generic
                 # code told an agent to keep trying.
                 return _error_dict(
-                    f"Edge analysis failed: {exc}", code="UNREADABLE_INPUT"
+                    f"Kiln couldn't analyze the edges: {_plain_words.said(exc)}.", code="UNREADABLE_INPUT"
                 )
 
             # Whether a conversion HAPPENED is the path changing, never the
@@ -525,11 +526,11 @@ class _MeshToolsPlugin:
                 result = cross_section_at_plane(file_path, **kwargs)
                 return {"success": True, **result.to_dict()}
             except FileNotFoundError as exc:
-                return _error_dict(str(exc), code="FILE_NOT_FOUND")
+                return _error_dict(_plain_words.sentence(exc), code="FILE_NOT_FOUND")
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_ARGS")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _error_dict(f"Cross-section failed: {exc}")
+                return _error_dict(f"Kiln couldn't make the cross-section: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=read_only("Mesh quality scorecard"))
         def mesh_quality_scorecard(
@@ -604,7 +605,7 @@ class _MeshToolsPlugin:
                             ),
                         }
                 except Exception as exc:
-                    return _error_dict(f"CAD intake failed: {exc}")
+                    return _error_dict(f"Kiln couldn't read the drawing: {_plain_words.said(exc)}.")
 
             try:
                 from kiln.generation.validation import design_scorecard
@@ -621,7 +622,7 @@ class _MeshToolsPlugin:
                         ),
                     }
             except Exception as exc:
-                return _error_dict(f"Scorecard generation failed: {exc}")
+                return _error_dict(f"Kiln couldn't build the scorecard: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=read_only("Compare mesh versions"))
         def compare_mesh_versions(file_a: str, file_b: str) -> dict:
@@ -645,7 +646,7 @@ class _MeshToolsPlugin:
 
                 return {"success": True, **compare_meshes(file_a, file_b)}
             except Exception as exc:
-                return _error_dict(f"Mesh comparison failed: {exc}")
+                return _error_dict(f"Kiln couldn't compare the models: {_plain_words.said(exc)}.")
 
         # ---------------------------------------------------------------
         # Mesh repair
@@ -705,7 +706,7 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _error_dict(f"Mesh repair failed: {exc}", code="REPAIR_ERROR")
+                return _error_dict(f"Kiln couldn't repair the model: {_plain_words.said(exc)}.", code="REPAIR_ERROR")
 
         @mcp.tool(annotations=destructive("Repair a mesh"))
         def repair_mesh(
@@ -815,7 +816,7 @@ class _MeshToolsPlugin:
                     return response
             except Exception as exc:
                 logger.exception("splice_mesh_at_z failed")
-                return _error_dict(f"Splice failed: {exc}", code="SPLICE_ERROR")
+                return _error_dict(f"Kiln couldn't splice the parts: {_plain_words.said(exc)}.", code="SPLICE_ERROR")
 
         @mcp.tool(annotations=destructive("Mirror a model"))
         def mirror_mesh_model(file_path: str, axis: str = "x", output_path: str = "") -> dict:
@@ -851,7 +852,7 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _error_dict(f"Mirror failed: {exc}")
+                return _error_dict(f"Kiln couldn't mirror the model: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=creates("Hollow a model"))
         def hollow_mesh_model(
@@ -896,7 +897,7 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _error_dict(f"Hollowing failed: {exc}")
+                return _error_dict(f"Kiln couldn't hollow the model: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=creates("Thicken walls"))
         def thicken_mesh_walls(
@@ -955,9 +956,9 @@ class _MeshToolsPlugin:
                     keep_hole_size=keep_hole_size,
                 )
             except ValueError as exc:
-                return _error_dict(f"Wall thickening failed: {exc}", code="INVALID_ARGS")
+                return _error_dict(f"Kiln couldn't thicken the walls: {_plain_words.said(exc)}.", code="INVALID_ARGS")
             except Exception as exc:
-                return _error_dict(f"Wall thickening failed: {exc}")
+                return _error_dict(f"Kiln couldn't thicken the walls: {_plain_words.said(exc)}.")
             if not reply.get("success"):
                 return _error_dict(
                     reply["message"], code=reply["code"],
@@ -1181,9 +1182,9 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_ARGS")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _error_dict(f"Scale failed: {exc}")
+                return _error_dict(f"Kiln couldn't rescale the model: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=destructive("Center a model on the bed"))
         def center_model_on_bed(
@@ -1243,9 +1244,9 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_ARGS")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _error_dict(f"Centering failed: {exc}")
+                return _error_dict(f"Kiln couldn't center the model: {_plain_words.said(exc)}.")
 
         # ---------------------------------------------------------------
         # Mesh composition (merge, boolean, primitives)
@@ -1292,7 +1293,7 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _error_dict(f"Composition failed: {exc}", code="COMPOSE_ERROR")
+                return _error_dict(f"Kiln couldn't combine the parts: {_plain_words.said(exc)}.", code="COMPOSE_ERROR")
 
         @mcp.tool(annotations=creates("Merge mesh files"))
         def merge_mesh_files(
@@ -1331,7 +1332,7 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _error_dict(f"Merge failed: {exc}")
+                return _error_dict(f"Kiln couldn't merge the files: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=creates("Boolean mesh operation"))
         def boolean_mesh_op(
@@ -1392,11 +1393,11 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except FileNotFoundError as exc:
-                return _error_dict(str(exc), code="FILE_NOT_FOUND")
+                return _error_dict(_plain_words.sentence(exc), code="FILE_NOT_FOUND")
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_ARGS")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _error_dict(f"Boolean operation failed: {exc}")
+                return _error_dict(f"Kiln couldn't combine the shapes: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=creates("Compose a part from primitives"))
         def compose_part_from_primitives(
@@ -1513,7 +1514,7 @@ class _MeshToolsPlugin:
                             # will still catch off-bed geometry.
                             response["bed_centered"] = False
                             response.setdefault("warnings", []).append(
-                                f"bed-centering failed: {exc}"
+                                f"bed-centering failed: {_plain_words.said(exc)}"
                             )
                 # One part was asked for — a multi-body result means some
                 # primitive ended flush/tangent instead of overlapping.
@@ -1536,9 +1537,9 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_ARGS")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _error_dict(f"Composition failed: {exc}")
+                return _error_dict(f"Kiln couldn't combine the parts: {_plain_words.said(exc)}.")
 
         # ---------------------------------------------------------------
         # Mesh splitting and cleanup
@@ -1598,7 +1599,7 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _error_dict(f"Split failed: {exc}")
+                return _error_dict(f"Kiln couldn't split the model: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=destructive("Remove floating regions"))
         def remove_mesh_floating_regions(
@@ -1647,7 +1648,7 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _error_dict(f"Floating region removal failed: {exc}")
+                return _error_dict(f"Kiln couldn't remove the loose pieces: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=creates("Simplify a mesh"))
         def simplify_mesh_model(
@@ -1727,7 +1728,7 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except Exception as exc:
-                return _error_dict(f"Mesh simplification failed: {exc}")
+                return _error_dict(f"Kiln couldn't simplify the model: {_plain_words.said(exc)}.")
 
         # ---------------------------------------------------------------
         # Mesh export / import
@@ -1772,7 +1773,7 @@ class _MeshToolsPlugin:
                     "message": message,
                 }
             except Exception as exc:
-                return _error_dict(f"3MF export failed: {exc}", code="EXPORT_ERROR")
+                return _error_dict(f"Kiln couldn't export the 3MF: {_plain_words.said(exc)}.", code="EXPORT_ERROR")
 
         @mcp.tool(annotations=creates("Extract a model from 3MF"))
         def extract_model_from_3mf(file_path: str, output_path: str = "") -> dict:
@@ -1816,15 +1817,15 @@ class _MeshToolsPlugin:
                 except ImportError:
                     return response
             except FileNotFoundError as exc:
-                return _error_dict(str(exc), code="FILE_NOT_FOUND")
+                return _error_dict(_plain_words.sentence(exc), code="FILE_NOT_FOUND")
             except Exception as exc:
-                msg = f"3MF extraction failed: {exc}"
+                msg = f"3MF extraction failed: {_plain_words.said(exc)}"
                 result = _error_dict(msg, code="EXTRACT_ERROR")
                 if "no mesh geometry" in str(exc).lower():
                     result["hint"] = (
-                        "This .gcode.3mf has no mesh data. Use list_plate_objects() "
+                        "This .gcode.3mf has no mesh data. Use `list_plate_objects` "
                         "to see what objects are on the plate, then "
-                        "extract_plate_object() to extract one object's G-code."
+                        "`extract_plate_object` to extract one object's G-code."
                     )
                 return result
 
@@ -1887,7 +1888,7 @@ class _MeshToolsPlugin:
             if not local_stage.enabled():
                 return _error_dict(
                     "Kiln's inline 3D stage is switched off on this install "
-                    "(KILN_NO_LOCAL_STAGE is set); visualize_model gives still "
+                    "(KILN_NO_LOCAL_STAGE is set); `visualize_model` gives still "
                     "pictures and a browser stage link instead.",
                     code="STAGE_OFF",
                 )
@@ -1926,7 +1927,7 @@ class _MeshToolsPlugin:
                 "shows": shows,
                 "message": (
                     f"Kiln's 3D stage shows {shows}. `shown` says whether the "
-                    "host drew the inline panel or the viewer_url is the stage "
+                    "host drew the inline panel or the `viewer_url` is the stage "
                     "for now. Before a print, once the person has looked, issue "
                     "the preview token for this same file."
                 ),
@@ -1992,11 +1993,11 @@ class _MeshToolsPlugin:
                 )
                 return {"success": True, **result.to_dict()}
             except FileNotFoundError as exc:
-                return _error_dict(str(exc), code="FILE_NOT_FOUND")
+                return _error_dict(_plain_words.sentence(exc), code="FILE_NOT_FOUND")
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_ARGS")
+                return _error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _error_dict(f"Weight estimation failed: {exc}")
+                return _error_dict(f"Kiln couldn't estimate the weight: {_plain_words.said(exc)}.")
 
         @mcp.tool(annotations=read_only("Estimate print time"))
         def estimate_mesh_print_time(
@@ -2047,7 +2048,7 @@ class _MeshToolsPlugin:
                     ),
                 }
             except Exception as exc:
-                return _error_dict(f"Time estimate failed: {exc}")
+                return _error_dict(f"Kiln couldn't estimate the print time: {_plain_words.said(exc)}.")
 
 
 plugin = _MeshToolsPlugin()

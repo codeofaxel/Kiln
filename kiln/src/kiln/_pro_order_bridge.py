@@ -839,7 +839,7 @@ class ServedProvider:
         handed = str(getattr(request, "quote_token", "") or "")
         if handed and handed != token:
             raise ServedRefusal(
-                f"The quote_token handed in is not the one Kiln holds for quote {quote_id!r}, so the "
+                f"The `quote_token` handed in is not the one Kiln holds for quote {quote_id!r}, so the "
                 "order was not placed.", "QUOTE_TOKEN_MISMATCH",
             )
         answer = place(

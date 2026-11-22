@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def _survey_plates(
         return None, _srv._error_dict(
             "Kiln could not read your printers' plates, because the plate survey on this "
             "computer is older than this Kiln release, so nothing was routed. Name the "
-            "printer yourself with start_print or submit_job.",
+            "printer yourself with `start_print` or `submit_job`.",
             code="ROUTING_UNAVAILABLE",
         )
     survey = for_fleet(bridge.job_envelope(file_path), names, adapters=adapters)
@@ -431,7 +432,7 @@ class _FleetToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in fleet_analytics")
-                return _srv._error_dict(f"Unexpected error in fleet_analytics: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't put together the fleet report: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # list_fleet_sites
@@ -456,7 +457,7 @@ class _FleetToolsPlugin:
                 return {"success": True, "sites": site_data, "count": len(site_data)}
             except Exception as exc:
                 _logger.exception("Unexpected error in list_fleet_sites")
-                return _srv._error_dict(f"Unexpected error in list_fleet_sites: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't list the fleet's sites: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # fleet_status_by_site
@@ -473,8 +474,8 @@ class _FleetToolsPlugin:
             or habit still leads somewhere.  It reads no printer.
             """
             return _srv._error_dict(
-                "It was retired: the fleet grouped by site is "
-                "fleet_status(by_site=True), the one fleet view. Nothing was changed.",
+                "It was retired: for the fleet grouped by site, use "
+                "`fleet_status(by_site=True)`. Nothing was changed.",
                 code="RETIRED",
             )
 
@@ -523,7 +524,7 @@ class _FleetToolsPlugin:
                 return _srv._error_dict(f"Printer {name!r} not registered.", code="NOT_FOUND")
             except Exception as exc:
                 _logger.exception("Unexpected error in update_printer_site")
-                return _srv._error_dict(f"Unexpected error in update_printer_site: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't update the printer's site: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # route_print_job
@@ -702,7 +703,7 @@ class _FleetToolsPlugin:
                     help_ = dict(getattr(exc, "help", None) or {})
                     retryable = help_.pop("retryable", None)
                     resp = _srv._error_dict(
-                        f"{exc}. Nothing was routed.", code=str(help_.pop("code", None) or "NO_ROOM"),
+                        f"{_plain_words.said(exc)}. Nothing was routed.", code=str(help_.pop("code", None) or "NO_ROOM"),
                         retryable=retryable if isinstance(retryable, bool) else None,
                     )
                     resp["per_machine"] = {k: list(v) for k, v in per_machine.items()}
@@ -712,10 +713,10 @@ class _FleetToolsPlugin:
                     for key, value in help_.items():
                         resp.setdefault(key, value)
                     return _with_runs_in_fleet(resp, candidates, material.strip())
-                return _srv._error_dict(str(exc), code="ROUTING_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="ROUTING_ERROR")
             except Exception as exc:
                 _logger.exception("Error in route_print_job")
-                return _srv._error_dict(f"Failed to route print job: {exc}", code="ROUTING_ERROR")
+                return _srv._error_dict(f"Kiln couldn't route the print job: {_plain_words.said(exc)}.", code="ROUTING_ERROR")
 
         # ------------------------------------------------------------------
         # fleet_submit_job
@@ -748,8 +749,8 @@ class _FleetToolsPlugin:
             :param preview_token: Ignored: this name queues nothing.
             """
             return _srv._error_dict(
-                "It was retired: plan_multi_copy_split sends a part to your printers (one copy or "
-                "many), and submit_job with printer_name queues one print on one printer. "
+                "It was retired: `plan_multi_copy_split` sends a part to your printers (one copy or "
+                "many), and `submit_job` with `printer_name` queues one print on one printer. "
                 "Nothing was queued.",
                 code="RETIRED",
             )
@@ -764,8 +765,8 @@ class _FleetToolsPlugin:
                 ``split_plan_status`` or ``job_status``.
             """
             return _srv._error_dict(
-                "It was retired: split_plan_status follows a run across your printers, and "
-                "job_status follows one queued print.",
+                "It was retired: `split_plan_status` follows a run across your printers, and "
+                "`job_status` follows one queued print.",
                 code="RETIRED",
             )
 
@@ -788,7 +789,7 @@ class _FleetToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Error in fleet_utilization")
-                return _srv._error_dict(f"Failed to get fleet utilization: {exc}", code="FLEET_ERROR")
+                return _srv._error_dict(f"Kiln couldn't get the fleet utilization: {_plain_words.said(exc)}.", code="FLEET_ERROR")
 
 
 plugin = _FleetToolsPlugin()

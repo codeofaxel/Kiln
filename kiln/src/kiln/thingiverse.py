@@ -31,6 +31,7 @@ from urllib.parse import quote
 
 import requests
 
+from kiln import plain_words as _plain_words
 from kiln.daily_stats import counts_outside_service, record_marketplace_use
 
 logger = logging.getLogger(__name__)
@@ -232,12 +233,12 @@ class ThingiverseClient:
                 )
             except requests.ConnectionError as exc:
                 raise ThingiverseError(
-                    f"Connection to Thingiverse failed: {exc}",
+                    f"Kiln couldn't reach Thingiverse: {_plain_words.said(exc)}. Check the internet connection and try again.",
                     status_code=None,
                 ) from exc
             except requests.Timeout as exc:
                 raise ThingiverseError(
-                    f"Thingiverse request timed out: {exc}",
+                    "Thingiverse didn't answer in time. Try again in a moment.",
                     status_code=None,
                 ) from exc
 
@@ -387,7 +388,7 @@ class ThingiverseClient:
         try:
             name = safe_saved_name(raw_name, f"file_{file_id}")
         except ValueError as exc:
-            raise ThingiverseError(str(exc)) from exc
+            raise ThingiverseError(_plain_words.sentence(exc)) from exc
         dest = Path(dest_dir)
         out_path = dest / name
 
@@ -403,7 +404,7 @@ class ThingiverseClient:
             )
         except Exception as exc:
             raise ThingiverseError(
-                f"Failed to download file {file_id}: {exc}",
+                f"Kiln couldn't download the file {file_id}: {_plain_words.said(exc)}.",
             ) from exc
 
     # -- browse endpoints --------------------------------------------------

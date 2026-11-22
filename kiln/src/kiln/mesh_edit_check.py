@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 #: Two measurements of the same surface agree to this, in mm: faceting and
 #: the analyzer's own sampling, not an edit.
 _SAME_MM = 0.05
@@ -241,7 +243,8 @@ def guarded_edit(
         return {
             "success": False,
             "code": TOO_LARGE_TO_CHECK,
-            "message": f"Kiln did not {edit}: the part's mesh has {exc}. Your file is unchanged.",
+            "message": f"Kiln did not {edit}: the part's mesh has {_plain_words.said(exc)}. Your file is unchanged.",
+            **_plain_words.detail_field(exc),
         }
     fd, scratch = tempfile.mkstemp(suffix=os.path.splitext(output_path)[1] or ".stl")
     os.close(fd)
@@ -254,7 +257,7 @@ def guarded_edit(
                 "success": False,
                 "code": TOO_LARGE_TO_CHECK,
                 "message": (
-                    f"Kiln did not {edit}: the result came to {exc}, so it could not be checked and is not handed "
+                    f"Kiln did not {edit}: the result came to {_plain_words.said(exc)}, so it could not be checked and is not handed "
                     "back. Your file is unchanged."
                 ),
                 **({"engine": stats} if stats else {}),

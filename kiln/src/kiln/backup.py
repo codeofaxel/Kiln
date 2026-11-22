@@ -20,6 +20,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,7 +75,7 @@ def backup_database(
     try:
         shutil.copy2(db_path, output_path)
     except OSError as exc:
-        raise BackupError(f"Failed to copy database: {exc}") from exc
+        raise BackupError(f"Kiln couldn't copy its database: {_plain_words.said(exc)}.") from exc
 
     if redact_credentials:
         _redact_credentials(output_path)
@@ -107,7 +109,7 @@ def _redact_credentials(db_path: str) -> None:
         conn.commit()
         conn.close()
     except sqlite3.Error as exc:
-        raise BackupError(f"Failed to redact credentials: {exc}") from exc
+        raise BackupError(f"Kiln couldn't take the saved passwords out of the backup copy: {_plain_words.said(exc)}.") from exc
 
 
 def restore_database(
@@ -138,7 +140,7 @@ def restore_database(
     try:
         shutil.copy2(backup_path, db_path)
     except OSError as exc:
-        raise BackupError(f"Failed to restore database: {exc}") from exc
+        raise BackupError(f"Kiln couldn't restore its database: {_plain_words.said(exc)}.") from exc
 
     return os.path.abspath(db_path)
 
@@ -154,9 +156,9 @@ def _validate_sqlite(path: str) -> None:
         result = conn.execute("PRAGMA integrity_check(1)").fetchone()
         conn.close()
         if result is None or result[0] != "ok":
-            raise BackupError(f"SQLite integrity check failed for {path}")
+            raise BackupError(f"{path} is damaged, so Kiln can't restore from it.")
     except sqlite3.DatabaseError as exc:
-        raise BackupError(f"Not a valid SQLite database: {path} ({exc})") from exc
+        raise BackupError(f"{path} isn't a Kiln database, so Kiln can't restore from it.") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +227,7 @@ def verify_integrity(db_path: str) -> IntegrityResult:
         finally:
             conn.close()
     except sqlite3.Error as exc:
-        return IntegrityResult(ok=False, details=f"SQLite error: {exc}")
+        return IntegrityResult(ok=False, details=f"SQLite error: {_plain_words.said(exc)}")
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +309,7 @@ def snapshot_database(
         return ScheduledBackupResult(
             success=False,
             timestamp=timestamp,
-            error=f"Cannot create backup directory: {exc}",
+            error=f"Kiln couldn't make the backup folder: {_plain_words.said(exc)}.",
         )
 
     backup_filename = _generate_backup_filename(db_path)
@@ -324,7 +326,7 @@ def snapshot_database(
             success=False,
             path=backup_path,
             timestamp=timestamp,
-            error=f"Backup failed: {exc}",
+            error=f"The backup didn't finish: {_plain_words.said(exc)}.",
         )
 
     if not os.path.isfile(backup_path):

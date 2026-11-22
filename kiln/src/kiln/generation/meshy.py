@@ -201,7 +201,7 @@ class MeshyProvider(GenerationProvider):
         self._api_key = api_key or os.environ.get("KILN_MESHY_API_KEY", "")
         if not self._api_key:
             raise GenerationAuthError(
-                "Meshy API key required.  Set KILN_MESHY_API_KEY or pass api_key.",
+                "Meshy API key required.  Set KILN_MESHY_API_KEY or pass `api_key`.",
                 code="AUTH_REQUIRED",
             )
         self._timeout = timeout
@@ -564,7 +564,7 @@ class MeshyProvider(GenerationProvider):
         if job.status in (GenerationStatus.PENDING, GenerationStatus.IN_PROGRESS):
             raise GenerationError(
                 f"Meshy is still making task {job_id} ({int(job.progress or 0)}% done). "
-                "Wait for it to finish (await_generation), then download it.",
+                "Wait for it to finish (`await_generation`), then download it.",
                 code="NOT_READY",
             )
         if job.status in (GenerationStatus.FAILED, GenerationStatus.CANCELLED):
@@ -674,7 +674,7 @@ class MeshyProvider(GenerationProvider):
         try:
             resp = requests.get(url, timeout=timeout, stream=True)
         except requests.ConnectionError:
-            raise GenerationError("Could not connect to Meshy's file host.", code="CONNECTION_ERROR") from None
+            raise GenerationError("Kiln couldn't reach Meshy's download server.", code="CONNECTION_ERROR") from None
         except requests.Timeout:
             raise GenerationError("Meshy's file host timed out.", code="TIMEOUT") from None
         if resp.status_code in _EXPIRED_LINK:
@@ -715,7 +715,7 @@ class MeshyProvider(GenerationProvider):
                     stream=stream,
                 )
             except requests.ConnectionError:
-                raise GenerationError("Could not connect to Meshy API.", code="CONNECTION_ERROR") from None
+                raise GenerationError("Kiln couldn't reach Meshy.", code="CONNECTION_ERROR") from None
             except requests.Timeout:
                 raise GenerationError("Meshy API request timed out.", code="TIMEOUT") from None
 

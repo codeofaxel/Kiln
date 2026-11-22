@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli.install_mcp import (
     _claude_code_config_path,
     _claude_desktop_config_path,
@@ -143,7 +144,7 @@ def _audit_claude_json(client: str, path: Path) -> ClientAuditResult:
             client=client,
             path=path,
             config_exists=True,
-            parse_error=f"{type(exc).__name__}: {exc}",
+            parse_error=_plain_words.sentence(exc),
         )
 
     servers = data.get("mcpServers") if isinstance(data, dict) else None
@@ -191,7 +192,7 @@ def _audit_codex_toml(client: str, path: Path) -> ClientAuditResult:
             client=client,
             path=path,
             config_exists=True,
-            parse_error=f"{type(exc).__name__}: {exc}",
+            parse_error=_plain_words.sentence(exc),
         )
 
     parser = _toml_parser()
@@ -203,7 +204,7 @@ def _audit_codex_toml(client: str, path: Path) -> ClientAuditResult:
                 client=client,
                 path=path,
                 config_exists=True,
-                parse_error=f"TOMLDecodeError: {exc}",
+                parse_error=f"TOMLDecodeError: {_plain_words.said(exc)}",
             )
         servers = data.get("mcp_servers") if isinstance(data, dict) else None
         if not isinstance(servers, dict):

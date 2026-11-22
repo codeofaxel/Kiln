@@ -429,4 +429,4 @@ def test_a_slice_the_slicer_refuses_still_says_kiln_s_verdict(cone_on_its_tip, b
         fine = _call("slice_and_estimate", input_path=block, material="PLA")
     assert fine.get("success") is False
     assert fine["printability_verdict"] == "ready", fine
-    assert fine["error"]["message"].startswith("Failed to slice model: boom"), fine["error"]
+    assert fine["error"]["message"].startswith("Kiln couldn't slice the model: boom"), fine["error"]

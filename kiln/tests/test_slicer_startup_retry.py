@@ -193,7 +193,7 @@ def test_orca_keeps_its_deterministic_bambu_verdict_unretried(tmp_path: Path) ->
     """-11 on the Orca dialect is a real answer with a real message; the
     retry must not crash the same way twice more to say the same thing."""
     error, launches = _orca_sigsegv(tmp_path, "bambu_x1c")
-    assert "known crash" in str(error)
+    assert "not in your model or your settings" in str(error)
     assert launches == 1
 
 
@@ -203,5 +203,5 @@ def test_an_orca_crash_on_another_printer_names_that_printer_not_bambu(tmp_path:
     error, launches = _orca_sigsegv(tmp_path, "k2_pro")
     said = str(error)
     assert "Creality K2 Pro" in said and "signal 11" in said
-    assert "known crash" not in said and "Bambu Lab printer profiles" not in said
+    assert "not in your model or your settings" not in said
     assert launches == 1

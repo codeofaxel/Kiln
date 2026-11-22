@@ -139,6 +139,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
 from kiln.gcode import FEATURE_LINE, slicer_made_by
 
@@ -1341,7 +1342,7 @@ def slicer_features_block(
         return unavailable_block("the sliced G-code is no longer on disk", _source(path, None))
     except Exception as exc:  # noqa: BLE001 — a stage never dies over furniture
         logger.debug("slicer geometry parse failed", exc_info=True)
-        return unavailable_block(f"the G-code could not be read: {exc}", _source(path, None))
+        return unavailable_block(f"the G-code could not be read: {_plain_words.said(exc)}", _source(path, None))
 
     pose, reason = align_pose(parsed, mesh_min, mesh_max, mesh_floor=mesh_floor)
     if pose is None:

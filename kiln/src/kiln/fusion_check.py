@@ -47,6 +47,8 @@ from typing import Any
 
 import numpy as np
 
+from kiln import plain_words as _plain_words
+
 _logger = logging.getLogger(__name__)
 
 # Gap at or under this reads as "touching": half a typical first-layer
@@ -218,7 +220,7 @@ def check_fusion(
             return {"checked": False, "reason": "mesh has no geometry"}
         bodies, solid_of = _pieces(mesh)
     except Exception as exc:  # noqa: BLE001
-        return {"checked": False, "reason": f"mesh could not be loaded: {exc}"}
+        return {"checked": False, "reason": f"mesh could not be loaded: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
     return _judge(bodies, solid_of, expect_single_body=expect_single_body, max_pairs=max_pairs)
 
 
@@ -929,7 +931,7 @@ def measure_body_pairs(mesh_path: str, *, max_pairs: int = _PAIR_TABLE_MAX_PAIRS
             }
         bodies, _ = _pieces(mesh)
     except Exception as exc:  # noqa: BLE001
-        return {"checked": False, "reason": f"mesh could not be loaded: {exc}"}
+        return {"checked": False, "reason": f"mesh could not be loaded: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
     if len(bodies) < 2:
         return {"checked": False, "reason": "the mesh is one body"}
     if len(bodies) > _PAIR_TABLE_MAX_BODIES:

@@ -45,6 +45,7 @@ import requests
 import urllib3.exceptions
 
 from kiln import daily_stats, streaming
+from kiln import plain_words as _plain_words
 from kiln.printers.base import (
     CameraHandshake,
     ExternalCamera,
@@ -179,7 +180,7 @@ def classify_camera_address(
                 None,
             )
         except requests.RequestException as exc:
-            return "other", f"The check could not open this address ({exc.__class__.__name__}).", None, None
+            return "other", f"The check couldn't open this address: {_plain_words.said(exc)}.", None, None
         return _classify_response(response, timeout=timeout, max_bytes=max_bytes)
     finally:
         if response is not None:

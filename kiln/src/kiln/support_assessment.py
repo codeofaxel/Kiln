@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.generation.validation import _is_bed_supported_triangle, _mesh_bed_z
 
 logger = logging.getLogger(__name__)
@@ -248,7 +249,7 @@ def _shared_verdict(
             layer_height=layer_height_mm,
         )
     except ValueError as exc:
-        return False, None, f"Whether supports are needed was not judged: {exc}"
+        return False, None, f"Whether supports are needed was not judged: {_plain_words.said(exc)}"
     except MemoryError:
         # The analysis runner's cap: more memory than this machine gives a
         # single analysis.  Not judged, said -- never a quiet "no".

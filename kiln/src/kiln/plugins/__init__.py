@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.events import EventType
 
 logger = logging.getLogger(__name__)
@@ -304,7 +305,7 @@ class PluginManager:
                 error_info = PluginInfo(
                     name=ep.name,
                     version="unknown",
-                    error=str(exc),
+                    error=_plain_words.sentence(exc),
                 )
                 with self._lock:
                     self._infos[ep.name] = error_info
@@ -379,7 +380,7 @@ class PluginManager:
             if ctx.event_bus is not None:
                 ctx.event_bus.publish(
                     EventType.PLUGIN_ERROR,
-                    data={"name": name, "error": str(exc)},
+                    data={"name": name, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)},
                     source="plugin_manager",
                 )
 

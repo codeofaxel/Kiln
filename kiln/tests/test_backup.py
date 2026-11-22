@@ -161,7 +161,7 @@ class TestRestoreDatabase:
         with open(bad, "w") as f:
             f.write("this is not a database")
         dest = str(tmp_path / "restored.db")
-        with pytest.raises(BackupError, match="Not a valid SQLite database"):
+        with pytest.raises(BackupError, match="isn't a Kiln database"):
             restore_database(bad, dest)
 
     def test_restore_refuses_overwrite_without_force(self, tmp_path):

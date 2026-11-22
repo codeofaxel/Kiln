@@ -38,6 +38,8 @@ from typing import Any, NamedTuple
 
 import click
 
+from kiln import plain_words as _plain_words
+
 # ═════════════════════════════════════════════════════════════════════
 # Client discovery
 # ═════════════════════════════════════════════════════════════════════
@@ -256,21 +258,22 @@ def _read_config(path: Path) -> dict[str, Any]:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise _ConfigParseError(
-            f"Couldn't read {path}: {exc}"
+            f"Couldn't read {path}: {_plain_words.said(exc)}."
         ) from exc
     if not text.strip():
         return {}
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
+        line = exc.lineno
         raise _ConfigParseError(
-            f"{path} exists but isn't valid JSON ({exc.msg} at line {exc.lineno}).\n"
-            f"  Fix or delete the file, then re-run `kiln install-mcp`."
+            f"{path} exists, but Kiln can't read it: it has a mistake at line {line}.\n"
+            f"  Fix or delete the file, then run `kiln install-mcp` again."
         ) from exc
     if not isinstance(data, dict):
         raise _ConfigParseError(
-            f"{path} isn't a JSON object at the root.  "
-            f"Fix or delete it, then re-run `kiln install-mcp`."
+            f"{path} doesn't hold a set of named settings, so Kiln can't use it.  "
+            f"Fix or delete it, then run `kiln install-mcp` again."
         )
     return data
 
@@ -310,8 +313,8 @@ def _validate_toml_if_possible(path: Path, text: str) -> None:
         parser.loads(text)
     except Exception as exc:
         raise _ConfigParseError(
-            f"{path} exists but isn't valid TOML ({exc}).\n"
-            f"  Fix or delete the file, then re-run `kiln install-mcp`."
+            f"{path} exists, but Kiln can't read it: {_plain_words.said(exc)}.\n"
+            f"  Fix or delete the file, then run `kiln install-mcp` again."
         ) from exc
 
 
@@ -323,7 +326,7 @@ def _read_text_config(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise _ConfigParseError(
-            f"Couldn't read {path}: {exc}"
+            f"Couldn't read {path}: {_plain_words.said(exc)}."
         ) from exc
 
 

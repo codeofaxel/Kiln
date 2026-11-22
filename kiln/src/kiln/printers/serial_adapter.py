@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any, ClassVar
 
+from kiln import plain_words as _plain_words
 from kiln.printers.base import (
     CAUSE_WAITING_FOR_USER,
     DEFAULT_LOAD_LENGTH_MM,
@@ -189,12 +190,12 @@ class SerialPrinterAdapter(PrinterAdapter):
                     cause=exc,
                 ) from exc
             raise PrinterError(
-                f"Failed to open serial port {self._port}: {exc}",
+                f"Kiln couldn't open the serial port {self._port}: {_plain_words.said(exc)}.",
                 cause=exc,
             ) from exc
         except OSError as exc:
             raise PrinterError(
-                f"OS error opening serial port {self._port}: {exc}",
+                f"Kiln couldn't open the serial port {self._port}: {_plain_words.said(exc)}.",
                 cause=exc,
             ) from exc
 
@@ -327,7 +328,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         except Exception as exc:
             self._connected = False
             raise PrinterError(
-                f"Failed to send command '{command}': {exc}",
+                f"Kiln couldn't send the command '{command}': {_plain_words.said(exc)}.",
                 cause=exc,
             ) from exc
 
@@ -348,7 +349,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                 except Exception as exc:
                     self._connected = False
                     raise PrinterError(
-                        f"Serial read error after sending '{command}': {exc}",
+                        f"Kiln sent '{command}' but couldn't read the printer's answer: {_plain_words.said(exc)}.",
                         cause=exc,
                     ) from exc
 
@@ -602,7 +603,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                 self._send_command_locked(f"M28 {filename}", self._timeout, True)
             except PrinterError as exc:
                 raise PrinterError(
-                    f"Failed to start SD write for {filename}: {exc}",
+                    f"Kiln couldn't start writing {filename} to the SD card: {_plain_words.said(exc)}.",
                     cause=exc,
                 ) from exc
 
@@ -632,7 +633,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                 raise
             except Exception as exc:
                 raise PrinterError(
-                    f"Error during SD upload: {exc}",
+                    f"The upload to the SD card didn't finish: {_plain_words.said(exc)}.",
                     cause=exc,
                 ) from exc
             finally:
@@ -843,7 +844,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return PrintResult(
             success=True,
             message=(
-                "Sent M999 to restart the firmware. Re-read printer_status to "
+                "Sent M999 to restart the firmware. Re-read `printer_status` to "
                 "confirm it came back ready."
             ),
         )
@@ -871,11 +872,11 @@ class SerialPrinterAdapter(PrinterAdapter):
     def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
         """Abandon objects on a live multi-object print via ``M486``."""
         if not object_ids:
-            raise PrinterError("skip_objects requires at least one object id.")
+            raise PrinterError("`skip_objects` requires at least one object id.")
         try:
             ids = [int(x) for x in object_ids]
         except (TypeError, ValueError) as exc:
-            raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
+            raise PrinterError("The objects to skip must be given as whole-number ids.") from exc
         return self.send_gcode([f"M486 P{i}" for i in ids])
 
     # ------------------------------------------------------------------
@@ -894,7 +895,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                 success=False,
                 message=(
                     f"Calibration option(s) {', '.join(repr(o) for o in unsupported)} "
-                    "not supported over serial. Only bed_leveling is available."
+                    "not supported over serial. Only `bed_leveling` is available."
                 ),
             )
 
@@ -1011,15 +1012,15 @@ class SerialPrinterAdapter(PrinterAdapter):
         """Send Marlin M413 power-loss recovery positioning G-code."""
         # -- parameter validation ------------------------------------------
         if z_height_mm <= 0:
-            raise PrinterError(f"z_height_mm must be > 0, got {z_height_mm}.")
+            raise PrinterError(f"`z_height_mm` must be above 0, not {z_height_mm}.")
         if hotend_temp_c <= 0:
             raise PrinterError(f"Hotend temperature must be > 0\u00b0C, got {hotend_temp_c}\u00b0C.")
         self._validate_temp(hotend_temp_c, _MAX_HOTEND_TEMP, "Hotend")
         self._validate_temp(bed_temp_c, _MAX_BED_TEMP, "Bed")
         if prime_length_mm < 0:
-            raise PrinterError(f"prime_length_mm must be >= 0, got {prime_length_mm}.")
+            raise PrinterError(f"`prime_length_mm` must be 0 or more, not {prime_length_mm}.")
         if z_clearance_mm <= 0 or z_clearance_mm > 10:
-            raise PrinterError(f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}.")
+            raise PrinterError(f"`z_clearance_mm` must be above 0 and at most 10, not {z_clearance_mm}.")
 
         fan_pwm = int(fan_speed_pct * 2.55)
         commands = build_firmware_resume_positioning(
@@ -1040,7 +1041,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             message=(
                 f"Firmware resume positioning complete for {fence(file_name)}{layer_info}. "
                 f"Z={z_height_mm}mm, hotend={hotend_temp_c}\u00b0C, bed={bed_temp_c}\u00b0C. "
-                f"Printer is positioned and ready \u2014 start the resume file via start_print."
+                f"Printer is positioned and ready \u2014 start the resume file via `start_print`."
             ),
         )
 

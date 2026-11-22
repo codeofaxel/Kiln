@@ -738,7 +738,7 @@ class TestEveryPlanIsBounded:
             slicer.generate_plan([], profile, model_height_mm=value)
         with pytest.raises(AdaptiveSlicerError, match="Nozzle diameter must be a finite number"):
             generic_profile("PLA", nozzle_diameter_mm=value)
-        with pytest.raises(AdaptiveSlicerError, match="int too large"):
+        with pytest.raises(AdaptiveSlicerError, match="too large to be a size"):
             _parse_region_dicts([{"region_type": "bulk", "z_start_mm": value}], 10.0)
 
     def test_a_refusal_repeats_at_most_64_characters_of_a_value(self, slicer, profile):

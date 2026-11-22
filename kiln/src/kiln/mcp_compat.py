@@ -470,7 +470,7 @@ async def ask_user_to_confirm(
         schema = dialog_form(offer_window=offer_window, offer_fleet=offer_fleet)
     except Exception as exc:  # noqa: BLE001 — no pydantic, no elicitation
         _logger.debug("Could not build the confirmation form: %s", exc)
-        return DialogAnswer("unavailable", f"form_unavailable:{type(exc).__name__}")
+        return DialogAnswer("unavailable", detail=f"form_unavailable:{type(exc).__name__}")
 
     asked = message
     for last_try in (False, True):
@@ -479,7 +479,7 @@ async def ask_user_to_confirm(
             result = await ctx.elicit(message=asked, schema=schema)
         except Exception as exc:  # noqa: BLE001 — a host that cannot answer is not an error
             _logger.debug("Could not ask the user for confirmation: %s", exc)
-            return DialogAnswer("unavailable", f"{type(exc).__name__}")
+            return DialogAnswer("unavailable", detail=type(exc).__name__)
         elapsed = time.monotonic() - started
         data = getattr(result, "data", None)
         if data is None:

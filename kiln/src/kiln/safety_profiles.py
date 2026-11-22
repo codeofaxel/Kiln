@@ -1488,7 +1488,7 @@ def validate_safety_profile(profile: dict[str, Any]) -> list[str]:
     # --- required fields ---
     for field in _REQUIRED_FIELDS:
         if field not in profile:
-            errors.append(f"Missing required field: {field}")
+            errors.append(f"`{field}` is missing")
 
     # Early-out if required fields are absent — further checks would KeyError.
     if errors:
@@ -1498,35 +1498,35 @@ def validate_safety_profile(profile: dict[str, Any]) -> list[str]:
     for temp_field in ("max_hotend_temp", "max_bed_temp"):
         val = profile[temp_field]
         if not isinstance(val, (int, float)):
-            errors.append(f"{temp_field} must be a number, got {type(val).__name__}")
+            errors.append(f"`{temp_field}` must be a number of degrees")
         elif not (0 <= val <= _MAX_TEMP_CEILING):
-            errors.append(f"{temp_field} must be between 0 and {_MAX_TEMP_CEILING}, got {val}")
+            errors.append(f"`{temp_field}` must be from 0 to {_MAX_TEMP_CEILING}°C, not {val}")
 
     # Optional chamber temp — same range when present.
     if "max_chamber_temp" in profile and profile["max_chamber_temp"] is not None:
         val = profile["max_chamber_temp"]
         if not isinstance(val, (int, float)):
-            errors.append(f"max_chamber_temp must be a number, got {type(val).__name__}")
+            errors.append("`max_chamber_temp` must be a number of degrees")
         elif not (0 <= val <= _MAX_TEMP_CEILING):
-            errors.append(f"max_chamber_temp must be between 0 and {_MAX_TEMP_CEILING}, got {val}")
+            errors.append(f"`max_chamber_temp` must be from 0 to {_MAX_TEMP_CEILING}°C, not {val}")
 
     # --- feedrate ---
     fr = profile["max_feedrate"]
     if not isinstance(fr, (int, float)):
-        errors.append(f"max_feedrate must be a number, got {type(fr).__name__}")
+        errors.append("`max_feedrate` must be a number")
     elif not (0 <= fr <= _MAX_FEEDRATE_CEILING):
-        errors.append(f"max_feedrate must be between 0 and {_MAX_FEEDRATE_CEILING}, got {fr}")
+        errors.append(f"`max_feedrate` must be from 0 to {_MAX_FEEDRATE_CEILING} mm/min, not {fr}")
 
     # --- build volume ---
     bv = profile["build_volume"]
     if not isinstance(bv, list) or len(bv) != 3:
-        errors.append("build_volume must be a list of 3 numbers [X, Y, Z]")
+        errors.append("`build_volume` must be three numbers: width, depth and height")
     else:
-        for i, dim in enumerate(bv):
+        for axis, dim in zip(("width", "depth", "height"), bv, strict=True):
             if not isinstance(dim, (int, float)):
-                errors.append(f"build_volume[{i}] must be a number, got {type(dim).__name__}")
+                errors.append(f"the {axis} in `build_volume` must be a number")
             elif dim <= 0:
-                errors.append(f"build_volume[{i}] must be positive, got {dim}")
+                errors.append(f"the {axis} in `build_volume` must be above 0, not {dim}")
 
     return errors
 
@@ -1727,7 +1727,7 @@ def set_local_printer_override(
 
     errors = validate_safety_profile(profile)
     if errors:
-        raise ValueError(f"Invalid safety profile: {'; '.join(errors)}")
+        raise ValueError(f"The safety profile has problems: {'; '.join(errors)}.")
     if not confirmed:
         above = limits_above_floor(printer_model, profile)
         if above:

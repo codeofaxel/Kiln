@@ -26,6 +26,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 #: How often the printer is asked which layer it is on.
@@ -86,20 +88,30 @@ def parse_segments(schedule: Any) -> tuple[Segment, ...]:
     out: list[Segment] = []
     for index, entry in enumerate(schedule):
         if not isinstance(entry, dict):
-            raise ScheduleRefused(f"segment {index} is not a mapping")
+            raise ScheduleRefused(
+                f"Step {index + 1} of the schedule needs `from_layer`, `to_layer` and `speed_percent`."
+            )
         try:
             seg = Segment(int(entry["from_layer"]), int(entry["to_layer"]), int(entry["speed_percent"]))
         except (KeyError, TypeError, ValueError) as exc:
-            raise ScheduleRefused(f"segment {index}: from_layer, to_layer and speed_percent must be integers ({exc})") from exc
+            raise ScheduleRefused(
+                f"Step {index + 1} needs whole numbers for `from_layer`, `to_layer` and `speed_percent`."
+            ) from exc
         if isinstance(entry.get("speed_percent"), bool) or seg.from_layer < 0 or seg.to_layer < seg.from_layer:
-            raise ScheduleRefused(f"segment {index}: layers must be non-negative and from_layer <= to_layer")
+            raise ScheduleRefused(
+                f"In step {index + 1}, the layers can't be negative and `from_layer` can't be above `to_layer`."
+            )
         if not 10 <= seg.speed_percent <= 300:
-            raise ScheduleRefused(f"segment {index}: speed_percent {seg.speed_percent} is outside 10-300")
+            raise ScheduleRefused(
+                f"Step {index + 1} asks for {seg.speed_percent}% speed; Kiln allows 10% to 300%."
+            )
         out.append(seg)
     out.sort(key=lambda s: s.from_layer)
     for a, b in zip(out, out[1:], strict=False):
         if b.from_layer <= a.to_layer:
-            raise ScheduleRefused(f"segments overlap at layer {b.from_layer}")
+            raise ScheduleRefused(
+                f"Two steps both cover layer {b.from_layer}. Each layer can belong to only one step."
+            )
     return tuple(out)
 
 
@@ -143,7 +155,7 @@ def floor_schedule(
     *past_the_melt_limit* each is kept as asked and judged only to say what
     it costs.  Raises :class:`ScheduleRefused` for a schedule that is not
     well formed."""
-    from kiln.live_speed_floor import covering, judge
+    from kiln.live_speed_floor import judging_layers, judge
     from kiln.live_speed_floor import past_the_melt_limit as past
 
     presets = takes_presets(adapter)
@@ -154,7 +166,7 @@ def floor_schedule(
         if percent > 100:
             preset = nearest_preset(percent) if presets else None
             asked = PRESET_PERCENT[preset] if preset else percent
-            with covering(segment.from_layer, segment.to_layer), past(past_the_melt_limit):
+            with judging_layers(segment.from_layer, segment.to_layer), past(past_the_melt_limit):
                 verdict = judge(adapter, asked, preset=preset)
             judgements.append(verdict)
             if verdict.lowered:
@@ -201,15 +213,15 @@ def _tick(run: RunState, adapter: Any) -> bool:
     segment = run.segments[index]
     percent = segment.speed_percent
     try:
-        from kiln.live_speed_floor import covering, past_the_melt_limit
+        from kiln.live_speed_floor import judging_layers, past_the_melt_limit
 
-        with covering(segment.from_layer, segment.to_layer), past_the_melt_limit(run.past_the_melt_limit):
+        with judging_layers(segment.from_layer, segment.to_layer), past_the_melt_limit(run.past_the_melt_limit):
             verdict = set_speed(adapter, percent)
     except Exception as exc:  # noqa: BLE001 — said, and the next poll tries the next segment
-        run.error = f"could not set {percent}% at layer {layer}: {type(exc).__name__}: {exc}"
+        run.error = f"Kiln couldn't set the speed to {percent}% at layer {layer}: {_plain_words.said(exc)}."
         return True
     if getattr(verdict, "ok", True) is False:
-        run.error = f"the printer refused {percent}% at layer {layer}"
+        run.error = f"The printer refused {percent}% at layer {layer}."
         return True
     run.active_segment = index
     run.applied.append((int(layer), percent))
@@ -223,7 +235,7 @@ def _loop(run: RunState, resolve: Callable[[], Any], poll_s: float) -> None:
             if not _tick(run, adapter):
                 break
         except Exception as exc:  # noqa: BLE001 — the printer is asked again next time
-            run.error = f"{type(exc).__name__}: {exc}"
+            run.error = _plain_words.sentence(exc)
         run.stop.wait(poll_s)
     if run.ended is None:
         run.ended = "stopped" if run.stop.is_set() else run.error or "stopped"

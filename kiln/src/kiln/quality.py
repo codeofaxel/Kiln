@@ -204,13 +204,13 @@ def assess_quality(
         out of range.
     """
     if not job_id:
-        raise QualityError("job_id is required")
+        raise QualityError("`job_id` is required.")
     if not printer_id:
-        raise QualityError("printer_id is required")
+        raise QualityError("`printer_id` is required.")
     if not assessed_by:
-        raise QualityError("assessed_by is required")
+        raise QualityError("`assessed_by` is required.")
     if not signing_key:
-        raise QualityError("signing_key is required")
+        raise QualityError("`signing_key` is required.")
 
     # -- Extract and validate scores --
     overall = metrics.get("overall")

@@ -13,6 +13,7 @@ import logging
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ class _ServiceToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in publish_model")
                 return _srv._error_dict(
-                    f"Unexpected error in publish_model: {exc}",
+                    f"Kiln couldn't publish the model: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -146,7 +147,7 @@ class _ServiceToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_print_certificate")
                 return _srv._error_dict(
-                    f"Unexpected error in generate_print_certificate: {exc}",
+                    f"Kiln couldn't make the print certificate: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -176,7 +177,7 @@ class _ServiceToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in list_published_models")
                 return _srv._error_dict(
-                    f"Unexpected error in list_published_models: {exc}",
+                    f"Kiln couldn't list the published models: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -224,11 +225,11 @@ class _ServiceToolsPlugin:
                     "message": f"Recorded {transaction_type} of ${amount_usd:.2f} for {model_id}.",
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in record_revenue")
                 return _srv._error_dict(
-                    f"Unexpected error in record_revenue: {exc}",
+                    f"Kiln couldn't record the sale: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -258,7 +259,7 @@ class _ServiceToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in revenue_dashboard")
                 return _srv._error_dict(
-                    f"Unexpected error in revenue_dashboard: {exc}",
+                    f"Kiln couldn't put together the earnings report: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -285,7 +286,7 @@ class _ServiceToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in model_revenue")
                 return _srv._error_dict(
-                    f"Unexpected error in model_revenue: {exc}",
+                    f"Kiln couldn't read the model's earnings: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -346,15 +347,15 @@ class _ServiceToolsPlugin:
                     "message": (
                         f"Order {quote.order_id} created. Recommended: {quote.recommended} "
                         f"(${quote.total_cost_usd:.2f}, ~{quote.estimated_time_hours:.1f}h). "
-                        f"Call print_service_quote to confirm."
+                        f"Call `print_service_quote` to confirm."
                     ),
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in create_print_service_order")
                 return _srv._error_dict(
-                    f"Unexpected error in create_print_service_order: {exc}",
+                    f"Kiln couldn't place the print-service order: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -385,11 +386,11 @@ class _ServiceToolsPlugin:
                     "message": f"Order {order_id} confirmed. Status: {order.status}.",
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in print_service_quote")
                 return _srv._error_dict(
-                    f"Unexpected error in print_service_quote: {exc}",
+                    f"Kiln couldn't get a print-service quote: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -411,11 +412,11 @@ class _ServiceToolsPlugin:
                     "message": f"Order {order_id}: {order.status} (step: {order.current_step}).",
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="NOT_FOUND")
+                return _srv._error_dict(_plain_words.sentence(exc), code="NOT_FOUND")
             except Exception as exc:
                 _logger.exception("Unexpected error in print_service_status")
                 return _srv._error_dict(
-                    f"Unexpected error in print_service_status: {exc}",
+                    f"Kiln couldn't check the print-service order: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 
@@ -438,11 +439,11 @@ class _ServiceToolsPlugin:
                 result = cancel_order(order_id)
                 return result
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="NOT_FOUND")
+                return _srv._error_dict(_plain_words.sentence(exc), code="NOT_FOUND")
             except Exception as exc:
                 _logger.exception("Unexpected error in cancel_print_service_order")
                 return _srv._error_dict(
-                    f"Unexpected error in cancel_print_service_order: {exc}",
+                    f"Kiln couldn't cancel the print-service order: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

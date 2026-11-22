@@ -54,6 +54,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.print_lineage import SPEED_BY_HEIGHT_KEY
 from kiln.slicer import SlicerError
 
@@ -237,32 +238,32 @@ def checked(wish: Any) -> list[SpeedRange]:
         start = _number(raw.get("from_mm", 0))
         end = None if raw.get("to_mm") is None else _number(raw.get("to_mm"))
         if start is None or (raw.get("to_mm") is not None and end is None):
-            raise SpeedByHeightError(f"Range {number}: from_mm and to_mm are heights in millimetres. {_SHAPE}")
+            raise SpeedByHeightError(f"Range {number}: `from_mm` and `to_mm` are heights in millimetres. {_SHAPE}")
         if start < 0:
             raise SpeedByHeightError(f"Range {number} starts {abs(start):g} mm below the plate; heights start at 0.")
         if end is not None and end <= start:
             raise SpeedByHeightError(
                 f"Range {number} runs from {start:g} mm to {end:g} mm, so it has no height: "
-                "to_mm must be above from_mm."
+                "`to_mm` must be above `from_mm`."
             )
         speed, percent, most = raw.get("speed_mm_s"), raw.get("percent"), raw.get("max_mm_s")
         hardest = raw.get("max_acceleration_mm_s2")
         given = sum(value is not None for value in (speed, percent, most))
         if given > 1 or (given == 0 and hardest is None):
             raise SpeedByHeightError(
-                f"Range {number} needs one speed: speed_mm_s, percent or max_mm_s, not two and not none."
+                f"Range {number} needs one speed: `speed_mm_s`, `percent` or `max_mm_s`, not two and not none."
             )
         lines = raw.get("lines", ALL_LINES)
         if lines not in (ALL_LINES, INSIDE_LINES):
-            raise SpeedByHeightError(f'Range {number}: lines is "{ALL_LINES}" or "{INSIDE_LINES}".')
+            raise SpeedByHeightError(f'Range {number}: `lines` is "{ALL_LINES}" or "{INSIDE_LINES}".')
         if lines == INSIDE_LINES and speed is None and percent is None:
-            raise SpeedByHeightError(f'Range {number}: lines "{INSIDE_LINES}" goes with speed_mm_s or percent.')
+            raise SpeedByHeightError(f'Range {number}: `lines` "{INSIDE_LINES}" goes with `speed_mm_s` or `percent`.')
         fields: dict[str, Any] = {"lines": lines}
         if hardest is not None:
             value = _number(hardest)
             if value is None or not MIN_ACCELERATION <= value <= MAX_ACCELERATION:
                 raise SpeedByHeightError(
-                    f"Range {number}: max_acceleration_mm_s2 is from {MIN_ACCELERATION:g} to {MAX_ACCELERATION:g}."
+                    f"Range {number}: `max_acceleration_mm_s2` is from {MIN_ACCELERATION:g} to {MAX_ACCELERATION:g}."
                 )
             fields["max_acceleration"] = value
         for key, raw_speed in (("speed_mm_s", speed), ("max_mm_s", most)):
@@ -270,7 +271,7 @@ def checked(wish: Any) -> list[SpeedRange]:
                 value = _number(raw_speed)
                 if value is None or not MIN_SPEED_MM_S <= value <= MAX_SPEED_MM_S:
                     raise SpeedByHeightError(
-                        f"Range {number}: {key} is from {MIN_SPEED_MM_S:g} to {MAX_SPEED_MM_S:g} mm/s."
+                        f"Range {number}: `{key}` is from {MIN_SPEED_MM_S:g} to {MAX_SPEED_MM_S:g} mm/s."
                     )
                 fields[key] = value
         if percent is not None:
@@ -594,7 +595,7 @@ def _asked_speeds(band: SpeedRange, stated: Mapping[str, float], family: str) ->
     if not stated:
         raise SpeedByHeightError(
             f"The range {band.span()} asks for {band.wanted()}, and this slice states no speeds to read that "
-            "against. Ask for speed_mm_s instead."
+            "against. Ask for `speed_mm_s` instead."
         )
     if band.max_mm_s is not None:
         return {key: band.max_mm_s for key, speed in stated.items() if speed > band.max_mm_s}
@@ -648,7 +649,7 @@ def plate_3mf(input_path: str, out_dir: str, *, bed_centre: tuple[float, float] 
     except (OSError, ValueError) as exc:
         raise SpeedByHeightError(
             f"{Path(input_path).name} could not be read as a mesh, so the speed ranges were not put into its "
-            f"slice: {exc}"
+            f"slice: {_plain_words.said(exc)}"
         ) from exc
     corner_ids: dict[tuple[float, ...], int] = {}
     rows = [
@@ -699,7 +700,7 @@ def with_ranges(
             raise SpeedByHeightError("This 3MF has no model Kiln can read, so the speed ranges were not put into its slice.")
         if any(n.lstrip("/") in _RANGE_MEMBER.values() for n in names):
             raise SpeedByHeightError(
-                "This 3MF already carries height ranges of its own. Slice it without speed_by_height, or take "
+                "This 3MF already carries height ranges of its own. Slice it without `speed_by_height`, or take "
                 "its ranges out in the slicer that made it."
             )
         objects = max(1, len(_BUILD_ITEM.findall(zin.read(root).decode("utf-8", errors="replace"))))
@@ -1054,7 +1055,7 @@ def sliced(
             raise SpeedByHeightError(
                 "The slicer did not apply every speed range, so no file was kept. "
                 + " ".join(o["said"] for o in refused)
-                + " Slice again without speed_by_height, or with other ranges.",
+                + " Slice again without `speed_by_height`, or with other ranges.",
                 code="SPEED_BY_HEIGHT_NOT_APPLIED", ranges=outcomes,
             )
         inside = {id(layer) for band in ranges for layer in _layers_in(made, band)}

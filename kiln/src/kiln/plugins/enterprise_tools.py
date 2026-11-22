@@ -194,7 +194,7 @@ class _EnterpriseToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Error in export_audit_trail")
-                return _srv._error_dict(f"Failed to export audit trail: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't export the audit trail: {exc}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # Safety profile locking
@@ -224,7 +224,7 @@ class _EnterpriseToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Error in lock_safety_profile")
-                return _srv._error_dict(f"Failed to lock safety profile: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't lock the safety profile: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=destructive("Unlock a safety profile"))
         @requires_tier(LicenseTier.ENTERPRISE)
@@ -256,7 +256,7 @@ class _EnterpriseToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Error in unlock_safety_profile")
-                return _srv._error_dict(f"Failed to unlock safety profile: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't unlock the safety profile: {exc}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # Team management
@@ -289,7 +289,7 @@ class _EnterpriseToolsPlugin:
                 return _usage_from_the_servers(printers, plan)
             except Exception as exc:
                 _logger.exception("Error in printer_usage_summary")
-                return _srv._error_dict(f"Failed to get printer usage: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't get the printer usage: {exc}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # Uptime
@@ -327,7 +327,7 @@ class _EnterpriseToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Error in encryption_status")
-                return _srv._error_dict(f"Failed to get encryption status: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't get the encryption status: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Database status"))
         @requires_tier(LicenseTier.ENTERPRISE)
@@ -366,7 +366,7 @@ class _EnterpriseToolsPlugin:
                 return info
             except Exception as exc:
                 _logger.exception("Error in database_status")
-                return _srv._error_dict(f"Failed to get database status: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Kiln couldn't get the database status: {exc}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # SSO (Enterprise)

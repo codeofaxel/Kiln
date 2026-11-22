@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.bench import AGENT_LEARN_LINE
 from kiln.cli_command import kiln_command
 from kiln.curve_resolution import AGENT_ADVICE
@@ -839,7 +840,7 @@ def install_skill(workspace_path: str, *, force: bool = False) -> dict[str, Any]
     try:
         source = get_skill_definition_path()
     except FileNotFoundError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
     # Prefer .dev/ if it exists, otherwise workspace root
     dev_dir = workspace / ".dev"

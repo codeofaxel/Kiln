@@ -15,6 +15,7 @@ import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
+from kiln import plain_words as _plain_words
 from kiln.printer_backends import REQUEST_OFFERS, backend_for
 from kiln.printers.base import (
     DEFAULT_LOAD_LENGTH_MM,
@@ -71,6 +72,17 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
             return default
         current = current.get(key, default)
     return current
+
+
+def _octoprint_words(response: Any) -> str:
+    """OctoPrint's own reason for refusing a request (``{"error": ...}``), as a
+    sentence, or ``""`` when the reply carries none."""
+    try:
+        message = _safe_get(response.json(), "error", default="")
+    except ValueError:
+        return ""
+    message = message.strip()[:300] if isinstance(message, str) else ""
+    return message if not message or message.endswith((".", "!", "?")) else message + "."
 
 
 def _map_flags_to_status(flags: dict[str, Any]) -> PrinterStatus:
@@ -510,49 +522,50 @@ class OctoPrintAdapter(PrinterAdapter):
                         body += " (truncated)"
                     sc = response.status_code
                     if sc in (401, 403):
-                        hint = (
-                            " OctoPrint refused the API key: it is missing, wrong, or its user lacks "
+                        said = (
+                            "OctoPrint refused the API key: it is missing, wrong, or its user lacks "
                             f"permission for this. Make a new one {_KEY_WHERE}"
                             + (f"; {_KEY_OFFER}." if _KEY_OFFER else ".")
                         )
                     elif sc == 404:
-                        hint = " Resource not found — the file or endpoint may not exist. Verify with `list_files()`."
+                        said = "OctoPrint doesn't have what Kiln asked for; the file may not be there. Check with `printer_files`."
                     elif sc == 409:
-                        hint = " Conflict — printer may be busy with another operation. Check `get_state()` first."
+                        said = "OctoPrint says the printer can't do that right now: " + (
+                            _octoprint_words(response)
+                            or "it may not be connected to OctoPrint, or it may be busy printing."
+                        ) + " Check `printer_status`, then try again."
+                    elif octoprint_said := _octoprint_words(response):
+                        said = (f"OctoPrint ran into a problem of its own: {octoprint_said}" if sc >= 500
+                                else f"OctoPrint refused it: {octoprint_said}")
                     else:
-                        hint = " Retry with `get_state()` to check printer status."
-                    raise PrinterError(
-                        f"OctoPrint returned HTTP {sc} for {method} {path}: {body}.{hint}",
-                    )
+                        said = "OctoPrint didn't complete the request. Check `printer_status`, then try again."
+                    raise PrinterError(said, detail=f"HTTP {sc} on {method} {path}: {body}")
 
                 # Retryable HTTP status -- fall through to backoff.
                 last_exc = PrinterError(
-                    f"OctoPrint returned HTTP {response.status_code} "
-                    f"for {method} {path} "
-                    f"(attempt {attempt + 1}/{self._retries}). "
-                    f"OctoPrint backend may be unavailable — check that the service is running. "
-                    f"Retry with `get_state()`."
+                    "OctoPrint isn't answering right now. Check that it's running, then try again.",
+                    detail=f"HTTP {response.status_code} on {method} {path} (try {attempt + 1} of {self._retries})",
                 )
 
             except Timeout as exc:
                 last_exc = PrinterError(
-                    f"{method} {path} timed out after {self._timeout}s. "
-                    f"Printer may be offline or overloaded. "
-                    f"(attempt {attempt + 1}/{self._retries})",
+                    f"The printer took longer than {self._timeout:g}s to answer. It may be off or busy.",
                     cause=exc,
+                    detail=f"{method} {path} (try {attempt + 1} of {self._retries})",
                 )
             except ReqConnectionError as exc:
                 last_exc = PrinterError(
-                    f"Could not connect to OctoPrint at {self._host} (attempt {attempt + 1}/{self._retries})",
+                    f"Kiln couldn't reach OctoPrint at {self._host}.",
                     cause=exc,
+                    detail=f"try {attempt + 1} of {self._retries}",
                 )
             except RequestException as exc:
                 # Non-transient request errors -- raise immediately.
                 raise PrinterError(
-                    f"Request error for {method} {path}: {exc}. "
-                    f"Cannot reach OctoPrint at {self._host}. Check network and that OctoPrint is running. "
-                    f"Retry with `get_state()`.",
+                    f"Kiln couldn't reach OctoPrint at {self._host}: {_plain_words.said(exc)}. "
+                    "Check the network, and that OctoPrint is running.",
                     cause=exc,
+                    detail=f"{method} {path}",
                 ) from exc
 
             # Exponential backoff: 1 s, 2 s, 4 s, ...
@@ -579,8 +592,9 @@ class OctoPrintAdapter(PrinterAdapter):
             return response.json()  # type: ignore[no-any-return]
         except ValueError as exc:
             raise PrinterError(
-                f"Invalid JSON in response from GET {path}",
+                "The printer sent back a reply Kiln couldn't read.",
                 cause=exc,
+                detail=f"invalid JSON from GET {path}",
             ) from exc
 
     def _post(
@@ -861,11 +875,11 @@ class OctoPrintAdapter(PrinterAdapter):
     def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
         """Abandon objects on a live multi-object print via ``M486``."""
         if not object_ids:
-            raise PrinterError("skip_objects requires at least one object id.")
+            raise PrinterError("`skip_objects` requires at least one object id.")
         try:
             ids = [int(x) for x in object_ids]
         except (TypeError, ValueError) as exc:
-            raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
+            raise PrinterError("The objects to skip must be given as whole-number ids.") from exc
         self._post("/api/printer/command", json={"commands": [f"M486 P{i}" for i in ids]})
         return self._http_accepted(f"Skip object(s) {', '.join(str(i) for i in ids)}")
 
@@ -909,15 +923,15 @@ class OctoPrintAdapter(PrinterAdapter):
         """Send Marlin M413 power-loss recovery positioning G-code."""
         # -- parameter validation ------------------------------------------
         if z_height_mm <= 0:
-            raise PrinterError(f"z_height_mm must be > 0, got {z_height_mm}.")
+            raise PrinterError(f"`z_height_mm` must be above 0, not {z_height_mm}.")
         if hotend_temp_c <= 0:
             raise PrinterError(f"Hotend temperature must be > 0°C, got {hotend_temp_c}°C.")
         self._validate_temp(hotend_temp_c, 300.0, "Hotend")
         self._validate_temp(bed_temp_c, 130.0, "Bed")
         if prime_length_mm < 0:
-            raise PrinterError(f"prime_length_mm must be >= 0, got {prime_length_mm}.")
+            raise PrinterError(f"`prime_length_mm` must be 0 or more, not {prime_length_mm}.")
         if z_clearance_mm <= 0 or z_clearance_mm > 10:
-            raise PrinterError(f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}.")
+            raise PrinterError(f"`z_clearance_mm` must be above 0 and at most 10, not {z_clearance_mm}.")
 
         fan_pwm = int(fan_speed_pct * 2.55)
         commands = build_firmware_resume_positioning(
@@ -938,7 +952,7 @@ class OctoPrintAdapter(PrinterAdapter):
             message=(
                 f"Firmware resume positioning complete for {fence(file_name)}{layer_info}. "
                 f"Z={z_height_mm}mm, hotend={hotend_temp_c}°C, bed={bed_temp_c}°C. "
-                f"Printer is positioned and ready — start the resume file via start_print."
+                f"Printer is positioned and ready — start the resume file via `start_print`."
             ),
         )
 
@@ -975,7 +989,7 @@ class OctoPrintAdapter(PrinterAdapter):
             success=True,
             message=(
                 "Asked OctoPrint to reconnect to the printer. Re-read "
-                "printer_status to confirm it came back ready."
+                "`printer_status` to confirm it came back ready."
             ),
         )
 
@@ -1051,7 +1065,7 @@ class OctoPrintAdapter(PrinterAdapter):
                 success=False,
                 message=(
                     f"Calibration option(s) {', '.join(repr(o) for o in unsupported)} "
-                    "not supported on OctoPrint. Only bed_leveling is available."
+                    "not supported on OctoPrint. Only `bed_leveling` is available."
                 ),
             )
 
@@ -1104,18 +1118,17 @@ class OctoPrintAdapter(PrinterAdapter):
             ) from exc
         except ReqConnectionError as exc:
             raise PrinterError(
-                "Webcam snapshot failed: could not connect. Check that the "
-                "webcam is configured in OctoPrint and the printer is online."
+                "Kiln couldn't get a picture from the webcam: it couldn't connect. Check that the "
+                "webcam is set up in OctoPrint and the printer is online."
             ) from exc
         except RequestException as exc:
             raise PrinterError(
-                f"Webcam snapshot failed: {exc}. "
-                "Check webcam configuration in OctoPrint. Retry with `get_snapshot()`.",
+                f"Kiln couldn't get a picture from the webcam: {_plain_words.said(exc)}. "
+                "Check the webcam's setup in OctoPrint.",
             ) from exc
         except Exception as exc:
             raise PrinterError(
-                f"Webcam snapshot failed unexpectedly: {exc}. "
-                "Retry with `get_snapshot()`.",
+                f"Kiln couldn't get a picture from the webcam: {_plain_words.said(exc)}.",
             ) from exc
 
     # ------------------------------------------------------------------
@@ -1235,12 +1248,12 @@ class OctoPrintAdapter(PrinterAdapter):
         try:
             state = self.get_state()
             if state.effective_state == PrinterStatus.PRINTING:
-                raise PrinterError("Cannot update firmware while printing. Wait for the current print to finish.")
+                raise PrinterError("Kiln can't update the firmware while printing. Wait for the current print to finish.")
         except PrinterError:
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Cannot verify printer is idle before firmware update: {exc}. Aborting for safety.",
+                f"Kiln can't verify the printer is idle before firmware update: {_plain_words.said(exc)}. Aborting for safety.",
                 cause=exc,
             ) from exc
 
@@ -1269,7 +1282,7 @@ class OctoPrintAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware update failed: {exc}. "
+                f"The firmware update didn't finish: {_plain_words.said(exc)}. "
                 "Check OctoPrint logs for details. Retry with `update_machine_firmware`.",
                 cause=exc,
             ) from exc

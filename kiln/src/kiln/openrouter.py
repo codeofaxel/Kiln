@@ -32,6 +32,7 @@ import os
 import sys
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.agent_loop import AgentConfig, AgentResult, run_agent_loop
 
 logger = logging.getLogger(__name__)
@@ -257,7 +258,7 @@ def agent_cli() -> None:
             # Continue the conversation
             conversation = result.messages
         except Exception as exc:
-            print(f"\nError: {exc}\n")
+            print(f"\nError: {_plain_words.said(exc)}\n")
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive
 
 
@@ -86,7 +87,7 @@ class _AuthToolsPlugin:
                 from kiln.cli.auth_commands import _detect_client_name, _hostname_label, _http_post
             except Exception as exc:  # pragma: no cover — helpers are in-package
                 return _srv._error_dict(
-                    f"kiln_signin: sign-in helpers unavailable: {exc}",
+                    f"Signing in isn't available on this install: {_plain_words.said(exc)}.",
                     code="SIGNIN_UNAVAILABLE",
                 )
 
@@ -104,7 +105,7 @@ class _AuthToolsPlugin:
                 # failure; surface its message rather than let it bubble.
                 _record_signin_stage("start_failed")
                 return _srv._error_dict(
-                    f"kiln_signin: could not start the sign-in flow: {exc}",
+                    f"Kiln couldn't start signing in: {_plain_words.said(exc)}.",
                     code="SIGNIN_START_FAILED",
                 )
 
@@ -161,8 +162,7 @@ class _AuthToolsPlugin:
             code = (device_code or "").strip()
             if not code:
                 return _srv._error_dict(
-                    "kiln_signin_poll: device_code is required "
-                    "(use the value from kiln_signin).",
+                    "Pass the `device_code` that `kiln_signin` gave you.",
                     code="INVALID_INPUT",
                 )
 
@@ -171,7 +171,7 @@ class _AuthToolsPlugin:
                 from kiln.cli.auth_commands import _complete_signin, _http_post
             except Exception as exc:  # pragma: no cover — helpers are in-package
                 return _srv._error_dict(
-                    f"kiln_signin_poll: sign-in helpers unavailable: {exc}",
+                    f"Signing in isn't available on this install: {_plain_words.said(exc)}.",
                     code="SIGNIN_UNAVAILABLE",
                 )
 
@@ -179,7 +179,7 @@ class _AuthToolsPlugin:
                 resp = _http_post("/api/auth/device/poll", {"device_code": code})
             except Exception as exc:
                 return _srv._error_dict(
-                    f"kiln_signin_poll: could not reach Kiln API: {exc}",
+                    f"Kiln couldn't reach its servers: {_plain_words.said(exc)}.",
                     code="SIGNIN_POLL_FAILED",
                 )
 
@@ -192,9 +192,9 @@ class _AuthToolsPlugin:
                 access_token = str(resp.get("access_token") or "")
                 if not access_token:
                     return _srv._error_dict(
-                        "kiln_signin_poll: sign-in succeeded but the "
-                        "server response carried no access_token.  "
-                        "Nothing was written locally.",
+                        "Signing in went through, but Kiln's servers didn't send "
+                        "back a sign-in, so nothing was saved on this computer. "
+                        "Start again with `kiln_signin`.",
                         code="TOKEN_RESPONSE_INCOMPLETE",
                     )
                 email = str(resp.get("email") or "")
@@ -212,8 +212,8 @@ class _AuthToolsPlugin:
                     }, door="chat")
                 except Exception as exc:
                     return _srv._error_dict(
-                        f"kiln_signin_poll: sign-in succeeded but the "
-                        f"token file could not be written: {exc}",
+                        f"Signing in went through, but Kiln couldn't save it on this "
+                        f"computer: {_plain_words.said(exc)}.",
                         code="TOKEN_WRITE_FAILED",
                     )
                 return {

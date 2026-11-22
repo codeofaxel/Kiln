@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import _vec
+from kiln import plain_words as _plain_words
 from kiln.openscad_runner import crashed_on_startup, run_openscad
 from kiln.quoted_text import fence
 
@@ -1353,7 +1354,7 @@ def measure_text_block_mm(
                 openscad = _find_openscad()
             except FileNotFoundError as exc:
                 raise TextMeasureError(
-                    f"OpenSCAD not found for text probe: {exc}"
+                    "OpenSCAD isn't installed, so Kiln can't measure the text."
                 ) from exc
             try:
                 proc = run_openscad(
@@ -1363,7 +1364,7 @@ def measure_text_block_mm(
                 )
             except (subprocess.TimeoutExpired, OSError) as exc:
                 raise TextMeasureError(
-                    f"text probe did not run: {exc}"
+                    f"Kiln couldn't measure the text: {_plain_words.said(exc)}."
                 ) from exc
             if proc.returncode != 0 or not os.path.exists(stl):
                 raise TextMeasureError(
@@ -2672,7 +2673,8 @@ def compile_embossed_model(
             "file_size": 0,
             "compile_time_seconds": 0.0,
             "success": False,
-            "error": str(exc),
+            "error": _plain_words.sentence(exc),
+            **_plain_words.detail_field(exc),
         }
 
     import os as _os

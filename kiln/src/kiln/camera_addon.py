@@ -28,6 +28,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.printers.base import CameraStreamError, ExternalCamera
 
 ADDON = "camera"
@@ -615,7 +616,7 @@ def _check_program(program: str, *, runner: Callable[..., Any] | None = None) ->
             argv, capture_output=True, text=True, timeout=_CHECK_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001 -- a program that cannot start is the finding
-        return f"The program did not run on this computer ({exc})."
+        return f"The program did not run on this computer ({_plain_words.said(exc)})."
     if proc.returncode != 0:
         return "The program did not run on this computer."
     listed = f"{proc.stdout or ''}\n{proc.stderr or ''}".split()

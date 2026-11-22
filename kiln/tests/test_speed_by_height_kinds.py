@@ -98,10 +98,10 @@ def _with(changes: dict[str, Any], first: float, last: float) -> dict[float, dic
 class TestTheWishItself:
     @pytest.mark.parametrize(("wish", "says"), [
         ([{"from_mm": 0, "to_mm": 4, "max_mm_s": 30, "percent": 50}], "needs one speed"),
-        ([{"from_mm": 0, "to_mm": 4, "max_mm_s": 5000}], "max_mm_s is from 1 to 1000"),
-        ([{"from_mm": 0, "to_mm": 4, "percent": 120, "lines": "walls"}], 'lines is "all" or "inside"'),
-        ([{"from_mm": 0, "to_mm": 4, "max_mm_s": 30, "lines": "inside"}], "goes with speed_mm_s or percent"),
-        ([{"from_mm": 0, "to_mm": 4, "max_acceleration_mm_s2": 5}], "max_acceleration_mm_s2 is from 100 to 50000"),
+        ([{"from_mm": 0, "to_mm": 4, "max_mm_s": 5000}], "`max_mm_s` is from 1 to 1000"),
+        ([{"from_mm": 0, "to_mm": 4, "percent": 120, "lines": "walls"}], '`lines` is "all" or "inside"'),
+        ([{"from_mm": 0, "to_mm": 4, "max_mm_s": 30, "lines": "inside"}], "goes with `speed_mm_s` or `percent`"),
+        ([{"from_mm": 0, "to_mm": 4, "max_acceleration_mm_s2": 5}], "`max_acceleration_mm_s2` is from 100 to 50000"),
     ])
     def test_a_range_that_cannot_be_printed_as_said_is_refused(self, wish, says):
         with pytest.raises(sbh.SpeedByHeightError, match=says):

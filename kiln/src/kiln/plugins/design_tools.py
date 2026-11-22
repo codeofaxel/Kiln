@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, read_only
 
 _logger = logging.getLogger(__name__)
@@ -173,7 +174,7 @@ class _DesignToolsPlugin:
                 _logger.error(
                     "analyze_design_requirements failed: %s", exc, exc_info=True,
                 )
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Build a generation prompt"))
         def build_generation_prompt(
@@ -221,7 +222,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Build generation prompt failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Audit an original design"))
         def audit_original_design(
@@ -322,10 +323,10 @@ class _DesignToolsPlugin:
                 result["message"] = f"{said}  {outcome}".strip()
                 return result
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error("Original design audit failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Get material design profile"))
         def get_material_design_profile(material: str) -> dict:
@@ -352,7 +353,7 @@ class _DesignToolsPlugin:
                 return result
             except Exception as exc:
                 _logger.error("Material profile failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("List design materials"))
         def list_design_materials() -> dict:
@@ -384,7 +385,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("List materials failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Recommend a design material"))
         def recommend_design_material(
@@ -591,7 +592,7 @@ class _DesignToolsPlugin:
                 return result
             except Exception as exc:
                 _logger.error("Material recommendation failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Estimate structural load"))
         def estimate_structural_load(
@@ -684,7 +685,7 @@ class _DesignToolsPlugin:
                 return {**estimate, "success": True}
             except Exception as exc:
                 _logger.error("Load estimation failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Check material for an environment"))
         def check_material_environment(
@@ -747,7 +748,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         def get_printer_design_capabilities(printer_id: str) -> dict:
             """Get the design capability profile for a printer.
@@ -778,7 +779,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         def list_printer_design_profiles() -> dict:
             """List all known printer design capability profiles."""
@@ -797,7 +798,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Get design template info"))
         def get_design_template_info(template: str) -> dict:
@@ -863,7 +864,7 @@ class _DesignToolsPlugin:
                 return result
             except Exception as exc:
                 _logger.error("Design template failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Browse design templates"))
         def list_design_templates_catalog() -> dict:
@@ -908,7 +909,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("List templates failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Find design templates"))
         def find_design_templates(use_case: str) -> dict:
@@ -962,7 +963,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Find templates failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Match design requirements"))
         def match_design_requirements(description: str) -> dict:
@@ -991,7 +992,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Match requirements failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
         @mcp.tool(annotations=read_only("Validate design against requirements"))
@@ -1028,10 +1029,10 @@ class _DesignToolsPlugin:
                 result["success"] = True
                 return result
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error("Design validation failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
         # ── Troubleshooting, compatibility, and diagnostics ──────────────
@@ -1090,7 +1091,7 @@ class _DesignToolsPlugin:
                 return out
             except Exception as exc:
                 _logger.error("Troubleshoot failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Check printer material compatibility"))
         def check_printer_material_compatibility(
@@ -1147,7 +1148,7 @@ class _DesignToolsPlugin:
                 return out
             except Exception as exc:
                 _logger.error("Compatibility check failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Post-processing guide"))
         def get_post_processing_guide(
@@ -1246,9 +1247,9 @@ class _DesignToolsPlugin:
                         return {
                             "success": False,
                             "error": (
-                                f"Unknown post-processing goal '{goal}'. "
-                                "Use surface_finish, paint, strengthen, or one "
-                                f"of: {', '.join(names)}"
+                                f"Kiln doesn't know the finishing goal '{goal}'. "
+                                "Use `surface_finish`, `paint`, `strengthen`, or one "
+                                f"of: {', '.join(names)}."
                             ),
                         }
                     answer = {"technique": match}
@@ -1263,7 +1264,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Post-processing guide failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Check multi-material pairing"))
         def check_multi_material_pairing(
@@ -1308,7 +1309,7 @@ class _DesignToolsPlugin:
                 return out
             except Exception as exc:
                 _logger.error("Multi-material check failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Print diagnostic"))
         def get_print_diagnostic(
@@ -1372,7 +1373,7 @@ class _DesignToolsPlugin:
                 return out
             except Exception as exc:
                 _logger.error("Print diagnostic failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         # ── Cost estimation ─────────────────────────────────────────────────
 
@@ -1448,13 +1449,13 @@ class _DesignToolsPlugin:
                 return result
             except FileNotFoundError as exc:
                 _logger.error("Cost estimation file not found: %s", exc)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except ValueError as exc:
                 _logger.error("Cost estimation invalid input: %s", exc)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error("Cost estimation failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         # ── Parametric OpenSCAD tools ──────────────────────────────────────
 
@@ -1496,7 +1497,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Build parametric prompt failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Parse OpenSCAD parameters"))
         def parse_scad_parameters(scad_code: str) -> dict:
@@ -1527,7 +1528,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Parse SCAD parameters failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Change an OpenSCAD parameter"))
         def update_scad_parameter(
@@ -1558,10 +1559,10 @@ class _DesignToolsPlugin:
                     "message": f"Updated {parameter_name} to {new_value}.",
                 }
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error("Update SCAD parameter failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Validate OpenSCAD parameters"))
         def validate_scad_parameters(
@@ -1596,7 +1597,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Validate SCAD parameters failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         # ── Library component tools ─────────────────────────────────────
 
@@ -1630,7 +1631,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("List components failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Match design components"))
         def match_design_components(description: str) -> dict:
@@ -1665,7 +1666,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Match components failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
         @mcp.tool(annotations=creates("Compile OpenSCAD"))
@@ -1782,7 +1783,7 @@ class _DesignToolsPlugin:
                     with open(scad_path, encoding="utf-8") as f:
                         code = f.read()
                 if not code:
-                    return {"success": False, "error": "Provide scad_code or scad_path"}
+                    return {"success": False, "error": "Give `scad_code` or `scad_path`."}
 
                 build = compile_scad_source(code, timeout=timeout)
                 stl_path = build.stl_path
@@ -1880,10 +1881,10 @@ class _DesignToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error("Compile SCAD failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=creates("Tweak and compile OpenSCAD"))
         def tweak_and_compile_scad(
@@ -1963,12 +1964,12 @@ class _DesignToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error(
                     "Tweak and compile failed: %s", exc, exc_info=True
                 )
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Analyze OpenSCAD code"))
         def analyze_scad_code(scad_code: str) -> dict:
@@ -1997,7 +1998,7 @@ class _DesignToolsPlugin:
                 _logger.error(
                     "Analyze SCAD failed: %s", exc, exc_info=True
                 )
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Replace an OpenSCAD module"))
         def modify_scad_module(
@@ -2026,12 +2027,12 @@ class _DesignToolsPlugin:
                     "message": f"Replaced module {module_name!r}.",
                 }
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error(
                     "Modify SCAD module failed: %s", exc, exc_info=True
                 )
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Insert into an OpenSCAD module"))
         def insert_into_scad(
@@ -2065,12 +2066,12 @@ class _DesignToolsPlugin:
                     "message": f"Inserted code into module {module_name!r} at {position}.",
                 }
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error(
                     "Insert into SCAD failed: %s", exc, exc_info=True
                 )
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
         # ── Design DNA ───────────────────────────────────────────────
@@ -2125,10 +2126,10 @@ class _DesignToolsPlugin:
                     "message": f"Cached design {entry.id} with parametric source.",
                 }
             except (FileNotFoundError, ValueError) as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error("cache_design_with_source failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Get design source"))
         def get_design_source(design_id: str) -> dict:
@@ -2164,7 +2165,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("get_design_source failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Analyze warping risk"))
         def analyze_warping_risk(
@@ -2240,7 +2241,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Warping analysis failed: %s", exc, exc_info=True)
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         # ---------------------------------------------------------------
         # Brand filament profiles
@@ -2385,7 +2386,7 @@ class _DesignToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in resolve_filament_profile")
                 return _srv._error_dict(
-                    f"Failed to resolve filament: {exc}",
+                    f"Kiln couldn't find the filament: {_plain_words.said(exc)}.",
                     code="INTERNAL_ERROR",
                 )
 

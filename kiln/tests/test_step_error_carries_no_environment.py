@@ -59,4 +59,4 @@ def test_one_variable_is_never_cut_out_of_the_middle_of_another(monkeypatch) -> 
     with pytest.raises(StepImportError) as caught:
         _parse_kiln_result(_finished("OLDPWD=/work/kiln-secret-dir\nPWD=/work\nno shapes\n"), "FreeCAD")
     message = str(caught.value)
-    assert "kiln-secret-dir" not in message and message.endswith("stdout: no shapes")
+    assert "kiln-secret-dir" not in message and message.endswith("It said: no shapes")
