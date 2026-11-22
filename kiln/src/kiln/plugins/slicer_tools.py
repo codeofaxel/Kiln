@@ -3087,9 +3087,8 @@ class _SlicerToolsPlugin:
                     gentler acceleration in the range, on a slicer that can hold
                     it by height (Bambu Studio).  Or ``"kiln"``: Kiln chooses the
                     ranges from the part's own shape, gentle where it would sway
-                    and quicker where there is room, and says why (Kiln Pro,
-                    https://kiln3d.com/pricing; no plan is ever guessed when the
-                    answer does not arrive).  Their slicer applies the ranges and the
+                    and quicker where there is room, and says why (Kiln Pro; no
+                    plan is ever guessed when the answer does not arrive).  Their slicer applies the ranges and the
                     sliced file is read back: the response's ``speed_by_height``
                     says, for each range, what was asked, what the file commands,
                     and whether it was applied, was already that slow, or was held
