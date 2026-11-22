@@ -19964,6 +19964,19 @@ def get_printer_intelligence(printer_id: str) -> dict:
         return _error_dict(f"Unexpected error in get_printer_intelligence: {exc}", code="INTERNAL_ERROR")
 
 
+#: What a settings answer made on an install without kiln-pro says about the
+#: printer's notes it does not carry, in :func:`kiln.served_answer.sentence`'s parts.
+_PRINTER_NOTES_ON_THE_LINE = (
+    "Kiln's notes on printing this plastic on this printer come from Kiln's servers, "
+    "free with any Kiln account"
+)
+#: Said when no served ask was made for this answer, so no cause can be named.
+_PRINTER_NOTES_NOT_ASKED = (
+    f"{_PRINTER_NOTES_ON_THE_LINE}. This answer gives the settings without them; "
+    "ask through Kiln's printer tools while signed in to get them."
+)
+
+
 @mcp.tool(annotations=read_only("Get material slicer settings"))
 def get_material_recommendation(
     printer_id: str,
@@ -19992,7 +20005,7 @@ def get_material_recommendation(
                 code="NOT_FOUND",
             )
         intel = get_printer_intel(printer_id)
-        return {
+        result = {
             "success": True,
             "printer": intel.display_name,
             "material": material.upper(),
@@ -20001,6 +20014,21 @@ def get_material_recommendation(
             "fan_speed": mp.fan,
             "notes": mp.notes,
         }
+        if not mp.notes:
+            # The notes come from Kiln's servers for any signed-in account; an
+            # answer made on an install without kiln-pro says why they are missing.
+            from kiln import served_public
+
+            note, why = served_public.why_made_here(
+                _PRINTER_NOTES_ON_THE_LINE,
+                cannot="get them",
+                wont="gives the settings without them",
+                not_asked=_PRINTER_NOTES_NOT_ASKED,
+            )
+            if note:
+                result["notes_note"] = note
+                result.update(why)
+        return result
     except KeyError:
         return _error_dict(
             f"No intelligence data for '{printer_id}'.",
@@ -20075,6 +20103,21 @@ def _hms_reference(code: str) -> tuple[str | None, str, Any]:
     kind = "hms" if len(code.replace("_", "")) >= 16 else "print_error"
     fault = read_bambu_fault(code, kind=kind)
     return fault.url, kind, fault
+
+
+#: What an answer made on an install without kiln-pro says about the known
+#: failures it does not carry, in :func:`kiln.served_answer.sentence`'s parts.
+#: The same answer comes from Kiln's servers for any signed-in account.
+_PRINTER_FAILURES_ON_THE_LINE = (
+    "Kiln's known failures for this printer model, with their causes and fixes, "
+    "come from Kiln's servers, free with any Kiln account"
+)
+_PRINTER_FAILURES_WONT = "gives only what is kept on this computer"
+#: Said when no served ask was made for this answer, so no cause can be named.
+_PRINTER_FAILURES_NOT_ASKED = (
+    f"{_PRINTER_FAILURES_ON_THE_LINE}. This answer {_PRINTER_FAILURES_WONT}; "
+    "ask through Kiln's printer tools while signed in to get them."
+)
 
 
 @mcp.tool(annotations=read_only("Troubleshoot printer"))
@@ -20201,9 +20244,19 @@ def troubleshoot_printer(
         # would have been welcome. The claim is the shared one every rationed
         # line in Kiln counts against, so two surfaces cannot each spend
         # their own "once".
+        from kiln import served_public
         from kiln.tiers_and_terms import claim_once
 
-        if has_private_depth:
+        # No plan holds a printer's known failures back: Kiln's servers give
+        # them to every signed-in account.  So an answer made on an install
+        # without kiln-pro pitches nothing and says why they are missing.
+        matches_note, matches_why = ("", {}) if has_private_depth else served_public.why_made_here(
+            _PRINTER_FAILURES_ON_THE_LINE,
+            cannot="get them",
+            wont=_PRINTER_FAILURES_WONT,
+            not_asked=_PRINTER_FAILURES_NOT_ASKED,
+        )
+        if has_private_depth or matches_note:
             upgrade_hint = ""
         else:
             # A reading kiln-pro just put on the wire (a free row, served to
@@ -20257,6 +20310,9 @@ def troubleshoot_printer(
             "count": len(matches),
             "upgrade_hint": upgrade_hint,
         }
+        if matches_note:
+            result["matches_note"] = matches_note
+            result.update(matches_why)
         if fault_readings:
             result["fault_readings"] = fault_readings
         if reading_note is not None and claim_once(f"fault_reading.note.{reading_note[1].get('why')}"):
@@ -23532,6 +23588,10 @@ def check_printer_material_support(
                 result["note"] = reason["line"]
                 if reason.get("why_generic"):
                     result["why_generic"] = reason["why_generic"]
+                    # The miss this note names, set as an answer made here
+                    # carries it, so it is said once.
+                    result["why"] = reason["why_generic"]
+                    result["why_code"] = reason.get("why_code", "")
             else:
                 result["note"] = (
                     f"No compatibility profile for '{printer_id}'; this answer comes "
@@ -23539,6 +23599,11 @@ def check_printer_material_support(
                     + (f" Did you mean: {', '.join(nearest)}?" if nearest else "")
                 )
             result["suggested_printer_ids"] = nearest
+        else:
+            # This printer's verdict without its notes: say why.
+            from kiln.design_intelligence import compat_notes_note
+
+            result.update(compat_notes_note(report))
         mat_lower = material_id.lower()
         if mat_lower in report.materials:
             mat_info = report.materials[mat_lower]

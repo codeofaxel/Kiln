@@ -3466,6 +3466,45 @@ def compat_floor_reason(printer_id: str) -> dict[str, str] | None:
     return {"roster_id": roster_id, "line": line, "why_generic": cause, "why_code": str(getattr(miss, "code", "") or "")}
 
 
+#: What a compatibility answer made on an install without kiln-pro says about
+#: the printer's notes it does not carry, in :func:`kiln.served_answer.sentence`'s
+#: parts.  The same answer comes from Kiln's servers for any signed-in account.
+_COMPAT_NOTES_ON_THE_LINE = (
+    "Kiln's notes on how this printer handles each plastic come from Kiln's servers, "
+    "free with any Kiln account"
+)
+_COMPAT_NOTES_WONT = "gives the verdict without them"
+#: Said when no served ask was made for this answer, so no cause can be named.
+_COMPAT_NOTES_NOT_ASKED = (
+    f"{_COMPAT_NOTES_ON_THE_LINE}. This answer {_COMPAT_NOTES_WONT}; "
+    "ask through Kiln's printer tools while signed in to get them."
+)
+
+
+def compat_notes_note(report: PrinterCompatibilityReport) -> dict[str, Any]:
+    """``{"notes_note": ..., "why": ...}`` for a compatibility answer that
+    carries this printer's own verdict without its notes, made on an install
+    without kiln-pro; ``{}`` otherwise.  An answer from the generic floor
+    already says why in its own note (:func:`compat_floor_reason`)."""
+    if getattr(report, "resolved_from", "default") == "default":
+        return {}
+    bare = any(
+        isinstance(entry, dict) and entry.get("status") != "unknown" and not entry.get("notes")
+        for entry in (getattr(report, "materials", None) or {}).values()
+    )
+    if not bare:
+        return {}
+    from kiln import served_public
+
+    note, why = served_public.why_made_here(
+        _COMPAT_NOTES_ON_THE_LINE,
+        cannot="get them",
+        wont=_COMPAT_NOTES_WONT,
+        not_asked=_COMPAT_NOTES_NOT_ASKED,
+    )
+    return {"notes_note": note, **why} if note else {}
+
+
 # ---------------------------------------------------------------------------
 # Public API — Post-Processing
 # ---------------------------------------------------------------------------
