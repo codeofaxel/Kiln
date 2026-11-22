@@ -94,6 +94,12 @@ _MISSES = [
 ]
 
 
+def bridge_general_keys() -> tuple[str, ...]:
+    from kiln._pro_finishing_bridge import GENERAL_KEYS
+
+    return GENERAL_KEYS
+
+
 class TestTheGuide:
     def test_the_overview_is_rebuilt_from_the_served_answer(self, monkeypatch):
         sent = _serve(monkeypatch, _OVERVIEW)
@@ -132,6 +138,21 @@ class TestTheGuide:
         assert set(out) == {"success", "material", "goal", "answer", "upgrade_hint"}
         assert out["answer"]["technique"] == technique
 
+    def test_the_general_answer_is_relayed_with_its_own_line_and_no_second_pitch(self, monkeypatch):
+        general = {
+            "success": True,
+            "status": "ok",
+            "material": "pla",
+            "general": True,
+            "techniques": [{"name": "Technique A", "safety_notes": _NOTE}],
+            "strengthening_cautions": [{"method": "Method B", "safety_notes": _NOTE}],
+            "message": "Only the safety notes for this plastic today.",
+        }
+        _serve(monkeypatch, general)
+        out = _tools()["get_post_processing_guide"]("pla", "strengthen")
+        assert out == {"success": True, **{k: general[k] for k in bridge_general_keys()}}
+        assert "upgrade_hint" not in out and "basic" not in out
+
     @pytest.mark.parametrize("code", ["NO_FINISHING_DATA", "UNKNOWN_GOAL", "VALIDATION_ERROR"])
     def test_the_servers_own_no_is_the_doors_answer(self, code, monkeypatch):
         _serve(
@@ -153,6 +174,8 @@ class TestTheGuide:
         assert out["techniques"] == cautions("pla")[1]
         assert all(set(t) == {"name", "safety_notes"} and t["safety_notes"].strip() for t in out["techniques"])
         assert not {"steps", "answer", "paintability", "strengthening", "upgrade_hint"} & set(out)
+        annealing = [c for c in out["strengthening_cautions"] if c["method"] == "Annealing"]
+        assert annealing and "warp" in annealing[0]["safety_notes"]
         assert "Kiln can't" in out["message"] and fix in out["message"]
         assert "PLA" in out["message"]
         assert "%" not in json.dumps(out)

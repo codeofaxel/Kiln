@@ -18,6 +18,12 @@
         "name": "Epoxy Coating",
         "safety_notes": "Work in ventilated area. Wear nitrile gloves — uncured epoxy is a skin sensitizer."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "pla_plus": {
@@ -33,6 +39,12 @@
       {
         "name": "Epoxy Coating",
         "safety_notes": "Ventilated area. Nitrile gloves required."
+      }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
       }
     ]
   },
@@ -114,6 +126,12 @@
         "name": "Epoxy Coating",
         "safety_notes": "Ventilated area. Nitrile gloves required."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "cf_pla": {
@@ -129,6 +147,12 @@
       {
         "name": "Painting",
         "safety_notes": "Wet sand preparation to contain fiber dust."
+      }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
       }
     ]
   },
@@ -146,6 +170,12 @@
         "name": "Painting",
         "safety_notes": "Wet sand preparation. Standard painting ventilation."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "petg_cf": {
@@ -162,6 +192,12 @@
         "name": "Painting",
         "safety_notes": "Wet sand to contain fiber dust."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "pet_cf": {
@@ -177,6 +213,12 @@
       {
         "name": "Painting",
         "safety_notes": "Wet sand to contain fiber dust."
+      }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       }
     ]
   },
@@ -206,6 +248,12 @@
         "name": "Epoxy Coating",
         "safety_notes": "Ventilated area. Nitrile gloves."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "cf_nylon": {
@@ -222,6 +270,12 @@
         "name": "Painting",
         "safety_notes": "Wet sand to contain fiber dust. Standard painting ventilation."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "pa6_gf": {
@@ -237,6 +291,12 @@
       {
         "name": "Painting",
         "safety_notes": "Wet sand to contain glass fiber dust."
+      }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       }
     ]
   },
@@ -258,6 +318,12 @@
         "name": "Epoxy Coating",
         "safety_notes": "Ventilated area. Nitrile gloves."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "pc_abs": {
@@ -273,6 +339,12 @@
       {
         "name": "Painting",
         "safety_notes": "Standard painting precautions."
+      }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       }
     ]
   },
@@ -302,6 +374,12 @@
         "name": "Epoxy Coating",
         "safety_notes": "Work in ventilated area. Wear nitrile gloves — uncured epoxy is a skin sensitizer."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "petg_hf": {
@@ -318,6 +396,12 @@
         "name": "Epoxy Coating",
         "safety_notes": "Ventilated area. Nitrile gloves required."
       }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+      }
     ]
   },
   "pla_tough": {
@@ -333,6 +417,12 @@
       {
         "name": "Epoxy Coating",
         "safety_notes": "Work in ventilated area. Wear nitrile gloves — uncured epoxy is a skin sensitizer."
+      }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
       }
     ]
   },
@@ -393,6 +483,12 @@
       {
         "name": "PP-Compatible Adhesive Bonding",
         "safety_notes": "Primer contains adhesion promoter chemicals — ventilated area, nitrile gloves."
+      }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       }
     ]
   },
@@ -557,6 +653,12 @@
       {
         "name": "Heat-set inserts and bonding",
         "safety_notes": "Ventilate while mixing epoxy. Dry the part before bonding."
+      }
+    ],
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       }
     ]
   },

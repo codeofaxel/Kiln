@@ -1159,11 +1159,21 @@ class _DesignToolsPlugin:
             Pass ``surface_finish``, ``paint``, ``strengthen``, or the name of
             one listed technique. Omitting ``goal`` returns a compact
             compatibility overview rather than the complete guide.  Every
-            technique named carries its safety notes.
+            technique named carries its safety notes, and so does every way
+            of strengthening that carries a caution (annealing, where it is
+            suggested).  Each strengthening method says its effect in words.
+
+            Free on every plan with a Kiln account.  Below Kiln Business a
+            seat gets the full guide for a few distinct plastics a day; past
+            that the answer is ``general: true``: ``techniques`` and
+            ``strengthening_cautions``, each with its safety notes only, and
+            ``message`` saying so and when it renews.  Relay the safety notes
+            whole.
 
             When Kiln's finishing guide cannot be had (offline, signed out, no
             answer), the answer is ``basic: true``: ``techniques``, each finish
-            the plastic takes with its safety notes (only the one named, when
+            the plastic takes with its safety notes, and ``strengthening_cautions``, each
+            caution about strengthening it (only the one finish named, when
             ``goal`` names one of them), or ``steps``, one general step with its
             safety notes for a plastic not listed; and ``message`` saying why
             the rest of the guide is missing and how to get it.  Relay the
@@ -1189,7 +1199,8 @@ class _DesignToolsPlugin:
                         return {"success": False, "error": asked.error}
                     return finishing.basic_guide(asked.miss, material, goal)
                 reply = finishing.reply_from(asked.answer)
-                reply["upgrade_hint"] = _upgrade_hint("post_processing")
+                if not reply.get("general"):
+                    reply["upgrade_hint"] = _upgrade_hint("post_processing")
                 return reply
             except Exception as exc:
                 _logger.error("Post-processing guide failed: %s", exc, exc_info=True)

@@ -14,9 +14,10 @@ any signed-in account; nothing sent is kept.  Two ways in, in order:
 
 A miss (offline, signed out, no answer, refused) is never a finishing answer,
 and never silent about safety.  The guide answers basic instead
-(:func:`basic_guide`): each finish the plastic takes, by name, with its
-safety notes, read from the bundled cautions table (:data:`CAUTIONS_FILE`),
-or only the finish the caller named when it is one of them; for a plastic
+(:func:`basic_guide`): each finish the plastic takes, by name, and each way
+of strengthening it that carries a caution, every one with its safety notes,
+read from the bundled cautions table (:data:`CAUTIONS_FILE`), or only the
+finish the caller named when it is one of them; for a plastic
 the table does not list, one textbook step that suits any plastic with its
 own safety note.  Either is marked ``basic`` and carries one line
 (:func:`basic_line`, in :mod:`kiln.served_answer`'s voice) saying why the
@@ -66,6 +67,10 @@ TIPS_TIMEOUT_S: float = 4.0
 #: The guide's reply keys, in order, with no goal and with one.
 OVERVIEW_KEYS = ("material", "available_goals", "techniques", "paintability", "strengthening")
 GOAL_KEYS = ("material", "goal", "answer")
+#: The reply keys of the general answer Kiln's servers give when the caller's
+#: daily allowance of distinct plastics is used: each finish and caution of
+#: the plastic with its safety notes, and the line saying why.
+GENERAL_KEYS = ("material", "general", "techniques", "strengthening_cautions", "message")
 
 #: Each plastic's finishes with their safety notes: what a miss still says.
 CAUTIONS_FILE = Path(__file__).parent / "data" / "design_knowledge" / "finishing_cautions.json"
@@ -218,6 +223,12 @@ def _read_guide(answer: Any) -> Asked:
 def _is_guide(answer: dict[str, Any]) -> bool:
     if not isinstance(answer.get("material"), str):
         return False
+    if answer.get("general") is True:
+        return (
+            isinstance(answer.get("techniques"), list)
+            and isinstance(answer.get("strengthening_cautions"), list)
+            and isinstance(answer.get("message"), str)
+        )
     if "goal" in answer:
         return isinstance(answer.get("goal"), str) and isinstance(answer.get("answer"), dict)
     return (
@@ -230,8 +241,11 @@ def _is_guide(answer: dict[str, Any]) -> bool:
 
 def reply_from(answer: dict[str, Any]) -> dict[str, Any]:
     """The guide door's reply rebuilt from Kiln's answer, key for key, before
-    its upgrade line is added."""
-    keys = GOAL_KEYS if "goal" in answer else OVERVIEW_KEYS
+    its upgrade line is added (a general answer carries its own line)."""
+    if answer.get("general") is True:
+        keys = GENERAL_KEYS
+    else:
+        keys = GOAL_KEYS if "goal" in answer else OVERVIEW_KEYS
     return {"success": True, **{key: answer[key] for key in keys}}
 
 
@@ -280,6 +294,20 @@ def _cautions_table() -> dict[str, Any]:
         logger.warning("finishing cautions table unreadable: %s", CAUTIONS_FILE, exc_info=True)
         return {}
     return {key: value for key, value in raw.items() if not key.startswith("_") and isinstance(value, dict)}
+
+
+def strengthening_cautions(material: Any) -> list[dict[str, str]]:
+    """Each way of strengthening *material* that carries a caution, each
+    ``{"method", "safety_notes"}``, from the bundled cautions table; empty for
+    a plastic it lists none for."""
+    if not isinstance(material, str):
+        return []
+    record = _cautions_table().get(material.lower()) or {}
+    return [
+        {"method": str(s["method"]), "safety_notes": str(s["safety_notes"])}
+        for s in record.get("strengthening") or []
+        if isinstance(s, dict) and s.get("method") and str(s.get("safety_notes") or "").strip()
+    ]
 
 
 def cautions(material: Any) -> tuple[str, list[dict[str, str]]] | None:
@@ -344,10 +372,12 @@ def basic_guide(miss: Miss | None, material: Any, goal: Any = None) -> dict[str,
     """The guide's answer when Kiln's could not be had.
 
     For a plastic the cautions table lists: ``techniques``, each finish it
-    takes with its safety notes (only the one the caller named, when *goal*
-    names one of them).  Otherwise ``steps``, the one general step.  Either
-    way ``basic: True``, the line saying why and its machine-readable twin;
-    never a tool, a paint or a strength figure."""
+    takes with its safety notes, and ``strengthening_cautions``, each way of
+    strengthening it that carries a caution with its safety notes (only the
+    finish the caller named, when *goal* names one of them).  Otherwise
+    ``steps``, the one general step.  Either way ``basic: True``, the line
+    saying why and its machine-readable twin; never a tool, a paint or a
+    strength figure."""
     miss = miss or Miss("unanswered", detail="no finishing guide")
     listed = cautions(material)
     if listed is None:
@@ -359,15 +389,17 @@ def basic_guide(miss: Miss | None, material: Any, goal: Any = None) -> dict[str,
             **fields(miss),
         }
     key, finishes = listed
+    strengthening = strengthening_cautions(material)
     if isinstance(goal, str) and goal.strip().lower().replace("-", "_").replace(" ", "_") not in GOAL_WORDS:
         named = find_technique(finishes, goal)
         if named is not None:
-            finishes = [named]
+            finishes, strengthening = [named], []
     return {
         "success": True,
         "basic": True,
         "material": key,
         "techniques": [dict(finish) for finish in finishes],
+        "strengthening_cautions": strengthening,
         "message": basic_line(miss, material, finishes_named=True),
         **fields(miss),
     }
@@ -398,6 +430,7 @@ __all__ = [
     "CAUTIONS_FILE",
     "DOOR_CODES",
     "FEATURE",
+    "GENERAL_KEYS",
     "GOAL_KEYS",
     "GOAL_WORDS",
     "LOCAL_MODULE",
@@ -413,6 +446,7 @@ __all__ = [
     "guide",
     "refusal_for",
     "reply_from",
+    "strengthening_cautions",
     "technique_core",
     "tips",
     "tips_line",
