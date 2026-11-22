@@ -548,21 +548,26 @@ def compute_gcode_bbox(
 
 
 def compute_3mf_bbox(
-    threemf_path: str, *, max_lines: int = 200_000
+    threemf_path: str, *, max_lines: int = 200_000, plate_number: int | None = None
 ) -> dict[str, Any] | None:
-    """Extract embedded gcode from a Bambu .gcode.3mf and compute its XY bounding box from the G0/G1 moves."""
-    with _plate_gcode_file(threemf_path) as gcode_path:
+    """Extract embedded gcode from a Bambu .gcode.3mf and compute its XY bounding box from the G0/G1 moves (plate *plate_number*'s when named)."""
+    with _plate_gcode_file(threemf_path, plate_number) as gcode_path:
         return compute_gcode_bbox(gcode_path, max_lines=max_lines) if gcode_path else None
 
 
 @contextlib.contextmanager
-def _plate_gcode_file(threemf_path: str) -> Any:
+def _plate_gcode_file(threemf_path: str, plate_number: int | None = None) -> Any:
     """The plate a .gcode.3mf prints, unpacked to a temp G-code file for the readers that take a path -- ``None`` when the archive has none."""
     gcode_bytes: bytes | None = None
     if Path(threemf_path).is_file():
         try:
             with UntrustedZipFile(threemf_path) as zf:
-                member = sliced_gcode_member(zf)
+                if plate_number is None:
+                    member = sliced_gcode_member(zf)
+                else:
+                    from kiln.gcode_metadata import plate_gcode_member
+
+                    member = plate_gcode_member(zf, plate_number)
                 if member is not None:
                     gcode_bytes = read_member_text(zf, member, _MAX_SCAN_BYTES).encode("utf-8")
         except (zipfile.BadZipFile, KeyError, ValueError) as exc:

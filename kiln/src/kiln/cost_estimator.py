@@ -295,9 +295,11 @@ def _refuse_oversized(file_path: str) -> None:
         )
 
 
-def _sliced_3mf_gcode_lines(file_path: str) -> list[str]:
+def _sliced_3mf_gcode_lines(file_path: str, plate_number: int | None = None) -> list[str]:
     """The lines of the G-code a sliced 3MF prints
-    (:func:`kiln.gcode_metadata.sliced_gcode_member`).
+    (:func:`kiln.gcode_metadata.sliced_gcode_member`), or of plate
+    *plate_number* when one is named
+    (:func:`kiln.gcode_metadata.plate_gcode_member`).
 
     :raises ValueError: when the archive holds no G-code (a model, not a
         print file), is not a readable archive, or its G-code cannot be
@@ -307,12 +309,14 @@ def _sliced_3mf_gcode_lines(file_path: str) -> list[str]:
     import zipfile
 
     from kiln.gcode import _MAX_SCAN_BYTES
-    from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+    from kiln.gcode_metadata import plate_gcode_member, read_member_text, sliced_gcode_member
 
     name = os.path.basename(file_path)
     try:
         with UntrustedZipFile(file_path) as zf:
-            member = sliced_gcode_member(zf)
+            member = sliced_gcode_member(zf) if plate_number is None else plate_gcode_member(zf, plate_number)
+            if member is None and plate_number is not None:
+                raise ValueError(f"{name} holds no sliced plate {plate_number}")
             if member is None:
                 raise ValueError(
                     f"{name} holds a model, not sliced G-code, so it has no print cost to read yet; "
@@ -328,6 +332,21 @@ def _comment_text(lines: list[str]) -> str:
     """Only the comment lines, joined: the slicer's own figures are all on
     them, and a plate's moves are 99% of its 8 MB."""
     return "\n".join(line.rstrip("\r\n") for line in lines if line.lstrip().startswith(";"))
+
+
+def _slice_info_plate(root: Any, plate_number: int) -> Any:
+    """Plate *plate_number*'s entry in a parsed ``slice_info.config``: the
+    one whose ``index`` names it, or the only entry, unnumbered, for plate 1."""
+    plates = root.findall("plate")
+    for plate in plates:
+        index = next((md.get("value") for md in plate.findall("metadata") if md.get("key") == "index"), None)
+        if index is not None and str(index).strip() == str(plate_number):
+            return plate
+    if plate_number == 1 and len(plates) == 1:
+        only = plates[0]
+        if not any(md.get("key") == "index" for md in only.findall("metadata")):
+            return only
+    return None
 
 
 @dataclass
@@ -922,21 +941,32 @@ class CostEstimator:
         self,
         file_path: str,
         material: str | None = None,
+        *,
+        plate_number: int | None = None,
     ) -> FilamentPricing | None:
-        """What a print file's filaments weigh and cost, and nothing else.
+        """What the plate printed of a print file weighs and costs, and
+        nothing else.
 
         The filament half of :meth:`estimate_from_file`, for a door that
         needs only that: no count of the moves, no time, no electricity.
         Each filament is priced as the material the file was sliced for,
-        unless *material* names one.  ``None`` when the file cannot be
-        read or says nothing about its filament.
+        unless *material* names one.  A sliced 3MF is priced as plate
+        *plate_number*; with no plate named only a 3MF of one plate is
+        priced (:func:`kiln.file_metadata.plate_of_print`).  ``None`` when
+        the plate is not known, the file cannot be read or it says nothing
+        about its filament.
         """
         try:
             if file_path.lower().endswith(".3mf"):
-                found = self._slice_info_filaments(file_path, material)
+                from kiln.file_metadata import plate_of_print
+
+                plate = plate_of_print(file_path, plate_number)
+                if plate is None:
+                    return None
+                found = self._slice_info_filaments(file_path, material, plate_number=plate)
                 if found is not None:
                     return found[0]
-                body = "".join(_sliced_3mf_gcode_lines(file_path))
+                body = "".join(_sliced_3mf_gcode_lines(file_path, plate))
             else:
                 _refuse_oversized(file_path)
                 with open(file_path, errors="replace", encoding="utf-8") as fh:
@@ -1029,9 +1059,13 @@ class CostEstimator:
         self,
         file_path: str,
         material: str | None,
+        *,
+        plate_number: int | None = None,
     ) -> tuple[FilamentPricing, int | None] | None:
         """A sliced 3MF's filaments from its ``Metadata/slice_info.config``,
         and the slicer's print time, or ``None`` when it carries no figures.
+        With *plate_number* named, that plate's entry alone (its ``index``,
+        or the only entry for plate 1), else ``None``; without, the first.
 
         Bambu Studio, OrcaSlicer, and compatible slicers write one
         ``<filament>`` entry per filament a plate uses, with its type,
@@ -1054,7 +1088,7 @@ class CostEstimator:
         except ET.ParseError:
             return None
 
-        plate = root.find("plate")
+        plate = root.find("plate") if plate_number is None else _slice_info_plate(root, plate_number)
         if plate is None:
             return None
 

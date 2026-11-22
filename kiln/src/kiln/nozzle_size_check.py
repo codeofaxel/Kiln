@@ -83,29 +83,50 @@ class NozzleSizeCheck:
         }
 
 
-def _stated_sizes(job_path: str) -> set[float]:
-    """Every distinct nozzle size the sliced file at *job_path* states."""
-    from kiln.file_metadata import sliced_gcode_lines
+def _sizes_in(lines: list[str] | None) -> set[float]:
     from kiln.gcode import slicer_nozzle_diameters
 
-    lines = sliced_gcode_lines(job_path)
     if not lines:
         return set()
     return {round(size, 3) for statement in slicer_nozzle_diameters("\n".join(lines)) for size in statement}
 
 
-def file_nozzle_mm(job_path: str) -> float | None:
+def _plate_sizes(job_path: str, plate_number: int | None) -> list[set[float]]:
+    """The nozzle sizes each plate that may print states, one set per plate.
+
+    With *plate_number* named, that plate alone (none when the file lacks
+    it).  With none named, every plate of a sliced 3MF: which one prints is
+    not known, so each is checked."""
+    from kiln.file_metadata import every_plate_gcode_lines, printed_gcode_lines
+
+    if plate_number is not None:
+        return [_sizes_in(printed_gcode_lines(job_path, plate_number))]
+    return [_sizes_in(lines) for lines in every_plate_gcode_lines(job_path) or []]
+
+
+def _stated_sizes(job_path: str, plate_number: int | None = None) -> set[float]:
+    """Every distinct nozzle size the plates of *job_path* that may print state."""
+    return set().union(*_plate_sizes(job_path, plate_number))
+
+
+def file_nozzle_mm(job_path: str, plate_number: int | None = None) -> float | None:
     """The one nozzle size the file at *job_path* was sliced for, or ``None``
     when it states none (a mesh, a slicer that writes no such line) or more
-    than one (a multi-nozzle slice)."""
-    sizes = _stated_sizes(job_path)
+    than one (a multi-nozzle slice, or plates sliced for different sizes)."""
+    sizes = _stated_sizes(job_path, plate_number)
     return next(iter(sizes)) if len(sizes) == 1 else None
 
 
-def check_nozzle_size(adapter: Any, job_path: str) -> NozzleSizeCheck:
-    """Compare the file at *job_path* with *adapter*'s own nozzle setting.
+def check_nozzle_size(adapter: Any, job_path: str, plate_number: int | None = None) -> NozzleSizeCheck:
+    """Compare the plate of *job_path* that prints with *adapter*'s own
+    nozzle setting.
 
-    ``unchecked`` whenever either side cannot say -- the file states no one
+    *plate_number* names the plate printed.  With none named, every plate
+    of a sliced 3MF is compared and the first that differs answers, so a
+    plate that would be refused is never passed because it was not the one
+    read.
+
+    ``unchecked`` whenever either side cannot say -- the plate states no one
     size, the backend has no nozzle setting, the read failed or ran past its
     deadline, or the printer's last report is older than its own freshness
     budget.  Never raises.
@@ -113,16 +134,18 @@ def check_nozzle_size(adapter: Any, job_path: str) -> NozzleSizeCheck:
     from kiln.printers.base import NozzleSetting
 
     try:
-        sizes = _stated_sizes(job_path)
+        plates = _plate_sizes(job_path, plate_number)
     except Exception:  # noqa: BLE001 -- a file that cannot be read states nothing
         logger.debug("nozzle size: file unreadable", exc_info=True)
-        sizes = set()
-    if len(sizes) != 1:
+        plates = []
+    singles = [next(iter(sizes)) for sizes in plates if len(sizes) == 1]
+    if not plates or len(singles) != len(plates):
+        several = any(len(sizes) > 1 for sizes in plates)
         return NozzleSizeCheck(
             "unchecked",
-            why="the file states more than one nozzle size" if sizes else "the file states no nozzle size",
+            why="the file states more than one nozzle size" if several else "the file states no nozzle size",
         )
-    file_mm = next(iter(sizes))
+    file_mm = singles[0]
 
     try:
         from kiln.printer_nozzle_reading import read_setting
@@ -142,8 +165,10 @@ def check_nozzle_size(adapter: Any, job_path: str) -> NozzleSizeCheck:
             "unchecked", file_mm=file_mm, why="the printer's last report is too old to rely on",
         )
     printer_mm = float(setting.diameter_mm)
-    status = "match" if abs(printer_mm - file_mm) < _SAME_SIZE_MM else "differs"
-    return NozzleSizeCheck(status, file_mm=file_mm, printer_mm=printer_mm, held_by=setting.held_by)
+    differing = next((size for size in singles if abs(printer_mm - size) >= _SAME_SIZE_MM), None)
+    if differing is None:
+        return NozzleSizeCheck("match", file_mm=file_mm, printer_mm=printer_mm, held_by=setting.held_by)
+    return NozzleSizeCheck("differs", file_mm=differing, printer_mm=printer_mm, held_by=setting.held_by)
 
 
 __all__ = ["MISMATCH_CODE", "NozzleSizeCheck", "check_nozzle_size", "file_nozzle_mm"]

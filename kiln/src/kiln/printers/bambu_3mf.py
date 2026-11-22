@@ -1264,6 +1264,30 @@ def _slice_info_knows_its_weight(slice_info: str) -> bool:
         return False
 
 
+_SLICE_INFO_PLATE_RE = re.compile(r"<plate>.*?</plate>", re.S)
+_SLICE_INFO_INDEX_RE = re.compile(r'(<metadata\s+key="index"\s+value=")([^"]*)(")')
+_SLICE_INFO_PREDICTION_RE = re.compile(r'[ \t]*<metadata\s+key="prediction"\s+value="[^"]*"\s*/>[ \t]*\r?\n?')
+
+
+def _one_plate_untimed(slice_info: str, plate_number: int) -> str | None:
+    """*slice_info* holding plate *plate_number*'s entry alone, numbered 1
+    and with no predicted time, or ``None`` when it has no such entry."""
+    blocks = list(_SLICE_INFO_PLATE_RE.finditer(slice_info))
+    chosen = None
+    for block in blocks:
+        index = _SLICE_INFO_INDEX_RE.search(block.group(0))
+        if index is not None and index.group(2).strip() == str(plate_number):
+            chosen = block
+            break
+    if chosen is None and plate_number == 1 and len(blocks) == 1 and not _SLICE_INFO_INDEX_RE.search(blocks[0].group(0)):
+        chosen = blocks[0]
+    if chosen is None:
+        return None
+    kept = _SLICE_INFO_INDEX_RE.sub(r"\g<1>1\g<3>", chosen.group(0), count=1)
+    kept = _SLICE_INFO_PREDICTION_RE.sub("", kept)
+    return slice_info[: blocks[0].start()] + kept + slice_info[blocks[-1].end():]
+
+
 def _fill_slice_info_usage(slice_info: str, usage: FilamentUsage) -> str:
     """Write *usage* where the printer's screen reads it, touching nothing else."""
     out = _SLICE_INFO_WEIGHT_RE.sub(
@@ -2685,8 +2709,15 @@ def repackage_gcode_as_bambu_3mf(
     source_3mf_path: str | None = None,
     stl_paths: list[str] | None = None,
     estimated_time_minutes: int = 0,
+    taken_from_plate: int | None = None,
 ) -> str:
-    """Wrap already-Bambu gcode in a minimal 3MF container."""
+    """Wrap already-Bambu gcode in a minimal 3MF container.
+
+    *taken_from_plate* names the plate of *source_3mf_path* the G-code was
+    taken out of (one object of it): the plate's own metadata is copied,
+    and its slice record keeps that plate alone, states no print time, and
+    weighs the filament the G-code itself lays down.
+    """
     abs_path = os.path.abspath(gcode_path)
     if not os.path.isfile(abs_path):
         raise FileNotFoundError(f"Gcode file not found: {abs_path}")
@@ -2707,8 +2738,9 @@ def repackage_gcode_as_bambu_3mf(
                     ):
                         thumbnails[name] = zf.read(name)
                 # Copy plate metadata for accurate printer display
-                if "Metadata/plate_1.json" in zf.namelist():
-                    plate_json = zf.read("Metadata/plate_1.json").decode(
+                plate_meta = f"Metadata/plate_{taken_from_plate or 1}.json"
+                if plate_meta in zf.namelist():
+                    plate_json = zf.read(plate_meta).decode(
                         "utf-8", errors="replace"
                     )
                 if "Metadata/slice_info.config" in zf.namelist():
@@ -2725,7 +2757,14 @@ def repackage_gcode_as_bambu_3mf(
         thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
         rendered_here = bool(thumbnails)
 
-    if slice_info and estimated_time_minutes > 0:
+    if slice_info and taken_from_plate is not None:
+        slice_info = _one_plate_untimed(slice_info, taken_from_plate)
+        if slice_info:
+            slice_info = _fill_slice_info_usage(
+                slice_info,
+                filament_usage_from_gcode(gcode_bytes.decode("utf-8", errors="replace")),
+            )
+    elif slice_info and estimated_time_minutes > 0:
         prediction_sec = estimated_time_minutes * 60 + _BAMBU_STARTUP_OVERHEAD_SEC
         slice_info = re.sub(
             r'(<metadata\s+key="prediction"\s+value=")(\d+)(")',

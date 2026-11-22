@@ -80,15 +80,26 @@ def mixed_sizes_of_lines(lines: Iterable[str] | None) -> tuple[float, ...] | Non
     return tuple(sizes)
 
 
-def mixed_sizes_of_file(job_path: str | None) -> tuple[float, ...] | None:
-    """:func:`mixed_sizes_of_lines` for the sliced file at *job_path*;
-    ``None`` too for one that cannot be read."""
+def mixed_sizes_of_file(job_path: str | None, plate_number: int | None = None) -> tuple[float, ...] | None:
+    """:func:`mixed_sizes_of_lines` for the plate of the sliced file at
+    *job_path* that prints; ``None`` too for one that cannot be read.
+
+    With *plate_number* named, that plate.  With none named, every plate of
+    a sliced 3MF: the first that mixes sizes answers, since which one
+    prints is not known and an experiment is asked about before it starts.
+    """
     if not job_path:
         return None
     try:
-        from kiln.file_metadata import sliced_gcode_lines
+        from kiln.file_metadata import every_plate_gcode_lines, printed_gcode_lines
 
-        return mixed_sizes_of_lines(sliced_gcode_lines(job_path))
+        if plate_number is not None:
+            return mixed_sizes_of_lines(printed_gcode_lines(job_path, plate_number))
+        for lines in every_plate_gcode_lines(job_path) or []:
+            sizes = mixed_sizes_of_lines(lines)
+            if sizes:
+                return sizes
+        return None
     except Exception:  # noqa: BLE001 -- an unreadable file is no experiment
         logger.debug("experiment not read from %s", job_path, exc_info=True)
         return None

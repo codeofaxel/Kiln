@@ -10504,7 +10504,9 @@ def start_print(
                 from kiln._pro_cutter_bridge import local_sliced_path
 
                 _local = local_sliced_path(file_name)
-                _pricing = _get_cost_estimator().filament_pricing(_local) if _local else None
+                _pricing = (
+                    _get_cost_estimator().filament_pricing(_local, plate_number=plate_number) if _local else None
+                )
                 if _pricing is not None:
                     _planned_grams = _pricing.weight_g
                     _filament_material = _pricing.material
@@ -19148,7 +19150,7 @@ def print_plate_object(
                 extracted_path,
                 threemf_path,
                 source_3mf_path=file_path,
-                estimated_time_minutes=extract_result.get("estimated_time_minutes", 0),
+                taken_from_plate=plate_number,
             )
             upload_path = threemf_path
         except Exception as exc:

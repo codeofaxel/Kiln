@@ -177,15 +177,23 @@ def _filaments_from_painted_3mf(path: str) -> list[Filament]:
     return [Filament(hex6=h) for h in seen]
 
 
-def read_file_filaments(path: str | None) -> FileFilaments:
-    """The filaments ``path`` declares, or an empty answer."""
+def read_file_filaments(path: str | None, *, plate_number: int | None = None) -> FileFilaments:
+    """The filaments ``path`` declares, or an empty answer.  A sliced 3MF
+    is read as plate *plate_number* when one is named."""
     if not path or not os.path.isfile(path):
         return FileFilaments()
     lower = path.lower()
     try:
         if lower.endswith(".3mf"):
             with UntrustedZipFile(path) as zf:
-                member = sliced_gcode_member(zf)
+                if plate_number is None:
+                    member = sliced_gcode_member(zf)
+                else:
+                    from kiln.gcode_metadata import plate_gcode_member
+
+                    member = plate_gcode_member(zf, plate_number)
+                    if member is None:
+                        return FileFilaments()
                 if member is not None:
                     from kiln.gcode import _MAX_SCAN_BYTES
 

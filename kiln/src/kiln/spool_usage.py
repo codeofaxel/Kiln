@@ -111,24 +111,30 @@ class _Usage:
     total: float
 
 
-def _file_usage(file_name: str | None) -> _Usage | None:
-    """The grams *file_name* uses, or ``None`` when its own figures cannot be read."""
+def _file_usage(file_name: str | None, plate_number: int | None = None) -> _Usage | None:
+    """The grams the plate *plate_number* of *file_name* uses, or ``None``
+    when its own figures cannot be read.  A sliced 3MF is read as that plate
+    alone; with no plate named, only a 3MF of one plate has figures
+    (:func:`kiln.file_metadata.printed_gcode_lines`)."""
     from kiln._pro_cutter_bridge import local_sliced_path
     from kiln.ams_routing import read_file_filaments
-    from kiln.file_metadata import sliced_gcode_lines
+    from kiln.file_metadata import plate_of_print, printed_gcode_lines
     from kiln.gcode import slicer_filament_totals
 
     path = local_sliced_path(file_name) or _uploaded_copy(file_name)
     if not path:
         return None
-    lines = sliced_gcode_lines(path)
+    plate = plate_of_print(path, plate_number)
+    if plate is None:
+        return None
+    lines = printed_gcode_lines(path, plate)
     if not lines:
         return None
     totals = slicer_filament_totals("\n".join(lines))
     total = totals.weight_g
     if not total or total <= 0:
         return None
-    filaments = tuple(read_file_filaments(path).filaments)
+    filaments = tuple(read_file_filaments(path, plate_number=plate).filaments)
     listed = tuple(float(g) for g in totals.grams) if totals.grams and sum(totals.grams) > 0 else (float(total),)
     aligned = not filaments or len(listed) == len(filaments)
     return _Usage(filaments=filaments, grams=listed if aligned else None, total=float(total))
@@ -197,7 +203,10 @@ def _charge_worker(
     try:
         with _work_lock:
             _forget(printer)
-            usage = _file_usage(file_name)
+            from kiln.printers.print_gate import _plate_number
+
+            # The plate the printer prints: the one named, else plate 1.
+            usage = _file_usage(file_name, _plate_number(kwargs or {}))
             charges = _take(adapter, printer, usage, kwargs) if usage is not None else []
             if charges:
                 _db().save_spool_charge(printer, file_name, charges, state=_OPEN)

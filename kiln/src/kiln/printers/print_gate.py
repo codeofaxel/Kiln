@@ -716,11 +716,12 @@ def _plate_scan_verdict(
 
 def _nozzle_size_verdict(
     adapter: Any, job_path: str, file_name: str, printer_id: str | None, override: bool,
+    plate_number: int | None = None,
 ) -> dict[str, Any] | None:
     """The verdict when the file and the printer state different nozzle sizes (:func:`kiln.nozzle_size_check.check_nozzle_size`), or ``None``."""
     from kiln.nozzle_size_check import check_nozzle_size
 
-    check = check_nozzle_size(adapter, job_path)
+    check = check_nozzle_size(adapter, job_path, plate_number)
     if not check.refuses:
         return None
     reason = check.sentence(os.path.basename(str(file_name)))
@@ -1692,7 +1693,9 @@ def run_adapter_gate(
             if paired is not None:
                 verdict = paired
         if inspected and not verdict.get("blocked"):
-            sized = _nozzle_size_verdict(adapter, inspected, file_name, printer_id, override)
+            sized = _nozzle_size_verdict(
+                adapter, inspected, file_name, printer_id, override, _plate_number(kwargs)
+            )
             if sized is not None:
                 verdict = sized
         if inspected and not verdict.get("blocked"):

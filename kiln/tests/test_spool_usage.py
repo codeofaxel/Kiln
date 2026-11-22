@@ -622,7 +622,7 @@ class TestACountThatMissesSaysWhy:
     def test_a_count_that_fails_is_logged(self, machine, tmp_path, monkeypatch, caplog):
         _add("PLA", "red")
 
-        def _unreadable(file_name):
+        def _unreadable(file_name, plate_number=None):
             raise OSError("the sliced file went away")
 
         monkeypatch.setattr(spool_usage, "_file_usage", _unreadable)
