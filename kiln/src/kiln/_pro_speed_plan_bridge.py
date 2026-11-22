@@ -185,7 +185,8 @@ def _refusal(miss: Miss) -> str:
         on_the_line="Kiln chooses these speeds from the part's shape on its servers",
         cannot="choose them", wont="sliced nothing",
         safe_remedy="Slice without speed_by_height, or give your own ranges",
-        then="slice again" + served_answer.free_account_note(miss),
+        # No note that a free account is enough: this answer is part of a paid plan.
+        then="slice again",
     )
 
 

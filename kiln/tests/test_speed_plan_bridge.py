@@ -137,6 +137,8 @@ class TestThePlanner:
             bridge.planner(part, slicer_id="prusaslicer", ask={"material": "PLA"})(plain)
         assert refused.value.code == bridge.NO_PLAN
         assert says in str(refused.value) and "sliced nothing" in str(refused.value)
+        # Signing in with a free account would not get this answer, so nothing says it would.
+        assert "free account" not in str(refused.value)
 
     def test_the_engine_stopping_on_this_computer_is_a_refusal_never_a_traceback(self, monkeypatch, part, plain):
         def stopped(**_fields):
