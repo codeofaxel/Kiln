@@ -213,3 +213,29 @@ class TestALargeModelTravelsPacked:
         model.write_bytes(STL)
 
         assert served_makes._packed_for_the_trip("repair_mesh", Path(model)) is None
+
+    def test_the_packed_copy_never_lands_on_a_file_already_there(self, servers, tmp_path, monkeypatch):
+        """The packed copy is written in a folder made for the one trip: a
+        file of the same name in Kiln's own files folder is neither written
+        over nor removed."""
+        import struct
+
+        from kiln import output_paths, served_makes
+
+        scratch = tmp_path / "kiln-files"
+        scratch.mkdir()
+        monkeypatch.setattr(output_paths, "kiln_temp_dir", lambda: str(scratch))
+        mine = scratch / "lamp.3mf"
+        mine.write_bytes(b"the person's own file")
+        triangle = struct.pack("<12fH", 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0)
+        big = tmp_path / "lamp.stl"
+        big.write_bytes(b"\x00" * 80 + struct.pack("<I", 400) + triangle * 400)
+        monkeypatch.setattr(served_makes, "_PACK_PAST_BYTES", 1024)
+        servers.answer = {"success": True, "path": str(big), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(big))
+
+        (upload,) = servers.uploads
+        assert upload["data"][:2] == b"PK"
+        assert mine.read_bytes() == b"the person's own file"
+        assert sorted(p.name for p in scratch.iterdir()) == ["lamp.3mf"], "the trip's folder was left behind"

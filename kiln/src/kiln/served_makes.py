@@ -174,24 +174,45 @@ def _known(token: str) -> dict | None:
 
 
 def _packed_for_the_trip(tool: str, local: Path) -> Path | None:
-    """*local* packed as a 3MF in Kiln's own files folder, when *tool* takes
-    one and the 3MF is smaller; else ``None`` and the file travels as it is."""
+    """*local* packed as a 3MF, when *tool* takes one and the 3MF is smaller;
+    else ``None`` and the file travels as it is.
+
+    The packed copy is written into a folder made for this one trip, which
+    only this user can read, so it never lands on a file already there.  The
+    caller removes it with :func:`_unpack_after_the_trip`.
+    """
     if tool not in _TRAVELS_PACKED or local.suffix.lower() not in _PACKABLE:
         return None
+    folder: str | None = None
     try:
         if local.stat().st_size <= _PACK_PAST_BYTES:
             return None
+        import tempfile
+
         from kiln.generation.validation import export_3mf
         from kiln.output_paths import kiln_temp_dir
 
-        packed = Path(kiln_temp_dir()) / f"{local.stem}.3mf"
+        folder = tempfile.mkdtemp(prefix="kiln-packed-", dir=kiln_temp_dir())
+        packed = Path(folder) / f"{local.stem}.3mf"
         export_3mf(str(local), output_path=str(packed))
-        if packed.stat().st_size >= local.stat().st_size:
-            packed.unlink()
-            return None
-        return packed
+        if packed.stat().st_size < local.stat().st_size:
+            return packed
     except Exception:  # noqa: BLE001 - a file that will not pack travels as it is
-        return None
+        pass
+    if folder is not None:
+        import shutil
+
+        shutil.rmtree(folder, ignore_errors=True)
+    return None
+
+
+def _unpack_after_the_trip(packed: Path | None) -> None:
+    """Remove a packed copy and the folder made for it."""
+    if packed is None:
+        return
+    import shutil
+
+    shutil.rmtree(packed.parent, ignore_errors=True)
 
 
 def token_for_path(path: str) -> str | None:
@@ -1160,9 +1181,7 @@ class _Sending:
             try:
                 token, said = _upload_file(packed or local, on_miss=self._missed)
             finally:
-                if packed is not None:
-                    with contextlib.suppress(OSError):
-                        packed.unlink()
+                _unpack_after_the_trip(packed)
             if token is None:
                 return None, _not_sent(
                     self.tool, "FILE_NOT_SENT", self.miss,
