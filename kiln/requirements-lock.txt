@@ -35,7 +35,7 @@ mcp==2.3.0
 mdurl==0.1.2
 networkx==3.4.2
 numpy==2.2.6
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
 packaging==26.3
 paho-mqtt==2.1.0
 pillow==13.0.0
