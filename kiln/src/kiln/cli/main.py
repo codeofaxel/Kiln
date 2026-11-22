@@ -4885,9 +4885,13 @@ def emergency_trip_cmd(
 
 @cli.command()
 @click.argument("commands", nargs=-1, required=True)
+@click.option(
+    "--past-the-melt-limit", "past_the_melt_limit", is_flag=True,
+    help="Send a speed-up (M220) as written even past what the nozzle can melt, this once.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
+def gcode(ctx: click.Context, commands: tuple, past_the_melt_limit: bool, json_mode: bool) -> None:
     """Send raw G-code commands to the printer.
 
     Commands are validated before sending.  Pass multiple commands as
@@ -4921,7 +4925,7 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
 
         from kiln import live_speed_floor
 
-        with live_speed_floor.collect() as floor:
+        with live_speed_floor.collect() as floor, live_speed_floor.past_the_melt_limit(past_the_melt_limit):
             adapter.send_gcode(validation.commands)
         sent = live_speed_floor.guarded_lines(list(validation.commands), floor)
 
@@ -4931,7 +4935,9 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
         }
         if validation.warnings:
             data["warnings"] = validation.warnings
-        live_speed_floor.reply(data, floor, changed=live_speed_floor.changes_speed(validation.commands))
+        live_speed_floor.reply(
+            data, floor, changed=live_speed_floor.changes_speed(validation.commands), door=live_speed_floor.TERMINAL,
+        )
 
         click.echo(format_response("success", data=data, json_mode=json_mode))
     except click.ClickException:
@@ -14156,9 +14162,13 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
 
 @cli.command()
 @click.argument("profile", required=False)
+@click.option(
+    "--past-the-melt-limit", "past_the_melt_limit", is_flag=True,
+    help="Set the preset even past what the nozzle can melt, this once.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
+def speed(ctx: click.Context, profile: str | None, past_the_melt_limit: bool, json_mode: bool) -> None:
     """Get or set printer speed profile (silent/standard/sport/ludicrous)."""
     try:
         adapter = _get_adapter_from_ctx(ctx)
@@ -14176,7 +14186,7 @@ def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
                 sys.exit(1)
             from kiln import live_speed_floor
 
-            with live_speed_floor.collect() as floor:
+            with live_speed_floor.collect() as floor, live_speed_floor.past_the_melt_limit(past_the_melt_limit):
                 verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
             asked = profile.strip().lower()
             set_as = next((j.preset for j in floor if j.preset), asked)
@@ -14185,8 +14195,9 @@ def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
                 "profile": set_as,
                 **verdict.to_dict(),
             }
-            said = live_speed_floor.sentences(floor, changed=verdict.ok and asked != "standard")
-            live_speed_floor.reply(data, floor, changed=verdict.ok and asked != "standard")
+            terminal = live_speed_floor.TERMINAL
+            said = live_speed_floor.sentences(floor, changed=verdict.ok and asked != "standard", door=terminal)
+            live_speed_floor.reply(data, floor, changed=verdict.ok and asked != "standard", door=terminal)
             if json_mode:
                 click.echo(format_response("success", data=data, json_mode=True))
             else:

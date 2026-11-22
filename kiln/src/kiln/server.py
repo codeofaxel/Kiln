@@ -12240,7 +12240,10 @@ def cfs_status() -> dict:
 
 @mcp.tool(annotations=destructive("Set print speed"))
 def set_speed_profile(
-    profile: str | None = None, percent: int | None = None, printer_name: str | None = None,
+    profile: str | None = None,
+    percent: int | None = None,
+    printer_name: str | None = None,
+    past_the_melt_limit: bool = False,
 ) -> dict:
     """Set the print speed: a preset by name, or a percentage of the sliced speed.
 
@@ -12257,10 +12260,17 @@ def set_speed_profile(
             only its four presets, so the nearest one is set and the
             answer says which (``preset``, ``percent_actual``).
         printer_name: Which printer.  Omit for the default printer.
+        past_the_melt_limit: ``True`` sets the asked speed even past what
+            the nozzle can melt, for this request only.  Pass it only when
+            the person has read the warning a capped answer gave and still
+            wants the faster speed.
 
     A speed-up is held to what the running print's file lets the nozzle
     melt: above that it is lowered (never below the sliced speed) and the
-    answer says so, with the numbers, in ``message`` and ``speed_floor``.
+    answer says so, with the numbers, what going faster does, and how to
+    go past it, in ``message`` and ``speed_floor``.  With
+    ``past_the_melt_limit`` the asked speed is set and the answer says it
+    was set past the limit at the person's choice.
     When that cannot be checked (Kiln did not send the file, or the
     printer's melt limit is unknown) the speed is set as asked and the
     answer says it was not checked.  A slow-down is never changed.  Which
@@ -12294,11 +12304,11 @@ def set_speed_profile(
             code="VALIDATION_ERROR",
         )
     if has_profile:
-        return _set_speed_preset(profile, printer_name)
-    return _set_speed_percent(percent, printer_name)
+        return _set_speed_preset(profile, printer_name, past_the_melt_limit is True)
+    return _set_speed_percent(percent, printer_name, past_the_melt_limit is True)
 
 
-def _set_speed_preset(profile: str, printer_name: str | None) -> dict:
+def _set_speed_preset(profile: str, printer_name: str | None, past: bool = False) -> dict:
     """The preset half of :func:`set_speed_profile`."""
     try:
         try:
@@ -12313,7 +12323,7 @@ def _set_speed_preset(profile: str, printer_name: str | None) -> dict:
             )
         from kiln import live_speed_floor
 
-        with live_speed_floor.collect() as floor:
+        with live_speed_floor.collect() as floor, live_speed_floor.past_the_melt_limit(past):
             verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
         _audit("set_speed_profile", "executed", details={"profile": profile, "printer": printer_name})
         asked = profile.strip().lower()
@@ -12329,7 +12339,7 @@ def _set_speed_preset(profile: str, printer_name: str | None) -> dict:
         return _error_dict(f"Unexpected error in set_speed_profile: {exc}", code="INTERNAL_ERROR")
 
 
-def _set_speed_percent(percent: Any, printer_name: str | None) -> dict:
+def _set_speed_percent(percent: Any, printer_name: str | None, past: bool = False) -> dict:
     """The percentage half of :func:`set_speed_profile`."""
     if isinstance(percent, bool) or not isinstance(percent, int):
         try:
@@ -12348,7 +12358,7 @@ def _set_speed_percent(percent: Any, printer_name: str | None) -> dict:
         from kiln import live_speed_floor
         from kiln.speed_schedule_runner import PRESET_PERCENT, nearest_preset, set_speed, takes_presets
 
-        with live_speed_floor.collect() as floor:
+        with live_speed_floor.collect() as floor, live_speed_floor.past_the_melt_limit(past):
             verdict = CommandVerdict.coerce(set_speed(adapter, percent), what="speed")
         _audit("set_speed_profile", "executed", details={"percent": percent, "printer": target_name})
         out: dict[str, Any] = {"success": verdict.ok, "percent": percent, **verdict.to_dict()}
@@ -12383,6 +12393,7 @@ def run_speed_schedule(
     schedule: list[dict] | None = None,
     printer_name: str | None = None,
     action: str = "run",
+    past_the_melt_limit: bool = False,
 ) -> dict:
     """Run, report or stop a layer-based speed schedule on this computer.
 
@@ -12408,6 +12419,10 @@ def run_speed_schedule(
             int}`` entries, ``speed_percent`` within 10-300.
         printer_name: Which printer.  Omit for the default printer.
         action: ``"run"`` (default), ``"status"`` or ``"stop"``.
+        past_the_melt_limit: ``True`` (``action="run"`` only) keeps every
+            segment's speed as asked even past what the nozzle can melt, for
+            this run only.  Pass it only when the person has read the
+            warning a capped answer gave and still wants the faster speeds.
     """
     if err := _check_auth("printer_control"):
         return err
@@ -12436,7 +12451,9 @@ def run_speed_schedule(
             return {"success": True, "active": False, **run.to_dict(),
                     "message": "Speed schedule stopped. The printer stays at the last speed set."}
         try:
-            floored, floor = runner.floor_schedule(_adapter, schedule)
+            floored, floor = runner.floor_schedule(
+                _adapter, schedule, past_the_melt_limit=past_the_melt_limit is True,
+            )
         except runner.ScheduleRefused as exc:
             return _error_dict(str(exc), code="VALIDATION_ERROR")
         if run is not None:
@@ -12445,6 +12462,7 @@ def run_speed_schedule(
         try:
             started = runner.start(
                 floored, lambda: _resolve_control_target(printer_name)[0], printer_name=target_name,
+                past_the_melt_limit=past_the_melt_limit is True,
             )
         except runner.ScheduleRefused as exc:
             return _error_dict(str(exc), code="VALIDATION_ERROR")
@@ -13910,7 +13928,7 @@ def preflight_check(
 
 
 @mcp.tool(annotations=destructive("Send G-code"))
-def send_gcode(commands: str, dry_run: bool = False) -> dict:
+def send_gcode(commands: str, dry_run: bool = False, past_the_melt_limit: bool = False) -> dict:
     """Send raw G-code commands directly to the printer.
 
     Args:
@@ -13920,6 +13938,11 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         dry_run: When ``True``, run the full validation pipeline (auth,
             rate-limit, G-code safety) but do **not** actually send commands
             to the printer.  Returns what *would* have been sent.
+        past_the_melt_limit: ``True`` sends a feedrate override
+            (``M220 S<n>``) as written even past what the nozzle can melt,
+            for this request only.  Pass it only when the person has read
+            the warning a capped answer gave and still wants the faster
+            speed.  Every other check on the commands still applies.
 
     The commands are sent sequentially in order.  The printer must be
     connected (unless ``dry_run`` is ``True``).
@@ -13946,7 +13969,8 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
     # the replay is verbatim.
     if not dry_run and (
         conf := _check_confirmation(
-            "send_gcode", {"commands": commands, "dry_run": dry_run}
+            "send_gcode",
+            {"commands": commands, "dry_run": dry_run, "past_the_melt_limit": past_the_melt_limit},
         )
     ):
         return conf
@@ -14125,7 +14149,7 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 
         from kiln import live_speed_floor
 
-        with live_speed_floor.collect() as floor:
+        with live_speed_floor.collect() as floor, live_speed_floor.past_the_melt_limit(past_the_melt_limit is True):
             verdict = CommandVerdict.coerce(adapter.send_gcode(cmd_list), what="G-code")
         _audit("send_gcode", "executed", details={"count": len(cmd_list)})
 

@@ -11,6 +11,7 @@ the floor cannot read lets the command through and says it was not checked.
 from __future__ import annotations
 
 import math
+import re
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -139,7 +140,7 @@ class TestPercentDoor:
         answer = server.set_speed_profile(percent=300)
         assert printer.sent == ["M220 S100"]
         assert answer["percent"] == 300 and answer["percent_actual"] == 100
-        assert "Kept at 100%, not 300%" in answer["message"]
+        assert "Kept at 100% instead of the 300% you asked for" in answer["message"]
         assert answer["speed_floor"][0]["checked"] is True and answer["speed_floor"][0]["lowered"] is True
 
     def test_a_speed_up_past_the_printers_own_limit_is_lowered_to_the_highest_that_fits(
@@ -153,8 +154,8 @@ class TestPercentDoor:
         allowed = math.floor(100 * 11.0 / _peak(HEADROOM))
         assert 100 < allowed < 300
         assert printer.sent == [f"M220 S{allowed}"]
-        assert f"Set to {allowed}%, not 300%" in answer["message"]
-        assert "11 mm³/s" in answer["message"]
+        assert f"Set to {allowed}% instead of the 300% you asked for" in answer["message"]
+        assert "can melt about 11" in answer["message"]
 
     def test_a_speed_up_the_file_can_bear_goes_out_as_asked(self, sent_by_kiln, monkeypatch):
         sent_by_kiln(HEADROOM)
@@ -162,7 +163,7 @@ class TestPercentDoor:
         _doors(monkeypatch, printer)
         answer = server.set_speed_profile(percent=300)
         assert printer.sent == ["M220 S300"]
-        assert "percent_actual" not in answer and "not 300%" not in answer["message"]
+        assert "percent_actual" not in answer and "you asked for" not in answer["message"]
 
     def test_a_slow_down_is_never_judged(self, sent_by_kiln, monkeypatch):
         sent_by_kiln(NEAR_LIMIT)
@@ -211,7 +212,7 @@ class TestPresetDoor:
         answer = server.set_speed_profile(profile="ludicrous")
         assert printer.presets == ["standard"]
         assert answer["profile"] == "standard" and answer["profile_requested"] == "ludicrous"
-        assert "Kept at standard (100%), not ludicrous (166%)" in answer["message"]
+        assert "Kept at standard (100%) instead of the ludicrous (166%) you asked for" in answer["message"]
 
     def test_the_highest_preset_that_fits_is_set_and_its_acceleration_is_said(
         self, sent_by_kiln, ceiling, monkeypatch,
@@ -223,7 +224,7 @@ class TestPresetDoor:
         assert 124 * _peak(HEADROOM) / 100 <= 7.5 < 166 * _peak(HEADROOM) / 100
         answer = server.set_speed_profile(profile="ludicrous")
         assert printer.presets == ["sport"]
-        assert "Set to sport (124%), not ludicrous (166%)" in answer["message"]
+        assert "Set to sport (124%) instead of the ludicrous (166%) you asked for" in answer["message"]
         assert floor.ACCELERATION_UNBOUNDED in answer["message"]
 
     def test_a_percentage_on_a_preset_printer_lands_on_a_preset_that_fits(self, sent_by_kiln, monkeypatch):
@@ -253,7 +254,7 @@ class TestRawCommandDoors:
         monkeypatch.setattr(server, "_get_adapter", lambda: printer)
         answer = server.send_gcode("M220 S300")
         assert printer.sent == ["M220 S100"] and answer["commands_sent"] == ["M220 S100"]
-        assert "Kept at 100%, not 300%" in answer["message"]
+        assert "Kept at 100% instead of the 300% you asked for" in answer["message"]
         assert NOT_AT_SLICED_SPEED in answer["message"]
 
     def test_the_terminal_gcode_command_says_it_too(self, sent_by_kiln, monkeypatch):
@@ -267,7 +268,7 @@ class TestRawCommandDoors:
         monkeypatch.setattr(cli_main, "_saved_printer_model", lambda name: None)
         result = CliRunner().invoke(cli_main.cli, ["gcode", "M220 S300", "--json"])
         assert printer.sent == ["M220 S100"]
-        assert "Kept at 100%, not 300%" in result.output
+        assert "Kept at 100% instead of the 300% you asked for" in result.output
 
 
 class TestTerminalSpeedCommand:
@@ -282,7 +283,7 @@ class TestTerminalSpeedCommand:
         result = CliRunner().invoke(cli_main.cli, ["speed", "ludicrous"])
         assert printer.presets == ["standard"]
         assert "Speed profile 'standard'" in result.output
-        assert "not ludicrous (166%)" in result.output
+        assert "instead of the ludicrous (166%) you asked for" in result.output
 
 
 class TestSchedule:
@@ -300,7 +301,7 @@ class TestSchedule:
         try:
             speeds = [s["speed_percent"] for s in answer["segments"]]
             assert speeds == [300, math.floor(100 * 11.0 / _peak(HEADROOM, 2, 6))]
-            assert "not 300%" in answer["message"] and NOT_AT_SLICED_SPEED in answer["message"]
+            assert "instead of the 300% you asked for" in answer["message"] and NOT_AT_SLICED_SPEED in answer["message"]
         finally:
             server.run_speed_schedule(action="stop")
 
@@ -330,3 +331,185 @@ class TestWiring:
                 if method is None or getattr(method, "__isabstractmethod__", False):
                     continue
                 assert getattr(method, "_kiln_speed_floor_wrapped", False), f"{cls.__name__}.{action}"
+
+
+# ---------------------------------------------------------------------------
+# Going past the melt limit, once warned
+# ---------------------------------------------------------------------------
+
+
+def _gcode_door(monkeypatch, printer) -> None:
+    monkeypatch.setattr(server, "_check_auth", lambda scope: None)
+    monkeypatch.setattr(server, "_check_rate_limit", lambda name: None)
+    monkeypatch.setattr(server, "_check_confirmation", lambda name, args: None)
+    monkeypatch.setattr(server, "_emergency_latch_error", lambda name, printer: None)
+    monkeypatch.setattr(server, "_get_adapter", lambda: printer)
+
+
+class TestTheWarning:
+    def test_a_capped_speed_says_what_why_what_happens_and_how_to_go_past(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        _doors(monkeypatch, printer)
+        message = server.set_speed_profile(percent=300)["message"]
+        assert "Kept at 100% instead of the 300% you asked for." in message
+        assert re.search(r"layer \d+ already needs about 15 mm³ of melted plastic a second", message)
+        assert floor.FASTER_FAILS in message
+        assert floor.GO_PAST[floor.TOOL] in message
+        assert "past_the_melt_limit" in floor.GO_PAST[floor.TOOL]
+
+    def test_the_terminal_names_its_own_flag(self, sent_by_kiln, monkeypatch):
+        from click.testing import CliRunner
+
+        from kiln.cli import main as cli_main
+
+        sent_by_kiln(NEAR_LIMIT)
+        printer = BambuStyle()
+        monkeypatch.setattr(cli_main, "_get_adapter_from_ctx", lambda ctx: printer)
+        result = CliRunner().invoke(cli_main.cli, ["speed", "ludicrous"])
+        assert floor.GO_PAST[floor.TERMINAL] in result.output
+        assert "--past-the-melt-limit" in floor.GO_PAST[floor.TERMINAL]
+        assert floor.GO_PAST[floor.TOOL] not in result.output
+
+    def test_a_speed_that_fits_carries_no_warning(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(HEADROOM)
+        printer = _Fdm()
+        _doors(monkeypatch, printer)
+        message = server.set_speed_profile(percent=150)["message"]
+        assert floor.FASTER_FAILS not in message and floor.GO_PAST[floor.TOOL] not in message
+
+    def test_a_printer_that_reports_no_place_has_the_whole_file_judged_and_says_so(
+        self, sent_by_kiln, monkeypatch,
+    ):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm(layer=None)
+        _doors(monkeypatch, printer)
+        message = server.set_speed_profile(percent=300)["message"]
+        assert printer.sent == ["M220 S100"]
+        assert floor.WHOLE_FILE in message
+        assert "did not report where the print is" in floor.WHOLE_FILE
+
+
+class TestGoingPast:
+    def test_the_percent_door_sets_the_asked_speed_once_chosen(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        _doors(monkeypatch, printer)
+        answer = server.set_speed_profile(percent=300, past_the_melt_limit=True)
+        assert printer.sent == ["M220 S300"]
+        assert "percent_actual" not in answer
+        assert "Set to 300%, past the melt limit, because you chose to" in answer["message"]
+        assert floor.GO_PAST[floor.TOOL] not in answer["message"]
+        assert answer["speed_floor"][0]["past_the_melt_limit"] is True
+        assert answer["speed_floor"][0]["lowered"] is False
+
+    def test_the_choice_is_never_remembered(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        _doors(monkeypatch, printer)
+        server.set_speed_profile(percent=300, past_the_melt_limit=True)
+        server.set_speed_profile(percent=300)
+        assert printer.sent == ["M220 S300", "M220 S100"]
+
+    def test_the_preset_door_sets_the_asked_preset_once_chosen(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = BambuStyle()
+        _doors(monkeypatch, printer)
+        answer = server.set_speed_profile(profile="ludicrous", past_the_melt_limit=True)
+        assert printer.presets == ["ludicrous"]
+        assert answer["profile"] == "ludicrous" and "profile_requested" not in answer
+        assert "Set to ludicrous (166%), past the melt limit" in answer["message"]
+
+    def test_a_percent_on_a_preset_printer_goes_past_too(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = BambuStyle()
+        _doors(monkeypatch, printer)
+        answer = server.set_speed_profile(percent=170, past_the_melt_limit=True)
+        assert printer.presets == ["ludicrous"] and answer["percent_actual"] == 166
+
+    def test_send_gcode_sends_the_raw_override_as_written_once_chosen(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        _gcode_door(monkeypatch, printer)
+        answer = server.send_gcode("M220 S300", past_the_melt_limit=True)
+        assert printer.sent == ["M220 S300"] and answer["commands_sent"] == ["M220 S300"]
+        assert "past the melt limit, because you chose to" in answer["message"]
+
+    def test_send_gcode_keeps_the_choice_in_what_a_confirmation_replays(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        _gcode_door(monkeypatch, printer)
+        stored: list[dict] = []
+        monkeypatch.setattr(server, "_check_confirmation", lambda name, args: stored.append(args))
+        server.send_gcode("M220 S300", past_the_melt_limit=True)
+        assert stored and stored[0]["past_the_melt_limit"] is True
+
+    def test_the_terminal_gcode_command_goes_past_with_its_flag(self, sent_by_kiln, monkeypatch):
+        from click.testing import CliRunner
+
+        from kiln.cli import main as cli_main
+
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        monkeypatch.setattr(cli_main, "_get_adapter_from_ctx", lambda ctx: printer)
+        monkeypatch.setattr(cli_main, "_saved_printer_model", lambda name: None)
+        result = CliRunner().invoke(cli_main.cli, ["gcode", "M220 S300", "--past-the-melt-limit", "--json"])
+        assert printer.sent == ["M220 S300"]
+        assert "past the melt limit, because you chose to" in result.output
+
+    def test_the_terminal_speed_command_goes_past_with_its_flag(self, sent_by_kiln, monkeypatch):
+        from click.testing import CliRunner
+
+        from kiln.cli import main as cli_main
+
+        sent_by_kiln(NEAR_LIMIT)
+        printer = BambuStyle()
+        monkeypatch.setattr(cli_main, "_get_adapter_from_ctx", lambda ctx: printer)
+        result = CliRunner().invoke(cli_main.cli, ["speed", "ludicrous", "--past-the-melt-limit"])
+        assert printer.presets == ["ludicrous"]
+        assert "past the melt limit, because you chose to" in result.output
+
+    def test_a_schedule_run_goes_past_on_every_segment_it_sends(self, sent_by_kiln, monkeypatch):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        _doors(monkeypatch, printer)
+        answer = server.run_speed_schedule(
+            schedule=[{"from_layer": 1, "to_layer": 6, "speed_percent": 300}], past_the_melt_limit=True,
+        )
+        try:
+            assert [s["speed_percent"] for s in answer["segments"]] == [300]
+            assert "past the melt limit, because you chose to" in answer["message"]
+        finally:
+            server.run_speed_schedule(action="stop")
+        run = runner.RunState(
+            segments=(runner.Segment(1, 6, 300),), printer_name="voron", watching=None, past_the_melt_limit=True,
+        )
+        assert runner._tick(run, printer) is True
+        assert printer.sent[-1] == "M220 S300"
+
+    def test_a_schedule_run_without_the_choice_still_holds_each_segment(self, sent_by_kiln):
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm(layer=1)
+        run = runner.RunState(segments=(runner.Segment(1, 6, 300),), printer_name="voron", watching=None)
+        assert runner._tick(run, printer) is True
+        assert printer.sent == ["M220 S100"]
+
+    def test_a_speed_set_past_the_limit_is_written_on_the_not_as_sliced_record(self, sent_by_kiln, monkeypatch):
+        import kiln.ran_as_sliced as ras
+
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        _gcode_door(monkeypatch, printer)
+        noted: list[str] = []
+        monkeypatch.setattr(ras, "note", lambda adapter, kind, seen_by=ras.KILN: noted.append(kind) or True)
+        server.send_gcode("M220 S300", past_the_melt_limit=True)
+        assert ras.SPEED_CHANGED in noted
+
+    def test_the_choice_reaches_only_the_melt_limit(self, sent_by_kiln, monkeypatch):
+        """Every other check on a raw command still holds: a blocked command
+        stays blocked whatever is chosen here."""
+        sent_by_kiln(NEAR_LIMIT)
+        printer = _Fdm()
+        _gcode_door(monkeypatch, printer)
+        answer = server.send_gcode("M104 S999", past_the_melt_limit=True)
+        assert answer["success"] is False and printer.sent == []

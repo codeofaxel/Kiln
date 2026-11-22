@@ -25,6 +25,15 @@ The rule, for a request above the sliced speed (100%):
   is lowered to it, never below the sliced speed; a printer that takes only
   presets gets the highest preset that fits.
 
+A capped reply says what was set and what was asked, why, what going faster
+does, and how to go past it.  A request made inside
+:func:`past_the_melt_limit` (each door's ``past_the_melt_limit`` choice,
+``--past-the-melt-limit`` in the terminal) is set as asked and the reply
+says it was set past the limit at the person's choice; the choice lasts for
+that one request and reaches no other check.  A printer that reports
+neither its layer nor its progress has the whole file judged, and the reply
+says so.
+
 A slow-down (100% or less) is never judged and never changed.  Anything the
 check cannot read -- no running print, a file Kiln did not send, a file
 that does not state its filament diameter, a printer with no known limit --
@@ -68,22 +77,41 @@ ACCELERATION_UNBOUNDED = (
     "check does not bound."
 )
 
+# Every sentence a live speed door says about the melt limit lives here.
 _CAPPED = (
-    "Set to {allowed}, not {requested}: above that this file asks the nozzle for "
-    "more plastic than it can melt (layer {layer} would need {need:.0f} mm³/s at "
-    "{requested}, and it melts about {limit:g} mm³/s)."
+    "Set to {allowed} instead of the {requested} you asked for. At {requested}, "
+    "layer {layer} would need about {need:.0f} mm³ of melted plastic a second, and "
+    "the nozzle can melt about {limit:g}, so it cannot keep up on these layers."
 )
 _KEPT = (
-    "Kept at {allowed}, not {requested}: at the sliced speed this file already asks "
-    "the nozzle for about as much plastic as it can melt (layer {layer}: "
-    "{peak:.0f} of {limit:g} mm³/s), so a speed-up would under-extrude."
+    "Kept at {allowed} instead of the {requested} you asked for. At the sliced "
+    "speed, layer {layer} already needs about {peak:.0f} mm³ of melted plastic a "
+    "second, about all the nozzle can melt ({limit:g}), so it cannot keep up with "
+    "any speed-up on these layers."
+)
+#: What going faster than the cap does, said beside every cap.
+FASTER_FAILS = "Printing faster than that gives thin or missing lines and a weaker part."
+#: The two kinds of door, by how a person goes past the cap from each.
+TOOL = "tool"
+TERMINAL = "terminal"
+#: How to go past the cap, said once beside every cap, by door.
+GO_PAST = {
+    TOOL: "If you want the faster speed anyway, ask again with past_the_melt_limit set to true.",
+    TERMINAL: "If you want the faster speed anyway, run the same command again with --past-the-melt-limit.",
+}
+_PAST = (
+    "Set to {requested}, past the melt limit, because you chose to: Kiln did not "
+    "hold this speed back. At {requested}, layer {layer} needs about {need:.0f} mm³ "
+    "of melted plastic a second and the nozzle can melt about {limit:g}, so expect "
+    "thin or missing lines and a weaker part on those layers."
 )
 _UNCHECKED = (
     "{requested} was set without checking it against how much plastic the nozzle "
     "can melt: {why}."
 )
-_WHOLE_FILE = (
-    "The printer did not say how far along it is, so the whole file was judged."
+#: Said when the printer gives neither its layer nor its progress.
+WHOLE_FILE = (
+    "The whole file was judged, because the printer did not report where the print is."
 )
 
 #: Why a request could not be checked.
@@ -288,6 +316,8 @@ class Judgement:
     preset: str | None = None
     requested_preset: str | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
+    #: Set as asked although it is past the melt limit, at the person's choice.
+    past: bool = False
 
     @property
     def lowered(self) -> bool:
@@ -302,6 +332,8 @@ class Judgement:
         }
         if self.preset:
             out["preset"] = self.preset
+        if self.past:
+            out["past_the_melt_limit"] = True
         if self.limit is not None:
             out["melt_limit_mm3_s"] = self.limit
         if self.said:
@@ -326,6 +358,21 @@ def covering(from_layer: int, to_layer: int) -> Iterator[None]:
         yield
     finally:
         _covering.reset(token)
+
+
+_past: contextvars.ContextVar[bool] = contextvars.ContextVar("kiln_live_speed_past", default=False)
+
+
+@contextlib.contextmanager
+def past_the_melt_limit(chosen: bool = True) -> Iterator[None]:
+    """A speed sent inside this block is set as asked even past the melt
+    limit, because the person chose to after being told what it costs.  It
+    lasts for this block only and reaches no other check."""
+    token = _past.set(bool(chosen))
+    try:
+        yield
+    finally:
+        _past.reset(token)
 
 
 _inside: contextvars.ContextVar[bool] = contextvars.ContextVar("kiln_live_speed_inside", default=False)
@@ -466,7 +513,7 @@ def judge(adapter: Any, percent: int, *, preset: str | None = None) -> Judgement
         first = _first_layer(flow, job)
         last = len(flow.layers)
         if first is None:
-            first, notes = 1, (_WHOLE_FILE,)
+            first, notes = 1, (WHOLE_FILE,)
     covered = [
         (index, peak)
         for index, (_start, peak) in enumerate(flow.layers, start=1)
@@ -481,6 +528,12 @@ def judge(adapter: Any, percent: int, *, preset: str | None = None) -> Judgement
             percent, percent, True, preset=preset, requested_preset=preset,
             limit=ceiling, peak=peak, layer=layer, notes=notes,
         )
+    if _past.get():
+        said = _PAST.format(requested=requested_label, layer=layer, need=peak * percent / SLICED, limit=ceiling)
+        return Judgement(
+            percent, percent, True, said=said, limit=ceiling, peak=peak, layer=layer,
+            preset=preset, requested_preset=preset, notes=notes, past=True,
+        )
     fits = max(SLICED, math.floor(SLICED * ceiling / peak))
     allowed, allowed_preset = fits, None
     if preset is not None:
@@ -490,7 +543,7 @@ def judge(adapter: Any, percent: int, *, preset: str | None = None) -> Judgement
     said = template.format(
         allowed=_label(allowed, allowed_preset), requested=requested_label, layer=layer,
         need=peak * percent / SLICED, peak=peak, limit=ceiling,
-    )
+    ) + " " + FASTER_FAILS
     return Judgement(
         percent, allowed, True, said=said, limit=ceiling, peak=peak, layer=layer,
         preset=allowed_preset, requested_preset=preset, notes=notes,
@@ -581,9 +634,12 @@ def guard_preset(adapter: Any, profile: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def sentences(judgements: list[Judgement] | tuple[Judgement, ...], *, changed: bool) -> list[str]:
+def sentences(
+    judgements: list[Judgement] | tuple[Judgement, ...], *, changed: bool, door: str = TOOL,
+) -> list[str]:
     """The sentences a live speed door adds to its reply, each once: what the
-    floor did (or that it could not check), the acceleration a fast preset
+    floor did (or that it could not check), how to go past a cap from this
+    *door* (:data:`TOOL` or :data:`TERMINAL`), the acceleration a fast preset
     adds, and -- for a change away from the sliced speed -- that the print's
     time no longer follows the slicer, and how next time it can."""
     out: list[str] = []
@@ -591,6 +647,9 @@ def sentences(judgements: list[Judgement] | tuple[Judgement, ...], *, changed: b
         for line in (judgement.said, *judgement.notes):
             if line and line not in out:
                 out.append(line)
+    if any(j.lowered for j in judgements):
+        out.append(GO_PAST.get(door, GO_PAST[TOOL]))
+    for judgement in judgements:
         if judgement.preset in _FAST_PRESETS and ACCELERATION_UNBOUNDED not in out:
             out.append(ACCELERATION_UNBOUNDED)
     if changed:
@@ -600,10 +659,12 @@ def sentences(judgements: list[Judgement] | tuple[Judgement, ...], *, changed: b
     return out
 
 
-def reply(out: dict[str, Any], judgements: list[Judgement], *, changed: bool) -> dict[str, Any]:
+def reply(
+    out: dict[str, Any], judgements: list[Judgement], *, changed: bool, door: str = TOOL,
+) -> dict[str, Any]:
     """Put the floor's word on a door's reply *out*: ``speed_floor`` (each
     judgement) and the :func:`sentences` appended to ``message``."""
-    said = sentences(judgements, changed=changed)
+    said = sentences(judgements, changed=changed, door=door)
     if judgements:
         out["speed_floor"] = [j.to_dict() for j in judgements]
     if said:
@@ -613,7 +674,7 @@ def reply(out: dict[str, Any], judgements: list[Judgement], *, changed: bool) ->
 
 
 __all__ = [
-    "ACCELERATION_UNBOUNDED", "FileFlow", "Judgement", "MIN_MOVE_MM", "SLICED", "SLICE_IT_NEXT_TIME",
-    "changes_speed", "collect", "covering", "guarded_lines", "inside", "flow_of_file", "guard_gcode", "guard_preset", "judge", "read_flow",
+    "ACCELERATION_UNBOUNDED", "FASTER_FAILS", "FileFlow", "GO_PAST", "Judgement", "MIN_MOVE_MM", "SLICED",
+    "SLICE_IT_NEXT_TIME", "TERMINAL", "TOOL", "WHOLE_FILE", "changes_speed", "past_the_melt_limit", "collect", "covering", "guarded_lines", "inside", "flow_of_file", "guard_gcode", "guard_preset", "judge", "read_flow",
     "reply", "sentences",
 ]
