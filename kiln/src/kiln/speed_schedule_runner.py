@@ -143,7 +143,7 @@ def floor_schedule(
     *past_the_melt_limit* each is kept as asked and judged only to say what
     it costs.  Raises :class:`ScheduleRefused` for a schedule that is not
     well formed."""
-    from kiln.live_speed_floor import covering, judge
+    from kiln.live_speed_floor import judging_layers, judge
     from kiln.live_speed_floor import past_the_melt_limit as past
 
     presets = takes_presets(adapter)
@@ -154,7 +154,7 @@ def floor_schedule(
         if percent > 100:
             preset = nearest_preset(percent) if presets else None
             asked = PRESET_PERCENT[preset] if preset else percent
-            with covering(segment.from_layer, segment.to_layer), past(past_the_melt_limit):
+            with judging_layers(segment.from_layer, segment.to_layer), past(past_the_melt_limit):
                 verdict = judge(adapter, asked, preset=preset)
             judgements.append(verdict)
             if verdict.lowered:
@@ -201,9 +201,9 @@ def _tick(run: RunState, adapter: Any) -> bool:
     segment = run.segments[index]
     percent = segment.speed_percent
     try:
-        from kiln.live_speed_floor import covering, past_the_melt_limit
+        from kiln.live_speed_floor import judging_layers, past_the_melt_limit
 
-        with covering(segment.from_layer, segment.to_layer), past_the_melt_limit(run.past_the_melt_limit):
+        with judging_layers(segment.from_layer, segment.to_layer), past_the_melt_limit(run.past_the_melt_limit):
             verdict = set_speed(adapter, percent)
     except Exception as exc:  # noqa: BLE001 — said, and the next poll tries the next segment
         run.error = f"could not set {percent}% at layer {layer}: {type(exc).__name__}: {exc}"

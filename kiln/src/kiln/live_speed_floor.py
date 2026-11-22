@@ -384,7 +384,7 @@ _collected: contextvars.ContextVar[list[Judgement] | None] = contextvars.Context
 
 
 @contextlib.contextmanager
-def covering(from_layer: int, to_layer: int) -> Iterator[None]:
+def judging_layers(from_layer: int, to_layer: int) -> Iterator[None]:
     """A speed sent inside this block lasts for layers *from_layer* to
     *to_layer* only (a speed schedule's segment), so only those are judged."""
     token = _covering.set((int(from_layer), int(to_layer)))
@@ -716,6 +716,6 @@ def reply(
 
 __all__ = [
     "ACCELERATION_UNBOUNDED", "FASTER_FAILS", "FileFlow", "GO_PAST", "Judgement", "MIN_MOVE_MM", "SLICED",
-    "SLICE_IT_NEXT_TIME", "TERMINAL", "TOOL", "WHOLE_FILE", "changes_speed", "past_the_melt_limit", "collect", "covering", "guarded_lines", "inside", "flow_of_file", "guard_gcode", "guard_preset", "judge", "read_flow",
+    "SLICE_IT_NEXT_TIME", "TERMINAL", "TOOL", "WHOLE_FILE", "changes_speed", "past_the_melt_limit", "collect", "judging_layers", "guarded_lines", "inside", "flow_of_file", "guard_gcode", "guard_preset", "judge", "read_flow",
     "reply", "sentences",
 ]
