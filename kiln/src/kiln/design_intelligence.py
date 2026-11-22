@@ -325,11 +325,6 @@ def curated_entry_exists(overlay_kind: str, entity_id: str) -> bool:
 # Keyed by the overlay kind whose depth is missing, because that kind is what
 # decides ``{product}`` — see :func:`_upgrade_product_name`.
 _UPGRADE_HINT_TEMPLATES: dict[str, str] = {
-    "material_troubleshooting": (
-        "{product} adds per-symptom diagnostic playbooks "
-        "(root cause + ordered fixes + prevention). "
-        "See https://kiln3d.com/pricing"
-    ),
     # Deliberately does NOT mention safety notes.  Those ship free at every
     # tier — a dust mask, a respirator, "uncured epoxy is a skin sensitizer" —
     # so listing them here told a free user their protective-equipment guidance
@@ -352,7 +347,6 @@ _UPGRADE_HINT_TEMPLATES: dict[str, str] = {
 #: What each hint offers, as the plan check names it to someone who already
 #: pays for the plan.
 _HINT_SUBJECTS: dict[str, str] = {
-    "material_troubleshooting": "A diagnostic playbook for this symptom",
     "post_processing": "The step-by-step procedure",
     "environment_compatibility": "The curated note on each rating",
 }
@@ -373,9 +367,6 @@ def _upgrade_hint(kind: str) -> str:
 # The default rendering of each hint: what a public-only install shows, and
 # what any caller falls back to when no tier can be named.  Byte-identical to
 # the copy that shipped before the product name was allowed to vary.
-_UPGRADE_HINT_TROUBLESHOOTING = _UPGRADE_HINT_TEMPLATES[
-    "material_troubleshooting"
-].format(product=_DEFAULT_UPGRADE_PRODUCT)
 _UPGRADE_HINT_POST_PROCESSING = _UPGRADE_HINT_TEMPLATES["post_processing"].format(
     product=_DEFAULT_UPGRADE_PRODUCT
 )
@@ -3260,12 +3251,11 @@ def troubleshoot_print_issue(
         key=lambda i: severity_order.get(i.get("severity", "minor"), 2),
     )
 
+    # No plan holds these fixes back: every signed-in account is given them by
+    # Kiln's servers, so a missing table is never answered with an upgrade.
     hint, fixes_note, fixes_why = "", "", {}
-    if not _engineering_overlay_loaded("material_troubleshooting"):
-        if _kiln_pro_in_process():
-            hint = _upgrade_hint("material_troubleshooting")
-        else:
-            fixes_note, fixes_why = _fixes_not_on_this_computer()
+    if not _engineering_overlay_loaded("material_troubleshooting") and not _kiln_pro_in_process():
+        fixes_note, fixes_why = _fixes_not_on_this_computer()
 
     return TroubleshootingResult(
         material=material_key,
