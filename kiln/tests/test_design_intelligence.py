@@ -37,7 +37,6 @@ from kiln.design_intelligence import (
     EnvironmentReport,
     MaterialProfile,
     MultiMaterialReport,
-    PostProcessingGuide,
     PrintDiagnostic,
     PrinterCompatibilityReport,
     PrinterDesignProfile,
@@ -54,11 +53,9 @@ from kiln.design_intelligence import (
     get_design_constraints,
     get_design_template,
     get_material_profile,
-    get_post_processing,
     get_print_diagnostic,
     get_printer_design_profile,
     get_public_material_profile,
-    get_public_post_processing,
     get_public_design_template,
     list_compatibility_printers,
     list_design_templates,
@@ -76,7 +73,6 @@ from kiln.design_intelligence import (
 
 from .conftest import (
     requires_engineering_overlay,
-    requires_post_processing_overlay,
     requires_printer_profiles_overlay,
     requires_troubleshooting_overlay,
 )
@@ -712,6 +708,12 @@ class TestRequirementMatching:
         ids = {r.requirement_id for r in results}
         assert "heat_exposure" in ids
 
+    def test_heat_rules_recommend_no_annealing(self):
+        """A bare flag cannot say how annealing can change a part, and the
+        plastics these rules prefer gain little from it."""
+        rules = next(r for r in match_requirements("bracket next to a heater") if r.requirement_id == "heat_exposure")
+        assert not any("anneal" in key for key in rules.constraint_rules), rules.constraint_rules
+
     def test_flexible_match(self):
         results = match_requirements("soft flexible phone case")
         ids = {r.requirement_id for r in results}
@@ -1334,75 +1336,6 @@ class TestPrinterMaterialCompatibility:
 
 
 # ---------------------------------------------------------------------------
-# Post-Processing
-# ---------------------------------------------------------------------------
-
-
-class TestPostProcessing:
-    def test_pla_techniques(self):
-        guide = get_post_processing("pla")
-        assert guide is not None
-        assert isinstance(guide, PostProcessingGuide)
-        assert guide.material == "pla"
-        assert len(guide.techniques) > 0
-
-    @requires_post_processing_overlay
-    def test_techniques_have_fields(self):
-        # The ``procedure`` walkthrough comes from the overlay.
-        guide = get_post_processing("pla")
-        assert guide is not None
-        tech = guide.techniques[0]
-        assert "name" in tech
-        assert "difficulty" in tech
-        assert "procedure" in tech
-
-    def test_paintability(self):
-        guide = get_post_processing("pla")
-        assert guide is not None
-        assert guide.paintability is not None
-        assert "paint_types" in guide.paintability
-
-    def test_strengthening(self):
-        guide = get_post_processing("pla")
-        assert guide is not None
-        assert len(guide.strengthening) > 0
-        s = guide.strengthening[0]
-        assert "method" in s
-        assert "applicable" in s
-
-    def test_abs_vapor_smoothing(self):
-        guide = get_post_processing("abs")
-        assert guide is not None
-        technique_names = [t["name"].lower() for t in guide.techniques]
-        assert any("acetone" in n or "vapor" in n for n in technique_names)
-
-    def test_unknown_material(self):
-        assert get_post_processing("unobtainium") is None
-
-    def test_to_dict(self):
-        guide = get_post_processing("petg")
-        assert guide is not None
-        d = guide.to_dict()
-        assert "techniques" in d
-        assert "paintability" in d
-        assert "strengthening" in d
-
-    def test_public_post_processing_bypasses_merged_knowledge_base(self):
-        merged = get_post_processing("pla")
-        assert merged is not None
-        merged.techniques[0]["private_canary"] = "must-not-escape"
-
-        public = get_public_post_processing("pla")
-
-        assert public is not None
-        assert "private_canary" not in str(public.to_dict())
-        assert all("procedure" not in item for item in public.techniques)
-
-    def test_unknown_public_post_processing_returns_none(self):
-        assert get_public_post_processing("unobtainium") is None
-
-
-# ---------------------------------------------------------------------------
 # Multi-Material Compatibility
 # ---------------------------------------------------------------------------
 
@@ -1497,6 +1430,21 @@ class TestPrintDiagnostic:
         assert result is not None
         assert result.storage_requirements is not None
         assert any("stor" in g.lower() or "dry" in g.lower() for g in result.combined_guidance)
+
+    @pytest.mark.parametrize("material", ["pla_esd", "pp"])
+    def test_the_drying_line_is_said_for_a_plastic_that_takes_up_little_water(self, material):
+        result = get_print_diagnostic(material)
+        assert result is not None
+        dry_at = result.storage_requirements["drying_temp_c"]
+        lines = [g for g in result.combined_guidance if g.startswith("Storage:")]
+        assert len(lines) == 1, result.combined_guidance
+        assert f"Dry at {dry_at}C" in lines[0]
+        assert ".." not in lines[0]
+
+    def test_the_spool_softening_caution_reaches_the_guidance(self):
+        result = get_print_diagnostic("pla_esd")
+        assert result is not None
+        assert any("soften the spool" in g for g in result.combined_guidance), result.combined_guidance
 
     def test_unknown_material_returns_none(self):
         assert get_print_diagnostic("unobtainium") is None

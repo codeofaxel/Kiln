@@ -519,6 +519,23 @@ class TestSupportProfileLoading:
         assert profile["removal_difficulty"] == 2
         assert profile["soluble_pairing"] == "PVA"
 
+    def test_a_plastic_that_fuses_to_its_supports_is_warned_with_no_server(self) -> None:
+        tris = _make_flat_quad_triangles(z=0.0, size=5.0)
+        tris += _make_downward_face_triangles(z=20.0, size=30.0)
+        result = assess_support_feasibility(triangles=tris, material="PETG", needs_supports=True)
+
+        assert "fusing" in result.removal_notes.lower()
+        assert result.cross_material_option == "PLA supports for PETG"
+        assert any(r.startswith("Use PLA supports for PETG") for r in result.recommendations)
+        assert result.recommended_interface_layers == 3
+
+    def test_a_plastic_that_must_be_dry_says_so_with_no_server(self) -> None:
+        tris = _make_flat_quad_triangles(z=0.0, size=5.0)
+        tris += _make_downward_face_triangles(z=20.0, size=30.0)
+        result = assess_support_feasibility(triangles=tris, material="nylon", needs_supports=True)
+
+        assert "dry" in result.removal_notes.lower()
+
     def test_the_table_carries_no_angle_or_bridge_limit(self) -> None:
         """Those are the verdict's (kiln.printability); a copy here once
         said PLA bridges 50 mm while the engine refused 30."""

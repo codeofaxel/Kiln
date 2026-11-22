@@ -71,6 +71,9 @@ REFERENCE_DATA_FILES: dict[str, str] = {
     "design_knowledge/environment_compatibility.json": (
         "service-environment guidance, keyed by environment"
     ),
+    "design_knowledge/finishing_cautions.json": (
+        "each plastic's finishes with their safety notes, keyed by material"
+    ),
     "design_knowledge/functional_requirements.json": (
         "requirement vocabulary, keyed by requirement"
     ),
@@ -82,7 +85,6 @@ REFERENCE_DATA_FILES: dict[str, str] = {
         "print-defect guidance, keyed by symptom and material"
     ),
     "design_knowledge/materials.json": "material design data, keyed by material",
-    "design_knowledge/post_processing.json": "finishing guidance, keyed by process",
     "design_knowledge/skin_contact.json": (
         "skin-contact and biocompatibility guidance, keyed by material"
     ),

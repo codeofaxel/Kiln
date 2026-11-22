@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-20T23:24:56.490156+00:00",
+  "generated": "2026-11-22T09:55:53.740190+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -30879,6 +30879,7 @@
           "nozzle_mm"
         ]
       },
+      "analyze_design_requirements": {},
       "analyze_printability": {
         "inputs": {
           "files": {
@@ -30920,6 +30921,15 @@
           "nozzle_mm"
         ]
       },
+      "audit_original_design": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          }
+        }
+      },
+      "build_generation_prompt": {},
+      "build_parametric_prompt": {},
       "check_print_readiness": {
         "inputs": {
           "files": {
@@ -30939,6 +30949,8 @@
         ],
         "printer_param": "printer_id"
       },
+      "check_printer_material_compatibility": {},
+      "check_printer_material_support": {},
       "compile_scad": {
         "inputs": {
           "text": {
@@ -30968,6 +30980,8 @@
         ],
         "printer_param": "printer_id"
       },
+      "get_material_recommendation": {},
+      "get_print_diagnostic": {},
       "import_step_file": {
         "inputs": {
           "files": {
@@ -30978,6 +30992,7 @@
           }
         }
       },
+      "match_design_requirements": {},
       "recommend_design_material": {},
       "recommend_material": {
         "reads_first": [
@@ -31007,7 +31022,9 @@
       },
       "tax_estimate": {},
       "tax_jurisdiction_lookup": {},
-      "tax_jurisdictions": {}
+      "tax_jurisdictions": {},
+      "troubleshoot_print_issue": {},
+      "troubleshoot_printer": {}
     }
   },
   "edit_lineage": {

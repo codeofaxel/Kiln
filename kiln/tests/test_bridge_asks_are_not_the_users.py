@@ -126,6 +126,10 @@ _CALLER_DECIDES = {
     # (True: adding the model to it is what the make was asked to do) and a
     # goal Kiln opens or finds on its own for a model from outside (False).
     "_pro_goal_bridge": "asked_by_user",
+    # The finishing bridge carries the guide the person asked
+    # get_post_processing_guide for (True) and the strengthening tips the
+    # diagnostic fetches on its own (False).
+    "_pro_finishing_bridge": "asked_by_user",
 }
 
 #: Bridges with more than one served call where the calls answer differently,

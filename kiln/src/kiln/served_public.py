@@ -165,13 +165,14 @@ def _file_text(value: str) -> str | None:
 
 
 def ask(
-    name: str, arguments: dict[str, Any], entry: dict[str, Any],
+    name: str, arguments: dict[str, Any], entry: dict[str, Any], *, timeout_s: float | None = None,
 ) -> tuple[dict[str, Any] | None, Any]:
     """Run *name* on Kiln's servers.  ``(answer, None)`` with every file it
     wrote saved here, or ``(None, miss)`` when it should run here instead:
     *miss* is the :class:`kiln.served_answer.Miss` to say, or ``None`` when
     there is nothing to say (the tool, run here, names a missing file
-    itself).  Blocking; never raises."""
+    itself).  *timeout_s* bounds the wait for the answer (default: the wait
+    a make gets).  Blocking; never raises."""
     import kiln.server as srv
     from kiln import served_makes
     from kiln.served_answer import SESSION_EXPIRED_CODE, Miss, classify_answer
@@ -196,7 +197,7 @@ def ask(
             kwargs["step_results"] = facts
         http: dict[str, Any] = {}
         answer = srv._pro_api_call(
-            name, _timeout=srv._SERVED_MAKE_WAIT_S, _http=http, **kwargs,
+            name, _timeout=timeout_s or srv._SERVED_MAKE_WAIT_S, _http=http, **kwargs,
         )
         if http.get("status") != 200:
             return None, classify_answer(answer) or Miss("unanswered", "KILN_API_HTTP_ERROR")
@@ -305,6 +306,40 @@ def answer_or_missed(name: str, arguments: dict[str, Any]) -> tuple[dict[str, An
     if answer is not None:
         return answer, None
     return None, miss or Miss("unanswered")
+
+
+def missed_here() -> Any:
+    """The :class:`kiln.served_answer.Miss` this call is running for, when
+    it is the one Kiln's servers did not answer (:func:`here_after`), else
+    ``None``.  Asks nothing."""
+    held = _missed.get()
+    if held is _NOT_ASKED:
+        return None
+    from kiln.served_answer import Miss
+
+    return held or Miss("unanswered")
+
+
+def why_made_here(on_the_line: str, *, cannot: str, wont: str, not_asked: str) -> tuple[str, dict[str, Any]]:
+    """``(note, miss fields)`` for an answer made on this computer that
+    lacks what Kiln's servers add to it: the sentence for the miss this call
+    is running for (:func:`missed_here`), in :func:`kiln.served_answer.sentence`'s
+    parts, with ``why`` / ``why_code`` / ``why_detail`` to set beside it.
+    When no served ask was made for this call (the tool's engine called
+    directly), *not_asked* and no fields: there is no cause to name.  With
+    kiln-pro in the process (Kiln's servers) the answer is made whole here,
+    so ``("", {})``."""
+    from kiln.served_answer import fields, sentence
+
+    if _kiln_pro_here():
+        return "", {}
+    miss = missed_here()
+    if miss is None:
+        return not_asked, {}
+    note = sentence(
+        miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont, then="ask again",
+    )
+    return note, fields(miss)
 
 
 def already_missed() -> bool:
@@ -541,4 +576,5 @@ def _reset_for_tests() -> None:
 
 __all__ = [
     "NOTE_KEY", "SCHEMA_VERSION", "already_missed", "ask", "first_this_session", "load", "plan", "say_once",
+    "why_made_here",
 ]

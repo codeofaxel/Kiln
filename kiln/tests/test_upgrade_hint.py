@@ -8,9 +8,10 @@ with valid license), the hint is empty.
 
 Covered tools:
   - troubleshoot_print_issue              (TroubleshootingResult.upgrade_hint)
-  - get_post_processing                   (PostProcessingGuide.upgrade_hint)
   - check_environment_compatibility       (EnvironmentReport.upgrade_hint)
   - server.troubleshoot_printer wrapper   (dict["upgrade_hint"])
+  - get_post_processing_guide             (its reply's upgrade_hint, which
+                                           follows the caller's plan alone)
 
 Detection probe: ``_engineering_overlay_loaded()`` checks whether
 ``pla.agent_guidance`` is non-empty (overlay-only field).
@@ -30,11 +31,9 @@ from kiln.design_intelligence import (
     _UPGRADE_HINT_ENVIRONMENT,
     _UPGRADE_HINT_POST_PROCESSING,
     _UPGRADE_HINT_TEMPLATES,
-    _UPGRADE_HINT_TROUBLESHOOTING,
     _engineering_overlay_loaded,
     _upgrade_hint,
     check_environment_compatibility,
-    get_post_processing,
     troubleshoot_print_issue,
     unestablished_caution,
 )
@@ -65,7 +64,6 @@ class TestHintCopyHygiene:
     so a user (or MCP agent) reading the field can act on it directly."""
 
     @pytest.mark.parametrize("hint", [
-        _UPGRADE_HINT_TROUBLESHOOTING,
         _UPGRADE_HINT_POST_PROCESSING,
         _UPGRADE_HINT_ENVIRONMENT,
     ])
@@ -76,7 +74,6 @@ class TestHintCopyHygiene:
         )
 
     @pytest.mark.parametrize("hint", [
-        _UPGRADE_HINT_TROUBLESHOOTING,
         _UPGRADE_HINT_POST_PROCESSING,
         _UPGRADE_HINT_ENVIRONMENT,
     ])
@@ -86,8 +83,16 @@ class TestHintCopyHygiene:
             f"got: {hint!r}"
         )
 
+    def test_finishing_hint_says_what_the_plan_adds_word_for_word(self):
+        """The finishing guide's hint, word for word, with the plan's name
+        in front."""
+        assert _UPGRADE_HINT_TEMPLATES["post_processing"] == (
+            "{product} adds checked steps for annealing (baking a finished print "
+            "in an oven to make it tougher) and the trade-offs of each way to "
+            "strengthen a part. See https://kiln3d.com/pricing"
+        )
+
     @pytest.mark.parametrize("hint", [
-        _UPGRADE_HINT_TROUBLESHOOTING,
         _UPGRADE_HINT_POST_PROCESSING,
         _UPGRADE_HINT_ENVIRONMENT,
     ])
@@ -108,17 +113,17 @@ class TestFreeTierHintAttached:
     """When _engineering_overlay_loaded() returns False, every consumer
     tool attaches the corresponding upgrade_hint string."""
 
+    @patch("kiln.design_intelligence._kiln_pro_in_process", return_value=True)
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_troubleshoot_attaches_hint(self, _mock):
+    def test_troubleshooting_is_never_sold(self, _mock, _pro_here):
+        """No plan holds the fixes back (Kiln's servers give them to every
+        signed-in account), so a missing table is never an upgrade pitch.
+        An install without kiln-pro is told why instead
+        (TestPlainInstallTroubleshootingNote)."""
         result = troubleshoot_print_issue("pla")
         assert result is not None, "pla should resolve in the catalog"
-        assert result.upgrade_hint == _UPGRADE_HINT_TROUBLESHOOTING
-
-    @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_post_processing_attaches_hint(self, _mock):
-        result = get_post_processing("pla")
-        assert result is not None, "pla should resolve in the catalog"
-        assert result.upgrade_hint == _UPGRADE_HINT_POST_PROCESSING
+        assert result.upgrade_hint == ""
+        assert "pricing" not in str(result.to_dict())
 
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
     def test_environment_attaches_hint(self, _mock):
@@ -143,12 +148,6 @@ class TestProTierHintEmpty:
         assert result.upgrade_hint == ""
 
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=True)
-    def test_post_processing_no_hint(self, _mock):
-        result = get_post_processing("pla")
-        assert result is not None
-        assert result.upgrade_hint == ""
-
-    @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=True)
     def test_environment_no_hint(self, _mock):
         result = check_environment_compatibility("pla", "outdoor sunny")
         assert result is not None
@@ -166,19 +165,13 @@ class TestToDictIncludesHint:
     missing field would silently strip the hint before it reaches the
     agent)."""
 
+    @patch("kiln.design_intelligence._kiln_pro_in_process", return_value=True)
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_troubleshoot_dict_carries_hint(self, _mock):
+    def test_troubleshoot_dict_carries_an_empty_hint(self, _mock, _pro_here):
         result = troubleshoot_print_issue("pla")
         d = result.to_dict()
         assert "upgrade_hint" in d
-        assert d["upgrade_hint"] == _UPGRADE_HINT_TROUBLESHOOTING
-
-    @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_post_processing_dict_carries_hint(self, _mock):
-        result = get_post_processing("pla")
-        d = result.to_dict()
-        assert "upgrade_hint" in d
-        assert d["upgrade_hint"] == _UPGRADE_HINT_POST_PROCESSING
+        assert d["upgrade_hint"] == ""
 
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
     def test_environment_dict_carries_hint(self, _mock):
@@ -259,10 +252,6 @@ class TestHintNamesTheTierThatActuallyUnlocksIt:
         with _kiln_pro_says(None):
             assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
             assert (
-                _upgrade_hint("material_troubleshooting")
-                == _UPGRADE_HINT_TROUBLESHOOTING
-            )
-            assert (
                 _upgrade_hint("environment_compatibility") == _UPGRADE_HINT_ENVIRONMENT
             )
 
@@ -271,10 +260,6 @@ class TestHintNamesTheTierThatActuallyUnlocksIt:
         shipped yesterday."""
         with _kiln_pro_says(None, absent=True):
             assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
-            assert (
-                _upgrade_hint("material_troubleshooting")
-                == _UPGRADE_HINT_TROUBLESHOOTING
-            )
             assert (
                 _upgrade_hint("environment_compatibility") == _UPGRADE_HINT_ENVIRONMENT
             )
@@ -293,16 +278,27 @@ class TestHintNamesTheTierThatActuallyUnlocksIt:
 
     def test_the_wired_tool_carries_the_named_tier_not_just_the_helper(self):
         """The helper being right is not the product being right — this is what
-        an agent actually reads off the response."""
-        with _kiln_pro_says("business"):
-            with patch(
-                "kiln.design_intelligence._engineering_overlay_loaded",
-                return_value=False,
-            ):
-                result = get_post_processing("pla")
-        assert result is not None
-        assert "Kiln Business" in result.upgrade_hint
-        assert "Kiln Pro" not in result.upgrade_hint
+        an agent actually reads off the finishing guide's reply."""
+        from kiln._pro_finishing_bridge import Asked
+        from kiln.plugins.design_tools import plugin
+
+        tools: dict = {}
+
+        class _MCP:
+            def tool(self, **_kwargs):
+                def decorator(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+
+                return decorator
+
+        plugin.register(_MCP())
+        answer = Asked(answer={"success": True, "material": "pla", "goal": "paint", "answer": {"paintability": None}})
+        with _kiln_pro_says("business"), patch("kiln._pro_finishing_bridge.guide", return_value=answer):
+            result = tools["get_post_processing_guide"]("pla", "paint")
+        assert result["success"] is True
+        assert "Kiln Business" in result["upgrade_hint"]
+        assert "Kiln Pro" not in result["upgrade_hint"]
 
     def test_the_caution_tail_names_the_tier_too(self):
         """``unestablished_caution`` shares the same shortfall and the same

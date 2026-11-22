@@ -4473,18 +4473,27 @@ class _SlicerToolsPlugin:
                     # The sliced file says which colours it wants, so
                     # each extruder routes to the tray of that colour.
                     file_path=upload_path,
+                    goal={"version_id": version_id} if isinstance(version_id, str) and version_id.strip() else None,
                 )
                 ams_routing_warnings = list(ams_decision.get("warnings") or [])
                 if ams_decision.get("blocked"):
-                    _extra: dict[str, Any] = {"ams_plan": ams_decision.get("plan")}
-                    if ams_decision.get("colour"):
-                        _extra["colour"] = ams_decision["colour"]
-                    return _srv._error_dict(
-                        " ".join(ams_routing_warnings) or "AMS routing blocked.",
-                        # A held colour is its own refusal: the person is asked.
-                        code=str(ams_decision.get("code") or "AMS_COLOR_MISMATCH"),
-                        retryable=False,
-                        extra=_extra,
+                    _here = {"input_path": _multicolor_source, **({"printer_name": printer_name} if printer_name else {})}
+                    _mat = {"material": material} if material else {}
+                    # A held colour is its own refusal: the person is asked.
+                    return _srv._spool_refusal(
+                        ams_decision, prefix="",
+                        print_from=lambda o: (
+                            {"tool": "run_reslice_and_print", "arguments": {
+                                "model_path": _multicolor_source, **_mat, "ams_mapping": o["mapping"],
+                                **({"printer_name": printer_name} if printer_name else {})}}
+                            if o.get("mapping") else
+                            {"tool": "slice_and_print", "arguments": {**_here, **_mat, "color": o["hex"]}}
+                        ),
+                        reslice=lambda o, asked: _srv._swap_call(
+                            o, asked, file_path=_multicolor_source,
+                            here={"printer_name": printer_name} if printer_name else None,
+                            ids={"version_id": version_id, "design_id": design_id, "branch_id": branch_id},
+                        ),
                     )
                 # Refuse to silent-route when AMS state is ambiguous
                 # (hardware bits say AMS present but no tray state, or

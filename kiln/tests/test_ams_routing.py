@@ -266,8 +266,14 @@ class TestPlanAmsMapping:
         assert plan.ok
         assert plan.mapping == [1, 0]
 
-    def test_material_mismatch_matches_with_a_warning(self):
+    def test_material_mismatch_is_not_a_match(self):
         plan = plan_ams_mapping([Filament("F72323", "PETG")], _trays("F72323", material="PLA"))
+        assert not plan.ok
+        assert plan.unmatched == [0]
+        assert plan.warnings == ["no loaded spool is PETG"]
+
+    def test_a_word_that_names_no_type_still_matches_on_colour_with_a_warning(self):
+        plan = plan_ams_mapping([Filament("F72323", "FLEX")], _trays("F72323", material="TPU"))
         assert plan.ok
         assert any("material differs" in w for w in plan.warnings)
 
@@ -343,7 +349,7 @@ class TestResolverRoutesByColour:
         got = _resolve_use_ams("auto", None, self._adapter(), file_path=str(p))
         assert got.get("blocked") is True
         assert got["ams_mapping"] is None
-        assert "cannot supply them all" in got["warnings"][0]
+        assert got["warnings"][0].startswith("One of the two colours is loaded. The blue part needs blue PLA")
 
     def test_a_single_unmatched_colour_falls_back_with_a_warning(self, tmp_path):
         from kiln.server import _resolve_use_ams

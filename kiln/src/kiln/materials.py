@@ -14,6 +14,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln.catalog_keys import _MATERIAL_ABBREVIATIONS
 from kiln.events import EventType
 
 logger = logging.getLogger(__name__)
@@ -310,7 +311,9 @@ class MaterialTracker:
         expected_upper = expected_material.upper()
         loaded_upper = loaded.material_type.upper()
 
-        if expected_upper == loaded_upper:
+        from kiln.ams_routing import same_plastic
+
+        if expected_upper == loaded_upper or same_plastic(expected_material, loaded.material_type):
             return None
 
         warning = MaterialWarning(
@@ -574,16 +577,14 @@ MATERIAL_TEMPS: dict[str, tuple[int, int, int, int]] = {
     "PC": (280, 285, 110, 110),
 }
 
-#: Spellings users and vendors use for a name already in MATERIAL_TEMPS.
-_MATERIAL_ALIASES: dict[str, str] = {
-    "PA": "NYLON",
-    "PA6": "NYLON",
-    "PA12": "NYLON",
-}
-
 
 def normalise_material_type(raw: str | None) -> str | None:
     """Return the canonical name for *raw*, or ``None`` if unrecognised.
+
+    A name already in :data:`MATERIAL_TEMPS` is returned as it is; a short
+    name ("PA", "PA6") is written out through the one shared spelling map
+    (:data:`kiln.catalog_keys._MATERIAL_ABBREVIATIONS`) and kept only when
+    the written-out name is in :data:`MATERIAL_TEMPS`.
 
     ``None`` means "not a material Kiln has defaults for" — callers treat
     that as unknown rather than substituting a guess.
@@ -591,7 +592,7 @@ def normalise_material_type(raw: str | None) -> str | None:
     if not raw:
         return None
     value = raw.strip().upper()
-    value = _MATERIAL_ALIASES.get(value, value)
     if value in MATERIAL_TEMPS:
         return value
-    return None
+    spelled = _MATERIAL_ABBREVIATIONS.get(value.lower(), "").upper()
+    return spelled if spelled in MATERIAL_TEMPS else None

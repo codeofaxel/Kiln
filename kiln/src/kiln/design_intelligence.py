@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -116,7 +117,7 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     """Probe whether one kiln-pro engineering overlay actually merged.
 
     Used by free-tier-honest consumer tools (``troubleshoot_print_issue``,
-    ``get_post_processing``, ``check_environment_compatibility``, the
+    ``check_environment_compatibility``, the
     ``troubleshoot_printer`` MCP wrapper) to attach an ``upgrade_hint``
     field when the response shape is shallow because the overlay didn't
     merge — so a free user (or an agent acting on their behalf) sees an
@@ -324,11 +325,6 @@ def curated_entry_exists(overlay_kind: str, entity_id: str) -> bool:
 # Keyed by the overlay kind whose depth is missing, because that kind is what
 # decides ``{product}`` — see :func:`_upgrade_product_name`.
 _UPGRADE_HINT_TEMPLATES: dict[str, str] = {
-    "material_troubleshooting": (
-        "{product} adds per-symptom diagnostic playbooks "
-        "(root cause + ordered fixes + prevention). "
-        "See https://kiln3d.com/pricing"
-    ),
     # Deliberately does NOT mention safety notes.  Those ship free at every
     # tier — a dust mask, a respirator, "uncured epoxy is a skin sensitizer" —
     # so listing them here told a free user their protective-equipment guidance
@@ -336,9 +332,9 @@ _UPGRADE_HINT_TEMPLATES: dict[str, str] = {
     # overstates itself costs more trust than the sale is worth, and on safety
     # guidance it is the wrong claim to make at all.
     "post_processing": (
-        "{product} adds step-by-step procedures "
-        "and strengthening tradeoffs. "
-        "See https://kiln3d.com/pricing"
+        "{product} adds checked steps for annealing (baking a finished print "
+        "in an oven to make it tougher) and the trade-offs of each way to "
+        "strengthen a part. See https://kiln3d.com/pricing"
     ),
     "environment_compatibility": (
         "{product} adds curated SME notes on what each rating means "
@@ -351,8 +347,7 @@ _UPGRADE_HINT_TEMPLATES: dict[str, str] = {
 #: What each hint offers, as the plan check names it to someone who already
 #: pays for the plan.
 _HINT_SUBJECTS: dict[str, str] = {
-    "material_troubleshooting": "A diagnostic playbook for this symptom",
-    "post_processing": "The step-by-step procedure",
+    "post_processing": "The checked annealing steps",
     "environment_compatibility": "The curated note on each rating",
 }
 
@@ -372,9 +367,6 @@ def _upgrade_hint(kind: str) -> str:
 # The default rendering of each hint: what a public-only install shows, and
 # what any caller falls back to when no tier can be named.  Byte-identical to
 # the copy that shipped before the product name was allowed to vary.
-_UPGRADE_HINT_TROUBLESHOOTING = _UPGRADE_HINT_TEMPLATES[
-    "material_troubleshooting"
-].format(product=_DEFAULT_UPGRADE_PRODUCT)
 _UPGRADE_HINT_POST_PROCESSING = _UPGRADE_HINT_TEMPLATES["post_processing"].format(
     product=_DEFAULT_UPGRADE_PRODUCT
 )
@@ -798,11 +790,17 @@ class TroubleshootingResult:
     """Matched print issues with fixes for a material+symptom query.
 
     ``upgrade_hint`` is set (with the canonical Kiln Pro upsell + pricing
-    URL) only when the kiln-pro engineering overlay didn't merge — i.e.
-    free tier, missing license, or overlay endpoint unreachable past
-    grace.  Pro+ tier with a valid license sees this field empty.  Lets
-    an MCP agent surface the upgrade path verbatim without having to
-    invent the copy.
+    URL) only where kiln-pro runs in this process and its engineering
+    overlay didn't merge.  Pro+ tier with a valid license sees this field
+    empty.  Lets an MCP agent surface the upgrade path verbatim without
+    having to invent the copy.
+
+    ``fixes_note`` is set on an install without kiln-pro whose answer was
+    made on this computer: the step-by-step fixes come from Kiln's servers
+    (https://kiln3d.com) for any signed-in account, and the note says, in
+    one sentence, why they are not in this answer.  When a served ask
+    missed, ``to_dict`` carries the miss beside it as ``why``,
+    ``why_code`` and ``why_detail`` (:func:`kiln.served_answer.fields`).
     """
 
     material: str
@@ -810,9 +808,11 @@ class TroubleshootingResult:
     storage_requirements: dict[str, Any] | None
     break_in_tips: list[str]
     upgrade_hint: str = ""
+    fixes_note: str = ""
+    fixes_why: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _with_fixes_note(asdict(self))
 
 
 @dataclass
@@ -828,28 +828,6 @@ class PrinterCompatibilityReport:
     printer_id: str
     materials: dict[str, dict[str, Any]]
     resolved_from: str = "exact"
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class PostProcessingGuide:
-    """Post-processing techniques, paintability, and strengthening for a material.
-
-    ``upgrade_hint`` is set (with the canonical Kiln Pro upsell + pricing
-    URL) only when the kiln-pro engineering overlay didn't merge — i.e.
-    free tier, missing license, or overlay endpoint unreachable past
-    grace.  Pro+ tier with a valid license sees this field empty.  Lets
-    an MCP agent surface the upgrade path verbatim without having to
-    invent the copy.
-    """
-
-    material: str
-    techniques: list[dict[str, Any]]
-    paintability: dict[str, Any] | None
-    strengthening: list[dict[str, Any]]
-    upgrade_hint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -920,9 +898,23 @@ class PrintDiagnostic:
     storage_requirements: dict[str, Any] | None
     post_processing_tips: list[str]
     combined_guidance: list[str]
+    #: As on :class:`TroubleshootingResult`.
+    fixes_note: str = ""
+    fixes_why: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _with_fixes_note(asdict(self))
+
+
+def _with_fixes_note(out: dict[str, Any]) -> dict[str, Any]:
+    """*out* with ``fixes_note`` only when it says something, and the miss
+    behind it (``why``, ``why_code``, ``why_detail``) at the top level."""
+    why = out.pop("fixes_why", None) or {}
+    if not out.get("fixes_note"):
+        out.pop("fixes_note", None)
+        return out
+    out.update(why)
+    return out
 
 
 @dataclass
@@ -1002,7 +994,6 @@ class _DesignKnowledgeBase:
         self._printers: dict[str, dict[str, Any]] = {}
         self._troubleshooting: dict[str, dict[str, Any]] = {}
         self._printer_compatibility: dict[str, dict[str, Any]] = {}
-        self._post_processing: dict[str, dict[str, Any]] = {}
         self._skin_contact: dict[str, dict[str, Any]] = {}
         # Each table's ``_meta`` block, keyed by table attribute.  The tables
         # themselves drop every underscore key (that rule keeps metadata and
@@ -1042,7 +1033,6 @@ class _DesignKnowledgeBase:
             ("printer_profiles.json", "_printers"),
             ("material_troubleshooting.json", "_troubleshooting"),
             ("printer_material_compatibility.json", "_printer_compatibility"),
-            ("post_processing.json", "_post_processing"),
             ("skin_contact.json", "_skin_contact"),
         ]
 
@@ -1062,7 +1052,7 @@ class _DesignKnowledgeBase:
         logger.info(
             "Design knowledge loaded: %d materials, %d templates, %d requirements, "
             "%d load tables, %d environments, %d printers, %d troubleshooting, "
-            "%d printer-compat, %d post-processing",
+            "%d printer-compat",
             len(self._materials),
             len(self._templates),
             len(self._requirements),
@@ -1071,7 +1061,6 @@ class _DesignKnowledgeBase:
             len(self._printers),
             len(self._troubleshooting),
             len(self._printer_compatibility),
-            len(self._post_processing),
         )
 
     def _table(
@@ -1194,10 +1183,6 @@ class _DesignKnowledgeBase:
         records this process has fetched."""
         self._load()
         return self._printer_compatibility
-
-    @property
-    def post_processing(self) -> dict[str, dict[str, Any]]:
-        return self._table("_post_processing", "post_processing")
 
     @property
     def skin_contact(self) -> dict[str, dict[str, Any]]:
@@ -2862,16 +2847,14 @@ def _build_design_template(template_id: str, data: dict[str, Any]) -> DesignTemp
         caution=(
             ""
             if (reason or guidance)
-            else unestablished_caution(
+            else _design_notes_caution(
                 "design_templates",
                 "The print orientation for this pattern is named here, but "
                 "not why it matters, what dimensions the pattern needs, or "
                 "how it usually fails. Treat the label as a starting point "
                 "rather than a checked design, and print a test piece before "
                 "committing to it.",
-                curated_entry_exists=curated_entry_exists(
-                    "design_templates", template_id
-                ),
+                template_id,
             )
         ),
     )
@@ -2977,7 +2960,7 @@ def _requirement_caution(
     stated = data.get("caution", "")
     if stated or guidance:
         return stated
-    return unestablished_caution(
+    return _design_notes_caution(
         "functional_requirements",
         "Only the starting rules for this requirement are given here: which "
         "materials to use or avoid and the minimum settings. Why they apply, "
@@ -2985,10 +2968,76 @@ def _requirement_caution(
         "the part were not established here. Treat them as a starting point "
         "rather than a clearance, and test the part for this use before you "
         "depend on it.",
-        curated_entry_exists=curated_entry_exists(
-            "functional_requirements", req_id
-        ),
+        req_id,
     )
+
+
+#: Where an answer made on this computer, after Kiln's servers missed the
+#: call, says why the design notes are not in it (:func:`with_design_notes_note`).
+DESIGN_NOTES_KEY = "guidance_note"
+
+#: The running call's memo key for the miss behind a design note left out.
+_DESIGN_NOTES_LEFT_OUT = "design_notes_left_out"
+
+#: :func:`kiln.served_answer.sentence`'s parts for that note.  The same notes
+#: come from Kiln's servers for any signed-in account.
+_DESIGN_NOTES_ON_THE_LINE = (
+    "Kiln's design notes for each pattern and requirement come from Kiln's "
+    "servers, free with any Kiln account"
+)
+_DESIGN_NOTES_CANNOT = "get them"
+_DESIGN_NOTES_WONT = "gives only the starting rules kept on this computer"
+
+
+def _design_notes_caution(overlay_kind: str, what_is_unknown: str, entity_id: str) -> str:
+    """The caution for a pattern or requirement whose notes were not read.
+
+    In a call Kiln's servers did not answer (:func:`kiln.served_public.missed_here`),
+    the notes are what any signed-in account is given there, so the caution
+    names no plan: it is said alone, and the miss is kept on the call for the
+    answer to say once (:func:`with_design_notes_note`).  Any other call
+    words it through :func:`unestablished_caution`.
+    """
+    from kiln import served_public
+
+    miss = served_public.missed_here()
+    if miss is None:
+        return unestablished_caution(
+            overlay_kind,
+            what_is_unknown,
+            curated_entry_exists=curated_entry_exists(overlay_kind, entity_id),
+        )
+    from kiln.tool_context import call_memo
+
+    memo = call_memo()
+    if memo is not None:
+        memo[_DESIGN_NOTES_LEFT_OUT] = miss
+    return what_is_unknown
+
+
+def with_design_notes_note(result: Any) -> Any:
+    """*result* with one sentence under :data:`DESIGN_NOTES_KEY` saying why
+    the design notes are not in it, and the miss behind it (``why``,
+    ``why_code``, ``why_detail``), when this call left one out
+    (:func:`_design_notes_caution`).  Otherwise *result* unchanged."""
+    from kiln.tool_context import call_memo
+
+    memo = call_memo()
+    miss = memo.get(_DESIGN_NOTES_LEFT_OUT) if memo is not None else None
+    if miss is None or not isinstance(result, dict) or result.get("success") is False:
+        return result
+    from kiln.served_answer import fields, sentence
+
+    result[DESIGN_NOTES_KEY] = sentence(
+        miss,
+        feature="servers",
+        on_the_line=_DESIGN_NOTES_ON_THE_LINE,
+        cannot=_DESIGN_NOTES_CANNOT,
+        wont=_DESIGN_NOTES_WONT,
+        then="ask again",
+    )
+    result.update(fields(miss))
+    return result
 
 
 def get_design_constraints(
@@ -3237,17 +3286,65 @@ def troubleshoot_print_issue(
         key=lambda i: severity_order.get(i.get("severity", "minor"), 2),
     )
 
+    # No plan holds these fixes back: every signed-in account is given them by
+    # Kiln's servers, so a missing table is never answered with an upgrade.
+    hint, fixes_note, fixes_why = "", "", {}
+    if not _engineering_overlay_loaded("material_troubleshooting") and not _kiln_pro_in_process():
+        fixes_note, fixes_why = _fixes_not_on_this_computer()
+
     return TroubleshootingResult(
         material=material_key,
         matched_issues=issues,
         storage_requirements=data.get("storage_requirements"),
         break_in_tips=data.get("break_in_tips", []),
-        upgrade_hint=(
-            ""
-            if _engineering_overlay_loaded("material_troubleshooting")
-            else _upgrade_hint("material_troubleshooting")
-        ),
+        upgrade_hint=hint,
+        fixes_note=fixes_note,
+        fixes_why=fixes_why,
     )
+
+
+#: What a troubleshooting answer made on an install without kiln-pro says
+#: about the fixes it does not carry, in :func:`kiln.served_answer.sentence`'s
+#: parts.  The same answer comes from Kiln's servers for any signed-in account.
+_FIXES_ON_THE_LINE = (
+    "Kiln's step-by-step fixes for this print problem come from Kiln's servers, "
+    "free with any Kiln account"
+)
+_FIXES_CANNOT = "get them"
+_FIXES_WONT = "gives only the advice kept on this computer"
+#: Said when no served ask was made for this answer (the engine called
+#: directly, not through Kiln's tools), so no cause can be named.
+_FIXES_NOT_ASKED = (
+    f"{_FIXES_ON_THE_LINE}. This answer {_FIXES_WONT}; "
+    "ask through Kiln's troubleshooting tools while signed in to get them."
+)
+
+
+def _kiln_pro_in_process() -> bool:
+    """Whether kiln-pro is loaded in this process (Kiln's servers), where a
+    troubleshooting answer is always made here."""
+    return sys.modules.get("kiln_pro") is not None
+
+
+def _fixes_not_on_this_computer() -> tuple[str, dict[str, Any]]:
+    """``(note, miss fields)`` for an answer made here instead of on Kiln's
+    servers: the served ask's miss, worded once, when this call is the one
+    the servers did not answer (:func:`kiln.served_public.here_after`)."""
+    from kiln import served_public
+    from kiln.served_answer import fields, sentence
+
+    miss = served_public.missed_here()
+    if miss is None:
+        return _FIXES_NOT_ASKED, {}
+    note = sentence(
+        miss,
+        feature="servers",
+        on_the_line=_FIXES_ON_THE_LINE,
+        cannot=_FIXES_CANNOT,
+        wont=_FIXES_WONT,
+        then="ask again",
+    )
+    return note, fields(miss)
 
 
 def list_troubleshooting_materials() -> list[str]:
@@ -3404,141 +3501,43 @@ def compat_floor_reason(printer_id: str) -> dict[str, str] | None:
     return {"roster_id": roster_id, "line": line, "why_generic": cause, "why_code": str(getattr(miss, "code", "") or "")}
 
 
-# ---------------------------------------------------------------------------
-# Public API — Post-Processing
-# ---------------------------------------------------------------------------
-
-#: Technique names the post-processing table used before it described each
-#: finish by its chemistry and form instead of a retail product, mapped to the
-#: name the table uses now.  An agent, a saved note or an older client holding
-#: one of these still reaches the technique.  Keys are casefolded.
-#: An older technique name may carry a product in brackets ("Epoxy Coating
-#: (<product>)", "Dyeing with <product>") or lack a form word ("Flexible
-#: Paint" for "Flexible Rubber Paint").  An agent or saved note may still
-#: hold such a spelling, so a lookup matches on the technique's CORE -- the
-#: name with any bracketed tail, any "with ..." tail and the form word
-#: "rubber" removed -- rather than on a table of old names, which would keep
-#: the products in this file.
-_TECHNIQUE_TAIL = re.compile(r"\s*\(.*\)\s*$|\s+with\s+.*$", re.IGNORECASE)
-_TECHNIQUE_FORM_WORDS = re.compile(r"\brubber\b", re.IGNORECASE)
+#: What a compatibility answer made on an install without kiln-pro says about
+#: the printer's notes it does not carry, in :func:`kiln.served_answer.sentence`'s
+#: parts.  The same answer comes from Kiln's servers for any signed-in account.
+_COMPAT_NOTES_ON_THE_LINE = (
+    "Kiln's notes on how this printer handles each plastic come from Kiln's servers, "
+    "free with any Kiln account"
+)
+_COMPAT_NOTES_WONT = "gives the verdict without them"
+#: Said when no served ask was made for this answer, so no cause can be named.
+_COMPAT_NOTES_NOT_ASKED = (
+    f"{_COMPAT_NOTES_ON_THE_LINE}. This answer {_COMPAT_NOTES_WONT}; "
+    "ask through Kiln's printer tools while signed in to get them."
+)
 
 
-def technique_core(name: str) -> str:
-    """The comparable core of technique *name*: brackets, a ``with ...``
-    tail and the form word dropped, whitespace folded, casefolded."""
-    core = _TECHNIQUE_TAIL.sub("", str(name or "").strip())
-    core = _TECHNIQUE_FORM_WORDS.sub(" ", core)
-    return " ".join(core.split()).casefold()
-
-
-def find_post_processing_technique(
-    techniques: list[Any], name: str
-) -> dict[str, Any] | None:
-    """The technique in *techniques* called *name* (any case; an old
-    spelling that carried a product or a form word too).  An exact name
-    wins; otherwise the one technique with the same core."""
-    wanted = str(name or "").strip().casefold()
-    if not wanted:
-        return None
-    rows = [t for t in techniques if isinstance(t, dict)]
-    for technique in rows:
-        if str(technique.get("name", "")).strip().casefold() == wanted:
-            return technique
-    core = technique_core(name)
-    matches = [t for t in rows if technique_core(t.get("name", "")) == core]
-    return matches[0] if len(matches) == 1 else None
-
-
-def get_post_processing(material_id: str) -> PostProcessingGuide | None:
-    """Get post-processing techniques for a material.
-
-    :param material_id: Material key (e.g. ``"pla"``, ``"abs"``).
-    """
-    kb = _get_kb()
-    material_key = material_id.lower()
-    data = kb.post_processing.get(material_key)
-    if data is None:
-        return None
-
-    return PostProcessingGuide(
-        material=material_key,
-        techniques=data.get("techniques", []),
-        paintability=data.get("paintability"),
-        strengthening=data.get("strengthening", []),
-        upgrade_hint=(
-            ""
-            if _engineering_overlay_loaded("post_processing")
-            else _upgrade_hint("post_processing")
-        ),
+def compat_notes_note(report: PrinterCompatibilityReport) -> dict[str, Any]:
+    """``{"notes_note": ..., "why": ...}`` for a compatibility answer that
+    carries this printer's own verdict without its notes, made on an install
+    without kiln-pro; ``{}`` otherwise.  An answer from the generic floor
+    already says why in its own note (:func:`compat_floor_reason`)."""
+    if getattr(report, "resolved_from", "default") == "default":
+        return {}
+    bare = any(
+        isinstance(entry, dict) and entry.get("status") != "unknown" and not entry.get("notes")
+        for entry in (getattr(report, "materials", None) or {}).values()
     )
+    if not bare:
+        return {}
+    from kiln import served_public
 
-
-def _technique_safety_note(guide: PostProcessingGuide, method: str) -> str:
-    """The safety note of the technique a strengthening *method* names, or ``""``.
-
-    "IPA Vapor Smoothing (Structural)" is the "IPA Vapor Smoothing" technique,
-    so a tip that recommends it carries that technique's fire warning.
-    """
-    wanted = technique_core(method)
-    if not wanted:
-        return ""
-    for technique in guide.techniques:
-        if not isinstance(technique, dict):
-            continue
-        if technique_core(technique.get("name", "")) == wanted:
-            return str(technique.get("safety_notes") or "").strip()
-    return ""
-
-
-def get_public_post_processing(material_id: str) -> PostProcessingGuide | None:
-    """Get the public post-processing floor without optional enrichment.
-
-    Each technique keeps its ``safety_notes``: the fire, fume and dust
-    warnings are the floor, so an offline or signed-out install still says
-    them.
-    """
-    raw = json.loads(
-        (_DATA_DIR / "post_processing.json").read_text(encoding="utf-8")
+    note, why = served_public.why_made_here(
+        _COMPAT_NOTES_ON_THE_LINE,
+        cannot="get them",
+        wont=_COMPAT_NOTES_WONT,
+        not_asked=_COMPAT_NOTES_NOT_ASKED,
     )
-    material_key = material_id.lower()
-    data = raw.get(material_key)
-    if not isinstance(data, dict):
-        return None
-
-    techniques = [
-        {
-            key: item[key]
-            for key in ("name", "difficulty", "tools_needed", "safety_notes")
-            if key in item
-        }
-        for item in (data.get("techniques") or [])
-        if isinstance(item, dict)
-    ]
-    paintability = data.get("paintability")
-    if isinstance(paintability, dict):
-        paintability = {
-            key: paintability[key]
-            for key in ("primer_needed", "paint_types")
-            if key in paintability
-        }
-    strengthening = [
-        {
-            key: item[key]
-            for key in ("method", "applicable", "strength_gain_pct")
-            if key in item
-        }
-        if isinstance(item, dict)
-        else {"method": str(item), "applicable": None}
-        for item in (data.get("strengthening") or [])
-    ]
-
-    return PostProcessingGuide(
-        material=material_key,
-        techniques=techniques,
-        paintability=paintability,
-        strengthening=strengthening,
-        upgrade_hint=_upgrade_hint("post_processing"),
-    )
+    return {"notes_note": note, **why} if note else {}
 
 
 # ---------------------------------------------------------------------------
@@ -3729,7 +3728,9 @@ def get_print_diagnostic(
     This is the primary tool for agents diagnosing print problems.  It
     pulls from troubleshooting data, printer compatibility, storage
     requirements, and post-processing tips to give a comprehensive
-    answer in one call.
+    answer in one call.  The strengthening tips are Kiln's finishing
+    guide's (:mod:`kiln._pro_finishing_bridge`); when it cannot be had,
+    ``post_processing_tips`` holds one line saying why instead.
 
     :param material_id: Material being printed (e.g. ``"petg"``).
     :param symptom: What's going wrong (e.g. ``"stringing"``, ``"warping"``).
@@ -3749,20 +3750,14 @@ def get_print_diagnostic(
             mat_key = material_id.lower()
             compat = compat_report.materials.get(mat_key)
 
-    # Post-processing quick tips
-    pp_tips: list[str] = []
-    pp_guide = get_post_processing(material_id)
-    if pp_guide and pp_guide.strengthening:
-        for s in pp_guide.strengthening:
-            if s.get("applicable"):
-                tip = (
-                    f"{s.get('method', 'Unknown')}: ~{s.get('strength_gain_pct', 0)}% "
-                    f"strength gain. {s.get('tradeoffs', '')}"
-                )
-                safety = _technique_safety_note(pp_guide, str(s.get("method", "")))
-                if safety:
-                    tip = f"{tip.rstrip()} Safety: {safety}"
-                pp_tips.append(tip)
+    # Strengthening tips, each with the safety note of the technique it
+    # names, from Kiln's finishing guide; when they cannot be had, one line
+    # says why instead (never an empty list that reads as "none apply").
+    from kiln import _pro_finishing_bridge as finishing
+
+    pp_tips, tips_miss = finishing.tips(material_id)
+    if pp_tips is None:
+        pp_tips = [finishing.tips_line(tips_miss, material_id)]
 
     # Build combined guidance
     combined: list[str] = []
@@ -3781,9 +3776,12 @@ def get_print_diagnostic(
         )
     if ts_result.storage_requirements:
         sr = ts_result.storage_requirements
-        if sr.get("humidity_sensitive"):
+        # Said for every plastic with a drying temperature, quick to take up
+        # water or not: it is a temperature the spool dries at without softening.
+        if sr.get("humidity_sensitive") or sr.get("drying_temp_c") is not None:
+            method = str(sr.get("storage_method") or "sealed container").rstrip(". ")
             combined.append(
-                f"Storage: {sr.get('storage_method', 'sealed container')}. "
+                f"Storage: {method}. "
                 f"Max humidity {sr.get('max_humidity_pct', 'N/A')}%. "
                 f"Dry at {sr.get('drying_temp_c', 'N/A')}C for "
                 f"{sr.get('drying_time_hours', 'N/A')} hours if wet."
@@ -3798,6 +3796,8 @@ def get_print_diagnostic(
         storage_requirements=ts_result.storage_requirements,
         post_processing_tips=pp_tips,
         combined_guidance=combined,
+        fixes_note=ts_result.fixes_note,
+        fixes_why=dict(ts_result.fixes_why),
     )
 
 
