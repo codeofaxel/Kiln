@@ -307,7 +307,7 @@ def _validate_feedback(feedback: OrderFeedback) -> None:
         if len(feedback.comment) > _MAX_COMMENT_LEN:
             raise ReputationValidationError(f"comment exceeds max length of {_MAX_COMMENT_LEN} characters")
         if _CONTROL_CHAR_RE.search(feedback.comment):
-            raise ReputationValidationError("comment contains control characters")
+            raise ReputationValidationError("The comment can't contain line breaks, tabs or other invisible characters.")
 
 
 # ---------------------------------------------------------------------------
