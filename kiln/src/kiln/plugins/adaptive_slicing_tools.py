@@ -448,8 +448,9 @@ def quick_adaptive_plan(
 def list_supported_materials() -> dict:
     """List all materials with adaptive slicing profiles.
 
-    Returns material names with their key slicing constraints
-    (layer height limits, bridge parameters, overhang angles).  When the
+    Returns material names with their layer height window, best layer
+    height and bridge layer height.  How steep a material can print
+    unsupported is answered one material at a time, by its profile.  When the
     list cannot be reached (offline, signed out), it is empty, the reply
     says ``basic: true`` with ``message`` saying why, and
     ``generic_settings`` shows what a plan uses for every material instead,

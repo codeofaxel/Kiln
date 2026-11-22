@@ -167,7 +167,6 @@ class TestRegisterPrinterTool:
         registry = PrinterRegistry()
         monkeypatch.setattr(mod, "_registry", registry)
         monkeypatch.setattr(mod, "_adapter", None)
-        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
         built: list = []
 
         class FakeBambuAdapter:

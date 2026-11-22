@@ -16,7 +16,8 @@ picks it, so every check picks the same way and can say what it picked:
 Every answer names its rung.  A printer nobody named reaches rung 5 -- unless
 the caller asks for the only printer Kiln knows of (*or_only_printer*): one
 registered machine, or one nozzle on record for the account, is then the
-printer, and several is no answer.  A rung that could not be asked is
+printer; among several it is the one :mod:`kiln.which_printer` chooses, and
+when that chooses none there is no answer.  A rung that could not be asked is
 skipped, and the answer says so when it was the record.  Sends nothing to
 the printer.
 """
@@ -62,7 +63,8 @@ class AssumedNozzle:
     :param printer_id: The printer the answer is about, when one was named.
     :param record_unreachable: The record could not be asked (offline,
         signed out), so a lower rung answered.
-    :param inferred_printer: No printer was named and exactly one is known.
+    :param inferred_printer: No printer was named and one was chosen.
+    :param chosen_as: Why that printer, when it was not the only one known.
     :param setting_not_read: The printer's own setting was not read because
         Kiln is working with this other machine (the one-printer rule), so a
         lower rung answered.
@@ -76,11 +78,13 @@ class AssumedNozzle:
     inferred_printer: bool = False
     #: The machine Kiln was working with when it did not read this one's setting.
     setting_not_read: str | None = None
+    #: Why the printer was chosen, when nobody named it and several are known.
+    chosen_as: str = ""
 
     def sentence(self, verb: str = "Checked") -> str:
         where = _SOURCE_WORDS.get(self.source, self.source).format(printer=self.printer_id or "the printer")
         if self.inferred_printer:
-            where += ", the only printer Kiln knows of"
+            where += ", " + (self.chosen_as or "the only printer Kiln knows of")
         said = f"{verb} for a {self.diameter_mm:g} mm nozzle: {where}."
         if self.source == "default":
             said += " Name the printer, or pass the nozzle size, if yours differs."
@@ -206,16 +210,9 @@ def _stock_mm(printer_id: str) -> float | None:
 def _registered_machines() -> list[str]:
     """The printers registered here, one name per machine -- or, during a
     call Kiln's servers run for another computer, that computer's."""
-    from kiln import callers_printers
+    from kiln.which_printer import known_machines
 
-    if callers_printers.known():
-        return callers_printers.machines()
-    try:
-        from kiln.registry import get_printer_registry
-
-        return [str(name) for name in get_printer_registry().list_machines()]
-    except Exception:  # noqa: BLE001 -- no registry is no machine
-        return []
+    return known_machines()
 
 
 def assumed_nozzle(
@@ -227,8 +224,8 @@ def assumed_nozzle(
     """The nozzle size a check should run with for *printer_id*.
 
     *stated* is the size the caller passed, and wins.  With no printer named
-    and *or_only_printer* set, the one printer Kiln knows of stands in: the
-    one registered machine, else the one nozzle on record for the account.
+    and *or_only_printer* set, the printer :func:`kiln.which_printer.which_printer`
+    chooses stands in, else the one nozzle on record for the account.
     Never raises; with nothing to go on the answer is :data:`DEFAULT_MM`,
     named as a default.
     """
@@ -237,10 +234,15 @@ def assumed_nozzle(
     if said is not None:
         return AssumedNozzle(said, "stated", pid)
     inferred = False
+    chosen_as = ""
     if pid is None and or_only_printer:
+        from kiln.which_printer import ONLY, which_printer
+
         machines = _registered_machines()
-        if len(machines) == 1:
-            pid, inferred = machines[0], True
+        choice = which_printer(machines=machines)
+        if choice.printer:
+            pid, inferred = choice.printer, True
+            chosen_as = "" if choice.how == ONLY else choice.why
         elif not machines:
             # No machine registered here (a hosted call, or a Kiln that was
             # never pointed at a printer): the account's one recorded nozzle
@@ -268,17 +270,47 @@ def assumed_nozzle(
         on_record = _valid(recorded.get("diameter_mm"))
         record_unreachable = not recorded.get("answered", True)
         if on_record is not None:
-            return AssumedNozzle(on_record, "record", pid, inferred_printer=inferred)
+            return AssumedNozzle(on_record, "record", pid, inferred_printer=inferred, chosen_as=chosen_as)
     except Exception:  # noqa: BLE001 -- the record is one rung, never the check
         logger.debug("assumed nozzle: record lookup failed", exc_info=True)
 
     setting, not_read = _printer_setting_mm(pid)
     if setting is not None:
-        return AssumedNozzle(setting, "printer_setting", pid, record_unreachable, inferred)
+        return AssumedNozzle(setting, "printer_setting", pid, record_unreachable, inferred, chosen_as=chosen_as)
     stock = _stock_mm(pid)
     if stock is not None:
-        return AssumedNozzle(stock, "stock", pid, record_unreachable, inferred, not_read)
-    return AssumedNozzle(DEFAULT_MM, "default", pid, record_unreachable, inferred, not_read)
+        return AssumedNozzle(stock, "stock", pid, record_unreachable, inferred, not_read, chosen_as)
+    return AssumedNozzle(DEFAULT_MM, "default", pid, record_unreachable, inferred, not_read, chosen_as)
+
+
+def recorded_statement(printer_id: str | None) -> dict[str, Any]:
+    """What the owner stated on *printer_id*'s nozzle record: ``positions``
+    (each nozzle position, :func:`kiln._pro_nozzle_bridge.recorded_positions_of`)
+    and ``material`` (the nozzle's material), each ``None`` when the record
+    states none or could not be asked.  Never raises."""
+    pid = (printer_id or "").strip()
+    nothing: dict[str, Any] = {"positions": None, "material": None}
+    if not pid:
+        return nothing
+    try:
+        from kiln import _pro_nozzle_bridge
+
+        recorded = _pro_nozzle_bridge.consult_recorded_nozzle(pid)
+    except Exception:  # noqa: BLE001 -- the record is one reading, never the check
+        logger.debug("assumed nozzle: record statement lookup failed", exc_info=True)
+        return nothing
+    positions = recorded.get("positions")
+    material = recorded.get("material")
+    return {
+        "positions": positions if isinstance(positions, list) and positions else None,
+        "material": material if isinstance(material, str) and material else None,
+    }
+
+
+def recorded_positions(printer_id: str | None) -> list[dict[str, Any]] | None:
+    """The nozzle positions the owner stated for *printer_id*
+    (:func:`recorded_statement`), or ``None``.  Never raises."""
+    return recorded_statement(printer_id)["positions"]
 
 
 def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> AssumedNozzle:
@@ -312,4 +344,7 @@ def nozzle_for_profile(profile_id: str, printer_name: str | None = None) -> Assu
     return assumed_nozzle(key)
 
 
-__all__ = ["DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile", "stock_setting"]
+__all__ = [
+    "DEFAULT_MM", "AssumedNozzle", "assumed_nozzle", "nozzle_for_profile", "recorded_positions", "recorded_statement",
+    "stock_setting",
+]

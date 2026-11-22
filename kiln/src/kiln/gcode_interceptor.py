@@ -376,12 +376,13 @@ def _rebuild_command(cmd_word: str, params: dict[str, float]) -> str:
     return " ".join(parts)
 
 
-def _strip_comment(line: str) -> str:
-    """Remove inline comments (everything from ``;`` onward) and strip."""
-    idx = line.find(";")
-    if idx != -1:
-        line = line[:idx]
-    return line.strip()
+def _strip_comment(line: str) -> str | None:
+    """The line with its comment removed, read as Kiln's G-code checks read
+    it (:func:`kiln.gcode._strip_comment`); ``None`` when a quote is still
+    open where a ``;`` stands."""
+    from kiln.gcode import _strip_comment as strip
+
+    return strip(line)
 
 
 # ---------------------------------------------------------------------------
@@ -836,7 +837,7 @@ class GcodeInterceptor:
         cleaned = _strip_comment(command)
 
         # Empty / comment-only lines pass through.
-        if not cleaned:
+        if cleaned == "":
             result = InterceptionResult(
                 original_command=command,
                 action=InterceptionAction.ALLOW,
@@ -853,11 +854,14 @@ class GcodeInterceptor:
         # the safety layer does not understand is treated as a safe line.
         # kiln.gcode's static validator already rejects these; the
         # real-time path must not be more permissive than the static one.
-        if _parse_command_word(cleaned) is None:
+        if cleaned is None or _parse_command_word(cleaned) is None:
             result = InterceptionResult(
                 original_command=command,
                 action=InterceptionAction.BLOCK,
-                reasons=["Unrecognised command format — blocked (fail-closed)"],
+                reasons=[
+                    "A quote is still open where a ';' stands — blocked (fail-closed)"
+                    if cleaned is None else "Unrecognised command format — blocked (fail-closed)"
+                ],
                 timestamp=now,
             )
             with self._lock:

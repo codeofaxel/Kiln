@@ -34,6 +34,15 @@ a folder.  Its goal is noted beside the file the same way.  This ask waits a
 few seconds at most, and a signed-out install is told once per session what
 signing in adds.
 
+A design version saved on this computer that names a goal, or whose
+design's earlier version did, joins it the same way (:func:`join_saved`):
+the copy the design's history keeps is sent, and what plays a model with
+separate parts is kept beside that copy.  A save that names no goal sends
+nothing.
+
+A model whose motion note is already bound to its bytes is not sent to have
+it worked out again, and its note is never written over.
+
 A miss (offline, signed out, no answer, refused) is said once in the reply:
 the make stands as asked, it was not added to the goal, and it was not
 compared with the goal's picture -- never read as joined or as matching.
@@ -67,6 +76,10 @@ SAFETY_NOTES_KEY = "safety_notes"
 OWNER_NOTES_KEY = "owner_safety_notes"
 #: The one question the goal is waiting on the person to answer.
 QUESTION_KEY = "open_question"
+#: Said in ``made_with`` by a design version saved on this computer, so the
+#: goal's answer is worded for a version.  A join without it is a make.
+JOINS_AS_KEY = "joins_as"
+SAVED_VERSION = "saved_version"
 #: Where a make's envelope keeps its file, when the door did not hand it.
 _MESH_KEYS = ("local_path", "stl_path", "output_path", "path", "best_result_path", "produced_file")
 
@@ -141,6 +154,7 @@ def join(
     *,
     asked_by_user: bool = True,
     send_file: bool = True,
+    saved: bool = False,
 ) -> None:
     """Join the make in *envelope* to goal *brief_id* on Kiln's servers, in place.
 
@@ -148,7 +162,10 @@ def join(
     goal Kiln noted beside the file on its own is not their ask.  With
     *send_file* false the model stays on this computer and only its
     fingerprint goes (a goal Kiln opened on its own holds no pictures to
-    compare it with).
+    compare it with).  *saved* is a design version saved on this computer
+    rather than a make: the ask says so (:data:`JOINS_AS_KEY`), so the goal
+    words its answer for a version; a miss is worded for the version, and a
+    signed-out miss is said once per session with what signing in adds.
 
     Sets ``envelope["saved_goal"]`` -- what the servers recorded, or why
     nothing was -- and, when the goal holds a picture, the comparison under
@@ -167,23 +184,25 @@ def join(
         }
         return
     send_file, motion, tell = _for_motion(mesh, send_file)
-    answer, miss = _ask(brief_id, mesh, _made_with(envelope, mesh, fingerprint=not send_file), asked_by_user,
-                        send_file=send_file, motion=motion)
+    made_with = _made_with(envelope, mesh, fingerprint=not send_file)
+    if saved:
+        made_with[JOINS_AS_KEY] = SAVED_VERSION
+    answer, miss = _ask(brief_id, mesh, made_with, asked_by_user, send_file=send_file, motion=motion)
     if miss is not None:
-        _say_miss(brief_id, envelope, miss)
+        _say_miss(brief_id, envelope, miss, saved=saved)
         return
     if answer.get("code") == "NOT_FOUND":
         envelope[SAVED_GOAL_KEY] = {
             **goal_keys(brief_id),
             "joined": False,
-            "note": GOAL_NOTES["not_in_account"].format(brief_id=brief_id),
+            "note": GOAL_NOTES["version_not_in_account" if saved else "not_in_account"].format(brief_id=brief_id),
         }
         return
     block = answer.get(SAVED_GOAL_KEY)
     if not isinstance(block, dict) or not isinstance(block.get("note"), str):
         from kiln.served_answer import Miss
 
-        _say_miss(brief_id, envelope, Miss("unanswered", detail="no goal in the answer"))
+        _say_miss(brief_id, envelope, Miss("unanswered", detail="no goal in the answer"), saved=saved)
         return
     envelope[SAVED_GOAL_KEY] = {
         k: block[k]
@@ -203,6 +222,20 @@ def join(
         held = envelope.get(REFERENCE_KEY)
         if not isinstance(held, dict) or held.get("status") == _not_compared_status():
             envelope[REFERENCE_KEY] = compared
+
+
+def join_saved(envelope: dict[str, Any], brief_id: str, kept_path: str) -> None:
+    """Join a design version saved on this computer to goal *brief_id* in
+    the person's Kiln account, in place: :func:`join`, for the copy at
+    *kept_path* that the design's history keeps.
+
+    The goal is the one the save named or its design's earlier version
+    named.  A save that names no goal, or has no model file, sends nothing
+    and adds nothing to *envelope*.  Never raises.
+    """
+    if not brief_id or not kept_path or not os.path.isfile(kept_path):
+        return
+    join(brief_id, envelope, kept_path, saved=True)
 
 
 #: The most a statement of how a part moves may weigh to be sent with a make.
@@ -243,11 +276,11 @@ def _for_motion(mesh: str, send_file: bool) -> tuple[bool, Any, str]:
     goal: whether the file goes to Kiln's servers after all, the ``motion``
     that rides with it, and which once-only line the reply carries
     (``"sent"``, ``"off"``, or ``""``).  A make that states how it moves sends
-    its statement instead (:func:`_ask`), and a model in one piece changes
-    nothing."""
+    its statement instead (:func:`_ask`); a model that already plays here
+    (:func:`_plays_here`) and a model in one piece change nothing."""
     from kiln import import_motion
 
-    if _stated_motion() is not None or not import_motion.has_separate_parts(mesh):
+    if _stated_motion() is not None or _plays_here(mesh) or not import_motion.has_separate_parts(mesh):
         return send_file, None, ""
     if send_file:
         # The file goes anyway, as the person's own ask: nothing to tell.
@@ -255,6 +288,17 @@ def _for_motion(mesh: str, send_file: bool) -> tuple[bool, Any, str]:
     if import_motion.sending():
         return True, _WORK_IT_OUT, "sent"
     return False, None, "off"
+
+
+def _plays_here(mesh: str) -> bool:
+    """Whether a note bound to *mesh*'s own bytes already sits beside it for
+    a stage to play.  Never raises: a note that cannot be read is no note."""
+    from kiln import joint_stage, mechanism_stage
+
+    try:
+        return mechanism_stage.block_for(mesh) is not None or joint_stage.stage_block(mesh) is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _tell(envelope: dict[str, Any], tell: str) -> None:
@@ -288,15 +332,26 @@ def _keep_motion_note(mesh: str, note: dict[str, Any]) -> bool:
 def _carry_motion(answer: dict[str, Any], envelope: dict[str, Any], mesh: str) -> None:
     """Put what the servers found about the stated motion into the make's
     reply, and keep what plays it beside the file on this computer, so the
-    stage here plays it.  The reply carries the sentences only."""
+    stage here plays it.  The reply carries the sentences only.  A file that
+    already played here before the ask keeps its note, and nothing is said,
+    unless the make stated how it moves."""
     said = answer.get(MOTION_KEY)
     if not isinstance(said, dict) or MOTION_KEY in envelope:
+        return
+    if _stated_motion() is None and _plays_here(mesh):
         return
     shown = {k: said[k] for k in ("plays", "says", "detail", "still_checking", "worked_out", "guess", "upgrade")
              if k in said}
     note = said.get("note")
     if shown.get("plays") is True:
         kept = isinstance(note, dict) and _keep_motion_note(mesh, note)
+        if kept and isinstance(said.get("pieces"), dict):
+            # Which of its parts print as one piece, kept beside the file as
+            # a composed assembly's is: the stage reads it to know whether
+            # the design comes apart.
+            from kiln import assembly_stage
+
+            assembly_stage.keep_block(mesh, said["pieces"])
         shown["on_this_computer"] = kept
         # Only what was kept here is still being read here.
         shown.pop("still_checking", None)
@@ -541,23 +596,41 @@ def _ask(
     return served_makes.arrive(WIRE_TOOL, answer), None
 
 
-def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
-    """The make stands; the goal and the picture were not reached: said once."""
-    from kiln import served_answer
+#: How a miss names what did not reach the goal, what stands, and what to
+#: do once the cause is fixed: for a make, and for a version saved here.
+_MISS_WORDS = {
+    False: ("this make", "The make is here as asked", "make it again with the same goal"),
+    True: ("this version", "The version is saved on this computer as asked", "save it again with the same goal"),
+}
+
+
+def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any, *, saved: bool = False) -> None:
+    """The make (or the version *saved* here) stands; the goal and the
+    picture were not reached: said once.  For a saved version, signed out is
+    said the first time this session, with what signing in adds, and after
+    that nothing is added."""
+    from kiln import served_answer, served_public
     from kiln.front_door import SAVED_GOAL_KEY, goal_keys
     from kiln.reference_compare import NOT_COMPARED, REFERENCE_KEY
 
+    signed_out = saved and miss.cause == "signed_out"
+    if signed_out:
+        from kiln.make_words import SIGNED_OUT_SAID
+
+        if not served_public.first_this_session(SIGNED_OUT_SAID):
+            return
+    what, stands, again = _MISS_WORDS[saved]
     said = served_answer.sentence(
         miss,
         feature="servers",
         on_the_line=f"Saved goal {brief_id} lives in your Kiln account",
-        cannot="add this make to it",
+        cannot=f"add {what} to it",
         wont="did not add it to the goal or compare it with any picture kept there",
         safe_remedy=(
-            "The make is here as asked; if the person gave you a picture, look at "
+            f"{stands}; if the person gave you a picture, look at "
             "it beside the result and say how they differ"
         ),
-        then="make it again with the same goal",
+        then=again,
     )
     envelope[SAVED_GOAL_KEY] = {
         **goal_keys(brief_id),
@@ -565,6 +638,10 @@ def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
         "note": said,
         **served_answer.fields(miss),
     }
+    if signed_out:
+        from kiln.tiers_and_terms import signin_hint_fields
+
+        envelope[SAVED_GOAL_KEY].update(signin_hint_fields())
     held = envelope.get(REFERENCE_KEY)
     if not isinstance(held, dict) or held.get("status") == NOT_COMPARED:
         envelope[REFERENCE_KEY] = {
@@ -582,5 +659,6 @@ __all__ = [
     "SAFETY_NOTES_KEY",
     "WIRE_TOOL",
     "join",
+    "join_saved",
     "open_for",
 ]

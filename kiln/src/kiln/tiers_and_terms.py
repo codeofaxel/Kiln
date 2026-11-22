@@ -426,6 +426,25 @@ def plan_unconfirmed_message(subject: str, plan: str) -> str:
     )
 
 
+#: Where an account whose plan ended renews it: the web app's billing page.
+BILLING_PAGE_URL = "https://kiln3d.com/app/settings/billing"
+
+
+def plan_ended_message(subject: str, plan: str) -> str:
+    """Person-facing copy for a signed-in account whose paid plan (or trial)
+    has ended, about something that plan included.
+
+    Not an upsell: the plan was theirs, and the one step back is renewing it
+    (:data:`BILLING_PAGE_URL`), so nothing here names the pricing page.  The
+    same words Kiln's servers say at their own walls.
+    """
+    plan_name = str(plan).strip().title() or "paid"
+    return (
+        f"{subject} is part of the Kiln {plan_name} plan this account had, "
+        "which has ended. Renewing it brings it back."
+    )
+
+
 def free_allowance_phrase(allowance: dict | None) -> str:
     """``"3 textures a month"`` from a manifest allowance block, or ``""``.
 
@@ -473,6 +492,9 @@ def account_required_message(
     tool that genuinely costs money, what it costs is the answer to the
     question being asked; a free-monthly figure alongside it only muddies
     which one applies.
+
+    *subject* names one thing ("Kiln's material pick"): the sentence says
+    "is" of it.
 
     *every_plan* is the tool's ``floor`` sentence from the pro tool manifest:
     what a paid tool answers on every plan, free included.  This refusal is

@@ -16,7 +16,10 @@ Two cracks pin the slicer's own crack closing
 twice the radius is filled in the slice, a wider one stays open.
 
 Public CI has no slicer, so here it skips and says why; the pre-push
-slicer-pace gate runs it with the slicers on the machine.
+slicer-pace gate runs it with the slicers on the machine.  Where a feature is
+left out are Kiln's own figures (``kiln.material_limits.sliced_floors``), read
+from kiln-pro on this computer or from Kiln's servers; where neither answers,
+Kiln stops nothing for a thin feature and this file skips, saying why.
 """
 
 from __future__ import annotations
@@ -72,6 +75,20 @@ SLICERS: dict[str, str] = {
 pytestmark = pytest.mark.skipif(
     not SLICERS, reason="no slicer installed: this file judges Kiln against a real slice and has none to read"
 )
+
+
+@pytest.fixture(scope="module")
+def kilns_own_figures():
+    """Kiln's stop needs Kiln's own figures for what the slice leaves out;
+    the crack cases, which read only the slice, do not."""
+    from kiln.material_limits import sliced_floors
+
+    floors = sliced_floors(nozzle_mm=NOZZLE)
+    if not floors.exact:
+        pytest.skip(
+            "Kiln's own figures for what the slice leaves out are not reachable here "
+            f"(no kiln-pro and no answer from Kiln's servers: {floors.miss.cause if floors.miss else 'unknown'})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +387,7 @@ def sliced(work: Path):
 
 
 @pytest.fixture(scope="module")
-def kiln_stops(work: Path):
+def kiln_stops(work: Path, kilns_own_figures):
     """Kiln's verdict on each part, read once: the stops its print gate takes."""
     cache: dict[int, list[str]] = {}
 

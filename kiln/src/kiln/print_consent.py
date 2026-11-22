@@ -820,15 +820,17 @@ def consent_for(
     terminal.  ``None`` is the honest answer for "nobody said go" and for
     "somebody said go to a different print" alike.
 
-    *aimed_at* is the printer an unnamed call resolves to, for matching a
-    window; the consent recorded for the call is matched on the name the
-    call used, as before.
+    *aimed_at* is the printer an unnamed call resolves to.  A window, and
+    the consent recorded for the call, are both matched on the printer the
+    start is aimed at: a yes that names its printers covers an unnamed
+    start only when it names the one that start goes to.
     """
     consent = _current.get()
     if consent is not None:
         # A yes was given for THIS call.  If it is about another print,
         # that is a mismatch to refuse, not a gap to fill from elsewhere.
-        return consent if consent.matches(file_name=file_name, printer_name=printer_name) else None
+        aimed = printer_name or aimed_at
+        return consent if consent.matches(file_name=file_name, printer_name=aimed) else None
     hosted = _ask_hosted_hook(file_name=file_name, printer_name=printer_name)
     if hosted is not None:
         return hosted if hosted.matches(file_name=file_name, printer_name=printer_name) else None
@@ -850,23 +852,31 @@ def consent_for(
         window = None
     if window is None:
         return None
-    if window.always:
-        # Nobody is being asked, so the plate is looked at.  A camera that
-        # gives nothing usable cannot vouch for the plate: always allow is
-        # not used for this print.  A window with an end that covers the
-        # printer is still the person's yes for that while -- it never
-        # rested on a look -- and with none, they are asked the ordinary
-        # way.  (A frame not yet judged does not withdraw the yes -- the
-        # gate holds the start until eyes have judged it.)
-        from kiln.plate_state import LOOK_BLIND
+    from kiln.plate_state import unvouched
 
-        if unasked_look(aimed_at or printer_name).verdict == LOOK_BLIND:
-            try:
-                window = consent_windows.covering(aimed_at or printer_name, for_a_start=True, timed_only=True)
-            except Exception:  # noqa: BLE001 — an unreadable store is no window
-                window = None
-            if window is None:
-                return None
+    target = aimed_at or printer_name
+    # Nobody is being asked, so under always allow the plate is looked at.
+    # A look no eyes vouch for (a camera that gives nothing usable, a bed
+    # seen holding more than the record names) is no yes from always allow
+    # for this print; a window with an end may still cover it, below, and
+    # with none the person is asked the ordinary way.  (A frame not yet
+    # judged does not withdraw the yes -- the gate holds the start until
+    # eyes have judged it.)
+    if window.always and unvouched(unasked_look(target)):
+        try:
+            window = consent_windows.covering(target, for_a_start=True, timed_only=True)
+        except Exception:  # noqa: BLE001 — an unreadable store is no window
+            window = None
+        if window is None:
+            return None
+    # A window with an end never rested on a look, except for a start
+    # beside a part still on the plate: that bed is looked at first.
+    if (
+        not window.always
+        and consent_windows.plate_holds_a_part(target)
+        and unvouched(unasked_look(target))
+    ):
+        return None
     if window.always:
         # Always allow is for a machine, and ``covering`` has just matched
         # the machine this print is aimed at.  The consent is therefore
@@ -934,6 +944,88 @@ def display_name(file_name: str) -> str:
         if ch not in _DIRECTION_CONTROLS
     )
     return " ".join(kept.split()) or base
+
+
+#: The rows an approval carries about the print itself
+#: (:func:`what_the_print_is`), in the order they are shown, each with the
+#: label every door shows it under.
+PRINT_ROW_LABELS: dict[str, str] = {
+    "print_anyway": "Print anyway",
+    "experimental": "Experimental",
+    "colours": "Colours",
+}
+
+
+def row_label(name: str) -> str:
+    """The label the row *name* of :func:`what_the_print_is` is shown under."""
+    return PRINT_ROW_LABELS.get(name) or str(name).replace("_", " ").strip().capitalize()
+
+
+def print_rows_of(states: Any) -> dict[str, str]:
+    """The rows an approval shows, said from *states*
+    (:func:`what_the_print_states`) in the one wording of each, in the order
+    of :data:`PRINT_ROW_LABELS`: ``print_anyway`` and ``experimental`` for
+    the owner's words (:func:`kiln.experimental_print.word_rows`) and
+    ``colours`` (:func:`kiln.maker_slicer_notes.colours_row`).  Facts that
+    do not check say nothing.  Never raises."""
+    said: dict[str, str] = {}
+    if not isinstance(states, dict):
+        return said
+    try:
+        from kiln import experimental_print
+
+        said.update(experimental_print.word_rows(states.get("owner_words") or {}))
+    except Exception:  # noqa: BLE001 -- the approval opens without the rows
+        logger.debug("owner's word rows skipped", exc_info=True)
+    try:
+        from kiln.maker_slicer_notes import colours_row
+
+        colours = colours_row(states["colours"]) if "colours" in states else None
+        if colours:
+            said["colours"] = colours
+    except Exception:  # noqa: BLE001 -- the approval opens without the row
+        logger.debug("colours row skipped", exc_info=True)
+    return {name: said[name] for name in PRINT_ROW_LABELS if name in said}
+
+
+def what_the_print_states(file_name: str, local_path: str | None) -> dict[str, Any]:
+    """The checked facts every door says a print's approval rows from:
+    ``owner_words`` (``{word: facts}``, :func:`kiln.experimental_print.file_owner_words`)
+    for a slice the owner said to print anyway and a print sliced for
+    nozzles of different sizes, and ``colours``
+    (:func:`kiln.maker_slicer_notes.colours_facts`) for a plate Kiln sliced
+    in fewer colours than it holds.  Only what applies; *local_path* is the
+    copy of the file on this computer, when there is one.  Never raises."""
+    states: dict[str, Any] = {}
+    try:
+        from kiln import experimental_print
+
+        words = experimental_print.file_owner_words(local_path)
+        if words:
+            states["owner_words"] = words
+    except Exception:  # noqa: BLE001 -- the approval opens without the rows
+        logger.debug("owner's word facts skipped for %s", file_name, exc_info=True)
+    try:
+        from kiln.maker_slicer_notes import colours_facts
+
+        colours = colours_facts(file_name, local_path)
+        if colours is not None:
+            states["colours"] = colours
+    except Exception:  # noqa: BLE001 -- the approval opens without the row
+        logger.debug("colours facts skipped for %s", file_name, exc_info=True)
+    return states
+
+
+def what_the_print_is(file_name: str, local_path: str | None) -> dict[str, str]:
+    """The rows a person's approval carries about the print itself, the same
+    at every door that asks, in the order of :data:`PRINT_ROW_LABELS`:
+    ``print_anyway`` for a slice the owner said to print anyway,
+    ``experimental`` for a print Kiln has not proven on a printer, and
+    ``colours`` for a plate Kiln sliced in fewer colours than it holds; each
+    said from its checked facts (:func:`print_rows_of` of
+    :func:`what_the_print_states`).  Only the rows that apply.  Never
+    raises."""
+    return print_rows_of(what_the_print_states(file_name, local_path))
 
 
 def describe_print_request(

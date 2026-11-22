@@ -878,6 +878,11 @@ def _offer_first_printer() -> None:
         click.style("  Saved ✓", fg="green")
         + f" — '{name}' is your active printer."
     )
+    from kiln.maker_slicer_notes import setup_line as _nozzles_setup_line
+
+    nozzles_line = _nozzles_setup_line(model)
+    if nozzles_line:
+        click.echo(f"  {nozzles_line}")
     # Discovery just heard this printer; now, without a frame, does its
     # camera answer?  One line, and never a reason for enable to fail.
     try:

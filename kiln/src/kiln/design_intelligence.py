@@ -236,6 +236,7 @@ def unestablished_caution(
     what_is_unknown: str,
     *,
     curated_entry_exists: bool | None = None,
+    table_read: bool | None = None,
 ) -> str:
     """The honest answer when a caution's only source could not be read.
 
@@ -281,9 +282,13 @@ def unestablished_caution(
         :func:`curated_entry_exists` at the call site.  ``None`` keeps the
         table-level behaviour, for callers whose overlay is keyed by something
         the entity id alone cannot address (a material PAIR, a nested block).
+    :param table_read: Whether the table was read for this caller, when the
+        answer itself says so (an answer from Kiln's servers states whether
+        they read it).  ``None`` asks this computer.
     :returns: The caution, or ``""`` in state 3 only.
     """
-    if not _engineering_overlay_loaded(overlay_kind):
+    loaded = _engineering_overlay_loaded(overlay_kind) if table_read is None else table_read
+    if not loaded:
         from kiln.tiers_and_terms import plan_offer
 
         product = _upgrade_product_name(overlay_kind)
@@ -840,9 +845,14 @@ class MultiMaterialReport:
     pairing verdict did not come: ``compatible`` is then ``None`` (never a
     yes), ``notes`` says what the nozzle temperatures alone show, and
     ``caution`` says why the verdict is missing and how to get it, with
-    ``why`` / ``why_code`` / ``why_detail`` beside it
-    (:func:`kiln.served_answer.fields`).  Those four keys appear on a basic
-    answer only.
+    ``why`` / ``why_code`` / ``why_detail`` beside it, and ``retry_after_s``
+    when the miss is said again from an earlier ask
+    (:func:`kiln.served_answer.fields`).  Those keys appear on a basic answer
+    only.
+
+    ``hardware_warnings`` names a filled filament's need for a hardened
+    nozzle (:func:`kiln.material_safety.is_abrasive_filament`), on every
+    answer, served or basic; it appears only when there is one.
     """
 
     material_a: str
@@ -857,17 +867,23 @@ class MultiMaterialReport:
     why: str = ""
     why_code: str = ""
     why_detail: str = ""
+    retry_after_s: int = 0
+    hardware_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
         if not self.basic:
             for key in _BASIC_ANSWER_KEYS:
                 out.pop(key, None)
+        if not out.get("retry_after_s"):
+            out.pop("retry_after_s", None)
+        if not self.hardware_warnings:
+            out.pop("hardware_warnings", None)
         return out
 
 
 #: The keys only a basic pairing answer carries.
-_BASIC_ANSWER_KEYS = ("basic", "why", "why_code", "why_detail")
+_BASIC_ANSWER_KEYS = ("basic", "why", "why_code", "why_detail", "retry_after_s")
 
 
 @dataclass
@@ -1380,13 +1396,15 @@ def _public_material_profile_from_data(
         if "hard_to_bond" in bonding
         else {}
     )
+    from kiln.material_limits import general_design_limits
+
     return _PublicMaterialProfile(
         material_id=material_id.lower(),
         display_name=data["display_name"],
         category=data["category"],
         thermal=dict(data.get("thermal") or {}),
         chemical=dict(data.get("chemical") or {}),
-        design_limits=dict(data.get("design_limits") or {}),
+        design_limits=general_design_limits(),
         bonding=bonding_floor,
     )
 
@@ -1567,15 +1585,17 @@ def _format_upgrade_nudge(verdict: Any, caution: str = _PICK_LOAD_CAUTION) -> st
     and linking kiln3d.com from public Kiln is a funnel, not a leak.
     The caution is said to every caller; the plan line only to one who would
     buy the plan, and the plan check's own words to one who pays for it.
+    This line is the one place a material answer names the plan: what it
+    would do for this part first, the plan once, the link once.
     *caution* is the sentence that leads: beside a pick by default, beside a
     list of plastics with no pick (:data:`_BASIC_LOAD_CAUTION`).
     """
     from kiln.tiers_and_terms import plan_offer
 
     plan = plan_offer("pro", "The engineering math for this part").nudge(
-        "For real-engineering "
-        "math (beam mechanics with FoS control, ISO 286 fits, fatigue + "
-        "creep derating, calibrated tolerances), see "
+        "Kiln Pro sizes the part for the weight and how long it's held, with "
+        "real-engineering math (beam mechanics with FoS control, ISO 286 fits, "
+        "fatigue + creep derating, calibrated tolerances); see "
         "https://kiln3d.com/pricing."
     )
     return f"{caution} {plan}" if plan else caution
@@ -1661,15 +1681,32 @@ def recommend_material_for_design(
     return rec
 
 
+def material_basic_of(brief: Any) -> dict[str, Any] | None:
+    """The basic material block (:func:`basic_material_answer`) a reply built
+    from the design analysis *brief* carries when no material was picked for
+    it, or ``None`` when one was picked or named.
+
+    Every reply built from an analysis (the validator's report, a generation
+    prompt) reads it here, so none drops the material without saying that
+    Kiln did not pick one, why, and what fixes it.
+    """
+    if getattr(brief, "recommended_material", None) is not None:
+        return None
+    block = getattr(brief, "material_basic", None)
+    return dict(block) if isinstance(block, dict) else None
+
+
 def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: Any) -> dict[str, Any]:
     """The answer when no pick came (``basic: true``): the plastics this
     printer can melt, in no order and with nothing said about any one of
-    them; the cautions every answer to this request carries (a load-bearing
-    part, food contact, a part worn against skin); and one line saying that
-    Kiln did not pick a plastic for this part, why, and what fixes it.
+    them beyond what Kiln's public rules for this part leave out or allow
+    only with conditions; the cautions every answer to this request carries
+    (those rules, a load-bearing part, food contact, a part worn against
+    skin); and one line saying that Kiln did not pick a plastic for this
+    part, why, and what fixes it.
 
     Reads nothing about a material but the nozzle temperature table Kiln
-    ships with (:mod:`kiln.material_basics`).
+    ships with and the public requirement rules (:mod:`kiln.material_basics`).
 
     :param requirements_text: What the part is for, as asked.
     :param max_hotend_temp_c: The printer's hotend ceiling; a plastic whose
@@ -1679,11 +1716,12 @@ def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: 
     from kiln import served_answer
     from kiln._pro_material_pick_bridge import FEATURE
     from kiln.load_bearing_detector import detect_load_bearing
-    from kiln.material_basics import basic_pick_line, basic_plastics
+    from kiln.material_basics import basic_list, basic_pick_line
     from kiln.material_safety import food_contact_nozzle_advisory, use_case_implies_food_contact
 
     text = requirements_text if isinstance(requirements_text, str) else ""
-    warnings: list[str] = []
+    listed = basic_list(text, max_hotend_temp_c)
+    warnings: list[str] = [listed.rules_line] if listed.rules_line else []
     verdict = detect_load_bearing(text)
     if verdict.is_load_bearing:
         warnings.append(_format_upgrade_nudge(verdict, _BASIC_LOAD_CAUTION))
@@ -1695,7 +1733,7 @@ def basic_material_answer(requirements_text: str, max_hotend_temp_c: Any, miss: 
         "success": True,
         "basic": True,
         "message": basic_pick_line(miss, feature=FEATURE, hotend_known=max_hotend_temp_c is not None),
-        "plastics": basic_plastics(text, max_hotend_temp_c),
+        "plastics": listed.plastics,
         "warnings": warnings,
     }
     if use_case_implies_food_contact(text):
@@ -2275,7 +2313,7 @@ def _derive_manufacturer(printer_id: str, display_name: str) -> str:
 # Fallback estimates for printers without a curated printer_profiles.json
 # record. Input-shaping machines (CoreXY / modern fast bedslingers) get a
 # tighter tolerance and higher default speed than open-loop bedslingers.
-# Curated records override all of these where a hand-tuned value exists.
+# A printer's own catalogue record overrides all of these.
 _DERIVED_SPEED_WITH_IS_MM_S = 250
 _DERIVED_SPEED_DEFAULT_MM_S = 150
 _DERIVED_TOLERANCE_WITH_IS_MM = 0.15
@@ -2290,10 +2328,9 @@ def _design_profile_from_intel(
     entry, for printers without a hand-curated ``printer_profiles.json``
     record.  Fields the spec sheet doesn't carry (tolerance, layer-height
     ladder) use standard 0.4mm-nozzle FDM defaults; max speed is read from
-    the curated speed table when present, else estimated from input-shaping.
+    the row's own ``max_speed_mm_s`` when it states one, else estimated from
+    input shaping.
     """
-    from kiln.printer_intelligence import _SPEED_CAPABILITIES
-
     bv = raw.get("build_volume_mm") or [0, 0, 0]
     if isinstance(bv, dict):
         build = {"x": int(bv.get("x", 0)), "y": int(bv.get("y", 0)), "z": int(bv.get("z", 0))}
@@ -2301,9 +2338,9 @@ def _design_profile_from_intel(
         build = {"x": int(bv[0]), "y": int(bv[1]), "z": int(bv[2])} if len(bv) >= 3 else {"x": 0, "y": 0, "z": 0}
 
     has_is = bool(raw.get("has_input_shaping"))
-    caps = _SPEED_CAPABILITIES.get(printer_id)
+    stated = raw.get("max_speed_mm_s")
     max_speed = (
-        int(caps["max_speed"]) if caps and caps.get("max_speed")
+        int(stated) if isinstance(stated, (int, float)) and not isinstance(stated, bool) and stated > 0
         else (_DERIVED_SPEED_WITH_IS_MM_S if has_is else _DERIVED_SPEED_DEFAULT_MM_S)
     )
     materials = sorted({str(m).lower() for m in (raw.get("materials") or {})})
@@ -2930,6 +2967,9 @@ def get_design_constraints(
     *,
     material: str | None = None,
     printer_model: str | None = None,
+    material_limits: bool = True,
+    nozzle_mm: float | None = None,
+    layer_height_mm: float | None = None,
 ) -> DesignBrief:
     """Decompose functional requirements into a complete design-requirements analysis.
 
@@ -2944,6 +2984,16 @@ def get_design_constraints(
         summer heat"``).
     :param material: Optional material override (skip recommendation).
     :param printer_model: Optional printer model for capability lookup.
+    :param material_limits: Whether the combined rules carry the
+        recommended plastic's design limits (``material_*``).  A caller that
+        shows none of them leaves them out, so the plastic's limits are not
+        read for it.
+    :param nozzle_mm: The nozzle the part is printed with, when known: the
+        walls and pins the limits give follow it.  Unset, the reference
+        nozzle.
+    :param layer_height_mm: The layer height the part is printed at, when
+        known: the overhang and the finest thread follow it.  Unset, the
+        figures as stated.
     """
     # 1. Match functional requirements
     constraints = match_requirements(requirements_text)
@@ -2956,8 +3006,16 @@ def get_design_constraints(
     # 2. Recommend material (unless overridden)
     recommendation: MaterialRecommendation | None = None
     material_basic: dict[str, Any] | None = None
+    # The limits of a named plastic the catalogue cannot place, read through
+    # the one helper every check reads (which says once when Kiln's design
+    # limits cannot place it either).
+    unplaced_limits = None
     if material:
         profile = get_material_profile(material)
+        if profile is None and material_limits:
+            from kiln.material_limits import limits_for
+
+            unplaced_limits = limits_for(material, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm)
         if profile:
             warnings: list[str] = []
             if printer_profile:
@@ -3055,10 +3113,24 @@ def get_design_constraints(
     # Add material-specific guidance
     if recommendation and recommendation.material:
         combined_guidance.extend(recommendation.material.agent_guidance)
-        # Merge material design limits
+        # Merge material design limits: the curated keys a profile carries,
+        # then the plastic's limits from the one helper every check reads.
+        from kiln.material_limits import limits_for
+
         for key, value in recommendation.material.design_limits.items():
             limit_key = f"material_{key}"
             combined_rules[limit_key] = value
+        if material_limits:
+            plastic = limits_for(
+                recommendation.material.material_id, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm,
+            )
+            for key, value in plastic.design_limits().items():
+                combined_rules[f"material_{key}"] = value
+    elif unplaced_limits is not None and unplaced_limits.known:
+        # Kiln's design limits placed a name the catalogue could not: the
+        # plastic's own limits, as for a recommended one.
+        for key, value in unplaced_limits.design_limits().items():
+            combined_rules[f"material_{key}"] = value
 
     if printer_profile:
         combined_guidance.extend(printer_profile.agent_notes)
@@ -3315,26 +3387,38 @@ def check_multi_material_compatibility(
     """Check if two materials can be co-printed in a dual-extrusion setup.
 
     Kiln's pairing verdict (kiln-pro, https://kiln3d.com) gives the
-    compatibility, the interface adhesion and the soluble-support record when
-    one of the two dissolves away from the other; it is asked for through
-    :mod:`kiln._pro_material_pairing_bridge`.  When it does not come (offline, signed
+    compatibility, the interface adhesion, the soluble-support record when
+    one of the two dissolves away from the other, and the curated notes and
+    general rules for the pair; it is asked for through
+    :mod:`kiln._pro_material_pairing_bridge`.  The answer says whether those
+    notes were read for this caller, and the caution follows what it says.  When it does not come (offline, signed
     out, no answer, refused) the report is a basic answer made here from the
     nozzle temperature ranges alone (:func:`_basic_pairing_report`), and says
     so.
 
     :param material_a: First material (e.g. ``"pla"``).
     :param material_b: Second material (e.g. ``"tpu"``).
+    :raises ValueError: when a name is not text or is longer than
+        :data:`kiln._pro_material_pairing_bridge.MAX_MATERIAL_CHARS`; the
+        message repeats nothing that was sent.
     """
     from kiln import _pro_material_pairing_bridge as pairing
 
+    problem = pairing.name_problem(material_a, material_b)
+    if problem is not None:
+        raise ValueError(problem)
     answer, miss = pairing.co_print(material_a, material_b)
     if answer is None:
-        return _basic_pairing_report(material_a, material_b, miss)
+        return _with_nozzle_lines(_basic_pairing_report(material_a, material_b, miss))
 
     a = answer["material_a"]
     b = answer["material_b"]
     notes = answer["notes"]
     rules = list(answer["general_rules"])
+    # Whether the curated notes and rules were read for this caller, when the
+    # answer says so; otherwise this computer is asked.
+    notes_read = answer.get("notes_read")
+    notes_read = notes_read if isinstance(notes_read, bool) else None
 
     def _verdict_caution() -> str:
         """A verdict with no notes: yes/no, and nothing about what actually
@@ -3348,30 +3432,66 @@ def check_multi_material_compatibility(
             "and purging if you try the pair anyway. Run a small test piece "
             "before committing to a long print.",
             curated_entry_exists=False,
+            table_read=notes_read,
         )
 
+    compatible = answer["compatible"]
     if answer["found"] == "none":
-        # No data covers the pair, and the answer's note says so.
-        caution = unestablished_caution(
-            "multi_material_pairing",
-            "Nothing here covers this pair, and the general polymer rules "
-            "that would let you reason it out are not available either. "
-            "Treat it as untested rather than fine — a test piece is the "
-            "only thing that will tell you.",
-            curated_entry_exists=False,
-        )
+        # No data covers the pair, and the answer's note says so.  One
+        # material in both places bonds to itself, said the way the basic
+        # answer says it: that line is the notes and ``compatible`` is
+        # ``None``, never a no beside it.  Otherwise the caution says
+        # whether the general rules came with the answer.
+        from kiln.catalog_keys import same_material_spelling
+        from kiln.material_safety import basic_pair_finding
+
+        if same_material_spelling(a, b):
+            notes = basic_pair_finding(a, b)[0]
+            compatible = None
+            caution = ""
+        elif rules:
+            caution = unestablished_caution(
+                "multi_material_pairing",
+                "Nothing here covers this pair; reason it out from the general "
+                "rules below, and treat it as untested rather than fine — a "
+                "test piece is the only thing that will tell you.",
+                curated_entry_exists=False,
+                table_read=notes_read,
+            )
+        else:
+            caution = unestablished_caution(
+                "multi_material_pairing",
+                "Nothing here covers this pair, and the general polymer rules "
+                "that would let you reason it out are not available either. "
+                "Treat it as untested rather than fine — a test piece is the "
+                "only thing that will tell you.",
+                curated_entry_exists=False,
+                table_read=notes_read,
+            )
     else:
         caution = "" if notes else _verdict_caution()
-    return MultiMaterialReport(
+    return _with_nozzle_lines(MultiMaterialReport(
         material_a=a,
         material_b=b,
-        compatible=answer["compatible"],
+        compatible=compatible,
         interface_adhesion=answer["interface_adhesion"],
         notes=notes,
         support_pair=answer["support_pair"],
         general_rules=rules,
         caution=caution,
-    )
+    ))
+
+
+def _with_nozzle_lines(report: MultiMaterialReport) -> MultiMaterialReport:
+    """*report* with the hardened-nozzle line for each filled filament it
+    names (:func:`kiln.material_safety.is_abrasive_filament`), read from the
+    names alone so a served and a basic answer say it the same way."""
+    from kiln.catalog_keys import material_label
+    from kiln.material_safety import hardened_nozzle_line, is_abrasive_filament
+
+    labels = dict.fromkeys(material_label(m) for m in (report.material_a, report.material_b))
+    report.hardware_warnings = [hardened_nozzle_line(label) for label in labels if label and is_abrasive_filament(label)]
+    return report
 
 
 def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiMaterialReport:
@@ -3380,30 +3500,38 @@ def _basic_pairing_report(material_a: str, material_b: str, miss: Any) -> MultiM
     Built only from the nozzle table: two ranges that do not overlap mean the
     two materials can't share one nozzle temperature; ranges that do overlap
     say nothing about how well the two stick together or how much to purge
-    between them.  It never says the pair is compatible, carries no adhesion
+    between them; two spellings of one material share its temperature and
+    bond to themselves.  It never says the pair is compatible, carries no adhesion
     grade, support record or general rule, and its ``caution`` is the one
     sentence saying why Kiln's verdict is missing and how to get it.
     """
+    from kiln.catalog_keys import same_material_spelling
     from kiln.material_safety import basic_pair_finding
-    from kiln.served_answer import Miss, fields, sentence
+    from kiln.served_answer import Miss, fields, free_account_note, sentence
 
     if not isinstance(miss, Miss):
         miss = Miss("unanswered", detail="no pairing verdict")
     a = str(material_a or "").lower()
     b = str(material_b or "").lower()
     notes, judged, label_a, label_b = basic_pair_finding(a, b)
-    wont = "answered from the nozzle temperatures alone" if judged else "has judged nothing about this pair"
+    same = same_material_spelling(a, b)
+    if same:
+        wont = "answered only that one material pairs with itself"
+    elif judged:
+        wont = "answered from the nozzle temperatures alone"
+    else:
+        wont = "has judged nothing about this pair"
     caution = sentence(
         miss,
         feature="pairing check",
         on_the_line=(
-            "Kiln's pairing verdict says whether two materials bond in one print "
-            "and how much to purge between them"
+            "Kiln's pairing verdict says whether two materials can share one print "
+            "and how well they bond"
         ),
         cannot=f"give its pairing verdict for {label_a} and {label_b}",
         wont=wont,
-        safe_remedy="run a small test piece before a long print",
-        then="ask again",
+        safe_remedy="" if same else "run a small test piece before a long print",
+        then="ask again" + free_account_note(miss),
     )
     return MultiMaterialReport(
         material_a=a,

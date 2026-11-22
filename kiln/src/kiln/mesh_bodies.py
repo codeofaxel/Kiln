@@ -440,18 +440,26 @@ def _settle(label: np.ndarray) -> np.ndarray:
 
 
 def _components(n: int, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Component label per node for the undirected links ``a[i]-b[i]``."""
+    """Component label per node for the undirected links ``a[i]-b[i]``: the
+    smallest node in each node's component.
+
+    Every pass hangs each root a link reaches under the lowest root its
+    links offer it, then follows parents to the root, so a long chain of
+    links settles in a few passes.
+    """
     label = np.arange(n, dtype=np.int64)
     if len(a) == 0:
         return label
+    a = np.asarray(a, dtype=np.int64)
+    b = np.asarray(b, dtype=np.int64)
     while True:
-        low = np.minimum(label[a], label[b])
-        before = label.copy()
-        np.minimum.at(label, a, low)
-        np.minimum.at(label, b, low)
-        label = _settle(label)
-        if np.array_equal(label, before):
+        root_a, root_b = label[a], label[b]
+        apart = root_a != root_b
+        if not apart.any():
             return label
+        root_a, root_b = root_a[apart], root_b[apart]
+        np.minimum.at(label, np.maximum(root_a, root_b), np.minimum(root_a, root_b))
+        label = _settle(label)
 
 
 def _pair_round_edge(

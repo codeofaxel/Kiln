@@ -265,7 +265,7 @@ class TestAMissIsBasic:
     def test_signed_out_says_signing_in_gets_the_pick(self, doors):
         with plain_install_served(SIGNED_OUT):
             reply = doors["recommend_material"](intent="strong")
-        assert reply["message"].endswith("Sign in and Kiln picks the plastic for this part.")
+        assert reply["message"].endswith("Sign in and Kiln picks the plastic for this part (a free account is enough).")
 
     def test_both_material_picks_say_a_miss_the_same_way(self, doors):
         """The recommender and the design pick share one signed-out sentence
@@ -287,8 +287,10 @@ class TestAMissIsBasic:
         with plain_install_served(SIGNED_OUT):
             reply = doors["recommend_material"](intent=CEREAL)
         kept = filter_food_safe_materials(plastics_printer_can_melt(None), require="yes_or_conditional")
+        # The public rules for a food or liquid part also leave out nylon.
+        kept = [p for p in kept if p != "Nylon"]
         assert reply["plastics"] == kept and kept
-        assert not {"ABS", "ASA", "TPU"} & set(reply["plastics"])
+        assert not {"ABS", "ASA", "TPU", "Nylon"} & set(reply["plastics"])
 
     def test_a_brief_with_no_food_lists_every_plastic(self, doors):
         with plain_install_served(SIGNED_OUT):
@@ -394,8 +396,27 @@ class TestAMissFromTheMaterialsOnHand:
         assert reply["on_hand_scope"] == "printer:x1c" and reply["answered_for_printer"] == "x1c"
         caution, note = reply["message"].split("\n\n")
         assert caution.startswith("ABRASIVE FILAMENT: PETG-CF ")
-        assert "lists the materials you have on hand instead" in note
+        assert note.startswith("These are the materials you have on hand, not checked against this part.")
+        assert "Check each one against what the part has to do" in note
         _assert_one_voice(note)
+
+    def test_a_shelf_of_one_plastic_is_never_said_as_a_pick(self, doors, tmp_path, monkeypatch):
+        """A one-item list reads like a pick to an agent; the line says it was
+        not checked against the part and what to do instead."""
+        from kiln.persistence import KilnDB
+
+        db = KilnDB(db_path=str(tmp_path / "pva.db"))
+        db.save_material("x1c", 0, "PVA", color="natural", remaining_grams=400.0)
+        monkeypatch.setattr("kiln.persistence.get_db", lambda *a, **k: db)
+        try:
+            with plain_install_served(SIGNED_OUT):
+                reply = doors["recommend_material"](intent="strong bracket", on_hand_only=True, printer_id="x1c")
+        finally:
+            db.close()
+        assert reply["basic"] is True and reply["plastics"] == ["PVA"]
+        assert "not checked against this part" in reply["message"]
+        assert "check each one against what the part has to do" in reply["message"].lower()
+        assert "Kiln did not pick a plastic" not in reply["message"]
 
     def test_every_machine_counts_when_no_printer_is_named(self, doors, filled_shelf):
         with plain_install_served(SIGNED_OUT):
@@ -406,11 +427,11 @@ class TestAMissFromTheMaterialsOnHand:
     def test_the_food_floor_keeps_what_the_person_owns_off_a_mug(self, doors, filled_shelf):
         """Nothing on the shelf may touch food, so nothing owned is listed and
         the plastics listed are said not to be on hand."""
-        from kiln.material_basics import basic_plastics
+        from kiln.material_basics import basic_list
 
         with plain_install_served(SIGNED_OUT):
             reply = doors["recommend_material"](intent="coffee mug", on_hand_only=True)
-        assert reply["plastics"] == basic_plastics("coffee mug") and reply["on_hand"] == []
+        assert reply["plastics"] == basic_list("coffee mug").plastics and reply["on_hand"] == []
         assert not {"PETG-CF", "TPU"} & set(reply["plastics"]) and reply["on_hand_scope"] == "fleet"
         assert reply["message"].startswith(
             "NOT ON HAND: nothing you have recorded (PETG-CF, TPU) matches this request — "
@@ -446,6 +467,45 @@ class TestOverLongInput:
         assert sent == [], "an over-long intent was sent to Kiln's servers"
         assert reply["success"] is False and reply["error"]["code"] == "VALIDATION_ERROR"
         assert reply["error"]["message"] == "Invalid intent: say what the part is for in at most 10,000 characters."
+
+    @pytest.mark.parametrize("budget", ["25", True])
+    def test_a_request_the_recommendation_cannot_read_is_refused_never_basic(self, doors, budget):
+        """The recommendation's own refusal of a value it cannot read (a budget
+        sent as text or as yes/no through the REST door) is relayed as a
+        refusal, the way the substitution doors relay theirs."""
+        refusal = {
+            "status": "error", "success": False, "code": "INVALID_ARGUMENT",
+            "error": "Give the budget as a price per kilogram.",
+        }
+        with plain_install_served(refusal):
+            reply = doors["recommend_material"](intent="a shelf bracket", budget_usd=budget)
+        assert reply["success"] is False and "basic" not in reply, reply
+        assert reply["error"]["code"] == "VALIDATION_ERROR"
+        assert reply["error"]["message"] == "Give the budget as a price per kilogram."
+
+    def test_a_refusal_that_is_not_about_the_input_is_still_basic(self, doors):
+        refusal = {"status": "error", "success": False, "code": "ALLOWANCE_USED_UP", "error": "Not today."}
+        with plain_install_served(refusal):
+            reply = doors["recommend_material"](intent="a shelf bracket")
+        assert reply["basic"] is True and reply["why"] == "refused"
+
+    def test_an_over_long_printer_name_is_refused_and_never_said_back(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id="p" * 100_000)
+        assert sent == [], "a request with an over-long printer name was sent to Kiln's servers"
+        assert reply["success"] is False and reply["error"]["code"] == "VALIDATION_ERROR"
+        assert reply["error"]["message"] == "Invalid printer_id: name a registered printer in at most 200 characters."
+        assert len(json.dumps(reply)) < 1_000
+
+    def test_a_printer_name_that_is_not_text_is_refused(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id=["x1c"])
+        assert sent == [] and reply["error"]["code"] == "VALIDATION_ERROR"
+
+    def test_a_printer_name_at_the_limit_is_answered_for(self, doors):
+        with plain_install_served(served_pick()) as sent:
+            reply = doors["recommend_material"](intent="a shelf bracket", printer_id="p" * 200)
+        assert len(_picks(sent)) == 1 and reply["answered_for_printer"] == "p" * 200
 
     def test_an_intent_at_the_limit_is_asked(self, doors):
         with plain_install_served(served_pick()) as sent:
@@ -547,14 +607,39 @@ def test_a_basic_reply_carries_no_catalogue_figure(doors, intent):
 # ---------------------------------------------------------------------------
 
 
+#: The recommender's table and scoring names, by digest (tests/_moved_away.py).
+_RECOMMENDER_NAMES = frozenset({
+    "921a09ea08de9920f8bb1c513648333dff25ba0cea988a43fd7b4e44f17b5741",
+    "05b73ca5b7e998a8e31e7fa2c2f10f66a89c805aeeda76a159bf44289863bc1a",
+    "852ec86ecfa45ec13026b90cda723740826b665cafad0393a2264abfac8e3f2e",
+    "6148056da6a94a523efde903ecd64cc4131bebbc654ead166a0af9735d11f880",
+    "1f040a2fe112e9b544ed253caa2a64aa329fe0370ebef9a5734e640181fbe6fd",
+    "cc01db682fc86f8ae3994ccb023b3b84417fe1b59f525db30006eddfec217485",
+    "06a7651c5e78da178ae6c2978276b7dc2c5dd32135bffcecda997ee1e04813e6",
+    "74e26aedfdc69ffc0f94fd2828f53ddba8d171095d6864618475ec0a89549f2c",
+    "8a01335438f258d2d5358620eef11ddbcb654001c052a2be2108b54e4a2ca389",
+    "b742816c74c8ad1eb5249491df8f0dde127e15db070c0449284fcca0fb3716aa",
+    "e4d33e17261ad0520d4424c01fde02ae0a1a51d129fed48a7525dc7131073ceb",
+    "4ea02db8a1c1d41af7920ba068ed9e182ef1b2235347e4a6f02a96d2b7bd18d5",
+    "cd9ccfa02b09cf5d5780497d124eb451f08dcf21caa21aeb0fadc097d1b55632",
+    "983ff2a5bd16e93640ec3000571ce232c92b29bb1281e4396ea3a65055ddf3c7",
+})
+#: The table and its scoring gap, named anywhere in the package's source.
+_RECOMMENDER_WORDS = frozenset({
+    "05b73ca5b7e998a8e31e7fa2c2f10f66a89c805aeeda76a159bf44289863bc1a",
+    "b742816c74c8ad1eb5249491df8f0dde127e15db070c0449284fcca0fb3716aa",
+})
+#: A material's per-material score field, as a name in code (a field or a
+#: keyword); the same word as a dict key elsewhere is not the table.
+_RECOMMENDER_FIELDS = frozenset({
+    "563de2f8b494f9c75b8c81bb722588ba7f3b6602fc5d01a4ceae1ec7f1650189",
+})
+
+
 def test_the_table_and_its_scoring_are_not_in_the_public_package():
     import kiln.material_routing as routing
+    from tests._moved_away import attributes_back, names_back, tokens_back
 
-    gone = ("_MATERIALS", "_INTENT_MAP", "_DEFAULT_WEIGHTS", "_score_material", "parse_intent",
-            "describe_material_pick", "describe_better_option", "_CATALOG_ALIASES", "_catalog_match",
-            "_POOR_FIT_SCORE_GAP", "MaterialProperties", "IntentMapping", "list_materials", "get_material")
-    assert not [name for name in gone if hasattr(routing, name)]
-    for path in _SRC.rglob("*.py"):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        assert "_INTENT_MAP" not in text and "_POOR_FIT_SCORE_GAP" not in text, path
-        assert not re.search(r"ease_of_print\s*=", text), path
+    assert attributes_back(routing, _RECOMMENDER_NAMES) == []
+    assert tokens_back(_RECOMMENDER_WORDS, _SRC) == []
+    assert names_back(_RECOMMENDER_FIELDS, _SRC) == []

@@ -13,6 +13,7 @@ install rather than requiring an opt-in extra.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import logging
 import math
@@ -24,10 +25,12 @@ from typing import Any, ClassVar, Literal
 
 import numpy as np
 
-from kiln import _vec, step_import
+from kiln import _vec, generic_limits, step_import
 from kiln.generation.validation import (
+    _LEAN_RECHECK_DEG,
     _SUPPORTED_MESH_FORMATS,
     _bed_threshold_z,
+    _exact_corner_ids,
     _is_bed_supported_triangle,
     _mesh_bed_z,
     _parse_mesh_file,
@@ -191,8 +194,7 @@ class ThinWallAnalysis:
     layer_height_mm: float = 0.0
     #: The thin features Kiln's slicer drops, each naming ``why`` (``"wall"``,
     #: ``"pin"`` or ``"island"``): what a hard stop says (:func:`_hard_stops`).
-    #: A pin is read up to two nozzle widths across, so its thickness can be
-    #: past the nozzle.
+    #: A pin's thickness can be past the nozzle.
     dropped_regions: list[dict[str, Any]] = field(default_factory=list)
     #: The slicer settings the two above were judged for.  Empty on a block
     #: built by hand, which a hard stop then judges by the nozzle alone.
@@ -201,6 +203,20 @@ class ThinWallAnalysis:
     #: closes them (:func:`_seal_cracks`): how many places, and the widest.
     sealed_crack_count: int = 0
     sealed_crack_widest_mm: float = 0.0
+    #: Which figures judged what the slice leaves out: ``"exact"`` (Kiln's own,
+    #: from Kiln's servers or kiln-pro on this computer) or ``"general"`` (the
+    #: general minimum wall, when Kiln's own could not be read).  Empty on a
+    #: block built by hand.
+    slicer_check: str = ""
+    #: Under the general figures: the walls and pins the same reading, taken
+    #: against the general minimum wall (``general_wall_mm``), finds may be left
+    #: out when sliced, each naming ``why`` like ``dropped_regions``.  A warning,
+    #: never a stop; with Kiln's own figures these are empty and
+    #: ``dropped_regions`` says what is left out.
+    may_be_left_out_count: int = 0
+    may_be_left_out_min_mm: float = 0.0
+    may_be_left_out_regions: list[dict[str, Any]] = field(default_factory=list)
+    general_wall_mm: float = 0.0
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
@@ -1025,21 +1041,14 @@ _ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
     ],
 }
 
-# Public floor: the universal 45° rule that every cited 3D-printing
-# source treats as the safety-baseline angle below which any FDM
-# material prints cleanly without supports.  The free tier sees this
-# floor for every material.  Pro+ overlay (``printability_judgment``
-# overlay's ``overhangs`` block) supplies per-material limits keyed by
-# filament identifier; warp-prone materials (TPU, PP) drop below 45°,
-# forgiving materials (PLA, pla_plus) can sit above it.  The lookup
-# falls back to ``default_limit_deg`` when a material is absent from
-# the overlay's ``material_limits_deg``, and to the public 45° rule
-# when the overlay itself is absent.
+# The general overhang figure (kiln.generic_limits), the angle every
+# check falls back to.  A plastic's own figure reaches the lookup as an
+# ``overhangs`` block built by :func:`material_overhangs`; the lookup
+# falls back to ``default_limit_deg`` when a material is absent from the
+# block's ``material_limits_deg``, and to these defaults when no block
+# is given.
 _OVERHANGS_PUBLIC_DEFAULTS: dict[str, Any] = {
-    "default_limit_deg": 45.0,
-    # Free tier ships zero per-material overrides — the universal 45°
-    # rule is the only floor.  Pro+ overlay provides the per-material
-    # SME-tuned values; see kiln3d.com for tier details.
+    "default_limit_deg": generic_limits.OVERHANG_UNSUPPORTED_DEG,
     "material_limits_deg": {},
 }
 
@@ -1081,31 +1090,59 @@ def _resolve_overhang_threshold(
     return float(default_limit)
 
 
-def overhang_threshold_deg(material: str | None = None) -> float:
+def material_overhangs(
+    material: str | None, *, nozzle_mm: float | None = None, layer_height_mm: float | None = None,
+) -> dict[str, Any]:
+    """The ``overhangs`` block :func:`_resolve_overhang_threshold` reads for
+    *material* printed at *layer_height_mm* through *nozzle_mm*, from the
+    one helper every check reads (:func:`kiln.material_limits.limits_for`),
+    or the general figure when Kiln has none for it.  Every door that
+    judges an overhang hands the layer and nozzle the part is printed at, so
+    the report, the support verdict and the slice give one answer."""
+    from kiln.material_limits import OVERHANG, limits_for
+
+    config: dict[str, Any] = {
+        "default_limit_deg": generic_limits.OVERHANG_UNSUPPORTED_DEG,
+        "material_limits_deg": {},
+    }
+    if material:
+        limits = limits_for(material, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm)
+        if limits.is_own(OVERHANG) and limits.value(OVERHANG):
+            config["material_limits_deg"] = {material: float(limits.value(OVERHANG))}
+    return {"overhangs": config}
+
+
+def overhang_threshold_deg(
+    material: str | None = None, *, nozzle_mm: float | None = None, layer_height_mm: float | None = None,
+) -> float:
     """The overhang angle, from vertical, past which a face of *material*
     counts as an overhang here -- the angle :func:`analyze_printability`
     reads its verdict against, and the one a slice's support threshold is
-    written from.  Per-material values reach it through the kiln-pro
-    overlay; without one, the 45 degree floor."""
-    from kiln.design_intelligence import load_pro_overlay_or_empty
-
-    return _resolve_overhang_threshold(None, material, load_pro_overlay_or_empty("printability_judgment"))
+    written from, at the layer and nozzle given.  The plastic's own figure
+    where Kiln has one (:func:`material_overhangs`); without one, the
+    general figure."""
+    return _resolve_overhang_threshold(
+        None, material, material_overhangs(material, nozzle_mm=nozzle_mm, layer_height_mm=layer_height_mm),
+    )
 
 
 def judge_supports(
     file_path: str,
     *,
     nozzle_diameter: float | None = None,
-    layer_height: float = 0.2,
+    layer_height: float | None = None,
     max_overhang_angle: float | None = None,
-    material: str = "pla",
+    material: str | None = None,
     printer_id: str | None = None,
     clear_with_none_held: bool = False,
     plate_number: int | None = None,
 ) -> SupportJudgement:
     """The support verdict's inputs for *file_path*, and nothing else.
+    *layer_height* left unsaid is the layer Kiln slices the nozzle at, as
+    :func:`analyze_printability` reads it, so the two judge one part alike.
     *plate_number* names the plate of a several-plate project
-    (:func:`_mesh_path_for_analysis`).
+    (:func:`_mesh_path_for_analysis`).  *material* left unsaid is read as
+    the plastic a check assumes (:func:`kiln.material_limits.assuming`).
 
     *clear_with_none_held* asks for the faces a slice keeps supports off
     even when the verdict holds none: for a slice that carries supports on
@@ -1119,22 +1156,25 @@ def judge_supports(
     and runs where that analysis runs: through kiln-pro's memory-capped
     runner when there is one (a ``MemoryError`` is the cap), else here.
     """
-    kwargs = dict(
-        nozzle_diameter=nozzle_diameter, layer_height=layer_height,
-        max_overhang_angle=max_overhang_angle, material=material, printer_id=printer_id,
-        clear_with_none_held=clear_with_none_held, plate_number=plate_number,
-    )
-    runner = _analysis_runner()
-    if runner is None:
-        return _judge_supports_here(file_path, **kwargs)
-    return runner(_judge_supports_here, file_path, **kwargs)
+    from kiln.material_limits import assuming
+
+    with assuming(material) as plastic:
+        kwargs = dict(
+            nozzle_diameter=nozzle_diameter, layer_height=layer_height,
+            max_overhang_angle=max_overhang_angle, material=plastic, printer_id=printer_id,
+            clear_with_none_held=clear_with_none_held, plate_number=plate_number,
+        )
+        runner = _analysis_runner()
+        if runner is None:
+            return _judge_supports_here(file_path, **kwargs)
+        return runner(_judge_supports_here, file_path, **kwargs)
 
 
 def _judge_supports_here(
     file_path: str,
     *,
     nozzle_diameter: float | None = None,
-    layer_height: float = 0.2,
+    layer_height: float | None = None,
     max_overhang_angle: float | None = None,
     material: str = "pla",
     printer_id: str | None = None,
@@ -1143,13 +1183,16 @@ def _judge_supports_here(
 ) -> SupportJudgement:
     """:func:`judge_supports`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
-    from kiln.design_intelligence import load_pro_overlay_or_empty
 
     nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
+    if layer_height is None:
+        layer_height = _fitted_layer_height(nozzle.diameter_mm)
     mesh_path = _mesh_path_for_analysis(file_path, plate_number)
     triangles, _vertices, bbox, z_min = _load_mesh_for_analysis(mesh_path)
-    overlay = load_pro_overlay_or_empty("printability_judgment")
-    threshold = _resolve_overhang_threshold(max_overhang_angle, material, overlay)
+    threshold = _resolve_overhang_threshold(
+        max_overhang_angle, material,
+        material_overhangs(material, nozzle_mm=nozzle.diameter_mm, layer_height_mm=layer_height),
+    )
     judged = _judge_supports(
         triangles, z_min, bbox,
         resolved_threshold=threshold, layer_height=layer_height,
@@ -1346,6 +1389,14 @@ def _vertex_distance(
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
+def _triangle_array(triangles: list[tuple[tuple[float, ...], ...]]) -> np.ndarray:
+    """*triangles* as a ``(T, 3, 3)`` float array, each figure as it is."""
+    return np.fromiter(
+        itertools.chain.from_iterable(itertools.chain.from_iterable(triangles)),
+        dtype=np.float64, count=9 * len(triangles),
+    ).reshape(-1, 3, 3)
+
+
 def _signed_volume_total(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> float:
@@ -1356,14 +1407,11 @@ def _signed_volume_total(
     the magnitude shrinks toward zero — that's the signal we use to
     decide whether to trust the winding or fall back to the heuristic.
     """
+    # det([a; b; c]) / 6 = signed volume of tetrahedron (origin, a, b, c),
+    # added in triangle order from 0.0, as a running sum adds them.
     total = 0.0
-    for a, b, c in triangles:
-        # det([a; b; c]) / 6 = signed volume of tetrahedron (origin, a, b, c)
-        total += (
-            a[0] * (b[1] * c[2] - b[2] * c[1])
-            + a[1] * (b[2] * c[0] - b[0] * c[2])
-            + a[2] * (b[0] * c[1] - b[1] * c[0])
-        ) / 6.0
+    for terms in _signed_volume_blocks(triangles, None):
+        total = float(np.cumsum(np.concatenate(([total], terms)))[-1])
     return total
 
 
@@ -1373,6 +1421,10 @@ def _bbox_volume(
     """Axis-aligned bounding-box volume of a triangle list."""
     if not triangles:
         return 0.0
+    corners = _triangle_array(triangles).reshape(-1, 3)
+    if np.isfinite(corners).all():
+        low, high = corners.min(axis=0).tolist(), corners.max(axis=0).tolist()
+        return (high[0] - low[0]) * (high[1] - low[1]) * (high[2] - low[2])
     xs = [v[0] for tri in triangles for v in tri]
     ys = [v[1] for tri in triangles for v in tri]
     zs = [v[2] for tri in triangles for v in tri]
@@ -1917,18 +1969,102 @@ def _analyze_overhangs(
     return _overhang_analysis(triangles, picked, angles)
 
 
+def _face_leans(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    tris: np.ndarray | None,
+    z_min: float | None,
+    layer_height: float,
+) -> tuple[np.ndarray | None, np.ndarray] | None:
+    """Per face of *triangles*: whether it rests on the plate
+    (:func:`_is_bed_supported_triangle`; ``None`` when *z_min* is) and the z
+    of its unit normal (``_normalize(_triangle_normal(...))[2]``), read from
+    whole arrays by the same arithmetic in the same order as those helpers,
+    so the two agree to the bit.  *tris* is the same triangles as a
+    ``(T, 3, 3)`` array when the caller holds one.  ``None`` for a mesh with
+    a corner or a normal that is not a finite number, which the caller reads
+    one face at a time."""
+    if tris is None or tris.ndim != 3 or tris.shape[1:] != (3, 3) or tris.shape[0] != len(triangles):
+        tris = _triangle_array(triangles)
+    if not np.isfinite(tris).all():
+        return None
+    on_plate = None
+    if z_min is not None:
+        on_plate = (tris[:, :, 2] <= _bed_threshold_z(z_min, layer_height)).all(axis=1)
+    e1 = tris[:, 1, :] - tris[:, 0, :]
+    e2 = tris[:, 2, :] - tris[:, 0, :]
+    nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+    ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+    nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+    length = np.sqrt(nx * nx + ny * ny + nz * nz)
+    if not np.isfinite(length).all():
+        return None
+    too_short = length < 1e-12
+    unit_nz = np.where(too_short, 0.0, nz / np.where(too_short, 1.0, length))
+    return on_plate, unit_nz
+
+
+def _lean_of(down: float) -> float:
+    """How far a face whose unit normal points *down* (``-nz``) leans from
+    vertical, in degrees: the one reading every overhang check here uses."""
+    return max(0.0, 90.0 - math.degrees(math.acos(max(-1.0, min(1.0, down)))))
+
+
+def _leans_array(down: np.ndarray) -> np.ndarray:
+    """:func:`_lean_of` over an array, to within :data:`_LEAN_RECHECK_DEG`."""
+    return np.maximum(0.0, 90.0 - np.degrees(np.arccos(np.clip(down, -1.0, 1.0))))
+
+
+def _leans_at_least(
+    indices: np.ndarray, down: np.ndarray, limit_deg: float,
+) -> list[tuple[int, float]]:
+    """``(index, lean)`` of each face, in the order given, whose lean
+    (:func:`_lean_of` of its *down*) is at the overhang limit *limit_deg* or
+    past it (:func:`_at_overhang_limit`).  Faces the array reading puts far
+    below the limit are left out unread; every other face is read one at a
+    time, so each lean returned is :func:`_lean_of`'s own."""
+    near = _leans_array(down) + _OVERHANG_LIMIT_SLACK_DEG >= limit_deg - _LEAN_RECHECK_DEG
+    out = []
+    for index, value in zip(indices[near].tolist(), down[near].tolist(), strict=True):
+        angle = _lean_of(value)
+        if _at_overhang_limit(angle, limit_deg):
+            out.append((index, angle))
+    return out
+
+
+def _steepest_lean(down: np.ndarray) -> float:
+    """The largest :func:`_lean_of` among faces pointing *down*, or 0.0 for
+    none: read by array, then one face at a time among those near the top."""
+    if not len(down):
+        return 0.0
+    approx = _leans_array(down)
+    top = approx >= approx.max() - _LEAN_RECHECK_DEG
+    return max(0.0, *(_lean_of(value) for value in down[top].tolist()))
+
+
 def _overhang_faces(
     triangles: list[tuple[tuple[float, ...], ...]],
     threshold_deg: float,
     *,
     z_min: float | None,
     layer_height: float,
+    tris: np.ndarray | None = None,
 ) -> tuple[list[int], list[float]]:
     """The overhanging faces of *triangles*, in index order, and each one's
     lean from vertical: facing down at or past *threshold_deg* and, when
-    *z_min* is given, not resting on the plate."""
+    *z_min* is given, not resting on the plate.  *tris* is the same
+    triangles as a ``(T, 3, 3)`` array when the caller holds one."""
     picked: list[int] = []
     angles: list[float] = []
+    reading = _face_leans(triangles, tris, z_min, layer_height)
+    if reading is not None:
+        on_plate, unit_nz = reading
+        down = unit_nz < 0
+        if on_plate is not None:
+            down &= ~on_plate
+        for index, angle in _leans_at_least(np.flatnonzero(down), -unit_nz[down], threshold_deg):
+            picked.append(index)
+            angles.append(angle)
+        return picked, angles
     for index, tri in enumerate(triangles):
         if z_min is not None and _is_bed_supported_triangle(tri, z_min, layer_height):
             continue
@@ -2405,17 +2541,12 @@ def _compute_mesh_genus(
     and ignore the genus value when the mesh isn't a closed manifold.
 
     Pure numpy.  Shares the vertex-dedup + edge-canonicalize scheme
-    with ``_label_mesh_components``.  Measured on a 100 k-tri torus:
-    ``_compute_mesh_genus`` takes ~235 ms, similar to the existing
-    ``_label_mesh_components`` cost (~260 ms) — roughly doubles the
-    topology-pass budget rather than the ~50 ms I initially eyeballed
-    before benchmarking.
+    with ``_label_mesh_components``.
     """
     T = triangles.shape[0]
     if T == 0 or n_components <= 0:
         return 0
-    flat = triangles.reshape(-1, 3)
-    _, vid = np.unique(flat, axis=0, return_inverse=True)
+    vid = _exact_corner_ids(triangles.reshape(-1, 3))
     V = int(vid.max() + 1) if vid.size > 0 else 0
     tri_verts = vid.reshape(T, 3).astype(np.int64)
     edges = np.stack(
@@ -2423,7 +2554,7 @@ def _compute_mesh_genus(
         axis=1,
     ).reshape(-1, 2)
     edges.sort(axis=1)
-    E = int(np.unique(edges, axis=0).shape[0])
+    E = int(np.unique(edges[:, 0] * max(V, 1) + edges[:, 1]).shape[0])
     F = int(T)
     chi = V - E + F
     # g_total = c − χ / 2.  Multiply by 2 first to keep integer
@@ -2448,17 +2579,16 @@ def _label_mesh_components(
     where ``k`` is the component count.  Single-body meshes return
     ``np.zeros(T)``.
 
-    Implementation: ``np.unique``-based vertex dedup + edge sort, then
-    union-find on triangle pairs sharing an edge.  Pure numpy; the
-    Python loop iterates the union list (one entry per shared edge),
-    not per triangle.  ~240 ms on a 100 k-triangle single body.
+    Implementation: vertex dedup (:func:`_exact_corner_ids`) + edge sort,
+    then union-find on triangle pairs sharing an edge.  The Python loop
+    iterates the union list (one entry per shared edge), not per
+    triangle.
     """
     T = triangles.shape[0]
     if T == 0:
         return np.empty(0, dtype=np.int64)
 
-    flat = triangles.reshape(-1, 3)  # (3T, 3) — all vertex coords
-    _, vid = np.unique(flat, axis=0, return_inverse=True)
+    vid = _exact_corner_ids(triangles.reshape(-1, 3))
     tri_verts = vid.reshape(T, 3).astype(np.int64)
 
     # Three edges per triangle, with vertex IDs in canonical (u, v) order.
@@ -2481,7 +2611,11 @@ def _label_mesh_components(
     union_a = tri_of_slot[:-1][same]
     union_b = tri_of_slot[1:][same]
 
-    parent = np.arange(T, dtype=np.int64)
+    # The joins run one at a time, in edge order, each hanging the first
+    # triangle's root under the second's: which triangle ends as a
+    # component's root, and so how the components are numbered, follows
+    # from that order.
+    parent = list(range(T))
 
     def find(x: int) -> int:
         while parent[x] != x:
@@ -2494,9 +2628,16 @@ def _label_mesh_components(
         if ra != rb:
             parent[ra] = rb
 
-    roots = np.fromiter((find(i) for i in range(T)), dtype=np.int64, count=T)
+    # Every triangle's root, by following parents until nothing moves.
+    roots = np.asarray(parent, dtype=np.int64)
+    while True:
+        grand = roots[roots]
+        if np.array_equal(grand, roots):
+            break
+        roots = grand
     _, comp_ids = np.unique(roots, return_inverse=True)
     return comp_ids.astype(np.int64)
+
 
 
 #: How many cavity shells one measurement joins to the shell around them
@@ -3076,13 +3217,11 @@ _DETAIL_WINDOW_MM: float = 50.0
 
 # What Kiln's slicer does with a thin reading that is not tip detail
 # (:func:`_slice_fate`), for the slicer settings :data:`_JUDGED_FOR` names.
+# The thinnest wall Kiln's slice lays a line in and the thinnest round pin it
+# prints are Kiln's own figures (:func:`kiln.material_limits.sliced_floors`);
+# without them both are the general minimum wall, and what that judges thin
+# is a warning that it may be left out, never a stop (:func:`_measure_thin_walls`).
 # Pinned by test_printability_judges_what_the_slicer_drops.py.
-#: A wall narrower across its layer than slope x nozzle + offset gets no line.
-_WALL_DROP_SLOPE: float = 0.35
-_WALL_DROP_OFFSET_MM: float = 0.05
-#: A round pin needs at least this many nozzle widths across to print in every
-#: layer; readings up to it are read for pins on every tier.
-_PIN_MIN_FRACTION: float = 2.0
 #: Wider one way across its layer than the other by more than this, a thin
 #: piece is a fin and is judged as a wall, not as a pin.
 _PIN_ROUND_RATIO: float = 1.25
@@ -3287,6 +3426,8 @@ def _slice_fate(
     *,
     nozzle: float,
     layer_height: float,
+    wall_line: float,
+    pin_line: float,
     pins_only: bool = False,
 ) -> np.ndarray:
     """What Kiln's slicer does with each thin reading that is not tip detail
@@ -3294,17 +3435,18 @@ def _slice_fate(
 
     A slicer works a layer at a time, so a reading is judged by what a layer
     holds at it.  A wall narrower across its layer (the chord leaned onto
-    the layer) than :data:`_WALL_DROP_SLOPE` x nozzle +
-    :data:`_WALL_DROP_OFFSET_MM` gets no line.  A flat sheet prints when a
+    the layer) than *wall_line* gets no line.  A flat sheet prints when a
     layer falls inside it, so one thinner than *layer_height* may be left
     out: a warning, never a drop.  Otherwise the feature is read across its
     layer (:func:`_level_spans`): about as wide one way as the other
-    (:data:`_PIN_ROUND_RATIO`), it is a pin, and narrower than
-    :data:`_PIN_MIN_FRACTION` nozzle widths it is dropped; a fin shorter than
-    :data:`_ISLAND_MIN_LENGTH_FRACTION` nozzle widths is a speck, dropped too.
-    With *pins_only* (readings at or past the nozzle) only the pin rule
-    applies.  A reading thinner than the nozzle the probe could not afford
-    stays a drop, the cautious answer; a thicker one is left as it was.
+    (:data:`_PIN_ROUND_RATIO`), it is a pin, and narrower than *pin_line* it
+    is dropped; a fin shorter than :data:`_ISLAND_MIN_LENGTH_FRACTION` nozzle
+    widths is a speck, dropped too.  *wall_line* and *pin_line* come from
+    :class:`kiln.material_limits.SlicedFloors`: Kiln's own, or the general
+    minimum wall when Kiln's own could not be read.  With *pins_only*
+    (readings at or past the nozzle) only the pin rule applies.  A reading
+    thinner than the nozzle the probe could not afford stays a drop, the
+    cautious answer; a thicker one is left as it was.
     Pinned by test_printability_judges_what_the_slicer_drops.py.
     """
     n = int(chords.shape[0])
@@ -3317,7 +3459,7 @@ def _slice_fate(
         # Judged at the precision every thickness is reported at (µm).
         across = np.round(chords / np.maximum(np.sqrt(np.maximum(1.0 - dz * dz, 0.0)), 1e-9), 3)
         tall = np.round(chords / np.maximum(dz, 1e-9), 3)
-        fate[~flat & (across < _WALL_DROP_SLOPE * nozzle + _WALL_DROP_OFFSET_MM)] = _FATE_WALL
+        fate[~flat & (across < wall_line)] = _FATE_WALL
         fate[flat & (tall < layer_height)] = _FATE_SHEET
     idx = np.nonzero((fate == _FATE_PRINTS) & ~flat)[0]
     if idx.size == 0:
@@ -3327,7 +3469,7 @@ def _slice_fate(
     # a reading never taken.
     unread = ~np.isfinite(spans[:, 0])
     wide, narrow = spans.max(axis=1), spans.min(axis=1)
-    pin = (wide <= _PIN_ROUND_RATIO * narrow) & (wide < _PIN_MIN_FRACTION * nozzle)
+    pin = (wide <= _PIN_ROUND_RATIO * narrow) & (wide < pin_line)
     speck = (wide > _PIN_ROUND_RATIO * narrow) & (wide < _ISLAND_MIN_LENGTH_FRACTION * nozzle)
     if pins_only:
         fate[idx] = np.where(~unread & pin, _FATE_PIN, _FATE_PRINTS)
@@ -3606,11 +3748,13 @@ def _analyze_thin_walls(
     nozzle_diameter: float = 0.4,
     thin_below_mm: float | None = None,
     layer_height: float = 0.2,
+    sliced: Any = None,
 ) -> ThinWallAnalysis:
     """Measure thin walls; see :func:`_measure_thin_walls`."""
     return _measure_thin_walls(
         triangles, vertices,
         nozzle_diameter=nozzle_diameter, thin_below_mm=thin_below_mm, layer_height=layer_height,
+        sliced=sliced,
     )[0]
 
 
@@ -3624,6 +3768,7 @@ def _measure_thin_walls(
     tris: np.ndarray | None = None,
     comp_ids: np.ndarray | None = None,
     layer_height: float = 0.2,
+    sliced: Any = None,
 ) -> tuple[ThinWallAnalysis, float]:
     """Measure thin walls via per-component vectorized inward ray-casting.
 
@@ -3671,16 +3816,28 @@ def _measure_thin_walls(
     *tris* is the same triangles as a ``(T, 3, 3)`` float array and *comp_ids*
     their component labels, when the caller already holds them; each is
     built here otherwise.  Either way the measurement reads the same numbers.
+
+    *sliced* is what Kiln's own slice keeps at this nozzle
+    (:class:`kiln.material_limits.SlicedFloors`), asked here when not given.
+    With Kiln's own figures a feature the slice leaves out is a drop (a hard
+    stop); without them nothing is a drop, and what the same reading finds
+    against the general minimum wall is a warning that it may be left out.
     """
     threshold = max(nozzle_diameter, thin_below_mm or 0.0)
     basis = "material" if threshold > nozzle_diameter else "nozzle"
+    if sliced is None:
+        from kiln.material_limits import sliced_floors
+
+        sliced = sliced_floors(nozzle_mm=nozzle_diameter)
     # Readings up to the pin line are judged by what the slicer does with them
     # (_slice_fate) on every tier, read the same way on each: through the
     # cracks a slicer closes, on reads of their own (fate_budget).
-    pin_line = _PIN_MIN_FRACTION * nozzle_diameter
+    pin_line = float(sliced.pin_mm)
+    wall_line = float(sliced.wall_mm)
+    check = "exact" if sliced.exact else "general"
 
     def unmeasured() -> tuple[ThinWallAnalysis, float]:
-        return ThinWallAnalysis(0.0, 0, 0.0, [], threshold, basis), 0.0
+        return ThinWallAnalysis(0.0, 0, 0.0, [], threshold, basis, slicer_check=check), 0.0
 
     total = len(triangles)
     if total < 4:
@@ -3846,13 +4003,15 @@ def _measure_thin_walls(
     # slicer drops it (_slice_fate); only a drop stops the print.  From the
     # nozzle up to the pin line a round pin is a drop too, unless it is a tip
     # standing on solid.  The same on every tier: the nozzle and the layer
-    # decide, never a material's floor.
+    # decide, never a material's floor.  Without Kiln's own figures the same
+    # reading is taken against the general minimum wall, and what it finds is
+    # a warning, never a stop.
     fate = np.full(n_sample, _FATE_PRINTS, dtype=np.int64)
     below = np.nonzero(thin_mask & (reported < nozzle_diameter))[0]
     if below.size:
         fate[below] = _slice_fate(
             origins[below], directions[below], exit_dist[below], origin_comps[below], fate_runs,
-            nozzle=nozzle_diameter, layer_height=layer_height,
+            nozzle=nozzle_diameter, layer_height=layer_height, wall_line=wall_line, pin_line=pin_line,
         )
         if fate_budget.left > 0:
             # Nothing was refused (a refusal spends the whole budget), so a
@@ -3868,18 +4027,22 @@ def _measure_thin_walls(
     if band.size:
         shaped = _slice_fate(
             origins[band], directions[band], exit_dist[band], origin_comps[band], fate_runs,
-            nozzle=nozzle_diameter, layer_height=layer_height, pins_only=True,
+            nozzle=nozzle_diameter, layer_height=layer_height, wall_line=wall_line, pin_line=pin_line,
+            pins_only=True,
         )
         pins = band[shaped == _FATE_PIN]
         if pins.size:
             # Only a pin thin for longer than a tip stops (an antenna, a long
             # peg); a shorter one standing on the part is detail.  Past the
-            # nozzle nothing stopped before, so a walk cut short stops nothing.
+            # nozzle nothing stopped before, so a walk cut short stops nothing;
+            # a warning, which stops nothing either way, takes it as a pin.
             mids = origins[pins] + directions[pins] * (exit_dist[pins] * 0.5)[:, None]
-            length, _ = _pin_length(
+            length, refused = _pin_length(
                 mids, origin_comps[pins], targets, component_cache, fate_budget, pin_line=pin_line,
             )
             tip = length <= _DETAIL_HEIGHT_MAX_MM
+            if not sliced.exact:
+                tip &= ~refused
             fate[pins[~tip]] = _FATE_PIN
             detail_mask[pins[tip]] = True
             thin_mask &= ~detail_mask
@@ -3893,7 +4056,11 @@ def _measure_thin_walls(
     sub_nozzle_pct = int((counted & (reported < nozzle_diameter)).sum()) / n_sample * 100.0
 
     sub_nozzle = thin_mask & (reported < nozzle_diameter)
-    dropped = np.isin(fate, _FATE_DROPS)  # set only on the readings judged above
+    flagged = np.isin(fate, _FATE_DROPS)  # set only on the readings judged above
+    # Judged by Kiln's own figures, a flagged reading is left out of the slice;
+    # judged by the general minimum wall, it only may be.
+    dropped = flagged if sliced.exact else np.zeros_like(flagged)
+    left_out = flagged & ~dropped
     thin_line = sub_nozzle & (fate == _FATE_PRINTS)
     thin_sheet = sub_nozzle & (fate == _FATE_SHEET)
     line_count, sheet_count = int(thin_line.sum()), int(thin_sheet.sum())
@@ -3918,14 +4085,19 @@ def _measure_thin_walls(
         problematic = _thin_wall_features(
             origins[thin_mask], exit_dist[thin_mask], link_mm=link_mm,
         )
-    dropped_regions: list[dict[str, Any]] = []
-    for code in np.unique(fate[dropped]):
-        kind = dropped & (fate == code)
-        dropped_regions += [
-            {**r, "why": _FATE_WORD[int(code)]}
-            for r in _thin_wall_features(origins[kind], exit_dist[kind], link_mm=link_mm)
-        ]
-    dropped_regions.sort(key=lambda f: (f["thickness_mm"], f["x"], f["y"], f["z"]))
+    def regions(mask: np.ndarray) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        for code in np.unique(fate[mask]):
+            kind = mask & (fate == code)
+            found += [
+                {**r, "why": _FATE_WORD[int(code)]}
+                for r in _thin_wall_features(origins[kind], exit_dist[kind], link_mm=link_mm)
+            ]
+        found.sort(key=lambda f: (f["thickness_mm"], f["x"], f["y"], f["z"]))
+        return found
+
+    dropped_regions = regions(dropped)
+    left_out_regions = regions(left_out)
     # Cracks are counted where a chord thinner than the nozzle met them, a
     # set every tier shares, so the note reads the same on each.
     sealed = counted & (crack_width > 0) & (np.round(raw_chord, 3) < nozzle_diameter)
@@ -3956,6 +4128,11 @@ def _measure_thin_walls(
         judged_for=_JUDGED_FOR,
         sealed_crack_count=crack_places,
         sealed_crack_widest_mm=round(float(crack_width[sealed].max()), 3) if sealed.any() else 0.0,
+        slicer_check=check,
+        may_be_left_out_count=int(left_out.sum()),
+        may_be_left_out_min_mm=round(float(exit_dist[left_out].min()), 3) if left_out.any() else 0.0,
+        may_be_left_out_regions=left_out_regions[:_THIN_FEATURE_CAP],
+        general_wall_mm=0.0 if sliced.exact else round(wall_line, 3),
     ), sub_nozzle_pct
 
 
@@ -4344,10 +4521,9 @@ _BED_PROXIMATE_CEILING_MM: float = 0.61
 # on.
 _BRIDGE_SUPPORTED_EDGE_DROP_MM: float = 1e-3
 
-# Two-sided bridge spans up to this print reliably without supports —
-# the same universal 10 mm rule the public scoring has always used
-# (the pro overlay layers per-material limits on top).
-_MAX_SELF_SUPPORTING_BRIDGE_MM: float = 10.0
+# Two-sided bridge spans up to this print reliably without supports:
+# the general bridge figure (kiln.generic_limits).
+_MAX_SELF_SUPPORTING_BRIDGE_MM: float = generic_limits.BRIDGE_MAX_MM
 
 # One-sided lateral reach: an extruded line anchors to the line laid
 # next to it, so deck points within a few extrusion widths (0.4 mm
@@ -4383,22 +4559,13 @@ def _downward_region_members(
     start at the foot of a rod is an overhang, and a region must hold it
     (a centre inside the band is not a face resting on the plate).
 
-    Read from the ``(T, 3, 3)`` array when the caller holds one, by the
-    same arithmetic in the same order as the per-triangle helpers, so the
-    two readings agree to the bit; from the tuples otherwise.
+    Read from whole arrays (:func:`_face_leans`), which agree with the
+    per-triangle helpers to the bit; one face at a time for a mesh those
+    arrays cannot read.
     """
-    bed_threshold = _bed_threshold_z(z_min, layer_height)
-    if tris is not None and tris.ndim == 3 and tris.shape[1:] == (3, 3) and tris.shape[0] == len(triangles):
-        z = tris[:, :, 2]
-        on_plate = (z <= bed_threshold).all(axis=1)
-        e1 = tris[:, 1, :] - tris[:, 0, :]
-        e2 = tris[:, 2, :] - tris[:, 0, :]
-        nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
-        ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
-        nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
-        length = np.sqrt(nx * nx + ny * ny + nz * nz)
-        too_short = length < 1e-12
-        unit_nz = np.where(too_short, 0.0, nz / np.where(too_short, 1.0, length))
+    reading = _face_leans(triangles, tris, z_min, layer_height)
+    if reading is not None:
+        on_plate, unit_nz = reading
         member = ~on_plate & ~(unit_nz > _DOWNWARD_REGION_NZ_LIMIT)
         return np.flatnonzero(member).tolist(), (unit_nz[member] <= _BRIDGE_FLAT_NZ_LIMIT).tolist()
 
@@ -4480,6 +4647,80 @@ def _mesh_edges_among(
             if e in asked:
                 mesh_edges.setdefault(e, []).append(i)
     return mesh_edges
+
+
+#: The probe directions a deck point's chords are read along: the x and y
+#: of a unit step at each of :data:`_BRIDGE_CHORD_DIRECTIONS` even angles
+#: over the half-circle.
+_CHORD_STEPS: tuple[tuple[float, float], ...] = tuple(
+    (math.cos(math.pi * k / _BRIDGE_CHORD_DIRECTIONS), math.sin(math.pi * k / _BRIDGE_CHORD_DIRECTIONS))
+    for k in range(_BRIDGE_CHORD_DIRECTIONS)
+)
+
+#: The most point-direction-segment readings :func:`_supported_chords` holds
+#: at once.
+_CHORD_BLOCK: int = 1 << 18
+
+
+def _supported_chords(
+    points: np.ndarray, pa: np.ndarray, d_seg: np.ndarray, supported: np.ndarray,
+) -> np.ndarray:
+    """For each point of *points* ``(P, 2)``, the shortest chord through it,
+    along the :data:`_CHORD_STEPS` directions, whose nearest crossing of the
+    boundary segments (``pa + s * d_seg``, ``s`` in [0, 1]) on BOTH sides is
+    a *supported* one; ``inf`` for a point with none."""
+    best = np.full(len(points), np.inf)
+    if not len(points) or not len(pa):
+        return best
+    ux = np.array([step[0] for step in _CHORD_STEPS])[:, None]  # (K, 1)
+    uy = np.array([step[1] for step in _CHORD_STEPS])[:, None]
+    along_x = np.abs(ux) > np.abs(uy)  # (K, 1): read t from x, else from y
+    denom = ux * d_seg[None, :, 1] - uy * d_seg[None, :, 0]  # (K, S)
+    crosses = np.abs(denom) > 1e-12
+    per_point = len(_CHORD_STEPS) * len(pa)
+    step = max(1, _CHORD_BLOCK // per_point)
+    for start in range(0, len(points), step):
+        cx = points[start:start + step, 0][:, None, None]  # (P, 1, 1)
+        cy = points[start:start + step, 1][:, None, None]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            w_x = pa[None, None, :, 0] - cx  # (P, 1, S)
+            w_y = pa[None, None, :, 1] - cy
+            s = (w_x * uy - w_y * ux) / denom  # (P, K, S)
+            t = np.where(
+                along_x,
+                (pa[None, None, :, 0] + s * d_seg[None, None, :, 0] - cx) / ux,
+                (pa[None, None, :, 1] + s * d_seg[None, None, :, 1] - cy) / uy,
+            )
+        hit = crosses & (s >= -1e-9) & (s <= 1.0 + 1e-9)
+        fwd = hit & (t > 1e-9)
+        bwd = hit & (t < -1e-9)
+        t_f = np.where(fwd, t, np.inf)
+        t_b = np.where(bwd, -t, np.inf)
+        i_f = np.argmin(t_f, axis=2)[..., None]
+        i_b = np.argmin(t_b, axis=2)[..., None]
+        held = fwd.any(axis=2) & bwd.any(axis=2) & supported[i_f[..., 0]] & supported[i_b[..., 0]]
+        chord = np.take_along_axis(t_f, i_f, axis=2)[..., 0] + np.take_along_axis(t_b, i_b, axis=2)[..., 0]
+        best[start:start + step] = np.where(held, chord, np.inf).min(axis=1)
+    return best
+
+
+def _distances_to_segments(
+    points: np.ndarray, seg_a: np.ndarray, seg_d: np.ndarray, len_sq: np.ndarray,
+) -> np.ndarray:
+    """For each point of *points* ``(P, 2)``, how far it is from the nearest
+    segment ``seg_a + s * seg_d`` (``s`` in [0, 1]); ``inf`` with no segments.
+    *len_sq* is each segment's squared length, floored above zero."""
+    if not len(seg_a):
+        return np.full(len(points), np.inf)
+    out = np.empty(len(points))
+    step = max(1, _CHORD_BLOCK // len(seg_a))
+    for start in range(0, len(points), step):
+        xy = points[start:start + step, None, :]  # (P, 1, 2)
+        rel = xy - seg_a
+        proj = np.clip((rel * seg_d).sum(axis=2) / len_sq, 0.0, 1.0)
+        diff = xy - (seg_a + proj[:, :, None] * seg_d)
+        out[start:start + step] = np.sqrt((diff ** 2).sum(axis=2).min(axis=1))
+    return out
 
 
 def _analyze_downward_regions(
@@ -4659,12 +4900,7 @@ def _analyze_downward_regions(
             x: float, y: float, sup_a: Any = sup_a, sup_d: Any = sup_d, sup_len_sq: Any = sup_len_sq,
         ) -> float:
             """How far (x, y) is from the nearest supported boundary segment."""
-            if not len(sup_a):
-                return float("inf")
-            rel = np.array([x, y]) - sup_a
-            proj = np.clip((rel * sup_d).sum(axis=1) / sup_len_sq, 0.0, 1.0)
-            diff = np.array([x, y]) - (sup_a + proj[:, None] * sup_d)
-            return float(np.sqrt((diff ** 2).sum(axis=1).min()))
+            return float(_distances_to_segments(np.array([[x, y]]), sup_a, sup_d, sup_len_sq)[0])
 
         # Deck points: the flat faces' centres; on a steep slope, every
         # face's centre and the corners of its free edges.
@@ -4683,44 +4919,14 @@ def _analyze_downward_regions(
         # side only (an overhang).  The larger says which the patch is.
         worst_bridged = 0.0
         worst_one_sided = 0.0
-        for cx, cy, _cz in points:
-
-            # Two-sided bridge: shortest chord through the point whose
-            # nearest boundary hit on BOTH sides is a supported edge.
-            best_chord = float("inf")
-            for k in range(_BRIDGE_CHORD_DIRECTIONS):
-                theta = math.pi * k / _BRIDGE_CHORD_DIRECTIONS
-                ux, uy = math.cos(theta), math.sin(theta)
-                # 2D ray/segment intersection, both directions at once:
-                # solve p + t*u = a + s*d for each boundary segment.
-                denom = ux * d_seg[:, 1] - uy * d_seg[:, 0]
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    w_x = pa[:, 0] - cx
-                    w_y = pa[:, 1] - cy
-                    s = (w_x * uy - w_y * ux) / denom
-                    t = np.where(
-                        np.abs(ux) > np.abs(uy),
-                        (pa[:, 0] + s * d_seg[:, 0] - cx) / ux,
-                        (pa[:, 1] + s * d_seg[:, 1] - cy) / uy,
-                    )
-                hit = (np.abs(denom) > 1e-12) & (s >= -1e-9) & (s <= 1.0 + 1e-9)
-                fwd = hit & (t > 1e-9)
-                bwd = hit & (t < -1e-9)
-                if not fwd.any() or not bwd.any():
-                    continue
-                t_f = np.where(fwd, t, np.inf)
-                t_b = np.where(bwd, -t, np.inf)
-                i_f = int(np.argmin(t_f))
-                i_b = int(np.argmin(t_b))
-                if not (supported_arr[i_f] and supported_arr[i_b]):
-                    continue
-                chord = float(t_f[i_f] + t_b[i_b])
-                if chord < best_chord:
-                    best_chord = chord
-
-            # One-sided lateral reach: distance to the nearest
-            # supported boundary segment.
-            d_sup = _to_held(cx, cy)
+        # Two-sided bridge: per point, the shortest chord through it whose
+        # nearest boundary hit on BOTH sides is a supported edge.  One-sided
+        # lateral reach: per point, the distance to the nearest supported
+        # boundary segment.
+        deck_xy = np.array([(cx, cy) for cx, cy, _cz in points], dtype=np.float64)
+        chords = _supported_chords(deck_xy, pa, d_seg, supported_arr).tolist()
+        reaches = _distances_to_segments(deck_xy, sup_a, sup_d, sup_len_sq).tolist()
+        for (cx, cy, _cz), best_chord, d_sup in zip(points, chords, reaches, strict=True):
 
             # Span selection mirrors the print mechanism: a true
             # two-sided bridge reports its chord; a point that only
@@ -5411,6 +5617,7 @@ class _InsideMeshTest:
 def _likely_bridge_substituted(
     overhang_triangles: list[tuple[tuple[float, ...], ...]],
     all_triangles: list[tuple[tuple[float, ...], ...]],
+    tris: np.ndarray | None = None,
 ) -> bool:
     """Whether a near-horizontal overhang is a genuine spannable bridge
     a slicer fills on its own — rather than a cantilever or island that
@@ -5439,7 +5646,8 @@ def _likely_bridge_substituted(
     registers.
 
     The caller still gates this behind a near-horizontal overhang check
-    before acting on it.
+    before acting on it.  *tris* is *all_triangles* as a ``(T, 3, 3)`` array
+    when the caller holds one.
     """
     if not overhang_triangles or not all_triangles:
         return False
@@ -5458,7 +5666,8 @@ def _likely_bridge_substituted(
     if overhang_height <= 1e-6:
         return False  # overhang sits on the bed — nothing to bridge over
 
-    tris = np.asarray(all_triangles, dtype=np.float64)
+    if tris is None or tris.ndim != 3 or tris.shape[1:] != (3, 3) or tris.shape[0] != len(all_triangles):
+        tris = np.asarray(all_triangles, dtype=np.float64)
     if tris.ndim != 3 or tris.shape[1:] != (3, 3):
         return False
 
@@ -5509,14 +5718,64 @@ def _likely_bridge_substituted(
     )
 
 
+def _overhangs_in_order(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    tris: np.ndarray | None,
+    z_min: float,
+    layer_height: float,
+    limit_deg: float,
+) -> Iterable[tuple[tuple[tuple[float, ...], ...], float]]:
+    """``(triangle, lean)`` of each face of *triangles*, in index order, that
+    is off the plate, faces down and leans to *limit_deg* or past it
+    (:func:`_at_overhang_limit`)."""
+    reading = _face_leans(triangles, tris, z_min, layer_height)
+    if reading is not None:
+        on_plate, unit_nz = reading
+        down = (unit_nz < 0) & ~on_plate
+        for index, angle in _leans_at_least(np.flatnonzero(down), -unit_nz[down], limit_deg):
+            yield triangles[index], angle
+        return
+    for tri in triangles:
+        if _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+        nz = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))[2]
+        if nz >= 0:
+            continue
+        angle = _lean_of(-nz)
+        if _at_overhang_limit(angle, limit_deg):
+            yield tri, angle
+
+
+def _signed_volume_blocks(
+    triangles: list[tuple[tuple[float, ...], ...]], tris: np.ndarray | None,
+) -> Iterable[np.ndarray]:
+    """:func:`_signed_volume_of_triangle` of each face, in order, a block of
+    faces at a time, read from arrays by the same arithmetic, so each is the
+    helper's own."""
+    if tris is None or tris.ndim != 3 or tris.shape[1:] != (3, 3) or tris.shape[0] != len(triangles):
+        tris = None
+    for start in range(0, len(triangles), _LAYER_FACE_BLOCK):
+        block = (
+            _triangle_array(triangles[start:start + _LAYER_FACE_BLOCK])
+            if tris is None else tris[start:start + _LAYER_FACE_BLOCK]
+        )
+        v1, v2, v3 = block[:, 0], block[:, 1], block[:, 2]
+        yield (
+            v1[:, 0] * (v2[:, 1] * v3[:, 2] - v2[:, 2] * v3[:, 1])
+            + v1[:, 1] * (v2[:, 2] * v3[:, 0] - v2[:, 0] * v3[:, 2])
+            + v1[:, 2] * (v2[:, 0] * v3[:, 1] - v2[:, 1] * v3[:, 0])
+        ) / 6.0
+
+
 def _analyze_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
     *,
-    max_overhang_angle: float = 45.0,
+    max_overhang_angle: float = generic_limits.OVERHANG_UNSUPPORTED_DEG,
     layer_height: float = 0.2,
     normalize_winding: bool = True,
     bbox: dict[str, float] | None = None,
+    tris: np.ndarray | None = None,
 ) -> SupportAnalysis:
     """Estimate support volume.
 
@@ -5532,30 +5791,22 @@ def _analyze_supports(
     When ``bbox`` is supplied, the ``likely_substituted_by_bridge``
     flag is set when the part's horizontal envelope is short enough
     that PrusaSlicer's auto-support will probably bridge instead.
+
+    *tris* is the same triangles as a ``(T, 3, 3)`` array when the caller
+    holds one (read only when the winding is left as it is).
     """
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)
+        tris = None
 
     support_volume = 0.0
     support_regions: list[dict[str, float]] = []
     # The near-horizontal overhang faces: the only ones a slicer bridges.
     ceiling_tris: list[tuple[tuple[float, ...], ...]] = []
 
-    for tri in triangles:
-        if _is_bed_supported_triangle(tri, z_min, layer_height):
-            continue
-
-        n = _triangle_normal(tri[0], tri[1], tri[2])
-        nn = _normalize(n)
-        nz = nn[2]
-
-        if nz >= 0:
-            continue
-
-        angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
-        overhang_angle = max(0.0, 90.0 - angle_from_down)
-        if not _at_overhang_limit(overhang_angle, max_overhang_angle):
-            continue
+    for tri, overhang_angle in _overhangs_in_order(
+        triangles, tris, z_min, layer_height, max_overhang_angle,
+    ):
         if overhang_angle >= _BRIDGEABLE_LEAN_DEG:
             ceiling_tris.append(tri)
 
@@ -5582,7 +5833,9 @@ def _analyze_supports(
     support_regions.sort(key=lambda r: r["volume_mm3"], reverse=True)
 
     # Estimate model volume for percentage calculation.
-    model_volume = abs(sum(_signed_volume_of_triangle(tri[0], tri[1], tri[2]) for tri in triangles))
+    model_volume = abs(sum(itertools.chain.from_iterable(
+        terms.tolist() for terms in _signed_volume_blocks(triangles, tris)
+    )))
 
     # Clamp at 100% — the naive support estimate can exceed the model
     # volume on geometries with large horizontal overhangs above small
@@ -5593,7 +5846,7 @@ def _analyze_supports(
     support_pct = (support_volume / model_volume * 100.0) if model_volume > 0 else 0.0
     support_pct = min(100.0, support_pct)
 
-    bridge_substituted = _likely_bridge_substituted(ceiling_tris, triangles)
+    bridge_substituted = _likely_bridge_substituted(ceiling_tris, triangles, tris)
 
     return SupportAnalysis(
         estimated_support_volume_mm3=round(support_volume, 2),
@@ -5853,6 +6106,37 @@ def _footprint_sharp_corners(
     return _sharp_corners_of_rings(_outline_rings(*_patch_outline(tris, ids)))
 
 
+def _flat_faces(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> Iterable[tuple[tuple[tuple[float, ...], ...], float]]:
+    """``(triangle, area)`` of each face of *triangles*, in order, that lies
+    within about 18 degrees of level (its unit normal's z past 0.95 either
+    way); each area is :func:`_triangle_area`'s own."""
+    level_parts = []
+    for start in range(0, len(triangles), _LAYER_FACE_BLOCK):
+        reading = _face_leans(triangles[start:start + _LAYER_FACE_BLOCK], None, None, 0.0)
+        if reading is None:
+            for tri in triangles:
+                if abs(_normalize(_triangle_normal(tri[0], tri[1], tri[2]))[2]) > 0.95:
+                    yield tri, _triangle_area(tri[0], tri[1], tri[2])
+            return
+        level_parts.append(start + np.flatnonzero(np.abs(reading[1]) > 0.95))
+    level = np.concatenate(level_parts) if level_parts else np.empty(0, dtype=np.int64)
+    if not len(level):
+        return
+    tris = _triangle_array([triangles[i] for i in level.tolist()])
+    e1 = tris[:, 1] - tris[:, 0]
+    e2 = tris[:, 2] - tris[:, 0]
+    # float_power is the C library's pow, as _triangle_area's ``**`` is.
+    areas = 0.5 * np.sqrt(
+        np.float_power(e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1], 2.0)
+        + np.float_power(e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2], 2.0)
+        + np.float_power(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0], 2.0)
+    )
+    for index, area in zip(level.tolist(), areas.tolist(), strict=True):
+        yield triangles[index], area
+
+
 def _analyze_warping(
     triangles: list[tuple[tuple[float, ...], ...]],
     vertices: list[tuple[float, ...]],
@@ -5892,20 +6176,16 @@ def _analyze_warping(
 
     flat_area_total = 0.0
     large_flat_surfaces: list[dict[str, float]] = []
-    for tri in triangles:
-        n = _triangle_normal(tri[0], tri[1], tri[2])
-        nn = _normalize(n)
-        if abs(nn[2]) > 0.95:
-            area = _triangle_area(tri[0], tri[1], tri[2])
-            flat_area_total += area
-            if area > 100.0:
-                centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-                large_flat_surfaces.append({
-                    "area_mm2": round(area, 2),
-                    "centroid_x": round(centroid[0], 2),
-                    "centroid_y": round(centroid[1], 2),
-                    "centroid_z": round(centroid[2], 2),
-                })
+    for tri, area in _flat_faces(triangles):
+        flat_area_total += area
+        if area > 100.0:
+            centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+            large_flat_surfaces.append({
+                "area_mm2": round(area, 2),
+                "centroid_x": round(centroid[0], 2),
+                "centroid_y": round(centroid[1], 2),
+                "centroid_z": round(centroid[2], 2),
+            })
     # The ten largest, whichever triangles of the file they are.
     large_flat_surfaces.sort(
         key=lambda s: (-s["area_mm2"], s["centroid_x"], s["centroid_y"], s["centroid_z"]),
@@ -6088,6 +6368,136 @@ def _suffix_thickness_mm(
     return 4.0 * abs(volume) / wall_area
 
 
+def _wall_area_by_layer(
+    triangles: list[tuple[tuple[float, ...], ...]], z_min: float, layer_height: float, num_layers: int,
+) -> list[float]:
+    """Each layer's wall area for :func:`_analyze_thermal_stress`: every
+    face's area, weighted by how near upright it stands, shared among the
+    layers it spans by its height in each (a face with next to no height
+    goes whole to the layer it sits in).
+
+    Read from whole arrays, :data:`_LAYER_FACE_BLOCK` faces at a time, each
+    share and each layer's running sum taken by the same arithmetic in the
+    same order as :func:`_wall_area_by_layer_by_face`, so the two agree to
+    the bit; a mesh with a figure that is not a finite number is read by
+    that one.
+    """
+    areas = np.zeros(num_layers)
+    for start in range(0, len(triangles), _LAYER_FACE_BLOCK):
+        if not _add_wall_area(areas, _triangle_array(triangles[start:start + _LAYER_FACE_BLOCK]),
+                              z_min, layer_height, num_layers):
+            return _wall_area_by_layer_by_face(triangles, z_min, layer_height, num_layers)
+    return areas.tolist()
+
+
+#: Faces a whole-array reading over every face reads at once
+#: (:func:`_wall_area_by_layer`, :func:`_flat_faces`,
+#: :func:`_signed_volume_blocks`), and the most face-layer shares
+#: :func:`_wall_area_by_layer` holds at once.
+_LAYER_FACE_BLOCK: int = 1 << 17
+_LAYER_SHARE_BLOCK: int = 1 << 20
+
+
+def _add_wall_area(areas: np.ndarray, tris: np.ndarray, z_min: float, layer_height: float, num_layers: int) -> bool:
+    """Add the wall area of the faces *tris* ``(T, 3, 3)`` to each layer of
+    *areas*, in face order (:func:`_wall_area_by_layer`); ``False``, with
+    nothing promised about *areas*, when a figure is not a finite number."""
+    if not np.isfinite(tris).all():
+        return False
+    e1 = tris[:, 1] - tris[:, 0]
+    e2 = tris[:, 2] - tris[:, 0]
+    c0 = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+    c1 = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+    c2 = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+    length = np.sqrt(c0 * c0 + c1 * c1 + c2 * c2)
+    too_short = length < 1e-12
+    unit_nz = np.where(too_short, 0.0, c2 / np.where(too_short, 1.0, length))
+    wall_weight = 1.0 - np.abs(unit_nz)
+    kept = ~(wall_weight <= 1e-4)
+    # float_power is the C library's pow, as the area helper's ``**`` is.
+    area = 0.5 * np.sqrt(
+        np.float_power(c0[kept], 2.0) + np.float_power(c1[kept], 2.0) + np.float_power(c2[kept], 2.0)
+    )
+    contribution = wall_weight[kept] * area
+    z = tris[kept][:, :, 2]
+    if not (np.isfinite(contribution).all() and np.isfinite(unit_nz).all()):
+        return False
+    # min() and max() over the three heights, first one kept on a tie.
+    z_low = np.where(z[:, 1] < z[:, 0], z[:, 1], z[:, 0])
+    z_low = np.where(z[:, 2] < z_low, z[:, 2], z_low)
+    z_high = np.where(z[:, 1] > z[:, 0], z[:, 1], z[:, 0])
+    z_high = np.where(z[:, 2] > z_high, z[:, 2], z_high)
+    tri_span = z_high - z_low
+    flat = tri_span <= 1e-6
+    # int() of the height in layers; past the last layer every reading is
+    # the last layer, so a height is held only that far.
+    low_bucket = np.clip(np.trunc((z_low - z_min) / layer_height), -1, num_layers).astype(np.int64)
+    high_bucket = np.clip(np.trunc((z_high - z_min) / layer_height), -1, num_layers).astype(np.int64)
+    first = np.where(flat, np.clip(low_bucket, 0, num_layers - 1), np.maximum(0, low_bucket))
+    last = np.where(flat, first, np.minimum(num_layers - 1, high_bucket))
+    count = np.maximum(last - first + 1, 0)
+
+    ends = np.cumsum(count)
+    start = 0
+    while start < len(count):
+        # A block of faces whose shares fit the budget, at least one face.
+        before = int(ends[start - 1]) if start else 0
+        stop = max(start + 1, int(np.searchsorted(ends, before + _LAYER_SHARE_BLOCK, side="right")))
+        block = slice(start, stop)
+        face = np.repeat(np.arange(start, stop), count[block])
+        bucket = first[face] + (np.arange(len(face)) - np.repeat(np.cumsum(count[block]) - count[block], count[block]))
+        share = contribution[face]
+        spanning = ~flat[face]
+        layer_low = z_min + bucket * layer_height
+        layer_high = layer_low + layer_height
+        top = np.where(layer_high < z_high[face], layer_high, z_high[face])
+        bottom = np.where(layer_low > z_low[face], layer_low, z_low[face])
+        overlap = top - bottom
+        with np.errstate(divide="ignore", invalid="ignore"):
+            share = np.where(spanning, share * (overlap / tri_span[face]), share)
+        takes = ~spanning | ~(overlap <= 0)
+        np.add.at(areas, bucket[takes], share[takes])
+        start = stop
+    return True
+
+
+def _wall_area_by_layer_by_face(
+    triangles: list[tuple[tuple[float, ...], ...]], z_min: float, layer_height: float, num_layers: int,
+) -> list[float]:
+    """:func:`_wall_area_by_layer` one face at a time."""
+    layer_areas: list[float] = [0.0] * num_layers
+    for tri in triangles:
+        normal = _triangle_normal(tri[0], tri[1], tri[2])
+        nn = _normalize(normal)
+        wall_weight = 1.0 - abs(nn[2])
+        if wall_weight <= 1e-4:
+            continue
+        area = _triangle_area(tri[0], tri[1], tri[2])
+        contribution = wall_weight * area
+
+        zs = (tri[0][2], tri[1][2], tri[2][2])
+        z_low = min(zs)
+        z_high = max(zs)
+        tri_span = z_high - z_low
+        if tri_span <= 1e-6:
+            # Degenerate slim triangle — drop into single bucket by mid-Z.
+            bucket = int((z_low - z_min) / layer_height)
+            bucket = max(0, min(bucket, num_layers - 1))
+            layer_areas[bucket] += contribution
+            continue
+
+        bucket_low = max(0, int((z_low - z_min) / layer_height))
+        bucket_high = min(num_layers - 1, int((z_high - z_min) / layer_height))
+        for b in range(bucket_low, bucket_high + 1):
+            layer_z_low = z_min + b * layer_height
+            layer_z_high = layer_z_low + layer_height
+            overlap = min(z_high, layer_z_high) - max(z_low, layer_z_low)
+            if overlap <= 0:
+                continue
+            layer_areas[b] += contribution * (overlap / tri_span)
+    return layer_areas
+
+
 def _analyze_thermal_stress(
     triangles: list[tuple[tuple[float, ...], ...]],
     bbox: dict[str, float],
@@ -6126,7 +6536,6 @@ def _analyze_thermal_stress(
         )
 
     num_layers = max(2, int(z_span / layer_height))
-    layer_areas: list[float] = [0.0] * num_layers
 
     # Wall-vs-face fix: cross-section change at each Z is proxied by the
     # vertical-wall contribution at that layer, not the horizontal-face
@@ -6139,35 +6548,7 @@ def _analyze_thermal_stress(
     # Horizontal faces (|normal_z| ≈ 1) contribute (1 - |nz|) ≈ 0 and
     # are effectively ignored; vertical walls (|nz| ≈ 0) contribute
     # their full area, distributed along Z.
-    for tri in triangles:
-        normal = _triangle_normal(tri[0], tri[1], tri[2])
-        nn = _normalize(normal)
-        wall_weight = 1.0 - abs(nn[2])
-        if wall_weight <= 1e-4:
-            continue
-        area = _triangle_area(tri[0], tri[1], tri[2])
-        contribution = wall_weight * area
-
-        zs = (tri[0][2], tri[1][2], tri[2][2])
-        z_low = min(zs)
-        z_high = max(zs)
-        tri_span = z_high - z_low
-        if tri_span <= 1e-6:
-            # Degenerate slim triangle — drop into single bucket by mid-Z.
-            bucket = int((z_low - z_min) / layer_height)
-            bucket = max(0, min(bucket, num_layers - 1))
-            layer_areas[bucket] += contribution
-            continue
-
-        bucket_low = max(0, int((z_low - z_min) / layer_height))
-        bucket_high = min(num_layers - 1, int((z_high - z_min) / layer_height))
-        for b in range(bucket_low, bucket_high + 1):
-            layer_z_low = z_min + b * layer_height
-            layer_z_high = layer_z_low + layer_height
-            overlap = min(z_high, layer_z_high) - max(z_low, layer_z_low)
-            if overlap <= 0:
-                continue
-            layer_areas[b] += contribution * (overlap / tri_span)
+    layer_areas = _wall_area_by_layer(triangles, z_min, layer_height, num_layers)
 
     # Median wall-area smooths over single-layer numerical artifacts
     # (one triangle landing alone in a thin layer) while still letting
@@ -7412,10 +7793,9 @@ _PLACEMENT_PENALTY = 50
 #: that rounded to "0.0 mm below the build plate" — a fatal verdict on a
 #: part that prints perfectly.
 #:
-#: The floor that matters is the thinnest layer any supported machine can
-#: lay down, about 0.08mm.  Half of that is material the
-#: process cannot resolve in the first place, so clipping it costs nothing
-#: real.  Deliberately loose in the safe direction: a part 0.03mm low loses
+#: The tolerance sits well under the thinnest layer any supported machine
+#: can lay down, so clipping that much costs nothing real.
+#: Deliberately loose in the safe direction: a part 0.03mm low loses
 #: a slab far under one layer, while a false fatal teaches users that the
 #: printability grade is noise.
 _PLACEMENT_Z_TOLERANCE_MM = 0.04
@@ -7679,6 +8059,7 @@ def _build_recommendations(
     adhesion_force: AdhesionForceEstimate | None = None,
     adhesion: AdhesionRecommendation | None = None,
     thin_walls_below_nozzle: bool | None = None,
+    slicer_note: str = "",
 ) -> list[str]:
     """Generate actionable recommendations based on analysis results.
 
@@ -7687,6 +8068,9 @@ def _build_recommendations(
     and declines one.  The nozzle advice fires only for walls thinner
     than the nozzle (``thin_walls_below_nozzle``); a wall above the
     nozzle but under a material's floor is the material rule's to name.
+    *slicer_note* is why what the slice leaves out was judged by the
+    general figures (:meth:`kiln.material_limits.SlicedFloors.note`), said
+    once, after the warning it explains.
     """
     recs: list[str] = []
 
@@ -7725,6 +8109,15 @@ def _build_recommendations(
                 f"{layer:g} mm layer, so it may be left out when sliced; make it at least {layer:g} mm "
                 f"thick."
             )
+        if getattr(thin_walls, "may_be_left_out_count", 0):
+            general = thin_walls.general_wall_mm
+            recs.append(
+                f"A wall or pin as thin as {thin_walls.may_be_left_out_min_mm:.2f} mm is thinner than "
+                f"{general:g} mm, the general minimum wall, so it may be left out when sliced; make it "
+                f"at least {general:g} mm thick."
+            )
+            if slicer_note:
+                recs.append(slicer_note)
     elif below_nozzle:
         recs.append(
             f"Thin walls detected ({thin_walls.min_wall_thickness_mm:.2f} mm min).  "
@@ -7812,38 +8205,37 @@ def _analyze_cost(
     brim or raft the adhesion decision chose.
     """
     from kiln.cost_estimator import CostEstimator
-    from kiln.generation.validation import analyze_mesh
+    from kiln.generation.validation import measure_mesh
 
     estimator = CostEstimator()
-    # Read the file once for every estimate below; the PLA and low-infill
-    # alternatives are handed this reading too.
-    mesh_analysis = analyze_mesh(file_path)
+    # Read the file once, at the print's own layer, for every estimate below;
+    # the PLA and low-infill alternatives are handed this reading too.
+    mesh_analysis = measure_mesh(file_path, layer_height_mm=layer_height_mm)
 
-    estimate = estimator.estimate_from_mesh(
-        file_path,
-        material=material,
-        infill_percent=infill_percent,
-        wall_layers=_COST_WALL_LAYERS,
-        layer_height_mm=layer_height_mm,
-        nozzle_mm=nozzle_mm,
-        include_supports=needs_supports,
-        adhesion_type=adhesion_type,
-        analysis=mesh_analysis,
-    )
+    def priced(**change: Any) -> Any:
+        """This print's estimate with one setting changed, every other one as
+        asked, so a saving compares the same print and nothing else."""
+        settings: dict[str, Any] = {
+            "material": material,
+            "infill_percent": infill_percent,
+            "wall_layers": _COST_WALL_LAYERS,
+            "layer_height_mm": layer_height_mm,
+            "nozzle_mm": nozzle_mm,
+            "include_supports": needs_supports,
+            "adhesion_type": adhesion_type,
+            "analysis": mesh_analysis,
+        }
+        settings.update(change)
+        return estimator.estimate_from_mesh(file_path, **settings)
+
+    estimate = priced()
 
     # --- Cost-saving recommendations ---
     recommendations: list[str] = []
 
     # Suggestion: lower infill
     if infill_percent > 15.0:
-        lower_est = estimator.estimate_from_mesh(
-            file_path,
-            material=material,
-            infill_percent=15.0,
-            include_supports=needs_supports,
-            adhesion_type=adhesion_type,
-            analysis=mesh_analysis,
-        )
+        lower_est = priced(infill_percent=15.0)
         savings = estimate.total_cost_usd - lower_est.total_cost_usd
         if savings > 0.01:
             recommendations.append(
@@ -7862,14 +8254,7 @@ def _analyze_cost(
     profile = estimator.get_material(mat_upper)
     pla = estimator.get_material("PLA")
     if profile is not None and pla is not None and profile.cost_per_kg_usd > pla.cost_per_kg_usd:
-        pla_est = estimator.estimate_from_mesh(
-            file_path,
-            material="PLA",
-            infill_percent=infill_percent,
-            include_supports=needs_supports,
-            adhesion_type=adhesion_type,
-            analysis=mesh_analysis,
-        )
+        pla_est = priced(material="PLA")
         savings = estimate.total_cost_usd - pla_est.total_cost_usd
         if savings > 0.01:
             recommendations.append(
@@ -7879,14 +8264,7 @@ def _analyze_cost(
 
     # Suggestion: high infill on expensive prints
     if estimate.total_cost_usd > 5.0 and infill_percent > 20.0:
-        low_est = estimator.estimate_from_mesh(
-            file_path,
-            material=material,
-            infill_percent=10.0,
-            include_supports=needs_supports,
-            adhesion_type=adhesion_type,
-            analysis=mesh_analysis,
-        )
+        low_est = priced(infill_percent=10.0)
         savings = estimate.total_cost_usd - low_est.total_cost_usd
         if savings > 0.01:
             recommendations.append(
@@ -7935,26 +8313,30 @@ def _material_wall_floor(
     component_size_uniformity: float,
     genus: int,
 ) -> float | None:
-    """The material's minimum wall, when kiln-pro has one to give.
+    """The material's minimum wall, when there is one to give.
 
     Asked BEFORE the walls are measured, so the thin-wall block reports
     against the same floor kiln-pro's material wall rule judges by
     (https://kiln3d.com) — one measurement that both read, never a
-    second pass re-measured to agree.  ``None`` — no kiln-pro, a kiln-pro
-    that predates the question, no floor for this material or this
-    caller — leaves the nozzle as the threshold, the safety floor every
-    tier gets.
+    second pass re-measured to agree.  Without kiln-pro's rule here, the
+    plastic's own wall floor from the one helper every check reads
+    (:func:`_plastic_recommended_wall`), which is also the floor when
+    kiln-pro's rule is there but gives this caller no answer: the
+    plastic's own recommended wall is every signed-in account's.  ``None``
+    — no floor of the
+    plastic's own for this caller — leaves the nozzle as the threshold,
+    the safety floor every tier gets.
     """
     try:
         from kiln_pro.bridge import pro_features
     except ImportError:
-        return None
+        return _plastic_recommended_wall(material, nozzle_diameter)
     try:
         if not pro_features.is_available("printability_overlay"):
-            return None
+            return _plastic_recommended_wall(material, nozzle_diameter)
         resolve = getattr(pro_features.printability_overlay, "resolve_wall_floor", None)
         if resolve is None:
-            return None
+            return _plastic_recommended_wall(material, nozzle_diameter)
         floor = resolve(
             material,
             printer_id=printer_id,
@@ -7966,8 +8348,22 @@ def _material_wall_floor(
         floor = float(floor) if floor is not None else 0.0
     except Exception:  # noqa: BLE001 — the overlay must never break the public path
         logger.debug("material wall floor unavailable", exc_info=True)
-        return None
-    return floor if floor > 0.0 else None
+        return _plastic_recommended_wall(material, nozzle_diameter)
+    return floor if floor > 0.0 else _plastic_recommended_wall(material, nozzle_diameter)
+
+
+def _plastic_recommended_wall(material: str, nozzle_diameter: float) -> float | None:
+    """The plastic's own wall floor at *nozzle_diameter*
+    (:func:`kiln.material_limits.limits_for`): the larger of its own
+    recommended wall and a static-safe grade's own minimum wall, which is a
+    floor of its own and never lowered.  ``None`` when the plastic has
+    neither for this caller."""
+    from kiln.material_limits import ESD_WALL, WALL_RECOMMENDED, limits_for
+
+    limits = limits_for(material, nozzle_mm=nozzle_diameter)
+    own = limits.value(WALL_RECOMMENDED) if limits.is_own(WALL_RECOMMENDED) else None
+    floor = max(float(own or 0.0), float(limits.value(ESD_WALL) or 0.0))
+    return floor if floor > 0 else None
 
 
 def _tell_whoever_runs_this_machine(file_path: str, stopped: Exception) -> None:
@@ -8011,7 +8407,7 @@ def analyze_printability(
     layer_height: float | None = None,
     max_overhang_angle: float | None = None,
     build_volume: tuple[float, float, float] | None = None,
-    material: str = "pla",
+    material: str | None = None,
     infill_percent: float = 20.0,
     include_hole_detection: bool = True,
     printer_id: str | None = None,
@@ -8034,7 +8430,9 @@ def analyze_printability(
     :param build_volume: Optional (X, Y, Z) build volume in mm.  If
         provided, the report will warn if the model exceeds it.  Takes
         precedence over the bed *printer_id* would resolve.
-    :param material: Material ID for warping and cost analysis (default ``"pla"``).
+    :param material: Material ID for warping and cost analysis.  Left
+        unsaid, PLA, read as the plastic a check assumes because the person
+        named none (:func:`kiln.material_limits.assuming`).
     :param infill_percent: Interior infill density (0-100) for cost estimation.
     :param include_hole_detection: When True (default), also run
         :func:`kiln.generation.validation.detect_holes` and surface the
@@ -8084,22 +8482,25 @@ def analyze_printability(
     and the report are the same either way.  Without kiln-pro, or without
     that runner, it runs here.
     """
-    kwargs: dict[str, Any] = {
-        "nozzle_diameter": nozzle_diameter,
-        "layer_height": layer_height,
-        "max_overhang_angle": max_overhang_angle,
-        "build_volume": build_volume,
-        "material": material,
-        "infill_percent": infill_percent,
-        "include_hole_detection": include_hole_detection,
-        "printer_id": printer_id,
-        "slicer_style": slicer_style,
-        "plate_number": plate_number,
-    }
-    runner = _analysis_runner()
-    if runner is None:
-        return _analyze_printability_here(file_path, **kwargs)
-    return runner(_analyze_printability_here, file_path, **kwargs)
+    from kiln.material_limits import assuming
+
+    with assuming(material) as plastic:
+        kwargs: dict[str, Any] = {
+            "nozzle_diameter": nozzle_diameter,
+            "layer_height": layer_height,
+            "max_overhang_angle": max_overhang_angle,
+            "build_volume": build_volume,
+            "material": plastic,
+            "infill_percent": infill_percent,
+            "include_hole_detection": include_hole_detection,
+            "printer_id": printer_id,
+            "slicer_style": slicer_style,
+            "plate_number": plate_number,
+        }
+        runner = _analysis_runner()
+        if runner is None:
+            return _analyze_printability_here(file_path, **kwargs)
+        return runner(_analyze_printability_here, file_path, **kwargs)
 
 
 def _analysis_runner() -> Callable[..., Any] | None:
@@ -8233,10 +8634,8 @@ def _summarize_regions(
     centroids = tris.mean(axis=1)
     # Only a face whose box lies under a sample can be below it, so each
     # sample reads those faces alone (the same answer as reading them all).
-    index = XYIndex(tris)
-    in_region = np.zeros(len(tris), dtype=bool)
-
-    out: list[RegionSummary] = []
+    read: list[tuple[_DownwardRegion, np.ndarray, float, np.ndarray, float, float]] = []
+    samples: list[np.ndarray] = []
     for region in regions:
         idx = np.asarray(region.triangle_indices, dtype=np.int64)
         if idx.size == 0:
@@ -8250,18 +8649,12 @@ def _summarize_regions(
         max_angle = float(np.max(np.maximum(0.0, 90.0 - angles)))
         height = max(0.0, float(centroids[idx][:, 2].min()) - z_min)
         stride = max(1, idx.size // _REGION_SAMPLE_CAP)
-        samples = centroids[idx[::stride]]
-        sample_of, face_of = index.at_points(samples[:, :2])
-        bounds = np.searchsorted(sample_of, np.arange(len(samples) + 1))
-        in_region[idx] = True
-        over_model = False
-        for j, point in enumerate(samples):
-            under = face_of[bounds[j]:bounds[j + 1]]
-            gap = _gap_to_faces_below(tris[under[~in_region[under]]], point)
-            if gap is not None and gap > layer_height:
-                over_model = True
-                break
-        in_region[idx] = False
+        samples.append(centroids[idx[::stride]])
+        read.append((region, idx, total, centre, max_angle, height))
+    over = _regions_over_model(tris, [entry[1] for entry in read], samples, layer_height)
+
+    out: list[RegionSummary] = []
+    for (region, idx, total, centre, max_angle, height), over_model in zip(read, over, strict=True):
         out.append(RegionSummary(
             centroid=(float(centre[0]), float(centre[1]), float(centre[2])),
             area_mm2=total,
@@ -8275,6 +8668,58 @@ def _summarize_regions(
         ))
     out.sort(key=lambda r: r.area_mm2, reverse=True)
     return out
+
+
+#: The most region samples :func:`_regions_over_model` looks up at once, and
+#: the most sample-face pairs it reads at once.
+_OVER_MODEL_SAMPLE_BLOCK: int = 128
+_OVER_MODEL_PAIR_BLOCK: int = 1 << 17
+
+
+def _regions_over_model(
+    tris: np.ndarray, members: list[np.ndarray], samples: list[np.ndarray], layer_height: float,
+) -> list[bool]:
+    """For each region (its faces *members*, its points *samples*), whether
+    a support there stands on the model: some sample has a face of the part
+    straight below it (:func:`_gap_to_faces_below`), outside the region and
+    more than *layer_height* away.  Every sample is read, in blocks, each
+    face by the same arithmetic as :func:`_gap_to_faces_below`."""
+    over = [False] * len(members)
+    if not members:
+        return over
+    region_of_face = np.full(len(tris), -1, dtype=np.int64)
+    for k, idx in enumerate(members):
+        region_of_face[idx] = k
+    points = np.concatenate(samples)
+    owner = np.repeat(np.arange(len(samples)), [len(s) for s in samples])
+    index = XYIndex(tris)
+    for start in range(0, len(points), _OVER_MODEL_SAMPLE_BLOCK):
+        block = points[start:start + _OVER_MODEL_SAMPLE_BLOCK]
+        sample_of, face_of = index.at_points(block[:, :2])
+        keep = region_of_face[face_of] != owner[start + sample_of]
+        sample_of, face_of = sample_of[keep], face_of[keep]
+        nearest = np.full(len(block), -np.inf)
+        for first in range(0, len(face_of), _OVER_MODEL_PAIR_BLOCK):
+            at = sample_of[first:first + _OVER_MODEL_PAIR_BLOCK]
+            sub = tris[face_of[first:first + _OVER_MODEL_PAIR_BLOCK]]
+            px, py, pz = block[at, 0], block[at, 1], block[at, 2]
+            ax, ay = sub[:, 0, 0], sub[:, 0, 1]
+            bx, by = sub[:, 1, 0], sub[:, 1, 1]
+            cx, cy = sub[:, 2, 0], sub[:, 2, 1]
+            det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+            with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+                u = ((px - ax) * (cy - ay) - (cx - ax) * (py - ay)) / det
+                v = ((bx - ax) * (py - ay) - (px - ax) * (by - ay)) / det
+                # Read for every pair, and kept only where the face is below.
+                z_at = sub[:, 0, 2] + u * (sub[:, 1, 2] - sub[:, 0, 2]) + v * (sub[:, 2, 2] - sub[:, 0, 2])
+                inside = (np.abs(det) > 1e-12) & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1.0 + 1e-9)
+            below = inside & (z_at <= pz + 1e-6)
+            np.maximum.at(nearest, at[below], z_at[below])
+        found = np.flatnonzero(np.isfinite(nearest))
+        gap = block[found, 2] - nearest[found]
+        for k in np.unique(owner[start + found[gap > layer_height]]).tolist():
+            over[k] = True
+    return over
 
 
 def _gap_to_faces_below(sub: np.ndarray, point: np.ndarray) -> float | None:
@@ -8495,6 +8940,36 @@ def _faces_under_a_start(
     return sorted(set(under))
 
 
+def _steepest_free_air_lean(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    tris: np.ndarray | None,
+    z_min: float,
+    layer_height: float,
+    exempt: set[int],
+) -> float:
+    """The steepest lean (:func:`_lean_of`) among the faces of *triangles*
+    that hang in free air: off the plate, facing down but not a flat
+    bridge deck, and not in *exempt*; 0.0 for none."""
+    reading = _face_leans(triangles, tris, z_min, layer_height)
+    if reading is not None:
+        on_plate, unit_nz = reading
+        hangs = ~on_plate & (unit_nz < 0) & ~(unit_nz <= _BRIDGE_FLAT_NZ_LIMIT)
+        if exempt:
+            hangs[np.fromiter(exempt, dtype=np.int64, count=len(exempt))] = False
+        return _steepest_lean(-unit_nz[hangs])
+    steepest = 0.0
+    for index, tri in enumerate(triangles):
+        if index in exempt or _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+        nz = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))[2]
+        if nz >= 0 or nz <= _BRIDGE_FLAT_NZ_LIMIT:
+            continue
+        lean = _lean_of(-nz)
+        if lean > steepest:
+            steepest = lean
+    return steepest
+
+
 def _judge_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -8513,7 +8988,7 @@ def _judge_supports(
     ``(T, 3, 3)`` array when the caller holds one, handed to each reading
     below that would otherwise build its own."""
     over_faces, over_angles = _overhang_faces(
-        triangles, resolved_threshold, z_min=z_min, layer_height=layer_height,
+        triangles, resolved_threshold, z_min=z_min, layer_height=layer_height, tris=tris,
     )
     overhangs = _overhang_analysis(triangles, over_faces, over_angles)
     downward_regions = _analyze_downward_regions(
@@ -8533,6 +9008,7 @@ def _judge_supports(
         layer_height=layer_height,
         normalize_winding=False,
         bbox=bbox,
+        tris=tris,
     )
 
     # Bridge-aware overhang verdict.  When _analyze_supports's
@@ -8634,19 +9110,9 @@ def _judge_supports(
     # ceiling anywhere, so per-material angle limits compared against
     # it fired as noise on trivially printable parts; this is the
     # number they should judge.
-    _free_air_max_deg = 0.0
-    for _gi, _tri in enumerate(triangles):
-        if _gi in _exempt_overhang_tris:
-            continue
-        if _is_bed_supported_triangle(_tri, z_min, layer_height):
-            continue
-        _nn = _normalize(_triangle_normal(_tri[0], _tri[1], _tri[2]))
-        if _nn[2] >= 0 or _nn[2] <= _BRIDGE_FLAT_NZ_LIMIT:
-            continue
-        _afd = math.degrees(math.acos(max(-1.0, min(1.0, -_nn[2]))))
-        _oa = max(0.0, 90.0 - _afd)
-        if _oa > _free_air_max_deg:
-            _free_air_max_deg = _oa
+    _free_air_max_deg = _steepest_free_air_lean(
+        triangles, tris, z_min, layer_height, _exempt_overhang_tris,
+    )
     from dataclasses import replace as _dc_replace
     overhangs = _dc_replace(
         overhangs, max_free_air_overhang_deg=round(_free_air_max_deg, 1),
@@ -8701,18 +9167,178 @@ def _size_said(size: list[float]) -> str:
     return " x ".join(_mm_said(v) for v in size) + " mm"
 
 
-def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) -> PiecesAnalysis | None:
+#: The share of a separate part's triangles that must carry one label in the
+#: file's motion note for the part to take that label: a part the note covers
+#: only here and there is not read as moving.
+_MOTION_LABEL_SHARE = 0.9
+
+
+@dataclass(frozen=True)
+class _MotionOnRecord:
+    """A file's motion note laid onto its triangles: which of them belong to
+    a part of the motion (*member*), which belong to a part that moves
+    (*moving*), and which the note could be matched to at all (*labelled*),
+    each aligned with the triangles the pieces were read from."""
+
+    member: np.ndarray
+    moving: np.ndarray
+    labelled: np.ndarray
+
+
+def _corner_key(triangle: Any) -> tuple[tuple[float, ...], ...]:
+    """*triangle* starting at its lowest corner (by x, then y, then z) with
+    its winding kept: the same triangle in any file order and from any
+    starting corner gives the same key."""
+    corners = [tuple(float(v) for v in corner) for corner in triangle]
+    start = min(range(len(corners)), key=lambda k: corners[k])
+    return tuple(corners[start:] + corners[:start])
+
+
+def _motion_runs(file_path: str, count: int) -> tuple[np.ndarray, np.ndarray] | None:
+    """``(member, moving)`` over the file's own *count* triangles in the
+    file's order, from the motion notes bound to its bytes
+    (:func:`kiln.mechanism_stage.block_for`, :func:`kiln.joint_stage.stage_block`),
+    or ``None`` when neither note is there or fits the file."""
+    from kiln import joint_stage, mechanism_stage
+
+    member = np.zeros(count, dtype=bool)
+    moving = np.zeros(count, dtype=bool)
+    found = False
+
+    def lay(mask: np.ndarray, spans: Any) -> None:
+        for first, length in spans:
+            first, length = int(first), int(length)
+            if first < 0 or length <= 0 or first + length > count:
+                raise ValueError("a run of triangles past the end of the file")
+            mask[first:first + length] = True
+
+    mechanism = mechanism_stage.block_for(file_path)
+    if mechanism is not None:
+        try:
+            mine_member, mine_moving = member.copy(), moving.copy()
+            moves = {str(name) for name in mechanism.get("moving_parts") or ()}
+            for name, part in (mechanism.get("parts") or {}).items():
+                spans = part.get("spans") or ()
+                lay(mine_member, spans)
+                if str(name) in moves:
+                    lay(mine_moving, spans)
+            member, moving, found = mine_member, mine_moving, True
+        except (AttributeError, TypeError, ValueError):
+            logger.debug("the mechanism note beside %s does not fit the file", file_path, exc_info=True)
+    joints = joint_stage.stage_block(file_path)
+    if joints is not None:
+        try:
+            total = joints.get("total_triangles")
+            if total is not None and int(total) != count:
+                raise ValueError("the joints note counts another number of triangles")
+            mine_moving = moving.copy()
+            for joint in joints.get("joints") or ():
+                lay(mine_moving, (joint.get("moving") or {}).get("spans") or ())
+            # A joints note is written beside a composed assembly: every
+            # part in the file is a part of its motion.
+            member, moving, found = np.ones(count, dtype=bool), mine_moving, True
+        except (AttributeError, TypeError, ValueError):
+            logger.debug("the joints note beside %s does not fit the file", file_path, exc_info=True)
+    return (member, moving) if found else None
+
+
+def _motion_on_record(file_path: str, triangles: list[tuple[tuple[float, ...], ...]]) -> _MotionOnRecord | None:
+    """The motion note beside *file_path*, bound to its bytes, laid onto
+    *triangles*: the file's triangles as the pieces were read from them, in
+    whatever order that reading holds them.  A note names runs of triangles
+    in the file's own order, so each triangle is matched by its corners.
+    ``None`` when the file carries no motion note, the note does not fit
+    the file, or no triangle matches.  Never raises: a note that cannot be
+    read changes nothing that is said."""
+    try:
+        from kiln import joint_stage, mechanism_stage
+
+        if not (Path(joint_stage.note_path_for(file_path)).is_file()
+                or Path(mechanism_stage.note_path_for(file_path)).is_file()):
+            return None
+        written, _vertices = _parse_mesh_file(Path(file_path), [])
+        runs = _motion_runs(file_path, len(written))
+        if runs is None:
+            return None
+        member, moving = runs
+        missing = object()
+        flags: dict[tuple[tuple[float, ...], ...], Any] = {}
+        for triangle, is_member, is_moving in zip(written, member.tolist(), moving.tolist(), strict=True):
+            key = _corner_key(triangle)
+            held = flags.get(key, missing)
+            if held is missing:
+                flags[key] = (is_member, is_moving)
+            elif held != (is_member, is_moving):
+                flags[key] = None  # one triangle named two ways: matched to neither
+        n = len(triangles)
+        on_member = np.zeros(n, dtype=bool)
+        on_moving = np.zeros(n, dtype=bool)
+        labelled = np.zeros(n, dtype=bool)
+        for i, triangle in enumerate(triangles):
+            held = flags.get(_corner_key(triangle))
+            if held:
+                labelled[i] = True
+                on_member[i], on_moving[i] = held
+        if not labelled.any():
+            return None
+        return _MotionOnRecord(member=on_member, moving=on_moving, labelled=labelled)
+    except Exception:  # noqa: BLE001 -- an unreadable note says nothing
+        logger.debug("motion note beside %s not read", file_path, exc_info=True)
+        return None
+
+
+def _moves_apart(reading: Any, solid_of: list[int], motion: _MotionOnRecord | None) -> Callable[[int, int], bool]:
+    """Whether the file's motion note has two separate parts (by solid)
+    moving against each other: both are parts of the motion and at least
+    one of them moves.  A part takes a label only when nearly all of its
+    triangles the note was matched to carry it (:data:`_MOTION_LABEL_SHARE`).
+    Answers no for every pair when there is no note."""
+
+    def never(_a: int, _b: int) -> bool:
+        return False
+
+    if motion is None:
+        return never
+    face_piece = np.asarray(getattr(reading, "face_piece", ()), dtype=np.int64)
+    if len(face_piece) != len(motion.labelled) or not solid_of:
+        return never
+    live = (face_piece >= 0) & motion.labelled
+    if not live.any():
+        return never
+    solids = np.asarray(solid_of, dtype=np.int64)[face_piece[live]]
+    counted = np.bincount(solids, minlength=max(solid_of) + 1).astype(float)
+    shares = np.maximum(counted, 1.0)
+    member_share = np.bincount(solids, weights=motion.member[live].astype(float), minlength=len(counted)) / shares
+    moving_share = np.bincount(solids, weights=motion.moving[live].astype(float), minlength=len(counted)) / shares
+    member = {s for s in range(len(counted)) if counted[s] and member_share[s] >= _MOTION_LABEL_SHARE}
+    moving = {s for s in member if moving_share[s] >= _MOTION_LABEL_SHARE}
+
+    def moves_apart(a: int, b: int) -> bool:
+        return a != b and a in member and b in member and (a in moving or b in moving)
+
+    return moves_apart
+
+
+def _judge_pieces(
+    triangles: list[tuple[tuple[float, ...], ...]], reading: Any, *, motion: Any = None,
+) -> PiecesAnalysis | None:
     """Whether *reading*'s pieces print as one solid, which separate parts
     they make and which of them float (:class:`PiecesAnalysis`).
 
     Pieces in the air are judged as :mod:`kiln.fusion_check` judges them,
     and said in its words, so the make doors that refuse a floating piece
-    and this report name the same pieces.  ``None`` when the mesh has no
-    pieces to read.
+    and this report name the same pieces.  Separate parts on the plate that
+    stand a clearance apart print in place together, and are said so, never
+    told to be joined.  Where the file's motion note (*motion*, from
+    :func:`_motion_on_record`) has two parts a clearance apart moving against
+    each other, the gap between them is said as the gap moving parts need,
+    with no suggestion that they were meant to be one solid.  ``None`` when
+    the mesh has no pieces to read.
     """
     if reading is None or reading.piece_count == 0:
         return None
     solid_of = list(reading.solid_of) or list(range(reading.piece_count))
+    moves_apart = _moves_apart(reading, solid_of, motion)
     lows: dict[int, np.ndarray] = {}
     highs: dict[int, np.ndarray] = {}
     for piece, solid in zip(reading.pieces, solid_of, strict=True):
@@ -8732,7 +9358,7 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     from kiln.fusion_check import judge_reading
 
     try:
-        fusion = judge_reading(triangles, reading)
+        fusion = judge_reading(triangles, reading, clearances=True)
     except Exception:  # noqa: BLE001 -- the parts are still counted; the air goes unjudged
         logger.debug("pieces in the air unjudged", exc_info=True)
         block.note = f"It prints as {block.solid_count} separate parts, not one."
@@ -8749,34 +9375,31 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     standing = [s for s in largest_first if s not in in_air]
     said: list[str] = []
     if len(standing) >= 2:
-        largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
-        across = [max(size[0], size[1]) for size in rest]
-        if len(rest) == 1:
-            others = f"and one {_size_said(rest[0])}"
-        elif max(across) - min(across) < 0.05:
-            others = f"and {len(rest)} more, each {_mm_said(min(across))} mm across"
-        else:
-            others = f"and {len(rest)} more, {_mm_said(min(across))} to {_mm_said(max(across))} mm across"
-        said.append(
-            f"It prints as {len(standing)} separate parts on the plate, not one: the largest is "
-            f"{_size_said(largest)} {others}, and each comes off the plate on its own. "
-            "If they belong together, join them so they overlap."
-        )
+        said.append(_standing_said(standing, size_of, fusion.get("clearances"), solid_of, moves_apart))
     # The pieces in the air that do print, by how the fusion check found
     # them: resting on the part, a clearance away from it, held inside it.
     resting: set[int] = set()
     close: set[int] = set()
+    close_moving: set[int] = set()
     for finding in findings:
-        named = unheld & set(finding.get("bodies") or [])
+        bodies = list(finding.get("bodies") or [])
+        named = unheld & set(bodies)
         if finding.get("relation") == "touching":
             resting |= named
         elif finding.get("relation") == "near":
-            close |= named
+            pair = [solid_of[body - 1] for body in bodies if 0 < body <= len(solid_of)]
+            if len(pair) == 2 and moves_apart(pair[0], pair[1]):
+                close_moving |= named
+            else:
+                close |= named
     close -= resting
+    close_moving -= resting | close
     if resting:
         said.append(_in_the_air_said(len(resting), resting=True))
     if close:
         said.append(_in_the_air_said(len(close), resting=False))
+    if close_moving:
+        said.append(_in_the_air_said(len(close_moving), resting=False, moving=True))
     captive = next((f for f in findings if f.get("relation") == "captive"), None)
     if captive is not None:
         said.append(str(captive["message"]))
@@ -8784,9 +9407,120 @@ def _judge_pieces(triangles: list[tuple[tuple[float, ...], ...]], reading: Any) 
     return block
 
 
-def _in_the_air_said(count: int, *, resting: bool) -> str:
+def _standing_said(
+    standing: list[int],
+    size_of: dict[int, list[float]],
+    clearances: dict[str, Any] | None,
+    solid_of: list[int],
+    moves_apart: Callable[[int, int], bool] = lambda _a, _b: False,
+) -> str:
+    """What is said of the separate parts standing on the plate (*standing*,
+    largest first): their sizes, then that the ones a clearance apart
+    (:func:`kiln.fusion_check.judge_reading`'s *clearances*) print in place
+    together, and that the rest each come off the plate on their own.  A
+    pair *moves_apart* says moves against each other is said as moving
+    parts, and only the others are asked whether they were meant to be one
+    solid."""
+    from kiln.fusion_check import embedment_floor_mm
+
+    largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
+    across = [max(size[0], size[1]) for size in rest]
+    if len(rest) == 1:
+        others = f"and one {_size_said(rest[0])}"
+    elif max(across) - min(across) < 0.05:
+        others = f"and {len(rest)} more, each {_mm_said(min(across))} mm across"
+    else:
+        others = f"and {len(rest)} more, {_mm_said(min(across))} to {_mm_said(max(across))} mm across"
+    parts = (
+        f"It prints as {len(standing)} separate parts on the plate, not one: the largest is "
+        f"{_size_said(largest)} {others}"
+    )
+    reading = clearances or {}
+    if reading.get("skipped"):
+        return (
+            f"{parts}. The gaps between them were not measured, as the mesh is past what this check reads; "
+            "any that are meant to be one solid have to overlap."
+        )
+    moving: set[int] = set()
+    still: set[int] = set()
+    moving_gaps: list[float] = []
+    still_gaps: list[float] = []
+    for pair in reading.get("pairs") or []:
+        a, b = (solid_of[body - 1] for body in pair["bodies"])
+        if moves_apart(a, b):
+            moving |= {a, b}
+            moving_gaps.append(float(pair["gap_mm"]))
+        else:
+            still |= {a, b}
+            still_gaps.append(float(pair["gap_mm"]))
+    still -= moving
+    spaced = moving | still
+    unread = {solid_of[body - 1] for body in reading.get("unmeasured") or []} - spaced
+    near = [s for s in standing if s in spaced]
+    unknown = [s for s in standing if s in unread]
+    if unknown:
+        one = len(unknown) == 1
+        not_measured = (
+            f" {len(unknown)} of them {'stands' if one else 'stand'} close to another part, and "
+            f"{'the gap was' if one else 'the gaps were'} not measured."
+        )
+    else:
+        not_measured = ""
+    if not near and not unknown:
+        return f"{parts}, and each comes off the plate on its own. If they belong together, join them so they overlap."
+    if near:
+        floor = embedment_floor_mm()
+        sentences = []
+        moving_near = [s for s in standing if s in moving]
+        still_near = [s for s in standing if s in still]
+        if moving_near:
+            who = "They" if len(moving_near) == len(standing) else f"{len(moving_near)} of them"
+            sentences.append(
+                f"{who} stand {_gaps_said(moving_gaps)} apart without touching, so they print in place "
+                "together with nothing joining them, the way parts that move have to."
+            )
+            if still_gaps:
+                # Said by the gap, not by the part: a part that moves against
+                # one neighbour can stand still beside another.
+                sentences.append(
+                    f"Other parts stand {_gaps_said(still_gaps)} apart with nothing joining them: fine for a "
+                    "designed clearance. If they were meant to be one solid, sink them at least "
+                    f"{floor:g} mm into each other."
+                )
+        else:
+            who = "They" if len(still_near) == len(standing) else f"{len(still_near)} of them"
+            sentences.append(
+                f"{who} stand {_gaps_said(still_gaps)} apart without touching, so they print in place together "
+                "with nothing joining them: fine for a designed clearance. If they were meant to be one solid, "
+                f"sink them at least {floor:g} mm into each other."
+            )
+        said = f"{parts}. {' '.join(sentences)}{not_measured}"
+    else:
+        said = f"{parts}.{not_measured} Any that are meant to be one solid have to overlap."
+    loose = len(standing) - len(near) - len(unknown)
+    if loose == 1:
+        return f"{said} The other one comes off the plate on its own; if it belongs with them, join it so they overlap."
+    if loose:
+        return (
+            f"{said} The other {loose} each come off the plate on their own; "
+            "if they belong together, join them so they overlap."
+        )
+    return said
+
+
+def _gaps_said(gaps: list[float]) -> str:
+    def said(value: float) -> str:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    low, high = said(min(gaps)), said(max(gaps))
+    return f"{low} mm" if low == high else f"{low} to {high} mm"
+
+
+def _in_the_air_said(count: int, *, resting: bool, moving: bool = False) -> str:
     """What is said of *count* pieces off the plate that rest on the part
-    without being joined to it (*resting*), or sit a clearance away from it."""
+    without being joined to it (*resting*), or sit a clearance away from it,
+    as parts that move against it (*moving*) or as pieces that may have been
+    meant to be one solid with it."""
     from kiln.fusion_check import NEAR_GAP_MM, embedment_floor_mm
 
     one = count == 1
@@ -8802,10 +9536,19 @@ def _in_the_air_said(count: int, *, resting: bool) -> str:
             f"most. {sink}"
         )
     sit = "sits" if one else "sit"
+    if moving:
+        return (
+            f"{pieces} {sit} less than {NEAR_GAP_MM:g} mm from the part, joined to nothing, "
+            f"so {they} {'prints' if one else 'print'} loose on it, the way parts that move have to."
+        )
+    meant = (
+        f"If {they} {'was' if one else 'were'} meant to be one solid with the part, "
+        f"sink {them} at least {embedment_floor_mm():g} mm into it."
+    )
     return (
         f"{pieces} {sit} less than {NEAR_GAP_MM:g} mm from the part, joined to nothing, "
         f"so {they} {'prints' if one else 'print'} loose on it: fine for a designed "
-        f"clearance. {sink}"
+        f"clearance. {meant}"
     )
 
 
@@ -8964,7 +9707,8 @@ def _analyze_printability_here(
     else:
         repeated = None
     # Which separate parts those pieces print as, and which float.
-    parts = _judge_pieces(parsed, pieces)
+    motion = _motion_on_record(file_path, once) if pieces is not None else None
+    parts = _judge_pieces(parsed, pieces, motion=motion)
     triangles, vertices, bbox, z_min = _prepare_parsed(parsed, parsed_vertices, repeated=repeated)
     del parsed, parsed_vertices
 
@@ -8982,9 +9726,13 @@ def _analyze_printability_here(
     # "TPU at 38° needs_supports=True, but supports.estimated_support_volume_mm3=0"
     # because 38° is below the supports estimator's 45° floor.  Pin
     # them together so the verdict and the volume estimate agree.
+    _overhangs_block = material_overhangs(material, nozzle_mm=nozzle_diameter, layer_height_mm=layer_height)
     _resolved_threshold = _resolve_overhang_threshold(
-        max_overhang_angle, material, judgment_overlay,
+        max_overhang_angle, material, _overhangs_block,
     )
+    # Judged at the plastic's own figure (not one the caller stated): the
+    # figure is Kiln's to serve, so the reply says the verdict, not the angle.
+    _own_overhang = max_overhang_angle is None and bool(_overhangs_block["overhangs"]["material_limits_deg"])
     # Connected-component count: one closed body = 1; a multi-body mesh
     # = N components.  Exposed for the kiln-pro overlay.
     #
@@ -9051,12 +9799,16 @@ def _analyze_printability_here(
         component_size_uniformity=round(component_size_uniformity, 3),
         genus=mesh_genus,
     )
+    # What Kiln's own slice keeps at this nozzle, asked once for the report.
+    from kiln.material_limits import sliced_floors
+
+    sliced = sliced_floors(nozzle_mm=nozzle_diameter)
     # The walls and the gaps share one budget for the corners they read.
     corner_budget = _CornerBudget()
     thin_walls, sub_nozzle_wall_pct = _measure_thin_walls(
         triangles, vertices,
         nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor, corner_budget=corner_budget,
-        tris=shared_tris, comp_ids=shared_comp_ids, layer_height=layer_height,
+        tris=shared_tris, comp_ids=shared_comp_ids, layer_height=layer_height, sliced=sliced,
     )
     cavities = _analyze_cavity_widths(
         triangles, vertices, nozzle_diameter=nozzle_diameter, corner_budget=corner_budget,
@@ -9121,6 +9873,7 @@ def _analyze_printability_here(
         warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
         adhesion=adhesion,
         thin_walls_below_nozzle=sub_nozzle_wall_pct > 0,
+        slicer_note=sliced.note(),
     )
 
     # Surface the bridge-substitution downgrade.  When the
@@ -9220,15 +9973,19 @@ def _analyze_printability_here(
             "minimum feature size manually."
         )
 
-    # Upsell hook: when the judgment overlay is absent, the
-    # warping / thermal-stress / adhesion-force recommendations come
-    # from the public safety-floor templates. With the overlay, curated /
-    # printer-tuned / brand-aware guidance. One non-intrusive line.
+    # When the judgment overlay is absent, the warping / thermal-stress /
+    # adhesion-force recommendations come from the public safety-floor
+    # templates; with it, curated, printer-tuned guidance.  One line says so,
+    # only to someone who would be buying the plan: an account whose plan
+    # ended, and one whose plan already includes it, are not sold it here.
     if not judgment_overlay:
-        recommendations.append(
-            "Curated, brand-tuned recommendations (printer-specific bed temps, "
-            "enclosure choice, filament profile) are available with Kiln Pro."
-        )
+        from kiln.tiers_and_terms import plan_offer
+
+        if plan_offer("pro", "Curated, brand-tuned recommendations").buying:
+            recommendations.append(
+                "Curated, brand-tuned recommendations (printer-specific bed temps, "
+                "enclosure choice, filament profile) are available with Kiln Pro."
+            )
 
     # Estimate print time modifier: supports and bridges add time.
     time_mod = 1.0
@@ -9334,7 +10091,7 @@ def _analyze_printability_here(
                 enriched = pro_features.printability_overlay.enrich_printability_report(
                     # In process, with the rating, so a lower score the
                     # overlay finds can reach the verdict below.
-                    {**report.to_dict(), "score": report.score, "grade": report.grade},
+                    {**report.to_dict(), "score": report.score, "grade": report.grade, "layer_height_mm": layer_height},
                     material=material,
                     printer_id=printer_id,
                     nozzle_diameter_mm=nozzle_diameter,
@@ -9369,7 +10126,7 @@ def _analyze_printability_here(
                         enriched = pro_features.printability_overlay.enrich_printability_report(
                             # In process, with the rating, so a lower score
                             # the overlay finds can reach the verdict below.
-                            {**report.to_dict(), "score": report.score, "grade": report.grade},
+                            {**report.to_dict(), "score": report.score, "grade": report.grade, "layer_height_mm": layer_height},
                             **kwargs,
                         )
                         break
@@ -9456,6 +10213,8 @@ def _analyze_printability_here(
         or _material_physics_from_overlay(material)
     ):
         _mark_tuned(report)
+    elif _own_overhang:
+        report.tuned = True
     return report
 
 
@@ -9531,18 +10290,18 @@ def _dropped_sentence(region: dict[str, Any], nozzle_diameter: float) -> str:
     (``region["why"]``, a wall when unsaid)."""
     thick = float(region["thickness_mm"])
     why = region.get("why", "wall")
+    # The fix is the general minimum wall: past it, nothing here is left out.
+    enough = generic_limits.wall_min_mm(nozzle_diameter)
     if why == "pin":
-        need = _PIN_MIN_FRACTION * nozzle_diameter
         return (
-            f"A pin {thick:.2f} mm across is too thin for Kiln's slicer to print reliably: it "
-            f"needs at least {need:g} mm. Thicken it to {need:g} mm, or use a smaller nozzle."
+            f"A pin {thick:.2f} mm across is too thin for Kiln's slicer to print reliably. "
+            f"Thicken it to at least {enough:g} mm, or use a smaller nozzle."
         )
-    fix = f"Thicken it to at least {2 * nozzle_diameter:g} mm."
+    fix = f"Thicken it to at least {enough:g} mm."
     if why == "island":
         return (
             f"A piece only {thick:.2f} mm thick is too short for Kiln's slicer to lay a line "
-            f"along, so it will be missing. Make it longer, or at least {2 * nozzle_diameter:g} mm "
-            f"thick."
+            f"along, so it will be missing. Make it longer, or at least {enough:g} mm thick."
         )
     return (
         f"A wall measures {thick:.2f} mm, thinner than the {nozzle_diameter:g} mm nozzle can "

@@ -746,18 +746,17 @@ def _build_model_settings(parsed: list[_ParsedPart], groups: list[list[int]]) ->
 # ---------------------------------------------------------------------------
 
 
-def _build_project_settings(flush_matrix_str: str) -> str:
-    """Build ``Metadata/project_settings.config`` — the purge volumes."""
+def _build_project_settings(flush_matrix_str: str, filaments: list[str] | None = None) -> str:
+    """Build ``Metadata/project_settings.config``: the purge volumes, and each slot's filament when every slot names one."""
     import json
 
     values = [str(int(float(v))) for v in flush_matrix_str.split()]
-    return json.dumps(
-        {
-            "flush_volumes_matrix": values,
-            "flush_multiplier": ["1"],
-        },
-        indent=2,
-    )
+    settings: dict[str, Any] = {"flush_volumes_matrix": values, "flush_multiplier": ["1"]}
+    if filaments and all(filaments):
+        from kiln.slicer_filament import safe_filament_type
+
+        settings["filament_type"] = [safe_filament_type(name) for name in filaments]
+    return json.dumps(settings, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -776,14 +775,21 @@ def _resolve_plate(
 
 
 def plate_bed(
-    plate_width: float, plate_depth: float, printer_id: str | None,
+    plate_width: float, plate_depth: float, printer_id: str | None, *, several_filaments: bool = False,
 ) -> tuple[float, float, float | None, str]:
-    """``(width, depth, height, words)`` of the bed a plate is laid out for."""
+    """``(width, depth, height, words)`` of the bed a plate is laid out for:
+    with *several_filaments*, the bed the printer's nozzles print on when its
+    record states one (:func:`kiln.printers.bed_fit.two_nozzle_bed`) and the
+    plate is sliced for them here (:func:`kiln.maker_slicer.is_ready`); a
+    plate sliced for one nozzle is laid out on the printer's own bed."""
     if printer_id:
         try:
-            from kiln.printers.bed_fit import get_printer_display_name, printer_bed
+            from kiln.maker_slicer import is_ready
+            from kiln.printers.bed_fit import get_printer_display_name, printer_bed, two_nozzle_bed
+            from kiln.slicer_profiles import printer_nozzles
 
-            bed = printer_bed(printer_id)
+            several = several_filaments and is_ready(printer_nozzles(printer_id))
+            bed = (two_nozzle_bed(printer_id) if several else None) or printer_bed(printer_id)
         except Exception:  # noqa: BLE001 — placement is advisory, never fatal
             bed = None
             logger.debug("build volume lookup failed for %r", printer_id,
@@ -944,6 +950,75 @@ def auto_arrange_parts(
 
 
 # ---------------------------------------------------------------------------
+# The plate's materials
+# ---------------------------------------------------------------------------
+
+
+def _specified_materials(parts: list[ColorPart]) -> list[str]:
+    """The materials *parts* name, in order, blanks left out."""
+    return [p.material for p in parts if p.material and p.material.strip()]
+
+
+def _material_check(materials: list[str]) -> dict[str, Any] | None:
+    """Kiln's multi-material check for *materials*, or ``None`` with none named."""
+    if not materials:
+        return None
+    try:
+        from kiln.material_safety import (  # lazy import keeps startup lean
+            check_material_compatibility,
+        )
+
+        return check_material_compatibility(materials)
+    except ImportError:
+        logger.debug("kiln.material_safety not available — skipping safety check")
+        return None
+
+
+def _unsafe_materials(safety_result: dict[str, Any]) -> dict[str, Any]:
+    """The refusal for materials that must never share a print."""
+    return {
+        "success": False,
+        "error": "⛔ Incompatible materials — do not print. " + safety_result["message"],
+        "hardware_warnings": safety_result.get("hardware_warnings", []),
+        "safety": safety_result,
+    }
+
+
+def _safety_fields(safety_result: dict[str, Any]) -> dict[str, Any]:
+    """The material check's fields as a plate result carries them."""
+    fields: dict[str, Any] = {
+        "safety_level": safety_result["level"],
+        "safety_message": safety_result["message"],
+    }
+    if safety_result.get("hardware_warnings"):
+        fields["hardware_warnings"] = safety_result["hardware_warnings"]
+    if safety_result.get("pairs"):
+        fields["material_pairs"] = safety_result["pairs"]
+    if safety_result.get("basic"):
+        # Kiln's check did not answer: the pairs that must never share a
+        # print were still refused, and every other purge is the
+        # conservative default.  Say why, once.
+        fields["safety_basic"] = True
+        fields["safety_caution"] = safety_result.get("caution", "")
+    return fields
+
+
+def plate_material_safety(parts: list[ColorPart]) -> dict[str, Any]:
+    """The composer's material verdict for *parts*, without composing.
+
+    The same safety fields a composed plate carries, or the composer's own
+    refusal, so the call that prints a plate built earlier says what its
+    preview said.
+    """
+    safety_result = _material_check(_specified_materials(parts))
+    if safety_result is None:
+        return {"success": True}
+    if not safety_result["safe"]:
+        return _unsafe_materials(safety_result)
+    return {"success": True, **_safety_fields(safety_result)}
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -999,28 +1074,11 @@ def compose_multicolor_3mf(
 
     # -----------------------------------------------------------------------
     # -----------------------------------------------------------------------
-    safety_result: dict[str, Any] | None = None
     flush_matrix_str: str | None = None
-    specified_materials = [p.material for p in parts if p.material and p.material.strip()]
-    if specified_materials:
-        try:
-            from kiln.material_safety import (  # lazy import keeps startup lean
-                check_material_compatibility,
-            )
-
-            safety_result = check_material_compatibility(specified_materials)
-            if not safety_result["safe"]:
-                return {
-                    "success": False,
-                    "error": (
-                        "⛔ Incompatible materials — do not print. "
-                        + safety_result["message"]
-                    ),
-                    "hardware_warnings": safety_result.get("hardware_warnings", []),
-                    "safety": safety_result,
-                }
-        except ImportError:
-            logger.debug("kiln.material_safety not available — skipping safety check")
+    specified_materials = _specified_materials(parts)
+    safety_result = _material_check(specified_materials)
+    if safety_result is not None and not safety_result["safe"]:
+        return _unsafe_materials(safety_result)
 
     # -----------------------------------------------------------------------
     # Parse all STL files
@@ -1069,7 +1127,9 @@ def compose_multicolor_3mf(
     # -----------------------------------------------------------------------
     # Place the GROUP on the plate
     # -----------------------------------------------------------------------
-    plate_w, plate_d, plate_h, bed_words = plate_bed(plate_width, plate_depth, printer_id)
+    plate_w, plate_d, plate_h, bed_words = plate_bed(
+        plate_width, plate_depth, printer_id, several_filaments=len({part.extruder for part in parts}) >= 2,
+    )
     g_min_x = g_min_y = g_min_z = float("inf")
     g_max_x = g_max_y = g_max_z = float("-inf")
     for part, vertices, _ in parsed:
@@ -1136,11 +1196,12 @@ def compose_multicolor_3mf(
     try:
         _write_archive(output_path, members)
         if specified_materials:
-            flush_matrix_str = _flush_matrix_for(output_path, parsed, safety_result)
+            filaments = _slot_filaments(output_path, parsed)
+            flush_matrix_str = _flush_matrix_for(filaments, safety_result)
             if flush_matrix_str:
                 members.append((
                     "Metadata/project_settings.config",
-                    _build_project_settings(flush_matrix_str),
+                    _build_project_settings(flush_matrix_str, filaments),
                 ))
                 _write_archive(output_path, members)
     except Exception as exc:
@@ -1183,19 +1244,8 @@ def compose_multicolor_3mf(
 
     # Attach full safety report (all free)
     if safety_result is not None:
-        result["safety_level"] = safety_result["level"]
-        result["safety_message"] = safety_result["message"]
-        if safety_result.get("hardware_warnings"):
-            result["hardware_warnings"] = safety_result["hardware_warnings"]
-        if safety_result.get("pairs"):
-            result["material_pairs"] = safety_result["pairs"]
+        result.update(_safety_fields(safety_result))
         result["flush_matrix_embedded"] = bool(flush_matrix_str)
-        if safety_result.get("basic"):
-            # Kiln's check did not answer: the pairs that must never share a
-            # print were still refused, and every other purge is the
-            # conservative default.  Say why, once.
-            result["safety_basic"] = True
-            result["safety_caution"] = safety_result.get("caution", "")
 
     result["fits_bed"] = plate_verdict["fits"]
     result["bed_fit"] = plate_verdict
@@ -1276,25 +1326,29 @@ def _write_archive(output_path: str, members: list[tuple[str, str | bytes]]) -> 
             zf.writestr(name, data)
 
 
-def _flush_matrix_for(
-    output_path: str, parsed: list[_ParsedPart], check: dict[str, Any] | None = None,
-) -> str | None:
-    """The purge matrix for *output_path*, one row per filament slot a slice of it loads, or ``None`` when that slice loads a single filament.  *check* is the material check already made for these parts, read for each pair's purge."""
+def _slot_filaments(output_path: str, parsed: list[_ParsedPart]) -> list[str]:
+    """Each filament slot a slice of *output_path* loads, as the material its parts name ("" for none), or ``[]`` for a single filament."""
     evidence = detect_3mf_multicolor(output_path)
     slots = int((evidence or {}).get("filament_slots_needed", 0))
     if slots < 2:
-        return None
-    try:
-        from kiln.material_safety import build_bambu_flush_matrix
-    except ImportError:
-        return None
+        return []
     per_slot: dict[int, str] = {}
     for part, _, _ in parsed:
         material = (part.material or "").strip()
         if material:
             per_slot.setdefault(part.extruder, material)
-    materials = [per_slot.get(slot, "") for slot in range(1, slots + 1)]
-    return build_bambu_flush_matrix(materials, n_slots=slots, check=check)
+    return [per_slot.get(slot, "") for slot in range(1, slots + 1)]
+
+
+def _flush_matrix_for(filaments: list[str], check: dict[str, Any] | None = None) -> str | None:
+    """The purge matrix for one filament slot per entry of *filaments*, or ``None`` for fewer than two.  *check* is the material check already made for these parts, read for each pair's purge."""
+    if len(filaments) < 2:
+        return None
+    try:
+        from kiln.material_safety import build_bambu_flush_matrix
+    except ImportError:
+        return None
+    return build_bambu_flush_matrix(filaments, n_slots=len(filaments), check=check)
 
 
 # ---------------------------------------------------------------------------

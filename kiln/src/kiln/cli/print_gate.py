@@ -111,6 +111,11 @@ def confirm_print_at_terminal(
 
     name = os.path.basename(file_path) or file_path
     where = f" on {printer_name}" if printer_name else ""
+    # What the print itself is, as the approval dialog says it.
+    from kiln.print_consent import row_label, what_the_print_is
+
+    for row, said in what_the_print_is(name, file_path).items():
+        click.echo(f"{row_label(row)}: {said}")
     images: list[str] = []
     viewer_url: str | None = None
     if preview_token:

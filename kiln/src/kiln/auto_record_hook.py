@@ -561,6 +561,10 @@ def fire_terminal_state_hook(
     """
     if not prev_state or not job_id:
         return None
+    from kiln.print_keeping import keeps
+
+    if not keeps(printer_name, file_name or job_id):
+        return None
 
     prev_lc = prev_state.lower().strip()
     new_lc = new_state.lower().strip()
@@ -703,7 +707,16 @@ def observe_state(
 
 
 def _announce_print_ended(printer_name: str) -> None:
-    """Tell the print-ended hooks about *printer_name*; never raise into a read."""
+    """Tell the print-ended hooks about *printer_name*; never raise into a read.
+
+    A print the person asked not to keep has its start record deleted here
+    first (:func:`kiln.print_keeping.print_ended`)."""
+    try:
+        from kiln.print_keeping import print_ended
+
+        print_ended(printer_name)
+    except Exception:  # noqa: BLE001 — a cleanup never breaks a status read
+        _logger.debug("print-not-kept cleanup failed for %r", printer_name, exc_info=True)
     try:
         from kiln.printers.base import fire_print_ended_hooks
 

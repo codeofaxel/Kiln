@@ -14,8 +14,8 @@ every place a print can be started or queued to start later:
 * a call that puts a job into the queue the scheduler drains
   (``submit``, ``submit_result``, ``submit_job_result``, ``save_job``);
 * a call to ``<something>.send_gcode(...)`` — raw words to the firmware,
-  which can start a file on the printer (``M23``/``M24``, ``M32``) around
-  every other door.
+  which can start a file on the printer (``M23``/``M24``, ``M32``) or run
+  one as a macro (``M98``) around every other door.
 
 For the first two, it asks whether the function containing the call — or a
 function enclosing that one, for the closures the pipelines and watchers
@@ -211,8 +211,11 @@ def _static_text(node: ast.AST) -> str | None:
 
 def _fixed_commands_are_not_a_start(node: ast.Call) -> bool:
     """True when every command in the call is a literal whose word is
-    known and is not a print start.  A variable, or an unparseable word,
-    is not vouched for."""
+    known and is not a print start, nor a file run or restarted that the
+    validator refuses.  A variable, or an unparseable word, is not vouched
+    for."""
+    from kiln.gcode import _runs_a_file_unseen
+
     if not node.args:
         return False
     arg = node.args[0]
@@ -226,7 +229,8 @@ def _fixed_commands_are_not_a_start(node: ast.Call) -> bool:
         m = _CMD_WORD.match(text)
         if m is None:
             return False
-        if f"{m.group(1).upper()}{int(m.group(2))}" in PRINT_START_WORDS:
+        word = f"{m.group(1).upper()}{int(m.group(2))}"
+        if word in PRINT_START_WORDS or _runs_a_file_unseen(word, text) is not None:
             return False
     return True
 

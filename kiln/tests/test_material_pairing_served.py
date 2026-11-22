@@ -28,14 +28,15 @@ from kiln import design_intelligence as di
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "kiln"
 
-#: The three shapes a basic answer's notes take, and nothing else.
+#: The four shapes a basic answer's notes take, and nothing else.
 _BASIC_NOTES = (
     re.compile(r"^These two can't share one nozzle temperature: the nozzle ranges of .+ do not overlap\. "
                r"How well they stick together was not judged\.$"),
     re.compile(r"^The nozzle ranges of .+ overlap\. How well they stick together and how much to purge "
                r"between them was not judged\.$"),
-    re.compile(r"^Kiln has no nozzle temperature range for .+ on this computer, so neither their "
+    re.compile(r"^Kiln's nozzle temperature table has no range for .+, so neither their "
                r"temperatures nor how well they stick together was judged\.$"),
+    re.compile(r"^Both are .+: one material shares its own nozzle temperature and bonds to itself\.$"),
 )
 
 
@@ -65,7 +66,7 @@ def _served(monkeypatch, reply: Any) -> list[dict[str, Any]]:
 
     asks: list[dict[str, Any]] = []
 
-    def call(tool_name, _timeout=None, _asked_by_user=None, **kwargs):
+    def call(tool_name, _timeout=None, _asked_by_user=None, _feature=None, **kwargs):
         asks.append({"tool": tool_name, "asked_by_user": _asked_by_user, **kwargs})
         if isinstance(reply, BaseException):
             raise reply
@@ -73,6 +74,18 @@ def _served(monkeypatch, reply: Any) -> list[dict[str, Any]]:
 
     monkeypatch.setattr(srv, "_pro_api_call", call)
     return asks
+
+
+def _free_plan(monkeypatch) -> None:
+    """This computer is signed in on the Free plan: the plan check pitches
+    Kiln Pro for anything it holds back."""
+    import kiln.licensing as licensing
+
+    monkeypatch.setattr(
+        licensing, "check_tier",
+        lambda *_a, **_k: (False, "This feature needs Kiln Pro. See https://kiln3d.com/pricing"),
+        raising=False,
+    )
 
 
 def _answer(**overrides: Any) -> dict[str, Any]:
@@ -110,6 +123,91 @@ class TestTheServedVerdict:
         assert out["compatible"] is False and out["interface_adhesion"] == "unknown"
         assert out["notes"] == "No compatibility data for pla + hips."
         assert out["caution"].startswith("Nothing here covers this pair")
+        assert "not available either" in out["caution"]
+
+    def test_a_pair_nothing_covers_points_at_the_general_rules_it_came_with(self, monkeypatch):
+        """Kiln's servers send the general rules with a pair the table lacks;
+        the caution points at them instead of saying they are missing."""
+        rules = ["Materials with similar print temperatures usually bond better.", "Purge more after dark colours."]
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes="No compatibility data for pla + hips.", material_b="hips",
+                                     general_rules=rules))
+        out = _door()("pla", "hips")
+        assert out["general_rules"] == rules
+        assert out["caution"].startswith("Nothing here covers this pair; reason it out from the general rules below")
+        assert "not available" not in out["caution"]
+
+    def test_a_verdict_with_the_notes_read_and_none_written_sells_no_plan(self, monkeypatch):
+        """Kiln's servers say they read the curated notes for this caller, and
+        this pair has none written: the caution says no note exists at any
+        plan, and names no plan to buy."""
+        _free_plan(monkeypatch)
+        _served(monkeypatch, _answer(notes="", notes_read=True))
+        out = _door()("pla", "tpu")
+        assert out["caution"].startswith("The verdict is here, but not the reasoning behind it")
+        assert out["caution"].endswith("No curated note has been established for this one at any tier yet.")
+        assert "kiln3d.com/pricing" not in json.dumps(out) and "Kiln Pro" not in json.dumps(out)
+        assert "notes_read" not in out, "the flag is how the answer was read, never part of the reply"
+
+    def test_a_pair_nothing_covers_with_the_notes_read_sells_no_plan(self, monkeypatch):
+        _free_plan(monkeypatch)
+        rules = ["Materials with similar print temperatures usually bond better."]
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes="No compatibility data for pla + hips. Check general rules.",
+                                     material_b="hips", general_rules=rules, notes_read=True))
+        out = _door()("pla", "hips")
+        assert out["general_rules"] == rules
+        assert out["caution"].startswith("Nothing here covers this pair; reason it out from the general rules below")
+        assert "kiln3d.com/pricing" not in json.dumps(out) and "Kiln Pro" not in json.dumps(out)
+
+    def test_the_notes_that_came_are_the_reply_and_nothing_is_cautioned(self, monkeypatch):
+        _served(monkeypatch, _answer(notes="Bonds mechanically; use interlocking geometry.", notes_read=True,
+                                     general_rules=["A stand-in rule."]))
+        out = _door()("pla", "tpu")
+        assert out["notes"] == "Bonds mechanically; use interlocking geometry."
+        assert out["general_rules"] == ["A stand-in rule."] and out["caution"] == ""
+
+    @pytest.mark.parametrize("flag", [None, "yes", 1])
+    def test_an_answer_that_does_not_say_it_read_the_notes_is_judged_here(self, monkeypatch, flag):
+        """An answer with no word on the notes (or a word that is not a yes or
+        a no) is read as before: this computer decides whether the notes could
+        be read, and here they could not."""
+        _free_plan(monkeypatch)
+        reply = _answer(notes="")
+        if flag is not None:
+            reply["notes_read"] = flag
+        _served(monkeypatch, reply)
+        out = _door()("pla", "tpu")
+        assert "No curated note has been established" not in out["caution"]
+        assert out["caution"].endswith("Kiln Pro carries the curated notes for this. See https://kiln3d.com/pricing")
+
+    @pytest.mark.parametrize("pair", [("ABS", "abs"), ("pla", "PLA"), ("PETG-CF", "petg_cf")])
+    def test_one_material_in_both_places_is_said_to_bond_to_itself(self, monkeypatch, pair):
+        """A served answer for one material twice reads the way the basic
+        answer does: ``compatible`` is never a no beside a line saying the
+        material bonds to itself, and that line is the notes."""
+        a, b = (name.lower() for name in pair)
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes=f"No compatibility data for {a} + {b}. Check general rules.",
+                                     material_a=a, material_b=b, general_rules=["A stand-in rule."]))
+        out = _door()(*pair)
+        assert re.match(r"^Both are .+: one material shares its own nozzle temperature and bonds to itself\.$",
+                        out["notes"]), out["notes"]
+        assert out["compatible"] is None
+        assert out["caution"] == ""
+        assert "No compatibility data" not in json.dumps(out)
+        assert "basic" not in out and "why" not in out
+
+    @pytest.mark.parametrize("pair", [("pla", "pla"), ("PETG-CF", "petg_cf")])
+    def test_one_material_twice_reads_the_same_served_or_basic(self, monkeypatch, pair):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        basic = _door()(*pair)
+        a, b = (name.lower() for name in pair)
+        _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                     notes=f"No compatibility data for {a} + {b}.", material_a=a, material_b=b))
+        served = _door()(*pair)
+        for key in ("compatible", "interface_adhesion", "notes", "support_pair"):
+            assert served[key] == basic[key], key
 
 
 class TestABasicAnswer:
@@ -151,16 +249,36 @@ class TestABasicAnswer:
     def test_a_material_the_nozzle_table_lacks_is_said(self, monkeypatch):
         _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
         out = _door()("pla_plus", "pva")
-        assert out["notes"].startswith("Kiln has no nozzle temperature range for PLA+ or PVA")
+        assert out["notes"].startswith("Kiln's nozzle temperature table has no range for PLA+ or PVA,")
+        assert "on this computer" not in out["notes"]
         assert "has judged nothing about this pair" in out["caution"]
+
+    def test_the_line_promises_only_what_the_verdict_carries(self, monkeypatch):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        caution = _door()("pla", "petg")["caution"]
+        assert caution.startswith(
+            "Kiln's pairing verdict says whether two materials can share one print and how well they bond."
+        )
+        assert "purge" not in caution
+
+    @pytest.mark.parametrize("pair", [("pla", "pla"), ("PETG-CF", "petg_cf"), ("tpu", "TPU")])
+    def test_one_material_twice_is_not_a_precaution(self, monkeypatch, pair):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        out = _door()(*pair)
+        assert re.match(r"^Both are .+: one material shares its own nozzle temperature and bonds to itself\.$",
+                        out["notes"]), out["notes"]
+        assert "answered only that one material pairs with itself" in out["caution"]
+        assert "test piece" not in out["caution"]
+        assert out["compatible"] is None, "a basic answer is still never a yes"
 
     @pytest.mark.parametrize("pair", [("pla", "tpu"), ("pla", "abs"), ("petg", "pva"), ("nylon", "pa"),
                                       ("cf_pla", "pla"), ("tpu", "tpu"), ("asa", "abs"), ("x", "y")])
     def test_a_basic_reply_carries_nothing_from_a_pairing_table(self, monkeypatch, pair):
         _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
         out = _door()(*pair)
+        filled = {"hardware_warnings"} if pair == ("cf_pla", "pla") else set()
         assert set(out) == {"material_a", "material_b", "compatible", "interface_adhesion", "notes", "support_pair",
-                            "general_rules", "caution", "basic", "why", "why_code", "why_detail", "success"}
+                            "general_rules", "caution", "basic", "why", "why_code", "why_detail", "success"} | filled
         assert out["compatible"] is None and out["interface_adhesion"] == "unknown"
         assert out["support_pair"] is None and out["general_rules"] == []
         assert any(shape.match(out["notes"]) for shape in _BASIC_NOTES), out["notes"]
@@ -168,9 +286,88 @@ class TestABasicAnswer:
             assert grade not in json.dumps(out), grade
 
 
+class TestAFilledFilament:
+    """A filled filament needs a hardened nozzle whatever the verdict says,
+    and the reply says so the same way served or basic."""
+
+    _LINE = "PETG-CF requires a hardened/wear-resistant nozzle (not standard brass)."
+
+    def test_a_served_answer_carries_the_hardened_nozzle_line(self, monkeypatch):
+        _served(monkeypatch, _answer(material_a="petg-cf", material_b="pla"))
+        out = _door()("PETG-CF", "pla")
+        assert out["hardware_warnings"] == [self._LINE]
+        assert out["compatible"] is True, "the verdict itself is unchanged"
+
+    def test_a_basic_answer_carries_the_same_line(self, monkeypatch):
+        _served(monkeypatch, {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"})
+        out = _door()("PETG-CF", "pla")
+        assert out["basic"] is True and out["hardware_warnings"] == [self._LINE]
+
+    def test_one_line_per_material_and_none_for_an_unfilled_pair(self, monkeypatch):
+        _served(monkeypatch, _answer(material_a="petg_cf", material_b="pa6_gf"))
+        assert _door()("petg_cf", "pa6_gf")["hardware_warnings"] == [
+            self._LINE, "PA6-GF requires a hardened/wear-resistant nozzle (not standard brass).",
+        ]
+        _served(monkeypatch, _answer(material_a="petg-cf", material_b="petg_cf"))
+        assert _door()("petg-cf", "petg_cf")["hardware_warnings"] == [self._LINE]
+        _served(monkeypatch, _answer())
+        assert "hardware_warnings" not in _door()("pla", "tpu")
+
+
+class TestANameTooLong:
+    """A material name longer than the check reads is refused before anything
+    is asked, and no reply repeats any of it."""
+
+    _LONG = "q" * 60 + "zzmrk"
+
+    @pytest.mark.parametrize("names", [(_LONG, "pla"), ("pla", _LONG)])
+    def test_the_door_refuses_in_plain_words_and_asks_nothing(self, monkeypatch, names):
+        from kiln import _pro_material_pairing_bridge as bridge
+
+        asks = _served(monkeypatch, _answer())
+        monkeypatch.setattr(bridge, "_local_co_print", lambda a, b: pytest.fail("asked kiln-pro"))
+        out = _door()(*names)
+        assert asks == []
+        assert out == {"success": False, "code": "INVALID_INPUT",
+                       "error": f"A material name is at most {bridge.MAX_MATERIAL_CHARS} characters."}
+
+    def test_the_bridge_refuses_before_asking(self, monkeypatch):
+        from kiln import _pro_material_pairing_bridge as bridge
+
+        asks = _served(monkeypatch, _answer())
+        monkeypatch.setattr(bridge, "_local_co_print", lambda a, b: pytest.fail("asked kiln-pro"))
+        answer, miss = bridge.co_print("pla", self._LONG)
+        assert answer is None and asks == []
+        assert (miss.cause, miss.code) == ("refused", "INVALID_INPUT")
+        assert "zzmrk" not in miss.detail and "qqq" not in miss.detail
+
+    def test_the_pairing_function_refuses_without_repeating_the_name(self, monkeypatch):
+        asks = _served(monkeypatch, _answer())
+        with pytest.raises(ValueError) as caught:
+            di.check_multi_material_compatibility(self._LONG, "pla")
+        assert asks == [] and "zzmrk" not in str(caught.value)
+
+    def test_a_name_at_the_limit_is_still_asked(self, monkeypatch):
+        from kiln import _pro_material_pairing_bridge as bridge
+
+        name = "p" * bridge.MAX_MATERIAL_CHARS
+        asks = _served(monkeypatch, _answer(found="none", compatible=False, interface_adhesion="unknown",
+                                            material_a=name, notes="No compatibility data."))
+        out = _door()(name, "pla")
+        assert [ask["material_a"] for ask in asks] == [name]
+        assert out["success"] is True
+
+
+#: The pairing table's file, its reader's name and its structure key, by
+#: digest (tests/_moved_away.py).
+_PAIRING_TABLE_FILE = frozenset({"23a77f89c8184d8c7a63a63b9d7780941d7d05a7bb7a168cae1b34d67de0ca95"})
+_PAIRING_TABLE_READER = frozenset({"9e9c2bdd74f7b92cf3909ba6082a5202c9ac757089661ba55e16c8b45f3d4127"})
+_PAIRING_TABLE_KEY = frozenset({"65a1a25b86a4f9499ce7909386e5eff1b43fae210093a1b553419b7051146c5e"})
+
+
 def test_the_pairing_table_is_not_in_this_package():
-    assert not (_SRC / "data" / "design_knowledge" / "multi_material_pairing.json").exists()
-    assert not hasattr(di._DesignKnowledgeBase, "multi_material")
-    hits = [p for p in _SRC.rglob("*") if p.is_file() and p.suffix in (".py", ".json")
-            and "co_print_compatibility" in p.read_text(encoding="utf-8", errors="replace")]
-    assert not hits, [str(p.relative_to(_SRC)) for p in hits]
+    from tests._moved_away import attributes_back, files_back, quoted_back
+
+    assert files_back(_PAIRING_TABLE_FILE, _SRC) == []
+    assert attributes_back(di._DesignKnowledgeBase, _PAIRING_TABLE_READER) == []
+    assert quoted_back(_PAIRING_TABLE_KEY, (".py", ".json"), _SRC) == []

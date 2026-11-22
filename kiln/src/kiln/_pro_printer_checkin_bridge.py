@@ -204,6 +204,12 @@ def ask_now(printer_name: str, *, db: Any = None, wait: float = WAIT_S) -> dict[
 
     if not resolve_api_bearer().token:
         return {"asked": False, "why": "signed_out"}
+    from kiln import print_keeping
+
+    # Print history kept on this computer only never goes up (kiln.print_keeping;
+    # the reading the last start refreshed, so a check-in never waits on it).
+    if print_keeping.account_choice() != print_keeping.ACCOUNT:
+        return {"asked": False, "why": "kept_on_this_computer"}
     store = _db(db)
     latest = store.latest_outcome_row(printer_name)
     if latest is None:
@@ -326,21 +332,9 @@ def _label(printer_name: Any) -> str | None:
     :data:`LABEL_MAX`.  ``None`` for a name that holds one of the addresses,
     serials or codes this computer keeps for its printers, or one that cannot
     be checked against them."""
-    name = " ".join(str(printer_name or "").split())
-    if not name:
-        return None
-    try:
-        from kiln.outbound_guard import _own_printer_values
+    from kiln.outbound_guard import printer_label
 
-        own = _own_printer_values()
-    except Exception:  # noqa: BLE001 -- a name that cannot be checked is not sent
-        return None
-    lowered = name.lower()
-    for _phrase, held in own:
-        mine = str(held).strip().lower()
-        if mine and mine in lowered:
-            return None
-    return name[:LABEL_MAX]
+    return printer_label(printer_name, cap=LABEL_MAX)
 
 
 def request_body(store: Any, machine_fingerprint: str, printer_name: str) -> dict[str, Any] | None:
@@ -355,7 +349,10 @@ def request_body(store: Any, machine_fingerprint: str, printer_name: str) -> dic
     label = _label(printer_name)
     if label:
         body["printer_label"] = label
-    prints = [record(row) for row in store.machine_print_rows(machine_fingerprint, MAX_PRINTS)]
+    prints = [
+        record(row) for row in store.machine_print_rows(machine_fingerprint, MAX_PRINTS)
+        if row.get("kept") != "local"
+    ]
     body["prints"] = [p for p in prints if p is not None]
     repair = _repair(store, machine_fingerprint)
     if repair:

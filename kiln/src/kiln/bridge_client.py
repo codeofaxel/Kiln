@@ -71,6 +71,10 @@ SUSTAINED_REFUSALS = 2
 #: file the next attempt picks up on its own.
 SIGNED_OUT_RETRY_S = 300.0
 
+#: How often a connected bridge looks at the printers saved on this computer,
+#: so one saved from another program is announced without a restart.
+SAVED_PRINTERS_CHECK_S = 15.0
+
 #: The session states a server-side probe can END on: the server answered.
 #: ``degraded`` is the server NOT answering (a proxy 502, a 429, a network
 #: blip, a refresh backoff) and is never a verdict about the session.
@@ -119,6 +123,8 @@ BRIDGE_ARGUMENTS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "design_id",
                 "branch_id",
                 "account_sync_id",
+                # The person's own choice not to keep this one print.
+                "keep_record",
             }
         ),
         # Stopping, and resuming what was paused.
@@ -204,7 +210,10 @@ def handle_relay_request(
     call (see :func:`_consent_from_authority`), and only after the bytes
     that arrived hash to the bytes that were approved.  Bytes that differ
     are refused before any tool runs: a consent by file name would let a
-    re-generated model print under the old approval.
+    re-generated model print under the old approval.  The person's own
+    approval of a print may also carry their word to print it anyway or
+    their yes to nozzles of different sizes; those become the slice's
+    keywords here (:func:`owner_words`), and never arrive as arguments.
 
     The list: a tool outside :data:`BRIDGE_ARGUMENTS`, or an argument its
     entry does not name, is refused here before anything else runs (no fetch,
@@ -234,6 +243,8 @@ def handle_relay_request(
                 from kiln.print_consent import set_consent
 
                 reset = set_consent(consent)
+            if tool == "slice_and_print":
+                args.update(owner_words(authority))
         result = call_tool(tool, args)
         # The answer leaves this computer here, whichever tool gave it.
         return {"request_id": request_id, "ok": True, "result": scrub_relayed(result)}
@@ -249,6 +260,27 @@ def handle_relay_request(
             from kiln.print_consent import reset_consent
 
             reset_consent(reset)
+
+
+def owner_words(block: Any) -> dict[str, Any]:
+    """The slice keywords a relayed print's authority block carries for the
+    person who approved it: the word to print anyway an abrasive filament
+    through a nozzle that is not wear-resistant (``soft_nozzle_confirmed``)
+    and the yes to nozzles of different sizes for this print
+    (``mixed_nozzle_experiment``), as :func:`kiln.slicer.owner_asks` passes
+    them.  Only on the person's own approval of this one print, said by that
+    person; an agent printing under it, a delegation, or anything else
+    carries neither, and the slice refuses as it would have."""
+    if not isinstance(block, dict) or str(block.get("kind") or "") != "approval":
+        return {}
+    grantor = str(block.get("grantor") or "")
+    if not grantor or str(block.get("said_go_by") or grantor) != grantor:
+        return {}
+    from kiln.slicer import owner_asks
+
+    return owner_asks(
+        block.get("soft_nozzle_confirmed") is True, None, block.get("mixed_nozzle_experiment") is True,
+    )
 
 
 class NotTheApprovedBytes(RuntimeError):
@@ -319,8 +351,8 @@ def _consent_from_authority(block: Any, *, file_name: str, printer_name: Any):
             scope = None
     until = block.get("until")
     # The printer is the one the CALL names, or none: the gate matches a
-    # consent against the name the call used, and the hosted server has
-    # already held the record to the printer it was made for.
+    # consent against the printer the call is aimed at, and the hosted
+    # server has already held the record to the printer it was made for.
     return PrintConsent(
         tool="bridge relay",
         file_name=file_name or str(block.get("file_name") or ""),
@@ -384,6 +416,27 @@ def _default_tool_caller() -> ToolCaller:
         return tool.fn(**args)
 
     return call_tool
+
+
+def _saved_printers_stamp() -> tuple[int, int] | None:
+    """What the saved-printers file looks like on disk right now (when it was
+    last written, and its size), or ``None`` when there is no file to read.
+    Two different stamps mean the saved printers may have changed."""
+    try:
+        from kiln.cli.config import get_config_path
+
+        found = os.stat(get_config_path())
+        return (found.st_mtime_ns, found.st_size)
+    except Exception:  # noqa: BLE001 -- no file, or one that cannot be read, is "nothing saved"
+        return None
+
+
+def _load_saved_printers() -> None:
+    """Put the printers saved on this computer in the live registry, beside
+    the ones already there."""
+    from kiln import server as _server
+
+    _server.refresh_configured_printers()
 
 
 def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
@@ -722,6 +775,14 @@ class BridgeClient:
         #: The fault frame last sent on THIS connection (``None``: none), so
         #: a cleared fault is announced only where a fault was announced.
         self._fault_sent: dict[str, str] | None = None
+        #: True once this client has loaded this computer's own printers
+        #: (the default tool caller's build); a caller handed in from
+        #: outside brings its own printers and is never refreshed.
+        self._reads_saved_printers = False
+        #: The saved-printers file as it looked when the registry was last
+        #: filled from it, so the file is read again only when it changes.
+        self._saved_stamp: tuple[int, int] | None = None
+        self._saved_lock = threading.Lock()
 
     def _ensure_tool_caller(self) -> ToolCaller | None:
         """The tool caller, built on first use and shared by every caller after.
@@ -737,7 +798,12 @@ class BridgeClient:
         with self._tools_lock:
             if self._call_tool is None and self._tools_error is None:
                 try:
+                    # Stamped before the build reads the file, so a printer
+                    # saved while the tools load is picked up by the next look.
+                    stamp = _saved_printers_stamp()
                     self._call_tool = _default_tool_caller()
+                    self._saved_stamp = stamp
+                    self._reads_saved_printers = True
                 except Exception as exc:  # noqa: BLE001 -- a broken install must not kill the socket
                     self._tools_error = exc
                     logger.warning(
@@ -940,6 +1006,41 @@ class BridgeClient:
             logger.debug("bridge: printer registry unreadable", exc_info=True)
             return None
 
+    def _sync_saved_printers(self) -> None:
+        """Bring the registry up to date with the printers saved on this
+        computer, when the saved file has changed since it was last read.
+
+        A printer saved by another program while this bridge is running (a
+        setup command, the person's own agent) joins the list this computer
+        announces, with no restart.  Costs one look at the file's stamp when
+        nothing changed.  Does nothing until the tools have loaded, so the
+        list is never read while it is empty for the wrong reason; nothing
+        is ever removed, so a file caught half-written cannot shrink the
+        list.  Runs on a worker thread and never raises.
+        """
+        if not getattr(self, "_reads_saved_printers", False):
+            return
+        stamp = _saved_printers_stamp()
+        with self._saved_lock:
+            if stamp == self._saved_stamp:
+                return
+            try:
+                _load_saved_printers()
+            except Exception:  # noqa: BLE001 -- the next look tries again
+                logger.debug("bridge: saved printers could not be read", exc_info=True)
+                return
+            self._saved_stamp = stamp
+
+    async def _watch_saved_printers(self, ws) -> None:
+        """While this connection lives, notice a change to the printers saved
+        on this computer and announce it, without waiting for a relayed call.
+        The look runs on a worker thread, never on the receive loop."""
+        while getattr(self, "_ws", None) is ws:
+            await asyncio.sleep(SAVED_PRINTERS_CHECK_S)
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(self._sync_saved_printers)
+                await self._announce_if_changed(ws)
+
     async def _announce(self, ws, printers: tuple[str, ...]) -> None:
         """Tell the relay which printers are here.  Best-effort: a frame that
         cannot be sent leaves the relay routing this computer as it was."""
@@ -960,7 +1061,8 @@ class BridgeClient:
 
     async def _announce_if_changed(self, ws) -> None:
         """The registry-change hook: after a relayed call (which may have
-        added or removed a printer), announce again only if the list moved.
+        added or removed a printer) and after each look at the saved
+        printers, announce again only if the list moved.
         Nothing is sent before this connection's first announce has gone
         out -- that one waits for the tools, and must not be pre-empted by a
         list read while they are still loading."""
@@ -1022,6 +1124,10 @@ class BridgeClient:
 
             def call_tool(name: str, args: dict) -> Any:  # noqa: ARG001
                 raise RuntimeError(message)
+
+        # A printer saved since this bridge started is known before the call
+        # runs, so a call naming it is answered about that printer.
+        self._sync_saved_printers()
 
         # The download a call makes is removed when the call is over: the
         # print has its own copy by then, and nothing piles up on this disk.
@@ -1116,6 +1222,9 @@ class BridgeClient:
                     # the relay routes a call for one of them to this
                     # computer and not to another on the same account.
                     announce = asyncio.create_task(self._announce_when_ready(ws))
+                    # And any printer saved later, for as long as this
+                    # connection lives.
+                    watch = asyncio.create_task(self._watch_saved_printers(ws))
                     backoff = 1.0
                     refusals = 0
                     probed = False
@@ -1132,6 +1241,7 @@ class BridgeClient:
                     finally:
                         self._ws = None
                         announce.cancel()
+                        watch.cancel()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1481,6 +1591,11 @@ class AskCard:
     printer_state: str = ""
     #: The hosted stage's link for the print file's own bytes.
     stage_url: str = ""
+    #: The checked facts of what the print itself is
+    #: (:func:`kiln.print_consent.what_the_print_states`): the account's
+    #: server says each row from them in the words every door uses, and
+    #: never takes a row's text from the ask.
+    facts: Mapping[str, Any] | None = None
 
     def fields(self) -> dict[str, Any]:
         """The fields to send: each one present only when it holds a value
@@ -1511,6 +1626,22 @@ class AskCard:
         url = self.stage_url if isinstance(self.stage_url, str) else ""
         if url.startswith(("https://", "http://")) and not any(c.isspace() for c in url):
             out["stage_url"] = url
+        facts = self.facts if isinstance(self.facts, Mapping) else {}
+        # Each owner's word is always sent, with its facts when they check
+        # and its plain facts when they do not: the word holds the print on
+        # the card too.  Colours only when its facts check.
+        from kiln.experimental_print import word_facts
+        from kiln.maker_slicer_notes import colours_row
+
+        words = facts.get("owner_words")
+        if isinstance(words, Mapping):
+            sent = {word: word_facts(word, said) for word, said in words.items()}
+            sent = {word: said for word, said in sent.items() if said is not None}
+            if sent:
+                out["owner_words"] = sent
+        colours = facts.get("colours")
+        if isinstance(colours, Mapping) and colours_row(colours):
+            out["colours"] = dict(colours)
         return out
 
 

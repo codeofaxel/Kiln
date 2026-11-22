@@ -21,7 +21,12 @@ note deleted here goes up as a delete), and what the row holds of
 sliced with, how far the print got (a share and a layer number), the spool
 as a one-way code (:func:`kiln.outbound_guard.spool_code`) and the firmware
 version, only when it is a bare version
-(:func:`kiln.outbound_guard.version_text`).  No printer name, serial, address, file name, settings, spool
+(:func:`kiln.outbound_guard.version_text`); when the owner said to print
+an abrasive filament through a nozzle that is not wear-resistant, that word:
+the filaments' type words and each nozzle's position and material
+(:func:`kiln.print_lineage.soft_nozzle_of`); and, for a print that was an
+experiment (:mod:`kiln.experimental_print`), the word for which one and the
+nozzle sizes it used.  No printer name, serial, address, file name, settings, spool
 id, spool name or colour; a system string in ``notes`` with no label (a
 hook's "auto-recorded ...") stays here.
 
@@ -58,6 +63,8 @@ TOOL = "outcome_courier"
 #: This module's name in :data:`kiln.outbound_guard.VERSION_FIELDS`.
 SENDER = "kiln/outcome_courier.py"
 PUSH_PATH = "/api/cloud/outcomes/push"
+#: Where a forgotten print is forgotten on the account too.
+FORGET_PATH = "/api/cloud/outcomes/forget"
 SWITCH_ENV = "KILN_OUTCOME_COURIER"
 TEST_OPT_IN_ENV = "KILN_OUTCOME_COURIER_IN_TESTS"
 #: The most rows one push carries, matching what the server takes.
@@ -124,6 +131,9 @@ def _push_quietly(wait: float = _WAIT_S) -> None:
     global _timer
     _pushing.set()
     try:
+        # A forgotten print is forgotten on the account whatever the
+        # account's choice: forgetting is always the person's to ask.
+        forget_owed(wait=wait)
         push_owed(wait=wait)
     except Exception:  # noqa: BLE001 -- the next ending tries again
         logger.debug("outcome courier push failed", exc_info=True)
@@ -217,11 +227,53 @@ def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     firmware = wire_firmware(row.get("firmware_version"))
     if firmware:
         out["firmware"] = firmware
+    soft = _soft_nozzle_word(row.get("lineage_id"))
+    if soft:
+        out["soft_nozzle"] = soft
+    from kiln.experimental_print import read_recorded
+
+    experiment = read_recorded(row.get("experiment"))
+    if experiment:
+        out["experiment"], out["nozzle_sizes"] = experiment[0], list(experiment[1])
     for key, src in (("started_at", "created_at"), ("ended_at", "ended_at")):
         when = row.get(src)
         if isinstance(when, (int, float)) and not isinstance(when, bool) and when > 0:
             out[key] = float(when)
     return out
+
+
+_RUN_WORD = re.compile(r"^[A-Za-z0-9 +._-]{1,40}$")
+_NOZZLE_WORD = re.compile(r"^[a-z_]{1,40}$")
+
+
+def _soft_nozzle_word(lineage_id: Any) -> dict[str, Any] | None:
+    """The owner's word to print an abrasive filament through a nozzle that
+    is not wear-resistant, as the account keeps it: ``{"confirmed_by":
+    "owner", "filaments": [type words], "nozzles": [{"position", "material"}]}``,
+    each in its own shape, or ``None``."""
+    from kiln.print_lineage import soft_nozzle_of
+
+    kept = soft_nozzle_of(lineage_id if isinstance(lineage_id, str) else None)
+    if not kept or kept.get("confirmed_by") != "owner":
+        return None
+    words = [
+        str(f.get("material") or "").strip() for f in kept.get("filaments") or () if isinstance(f, dict)
+    ]
+    words = list(dict.fromkeys(w for w in words if _RUN_WORD.match(w)))[:5]
+    nozzles = []
+    for n in kept.get("nozzles") or ():
+        if not isinstance(n, dict):
+            continue
+        position = n.get("position")
+        material = str(n.get("material") or "").strip().lower()
+        if position is not None and (isinstance(position, bool) or not isinstance(position, int) or not 1 <= position <= 16):
+            continue
+        if not _NOZZLE_WORD.match(material):
+            continue
+        nozzles.append({"position": position, "material": material})
+    if not words or not nozzles:
+        return None
+    return {"confirmed_by": "owner", "filaments": words, "nozzles": nozzles[:16]}
 
 
 def _note_part(state: str | None) -> str:
@@ -288,6 +340,32 @@ def _kept_here(rows: list[dict[str, Any]]) -> set[int]:
         vault.close()
 
 
+def forget_owed(*, db: Any = None, wait: float = _WAIT_S) -> dict[str, Any]:
+    """Ask the account to forget the prints forgotten on this computer:
+    their account ids (random, minted here) and the designs whose every
+    print was forgotten.  Kept owed until the account takes them; never
+    raises for the network."""
+    from kiln.auth_session import resolve_api_bearer
+
+    if not resolve_api_bearer().token:
+        return {"forgotten": 0, "why": "signed_out"}
+    if db is None:
+        from kiln.persistence import get_db
+
+        db = get_db()
+    owed = db.forget_owed()
+    if not owed["ids"] and not owed["designs"]:
+        return {"forgotten": 0, "why": "nothing_owed"}
+    from kiln.history_courier import _request
+
+    answer = _request(TOOL, "POST", FORGET_PATH, {"ids": owed["ids"], "design_ids": owed["designs"]},
+                      timeout=wait)
+    if answer.get("success") is False or answer.get("status") == "error":
+        return {"forgotten": 0, "why": "not_taken", "code": answer.get("code")}
+    db.forget_taken(owed["ids"], owed["designs"])
+    return {"forgotten": int(answer.get("forgotten") or 0)}
+
+
 def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -> dict[str, Any]:
     """Send every settled row the account has not taken yet.  Returns what
     happened, in words a caller can show; never raises for the network.
@@ -296,6 +374,13 @@ def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -
 
     if not resolve_api_bearer().token:
         return {"sent": 0, "why": "signed_out"}
+    from kiln import print_keeping
+
+    # This computer only: nothing goes up, and an unread choice sends nothing
+    # until it is read (kiln.print_keeping).
+    choice = print_keeping.refresh_account_choice()
+    if choice != print_keeping.ACCOUNT:
+        return {"sent": 0, "why": "kept_on_this_computer" if choice else "choice_unread"}
     if db is None:
         from kiln.persistence import get_db
 

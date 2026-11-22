@@ -5,8 +5,19 @@ for one line, a round pin and a speck too short to lay a line along stop the
 print; a flat sheet thinner than a layer is a warning; anything else prints
 as one thin line or layer and is named as fragile.  A crack narrower than the
 slicer closes is read through, and named in a note.
+
+Where a wall is too narrow for a line and a pin too thin to print are Kiln's
+own figures, asked of Kiln's servers (``kiln.material_limits.sliced_floors``).
+The server is stood in here with figures of its own (``WALL_LINE``,
+``PIN_LINE``), so these tests pin that the check stops at the figures it is
+served, whatever they are.  Without them nothing is a stop: what the same
+reading finds against the general minimum wall is a warning that it may be
+left out, with one line saying why and how to get Kiln's exact check.
 """
 from __future__ import annotations
+
+import errno
+import sys
 
 import numpy as np
 import pytest
@@ -17,18 +28,84 @@ pytest.importorskip("manifold3d")  # trimesh's boolean backend builds the parts
 from kiln import printability as P  # noqa: E402
 
 NOZZLE = 0.4
-#: The narrowest wall Kiln's slice lays a line on with this nozzle.
-LINE = P._WALL_DROP_SLOPE * NOZZLE + P._WALL_DROP_OFFSET_MM
+#: The stand-in server's narrowest wall the slice lays a line on, and its
+#: thinnest round pin, at this nozzle.  Figures of this file's own.
+WALL_LINE = 0.17
+PIN_LINE = 0.7
+LINE = WALL_LINE
+#: The general minimum wall at this nozzle (kiln.generic_limits).
+GENERAL = 0.8
+
+
+def _forget() -> None:
+    from kiln import _pro_material_limits_bridge as bridge
+    from kiln import material_limits as helper
+
+    helper._answers.clear()
+    helper._said.clear()
+    bridge._service_down_until, bridge._service_down_miss = 0.0, None
+
+
+def _lines(nozzle_mm: float) -> dict:
+    return {
+        "success": True,
+        "status": "ok",
+        "known": False,
+        "material_id": None,
+        "scenario": {"nozzle_mm": nozzle_mm},
+        "limits": {
+            "sliced_wall_min_mm": {"value": WALL_LINE, "unit": "mm", "basis": "general"},
+            "sliced_pin_min_mm": {"value": PIN_LINE, "unit": "mm", "basis": "general"},
+        },
+        "note": "",
+    }
 
 
 @pytest.fixture(autouse=True)
 def public_floor(monkeypatch):
     """Public Kiln's own floor answers: every ``kiln_pro`` import fails."""
-    import sys
-
     for name in [n for n in sys.modules if n == "kiln_pro" or n.startswith("kiln_pro.")]:
         monkeypatch.setitem(sys.modules, name, None)
     monkeypatch.setitem(sys.modules, "kiln_pro", None)
+    _forget()
+    yield
+    _forget()
+
+
+@pytest.fixture(autouse=True)
+def asked(monkeypatch):
+    """What the stand-in server is asked; it answers with this file's lines.
+    A test that asks for ``signed_out`` or ``offline`` replaces it."""
+    import kiln.server as srv
+
+    calls: list[tuple[str, dict]] = []
+
+    def serve(tool_name, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
+        calls.append((tool_name, {"_asked_by_user": _asked_by_user, **kwargs}))
+        return _lines(kwargs.get("nozzle_mm", NOZZLE))
+
+    monkeypatch.setattr(srv, "_pro_api_call", serve)
+    return calls
+
+
+@pytest.fixture
+def signed_out(monkeypatch):
+    import kiln.server as srv
+
+    def refuse(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+        return {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "not signed in", "why": "signed_out"}
+
+    monkeypatch.setattr(srv, "_pro_api_call", refuse)
+
+
+@pytest.fixture
+def offline(monkeypatch):
+    import kiln.server as srv
+
+    def unreachable(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+        raise OSError(errno.ENETUNREACH, "Network is unreachable")
+
+    monkeypatch.setattr(srv, "_pro_api_call", unreachable)
 
 
 def _union(*parts):
@@ -109,9 +186,10 @@ class TestWhatTheSlicerPrintsIsNotAStop:
         assert "Bambu Studio" in said and "Arachne" in said
 
     def test_a_wall_just_past_the_line_prints(self):
-        walls = _walls(_on_a_plate(_wall(round(LINE + 0.02, 2))))
+        walls = _walls(_on_a_plate(_wall(round(LINE + 0.03, 2))))
         assert walls.dropped_regions == []
         assert walls.thin_line_count > 0
+        assert walls.slicer_check == "exact" and walls.may_be_left_out_count == 0
 
     def test_a_thin_bar_joining_two_blocks_prints_as_one_layer(self):
         walls = _walls(_between_two_blocks(_box((4.9, 2.0, 2.35), (8.1, 3.0, 2.65))))
@@ -154,20 +232,20 @@ class TestWhatTheSlicerDropsStillStops:
         assert found and "Kiln's slicer drops it" in found[0]
         assert {r["why"] for r in report.thin_walls.dropped_regions} == {"wall"}
 
-    def test_a_long_pin_thinner_than_two_nozzles_stops(self, tmp_path):
+    def test_a_long_pin_thinner_than_the_pin_line_stops(self, tmp_path):
         """An antenna, a whisker, a long peg: past the nozzle, and still lost."""
         report = _report(tmp_path, "pin", _on_a_plate(_pin(0.6, 8.0)))
         found = P.stops(report)
         assert found and found[0].startswith("A pin 0.5") and "mm across" in found[0], found
-        assert "needs at least 0.8 mm" in found[0] and "smaller nozzle" in found[0]
+        assert f"Thicken it to at least {GENERAL:g} mm" in found[0] and "smaller nozzle" in found[0]
         assert {r["why"] for r in report.thin_walls.dropped_regions} == {"pin"}
 
     def test_a_free_standing_needle_stops_as_a_pin(self):
         walls = _walls(_on_a_plate(_pin(0.3, 6.5)))
         assert {r["why"] for r in walls.dropped_regions} == {"pin"}
 
-    def test_a_pin_twice_the_nozzle_across_prints(self):
-        walls = _walls(_on_a_plate(_pin(2 * NOZZLE + 0.05, 8.0)))
+    def test_a_pin_wider_than_the_pin_line_prints(self):
+        walls = _walls(_on_a_plate(_pin(PIN_LINE + 0.15, 8.0)))
         assert walls.dropped_regions == []
 
     def test_a_speck_too_short_for_a_line_stops(self):
@@ -191,11 +269,12 @@ class TestWhatTheSlicerDropsStillStops:
             return np.full(len(o), np.inf), np.full(len(o), np.inf)
 
         at, along, comps = np.zeros((1, 3)), np.array([[1.0, 0.0, 0.0]]), np.zeros(1, dtype=int)
-        thin = P._slice_fate(at, along, np.array([0.3]), comps, refused, nozzle=NOZZLE, layer_height=0.2)
+        lines = {"wall_line": LINE, "pin_line": PIN_LINE}
+        thin = P._slice_fate(at, along, np.array([0.3]), comps, refused, nozzle=NOZZLE, layer_height=0.2, **lines)
         assert thin.tolist() == [P._FATE_UNREAD] and P._FATE_UNREAD in P._FATE_DROPS
         # Past the nozzle nothing stopped before, and a read never taken stops nothing now.
         past = P._slice_fate(
-            at, along, np.array([0.6]), comps, refused, nozzle=NOZZLE, layer_height=0.2, pins_only=True,
+            at, along, np.array([0.6]), comps, refused, nozzle=NOZZLE, layer_height=0.2, pins_only=True, **lines,
         )
         assert past.tolist() == [P._FATE_PRINTS]
 
@@ -318,3 +397,96 @@ class TestAShortPieceSaysHowToFixIt:
         stop's presence (fails at 8f220df6)."""
         said = P._dropped_sentence({"thickness_mm": 0.3, "why": "island"}, NOZZLE)
         assert "Make it longer" in said and "0.30 mm thick" in said, said
+
+    @pytest.mark.parametrize("why", ["wall", "pin", "island"])
+    def test_every_stop_names_the_general_minimum_wall_as_enough(self, why):
+        """The fix a stop names is a figure every install already has, the
+        general minimum wall, never the line the slice drops at."""
+        for nozzle, enough in ((0.2, 0.8), (0.4, 0.8), (0.6, 1.2)):
+            said = P._dropped_sentence({"thickness_mm": 0.05, "why": why}, nozzle)
+            assert f"at least {enough:g} mm" in said, said
+
+
+# --- Kiln's own figures: asked of Kiln's servers ---
+
+
+class TestKilnsOwnFiguresAreAsked:
+    def test_the_ask_names_the_nozzle_and_no_plastic(self, asked, tmp_path):
+        _report(tmp_path, "wall", _on_a_plate(_wall(0.3)))
+        sliced = [sent for tool, sent in asked if tool == "material_limits" and "quantities" in sent]
+        assert sliced == [{
+            "_asked_by_user": False,
+            "nozzle_mm": NOZZLE,
+            "quantities": ["sliced_wall_min_mm", "sliced_pin_min_mm"],
+        }]
+
+    def test_a_session_asks_once_per_nozzle(self, asked):
+        for _ in range(3):
+            _walls(_on_a_plate(_wall(0.3)))
+        assert len([sent for _tool, sent in asked if "quantities" in sent]) == 1
+
+    def test_an_answer_without_both_figures_is_no_answer(self, monkeypatch):
+        import kiln.server as srv
+        from kiln.material_limits import sliced_floors
+
+        half = _lines(NOZZLE)
+        del half["limits"]["sliced_pin_min_mm"]
+        monkeypatch.setattr(srv, "_pro_api_call", lambda *_a, **_k: half)
+        floors = sliced_floors(nozzle_mm=NOZZLE)
+        assert floors.exact is False and floors.miss is not None
+        assert (floors.wall_mm, floors.pin_mm) == (GENERAL, GENERAL)
+
+
+# --- without Kiln's own figures: a warning, never a stop ---
+
+
+def _why(report) -> list[str]:
+    return [r for r in report.recommendations if "Kiln's exact check" in r]
+
+
+class TestWithoutKilnsOwnFigures:
+    """Signed out or offline, Kiln's own figures are not read: nothing the
+    slice may leave out stops the print.  What the same reading finds against
+    the general minimum wall is one warning, and one line says why and how
+    to get Kiln's exact check."""
+
+    def test_a_wall_too_narrow_for_a_line_is_a_warning_when_signed_out(self, signed_out, tmp_path):
+        report = _report(tmp_path, "narrow", _on_a_plate(_wall(0.13)))
+        walls = report.thin_walls
+        assert P.stops(report) == [] and walls.dropped_regions == []
+        assert walls.slicer_check == "general" and walls.general_wall_mm == GENERAL
+        assert walls.may_be_left_out_count > 0 and {r["why"] for r in walls.may_be_left_out_regions} == {"wall"}
+        warned = [r for r in report.recommendations if r.startswith("A wall or pin as thin as")]
+        assert len(warned) == 1 and "may be left out when sliced" in warned[0]
+        assert f"at least {GENERAL:g} mm" in warned[0]
+        why = _why(report)
+        assert len(why) == 1 and "Kiln is signed out" in why[0] and "Sign in" in why[0]
+
+    def test_a_long_pin_is_a_warning_when_offline(self, offline, tmp_path):
+        report = _report(tmp_path, "pin", _on_a_plate(_pin(0.6, 8.0)))
+        walls = report.thin_walls
+        assert P.stops(report) == [] and walls.dropped_regions == []
+        assert {r["why"] for r in walls.may_be_left_out_regions} == {"pin"}
+        why = _why(report)
+        assert len(why) == 1 and "offline" in why[0]
+
+    def test_the_general_figure_warns_about_a_pin_kilns_own_would_print(self, signed_out):
+        """Between Kiln's own pin line and the general minimum wall, the
+        general check warns where Kiln's own would let it through."""
+        walls = _walls(_on_a_plate(_pin(0.75, 8.0)))
+        assert walls.dropped_regions == [] and walls.may_be_left_out_count > 0
+
+    def test_a_wall_at_least_a_nozzle_wide_is_not_said_to_be_left_out(self, signed_out):
+        """A wall at least a nozzle wide always gets a line; the general check
+        says nothing new about it."""
+        walls = _walls(_on_a_plate(_wall(0.6)))
+        assert walls.may_be_left_out_count == 0 and walls.dropped_regions == []
+
+    def test_a_part_with_nothing_thin_says_nothing(self, signed_out, tmp_path):
+        report = _report(tmp_path, "block", _box((0, 0, 0), (10, 10, 5)))
+        assert report.thin_walls.may_be_left_out_count == 0
+        assert _why(report) == []
+
+    def test_the_verdict_is_not_wont_print(self, signed_out, tmp_path):
+        report = _report(tmp_path, "narrow", _on_a_plate(_wall(0.13)))
+        assert P.verdict(report)[0] != "wont_print"

@@ -290,6 +290,45 @@ class TestArrangeThenComposeDoors:
         assert recorder.kwargs is not None, "the door never reached the composer"
         assert recorder.kwargs.get("printer_id") == "bambu_a1_mini"
 
+    def test_a_plate_for_a_printer_named_by_name_is_laid_out_on_its_bed(self, monkeypatch):
+        """Named by the machine alone, the plate is arranged and composed for
+        that machine's model -- the one the slice is made for -- never the
+        256 default."""
+        import json
+
+        from kiln import server
+        from kiln import multicolor_3mf
+
+        monkeypatch.setattr(
+            server, "_resolve_target_printer_model",
+            lambda name=None, *a, **k: "bambu_a1_mini" if name == "shop_a1" else None,
+        )
+        arranged: list = []
+        real_arrange = multicolor_3mf.auto_arrange_parts
+
+        def arrange(parts, *args, **kwargs):
+            arranged.append(kwargs.get("printer_id"))
+            return real_arrange(parts, *args, **kwargs)
+
+        stl = _write_stl(_off_plate_box())
+        recorder = _RecordingComposer()
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth), \
+                    patch("kiln.multicolor_3mf.auto_arrange_parts", arrange), \
+                    patch("kiln.multicolor_3mf.compose_multicolor_3mf", recorder):
+                server.multi_material_print(
+                    objects_json=json.dumps([
+                        {"file_path": stl, "material_id": "pla"},
+                        {"file_path": stl, "material_id": "pla"},
+                    ]),
+                    printer_name="shop_a1",
+                )
+        finally:
+            os.unlink(stl)
+        assert arranged and arranged[0] == "bambu_a1_mini"
+        assert recorder.kwargs is not None, "the door never reached the composer"
+        assert recorder.kwargs.get("printer_id") == "bambu_a1_mini"
+
 
 class TestComposeSaysWhetherColoursAreLoaded:
     """compose_multicolor_3mf chooses part colours, so it carries the advisory."""

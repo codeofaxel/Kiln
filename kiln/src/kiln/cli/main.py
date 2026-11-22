@@ -192,16 +192,24 @@ def _resolve_material_for_slice_with_source(
     return inferred, False, source, determined_by
 
 
-def _support_statement(support_mode: str | None, material: str | None = None) -> dict[str, str] | None:
+def _support_statement(
+    support_mode: str | None,
+    material: str | None = None,
+    *,
+    profile: str | None = None,
+    printer_id: str | None = None,
+) -> dict[str, str] | None:
     """The support keys a ``--support-mode`` STATES for the slice.
 
     ``off``, ``minimal`` (build-plate only) and ``aggressive`` (everywhere)
     are the caller speaking, written into the profile as stated keys so
     the slice keeps them; both support the faces Kiln's own verdict counts
-    as overhangs for *material* (``kiln.printability.overhang_threshold_deg``).
-    ``auto`` (the default) states nothing: the slice reads the part and
-    decides at the one place every slicing door shares
-    (:mod:`kiln.slicer_supports`), and the result says what it did.
+    as overhangs for *material* at the slice's own layer height and nozzle
+    (``kiln.printability.overhang_threshold_deg``): the caller's *profile*,
+    else the one Kiln slices *printer_id* with.  ``auto`` (the default)
+    states nothing: the slice reads the part and decides at the one place
+    every slicing door shares (:mod:`kiln.slicer_supports`), and the result
+    says what it did.
     """
     from kiln.printability import overhang_threshold_deg
     from kiln.slicer_supports import SUPPORT_KEY, support_settings
@@ -209,11 +217,29 @@ def _support_statement(support_mode: str | None, material: str | None = None) ->
     mode = (support_mode or "auto").strip().lower()
     if mode == "off":
         return {SUPPORT_KEY: "0"}
-    if mode == "minimal":
-        return support_settings(overhang_threshold_deg(material), build_plate_only=True)
-    if mode == "aggressive":
-        return support_settings(overhang_threshold_deg(material), build_plate_only=False)
-    return None
+    if mode not in ("minimal", "aggressive"):
+        return None
+    layer_height, nozzle = _slice_layer_and_nozzle(profile, printer_id)
+    threshold = overhang_threshold_deg(material, nozzle_mm=nozzle, layer_height_mm=layer_height)
+    return support_settings(threshold, build_plate_only=mode == "minimal")
+
+
+def _slice_layer_and_nozzle(profile: str | None, printer_id: str | None) -> tuple[float | None, float | None]:
+    """``(layer height, nozzle)`` of the slice a support mode is written
+    into: the caller's *profile*, else the profile Kiln slices *printer_id*
+    with; ``(None, None)`` when neither can be read."""
+    from kiln.slicer_supports import _first_number
+
+    try:
+        from kiln.slicer_orca import ini_to_settings
+        from kiln.slicer_profiles import resolve_slicer_profile
+
+        path = profile or (resolve_slicer_profile(printer_id) if printer_id else None)
+        settings = ini_to_settings(path) if path else {}
+    except Exception:  # noqa: BLE001 -- an unread profile is judged at the stated figure
+        logger.debug("support mode: the slice's layer and nozzle were not read", exc_info=True)
+        return None, None
+    return _first_number(settings.get("layer_height")), _first_number(settings.get("nozzle_diameter"))
 
 
 def _supports_said(plan: dict[str, Any], result: Any) -> tuple[str | None, str | None]:
@@ -312,7 +338,9 @@ def _resolve_slice_plan(
     (
         material_key, material_is_explicit, material_source, loaded_determined_by,
     ) = _resolve_material_for_slice_with_source(ctx, material)
-    statement = _support_statement(support_mode, material_key)
+    statement = _support_statement(
+        support_mode, material_key, profile=effective_profile, printer_id=effective_printer_id,
+    )
 
     # The material's temperatures, melt rate and cooling are not set here:
     # the slice writes them from the material it is told (below), the same
@@ -380,6 +408,18 @@ def _cli_print_gate(
         click.echo(format_error(f"{gate.reason}{hint}", code=gate.code, json_mode=json_mode))
         sys.exit(1)
     return gate.path
+
+
+def _said_at_the_terminal(exc: Exception) -> str:
+    """A slicing refusal with its asks spelled as this terminal's flags
+    (:func:`kiln.slicer.said_for`)."""
+    from kiln.slicer import said_for
+
+    return said_for(
+        str(exc), confirm="run it again with --soft-nozzle-confirmed",
+        map_with="run it again with a --filament-map that puts",
+        experiment="run it again with --mixed-nozzle-experiment",
+    )
 
 
 def _cli_placed_slice(
@@ -825,13 +865,18 @@ def cli_gate(
     refusal = block.get("error") if isinstance(block.get("error"), dict) else {}
     code = str(refusal.get("code") or CODE_NOT_CONFIRMED)
     message = str(refusal.get("message") or block)
-    if code in (CODE_NOT_CONFIRMED, "ALWAYS_ALLOW_LOOK_FIRST"):
+    from kiln.experimental_print import NEEDS_A_YES_CODES
+
+    if code in (CODE_NOT_CONFIRMED, "ALWAYS_ALLOW_LOOK_FIRST", *NEEDS_A_YES_CODES):
         # A person typing at their own terminal can be shown the print
         # (or, with a token, reminded what is on record) and asked.
         # Nobody at the terminal gets the refusal below.  See
         # kiln.cli.print_gate.  The same when always allow is on and the
         # bed has not been looked at: the person starting this print is
-        # here to ask, which is better than a frame for them to judge.
+        # here to ask, which is better than a frame for them to judge.  And
+        # an experimental print, or one the owner said to print anyway,
+        # which a window never starts: the person typing the command is
+        # here to say yes to this one.
         from kiln.cli.print_gate import confirm_print_at_terminal
 
         if confirm_print_at_terminal(
@@ -2085,6 +2130,154 @@ def sharing_off() -> None:
         click.echo(f"  {line}")
 
 
+@sharing.command(name="history")
+@click.argument("where", type=click.Choice(["account", "computer"]), required=False)
+def sharing_history(where: str | None) -> None:
+    """Where your print history is kept: in your Kiln account, or on this computer only."""
+    from kiln import print_keeping
+
+    said = print_keeping.SAID_AT_THIS_COMPUTER
+    if where is None:
+        read = print_keeping.refresh_account_choice(fresh=True)
+        click.echo(said[read or print_keeping.account_choice()])
+        if read is None:
+            click.echo(f"  {print_keeping.LAST_SEEN}")
+        return
+    answer = print_keeping.set_account_choice(where)
+    if answer.get("status") == "error":
+        click.echo(f"Nothing was changed: {answer.get('error')}", err=True)
+        raise SystemExit(1)
+    click.echo(said[where])
+
+
+@sharing.group(name="team-printers")
+def sharing_team_printers() -> None:
+    """Your team's printers: prints of the team's designs on them are kept when its owner says so."""
+
+
+def _team_printer_refusal(answer: dict[str, Any]) -> None:
+    said = answer.get("detail") if isinstance(answer.get("detail"), str) else answer.get("error")
+    click.echo(f"Nothing was changed: {said}", err=True)
+    raise SystemExit(1)
+
+
+def _saved_printer(ctx: click.Context, printer: str | None) -> tuple[Any, str | None]:
+    """The saved printer *printer* (or ``--printer``, or the active one)
+    names, as an adapter, with the name it is saved under here."""
+    from kiln.cli.config import _read_config_file, get_config_path
+    from kiln.registry import resolve_saved_printer_mention
+
+    aimed = printer or ((ctx.obj or {}).get("printer") if ctx else None)
+    try:
+        cfg = load_printer_config(aimed)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    name = None
+    if not os.environ.get("KILN_PRINTER_HOST"):
+        raw = _read_config_file(get_config_path()) or {}
+        saved = raw.get("printers") if isinstance(raw.get("printers"), dict) else {}
+        if aimed:
+            name = aimed if aimed in saved else (resolve_saved_printer_mention(aimed, saved) or aimed)
+        else:
+            name = raw.get("active_printer") or (next(iter(saved)) if len(saved) == 1 else None)
+    return _make_adapter(cfg), name
+
+
+@sharing_team_printers.command(name="list")
+@click.option("--team", default=None, help="The team, by name, when you are on more than one.")
+def sharing_team_printers_list(team: str | None) -> None:
+    """Show the printers on your teams' lists, and which of them are set up here."""
+    from kiln import print_keeping
+
+    answer = print_keeping.team_printer_listing(team)
+    if answer.get("status") == "error":
+        _team_printer_refusal(answer)
+    for found in answer["teams"]:
+        rule = "keeps its prints on them" if found["required"] else "doesn't require its prints kept"
+        click.echo(f"{found['name'] or found['org_id']} ({rule}):")
+        if not found["printers"]:
+            click.echo("  No printers yet. Add one from the computer it's set up on: "
+                       "kiln sharing team-printers add <printer>")
+        for p in found["printers"]:
+            called = p["label"] or p["model"] or p["id"]
+            extra = [p["model"]] if p["model"] and p["model"] != called else []
+            if p["known_by"] == "address":
+                extra.append("known by its address")
+            if p.get("here"):
+                extra.append(f"set up here as {p['here']}")
+            click.echo(f"  {called}" + (f" ({'; '.join(extra)})" if extra else "") + f"  [{p['id']}]")
+
+
+@sharing_team_printers.command(name="add")
+@click.argument("printer", required=False)
+@click.option("--team", default=None, help="The team, by name, when you are on more than one.")
+@click.option("--label", default=None, help="The name the team sees, instead of the printer's name here.")
+@click.pass_context
+def sharing_team_printers_add(ctx: click.Context, printer: str | None, team: str | None, label: str | None) -> None:
+    """Put a printer set up on this computer on your team's list. Any member of the team can."""
+    from kiln import print_keeping
+
+    adapter, name = _saved_printer(ctx, printer)
+    answer = print_keeping.add_team_printer(adapter, name, team=team, label=label)
+    if answer.get("status") == "error":
+        _team_printer_refusal(answer)
+    click.echo(answer["summary"])
+
+
+@sharing_team_printers.command(name="remove")
+@click.argument("which")
+@click.option("--team", default=None, help="The team, by name, when you are on more than one.")
+def sharing_team_printers_remove(which: str, team: str | None) -> None:
+    """Take a printer off your team's list, by the name it shows or its id. The team's owner only."""
+    from kiln import print_keeping
+
+    answer = print_keeping.remove_team_printer(which, team=team)
+    if answer.get("status") == "error":
+        _team_printer_refusal(answer)
+    click.echo(answer["summary"])
+
+
+@sharing.group(name="routines")
+def sharing_routines() -> None:
+    """Share your printer's own routines from your print files (off until you say yes)."""
+
+
+@sharing_routines.command(name="on")
+def sharing_routines_on() -> None:
+    """Share your printer's own routines from your print files (asks you to confirm)."""
+    from kiln.sharing_consent import record_routines_answer
+    from kiln.sharing_nudge import ROUTINES_SHARE, routines_question
+    from kiln.sliced_routines import kept_printer_name
+
+    # The person's consent, so it is confirmed at a terminal they are sitting
+    # at; a program running Kiln has no one to confirm and is refused.
+    if not _sharing_confirmable():
+        click.echo(
+            "Sharing your printer's routines needs you to confirm, so run this yourself in a "
+            "terminal.  Nothing was changed.",
+            err=True,
+        )
+        raise SystemExit(1)
+    question = routines_question(kept_printer_name() or "printer")
+    click.echo(question["title"])
+    click.echo(question["body"])
+    click.echo(question["privacy"])
+    if not click.confirm(ROUTINES_SHARE + "?", default=False):
+        click.echo("Left as it was.")
+        return
+    record_routines_answer(True, via="cli-confirmed")
+    click.echo("Your printer's routines will be shared. Thank you.")
+
+
+@sharing_routines.command(name="off")
+def sharing_routines_off() -> None:
+    """Never share your printer's routines."""
+    from kiln.sharing_consent import record_routines_answer
+
+    record_routines_answer(False, via="cli")
+    click.echo("Your printer's routines stay on this computer, and Kiln won't ask again.")
+
+
 @sharing.command(name="status")
 def sharing_status() -> None:
     """Show what this install shares, and why."""
@@ -2422,6 +2615,11 @@ def auth(
             data["diagnostics"] = creality_diagnostics
         if camera_handshake is not None:
             data["camera_check"] = {**camera_handshake.to_dict(), "line": camera_line}
+        from kiln.maker_slicer_notes import setup_line as _nozzles_setup_line
+
+        nozzles_line = _nozzles_setup_line(printer_model or (prusa_diagnostics or {}).get("profile_id"))
+        if nozzles_line:
+            data["two_nozzles"] = nozzles_line
 
         if printer_type == "prusalink" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
             checks = prusa_diagnostics.get("checks", [])
@@ -2476,6 +2674,8 @@ def auth(
         click.echo(format_response("success", data=data, json_mode=json_mode))
         if not json_mode and camera_line:
             click.echo(camera_line)
+        if not json_mode and nozzles_line:
+            click.echo(nozzles_line)
         if not json_mode and prusa_diagnostics is not None:
             profile_id = prusa_diagnostics.get("profile_id")
             file_count = prusa_diagnostics.get("file_count")
@@ -3221,6 +3421,10 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
 )
 @click.option("--object", "object_name", type=str, default=None, help="Extract and print a single object from a multi-object .gcode.3mf (Bambu). Partial name match supported (e.g. 'cap').")
 @click.option("--list-objects", is_flag=True, help="List named objects on the plate of a .gcode.3mf file, then exit.")
+@click.option(
+    "--dont-keep", is_flag=True,
+    help="Keep no record of this print once it ends: while it prints, Kiln keeps only what it needs to stay safe.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def print_cmd(
@@ -3237,6 +3441,7 @@ def print_cmd(
     preview_tokens: tuple[str, ...],
     object_name: str | None,
     list_objects: bool,
+    dont_keep: bool,
     json_mode: bool,
 ) -> None:
     """Start a print or check print status.
@@ -3254,6 +3459,20 @@ def print_cmd(
     Use --object to extract and print a single object from a multi-object
     Bambu .gcode.3mf file (e.g. --object "cap" to print just the lid).
     """
+    if dont_keep:
+        if use_queue:
+            click.echo(
+                format_error(
+                    "--dont-keep is for a print started now; the queue keeps its own list of jobs. "
+                    "Nothing was queued.",
+                    code="DONT_KEEP_NOT_QUEUED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        from kiln.print_keeping import mark_call_not_kept
+
+        mark_call_not_kept()
     import glob as _glob
     import os
 
@@ -3552,7 +3771,7 @@ def print_cmd(
             # Only pass these to adapters that accept **kwargs (Bambu,
             # OctoPrint, Moonraker).  Avoids TypeError on adapters
             # with a strict start_print(file_name) signature.
-            print_kwargs: dict[str, Any] = {}
+            print_kwargs: dict[str, Any] = {"keep_record": False} if dont_keep else {}
             from kiln.printers.bambu import BambuAdapter
 
             is_bambu = isinstance(adapter, BambuAdapter)
@@ -4775,6 +4994,13 @@ def use(name: str) -> None:
     help="The bed size its maker publishes, XxYxZ in mm, for a printer Kiln does not list (e.g. 250x220x270).",
 )
 @click.option("--bed-source", "bed_source", help="Where that bed size came from: the maker's page or manual.")
+@click.option(
+    "--owner-says-so",
+    "owner_says_so",
+    is_flag=True,
+    help="It is this model although its serial number names another (or a maker's upgrade kit is fitted). "
+    "You confirm at this terminal.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def set_model(
     model: str | None,
@@ -4784,6 +5010,7 @@ def set_model(
     replace: bool,
     bed: str | None,
     bed_source: str | None,
+    owner_says_so: bool,
     json_mode: bool,
 ) -> None:
     """Tell Kiln which printer model a saved printer is.
@@ -4805,11 +5032,17 @@ def set_model(
             bed_mm = [float(p) for p in parts]
         except ValueError:
             bed_mm = bed  # the door words the refusal
-    result = set_printer_model(
-        model, printer_make=printer_make, slicer_file=slicer_file, printer_name=printer_name, replace=replace,
-        # A person typing the size and its source at a terminal is the yes.
-        bed_mm=bed_mm, bed_source=bed_source, bed_confirmed=bed is not None,
-    )
+    def _call(said_by: dict | None = None) -> dict:
+        return set_printer_model(
+            model, printer_make=printer_make, slicer_file=slicer_file, printer_name=printer_name, replace=replace,
+            # A person typing the size and its source at a terminal is the yes.
+            bed_mm=bed_mm, bed_source=bed_source, bed_confirmed=bed is not None,
+            owner_says_so=owner_says_so, said_by=said_by,
+        )
+
+    result = _call()
+    if result.get("code") == "OWNER_MUST_SAY_SO":
+        result = _owner_says_so_at_terminal(result, _call)
     if json_mode:
         click.echo(json.dumps(result, indent=2))
         if not result["success"]:
@@ -4818,6 +5051,27 @@ def set_model(
     if not result["success"]:
         raise click.ClickException(result["error"])
     click.echo(result["message"])
+
+
+def _owner_says_so_at_terminal(result: dict, call: Any) -> dict:
+    """The owner's statement *result* asks for, taken from a person at this
+    terminal who reads it and types the printer's name -- the proof
+    ``kiln consent window --always`` takes.  Anything else records nothing."""
+    from kiln.consent_windows import person_at_terminal
+    from kiln.print_consent import SOURCE_TERMINAL
+    from kiln.printer_setup import person_said
+
+    target = str(result.get("printer") or "")
+    if not person_at_terminal():
+        return {**result, "error": (
+            f"Only {target}'s owner can say this, at a terminal: {result.get('question')}.  Nothing was changed."
+        )}
+    click.echo(f"You are about to record that {result.get('question')}.")
+    click.echo("Kiln will then plan this printer's moves and check its prints as that model.")
+    typed = click.prompt(f"Type the printer's name ({target}) to record it", default="", show_default=False)
+    if typed.strip().lower() != target.strip().lower():
+        return {**result, "error": "That is not this printer's name; nothing was recorded."}
+    return call(person_said(SOURCE_TERMINAL))
 
 
 @cli.command("remove")
@@ -4954,6 +5208,27 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
         "Such a project with no plate named is refused, and the refusal lists its plates."
     ),
 )
+@click.option(
+    "--mixed-nozzle-experiment", "mixed_nozzle_experiment", is_flag=True,
+    help=(
+        "The person says yes, for this print, to slicing for nozzles of different sizes at once, "
+        "an experiment and a slice otherwise refused. Only on their yes, each time."
+    ),
+)
+@click.option(
+    "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
+    help=(
+        "The owner says to print anyway an abrasive filament through a nozzle on record "
+        "that is not wear-resistant, a slice otherwise refused. Only on their word."
+    ),
+)
+@click.option(
+    "--filament-map", "filament_map", default=None,
+    help=(
+        "For a printer with more than one nozzle: the nozzle (1 for the first) each filament "
+        "prints from, comma-separated in filament order (e.g. '2,1')."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def slice(
@@ -4976,6 +5251,9 @@ def slice(
     ams_mapping: str | None,
     placement: str | None,
     plate_number: int | None,
+    soft_nozzle_confirmed: bool,
+    mixed_nozzle_experiment: bool,
+    filament_map: str | None,
     json_mode: bool,
 ) -> None:
     """Slice a 3D model (STL/3MF/STEP) to G-code.
@@ -5031,7 +5309,7 @@ def slice(
         )
     else:
         window = None
-    from kiln.slicer import SlicerError, SlicerNotFoundError
+    from kiln.slicer import SlicerError, SlicerNotFoundError, owner_asks
 
     try:
         plan = _resolve_slice_plan(
@@ -5091,6 +5369,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, input_file, plan=plan, placement=placement, json_mode=json_mode,
                 slicer=lambda path, **kw: slice_multicolor_copies(path, copies, spacing_mm=spacing, **kw),
+                **owner_asks(soft_nozzle_confirmed),
                 slicer_path=slicer,
                 extra_args=extra_args or None,
                 output_dir=output_dir,
@@ -5131,6 +5410,7 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
                 **fill_kwargs,
+                **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,
@@ -5260,6 +5540,10 @@ def slice(
                 if not json_mode:
                     click.echo(f"Bambu 3MF: {upload_path}")
             except Exception as exc:
+                if getattr(exc, "code", None) == "MULTI_NOZZLE_NOT_PACKAGED":
+                    # Sliced for more than one nozzle: no raw form of it starts.
+                    click.echo(format_error(str(exc), code=exc.code, json_mode=json_mode))
+                    sys.exit(1)
                 if wrap_kwargs.get("quiet_start") is not None or wrap_kwargs.get("lift_floor_mm") is not None:
                     # A raw file would carry no plan and no floor onto the
                     # occupied plate.  Why there was no plan is the verdict's
@@ -5356,7 +5640,7 @@ def slice(
         click.echo(format_error(str(exc), code="SLICER_NOT_FOUND", json_mode=json_mode))
         sys.exit(1)
     except SlicerError as exc:
-        click.echo(format_error(str(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
+        click.echo(format_error(_said_at_the_terminal(exc), code=getattr(exc, "code", "SLICER_ERROR"), json_mode=json_mode))
         sys.exit(1)
     except click.ClickException:
         raise
@@ -9868,6 +10152,11 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         click.echo(f"  Saved printer '{name}' to {saved.path}")
         if saved.notice:
             click.echo(click.style(f"  {saved.notice}", fg="yellow"))
+        from kiln.maker_slicer_notes import setup_line as _nozzles_setup_line
+
+        nozzles_line = _nozzles_setup_line(printer_model)
+        if nozzles_line:
+            click.echo(f"  {nozzles_line}")
     except OSError as exc:
         click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
         sys.exit(1)
@@ -10843,6 +11132,27 @@ def generate_download(
         "a region such as front-left or centre, or 'keep'. Omitted, an occupied plate refuses."
     ),
 )
+@click.option(
+    "--mixed-nozzle-experiment", "mixed_nozzle_experiment", is_flag=True,
+    help=(
+        "The person says yes, for this print, to slicing for nozzles of different sizes at once, "
+        "an experiment and a slice otherwise refused. Only on their yes, each time."
+    ),
+)
+@click.option(
+    "--soft-nozzle-confirmed", "soft_nozzle_confirmed", is_flag=True,
+    help=(
+        "The owner says to print anyway an abrasive filament through a nozzle on record "
+        "that is not wear-resistant, a slice otherwise refused. Only on their word."
+    ),
+)
+@click.option(
+    "--filament-map", "filament_map", default=None,
+    help=(
+        "For a printer with more than one nozzle: the nozzle (1 for the first) each filament "
+        "prints from, comma-separated in filament order (e.g. '2,1')."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def generate_and_print_cmd(
@@ -10858,6 +11168,9 @@ def generate_and_print_cmd(
     auto_print: bool,
     preview_enabled: bool,
     placement: str | None,
+    soft_nozzle_confirmed: bool,
+    mixed_nozzle_experiment: bool,
+    filament_map: str | None,
     json_mode: bool,
 ) -> None:
     """Generate a 3D model from text or image, slice it, and upload to the printer.
@@ -10968,8 +11281,11 @@ def generate_and_print_cmd(
             click.echo("Slicing...")
         # The plate may still hold the last print: same shared step as
         # kiln slice (plate gate, slice, second verdict).
+        from kiln.slicer import owner_asks
+
         slice_result, _placement_info = _cli_placed_slice(
             ctx, model_path, plan=plan, placement=placement, json_mode=json_mode,
+            **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
             extra_args=plan["extra_args"] or None,
             material=plan.get("declared_material"),
             loaded_material=plan.get("loaded_material"),
@@ -11015,15 +11331,22 @@ def generate_and_print_cmd(
                 printer_name=ctx.obj.get("printer"), json_mode=json_mode,
             )
             # The yes was about the model; the printer is handed the slice
-            # made from it.  Re-aim the clearance at that file, keeping the
-            # source and door the gate recorded.
-            from kiln.print_signoff import current, grant
+            # made from it.  Re-aim the clearance at that file, keeping who
+            # said yes, the door, and the printers it covers.  No clearance,
+            # no start: a yes is never written here on its own.
+            from kiln.print_signoff import CODE_NOT_CONFIRMED, current, grant
 
             cleared = current()
+            if cleared is None:
+                click.echo(format_error(
+                    "Nothing was started: no yes is on record for this print.",
+                    code=CODE_NOT_CONFIRMED, json_mode=json_mode,
+                ))
+                sys.exit(1)
             grant(
                 "kiln generate-and-print", remote, ctx.obj.get("printer"),
-                source=cleared.source if cleared else "unrecorded",
-                door=cleared.door if cleared else "",
+                source=cleared.source, door=cleared.door, scope=cleared.scope,
+                window_id=cleared.window_id, identity=cleared.identity,
             )
             _local = slice_result.output_path
             adapter.start_print(
@@ -11071,7 +11394,7 @@ def generate_and_print_cmd(
         click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
         sys.exit(1)
     except (SlicerNotFoundError, SlicerError) as exc:
-        click.echo(format_error(str(exc), code="SLICER_ERROR", json_mode=json_mode))
+        click.echo(format_error(_said_at_the_terminal(exc), code="SLICER_ERROR", json_mode=json_mode))
         sys.exit(1)
     except PrinterError as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
@@ -12054,6 +12377,23 @@ def _doctor_homing_how(adapter: Any) -> tuple[str, bool]:
     ), True
 
 
+def _doctor_learn(adapter: Any, check: dict[str, Any], gaps: tuple[str, ...]) -> dict[str, Any]:
+    """A checkup line that warns about *gaps* carries the one offer of a
+    lesson that can teach them (:func:`kiln.bench.offer_for`), when there is
+    one; otherwise the line is returned as it was."""
+    if not check.get("warn"):
+        return check
+    try:
+        from kiln.bench import offer_for
+
+        found = offer_for(adapter, list(gaps), "setup_check")
+    except Exception:  # noqa: BLE001 -- an offer never fails a checkup
+        found = None
+    if found:
+        check = {**check, "learn": found, "detail": f"{check['detail']} -- {found['sentence']}"}
+    return check
+
+
 def _doctor_camera_check(printer: str, adapter: Any) -> dict[str, Any] | None:
     """The doctor's ``camera`` line for *adapter*, or ``None`` when its camera needs no add-on.
 
@@ -12302,6 +12642,20 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
     except Exception as exc:  # noqa: BLE001 -- a name is never worth failing a checkup
         logger.debug("printer name check skipped: %s", exc)
 
+    # 5c. A printer sliced for more than one nozzle: is its maker's slicer
+    #     here, new enough to use them all?  Said every run, reachable or not.
+    if printer_cfg and printer_cfg.get("printer_model"):
+        try:
+            from kiln._pro_nozzle_bridge import consult_recorded_nozzle
+            from kiln.maker_slicer_notes import doctor_row
+
+            _fitted = consult_recorded_nozzle(str(name_label)).get("positions")
+            _nozzles_row = doctor_row(printer_cfg.get("printer_model"), positions=_fitted)
+            if _nozzles_row is not None:
+                checks.append(_nozzles_row)
+        except Exception as exc:  # noqa: BLE001 -- a row is never worth failing a checkup
+            logger.debug("nozzle slicer check skipped: %s", exc)
+
     # 6. Printer reachable (use adapter with auth, not raw HTTP)
     verify_adapter = None
     if printer_cfg:
@@ -12343,9 +12697,13 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                     detect_identity_conflict,
                     resolve_adapter_model,
                 )
+                from kiln.printer_model_check import statement_line
 
                 conflict = detect_identity_conflict(verify_adapter)
-                if conflict is not None:
+                settled = statement_line(verify_adapter, str(ctx.obj.get("printer") or printer_cfg.get("name") or ""))
+                if conflict is not None and settled is not None:
+                    checks.append({"name": "printer_model", "ok": True, "warn": True, "detail": settled})
+                elif conflict is not None:
                     checks.append(
                         {
                             "name": "printer_model",
@@ -12392,7 +12750,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                     # the chute or extrude in place, and whether wipe_nozzle
                     # will run or refuse.
                     where, warn = _doctor_filament_where(verify_adapter)
-                    checks.append({
+                    checks.append(_doctor_learn(verify_adapter, {
                         "name": "filament_handling",
                         "ok": True,
                         "warn": warn,
@@ -12401,7 +12759,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
                             "(kiln filament …, or the load_filament / "
                             f"unload_filament / purge_filament tools); {where}"
                         ),
-                    })
+                    }, ("wipe", "purge")))
                 else:
                     checks.append({
                         "name": "filament_handling",
@@ -12429,7 +12787,9 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool, bug_report: bool) ->
             #     park the tool refuses.
             try:
                 detail, warn = _doctor_homing_how(verify_adapter)
-                checks.append({"name": "homing", "ok": True, "warn": warn, "detail": detail})
+                checks.append(_doctor_learn(
+                    verify_adapter, {"name": "homing", "ok": True, "warn": warn, "detail": detail}, ("home", "park"),
+                ))
             except Exception as exc:
                 logger.debug("Homing check failed: %s", exc)
 

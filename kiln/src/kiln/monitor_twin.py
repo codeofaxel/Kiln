@@ -354,6 +354,8 @@ def note_print_started(
     machine: str = "",
     sent_sha256: str | None = None,
     continues: tuple[str, str] | None = None,
+    printer_model: str | None = None,
+    kept: str | None = None,
 ) -> None:
     """A print just started: join the printer-side name to the sliced pair
     and retain copies of the toolpath (+ mesh) for the Monitor's twin.
@@ -380,6 +382,17 @@ def note_print_started(
     beside the new one as ``original`` and its model stays, so the Monitor
     can show the whole print.  A print carried on a second time keeps no
     original: the record holds the file being printed alone.
+
+    The record also keeps the printer's model as it is at the start
+    (``printer_model``: the one the caller passes, else the one the
+    printer's setup states; ``None`` when neither says), so
+    "which kind of printer is this print on" is answered by the record
+    itself after the printer is renamed, set up again or removed.  A print
+    carried on keeps the model its record already held.
+
+    *kept* is ``"none"`` for a print the person asked not to keep
+    (:mod:`kiln.print_keeping`): the record is the running print's safety
+    record and is deleted when the print ends (:func:`forget_print`).
     """
     try:
         base = os.path.basename(str(file_name or ""))
@@ -391,11 +404,14 @@ def note_print_started(
             "file_name": base,
             "printer_name": printer_name or "default",
             "machine": str(machine or ""),
+            "printer_model": _model_at_start(printer_name, slug, continues, printer_model),
             "started_at": _now_iso(),
             "gcode": None,
             "gcode_sha256": None,
             "mesh": None,
         }
+        if kept:
+            record["kept"] = str(kept)
 
         if match is not None:
             src_gcode = str(match.get("output") or "")
@@ -452,6 +468,30 @@ def note_print_started(
         _write_json(_ACTIVE_FILE, active)
     except Exception:  # noqa: BLE001 — retention never blocks a print
         logger.debug("monitor_twin.note_print_started failed", exc_info=True)
+
+
+def _model_at_start(
+    printer_name: str, slug: str, continues: tuple[str, str] | None, stated: str | None = None,
+) -> str | None:
+    """The model of *printer_name* for a print starting now.  A print that
+    carries on the one already held for this printer keeps that record's
+    model; otherwise it is the model the caller *stated*, else the one the
+    printer's setup states."""
+    if continues and continues[1]:
+        active = _read_json(_ACTIVE_FILE, {})
+        held = active.get(slug) if isinstance(active, dict) else None
+        kept = str(held.get("printer_model") or "").strip() if isinstance(held, dict) else ""
+        if kept:
+            return kept
+    if str(stated or "").strip():
+        return str(stated).strip()
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model_for
+
+        named = None if (printer_name or "default") == "default" else printer_name
+        return str(resolve_printer_model_for(named) or "").strip() or None
+    except Exception:  # noqa: BLE001 — an unreadable setup states no model
+        return None
 
 
 def _carry_original(slug: str, continues: tuple[str, str] | None) -> dict[str, Any] | None:
@@ -577,6 +617,53 @@ def rename_printer(old_name: str, new_name: str) -> bool:
     return True
 
 
+def forget_print(printer_name: str) -> bool:
+    """Delete the start record held for *printer_name*, the toolpath, model
+    and original kept beside it, and every slice-ledger row that names one
+    of the print's files.  ``True`` when a record was deleted.  Never raises.
+
+    For a print the person asked not to keep, once it ends: nothing of it
+    stays on this computer (:func:`kiln.print_keeping.print_ended`).
+    """
+    try:
+        slug = _slug(printer_name)
+        active = _read_json(_ACTIVE_FILE, {})
+        if not isinstance(active, dict) or slug not in active:
+            return False
+        record = active.pop(slug)
+        _write_json(_ACTIVE_FILE, active)
+        names: set[str] = set()
+        if isinstance(record, dict):
+            if record.get("file_name"):
+                names.add(os.path.basename(str(record["file_name"])))
+            from kiln.print_keeping import remove_kilns_own
+
+            for key in ("gcode", "mesh", "original"):
+                # Only Kiln's own copies beside the record, never a file elsewhere.
+                remove_kilns_own(record.get(key), (str(_TWIN_DIR),))
+        for old in _TWIN_DIR.glob(f"{slug}-*"):
+            old.unlink(missing_ok=True)
+        entries = _read_json(_SLICES_FILE, [])
+        if isinstance(entries, list) and names:
+            def _names(entry: dict[str, Any]) -> set[str]:
+                return {
+                    os.path.basename(str(entry.get(k)))
+                    for k in ("output", "wrapped")
+                    if entry.get(k)
+                }
+
+            kept_entries = [
+                e for e in entries
+                if not (isinstance(e, dict) and _names(e) & names)
+            ]
+            if len(kept_entries) != len(entries):
+                _write_json(_SLICES_FILE, kept_entries)
+        return True
+    except Exception:  # noqa: BLE001 -- a cleanup never raises into a status read
+        logger.debug("monitor_twin.forget_print failed", exc_info=True)
+        return False
+
+
 def active_twin(printer_name: str | None = None) -> dict[str, Any] | None:
     """The retained record for ``printer_name``, or — unnamed — the record
     of the print that started most recently.  ``None`` when nothing is
@@ -640,6 +727,15 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
     nothing here runs ambiently.
     """
     rec = active_twin(printer_name)
+    if rec is not None:
+        from kiln import print_keeping
+
+        if not print_keeping.may_leave(printer_name=rec.get("printer_name"), file_name=rec.get("file_name")):
+            return {
+                "success": False,
+                "code": "PRINT_NOT_SENT",
+                "message": "This print is not kept in your Kiln account, so its toolpath stays on this computer.",
+            }
     if rec is None:
         return {
             "success": False,

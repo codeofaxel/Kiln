@@ -230,6 +230,39 @@ class TestTheStartTool:
         assert watchdog == ["print started"]
 
 
+    def test_the_start_record_keeps_the_printers_model(self, watchdog, monkeypatch):
+        """A started print's record names the printer's model as well as its
+        name, so the record still answers after the printer is renamed or
+        removed.  A/B: without ``printer_model=`` at the call this fails."""
+        import kiln.monitor_twin as twin
+
+        seen: list[dict] = []
+        monkeypatch.setattr(
+            twin, "note_print_started", lambda *a, **kw: seen.append(kw)
+        )
+        garage = _Printer("SERIAL-GARAGE")
+        garage._printer_model = "bambu_a1"
+        server._get_registry().register("garage", garage)
+        _call("start_print", file_name="part.gcode", printer_name="garage")
+        assert seen and seen[-1].get("printer_model") == "bambu_a1", seen
+
+    def test_the_start_record_is_filed_under_the_registered_name(self, watchdog, monkeypatch):
+        """The record is filed under the name the person registered, the one
+        a rename moves and a lookup asks for, never the adapter's own backend
+        name (two printers of one brand would share one record).  A/B:
+        passing ``self.name`` at the call fails this with ``"fake"``."""
+        import kiln.monitor_twin as twin
+
+        seen: list[tuple] = []
+        monkeypatch.setattr(
+            twin, "note_print_started", lambda *a, **kw: seen.append(a)
+        )
+        garage = _Printer("SERIAL-GARAGE")
+        server._get_registry().register("garage", garage)
+        _call("start_print", file_name="part.gcode", printer_name="garage")
+        assert seen and seen[-1][0] == "garage", seen
+
+
 class TestTheScheduler:
     def test_a_refused_job_is_not_marked_as_printing(self, one_at_a_time, tmp_path):
         """A/B: against the verdict without the ``refused_before_send``

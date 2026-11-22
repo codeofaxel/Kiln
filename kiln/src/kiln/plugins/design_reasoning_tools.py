@@ -593,10 +593,13 @@ class _DesignReasoningToolsPlugin:
             try:
                 from kiln.design_intelligence import get_design_constraints
 
+                # The advisor shows the brief's own rules, never the
+                # plastic's design limits, so it does not read them.
                 brief = get_design_constraints(
                     prompt,
                     material=material or None,
                     printer_model=printer_model or None,
+                    material_limits=False,
                 )
                 if brief.recommended_material:
                     mat = brief.recommended_material
@@ -1022,6 +1025,7 @@ class _DesignReasoningToolsPlugin:
                 return _srv._error_dict(f"Provider error: {exc}", code="PROVIDER_ERROR")
 
             current_prompt = prompt
+            material_basic: dict[str, Any] | None = None
 
             # Pre-enrich with design intelligence (skip for OpenSCAD raw code)
             if provider != "openscad":
@@ -1034,6 +1038,7 @@ class _DesignReasoningToolsPlugin:
                         max_length=limit,
                     )
                     current_prompt = enriched.improved_prompt
+                    material_basic = enriched.material_basic
                 except Exception:
                     pass
 
@@ -1143,6 +1148,9 @@ class _DesignReasoningToolsPlugin:
                 "brief_id": goal_id or None,
                 **best_result,
             }
+            if material_basic is not None:
+                # No material was picked for the part the prompt describes.
+                response["material_basic"] = material_basic
             # The best round is still a make: a piece left in the air is
             # said on it like on every other make door.
             from kiln.fusion_check import attach_fusion_report
@@ -1196,13 +1204,15 @@ class _DesignReasoningToolsPlugin:
                 return err
             try:
                 from kiln.generation.validation import optimize_orientation
+                from kiln.material_limits import assuming
 
-                result = optimize_orientation(
-                    file_path,
-                    output_path=output_path or None,
-                    material=material or "pla",
-                    printer_id=printer_id or None,
-                )
+                with assuming(material) as plastic:
+                    result = optimize_orientation(
+                        file_path,
+                        output_path=output_path or None,
+                        material=plastic,
+                        printer_id=printer_id or None,
+                    )
                 response = {"success": True, **result}
                 try:
                     from kiln_pro.plugins.git_render_tools import (
@@ -1292,17 +1302,20 @@ class _DesignReasoningToolsPlugin:
                     bed_x_mm, bed_y_mm, bed_z_mm = build_volume
                     printer_bed_mm = build_volume
 
-                response = {
-                    "success": True,
-                    **can_print_now(
-                        file_path,
-                        auto_fix=auto_fix,
-                        output_path=output_path or None,
-                        printer_bed_mm=printer_bed_mm,
-                        printer_id=resolved_model_id,
-                        material=material or "pla",
-                    ),
-                }
+                from kiln.material_limits import assuming
+
+                with assuming(material) as plastic:
+                    response = {
+                        "success": True,
+                        **can_print_now(
+                            file_path,
+                            auto_fix=auto_fix,
+                            output_path=output_path or None,
+                            printer_bed_mm=printer_bed_mm,
+                            printer_id=resolved_model_id,
+                            material=plastic,
+                        ),
+                    }
                 if resolved_model_id and isinstance(response.get("bed_check"), dict):
                     response["bed_check"]["source"] = "printer"
                 if resolved_model_id:

@@ -26,6 +26,11 @@ The second thing a reader knows that its door may not say: a door that edits
 a mesh writes STL, so editing a GLB, OBJ, 3MF or STEP "in place" writes the
 result beside it as ``.stl`` (:func:`note_written`), and the reply says which
 file that is under ``written_as``.
+
+And a sentence any reader under a door needs the reply to carry, said once
+under the reader's own key (:func:`note_said`): the design limits say there
+which figures a check read when they were not the plastic's own
+(:data:`LIMITS_KEY`).
 """
 
 from __future__ import annotations
@@ -40,6 +45,10 @@ REPLY_KEY = "units_question"
 
 #: The reply key for where an edit of a non-STL file was written.
 WRITTEN_KEY = "written_as"
+
+#: The reply key for what the design limits say about the figures a call's
+#: checks read (:func:`note_said`).
+LIMITS_KEY = "limits_note"
 
 #: A format's name as a person knows it, by suffix.
 _FORMAT_NAMES = {
@@ -76,6 +85,12 @@ class _WrittenNote:
             f"Written as STL to {self.written}, the format every slicer reads, rather than as "
             f"{fmt} over {os.path.basename(self.requested)}: {kept}."
         )
+
+
+@dataclass(frozen=True)
+class _SaidNote:
+    key: str
+    sentence: str
 
 
 def _collecting() -> list[Any] | None:
@@ -135,6 +150,18 @@ def note_written(requested: str, written: str) -> None:
         notes.append(_WrittenNote(str(requested), str(written)))
 
 
+def note_said(key: str, sentence: str) -> None:
+    """Note *sentence* for the reply of the running call, under *key*: said
+    once however many readers note it, and not at all when the reply already
+    says it.  Nothing is kept outside a tool call."""
+    notes = _collecting()
+    if notes is None or not sentence:
+        return
+    note = _SaidNote(str(key), str(sentence))
+    if note not in notes:
+        notes.append(note)
+
+
 def _texts(node: Any) -> list[str]:
     out: list[str] = []
     stack = [node]
@@ -165,4 +192,13 @@ def attach(reply: Any) -> Any:
     written = list(dict.fromkeys(n.sentence for n in notes if isinstance(n, _WrittenNote)))
     if written:
         added[WRITTEN_KEY] = "  ".join(written)
+    said = [n for n in notes if isinstance(n, _SaidNote)]
+    if said:
+        text = "\n".join(_texts(reply))
+        by_key: dict[str, list[str]] = {}
+        for note in said:
+            if note.sentence not in text and note.key not in reply:
+                by_key.setdefault(note.key, []).append(note.sentence)
+        for key, sentences in by_key.items():
+            added[key] = "  ".join(dict.fromkeys(sentences))
     return {**reply, **added} if added else reply

@@ -443,7 +443,10 @@ def _camera_addon_block(printer_name: str | None, status: dict | None) -> dict[s
 #: image may load from any origin but the document's own), so the relay's
 #: loopback origin is named here — the ONE loosening this panel asks for,
 #: and the reason the video relay is pinned to :data:`VIDEO_RELAY_PORT`.
+#: Pictures only: the panel opens no connection, and the empty connect list
+#: is stated so a host that reviews panels reads the whole policy.
 PANEL_CSP: dict[str, list[str]] = {
+    "connectDomains": [],
     "resourceDomains": ["http://127.0.0.1:8081", "http://localhost:8081"],
 }
 

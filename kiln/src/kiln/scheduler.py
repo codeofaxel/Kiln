@@ -26,6 +26,13 @@ from kiln.registry import PrinterNotFoundError, PrinterRegistry
 
 logger = logging.getLogger(__name__)
 
+#: How a refused queued plate says the owner's word, a map and the yes to
+#: nozzles of different sizes are given: by
+#: the door that queues copies (:func:`kiln.slicer.said_for`).
+QUEUED_PLATE_CONFIRM = "queue the copies again with multi_copy_print and soft_nozzle_confirmed=true"
+QUEUED_PLATE_MAP = "queue the copies again with multi_copy_print and a filament_map that puts"
+QUEUED_PLATE_EXPERIMENT = "queue the copies again with multi_copy_print and mixed_nozzle_experiment=true"
+
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -781,6 +788,7 @@ class JobScheduler:
         result, error = None, None
         try:
             from kiln.pipelines import reslice_and_print
+            from kiln.slicer import owner_asks
 
             result = reslice_and_print(
                 model_path=str(fill.get("model_path") or ""),
@@ -792,6 +800,12 @@ class JobScheduler:
                 spacing_mm=float(fill.get("spacing_mm") or 10.0),
                 signoff=(job.metadata or {}).get("preview_signoff"),
                 still_wanted=lambda: self._cancelled_sentence(job.id),
+                **({"keep_record": (job.metadata or {}).get("keep_record")}
+                   if isinstance((job.metadata or {}).get("keep_record"), bool) else {}),
+                # The owner's word and map the run was asked with.
+                **owner_asks(
+                    fill.get("soft_nozzle_confirmed"), fill.get("filament_map"), fill.get("mixed_nozzle_experiment"),
+                ),
             )
         except Exception as exc:  # noqa: BLE001 -- said on the job, never lost
             error = exc
@@ -868,6 +882,12 @@ class JobScheduler:
         except Exception:  # noqa: BLE001
             pass
         why = str(error) if error is not None else str(getattr(result, "message", "") or "the plate did not start")
+        from kiln.slicer import said_for
+
+        # A queued plate takes no word of its own: the run's door does.
+        why = said_for(
+            why, confirm=QUEUED_PLATE_CONFIRM, map_with=QUEUED_PLATE_MAP, experiment=QUEUED_PLATE_EXPERIMENT,
+        )
         self._requeue_or_fail(job.id, f"The next plate of copies did not start on {printer_name}: {why}", [])
 
     def _settle_fill_plate(self, job_id: str) -> None:
@@ -891,6 +911,13 @@ class JobScheduler:
             self._retry_here(job, copies, tries)
         except Exception:  # noqa: BLE001 -- bookkeeping never stops the queue
             logger.debug("could not settle the plate of job %s", job_id, exc_info=True)
+        finally:
+            # A run the person asked not to keep is forgotten once nothing of
+            # it is left to print (a plate retried or moved is still to print).
+            try:
+                self._queue.forget_run_if_ended(self._queue.get_job(job_id))
+            except Exception:  # noqa: BLE001
+                logger.debug("a run not kept was not forgotten", exc_info=True)
 
     def _kept_fleet_run(self, job: Any) -> bool:
         """Whether *job* is a plate of a fleet run this computer kept."""
@@ -921,6 +948,15 @@ class JobScheduler:
         self._queue_rest(job, copies, failed_retries=tries + 1)
 
     def _reroute_failed_plate(self, job: Any, copies: int, tries: int) -> None:
+        try:
+            self._reroute_failed_plate_now(job, copies, tries)
+        finally:
+            try:
+                self._queue.forget_run_if_ended(self._queue.get_job(job.id))
+            except Exception:  # noqa: BLE001
+                logger.debug("a run not kept was not forgotten", exc_info=True)
+
+    def _reroute_failed_plate_now(self, job: Any, copies: int, tries: int) -> None:
         """Where a fleet run's failed plate goes: the server's answer, acted on."""
         picture: str | None = None
         try:
@@ -994,7 +1030,11 @@ class JobScheduler:
         try:
             adapter = self._registry.get(printer_name)
             found = plate_state.look(adapter)
-            return plate_state.hand_over_frame(adapter, found) if hand_over else plate_state.save_frame(found)
+            if hand_over:
+                return plate_state.hand_over_frame(adapter, found)
+            path = plate_state.save_frame(found)
+            plate_state._note_picture(adapter, path)
+            return path
         except Exception:  # noqa: BLE001 -- no picture is said as no picture, never a stopped queue
             logger.debug("no picture of %s's plate", printer_name, exc_info=True)
             return None
@@ -1004,7 +1044,7 @@ class JobScheduler:
         beside_plate: str | None = None, moved_from: str | None = None, failed_picture: str | None = None,
     ) -> None:
         """Queue the copies this plate could not take as the plate after it, on the same terms: the same part, printer and yes, and the fleet plan it belongs to."""
-        metadata = {k: v for k, v in (job.metadata or {}).items() if k in ("preview_signoff", "split_plan_id")}
+        metadata = {k: v for k, v in (job.metadata or {}).items() if k in ("preview_signoff", "split_plan_id", "keep_record")}
         fill = {k: v for k, v in ((job.metadata or {}).get("fill") or {}).items()
                 if k not in ("beside_plate", "failed_retries", "moved_from", "look_first", "failed_picture")}
         fill["copies"] = int(copies)
@@ -1015,7 +1055,7 @@ class JobScheduler:
         if moved_from:
             fill["moved_from"] = moved_from
             fill["look_first"] = True
-            if failed_picture:
+            if failed_picture and (job.metadata or {}).get("keep_record") is not False:
                 fill["failed_picture"] = failed_picture
         where = printer_name or job.printer_name
         rest_id = self._queue.submit(
@@ -1709,6 +1749,8 @@ class JobScheduler:
                     if next_job.metadata and isinstance(next_job.metadata.get(k), str)
                     and next_job.metadata[k].strip()
                 }
+                if isinstance((next_job.metadata or {}).get("keep_record"), bool):
+                    _ids["keep_record"] = next_job.metadata["keep_record"]
                 result = adapter.start_print(next_job.file_name, **_ids)
                 if getattr(result, "code", "") in _TURN_CODES:
                     # Another printer's turn

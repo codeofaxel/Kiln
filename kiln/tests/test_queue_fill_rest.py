@@ -522,6 +522,9 @@ class TestQueueFillRest:
         )
         fill = dict(job.metadata["fill"])
         kept = fill.pop("model_path")
+        # Kiln's own copy is recorded as Kiln's, as it is made: the only part
+        # file a run not kept may delete when it ends.
+        assert fill.pop("owned_copy") == kept
         assert fill == {
             "copies": 14, "spacing_mm": 4.0, "printer_id": "bambu_a1", "overrides": {"fill_density": "20%"},
             "slicer_path": "/opt/slicer",
@@ -934,3 +937,60 @@ class TestACancelStopsThePlateBeforeThePrinter:
         assert result.success is False
         adapter.upload_file.assert_not_called()
         adapter.start_print.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# The owner's word to print anyway, and the map, ride every plate
+# ---------------------------------------------------------------------------
+
+
+class TestTheRunsAsksRideEveryPlate:
+    _ASKS = {"soft_nozzle_confirmed": True, "filament_map": [2], "mixed_nozzle_experiment": True}
+
+    def test_each_plate_is_sliced_with_the_runs_word_and_map_and_the_rest_keeps_them(self, k, fake):
+        job = _fill_job(k.queue, 14)
+        k.queue.update_metadata(job, {"fill": {**k.queue.get_job(job).metadata["fill"], **self._ASKS}})
+
+        k.sched.tick()
+
+        assert fake.calls[0]["soft_nozzle_confirmed"] is True and fake.calls[0]["filament_map"] == [2]
+        assert fake.calls[0]["mixed_nozzle_experiment"] is True
+        (rest,) = k.queue.queued_for("A")
+        assert {key: rest.metadata["fill"].get(key) for key in self._ASKS} == self._ASKS
+
+    def test_a_refused_plate_names_the_door_that_takes_the_word(self, k, fake):
+        from kiln.slicer import MAP_ADVICE, SOFT_NOZZLE_CONFIRM
+
+        k.sched._retry_backoff_base = 0.0
+        refusal = f"Filament 1 is PLA-CF, an abrasive filament, so nothing was sliced; {MAP_ADVICE}it on nozzle 1; {SOFT_NOZZLE_CONFIRM}."
+        fake.answer = lambda kw: _result(False, wanted=kw["copies"], placed=0, message=refusal)
+        job = _fill_job(k.queue, 4)
+        for _ in range(3):
+            k.sched.tick()
+        error = k.queue.get_job(job).error
+        assert "call again" not in error and MAP_ADVICE not in error
+        assert "queue the copies again with multi_copy_print and soft_nozzle_confirmed=true" in error
+
+    def test_a_plate_refused_for_two_nozzle_sizes_names_the_door_that_takes_the_yes(self, k, fake):
+        from kiln.slicer_profiles import MIXED_SIZES_CONFIRM
+
+        k.sched._retry_backoff_base = 0.0
+        refusal = f"The nozzles this print would use are different sizes, so nothing was sliced; {MIXED_SIZES_CONFIRM}."
+        fake.answer = lambda kw: _result(False, wanted=kw["copies"], placed=0, message=refusal)
+        job = _fill_job(k.queue, 4)
+        for _ in range(3):
+            k.sched.tick()
+        error = k.queue.get_job(job).error
+        assert "call again" not in error
+        assert "queue the copies again with multi_copy_print and mixed_nozzle_experiment=true" in error
+
+    def test_the_queued_rest_keeps_the_runs_asks(self, k, server, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        src = tmp_path / PART
+        src.write_bytes(b"solid bracket\nendsolid bracket\n")
+        out = server._queue_fill_rest(
+            str(src), 8, printer_name="A", printer_id=None, overrides=None, slicer_path=None,
+            spacing_mm=10.0, signoff=None, asks=dict(self._ASKS),
+        )
+        fill = k.queue.get_job(out["job_id"]).metadata["fill"]
+        assert {key: fill.get(key) for key in self._ASKS} == self._ASKS

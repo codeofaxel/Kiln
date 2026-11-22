@@ -49,6 +49,21 @@ class TestExtractLoadInNewtons:
         # When multiple loads mentioned, take the worst-case
         assert extract_load_in_newtons("holds 1 lb usually but up to 10 lb") == pytest.approx(44.48, rel=0.01)
 
+    @pytest.mark.parametrize("text", ["9" * 10_000, "1." + "9" * 10_000, "shelf " + "9" * 10_000 + " N"])
+    def test_a_long_run_of_digits_is_read_in_one_pass(self, text):
+        """Reading a number never re-reads the digits before it: 10,000 digits
+        take a fraction of a second, and the numbers read are the same."""
+        import time
+
+        start = time.perf_counter()
+        extract_load_in_newtons(text)
+        assert time.perf_counter() - start < 1.0
+        detect_load_bearing(text)
+        assert time.perf_counter() - start < 2.0
+        assert extract_load_in_newtons("x12.5 lbs") == pytest.approx(55.6, rel=0.01)
+        assert extract_load_in_newtons("v1.5kg and .5 kg") == pytest.approx(49.05, rel=0.01)  # ".5" reads 5
+        assert extract_load_in_newtons("1234567 N") == 1234567.0
+
 
 class TestDetectLoadBearingTrips:
     """Cases that SHOULD trip the detector."""

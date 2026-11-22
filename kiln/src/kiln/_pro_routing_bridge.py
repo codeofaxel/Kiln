@@ -40,37 +40,65 @@ LOCAL_MODULE = "kiln_pro.intent_materials.engine"
 
 #: What a person reads about a miss, filled in by :mod:`kiln.served_answer`.
 FEATURE = "material recommendation"
+#: What the sign-in sentence calls the answer asked for.
+SIGN_IN_NAME = f"Kiln's {FEATURE}"
 
 #: The longest description of what a part is for that is asked about.
 MAX_INTENT_CHARS = 10_000
 #: The most on-hand material names one ask carries, and how much of each.
 MAX_NAMES = 500
 MAX_NAME_CHARS = 120
+#: The longest printer name a recommendation is asked for; the answer
+#: names the printer it was for.
+MAX_PRINTER_ID_CHARS = 200
 
 #: ``_local``'s answer when kiln-pro is not on this computer.
 _NOT_HERE = object()
 
 __all__ = [
     "FEATURE",
+    "INPUT_REFUSED",
     "LOCAL_MODULE",
     "MAX_INTENT_CHARS",
     "MAX_NAMES",
     "MAX_NAME_CHARS",
+    "MAX_PRINTER_ID_CHARS",
+    "SIGN_IN_NAME",
     "WIRE_TOOL",
     "catalogue",
+    "input_refusal",
     "pick",
     "refusal_for",
 ]
 
 
-def refusal_for(intent: Any) -> str | None:
+#: The code Kiln's material recommendation gives a request it cannot read.
+INPUT_REFUSED = "INVALID_ARGUMENT"
+
+
+def input_refusal(miss: Miss | None) -> str | None:
+    """The recommendation's own sentence when *miss* is its refusal of a
+    request it could not read (a ruling on the input, which the door relays
+    as such), else ``None``."""
+    if isinstance(miss, Miss) and miss.cause == "refused" and miss.code == INPUT_REFUSED and miss.detail:
+        return miss.detail
+    return None
+
+
+def refusal_for(intent: Any, printer_id: Any = "") -> str | None:
     """Why the door refuses this request before asking, or ``None``: a
     description of the part that is not text, or longer than
-    :data:`MAX_INTENT_CHARS` characters."""
+    :data:`MAX_INTENT_CHARS` characters; a printer named by something other
+    than text, or by more than :data:`MAX_PRINTER_ID_CHARS` characters (the
+    answer names the printer it was for)."""
     if not isinstance(intent, str):
         return "Invalid intent: say what the part is for, as text."
     if len(intent) > MAX_INTENT_CHARS:
         return f"Invalid intent: say what the part is for in at most {MAX_INTENT_CHARS:,} characters."
+    if printer_id is not None and not isinstance(printer_id, str):
+        return "Invalid printer_id: name a registered printer, as text."
+    if printer_id and len(printer_id) > MAX_PRINTER_ID_CHARS:
+        return f"Invalid printer_id: name a registered printer in at most {MAX_PRINTER_ID_CHARS:,} characters."
     return None
 
 
@@ -162,6 +190,7 @@ def _served(want: str, request: dict[str, Any]) -> tuple[Any, Miss | None]:
             # The person asked which material to use, or for the list; the
             # answer is what they reached for.
             _asked_by_user=True,
+            _feature=SIGN_IN_NAME,
             want=want,
             **request,
         )

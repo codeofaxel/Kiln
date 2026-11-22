@@ -686,7 +686,8 @@ def _replay_note(answer: dict[str, Any]) -> dict[str, Any]:
     not replayed: the plan, said once, or why the servers did not answer."""
     from kiln.served_answer import classify_answer, clause, fields
 
-    if str(answer.get("code") or "") == "TIER_REQUIRED":
+    miss = classify_answer(answer)
+    if miss is not None and miss.code == "TIER_REQUIRED":
         note: dict[str, Any] = {
             "note": (
                 "Used the standard settings. Kiln Pro replays the settings "
@@ -696,7 +697,6 @@ def _replay_note(answer: dict[str, Any]) -> dict[str, Any]:
         if answer.get("upgrade_url"):
             note["upgrade_url"] = answer["upgrade_url"]
         return note
-    miss = classify_answer(answer)
     if miss is None:
         return {}
     return {

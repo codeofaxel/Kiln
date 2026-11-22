@@ -483,3 +483,75 @@ class TestALargeAssemblyKeepsItsPartsWhenSimplified:
         assert "decimated_from" not in payload and "kept_runs" not in payload
         assert [p["spans"] for p in payload["assembly"]["parts"]] == [[[0, 12]], [[12, 12]]]
 
+
+
+# ---------------------------------------------------------------------------
+# A record made for the file elsewhere, kept beside it here
+# ---------------------------------------------------------------------------
+
+
+def _two_boxes(tmp_path) -> tuple[str, dict]:
+    """One file of two boxes, and a record of them as one piece."""
+    path = tmp_path / "pair.stl"
+    a = trimesh.creation.box(extents=(4, 4, 4))
+    b = trimesh.creation.box(extents=(4, 4, 4))
+    b.apply_translation((10, 0, 0))
+    trimesh.util.concatenate([a, b]).export(path)
+    block = {
+        "kind": stage.STAGE_KIND, "frame": "mesh", "total_triangles": 24,
+        "parts": [{"id": "body", "spans": [[0, 12]], "insert": None},
+                  {"id": "lid", "spans": [[12, 12]], "insert": None}],
+        **ONE_PIECE,
+    }
+    return str(path), block
+
+
+def test_a_record_made_for_the_file_is_kept_and_read_back(tmp_path):
+    path, block = _two_boxes(tmp_path)
+    assert stage.stage_block(path) is None
+    assert stage.keep_block(path, block) is True
+    assert stage.stage_block(path) == block
+
+
+@pytest.mark.parametrize("change", [
+    {"kind": "something.else"},
+    {"frame": "plate"},
+    {"total_triangles": 12},  # the parts run past the file's end
+    {"pieces": [{"parts": ["body"], "joined": []}]},  # a part in no piece
+    {"parts": []},
+])
+def test_a_record_out_of_shape_writes_nothing(tmp_path, change):
+    path, block = _two_boxes(tmp_path)
+    assert stage.keep_block(path, {**block, **change}) is False
+    assert stage.stage_block(path) is None
+
+
+def test_a_record_for_a_file_that_is_not_there_writes_nothing(tmp_path):
+    _path, block = _two_boxes(tmp_path)
+    assert stage.keep_block(str(tmp_path / "gone.stl"), block) is False
+
+
+def test_a_make_that_plays_keeps_its_pieces_beside_the_file(tmp_path, monkeypatch):
+    """The servers' answer about a make's motion may carry which of its parts
+    print as one piece; the make keeps it with what plays the file."""
+    from kiln import _pro_goal_bridge as goal
+
+    path, block = _two_boxes(tmp_path)
+    monkeypatch.setattr(goal, "_stated_motion", lambda: {"parts": {}})
+    monkeypatch.setattr(goal, "_keep_motion_note", lambda mesh, note: True)
+    envelope: dict = {}
+    goal._carry_motion({"motion": {"plays": True, "says": "It turns.", "note": {"kind": "x"}, "pieces": block}},
+                       envelope, path)
+    assert envelope["motion"] == {"plays": True, "says": "It turns.", "on_this_computer": True}
+    assert stage.stage_block(path) == block
+
+
+def test_a_make_whose_motion_was_not_kept_keeps_no_pieces(tmp_path, monkeypatch):
+    from kiln import _pro_goal_bridge as goal
+
+    path, block = _two_boxes(tmp_path)
+    monkeypatch.setattr(goal, "_stated_motion", lambda: {"parts": {}})
+    monkeypatch.setattr(goal, "_keep_motion_note", lambda mesh, note: False)
+    goal._carry_motion({"motion": {"plays": True, "says": "It turns.", "note": {"kind": "x"}, "pieces": block}},
+                       {}, path)
+    assert stage.stage_block(path) is None

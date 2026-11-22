@@ -465,18 +465,21 @@ class TestEnhancedPromptEnrichment:
     """Design intelligence prompt enrichment with per-material constraints."""
 
     def test_material_overhang_limit_used(self):
-        """Should use material-specific overhang angle, not hardcoded 50."""
+        """Should use the plastic's own overhang angle, not a hardcoded one."""
         from kiln.generation_feedback import enhance_prompt_with_design_intelligence
 
-        # Mock design intelligence to return material with 55-degree limit
+        # The plastic's limits come from the one helper every check reads;
+        # the profile carries only the curated keys (a cantilever here).
         mock_material = MagicMock()
         mock_material.material.display_name = "PETG"
-        mock_material.material.design_limits = {
-            "max_unsupported_overhang_deg": 55,
-            "recommended_wall_thickness_mm": 1.5,
-            "max_bridge_length_mm": 12,
-            "max_cantilever_length_mm": 40,
-        }
+        mock_material.material.design_limits = {"max_cantilever_length_mm": 40}
+        from kiln.material_limits import BRIDGE, OVERHANG, WALL_RECOMMENDED, MaterialLimits
+
+        served = MaterialLimits(
+            "petg", "petg", True, 0.4, None,
+            figures={OVERHANG: 55, WALL_RECOMMENDED: 1.5, BRIDGE: 12},
+            basis={OVERHANG: "plastic", WALL_RECOMMENDED: "plastic", BRIDGE: "plastic"},
+        )
 
         mock_brief = MagicMock()
         mock_brief.combined_rules = {"min_wall_thickness_mm": 1.2}
@@ -485,12 +488,13 @@ class TestEnhancedPromptEnrichment:
         mock_brief.combined_guidance = []
 
         with patch("kiln.design_intelligence.get_design_constraints", return_value=mock_brief), \
-             patch("kiln.design_intelligence.get_printer_design_profile", return_value=None):
+             patch("kiln.design_intelligence.get_printer_design_profile", return_value=None), \
+             patch("kiln.material_limits.limits_for", return_value=served):
             result = enhance_prompt_with_design_intelligence("test prompt", max_length=2000)
 
-        assert "55 degrees" in result.improved_prompt
+        assert "no overhangs greater than 55.0 degrees" in result.improved_prompt
         assert "50 degrees" not in result.improved_prompt
-        assert "1.5mm" in result.improved_prompt
+        assert "minimum wall thickness 1.5mm" in result.improved_prompt
 
     def test_large_budget_includes_guidance(self):
         """With a large prompt budget, combined_guidance should be included."""

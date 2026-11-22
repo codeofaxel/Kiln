@@ -563,11 +563,13 @@ def test_importing_the_server_attaches_nothing_until_a_printer_is_resolved(tmp_p
 
     assert pathlib.Path(lines["SERVER"]).resolve() == pathlib.Path(server.__file__).resolve()
     assert lines["AFTER_IMPORT"] == "0 0"
-    # One started hook (the watchdog) and two ended hooks: the watchdog's
-    # retire, and the plate record's "the part is still there" note, which
-    # is registered here too -- a no-op without the served record, a
-    # re-assertion with it.  Both attach at first use, never at import.
-    assert lines["AFTER_RESOLVE"] == "1 2"
+    # One started hook (the watchdog) and three ended hooks: the watchdog's
+    # retire, the plate record's "the part is still there" note, which is
+    # registered here too -- a no-op without the served record, a
+    # re-assertion with it -- and the decision on what a printer's first print
+    # left for its first lesson (off under a test run).  All attach at first
+    # use, never at import.
+    assert lines["AFTER_RESOLVE"] == "1 3"
 
 
 def test_a_printer_the_server_does_not_resolve_gets_no_watchdog():
@@ -735,7 +737,7 @@ def test_slice_and_print_attaches_a_watchdog_to_the_print_it_starts(
     monkeypatch.setattr(
         slicer_tools,
         "_apply_bed_fit_gate",
-        lambda path, printer_id, auto_center, material_id=None: (path, None, {}),
+        lambda path, printer_id, auto_center, material_id=None, bed=None: (path, None, {}),
     )
     monkeypatch.setattr(
         "kiln.slicer_profiles.start_gcode_override_from_printer",

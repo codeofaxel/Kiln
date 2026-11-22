@@ -6,6 +6,11 @@ Two endings are asked about, once each:
 * a **stop**: the printer stopped the print and named no cause;
 * a **cancel**: someone stopped the print.
 
+A third is asked of a print that was an experiment
+(:mod:`kiln.experimental_print`), however it ended:
+
+* an **experiment**: how the part came out.
+
 Only the person knows whether the part was coming out bad.  A row carries the
 question until it is answered or the person has nothing to add
 (``KilnDB.mark_ending_asked``).  Every door that tells an agent a print ended
@@ -22,7 +27,7 @@ import logging
 import time
 from typing import Any
 
-from kiln.failure_vocabulary import ending_wants_a_question
+from kiln.failure_vocabulary import ending_verdict, ending_wants_a_question
 
 _logger = logging.getLogger(__name__)
 
@@ -35,6 +40,10 @@ QUESTIONS: dict[str, str] = {
         "bad, or did something stop it?"
     ),
     "cancel": "That print was stopped before it finished. Was it going wrong, or did you just stop it?",
+    "experiment": (
+        "That print used nozzles of different sizes at once, which Kiln has not proven on a "
+        "printer. How did it come out?"
+    ),
 }
 
 #: What to send for each thing the person can say.  ``{job_id}`` is the row's.
@@ -69,7 +78,37 @@ ANSWERS: dict[str, dict[str, str]] = {
         ),
         "they just stopped it": 'record_print_outcome(job_id="{job_id}", outcome="cancelled", ending_asked=True)',
     },
+    "experiment": {
+        "it came out well": (
+            'record_print_outcome(job_id="{job_id}", outcome="success", quality_grade="good", '
+            'determined_by="user_reported") (add notes in their words)'
+        ),
+        "it came out, with flaws": (
+            'record_print_outcome(job_id="{job_id}", outcome="success", quality_grade="poor", '
+            'determined_by="user_reported") (add notes in their words: what looked wrong, and on which part)'
+        ),
+        "it came out bad": (
+            'record_print_outcome(job_id="{job_id}", outcome="failed", determined_by="user_reported") '
+            "(add failure_mode when they name the defect)"
+        ),
+        "they cannot say": 'record_print_outcome(job_id="{job_id}", outcome="{outcome}", ending_asked=True)',
+    },
 }
+
+
+def experiment_owes(row: dict[str, Any] | None) -> bool:
+    """Whether *row* is an experimental print whose ending the person has
+    not yet spoken to: it carries an experiment's word, it has ended, and
+    nobody has reported on it or been asked."""
+    if not isinstance(row, dict) or row.get("stop_reason_asked"):
+        return False
+    from kiln.experimental_print import read_recorded
+
+    return (
+        read_recorded(row.get("experiment")) is not None
+        and ending_verdict(row.get("outcome")) is not None
+        and row.get("determined_by") != "user_reported"
+    )
 
 RULE = (
     "Ask once, in your own words, at a natural moment. Record what they say "
@@ -85,6 +124,8 @@ def for_row(row: dict[str, Any] | None, *, about: str | None = None) -> dict[str
     kind = about or ending_wants_a_question(
         row.get("outcome"), row.get("failure_mode"), row.get("determined_by")
     )
+    if kind not in QUESTIONS and experiment_owes(row):
+        kind = "experiment"
     if kind not in QUESTIONS:
         return None
     job_id = str(row.get("job_id") or "")
@@ -111,11 +152,13 @@ def _filed_name(printer_name: str | None) -> str | None:
 
 
 def for_printer(
-    printer_name: str | None, *, cancelling: bool = False, db: Any = None,
+    printer_name: str | None, *, cancelling: bool = False, db: Any = None, experiment_only: bool = False,
 ) -> dict[str, Any] | None:
     """The question the print that just ended on *printer_name* owes, or
     ``None``.  *cancelling* is the cancel tool's own call: the newest row is
     asked about as a cancel even while its ending is still being written.
+    *experiment_only* asks only about an experiment (a print that finished
+    owes no other question).
     Never raises: a question is never worth failing the tool that carries it.
     """
     try:
@@ -133,6 +176,8 @@ def for_printer(
             return for_row(row, about="cancel")
         when = row.get("ended_at") or row.get("created_at") or 0
         if time.time() - float(when) > AT_THE_ENDING_S:
+            return None
+        if experiment_only and not experiment_owes(row):
             return None
         return for_row(row)
     except Exception:  # noqa: BLE001
@@ -159,9 +204,12 @@ def attach(
     """*result* with ``ask_the_person``: the question the ending owes, else
     the one waiting about its printer.  Never both.  *ending_can_owe* is
     false for an ending that owes no question of its own (a print that
-    finished)."""
+    finished), which is still asked about when it was an experiment."""
     if isinstance(result, dict) and result.get("success") is not False:
-        ask = for_printer(printer_name, cancelling=cancelling) if ending_can_owe else None
+        ask = (
+            for_printer(printer_name, cancelling=cancelling) if ending_can_owe
+            else for_printer(printer_name, experiment_only=True)
+        )
         if not ask:
             ask = about_the_printer(printer_name)
         if ask:

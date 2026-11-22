@@ -21,6 +21,8 @@ if TYPE_CHECKING:  # imported lazily everywhere else in this module
     from kiln.queue import PrintQueue
     from kiln.store_scope import LocalRead
 
+from kiln import print_keeping  # noqa: E402
+
 _logger = logging.getLogger(__name__)
 
 # A bulk queue clear must see every queued job, not the default 100-row
@@ -84,6 +86,7 @@ def _is_free_tier() -> bool:
 # ---------------------------------------------------------------------------
 
 
+@print_keeping.call
 def submit_job(
     file_name: str,
     printer_name: str | None = None,
@@ -93,6 +96,7 @@ def submit_job(
     version_id: str | None = None,
     design_id: str | None = None,
     branch_id: str | None = None,
+    keep_record: bool | None = None,
 ) -> dict:
     """Submit a print job to the queue.
 
@@ -104,6 +108,12 @@ def submit_job(
     refusal says how many); Pro has no queue cap.
 
     Args:
+        keep_record: ``False`` only when the person asks for this print not to be kept
+            ("print this privately", "don't keep a record of this"); never suggest it.
+            Kiln then keeps nothing of the print once it ends, and the answer carries
+            one line saying so.  ``True`` keeps it, for a start a team's rule held
+            (``TEAM_KEEPS_PRINTS``) after the person agreed.  Omit otherwise: the
+            print is kept the way the account says.
         file_name: G-code file name (must already exist on the printer).
         printer_name: Target printer name.  Omit to let the scheduler
             choose: the printer the queue is already on (it stays on one
@@ -195,6 +205,7 @@ def submit_job(
             metadata=(
                 {
                     **({"preview_signoff": signoff} if signoff else {}),
+                    **({"keep_record": keep_record} if isinstance(keep_record, bool) else {}),
                     **{
                         k: v.strip()
                         for k, v in (

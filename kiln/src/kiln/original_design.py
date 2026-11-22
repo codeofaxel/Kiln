@@ -496,28 +496,38 @@ def audit_original_design(
     # Resolve printer context for audit prompt enrichment.
     audit_printer_ctx = resolve_printer_generation_context(material=material)
 
+    from kiln.assumed_nozzle import assumed_nozzle
+    from kiln.printability import _fitted_layer_height
+
+    # One nozzle and one layer for every check below: the brief, the prompt,
+    # the printability check and the design check judge the same part alike.
+    nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
+    layer = layer_height or _fitted_layer_height(nozzle.diameter_mm)
+
     brief = get_design_constraints(
         requirements_text,
         material=material or audit_printer_ctx.material,
         printer_model=printer_model or audit_printer_ctx.printer_model,
+        nozzle_mm=nozzle.diameter_mm,
+        layer_height_mm=layer,
     )
     prompt = enhance_prompt_with_design_intelligence(
         requirements_text,
         material=material or audit_printer_ctx.material,
         printer_model=printer_model or audit_printer_ctx.printer_model,
         printer_context=audit_printer_ctx,
+        nozzle_mm=nozzle.diameter_mm,
+        layer_height_mm=layer,
     )
     mesh_validation = validate_mesh(file_path)
 
-    from kiln.assumed_nozzle import assumed_nozzle
-
-    nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
     printability = analyze_printability(
         file_path,
         nozzle_diameter=nozzle.diameter_mm,
-        layer_height=layer_height,
+        layer_height=layer,
         max_overhang_angle=max_overhang_angle,
         build_volume=build_volume_tuple,
+        material=material,
     )
     # The engine was handed a size, not the printer: say where the size
     # really came from.
@@ -528,6 +538,8 @@ def audit_original_design(
         material=material,
         printer_model=printer_model,
         build_volume=build_volume_tuple,
+        nozzle_diameter=nozzle.diameter_mm,
+        layer_height=layer,
     )
 
     orientation = None
@@ -618,8 +630,14 @@ def audit_original_design(
             name="design_requirements",
             passed=design_validation.overall_pass,
             severity="critical" if not design_validation.overall_pass else "info",
-            message=design_validation.summary,
-            details=design_validation.to_dict(),
+            # The report itself is in the audit whole, with what it says
+            # about the figures its checks read; the gate repeats only what
+            # the checks found, so those lines are said once.
+            message=design_validation.checks_summary or design_validation.summary,
+            details={
+                **design_validation.to_dict(),
+                "summary": design_validation.checks_summary or design_validation.summary,
+            },
         ),
         AuditGate(
             name="printability",
@@ -879,7 +897,7 @@ def audit_original_design(
     if design_validation.critical_count or design_validation.warning_count:
         score -= design_validation.critical_count * 12
         score -= design_validation.warning_count * 4
-        reasons.append(design_validation.summary)
+        reasons.append(design_validation.checks_summary or design_validation.summary)
     if diagnostics is not None:
         severity_penalty = {
             "clean": 0,
@@ -991,7 +1009,7 @@ def audit_original_design(
             checked_for = (getattr(printability, "nozzle", None) or {}).get("diameter_mm")
             try:
                 enriched = overlay.enrich_printability_report(
-                    printability.to_dict(),
+                    {**printability.to_dict(), "layer_height_mm": layer},
                     material,
                     printer_model,
                     **({"nozzle_diameter_mm": checked_for} if checked_for else {}),
@@ -999,7 +1017,7 @@ def audit_original_design(
             except TypeError:
                 # A kiln-pro from before the overlay took a nozzle size.
                 enriched = overlay.enrich_printability_report(
-                    printability.to_dict(), material, printer_model,
+                    {**printability.to_dict(), "layer_height_mm": layer}, material, printer_model,
                 )
             enrichment_block = (
                 enriched.get("enrichment") if isinstance(enriched, dict) else None
@@ -1095,16 +1113,29 @@ def generate_original_design(
     # Use printer-resolved material if the user didn't specify one.
     effective_material = material or printer_ctx.material
 
+    from kiln.assumed_nozzle import assumed_nozzle
+
+    # The nozzle each attempt's audit judges with, so the brief and the
+    # prompt ask for the walls the audit will hold the result to.
+    seed_nozzle = assumed_nozzle(printer_model, stated=nozzle_diameter)
+    from kiln.printability import _fitted_layer_height
+
+    seed_layer = layer_height or _fitted_layer_height(seed_nozzle.diameter_mm)
+
     brief = get_design_constraints(
         requirements_text,
         material=effective_material,
         printer_model=printer_model or printer_ctx.printer_model,
+        nozzle_mm=seed_nozzle.diameter_mm,
+        layer_height_mm=seed_layer,
     )
     seed_prompt = enhance_prompt_with_design_intelligence(
         requirements_text,
         material=effective_material,
         printer_model=printer_model or printer_ctx.printer_model,
         printer_context=printer_ctx,
+        nozzle_mm=seed_nozzle.diameter_mm,
+        layer_height_mm=seed_layer,
     )
     provider_used, generation_provider, selection_reason = _resolve_original_design_provider(
         provider,

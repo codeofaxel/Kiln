@@ -242,20 +242,23 @@ def nozzle_unchecked(printer_id: str, *, at: str = "preflight") -> dict[str, Any
 
 
 def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
-    """The nozzle size on record for *printer_id*, when somebody recorded one.
+    """The nozzle on record for *printer_id*, when somebody recorded one.
 
-    ``{"diameter_mm": float | None, "answered": bool}``.  ``diameter_mm`` is
-    set only for a record a person or the machine stated; a catalogue
-    default is nobody's record and comes back ``None``.  ``answered`` is
-    ``False`` when the record could not be asked at all (offline, signed
-    out, no answer), so a caller can tell "no record" from "could not ask".
-    From kiln-pro locally when it is installed, asked every time; else
-    from the hosted door with a short timeout, and only that answer is
-    remembered, for :data:`RECORD_MEMO_S`.
+    ``{"diameter_mm": float | None, "material": str | None, "answered": bool,
+    "positions": list | None}``.  ``diameter_mm`` and ``material`` are set
+    only for a record a person or the machine stated; a catalogue default is
+    nobody's record and comes back ``None``, and so does a material nobody
+    knows.  ``positions`` is the owner's statement of each nozzle position,
+    when the record holds one (:func:`recorded_positions_of`), else ``None``.
+    ``answered`` is ``False`` when the record could not be asked at all
+    (offline, signed out, no answer), so a caller can tell "no record" from
+    "could not ask".  From kiln-pro locally when it is installed, asked
+    every time; else from the hosted door with a short timeout, and only
+    that answer is remembered, for :data:`RECORD_MEMO_S`.
     """
     pid = (printer_id or "").strip() if isinstance(printer_id, str) else ""
     if not pid:
-        return {"diameter_mm": None, "answered": True}
+        return {"diameter_mm": None, "material": None, "answered": True, "positions": None}
     if available():
         # Asked of the store each time, never remembered: the read is local,
         # the record can change between two checks, and a process that
@@ -265,13 +268,20 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
         try:
             from kiln_pro.nozzle_intelligence.store_resolver import recorded_nozzle
         except ImportError:  # a kiln-pro from before this door existed
-            return {"diameter_mm": None, "answered": True}
+            return {"diameter_mm": None, "material": None, "answered": True, "positions": None}
         try:
             state = recorded_nozzle(pid, tool_name=RECORD_TOOL)
         except Exception:  # noqa: BLE001 -- one rung of a check, never the check
             logger.debug("recorded nozzle lookup failed", exc_info=True)
-            return {"diameter_mm": None, "answered": True}
-        return {"diameter_mm": state.diameter_mm if state is not None else None, "answered": True}
+            return {"diameter_mm": None, "material": None, "answered": True, "positions": None}
+        if state is None:
+            return {"diameter_mm": None, "material": None, "answered": True, "positions": None}
+        return {
+            "diameter_mm": state.diameter_mm,
+            "material": _material_word(getattr(state, "material", None)),
+            "answered": True,
+            "positions": recorded_positions_of(getattr(state, "positions", None)),
+        }
     now = time.monotonic()
     memo = _record_memo.get(pid)
     if memo is not None and now - memo[0] < RECORD_MEMO_S:
@@ -279,6 +289,48 @@ def consult_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     answer = _served_recorded_nozzle(pid)
     _record_memo[pid] = (now, answer)
     return answer
+
+
+def _material_word(material: Any) -> str | None:
+    """A nozzle material as the record's word, lower case; ``None`` for none
+    or ``unknown``."""
+    word = str(getattr(material, "value", material) or "").strip().lower()
+    return word if word and word != "unknown" else None
+
+
+def _field(entry: Any, name: str) -> Any:
+    """*name* of one stated position, a mapping or an object alike."""
+    return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
+
+
+def recorded_positions_of(raw: Any) -> list[dict[str, Any]] | None:
+    """The nozzle positions a record states, as plain entries, or ``None``.
+
+    Each entry is ``{"id": int, "fitted": bool, "diameter_mm": float | None,
+    "material": str | None}``, in id order.  An entry with no whole-number id
+    of 1 or more is left out, and so is a second entry for an id already
+    read.  A record that states no positions, or none that read, is
+    ``None``.  Never raises.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+    read: dict[int, dict[str, Any]] = {}
+    for entry in raw:
+        pid = _field(entry, "id")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid < 1 or pid in read:
+            continue
+        size = _field(entry, "diameter_mm")
+        try:
+            size = float(size) if size is not None and not isinstance(size, bool) else None
+        except (TypeError, ValueError):
+            size = None
+        read[pid] = {
+            "id": pid,
+            "fitted": _field(entry, "fitted") is True,
+            "diameter_mm": size if size is not None and 0 < size <= 5 else None,
+            "material": _material_word(_field(entry, "material")),
+        }
+    return [read[pid] for pid in sorted(read)] or None
 
 
 #: The servers' last answer for each printer's nozzle record, for
@@ -317,9 +369,14 @@ def _served_state(printer_id: str) -> dict[str, Any] | None:
 def _served_recorded_nozzle(printer_id: str) -> dict[str, Any]:
     answer = _served_state(printer_id)
     if answer is None:
-        return {"diameter_mm": None, "answered": False}
+        return {"diameter_mm": None, "material": None, "answered": False, "positions": None}
     stated = answer.get("found") and answer.get("trusted_for_verdicts")
-    return {"diameter_mm": answer.get("diameter_mm") if stated else None, "answered": True}
+    return {
+        "diameter_mm": answer.get("diameter_mm") if stated else None,
+        "material": _material_word(answer.get("material")) if stated else None,
+        "answered": True,
+        "positions": recorded_positions_of(answer.get("positions")) if stated else None,
+    }
 
 
 #: The memo key for :func:`consult_only_recorded_nozzle`; no printer is named so.
@@ -784,6 +841,7 @@ def record_print_odometer(
     file_name: str | None,
     *,
     grams: float | None = None,
+    lineage_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Advance the nozzle odometer for one started print.
 
@@ -800,27 +858,60 @@ def record_print_odometer(
     reported to Kiln's servers on a short-lived thread, free on every
     plan for a signed-in account.  Signed out, or a file with no figure,
     and the print is simply not counted; nothing waits and nothing raises.
+
+    A print of a slice the owner said to print anyway with an abrasive
+    filament through a nozzle that is not wear-resistant carries that with
+    its grams, so the nozzle's record keeps it: *lineage_id* is the slice
+    record the start resolved the file to (:func:`abrasive_run_of`).
     """
+    run = abrasive_run_of(lineage_id)
     try:
         from kiln_pro.nozzle_intelligence.odometer import record_print_filament
     except ImportError:
         record_print_filament = None
     if record_print_filament is None:
-        _report_print_grams(printer_id, file_name, grams)
+        _report_print_grams(printer_id, file_name, grams, abrasive_run=run)
         return None
     try:
-        return record_print_filament(
-            printer_id,
-            file_path=file_name,
-            grams=grams,
-            dedupe_key=file_name,
-        )
+        try:
+            return record_print_filament(
+                printer_id,
+                file_path=file_name,
+                grams=grams,
+                dedupe_key=file_name,
+                **({"abrasive_run": run} if run else {}),
+            )
+        except TypeError:
+            if not run:
+                raise
+            # A kiln-pro that keeps no run still counts the grams.
+            return record_print_filament(printer_id, file_path=file_name, grams=grams, dedupe_key=file_name)
     except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
         return None
 
 
-def _report_print_grams(printer_id: str, file_name: str | None, grams: float | None) -> None:
-    """Send one start's grams to the hosted odometer, off the calling thread."""
+def abrasive_run_of(lineage_id: str | None) -> dict[str, Any] | None:
+    """What the owner said to print anyway in the slice record *lineage_id*
+    (:func:`kiln.print_lineage.soft_nozzle_of`): ``{"filaments": [{"filament",
+    "material"}], "nozzles": [{"position", "material"}]}``, or ``None`` for
+    every other print.  Never raises."""
+    try:
+        from kiln.print_lineage import soft_nozzle_of
+
+        kept = soft_nozzle_of(lineage_id)
+    except Exception:  # noqa: BLE001 -- an unread record is no run
+        logger.debug("abrasive run not read for %s", lineage_id, exc_info=True)
+        return None
+    if not isinstance(kept, dict) or not kept.get("filaments") or not kept.get("nozzles"):
+        return None
+    return {"filaments": list(kept["filaments"]), "nozzles": list(kept["nozzles"])}
+
+
+def _report_print_grams(
+    printer_id: str, file_name: str | None, grams: float | None, *, abrasive_run: dict[str, Any] | None = None,
+) -> None:
+    """Send one start's grams to the hosted odometer, off the calling thread,
+    with the owner's word to print anyway that rides it (*abrasive_run*)."""
     if not printer_id or not isinstance(printer_id, str):
         return
     if grams is None:
@@ -837,21 +928,28 @@ def _report_print_grams(printer_id: str, file_name: str | None, grams: float | N
         # One start, one charge; the same file printed again later is
         # another print, so the key carries the moment.
         args=(printer_id, float(grams), f"start:{printer_id}:{file_name}:{time.time():.0f}"),
+        kwargs={"abrasive_run": abrasive_run},
         name="kiln-odometer-report", daemon=True,
     ).start()
 
 
-def _served_odometer_report(printer_id: str, grams: float, dedupe_key: str) -> None:
-    """POST one start's grams to the hosted door.  Runs off the calling thread."""
+def _served_odometer_report(
+    printer_id: str, grams: float, dedupe_key: str, *, abrasive_run: dict[str, Any] | None = None,
+) -> None:
+    """POST one start's grams to the hosted door, with what the owner said
+    to print anyway in that file (:func:`abrasive_run_of`).  Runs off the
+    calling thread."""
     global _service_down_until, _service_down_miss
     from kiln.served_answer import classify_answer, classify_transport_error
 
+    run = abrasive_run
     try:
         from kiln.server import _pro_api_call
 
         answer = _pro_api_call(
             ODOMETER_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False,
             printer_id=printer_id, grams=grams, dedupe_key=dedupe_key,
+            **({"abrasive_run": run} if run else {}),
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a degrade, never a print
         logger.debug("print-start odometer not served", exc_info=True)
@@ -874,11 +972,13 @@ __all__ = [
     "RECORD_TOOL",
     "SERVICE_BACKOFF_S",
     "WIRE_TOOL",
+    "abrasive_run_of",
     "available",
     "clumping_unchecked",
     "consult_capacity",
     "consult_only_recorded_nozzle",
     "consult_recorded_nozzle",
+    "recorded_positions_of",
     "consult_sliced_file",
     "forget_recorded_nozzle",
     "nozzle_unchecked",

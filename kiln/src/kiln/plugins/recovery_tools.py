@@ -468,9 +468,10 @@ def _same_file(a: str, b: str) -> bool:
     return first is not None and first == _file_digest(b)
 
 
-def _submit_fill(file_path: str, plan_id: str) -> dict:
+def _submit_fill(file_path: str, plan_id: str, *, asks: dict | None = None, keep_record: bool | None = None) -> dict:
     """Queue a kept copies plan.  The door took the person's yes for the part
-    (the preview gate) before calling this."""
+    (the preview gate) before calling this.  *asks* is the owner's word to
+    print anyway and the filament-to-nozzle map, carried on every job."""
     import os
 
     import kiln.server as _srv
@@ -501,7 +502,7 @@ def _submit_fill(file_path: str, plan_id: str) -> dict:
         # each job as a yes for exactly this run's printers, so the queue
         # refuses any other at the start.
         signoff = {**signoff, "scope": names}
-    out = submit_fill_plan(plan_id, signoff)
+    out = submit_fill_plan(plan_id, signoff, asks=asks, keep_record=keep_record)
     if out.get("already"):
         out["message"] = f"This plan was already {out['already']}; nothing was queued again."
         return out
@@ -809,6 +810,10 @@ class _RecoveryToolsPlugin:
             quality: str | None = None,
             priority: str | None = None,
             share: str = "soonest",
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
+            filament_map: list[int] | None = None,
+            keep_record: bool | None = None,
         ) -> dict:
             """Plan many copies of one part across your printers, wherever there is safe room.
 
@@ -847,6 +852,22 @@ class _RecoveryToolsPlugin:
                 quality: "draft", "standard" or "fine".
                 priority: "low", "normal" or "high".
                 share: "soonest" (the default) or "even".
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
+                soft_nozzle_confirmed: When submitting: the owner has said to
+                    print anyway a plate refused with ``ABRASIVE_ON_SOFT_NOZZLE``
+                    (an abrasive filament through a nozzle on record that is
+                    not wear-resistant).  Every queued plate carries it.  Only
+                    on their word, never on your own judgement.
+                filament_map: When submitting, for printers with more than one
+                    nozzle: the nozzle (1 for the first) each filament prints
+                    from, one number per filament.  Every queued plate is
+                    sliced with it.
+                keep_record: ``False`` only when the person asks for these prints
+                    not to be kept ("print this privately", "don't keep a record of
+                    this"); never suggest it.  Kiln then keeps nothing of them, or of
+                    the plan, once they end.  Read with ``submit``.  Omit otherwise.
             """
             import os
 
@@ -868,7 +889,10 @@ class _RecoveryToolsPlugin:
                     return _srv._error_dict("submit needs the plan_id the plan answered.", code="VALIDATION_ERROR")
                 if block := _srv._preview_gate_error("plan_multi_copy_split", file_path, preview_token):
                     return block
-                return _submit_fill(file_path, plan_id)
+                from kiln.slicer import owner_asks
+
+                asks = owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
+                return _submit_fill(file_path, plan_id, asks=asks, keep_record=keep_record)
             try:
                 return _plan_fill(file_path, copies, material, quality=quality, priority=priority, share=share)
             except Exception as exc:

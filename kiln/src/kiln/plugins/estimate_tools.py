@@ -162,6 +162,9 @@ class _EstimateToolsPlugin:
             printer_name: str | None = None,
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Primary estimation tool — slice a 3D model and return time, filament, cost, and printability analysis.
 
@@ -180,6 +183,19 @@ class _EstimateToolsPlugin:
             filament will I use?" before committing to a print job.
 
             Args:
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 plate_number: Which plate to estimate of a slicer project that
                     holds several plates (1 for the first).  Leave unset for
                     any other file.  A several-plate project with none named
@@ -219,7 +235,7 @@ class _EstimateToolsPlugin:
             from kiln.gcode_metadata import extract_metadata
             from kiln.plugins.slicer_tools import plate_choice_refusal
             from kiln.printability import analyze_printability
-            from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError
+            from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError, owner_asks
 
             try:
                 # 1. Resolve the slicer profile
@@ -246,6 +262,7 @@ class _EstimateToolsPlugin:
                     printer_name=printer_name, placement=placement,
                     profile_path=effective_profile, auto_center=True,
                     material=material or None, plate_number=plate_number,
+                    **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -555,6 +572,9 @@ class _EstimateToolsPlugin:
             material: str = "",
             placement: str | list[float] | None = None,
             plate_number: int | None = None,
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Estimate print time and filament usage for a model.
 
@@ -594,6 +614,19 @@ class _EstimateToolsPlugin:
                 estimate never refuses because of the plate: with no safe
                 spot named the estimate is for the part on an empty plate
                 and ``plate_note`` says so.  Not read for a ``.gcode`` input.
+            :param mixed_nozzle_experiment: The person has said yes, for this print, to a slice
+                refused with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                experiment). Only on their yes, each time; ``slice_model`` says what follows.
+            :param soft_nozzle_confirmed: The owner has said to print anyway a
+                slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an abrasive
+                filament through a nozzle on record that is not
+                wear-resistant).  Only on their word, never on your own
+                judgement.
+            :param filament_map: Only for a printer with more than one nozzle:
+                the nozzle (1 for the first) each filament prints from, one
+                number per filament in filament order.  Leave unset to let the
+                slicer choose; a map that does not fit is refused before
+                slicing, as ``slice_model`` refuses it.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("slicer"):
@@ -615,7 +648,7 @@ class _EstimateToolsPlugin:
                 # the same shared step as every slice door, never refusing
                 # because of the plate (_estimate_slice).
                 from kiln.plugins.slicer_tools import _attach_placement
-                from kiln.slicer import estimates_for_result
+                from kiln.slicer import estimates_for_result, owner_asks
 
                 resolved_profile = profile or None
                 if not resolved_profile and printer_id:
@@ -630,6 +663,7 @@ class _EstimateToolsPlugin:
                     placement=placement, profile_path=resolved_profile,
                     slicer_path=slicer_path or None, material=material or None,
                     plate_number=plate_number,
+                    **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -805,6 +839,7 @@ class _EstimateToolsPlugin:
             tool_changer_addon: str = "",
             electricity_rate: float = 0.12,
             printer_wattage: float = 200.0,
+            filament_map: list[int] | None = None,
         ) -> dict:
             """Estimate print time, cost, and filament usage BEFORE generating a model.
 
@@ -862,6 +897,10 @@ class _EstimateToolsPlugin:
                 Use ``list_multi_material_addons`` to see all options.
             :param electricity_rate: Cost per kWh in USD (default 0.12).
             :param printer_wattage: Printer power in watts (default 200).
+            :param filament_map: Only for a printer with more than one nozzle:
+                the nozzle (1 for the first) each material prints from, in
+                material order.  The estimate then times moves between
+                nozzles and filament swaps apart.
             """
             import json as _json
 
@@ -889,10 +928,11 @@ class _EstimateToolsPlugin:
                 eff_infill: float | None = None if infill_percent < 0 else infill_percent
                 eff_layer: float | None = layer_height_mm if layer_height_mm > 0 else None
                 eff_printer: str | None = printer_id if printer_id else None
-                from kiln.assumed_nozzle import assumed_nozzle
+                from kiln.assumed_nozzle import assumed_nozzle, recorded_positions
 
                 nozzle = assumed_nozzle(eff_printer, stated=nozzle_mm, or_only_printer=True)
                 nozzle_mm = nozzle.diameter_mm
+                fitted = recorded_positions(nozzle.printer_id)
                 eff_addon: str | None = tool_changer_addon if tool_changer_addon.strip() else None
 
                 # Parse template overrides
@@ -916,6 +956,8 @@ class _EstimateToolsPlugin:
                         tool_changer_addon=eff_addon,
                         electricity_rate=electricity_rate,
                         printer_wattage=printer_wattage,
+                        filament_map=filament_map,
+                        fitted_positions=fitted,
                     )
                 else:
                     if width_mm <= 0 or depth_mm <= 0 or height_mm <= 0:
@@ -939,6 +981,8 @@ class _EstimateToolsPlugin:
                         tool_changer_addon=eff_addon,
                         electricity_rate=electricity_rate,
                         printer_wattage=printer_wattage,
+                        filament_map=filament_map,
+                        fitted_positions=fitted,
                     )
 
                 # Build human-readable summary

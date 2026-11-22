@@ -37,6 +37,7 @@ SHORT_FILES = (
     "printers/moonraker_history.py",
     "printers/motion_plan.py",
     "printers/motion_plan_cache.py",
+    "printers/motion_walk.py",
     "printers/octoprint.py",
     "printers/print_file_scan.py",
     "printers/print_gate.py",

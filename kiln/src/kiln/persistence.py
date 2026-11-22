@@ -728,6 +728,10 @@ class KilnDB:
         # (``mark_ending_asked``): the row is not asked about again.
         if "stop_reason_asked" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN stop_reason_asked REAL DEFAULT NULL")
+        # ``local`` for a print kept on this computer only (kiln.print_keeping):
+        # nothing about it leaves this computer.  NULL is the account's way.
+        if "kept" not in columns:
+            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN kept TEXT DEFAULT NULL")
         # How long the print took against what the slicer said it would
         # (kiln.learned_print_time).  ``estimated_seconds`` is the slicer's
         # time for the file, read at the START Kiln sent; ``print_seconds``
@@ -1181,7 +1185,8 @@ class KilnDB:
                     progress_at_end     REAL DEFAULT NULL,
                     layer_at_end        INTEGER DEFAULT NULL,
                     spool_id            TEXT DEFAULT NULL,
-                    firmware_version    TEXT DEFAULT NULL
+                    firmware_version    TEXT DEFAULT NULL,
+                    experiment          TEXT DEFAULT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
                     ON print_outcomes(printer_name);
@@ -2994,9 +2999,12 @@ class KilnDB:
         "layer_at_end": "INTEGER",
         "spool_id": "TEXT",
         "firmware_version": "TEXT",
+        "experiment": "TEXT",
     }
     #: The evidence a start writes, by the job id the start opened.
-    START_EVIDENCE_COLUMNS = ("settings_code", "spool_id", "firmware_version")
+    #: ``experiment`` is the word for a sent file that is an experiment
+    #: (:func:`kiln.experimental_print.recorded_word`); empty for any other.
+    START_EVIDENCE_COLUMNS = ("settings_code", "spool_id", "firmware_version", "experiment")
     #: How long after an ending a row with no open start still takes that
     #: ending's progress reading (seconds).
     PROGRESS_JUST_ENDED_S = 60.0
@@ -3013,6 +3021,15 @@ class KilnDB:
         door that writes an ending comes through here, so none has to
         remember to.  That never raises and never waits on the network.
         """
+        from kiln import print_keeping
+
+        level = print_keeping.level_of(
+            outcome.get("printer_name"), outcome.get("file_name") or outcome.get("job_id"),
+        )
+        if level == print_keeping.NONE:
+            raise ValueError(f"Print {outcome.get('job_id')!r} is not kept; no record is written")
+        if level == print_keeping.LOCAL and not outcome.get("kept"):
+            outcome = {**outcome, "kept": print_keeping.LOCAL}
         row_id = self._save_print_outcome(outcome)
         if outcome.get("outcome") != "pending":
             try:
@@ -3131,9 +3148,9 @@ class KilnDB:
                         notes, agent_id, determined_by, print_error, created_at,
                         version_id, design_id, branch_id, machine_fingerprint,
                         printer_model, nozzle_diameter_mm, ended_at, account_sync_id,
-                        note_by)
+                        note_by, kept)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         outcome["job_id"],
                         outcome["printer_name"],
@@ -3152,6 +3169,7 @@ class KilnDB:
                         outcome.get("created_at", time.time()),
                         *identity,
                         outcome.get("note_by"),
+                        outcome.get("kept") if outcome.get("kept") == "local" else None,
                     ),
                 )
                 self._conn.commit()
@@ -3318,6 +3336,10 @@ class KilnDB:
             ),
         )
         self._write_note_locked(row_id, outcome, prior_note_by, ending_taken=True)
+        if outcome.get("kept") == "local":
+            self._conn.execute(
+                "UPDATE print_outcomes SET kept = 'local' WHERE id = ? AND kept IS NULL", (row_id,)
+            )
         self._conn.commit()
 
     def _write_note_locked(
@@ -3657,13 +3679,17 @@ class KilnDB:
     ) -> list[dict[str, Any]]:
         """Recent prints whose ending owes the person a question nobody has
         asked yet (``kiln.failure_vocabulary.ending_wants_a_question``): the
-        printer stopped it and named no cause, or someone stopped it.  Only
-        the person knows whether the part was coming out bad."""
+        printer stopped it and named no cause, or someone stopped it; and an
+        experimental print the person has not reported on
+        (``kiln.ending_question.experiment_owes``).  Only the person knows
+        how the part came out."""
+        from kiln.ending_question import experiment_owes
         from kiln.failure_vocabulary import FAILED_OUTCOMES, ending_wants_a_question
 
         words = [*sorted(FAILED_OUTCOMES), "cancelled"]
         marks = ", ".join("?" for _ in words)
-        clauses = [f"outcome IN ({marks})", "stop_reason_asked IS NULL",
+        # An experimental print is asked about however it ended.
+        clauses = [f"(outcome IN ({marks}) OR experiment IS NOT NULL)", "stop_reason_asked IS NULL",
                    "COALESCE(ended_at, created_at) >= ?"]
         params: list[Any] = [*words, time.time() - self.STOP_ASK_WINDOW_S]
         if printer_name:
@@ -3677,7 +3703,10 @@ class KilnDB:
         out = []
         for raw in rows:
             row = self._outcome_row_to_dict(raw)
-            if ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+            if (
+                ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by"))
+                or experiment_owes(row)
+            ):
                 out.append(row)
                 if len(out) >= limit:
                     break
@@ -3706,7 +3735,12 @@ class KilnDB:
             if raw is None:
                 return None
             row = self._outcome_row_to_dict(raw)
-            if not ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by")):
+            from kiln.ending_question import experiment_owes
+
+            if not (
+                ending_wants_a_question(row.get("outcome"), row.get("failure_mode"), row.get("determined_by"))
+                or experiment_owes(row)
+            ):
                 return None
             self._conn.execute(
                 "UPDATE print_outcomes SET stop_reason_asked = COALESCE(stop_reason_asked, ?), "
@@ -3716,6 +3750,54 @@ class KilnDB:
             self._conn.commit()
         self._printer_checkin_soon(row.get("printer_name"))
         return self.get_print_outcome(job_id)
+
+    #: The setting that holds the account ids of forgotten prints whose
+    #: delete the account has not taken yet (random ids, nothing more).
+    FORGET_OWED_SETTING = "account_forget_owed"
+
+    def forget_prints(self, *, job_id: str | None = None, design_id: str | None = None) -> int:
+        """Delete prints from this computer's history: the one *job_id*
+        names, or every print of *design_id*.  The account ids of deleted
+        rows the account holds are kept as owed a delete
+        (:meth:`forget_owed`), so the account forgets them too.  Returns how
+        many rows went."""
+        if not job_id and not design_id:
+            return 0
+        where, args = ("job_id = ?", (job_id,)) if job_id else ("design_id = ?", (design_id,))
+        with self._write_lock:
+            rows = self._conn.execute(
+                f"SELECT id, account_sync_id FROM print_outcomes WHERE {where}", args,
+            ).fetchall()
+            owed = [r[1] for r in rows if r[1]]
+            self._conn.execute(f"DELETE FROM print_outcomes WHERE {where}", args)
+            if job_id:
+                self._conn.execute("DELETE FROM print_history WHERE job_id = ?", (job_id,))
+            self._conn.commit()
+        if owed or design_id:
+            current = self.forget_owed()
+            current["ids"] = sorted(set(current["ids"]) | set(owed))
+            if design_id:
+                current["designs"] = sorted(set(current["designs"]) | {design_id})
+            self.set_setting(self.FORGET_OWED_SETTING, json.dumps(current))
+        return len(rows)
+
+    def forget_owed(self) -> dict[str, list[str]]:
+        """The account deletes still owed: ``{"ids": [...], "designs": [...]}``."""
+        try:
+            raw = json.loads(self.get_setting(self.FORGET_OWED_SETTING, "") or "{}")
+        except (TypeError, ValueError):
+            raw = {}
+        return {
+            "ids": [i for i in raw.get("ids") or [] if isinstance(i, str)],
+            "designs": [d for d in raw.get("designs") or [] if isinstance(d, str)],
+        }
+
+    def forget_taken(self, ids: list[str], designs: list[str]) -> None:
+        """The account took these deletes: they are owed no longer."""
+        current = self.forget_owed()
+        current["ids"] = [i for i in current["ids"] if i not in set(ids)]
+        current["designs"] = [d for d in current["designs"] if d not in set(designs)]
+        self.set_setting(self.FORGET_OWED_SETTING, json.dumps(current))
 
     def clear_print_note(self, job_id: str) -> dict[str, Any] | None:
         """Delete the note on *job_id*'s print and return the row as it now
@@ -3772,6 +3854,7 @@ class KilnDB:
         rows = self._conn.execute(
             "SELECT * FROM print_outcomes "
             "WHERE version_id IS NOT NULL AND version_id <> '' AND outcome <> 'pending' "
+            "AND (kept IS NULL OR kept <> 'local') "
             "AND (account_pushed_state IS NULL OR account_pushed_state <> "
             "outcome || '|' || COALESCE(determined_by, '') || CASE WHEN note_by IS NULL THEN '' "
             "ELSE '|' || note_by || '|' || COALESCE(notes, '') END) "

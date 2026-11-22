@@ -291,6 +291,32 @@ def machine_key(adapter: Any) -> str:
     return found or f"name:{getattr(adapter, 'name', '') or 'default'}"
 
 
+def forget_plans_for_file(file_name: str | None) -> int:
+    """Delete every machine's hardware plan filed for the print of
+    *file_name* (its base name).  Returns how many went.  Never raises.
+
+    For a print the person asked not to keep, once it ends
+    (:func:`kiln.print_keeping.print_ended`).
+    """
+    base = os.path.basename(str(file_name or ""))
+    if not base:
+        return 0
+    try:
+        with _LOCK:
+            if not _store_path().is_file():
+                return 0
+            machines = _read_store()
+            gone = [k for k, r in machines.items() if isinstance(r, dict) and r.get("file") == base]
+            for key in gone:
+                machines.pop(key, None)
+            if gone:
+                _write_store(machines)
+            return len(gone)
+    except Exception:  # noqa: BLE001
+        logger.debug("hardware plan not forgotten", exc_info=True)
+        return 0
+
+
 def has_plan(adapter: Any) -> bool:
     """Whether a hardware plan is on record for *adapter*'s machine."""
     try:

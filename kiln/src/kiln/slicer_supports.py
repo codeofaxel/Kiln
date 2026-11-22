@@ -104,6 +104,11 @@ class SliceSupports:
     #: How many faces of the file the slicer was handed are painted to be
     #: supported; above zero, the slice supports nothing else.  Never served.
     under_painted: int = field(default=0, repr=False)
+    #: Whether the support threshold was written from the plastic's own
+    #: overhang figure.  The reply then states the decision and not the
+    #: threshold, as the printability reply states its verdict and not the
+    #: angle; the profile carries it.  Never served.
+    own_angle: bool = field(default=False, repr=False)
 
     @property
     def note(self) -> str:
@@ -138,8 +143,10 @@ class SliceSupports:
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        for bookkeeping in ("kept_off", "under", "under_painted"):
+        for bookkeeping in ("kept_off", "under", "under_painted", "own_angle"):
             d.pop(bookkeeping)
+        if self.own_angle:
+            d["settings"] = {k: v for k, v in d["settings"].items() if k != "support_material_threshold"}
         d["note"] = self.note
         return d
 
@@ -499,6 +506,7 @@ def decide_supports(
     *,
     material: str | None = None,
     nozzle_diameter: float | None = None,
+    layer_height: float | None = None,
     on_anyway: bool = False,
 ) -> SliceSupports:
     """Read *input_path* and decide whether its slice gets Kiln's supports.
@@ -508,18 +516,34 @@ def decide_supports(
     even for a part that needs none.
 
     *material* chooses the overhang and bridge thresholds (PLA bridges
-    farther than TPU); *nozzle_diameter* is the size the slice is for, so
-    the check and the slice judge the same part the same way.  Never
+    farther than TPU); *nozzle_diameter* and *layer_height* are the size and
+    layer the slice is for, so the check and the slice judge the same part
+    the same way.  Never
     raises: a part the engine cannot read is ``not_checked``, said.
 
     Nothing is kept between calls: one process serves every customer on
     the hosted server, and a reading takes 0.1 s on an ordinary part.
+    With no *material*, the plastic a check assumes
+    (:func:`kiln.material_limits.assuming`).
     """
-    from kiln.printability import judge_supports, support_verdict
+    from kiln.material_limits import assuming
+
+    with assuming(material) as plastic:
+        return _decide_supports(
+            input_path, plastic.lower(), nozzle_diameter=nozzle_diameter, layer_height=layer_height,
+            on_anyway=on_anyway,
+        )
+
+
+def _decide_supports(
+    input_path: str, plastic: str, *, nozzle_diameter: float | None, layer_height: float | None, on_anyway: bool,
+) -> SliceSupports:
+    """:func:`decide_supports` for one plastic, already read."""
+    from kiln.printability import judge_supports, material_overhangs, support_verdict
 
     try:
         judged = judge_supports(
-            input_path, material=(material or "pla").lower(), nozzle_diameter=nozzle_diameter,
+            input_path, material=plastic, nozzle_diameter=nozzle_diameter, layer_height=layer_height,
             **({"clear_with_none_held": True} if on_anyway else {}),
         )
     except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
@@ -535,6 +559,11 @@ def decide_supports(
             settings=support_settings(judged.overhang_threshold_deg),
             kept_off=tuple(judged.support_kept_off_faces),
             under=tuple(getattr(judged, "support_under_faces", ())),
+            own_angle=bool(
+                material_overhangs(plastic, nozzle_mm=nozzle_diameter, layer_height_mm=layer_height)[
+                    "overhangs"
+                ]["material_limits_deg"]
+            ),
         )
     return SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",
@@ -606,6 +635,7 @@ def ensure_profile_supports(
     nozzle = _first_number(settings.get("nozzle_diameter"))
     decision = decide_supports(
         input_path, material=material, nozzle_diameter=nozzle,
+        layer_height=_first_number(settings.get("layer_height")),
         **({"on_anyway": True} if project and project.get(SUPPORT_KEY) == "1" else {}),
     )
     if project and SUPPORT_KEY in project:

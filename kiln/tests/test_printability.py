@@ -2119,10 +2119,61 @@ class TestPrintabilityJudgmentTierSeam:
             "kiln.design_intelligence.load_pro_overlay_or_empty",
             lambda kind: {},
         )
+        # A free caller (the suite grants every plan by default).
+        monkeypatch.setattr(
+            "kiln.licensing.check_tier",
+            lambda *_a, **_k: (False, "This feature needs Kiln Pro. See what Pro includes at kiln3d.com/pricing"),
+        )
         path = _write_stl(str(tmp_path), _cube_triangles(20.0))
         report = analyze_printability(path, material="pla")
         rec_text = " ".join(report.recommendations)
         assert "Kiln Pro" in rec_text
+
+    @pytest.mark.parametrize(
+        ("signed_in", "said"),
+        [
+            pytest.param({"tier": "free"}, True, id="never-paid"),
+            pytest.param({"tier": "free", "lapsed_tier": "pro"}, False, id="plan-ended"),
+            pytest.param({"tier": "pro"}, False, id="paying-plain-install"),
+        ],
+    )
+    def test_the_upsell_line_is_said_only_to_someone_who_would_buy(
+        self, monkeypatch, tmp_path, signed_in, said,
+    ):
+        """The line selling curated recommendations is said to a never-paid
+        account only: never to one whose Pro plan ended, nor to a paying one
+        whose install has no curated overlay of its own."""
+        import base64
+        import json
+        import sys
+        import time
+        from unittest import mock
+
+        from kiln import account_plan
+
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        monkeypatch.setitem(sys.modules, "kiln.licensing", account_plan)
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+        monkeypatch.setattr(account_plan, "_last_ask_at", 0.0)
+        monkeypatch.setattr(account_plan, "_last_ask_answered", True)
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+
+        def b64(obj) -> str:
+            return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+        (tmp_path / ".kiln").mkdir(exist_ok=True)
+        (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps({
+            "access_token": f"{b64({'alg': 'none'})}.{b64({'exp': int(time.time()) + 86400})}.sig",
+            "refresh_token": "refresh", "email": "maker@example.com",
+            "signed_in_at": int(time.time()), **signed_in,
+        }))
+        path = _write_stl(str(tmp_path), _cube_triangles(20.0))
+        with mock.patch("requests.get", side_effect=OSError("offline")):
+            report = analyze_printability(path, material="pla")
+        assert ("available with Kiln Pro" in " ".join(report.recommendations)) is said
 
     def test_pro_tier_skips_upsell_line(self, monkeypatch, tmp_path):
         """When the overlay is populated, the upsell line is suppressed."""
@@ -2454,6 +2505,7 @@ class TestPlacementIsStructuredNotOnlyProse:
         assert report.placement.score_if_placed == seated_report.score
         assert report.placement.score_if_placed > report.score
 
+    @pytest.mark.usefixtures("kilns_slice_lines")
     def test_a_part_that_is_ALSO_badly_shaped_does_not_claim_otherwise(self):
         """The mirror case, and the one that keeps this honest: a part
         whose shape would fail on its own must not report that placement
@@ -2640,6 +2692,7 @@ class TestSubToleranceGeometryIsNotMeasured:
         assert report.cavities.cavity_sample_count == 0, report.cavities
         assert report.cavities.min_cavity_width_mm == 0.0, report.cavities
 
+    @pytest.mark.usefixtures("kilns_slice_lines")
     def test_a_30um_fin_is_measured_because_every_slicer_drops_it(self):
         # A 30 µm fin, 20 mm long and 5 mm tall, counts.  Every slicer
         # deletes it, so a floor that kept it out of the verdict would let

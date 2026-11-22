@@ -355,6 +355,43 @@ def update_openscad_parameter(
 # Validation
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class _LimitWords:
+    """Whose figure each parameter limit is, in the words a warning says it:
+    the plastic's own where it was read, the general figure (the same for
+    every plastic) otherwise.  Never calls a general figure the plastic's."""
+
+    min_wall: str = "the general minimum wall thickness"
+    recommended_wall: str = "the general recommended wall thickness"
+    hole: str = "the general minimum hole diameter"
+    pin: str = "the general minimum pin diameter"
+    bridge: str = "the general max bridge length"
+    overhang: str = "the general max unsupported overhang"
+    #: Why the wall floor is a static-safe grade's own minimum, where the
+    #: answer says so; empty otherwise.
+    static_safe_why: str = ""
+
+    @classmethod
+    def of(cls, limits: Any) -> _LimitWords:
+        from kiln.material_limits import BRIDGE, ESD_WALL, OVERHANG, PIN, WALL_RECOMMENDED
+
+        general = cls()
+        static_safe = limits.static_safe_floor()
+
+        def own(quantity: str, words: str, fallback: str) -> str:
+            return words if limits.is_own(quantity) else fallback
+
+        return cls(
+            static_safe_why=limits.why.get(ESD_WALL, "") if static_safe else "",
+            min_wall="this plastic's static-safe minimum wall" if static_safe else general.min_wall,
+            recommended_wall=own(WALL_RECOMMENDED, "this plastic's recommended wall thickness", general.recommended_wall),
+            hole=general.hole,
+            pin=own(PIN, "this plastic's minimum pin diameter", general.pin),
+            bridge=own(BRIDGE, "this plastic's max bridge length", general.bridge),
+            overhang=own(OVERHANG, "this plastic's max unsupported overhang", general.overhang),
+        )
+
+
 def validate_openscad_parameters(
     scad_code: str,
     material: str | None = None,
@@ -380,18 +417,29 @@ def validate_openscad_parameters(
 
     warnings: list[ParameterWarning] = []
 
-    # Load material design limits if available
+    # The material's limits, from the one helper every check reads.
     mat_limits: dict[str, Any] = {}
+    words = _LimitWords()
     if material:
         try:
-            from kiln.design_intelligence import get_material_profile
+            from kiln.material_limits import WALL_RECOMMENDED, limits_for
+            from kiln.reading_notes import LIMITS_KEY, note_said
 
-            profile = get_material_profile(material)
-            if profile and profile.design_limits:
-                mat_limits = profile.design_limits
+            plastic_limits = limits_for(material)
+            mat_limits = plastic_limits.design_limits()
+            # One wall with the design validator: the recommended wall is the
+            # plastic's own where it was read, the general figure otherwise.
+            recommended = plastic_limits.value(WALL_RECOMMENDED)
+            if recommended:
+                mat_limits.setdefault("recommended_wall_thickness_mm", float(recommended))
+            words = _LimitWords.of(plastic_limits)
+            # Why a figure is the general one (a miss, the day's allowance, a
+            # flexible plastic answered generally), said in the call's reply.
+            for line in plastic_limits.notes():
+                note_said(LIMITS_KEY, line)
         except Exception:
             _logger.debug(
-                "Could not load material profile for validation",
+                "Could not load material limits for validation",
                 exc_info=True,
             )
 
@@ -443,11 +491,17 @@ def validate_openscad_parameters(
                         limit_value=min_wall,
                         limit_type="min",
                         message=(
-                            f"'{p.name}' ({p.value}mm) is below material "
-                            f"minimum wall thickness ({min_wall}mm)"
+                            f"'{p.name}' ({p.value}mm) is below {words.min_wall} "
+                            f"({min_wall}mm)"
                         ),
                     )
                 )
+                if words.static_safe_why:
+                    # Why a static-safe grade's minimum is a floor of its
+                    # own, said once in the call's reply.
+                    from kiln.reading_notes import LIMITS_KEY, note_said
+
+                    note_said(LIMITS_KEY, words.static_safe_why)
             rec_wall = mat_limits.get("recommended_wall_thickness_mm")
             if (
                 rec_wall is not None
@@ -461,14 +515,16 @@ def validate_openscad_parameters(
                         limit_value=rec_wall,
                         limit_type="min",
                         message=(
-                            f"'{p.name}' ({p.value}mm) is below recommended "
-                            f"wall thickness ({rec_wall}mm)"
+                            f"'{p.name}' ({p.value}mm) is below {words.recommended_wall} "
+                            f"({rec_wall}mm)"
                         ),
                     )
                 )
 
-        # Hole / diameter checks
-        if "hole" in name_lower or "diameter" in name_lower:
+        # Hole checks: a parameter named for a hole.  A pin or a bare
+        # diameter is not a hole (a boss, a rod and a pin each have a
+        # limit of their own, or none this check knows).
+        if "hole" in name_lower and "pin" not in name_lower:
             min_hole = mat_limits.get("min_hole_diameter_mm")
             if min_hole is not None and p.value < min_hole:
                 warnings.append(
@@ -478,8 +534,8 @@ def validate_openscad_parameters(
                         limit_value=min_hole,
                         limit_type="min",
                         message=(
-                            f"'{p.name}' ({p.value}mm) is below material "
-                            f"minimum hole diameter ({min_hole}mm)"
+                            f"'{p.name}' ({p.value}mm) is below {words.hole} "
+                            f"({min_hole}mm)"
                         ),
                     )
                 )
@@ -495,8 +551,8 @@ def validate_openscad_parameters(
                         limit_value=min_pin,
                         limit_type="min",
                         message=(
-                            f"'{p.name}' ({p.value}mm) is below material "
-                            f"minimum pin diameter ({min_pin}mm)"
+                            f"'{p.name}' ({p.value}mm) is below {words.pin} "
+                            f"({min_pin}mm)"
                         ),
                     )
                 )
@@ -512,14 +568,15 @@ def validate_openscad_parameters(
                         limit_value=max_bridge,
                         limit_type="max",
                         message=(
-                            f"'{p.name}' ({p.value}mm) exceeds material "
-                            f"max bridge length ({max_bridge}mm)"
+                            f"'{p.name}' ({p.value}mm) exceeds {words.bridge} "
+                            f"({max_bridge}mm)"
                         ),
                     )
                 )
 
-        # Overhang / angle checks
-        if "overhang" in name_lower or "angle" in name_lower:
+        # Overhang checks: a parameter named for an overhang.  Any other
+        # angle (a chamfer, a draft, a thread) is not an overhang.
+        if "overhang" in name_lower:
             max_overhang = mat_limits.get("max_unsupported_overhang_deg")
             if max_overhang is not None and p.value > max_overhang:
                 warnings.append(
@@ -529,8 +586,8 @@ def validate_openscad_parameters(
                         limit_value=max_overhang,
                         limit_type="max",
                         message=(
-                            f"'{p.name}' ({p.value}\u00b0) exceeds material "
-                            f"max unsupported overhang ({max_overhang}\u00b0)"
+                            f"'{p.name}' ({p.value}\u00b0) exceeds {words.overhang} "
+                            f"({max_overhang}\u00b0)"
                         ),
                     )
                 )

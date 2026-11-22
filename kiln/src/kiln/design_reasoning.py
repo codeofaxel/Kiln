@@ -3793,6 +3793,7 @@ def design_to_gcode(
     printer_model: str = "",
     infill_percent: float = 20.0,
     placement: Any = "auto",
+    slice_asks: dict[str, Any] | None = None,
 ) -> DesignToGCodeResult:
     """End-to-end pipeline: description → template → STL → structural check → GCode.
 
@@ -3815,6 +3816,9 @@ def design_to_gcode(
         rate and cooling -- and weighed as.
     :param printer_model: Printer model for slicer profile lookup.
     :param infill_percent: Infill percentage for weight estimation.
+    :param slice_asks: The owner's word to print anyway and the
+        filament-to-nozzle map, handed to the slice as given
+        (:func:`kiln.slicer.owner_asks`).
     :returns: ``DesignToGCodeResult`` with paths and metadata.
     """
     import json as _json
@@ -3943,6 +3947,7 @@ def design_to_gcode(
             str(stl_path), effective_printer_id=printer_model or None, printer_name=None,
             placement=placement, profile_path=profile,
             output_dir=str(out_dir), output_name=f"{template_id}.gcode", material=material,
+            **(slice_asks or {}),
         )
         if place_err is not None:
             result.errors.append(str(place_err["error"]["message"]))

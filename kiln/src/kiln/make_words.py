@@ -77,9 +77,10 @@ _MAX_READ_CHARS = 4000
 #: read for needs one, and a phone number the shared rules do not know by
 #: its shape is one.
 _DIGIT_RUN = re.compile(r"\d(?:[ .()\-]*\d){6,}")
-#: The once-per-session key of the signed-out line (its own, so a note
-#: another tool said about its own answer never uses it up).
-_SIGNED_OUT_SAID = "make_session:signed_out"
+#: The once-per-session key of the signed-out line, for a make and for a
+#: saved version alike (its own, so a note another tool said about its own
+#: answer never uses it up).
+SIGNED_OUT_SAID = "make_session:signed_out"
 
 
 def _word(value: str, limit: int = MAX_WORD_CHARS) -> str:
@@ -188,7 +189,7 @@ def say(envelope: dict[str, Any], miss: Any) -> None:
     from kiln.front_door import SAVED_GOAL_KEY
 
     signed_out = miss.cause == "signed_out"
-    if not served_public.first_this_session(_SIGNED_OUT_SAID if signed_out else miss.cause):
+    if not served_public.first_this_session(SIGNED_OUT_SAID if signed_out else miss.cause):
         return
     block: dict[str, Any] = {
         "brief_id": "",
@@ -217,6 +218,7 @@ __all__ = [
     "SERVICE_BACKOFF_S",
     "SESSION_EXPIRED_LINE",
     "SIGNED_OUT_LINE",
+    "SIGNED_OUT_SAID",
     "WORD_ARGUMENTS",
     "line_for",
     "made_with",

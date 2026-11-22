@@ -249,6 +249,54 @@ def _served(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
     return None, miss
 
 
+def nozzles_for_sizes(
+    printer_id: Any, sizes: list[float], filament_map: list[int] | None = None,
+) -> tuple[dict[str, Any] | None, Miss | None]:
+    """The nozzle record of *printer_id* for ONE slice whose nozzles are
+    fitted at different *sizes* (one per nozzle position, in order), and for
+    *filament_map* when the person chose which nozzle each filament prints
+    from: ``(record, None)``, or ``(None, miss)``.
+
+    Asked for each such slice and kept nowhere.  With kiln-pro on this
+    computer it answers here; otherwise Kiln's servers do, signed in.  A
+    printer or a set of sizes there is no answer for is a ``refused`` miss
+    carrying the reason.  Never raises.
+    """
+    key = _key(printer_id)
+    if not key:
+        return None, Miss("refused", "INVALID_ARGUMENT", "the slice names no printer")
+    asked: dict[str, Any] = {"nozzle_sizes": [float(size) for size in sizes]}
+    if filament_map:
+        asked["filament_map"] = [int(position) for position in filament_map]
+    if available():
+        try:
+            from kiln_pro.device_intelligence.printer_catalogue import printer_record as local_record
+
+            answer: Any = local_record(key, **asked)
+        except Exception as exc:  # noqa: BLE001 -- a slice never fails for want of it
+            code = getattr(exc, "code", None)
+            if isinstance(code, str) and code:
+                return None, Miss("refused", code, str(exc))
+            return None, local_fault(exc)
+    else:
+        try:
+            from kiln.server import _pro_api_call
+
+            answer = _pro_api_call(
+                WIRE_TOOL, _timeout=_CONSULT_TIMEOUT_S, _asked_by_user=False, printer_model=key, **asked,
+            )
+        except Exception as exc:  # noqa: BLE001 -- the network is a miss, said by the caller
+            logger.debug("nozzle record for sizes not served", exc_info=True)
+            return None, classify_transport_error(exc)
+        miss = classify_answer(answer)
+        if miss is not None:
+            return None, miss
+    nozzles = (answer.get("slicer") or {}).get("nozzles") if isinstance(answer, dict) else None
+    if not isinstance(nozzles, dict) or not isinstance(nozzles.get("preset_extras"), dict):
+        return None, Miss("unanswered", detail="an answer with no nozzle record in it")
+    return dict(nozzles), None
+
+
 # ---------------------------------------------------------------------------
 # Kept on this computer (an install without kiln-pro only)
 # ---------------------------------------------------------------------------
@@ -391,6 +439,7 @@ __all__ = [
     "forget",
     "kept_record",
     "last_miss",
+    "nozzles_for_sizes",
     "printer_record",
     "unanswered",
     "why_unanswered",

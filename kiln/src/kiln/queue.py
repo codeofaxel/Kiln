@@ -345,6 +345,7 @@ class PrintQueue:
             job.status = JobStatus.CANCELLED
             job.completed_at = time.time()
         self._update_job_db(job)
+        self._forget_if_not_kept(job)
         return job
 
     # ------------------------------------------------------------------
@@ -384,6 +385,7 @@ class PrintQueue:
             job.status = JobStatus.COMPLETED
             job.completed_at = time.time()
         self._update_job_db(job)
+        self._forget_if_not_kept(job)
         return job
 
     def mark_failed(self, job_id: str, error: str) -> PrintJob:
@@ -395,6 +397,7 @@ class PrintQueue:
             job.completed_at = time.time()
             job.error = error
         self._update_job_db(job)
+        self._forget_if_not_kept(job)
         return job
 
     def mark_paused(self, job_id: str) -> PrintJob:
@@ -699,6 +702,95 @@ class PrintQueue:
             raise
         except Exception:
             logger.exception("Failed to persist job %s to SQLite", job.id)
+
+    #: Job metadata that names the print, dropped from a print not kept.
+    _NAMING_METADATA = ("file_hash", "version_id", "design_id", "branch_id", "started_file",
+                        "preview_signoff", "material_type")
+
+    def _forget_if_not_kept(self, job: PrintJob) -> None:
+        """A job the person asked not to keep has ended: its row leaves this
+        queue's store and the job in memory keeps nothing that names the
+        print (:mod:`kiln.print_keeping`).  Never raises."""
+        if (job.metadata or {}).get("keep_record") is not False:
+            return
+        if isinstance((job.metadata or {}).get("fill"), dict):
+            # A plate of copies: the run is forgotten whole once nothing of it
+            # is left to print; a failed plate waits for the queue to settle
+            # it, since it may be printed again.
+            if job.status != JobStatus.FAILED:
+                self.forget_run_if_ended(job)
+            return
+        try:
+            with self._lock:
+                job.file_name = ""
+                job.error = None
+                job.metadata = {k: v for k, v in (job.metadata or {}).items() if k not in self._NAMING_METADATA}
+            if self._db is not None:
+                self._db.execute("DELETE FROM jobs WHERE id=?", (job.id,))
+                self._db.commit()
+        except Exception:
+            logger.debug("a job not kept was not forgotten", exc_info=True)
+
+    def forget_run_if_ended(self, job: PrintJob | None) -> bool:
+        """For a run of copies the person asked not to keep: once every job
+        of it has ended, forget them all (names, kept copies of the part, the
+        plate pictures they carry, their rows) and the run's plan.  The run is
+        the jobs that carry the same plan id, else the same kept part.
+        Returns whether the run was forgotten.  Never raises."""
+        try:
+            meta = (job.metadata or {}) if job is not None else {}
+            if job is None or meta.get("keep_record") is not False:
+                return False
+            plan_id = meta.get("split_plan_id")
+            part = (meta.get("fill") or {}).get("model_path") if isinstance(meta.get("fill"), dict) else None
+            with self._lock:
+                run = [
+                    j for j in self._jobs.values()
+                    if (j.metadata or {}).get("keep_record") is False and (
+                        (plan_id and (j.metadata or {}).get("split_plan_id") == plan_id)
+                        or (not plan_id and part and ((j.metadata or {}).get("fill") or {}).get("model_path") == part)
+                        or j.id == job.id
+                    )
+                ]
+                if any(j.status not in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED) for j in run):
+                    return False
+                copies: set[str] = set()
+                pictures: set[str] = set()
+                for j in run:
+                    fill = dict((j.metadata or {}).get("fill") or {})
+                    # Only what Kiln itself made for the run, recorded as it
+                    # was made: its own copy of the part, a plate picture.
+                    if isinstance(fill.get("owned_copy"), str) and fill["owned_copy"]:
+                        copies.add(fill["owned_copy"])
+                    if isinstance(fill.get("failed_picture"), str) and fill["failed_picture"]:
+                        pictures.add(fill["failed_picture"])
+                    for key in ("model_path", "owned_copy", "failed_picture", "beside_plate", "moved_from"):
+                        fill.pop(key, None)
+                    meta_j = {k: v for k, v in (j.metadata or {}).items() if k not in self._NAMING_METADATA}
+                    if fill:
+                        meta_j["fill"] = fill
+                    j.metadata = meta_j
+                    j.file_name = ""
+                    j.error = None
+                still_used = {
+                    str(((j.metadata or {}).get("fill") or {}).get(key) or "")
+                    for j in self._jobs.values() if j not in run for key in ("model_path", "owned_copy")
+                }
+            from kiln.job_splitter import forget_run_files
+
+            forget_run_files(copies - still_used, pictures)
+            if self._db is not None:
+                for j in run:
+                    self._db.execute("DELETE FROM jobs WHERE id=?", (j.id,))
+                self._db.commit()
+            if plan_id:
+                from kiln.job_splitter import forget_plan
+
+                forget_plan(str(plan_id))
+            return True
+        except Exception:
+            logger.debug("a run not kept was not forgotten", exc_info=True)
+            return False
 
     def _update_job_db(self, job: PrintJob) -> None:
         """Update an existing job row in SQLite."""

@@ -234,7 +234,7 @@ class _DesignToolsPlugin:
             build_volume_z: float | None = None,
             nozzle_diameter: float | None = None,
             layer_height: float | None = None,
-            max_overhang_angle: float = 45.0,
+            max_overhang_angle: float | None = None,
         ) -> dict:
             """Run a ruthless audit of an original design before printing.
 
@@ -270,6 +270,7 @@ class _DesignToolsPlugin:
                     size; the report says which it used.
                 layer_height: Layer height in mm.
                 max_overhang_angle: Supportless overhang threshold in degrees.
+                    Left out, the material's own limit.
             """
             from kiln.original_design import audit_original_design as _audit
 
@@ -1200,13 +1201,17 @@ class _DesignToolsPlugin:
 
             Returns compatibility (yes/no), interface adhesion quality,
             notes on temperature management, and soluble support dissolution
-            instructions when applicable.
+            instructions when applicable.  A filled filament (carbon, glass,
+            wood or metal) also gets ``hardware_warnings`` saying it needs a
+            hardened nozzle.
 
             When Kiln's pairing verdict cannot be had (offline, signed out,
-            no answer), the answer is ``basic: true``: ``compatible`` is
-            ``null``, never a yes; ``notes`` says what the two materials'
-            nozzle temperature ranges alone show; ``caution`` says why the
-            verdict is missing and how to get it.  Relay it as unjudged.
+            no answer, refused), the answer is ``basic: true``:
+            ``compatible`` is ``null``, never a yes; ``notes`` says what the
+            two materials' nozzle temperature ranges alone show; ``caution``
+            says why the verdict is missing and how to get it.  Relay it as
+            unjudged.  A material name longer than 64 characters is refused
+            (``code: "INVALID_INPUT"``).
 
             Use this when a user asks "can I print PLA with TPU?" or
             "what support material works with ABS?" or planning any
@@ -1216,8 +1221,13 @@ class _DesignToolsPlugin:
                 material_a: First material (e.g. "pla", "abs").
                 material_b: Second material (e.g. "tpu", "hips", "pva").
             """
+            from kiln._pro_material_pairing_bridge import name_problem
             from kiln.design_intelligence import check_multi_material_compatibility
 
+            problem = name_problem(material_a, material_b)
+            if problem is not None:
+                # Refused before anything is asked; the sentence repeats no name.
+                return {"success": False, "code": "INVALID_INPUT", "error": problem}
             try:
                 report = check_multi_material_compatibility(material_a, material_b)
                 out = report.to_dict()

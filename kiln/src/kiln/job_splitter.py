@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -543,14 +544,46 @@ def _fill_record(plan_id: str) -> tuple[str, dict[str, Any], str] | None:
     return str(row.get("original_file") or ""), record if isinstance(record, dict) else {}, str(row.get("status") or "")
 
 
-def submit_fill_plan(plan_id: str, signoff: dict[str, Any] | None) -> dict[str, Any]:
+def forget_run_files(copies: set[str], pictures: set[str]) -> None:
+    """Delete the files Kiln made for a run the person asked not to keep:
+    its own copies of the part (only inside its queued-parts folder) and its
+    plate pictures (only Kiln's, by name).  Never raises."""
+    from kiln.asset_store import kiln_root
+    from kiln.print_keeping import PLATE_PICTURE_PREFIX, picture_roots, remove_kilns_own
+
+    for path in copies:
+        remove_kilns_own(path, (os.path.join(kiln_root(), "queued_parts"),))
+    for path in pictures:
+        remove_kilns_own(path, picture_roots(), prefix=PLATE_PICTURE_PREFIX)
+
+
+def forget_plan(plan_id: str) -> bool:
+    """Delete the plan *plan_id* (a run the person asked not to keep, once
+    it has ended).  Returns whether a plan went.  Never raises."""
+    try:
+        from kiln.persistence import get_db
+
+        db = get_db()
+        cur = db._conn.execute("DELETE FROM split_plans WHERE id = ?", (plan_id,))
+        db._conn.commit()
+        return bool(cur.rowcount)
+    except Exception:  # noqa: BLE001
+        logger.debug("plan %s not forgotten", plan_id, exc_info=True)
+        return False
+
+
+def submit_fill_plan(
+    plan_id: str, signoff: dict[str, Any] | None, *, asks: dict[str, Any] | None = None,
+    keep_record: bool | None = None,
+) -> dict[str, Any]:
     """Queue a kept fill plan: one copies job per printer, pinned to it.
 
     Each job asks for the copies that printer prints now and later; it is
     laid out for its plate when its turn comes, and what that plate cannot
     take is queued again on the same printer (the queue's own copies path),
     so later plates follow as plates are cleared.  *signoff* is the person's
-    yes, carried on every job.  The caller takes the gate first.  Queues
+    yes, carried on every job, and so are *asks*, the owner's word to print
+    anyway and the filament-to-nozzle map (:func:`kiln.slicer.owner_asks`).  The caller takes the gate first.  Queues
     nothing a second time: a plan already queued answers what it queued.
     """
     import kiln.server as _srv
@@ -572,7 +605,7 @@ def submit_fill_plan(plan_id: str, signoff: dict[str, Any] | None) -> dict[str, 
         out = _srv._queue_fill_rest(
             model_path, copies, printer_name=str(row["printer"]), printer_id=None, overrides=None,
             slicer_path=None, spacing_mm=10.0, signoff=signoff, run={"split_plan_id": plan_id},
-            beside_plate=beside or None,
+            beside_plate=beside or None, asks=asks, keep_record=keep_record,
         )
         if out.get("job_id"):
             queued.append({"printer": out.get("printer_name") or row["printer"], "job_id": out["job_id"], "copies": copies})

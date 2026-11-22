@@ -823,6 +823,12 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
 }
 
 
+def model_of_serial(serial: object) -> str | None:
+    """The catalogue model a Bambu Lab serial number names, or ``None`` when its prefix is not one Kiln knows."""
+    family = _BAMBU_MODEL_FAMILIES.get(str(serial or "").strip()[:3].upper())
+    return f"bambu_{family}" if family else None
+
+
 _BAMBU_ACCESSORY_MODULE_HEADS: frozenset[str] = frozenset(
     {"ams_f1", "n3f", "n3s", "ams"}
 )
@@ -1301,10 +1307,29 @@ def _first_real_job_id(*candidates: Any) -> str | None:
     return None
 
 
+def _declared_model_id(printer_model: str | None) -> str:
+    """The catalogue id a declared model spells ("Bambu Lab P2S" is ``bambu_p2s``).
+
+    The camera, storage folder and AMS choices compare catalogue ids.  A
+    spelling Kiln cannot place stays as written, lower-cased, never guessed.
+    """
+    written = (printer_model or "").strip().lower()
+    if not written:
+        return ""
+    try:
+        from kiln.printers.bed_fit import catalogue_printer_id
+
+        return catalogue_printer_id(written, typos=False) or written
+    except Exception:  # noqa: BLE001 -- an unreadable catalogue leaves the model as written
+        logger.debug("Bambu: catalogue unreadable while reading printer_model %r", written, exc_info=True)
+        return written
+
+
 class BambuAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by Bambu Lab MQTT + FTPS."""
 
     _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
+    _MODEL_REPORT_HOLDS_MOVES: ClassVar[bool] = True
 
     @property
     def camera_fitted_at_factory(self) -> bool | None:
@@ -1350,7 +1375,7 @@ class BambuAdapter(PrinterAdapter):
         self._host = host
         self._access_code = access_code
         self._serial = serial
-        self._printer_model = (printer_model or "").strip().lower()
+        self._printer_model = _declared_model_id(printer_model)
         self._timeout = timeout
         configured_tls_mode = (tls_mode or os.environ.get(_TLS_MODE_ENV, _DEFAULT_TLS_MODE)).strip().lower()
         if configured_tls_mode not in _VALID_TLS_MODES:
@@ -3229,12 +3254,32 @@ class BambuAdapter(PrinterAdapter):
         lift_floor_mm: float | None = None,
         bed_type: str | None = None,
     ) -> str:
-        """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF."""
-        from kiln.printers.bambu_3mf import TEXTURED_PLATE, BambuPrintSettings, build_bambu_3mf
+        """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
+
+        A file sliced for more than one nozzle gets the slicer's own package
+        instead (:func:`~kiln.printers.bambu_3mf.multi_nozzle_print_package`).
+        """
+        from kiln.printers.bambu_3mf import (
+            TEXTURED_PLATE,
+            BambuPrintSettings,
+            build_bambu_3mf,
+            multi_nozzle_print_package,
+        )
 
         abs_path = os.path.abspath(gcode_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Gcode file not found: {abs_path}")
+        package = multi_nozzle_print_package(
+            abs_path, quiet_start=quiet_start, lift_floor_mm=lift_floor_mm, resume_mode=resume_mode,
+        )
+        if package is not None:
+            try:
+                from kiln.monitor_twin import note_wrapped
+
+                note_wrapped(abs_path, package)
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a wrap
+                logger.debug("monitor-twin wrap note failed", exc_info=True)
+            return package
 
         gcode_body = Path(abs_path).read_text(encoding="utf-8")
         stem = Path(abs_path).stem
@@ -5418,8 +5463,12 @@ class BambuAdapter(PrinterAdapter):
             raise self._camera_failure(said, code=code, detail=detail) from exc
 
     def _camera_family(self) -> str:
-        """The model the camera transport falls back to: declared, else what the printer says it is."""
-        declared = self._family()
+        """The model the camera transport falls back to: declared, else what the printer says it is.
+
+        A declaration names a model only when it is a catalogue id; one Kiln
+        cannot place gives way to the printer's own serial and report.
+        """
+        declared = self._family() if self._printer_model.startswith("bambu_") else ""
         if declared:
             return declared
         serial_family, mqtt_family, _ = self._identity_families()

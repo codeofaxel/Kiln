@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.generic_limits import OVERHANG_UNSUPPORTED_DEG
 from kiln.plugins.slicer_tools import plate_choice_refusal
 from kiln.project_plates import PlateChoiceError
 from kiln.tool_annotations import destructive, read_only
@@ -298,6 +299,17 @@ class _PrintabilityToolsPlugin:
                 note = _kiln_pro_ranking_note()
                 if note:
                     resp["upgrade_hint"] = note
+                # Kiln Pro's order, which the plan includes, did not arrive:
+                # the cause on every miss, in words once a session.
+                if result.ranking_miss is not None:
+                    from kiln import _pro_orientation_bridge, served_public
+                    from kiln.served_answer import fields
+
+                    resp.update(fields(result.ranking_miss))
+                    if served_public.first_this_session("auto_orient_model:kiln_pro_order"):
+                        resp.setdefault("warnings", []).append(
+                            _pro_orientation_bridge.miss_note(result.ranking_miss)
+                        )
 
                 if apply:
                     oriented_path = apply_orientation(
@@ -326,7 +338,7 @@ class _PrintabilityToolsPlugin:
         @mcp.tool(annotations=read_only("Estimate supports"))
         def estimate_supports(
             file_path: str,
-            max_overhang_angle: float = 45.0,
+            max_overhang_angle: float = OVERHANG_UNSUPPORTED_DEG,
             plate_number: int | None = None,
         ) -> dict:
             """Estimate support volume for a 3D model.
@@ -489,7 +501,7 @@ class _PrintabilityToolsPlugin:
 
                         report = _analyze(
                             model_path,
-                            material=material or "pla",
+                            material=material or None,
                             printer_id=printer_id or None,
                         )
                         model_analysis = report.to_dict()

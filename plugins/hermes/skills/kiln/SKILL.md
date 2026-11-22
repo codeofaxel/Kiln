@@ -177,6 +177,10 @@ Designing, checking, slicing and estimating all work without one.
 
 No printer needed: this install of Kiln can get a price from a print service and place and follow an order for the part, once the person is signed in to Kiln (a free account). No other Kiln connector is needed. In order: `kiln_signin`, `fulfillment_materials`, `fulfillment_quote`, then `issue_preview_token` and `issue_shipping_confirmation_token` once the person has seen the part and confirmed where it ships, then `fulfillment_order` and `fulfillment_order_status`. An order is placed only after the person's own confirmation.
 
+## A printer Kiln doesn't fully know
+
+Kiln can get to know a printer: `printer_bench` is a short guided session that teaches Kiln what it does not yet know about how a printer moves, for a printer new to Kiln and for one it knows only in part. What it learns is used for that printer at once. A second lesson, a small test print the person reads a few numbers off, teaches Kiln how steep, how far and how thin that printer prints. Where Kiln cannot yet home or park a printer, a reply may offer to learn that move with the person, one small step at a time. Offer it once per printer, and never before the printer's first print: when a reply carries an offer of it, say that offer as written, and offer it when the person asks why Kiln cannot do something on their printer or wants to teach Kiln their printer. `printer_bench()` with no answer starts or resumes it, or says there is nothing to teach; `printer_bench(lesson="limits")` starts the second lesson on its own, and `printer_bench(lesson="walk", move=...)` starts a walk a reply offered. Relay each ask word for word, show its pictures, and take 'later' as an answer.
+
 ## Plans
 
 Printing on your own printer is free, one printer at a time. Running several

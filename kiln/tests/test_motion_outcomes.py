@@ -277,6 +277,7 @@ class TestTheDoors:
     def test_no_plan_is_a_refusal_by_reason(self, bambu, monkeypatch):
         _serve(monkeypatch, None)
         bambu._printer_model = "bambu_h2s"
+        bambu._serial = "09300A000000001"
         _idle(bambu, monkeypatch)
         with pytest.raises(HomingUnsupported):
             bambu.home_axes()
@@ -317,6 +318,7 @@ class TestTheDoors:
     def test_a_wipe_with_no_plan_is_a_refusal(self, bambu, monkeypatch):
         _serve_plans(monkeypatch, {})
         bambu._printer_model = "bambu_h2s"
+        bambu._serial = "09300A000000001"
         bambu._last_status["ams"]["tray_now"] = "0"
         _hot(bambu, monkeypatch)
         with pytest.raises(FilamentHandlingUnsupported):

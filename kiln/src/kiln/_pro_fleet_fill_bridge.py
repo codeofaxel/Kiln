@@ -86,6 +86,9 @@ def ask(
             served_answer.classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None)),
             failed=failed is not None,
         )
+    held = served_answer.held_plan_wall(answer)
+    if held is not None:
+        return _miss(held, failed=failed is not None)
     if isinstance(answer, dict) and (
         (answer.get("success") is True and isinstance(answer.get("fill"), dict)
          and (failed is None or isinstance(answer.get("failed_plate"), dict)))

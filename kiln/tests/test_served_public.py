@@ -369,7 +369,7 @@ class TestOtherwiseItRunsHereAndSaysWhyOnce:
         assert note["why"] == "refused"
         assert note["note"].endswith(
             "because Kiln's servers said no, so it answered here instead. "
-            "Kiln 9.9.9 or newer is required to continue."
+            "Kiln 9.9.9 or newer is required to continue. Update Kiln and ask again."
         )
 
 

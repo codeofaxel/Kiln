@@ -53,6 +53,16 @@ _SECRET_KV_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A printer's serial behind its label, and a Bambu printer's in its MQTT
+# topic (``device/<serial>/report``).  Six characters at least, so a
+# placeholder such as ``(none)`` stays.
+_SERIAL_KV_RE = re.compile(
+    r"((?:serial(?:[_-]?(?:number|no))?|\bsn|\bdev[_-]?id)[\"\x27]?\s*[:=]\s*[\"\x27]?)"
+    r"([A-Za-z0-9][A-Za-z0-9_-]{5,})",
+    re.IGNORECASE,
+)
+_SERIAL_TOPIC_RE = re.compile(r"(\bdevice/)([A-Za-z0-9]{6,})(/(?:report|request)\b)")
+
 # Bearer tokens — bare form also covers ``Authorization: Bearer <t>``.
 _BEARER_RE = re.compile(r"(Bearer\s+)(\S+)", re.IGNORECASE)
 _BASIC_AUTH_RE = re.compile(r"(Authorization:\s*Basic\s+)(\S+)", re.IGNORECASE)
@@ -233,6 +243,12 @@ def redact_secrets(text: str, marker: str = DEFAULT_MARKER) -> str:
     return text
 
 
+def redact_serials(text: str, marker: str = DEFAULT_MARKER) -> str:
+    """Redact a printer's serial written behind its label or in its MQTT topic."""
+    text = _SERIAL_KV_RE.sub(r"\1" + marker, text)
+    return _SERIAL_TOPIC_RE.sub(r"\1" + marker + r"\3", text)
+
+
 def redact_private_ips(text: str, marker: str = DEFAULT_MARKER) -> str:
     """Redact RFC-1918 private IP addresses from *text*."""
     return _PRIVATE_IP_RE.sub(marker, text)
@@ -261,7 +277,7 @@ def redact_machine_text(text: str) -> str:
 def redact_for_report(text: str) -> str:
     """Full boundary redaction for text leaving the user's machine.
 
-    Secrets + private IPs + home-directory usernames.  Links stay: a
+    Secrets + printer serials + private IPs + home-directory usernames.  Links stay: a
     report is the person's own words, and the URL form that worked is often
     its whole point (text a machine wrote goes through
     :func:`redact_machine_text` instead).  UNCONDITIONAL —
@@ -272,5 +288,6 @@ def redact_for_report(text: str) -> str:
     if not text:
         return text
     text = redact_secrets(text)
+    text = redact_serials(text)
     text = redact_private_ips(text)
     return redact_home_paths(text)

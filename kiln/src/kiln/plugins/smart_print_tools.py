@@ -14,6 +14,7 @@ import os
 import time
 from typing import Any
 
+from kiln import print_keeping
 from kiln.print_start_verdict import resolve_print_start
 from kiln.tool_annotations import destructive
 from kiln.tool_args import parse_json_object
@@ -41,6 +42,7 @@ class _SmartPrintToolsPlugin:
         """Register smart print tools with the MCP server."""
 
         @mcp.tool(annotations=destructive("Retry a print with a fix"))
+        @print_keeping.call
         def retry_print_with_fix(
             model_path: str,
             printer_name: str | None = None,
@@ -51,6 +53,10 @@ class _SmartPrintToolsPlugin:
             skip_validation: bool = False,
             preview_token: str | None = None,
             placement: str | list[float] | None = None,
+            soft_nozzle_confirmed: bool = False,
+            mixed_nozzle_experiment: bool = False,
+            filament_map: list[int] | None = None,
+            keep_record: bool | None = None,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
 
@@ -74,6 +80,26 @@ class _SmartPrintToolsPlugin:
                overrides, uploads the result, and starts the print.
 
             Args:
+                keep_record: ``False`` only when the person asks for this print not to
+                    be kept ("print this privately", "don't keep a record of this");
+                    never suggest it.  Kiln then keeps nothing of the print once it
+                    ends, and the answer carries one line saying so.  ``True`` keeps it,
+                    for a start a team's rule held (``TEAM_KEEPS_PRINTS``) after the
+                    person agreed.  Omit otherwise: the print is kept the way the
+                    account says.
+                mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
+                    with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
+                    experiment). Only on their yes, each time; ``slice_model`` says what follows.
+                soft_nozzle_confirmed: The owner has said to print anyway a
+                    slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
+                    abrasive filament through a nozzle on record that is not
+                    wear-resistant).  Only on their word, never on your own
+                    judgement.
+                filament_map: Only for a printer with more than one nozzle:
+                    the nozzle (1 for the first) each filament prints from,
+                    one number per filament in filament order.  Leave unset
+                    to let the slicer choose; a map that does not fit is
+                    refused before slicing, as ``slice_model`` refuses it.
                 model_path: Path to the model that failed (STL, OBJ, 3MF,
                     STEP, ...).  One the diagnosis cannot read is said in
                     ``printability_note``.
@@ -105,7 +131,11 @@ class _SmartPrintToolsPlugin:
                 preview_token: Token from ``issue_preview_token`` proving this
                     model was shown to the person before printing.  Required
                     beside their go-ahead: a print is shown to its owner
-                    before it starts.
+                    before it starts.  Placed beside a part on the plate,
+                    the model is the same part, so the token and the yes
+                    for ``model_path`` cover it; a mesh the check repairs
+                    or rescales is another part, and the refusal names the
+                    file to show and ask about once.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("print"):
@@ -191,7 +221,7 @@ class _SmartPrintToolsPlugin:
                         try:
                             report = analyze_printability(
                                 model_path,
-                                material=material or "pla",
+                                material=material or None,
                                 printer_id=printer_id or None,
                             )
                         except Exception as exc:
@@ -309,6 +339,7 @@ class _SmartPrintToolsPlugin:
             # sliced file).  A retry is where a diagnosis adds a wide brim
             # to a part that already failed.
             from kiln.plugins.slicer_tools import _attach_placement, _placed_slice
+            from kiln.slicer import owner_asks
 
             try:
                 # The density the slicer weighs the print with: what was
@@ -317,6 +348,7 @@ class _SmartPrintToolsPlugin:
                     model_path, effective_printer_id=effective_pid, printer_name=printer_name,
                     placement=placement, profile_path=effective_profile, adapter=adapter,
                     material=material, loaded_material=material_detected,
+                    **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
                 )
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
@@ -377,6 +409,10 @@ class _SmartPrintToolsPlugin:
                     )
                     _logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
                 except Exception as exc:
+                    if getattr(exc, "code", None) == "MULTI_NOZZLE_NOT_PACKAGED":
+                        # Sliced for more than one nozzle: no raw form of it
+                        # starts either, so nothing is handed on.
+                        return _srv._error_dict(str(exc), code=exc.code)
                     if quiet_plan is not None or lift_floor is not None:
                         # A raw file, or one without the plan, would carry
                         # the vendor's start onto the occupied plate.
@@ -390,14 +426,12 @@ class _SmartPrintToolsPlugin:
                         exc_info=True,
                     )
 
-            # A retry that changes the object needs a yes of its own (the same
-            # rule the gate applies before the start): asked before the file is
-            # sent, so a refused retry leaves nothing on the printer.
-            if _srv._retry_changes_the_object(
-                merged_overrides, bool((validation_summary or {}).get("repaired"))
-            ) and (block := _srv._no_yes_before_sending(
+            # A retry is a print like any other: nobody said go, nothing is
+            # sent, so a refused retry leaves nothing on the printer.  The
+            # full gate judges it again right before the start.
+            if block := _srv._no_yes_before_sending(
                 "retry_print_with_fix", model_path, preview_token, printer_name=printer_name,
-            )):
+            ):
                 return block
 
             try:
@@ -423,43 +457,28 @@ class _SmartPrintToolsPlugin:
                 )
 
             try:
-                # Captured before the command: it is what lets the verdict
-                # below tell a reading about THIS job from the printer's last
-                # word about the previous one.
-                # A reprint of the same object with a hotter nozzle is the
-                # print already approved.  One whose mesh was repaired, or
-                # whose overrides move supports/orientation/scale, is a
-                # different object leaning on the old approval.
-                _mesh_repaired = bool(
-                    (validation_summary or {}).get("repaired")
-                )
-                if _srv._retry_changes_the_object(
-                    merged_overrides, _mesh_repaired
+                # The person's yes and the preview of this model, both; under
+                # always allow, the bed seen clear as well.
+                if block := _srv._preview_gate_error(
+                    "retry_print_with_fix", model_path, preview_token,
+                    printer_name=printer_name,
                 ):
-                    if block := _srv._preview_gate_error(
-                        "retry_print_with_fix", model_path, preview_token,
-                        printer_name=printer_name,
-                    ):
-                        return block
-                else:
-                    from kiln import print_signoff
-
-                    # Same object, new settings: the yes the first print got
-                    # still stands, and the adapter template is told so.
-                    print_signoff.grant(
-                        "retry_print_with_fix", file_name, printer_name,
-                        source=print_signoff.SOURCE_PRIOR_APPROVAL,
-                    )
+                    return block
                 if quiet_plan is not None and (
                     block := start_refusal(adapter, file_name=file_name, local_path=upload_path)
                 ):
                     block["slice"] = slice_result.to_dict()
                     _attach_placement(block, place_info)
                     return block
+                # Captured before the command: it is what lets the verdict
+                # below tell a reading about THIS job from the printer's last
+                # word about the previous one.
                 sent_at = time.monotonic()
                 start_kwargs: dict[str, Any] = {}
                 if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
                     start_kwargs["local_file_path"] = upload_path
+                if isinstance(keep_record, bool):
+                    start_kwargs["keep_record"] = keep_record
                 print_result = adapter.start_print(file_name, **start_kwargs)
             except Exception as exc:
                 return _srv._error_dict(

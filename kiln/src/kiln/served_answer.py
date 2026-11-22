@@ -44,6 +44,10 @@ generator resolves every served tool to a kind at ship time and refuses
 to generate one it cannot place; the bundled manifest carries the kind,
 and this side derives it the same way when a bundle predates the block.
 
+**A door with a basic answer of its own** asks through :func:`ask_briefly`:
+a short wait, and after Kiln's servers leave an ask unanswered, every such
+door answers basic at once for a while instead of waiting again.
+
 **Every door to Kiln's servers** in this package is on :data:`HOSTED_DOORS`
 with how it words a miss; a test pins the roster against the source, so a
 new door cannot ship without deciding what an offline person is told.
@@ -55,9 +59,12 @@ import errno
 import http.client
 import json
 import logging
+import math
 import re
 import socket
 import ssl
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -80,6 +87,11 @@ _FIX = {
     "refused": "",  # the server's own words carry the fix
 }
 
+#: The servers' version floor (HTTP 426): their words name the Kiln it needs,
+#: and the fix is this install's own, so the sentence says it.
+UPGRADE_REQUIRED_CODE = "UPGRADE_REQUIRED"
+_UPGRADE_FIX = "update Kiln"
+
 #: The one ``signed_out`` that is not a stranger: this install HAD a
 #: sign-in and can no longer renew it.  Same cause, and the same fix in
 #: substance, but the person is told the truth of it -- the session ran
@@ -87,6 +99,46 @@ _FIX = {
 #: code alone.
 SESSION_EXPIRED_CODE = "KILN_SESSION_EXPIRED"
 _SESSION_EXPIRED = ("your Kiln session has expired", "sign back in")
+
+#: Plan walls from Kiln's servers: the plan is in the answer's
+#: ``required_tier``, or in the code itself.
+_PLAN_WALL_CODES = {
+    "TIER_REQUIRED": "", "PRO_REQUIRED": "pro", "BUSINESS_REQUIRED": "business",
+    "ENTERPRISE_REQUIRED": "enterprise",
+}
+_PAID_PLANS = ("pro", "business", "enterprise")
+#: The code a plan wall reads as for a caller this computer counts as
+#: holding that plan: the servers and this computer's record disagree, so
+#: the wall's own words (a pitch for a plan the person holds) are not said.
+PLAN_NOT_COUNTED_CODE = "PLAN_NOT_COUNTED"
+
+
+def plan_record_fix(plan: str) -> str:
+    """What fixes a *plan* wall the servers raised while this computer's
+    record of the sign-in holds that plan."""
+    return (
+        f"Kiln's servers do not count this computer's sign-in as Kiln {plan.strip().title()}; "
+        "signing in again brings this computer's record of the plan up to date"
+    )
+
+
+def _plan_held_here(answer: dict[str, Any], code: str) -> str:
+    """The plan a wall in *answer* stands in front of, when this computer
+    counts the caller as holding it; ``""`` otherwise (and for any answer
+    that is not a plan wall, or names no plan)."""
+    if code not in _PLAN_WALL_CODES:
+        return ""
+    plan = str(answer.get("required_tier") or _PLAN_WALL_CODES[code]).strip().lower()
+    if plan not in _PAID_PLANS:
+        return ""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        held, _why = check_tier(LicenseTier(plan))
+    except Exception:  # noqa: BLE001 -- an unreadable plan is not held
+        return ""
+    return plan if held else ""
+
 
 #: Wire codes that mean "no sign-in the servers accept" -- this install's
 #: own wall, an expired session, and the servers' own answer to a bearer
@@ -125,6 +177,9 @@ class Miss:
     cause: str
     code: str = ""
     detail: str = ""
+    #: Seconds until Kiln asks again on its own, for a miss said again from
+    #: an earlier ask instead of asked now; 0 when it was asked now.
+    retry_after_s: float = 0.0
 
     def __post_init__(self) -> None:
         if self.cause not in CAUSES:
@@ -261,7 +316,10 @@ def classify_answer(answer: Any) -> Miss | None:
     ``{"status": "error", "code", "error"}``, ``{"success": False, "error":
     {"code", "message"}}``, FastAPI's bare ``{"detail": ...}``, and a
     ``why`` already decided upstream.  An error with no code is not a
-    ruling; neither is one the server marked ``retryable``.
+    ruling; neither is one the server marked ``retryable``.  A plan wall
+    for a plan this computer counts the caller as holding is refused as
+    :data:`PLAN_NOT_COUNTED_CODE` with :func:`plan_record_fix`, never the
+    wall's own words, whichever door asked.
     """
     if not isinstance(answer, dict):
         return Miss("unanswered", detail="not an answer")
@@ -281,13 +339,19 @@ def classify_answer(answer: Any) -> Miss | None:
         return None
     text = text.strip()[:_DETAIL_LIMIT]
     why = answer.get("why")
-    if why in CAUSES:
+    if why in CAUSES and "why_detail" in answer:
         # An envelope that already decided why carries the server's own words
         # in ``why_detail``; its ``error`` is that envelope's whole sentence,
         # which would read as a second sentence inside the door's own.
-        if "why_detail" in answer:
-            raw = answer.get("why_detail")
-            text = str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else ""
+        raw = answer.get("why_detail")
+        text = str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else ""
+    text = _in_words(text, answer)
+    held = _plan_held_here(answer, code)
+    if held:
+        # A wall for a plan this computer counts the caller as holding, in
+        # whatever words: never the wall's own, which offer that plan.
+        return Miss("refused", PLAN_NOT_COUNTED_CODE, plan_record_fix(held))
+    if why in CAUSES:
         return Miss(why, code, text)
     if code in SIGNED_OUT_CODES:
         return Miss("signed_out", code, text)
@@ -296,6 +360,36 @@ def classify_answer(answer: Any) -> Miss | None:
     if not code or code in UNANSWERED_CODES or answer.get("retryable") is True:
         return Miss("unanswered", code, text)
     return Miss("refused", code, text)
+
+
+def held_plan_wall(answer: Any) -> Miss | None:
+    """The miss a plan wall in *answer* reads as when this computer counts
+    the caller as holding that plan (:func:`classify_answer`'s own reading),
+    else ``None``.  For a door that hands the servers' refusal on as they
+    wrote it: a wall is never handed to someone who holds its plan."""
+    if not isinstance(answer, dict):
+        return None
+    miss = classify_answer(answer)
+    return miss if miss is not None and miss.code == PLAN_NOT_COUNTED_CODE else None
+
+
+def _in_words(text: str, answer: dict[str, Any]) -> str:
+    """*text* when it is words for a person; otherwise the sentence the
+    servers put elsewhere in *answer* (an upgrade block's headline, then its
+    ``message``, then its ``detail``), or nothing.  A refusal's ``error`` can
+    be a bare code word ("upgrade_required"), which would otherwise end the
+    door's own sentence as if it were one."""
+    if not text or any(ch.isspace() for ch in text):
+        return text
+    upgrade = answer.get("upgrade")
+    for said in (
+        upgrade.get("headline") if isinstance(upgrade, dict) else None,
+        answer.get("message"),
+        answer.get("detail"),
+    ):
+        if isinstance(said, str) and any(ch.isspace() for ch in said.strip()):
+            return said.strip()[:_DETAIL_LIMIT]
+    return ""
 
 
 def classify_transport_error(exc: BaseException, *, host: str | None = None, probe: bool = True) -> Miss:
@@ -396,7 +490,7 @@ def sentence(
     cause, fix = _cause_and_fix(miss, feature)
     if miss.cause == "refused" and not miss.detail:
         cause += " and gave no reason"
-        fix = "wait a minute"
+        fix = fix or "wait a minute"
     out = f"{_cap(on_the_line).rstrip('. ')}. Kiln can't {cannot.strip()} right now because {cause}, so it {wont.strip().rstrip('.')}."
     if miss.cause == "refused" and miss.detail:
         out += f" {_sentence_of(miss.detail)}"
@@ -407,10 +501,39 @@ def sentence(
 
 
 def _cause_and_fix(miss: Miss, feature: str) -> tuple[str, str]:
-    """What *miss* reads as, and what fixes it."""
+    """What *miss* reads as, and what fixes it.  A no-answer said again
+    from an earlier ask says so, and the wait is the real one."""
     if miss.cause == "signed_out" and miss.code == SESSION_EXPIRED_CODE:
         return _SESSION_EXPIRED
-    return _CAUSE_CLAUSE[miss.cause].format(feature=feature), _FIX[miss.cause]
+    cause, fix = _CAUSE_CLAUSE[miss.cause].format(feature=feature), _FIX[miss.cause]
+    if miss.cause == "refused" and miss.code == UPGRADE_REQUIRED_CODE:
+        fix = _UPGRADE_FIX
+    if miss.cause == "unanswered" and miss.retry_after_s > 0:
+        cause += " when last asked"
+        fix = f"wait about {_minutes(miss.retry_after_s)}"
+    return cause, fix
+
+
+def _minutes(seconds: float) -> str:
+    """*seconds* as whole minutes, rounded up, never fewer than one."""
+    whole = max(1, math.ceil(seconds / 60))
+    return f"{whole} minute" if whole == 1 else f"{whole} minutes"
+
+
+#: Said after the fix to someone this install has never signed in for.
+FREE_ACCOUNT_NOTE = " (a free account is enough)"
+#: Signed-out codes from someone who already has an account: a session that
+#: ran out, and a sign-in Kiln's servers would not take.
+_HAS_AN_ACCOUNT = frozenset({SESSION_EXPIRED_CODE, "KILN_AUTH_REJECTED"})
+
+
+def free_account_note(miss: Miss | None) -> str:
+    """:data:`FREE_ACCOUNT_NOTE` when *miss* is someone who never signed in,
+    to end a free answer's *then* with; ``""`` for every other miss,
+    including an account whose session ran out or was not taken."""
+    if isinstance(miss, Miss) and miss.cause == "signed_out" and miss.code not in _HAS_AN_ACCOUNT:
+        return FREE_ACCOUNT_NOTE
+    return ""
 
 
 def clause(miss: Miss, *, feature: str, cannot: str, then: str = "try again") -> str:
@@ -420,18 +543,79 @@ def clause(miss: Miss, *, feature: str, cannot: str, then: str = "try again") ->
     cause, fix = _cause_and_fix(miss, feature)
     if miss.cause == "refused":
         cause = f"{cause}: {miss.detail.rstrip('. ')}" if miss.detail else f"{cause} and gave no reason"
-        fix = "" if miss.detail else "wait a minute"
+        if miss.code != UPGRADE_REQUIRED_CODE:
+            fix = "" if miss.detail else "wait a minute"
     out = f"Kiln can't {cannot.strip()} right now ({cause})"
     if fix:
         out += f"; {fix} and {then.strip().rstrip('.')}"
     return out
 
 
-def fields(miss: Miss | None) -> dict[str, str]:
-    """The machine-readable twin of the sentence, to splat beside it."""
+def fields(miss: Miss | None) -> dict[str, Any]:
+    """The machine-readable twin of the sentence, to splat beside it, with
+    ``retry_after_s`` (whole seconds) for a no-answer said again."""
     if miss is None:
         return {}
-    return {"why": miss.cause, "why_code": miss.code, "why_detail": miss.detail}
+    out = {"why": miss.cause, "why_code": miss.code, "why_detail": miss.detail}
+    if miss.retry_after_s > 0:
+        out["retry_after_s"] = math.ceil(miss.retry_after_s)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# asking briefly, for a door with a basic answer of its own
+# ---------------------------------------------------------------------------
+
+#: How long an ask waits, at most, when the door asking has a basic answer of
+#: its own to give instead.
+CONSULT_TIMEOUT_S: float = 4.0
+#: After Kiln's servers leave such an ask unanswered, how long every such ask
+#: leaves them alone and gives its basic answer at once.
+SERVICE_BACKOFF_S: float = 300.0
+
+_service_down_until: float = 0.0
+_service_down_miss: Miss | None = None
+
+
+def ask_briefly(ask: Callable[[float], Any], *, host: str | None = None) -> tuple[Any, Miss | None]:
+    """Ask Kiln's servers once, for a door that has a basic answer of its own.
+
+    *ask* makes the request, waiting at most the seconds it is handed
+    (:data:`CONSULT_TIMEOUT_S`), and returns what came back.  The result is
+    ``(what came back, None)`` when the servers gave any answer at all (an
+    answer, a refusal, a sign-in wall: the door reads it), or ``(None,
+    miss)`` when none came: this computer offline, or the servers silent.
+
+    Once the servers leave an ask unanswered, every ask made through here
+    gets that miss at once for :data:`SERVICE_BACKOFF_S`, said with the time
+    left before Kiln asks again (:attr:`Miss.retry_after_s`): a hung server
+    costs one short wait, not one per door.  An offline computer, a sign-in
+    and a refusal are asked again at once, since each answers at once and
+    the change that fixes it is the person's.  *host* is where the request
+    went, to tell offline from silent.  Never raises.
+    """
+    wait = _service_down_until - time.monotonic()
+    if wait > 0:
+        last = _service_down_miss or Miss("unanswered", code="SERVER_UNREACHABLE")
+        return None, Miss(last.cause, last.code, last.detail, retry_after_s=wait)
+    try:
+        answer = ask(CONSULT_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
+        logger.debug("served ask failed", exc_info=True)
+        return None, _no_answer(classify_transport_error(exc, host=host))
+    if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
+        return None, _no_answer(classify_answer(answer) or Miss("unanswered", code="SERVER_UNREACHABLE"))
+    return answer, None
+
+
+def _no_answer(miss: Miss) -> Miss:
+    """*miss*, after leaving Kiln's servers alone for a while when it is
+    their silence (:func:`ask_briefly`)."""
+    global _service_down_until, _service_down_miss
+    if miss.cause == "unanswered":
+        _service_down_until = time.monotonic() + SERVICE_BACKOFF_S
+        _service_down_miss = miss
+    return miss
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +639,12 @@ def envelope_for_transport(
     }
 
 
+#: How Kiln's servers start the 404 for a tool they do not have.
+_UNKNOWN_TOOL = "Unknown tool:"
+#: What a miss carries for such a tool, in place of the servers' words.
+_NOT_SERVED_HERE_DETAIL = "these servers do not have that answer yet"
+
+
 def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | None = None) -> dict[str, Any]:
     """The envelope for an HTTP error answer.
 
@@ -462,7 +652,9 @@ def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | Non
     server's own) comes back untouched: the server built it for this call
     and this side has no better words.  FastAPI's bare ``{"detail": ...}``
     -- which used to come back as-is, with no field that marked it an
-    error -- and a body that is not JSON at all are worded here.
+    error -- and a body that is not JSON at all are worded here.  A 404 for
+    a tool the servers do not have is no answer, never a ruling, and its
+    words (the tool's name) are not repeated.
     """
     if isinstance(body, dict) and any(k in body for k in ("status", "success", "error", "code")):
         return body
@@ -472,6 +664,10 @@ def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | Non
         detail = raw if isinstance(raw, str) else (json.dumps(raw) if raw is not None else "")
     if status == 401:
         miss = Miss("signed_out", "KILN_AUTH_REJECTED", detail)
+    elif status == 404 and detail.startswith(_UNKNOWN_TOOL):
+        # The servers do not have this tool (yet): nobody ruled on the ask,
+        # and the tool's name is not words for a person.
+        miss = Miss("unanswered", "NOT_SERVED_HERE", _NOT_SERVED_HERE_DETAIL)
     elif status >= 500:
         miss = Miss("unanswered", "KILN_API_HTTP_ERROR", detail)
     elif status == 429:
@@ -518,6 +714,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.server": ("served_answer", "the paid-tool manifest stubs and the served door every bridge uses"),
     "kiln.served_public": ("served_answer", "public design and analysis tools a signed-in install runs on Kiln's servers; a miss runs the tool here and says why once per cause"),
     "kiln._pro_motion_bridge": ("served_answer", "head-motion plans; a miss is worded by the Bambu doors"),
+    "kiln.printers.motion_walk": ("own_vocabulary", "owner-walked home and park, one step per ask; a refusal or a miss is said in the walk's own words and nothing is sent"),
     "kiln._pro_cutter_bridge": ("served_answer", "blade status for the pre-flight; cut reports are fire-and-forget"),
     "kiln._pro_nozzle_bridge": ("served_answer", "the pre-print nozzle-life verdict for the pre-flight, a start and a slice; the nozzle on record, for the pre-flight's comparison and for the size a check or a slice runs with"),
     "kiln._pro_placement_bridge": ("served_answer", "the plate-clearance verdict for slicing beside a part left on the plate"),
@@ -544,7 +741,8 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_routing_bridge": ("served_answer", "the material pick for an intent and the material list behind it, free at every plan and kept nowhere; a miss picks nothing, lists the plastics the printer can melt (or each material's name and category) with the food and skin cautions, and says why once"),
     "kiln._pro_material_pairing_bridge": ("served_answer", "whether two materials share one dual-extrusion print, and the multi-material check a compose makes; a miss answers from the nozzle temperature ranges alone, marked basic, never says a pair is compatible, still refuses the pairs that must never share a print and purges conservatively"),
     "kiln._pro_finishing_bridge": ("served_answer", "how to finish, paint and strengthen a print in one plastic, and that plastic's strengthening tips for the print diagnostic, free on every plan for a signed-in account and kept nowhere; every technique named carries its safety note, and a miss answers one general step that suits any plastic with its safety note, marked basic, gives the diagnostic no tip and says why in one line, never a plastic's own technique, paint or strength figure"),
-    "kiln._pro_orientation_bridge": ("served_answer", "Kiln Pro's order of one part's print poses, asked once per part only when the signed-in plan includes it and kept nowhere; a miss ranks by bed contact"),
+    "kiln._pro_material_limits_bridge": ("served_answer", "one plastic's design limits (how steep a face may lean, how far a bridge may span, how thin a wall and a pin may go) for every design check, the printability check and a slice's support threshold, free at every plan, asked per plastic and scenario and kept for the process; a miss checks against the general figures, marks them general, says why once per cause and never calls them the plastic's own. Also what Kiln's own slice keeps at a nozzle (the thinnest wall and pin), for the printability check's stop on a feature the slice leaves out, asked per nozzle with no plastic named; a miss stops nothing, warns from the general minimum wall about the thin walls and pins the slice may leave out, and says in one line why and how to get Kiln's exact check"),
+    "kiln._pro_orientation_bridge": ("served_answer", "Kiln Pro's order of one part's print poses, asked once per part only when the signed-in plan includes it and kept nowhere; a miss ranks by bed contact; auto_orient_model names the cause on every miss and says why in words once a session, and the stability check and the design audit, which rank poses too, take the floor quietly"),
     "kiln._pro_decorate_bridge": ("served_answer", "what Kiln's servers add to a decoration: a depth raised to one that shows (everyone), a recess under a bottom-face decoration (Kiln Pro, asked only when the signed-in plan includes it) and a QR code for a part (Kiln Pro); a miss carves here as always and says why once, and a QR code writes nothing and says which of the four it was"),
     "kiln._pro_arrival_pose_bridge": ("served_answer", "which way up a model that just arrived stands, free at every tier, asked once per arrival and kept nowhere; a miss shows the part exactly as it arrived and says why"),
     "kiln._pro_recovery_bridge": ("served_answer", "Kiln Pro's plan for one failed print (session plan with its G-code, or fix plan), asked only when the signed-in plan includes it and kept nowhere; a miss answers with the safe floor and says why once"),
@@ -557,6 +755,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_goal_bridge": ("served_answer", "a model made on this computer joining the goal it names, in the person's Kiln account: the model goes up, the goal records it with where it came from and compares it with the goal's pictures; a miss says the make stands, was not added to the goal and was not compared, never joined or matching; a model from outside Kiln that names no goal opens one there the same way (the goal is kept, never the model), an install never signed in is told in one line what signing in keeps, and a miss says the model is here and was not recorded; a model Kiln made here that names no goal opens one from the tool that made it, its fingerprint and the call's naming words, cleaned and capped, never the model or its source: a miss leaves the make as it was and says once per session what was not done, never that no safety note applies"),
     "kiln._pro_goal_material_bridge": ("served_answer", "the filament a saved goal's part printed in, told to the goal in the person's account as the print starts, free at every tier; a door that named the goal says a miss once in its reply and the print runs as started, a start no door waits on records nothing on a miss"),
     "kiln._pro_order_bridge": ("served_answer", "ordering a print from a print service on an install with no order service of its own (materials, a quote, placing, tracking and cancelling an order, the order history), kind action: a quote not given is no quote and an order not placed is said so, never read as placed; the servers' own refusal rides whole with its details"),
+    "kiln._pro_limits_bridge": ("served_answer", "one step of the printer session's second lesson (a test print made, its sliced files read, the person's readings kept, what is on record said back), free with an account and kept in it; a miss keeps nothing, says which of the four it was once in the session's own words, and the session stays where it was so the same step can be asked again"),
     "kiln._pro_printer_checkin_bridge": ("infrastructure", "one question about a printer, asked for after a print ends on it and never by the person; a miss of any cause (offline, signed out, no answer, refused) asks nothing and says nothing, keeps what was kept, and the next ending asks again"),
     "kiln.history_courier": ("served_answer", "design history pushed to, pulled from and cloned out of the person's account; a miss moves nothing and the history on this computer is untouched"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
@@ -600,19 +799,24 @@ def _sentence_of(text: str) -> str:
 
 __all__ = [
     "CAUSES",
+    "CONSULT_TIMEOUT_S",
+    "FREE_ACCOUNT_NOTE",
     "HOSTED_DOORS",
     "KINDS",
     "LOCAL_FAULT_CODE",
     "Miss",
     "SESSION_EXPIRED_CODE",
     "SIGNED_OUT_CODES",
+    "SERVICE_BACKOFF_S",
     "UNANSWERED_CODES",
+    "ask_briefly",
     "classify_answer",
     "classify_transport_error",
     "clause",
     "envelope_for_http",
     "envelope_for_transport",
     "fields",
+    "free_account_note",
     "kind_of_tool",
     "local_fault",
     "sentence",

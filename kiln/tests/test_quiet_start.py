@@ -775,7 +775,7 @@ class TestTheDoors:
         assert resp["start"]["allowed"] is True and resp["start"]["mode"] == "quiet_start"
         assert resp["start"]["why"].startswith("This file starts the quiet way: no Z home, no probe and no purge line")
         assert "47 mm clear" in resp["start"]["why"]
-        assert resp["approval_carries"] is False
+        assert resp["approval_carries"] is True
 
     def test_slice_and_print_hands_the_plan_to_the_wrap(self, tmp_path, machine, monkeypatch):
         mark_occupied(machine, JAR)

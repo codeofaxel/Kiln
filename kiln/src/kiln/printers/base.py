@@ -55,6 +55,21 @@ def _discard_copies(paths: list[str]) -> None:
     paths.clear()
 
 
+class _NotKept(Exception):
+    """A print the person asked not to keep: its outcome row is not opened."""
+
+
+def _continues_held_print(adapter: Any, file_name: str) -> bool:
+    """Whether *file_name* is a file Kiln made to carry on the print held for
+    *adapter* (:func:`kiln.resume_provenance.continuation_started`)."""
+    try:
+        from kiln.resume_provenance import continuation_started
+
+        return continuation_started(adapter, file_name) is not None
+    except Exception:  # noqa: BLE001 -- unreadable is a new print
+        return False
+
+
 def is_resume_mode_3mf(file_name: str) -> bool:
     """True if ``file_name`` looks like a mid-print resume 3MF.
 
@@ -139,6 +154,10 @@ _UNREAD = object()
 
 class ModelDeclarationRequired(PrinterError):
     """Raised when a motion needs the catalogue and no printer_model names the row."""
+
+
+class PrinterModelDisagrees(PrinterError):
+    """Raised when a move Kiln plans by model is asked of a printer that reports itself as another model."""
 
 
 class HomingUnsupported(PrinterError):
@@ -1098,12 +1117,20 @@ class PrintResult:
     message: str
     job_id: str | None = None
     refused_before_send: bool = False
+    #: How a started print is kept (:mod:`kiln.print_keeping`): ``kept``,
+    #: ``local`` or ``none``; ``None`` on anything but a start.
+    print_kept: str | None = None
+    #: The one line a start says about how it is kept, when it says one.
+    print_kept_said: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         out = asdict(self)
         if not self.refused_before_send:
             out.pop("refused_before_send", None)
+        for key in ("print_kept", "print_kept_said"):
+            if out.get(key) is None:
+                out.pop(key, None)
         return out
 
 
@@ -2198,7 +2225,15 @@ class PrinterAdapter(ABC):
     # -- print control --------------------------------------------------
 
     def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
-        """Begin printing a file that already exists on the printer."""
+        """Begin printing a file that already exists on the printer.
+
+        ``keep_record`` (popped here, never sent to the printer) says how the
+        print is kept (:mod:`kiln.print_keeping`): ``False`` not kept,
+        ``True`` kept, absent the account's choice.
+        """
+        from kiln import print_keeping
+
+        keep_record = print_keeping.requested(kwargs.pop("keep_record", None))
         quiet_contract = _quiet_start_contract(file_name, kwargs)
         if quiet_contract is not None:
             from kiln.plate_state import quiet_start_flags
@@ -2248,6 +2283,21 @@ class PrinterAdapter(ABC):
         if unsigned is not None:
             _discard_copies(kept)
             return PrintResult(success=False, message=unsigned["reason"], refused_before_send=True)
+        # How this print is kept: decided once, before anything is sent.  A
+        # print that carries on the one held for this printer keeps its way.
+        continuing = is_resume_mode_3mf(file_name) or _continues_held_print(self, file_name)
+        if continuing:
+            keeping = print_keeping.Decision(print_keeping.level_of(outcome_printer_name(self)))
+        else:
+            keeping = print_keeping.decide(self, file_name, kwargs, keep_record)
+        if keeping.held:
+            _discard_copies(kept)
+            return CodedPrintResult(
+                success=False, message=keeping.said or "", refused_before_send=True,
+                code=print_keeping.TEAM_HOLD_CODE,
+            )
+        not_kept = keeping.level == print_keeping.NONE
+        leaves = keeping.level == print_keeping.KEPT
         try:
             try:
                 from kiln.printers.print_gate import with_judged_plate
@@ -2292,10 +2342,14 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "engagement not recorded", exc_info=True
                 )
+            print_keeping.print_started(outcome_printer_name(self), file_name, keeping)
+            result.print_kept = keeping.level
+            result.print_kept_said = keeping.said
             try:
                 from kiln.daily_stats import record_print_start
 
-                record_print_start(self.name, file_name)
+                # A print not kept is counted and leaves no token naming it.
+                record_print_start(self.name, file_name, token=not not_kept)
             except Exception:  # noqa: BLE001 — stats must never affect a print
                 import logging as _logging
 
@@ -2308,9 +2362,11 @@ class PrinterAdapter(ABC):
                 from kiln.resume_provenance import continuation_started, sent_sha256
 
                 note_print_started(
-                    self.name, file_name, machine=machine_fingerprint(self),
+                    outcome_printer_name(self), file_name, machine=machine_fingerprint(self),
                     sent_sha256=sent_sha256(self, file_name),
                     continues=continuation_started(self, file_name),
+                    printer_model=self.declared_printer_model() or None,
+                    kept=print_keeping.NONE if not_kept else None,
                 )
             except Exception:  # noqa: BLE001 — the twin never affects a print
                 import logging as _logging
@@ -2352,37 +2408,52 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "plate-state start note failed", exc_info=True
                 )
+            # What this print is, asked of the one resolver once: the nozzle
+            # count below and the outcome row both read this answer.
+            identity: dict[str, Any] = {}
             try:
-                from kiln._pro_nozzle_bridge import record_print_odometer
+                from kiln.auto_record_hook import print_identity_at_start
 
-                record_print_odometer(self.name, file_name)
-            except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
+                if not not_kept:
+                    identity = print_identity_at_start(self, kwargs, file_name)
+            except Exception:  # noqa: BLE001 — identity never blocks a print
                 import logging as _logging
 
-                _logging.getLogger(__name__).debug(
-                    "nozzle odometer recording failed", exc_info=True
-                )
-            try:
-                from kiln._pro_cutter_bridge import record_print_cuts
+                _logging.getLogger(__name__).debug("print identity not read at start", exc_info=True)
+            # The wear counts below are sent to Kiln's servers: only for a
+            # print whose record may leave this computer.
+            if leaves:
+                try:
+                    from kiln._pro_nozzle_bridge import record_print_odometer
 
-                planned = record_print_cuts(
-                    self.name, file_name, printer_model=self.declared_printer_model() or None
-                )
-                self._cutter_print = {"file": file_name, "planned": planned, "observed": 0}
-            except Exception:  # noqa: BLE001 — cut bookkeeping never blocks a print
-                import logging as _logging
+                    record_print_odometer(self.name, file_name, lineage_id=identity.get("lineage_id"))
+                except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
+                    import logging as _logging
 
-                _logging.getLogger(__name__).debug(
-                    "cutter count recording failed", exc_info=True
-                )
+                    _logging.getLogger(__name__).debug(
+                        "nozzle odometer recording failed", exc_info=True
+                    )
+                try:
+                    from kiln._pro_cutter_bridge import record_print_cuts
+
+                    planned = record_print_cuts(
+                        self.name, file_name, printer_model=self.declared_printer_model() or None
+                    )
+                    self._cutter_print = {"file": file_name, "planned": planned, "observed": 0}
+                except Exception:  # noqa: BLE001 — cut bookkeeping never blocks a print
+                    import logging as _logging
+
+                    _logging.getLogger(__name__).debug(
+                        "cutter count recording failed", exc_info=True
+                    )
+            else:
+                self._cutter_print = None
             # Open the outcome row NOW, while we can still see the print
             opened = None
             try:
-                from kiln.auto_record_hook import (
-                    clear_cancel_intent,
-                    open_pending_outcome,
-                    print_identity_at_start,
-                )
+                if not_kept:
+                    raise _NotKept
+                from kiln.auto_record_hook import clear_cancel_intent, open_pending_outcome
 
                 # A cancel asked for before this print has nothing to say about this print
                 clear_cancel_intent(outcome_printer_name(self))
@@ -2395,7 +2466,7 @@ class PrinterAdapter(ABC):
                     material_type=(
                         str(commanded_material) if commanded_material else None
                     ),
-                    identity=print_identity_at_start(self, kwargs, file_name),
+                    identity=identity,
                 )
                 from kiln.learned_print_time import note_start_estimate
 
@@ -2403,6 +2474,8 @@ class PrinterAdapter(ABC):
                 from kiln.print_evidence import note_start_firmware
 
                 note_start_firmware(opened, self)
+            except _NotKept:
+                pass
             except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
                 import logging as _logging
 
@@ -2425,16 +2498,25 @@ class PrinterAdapter(ABC):
                 spawn_ending_watch(self, file_name)
             except Exception:  # noqa: BLE001 — never affects a print
                 pass
-            try:
-                from kiln._pro_goal_material_bridge import note_print_started as _note_goal_filament
+            if leaves:
+                try:
+                    from kiln.sliced_routines import note_print_started
 
-                _note_goal_filament(self, file_name, kwargs)
-            except Exception:  # noqa: BLE001 — a goal's record never affects a print
-                import logging as _logging
+                    # The printer's own routines in the file it prints, read on
+                    # a thread of their own (kiln.sliced_routines).
+                    note_print_started(self, file_name, kwargs)
+                except Exception:  # noqa: BLE001 — never affects a print
+                    pass
+                try:
+                    from kiln._pro_goal_material_bridge import note_print_started as _note_goal_filament
 
-                _logging.getLogger(__name__).debug(
-                    "goal filament note failed", exc_info=True
-                )
+                    _note_goal_filament(self, file_name, kwargs)
+                except Exception:  # noqa: BLE001 — a goal's record never affects a print
+                    import logging as _logging
+
+                    _logging.getLogger(__name__).debug(
+                        "goal filament note failed", exc_info=True
+                    )
             _fire_print_started_hooks(self, file_name)
         elif getattr(result, "success", False):
             try:
@@ -2860,6 +2942,7 @@ class PrinterAdapter(ABC):
                 "backend declares no filament handling. Use the printer's "
                 "own screen or web UI for that step."
             )
+        self._refuse_move_for_another_model()
 
         if slot is not None:
             try:
@@ -3182,6 +3265,21 @@ class PrinterAdapter(ABC):
         )
         raise PlateClearRequired(message, snapshot_path=witness)
 
+    #: Whether this backend reads what the printer is off the machine's own
+    #: serial number or firmware name, at no cost, so that a move Kiln plans
+    #: by model is refused while that report names another model.
+    _MODEL_REPORT_HOLDS_MOVES: ClassVar[bool] = False
+
+    def _refuse_move_for_another_model(self) -> None:
+        """Refuse a move Kiln plans by model while the printer reports itself as another model."""
+        from kiln.printer_model_check import MISMATCH_CODE, move_refusal
+
+        sentence = move_refusal(self)
+        if sentence is None:
+            return
+        self._count_motion_refusal(MISMATCH_CODE, "another_model")
+        raise PrinterModelDisagrees(sentence)
+
     def declared_printer_model(self) -> str:
         """The printer_model this adapter was built with, as the person wrote it."""
         own = str(getattr(self, "_printer_model", "") or "").strip()
@@ -3354,6 +3452,7 @@ class PrinterAdapter(ABC):
             raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
         if not wanted:
             raise PrinterError(f"Nothing to home: axes {axes!r} names none of X, Y, Z.")
+        self._refuse_move_for_another_model()
         state = self.get_state()
         if state.effective_state == PrinterStatus.PRINTING and not options.get("plan_only"):
             raise PrinterError(
@@ -3505,6 +3604,7 @@ class PrinterAdapter(ABC):
         step = options.get("step")
         if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
             raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
+        self._refuse_move_for_another_model()
         state = self.get_state()
         if state.effective_state == PrinterStatus.PRINTING and not options.get("plan_only"):
             raise PrinterError(
@@ -4547,6 +4647,14 @@ def _feed_outcome_lifecycle(
     if is_terminal_transition(prev, value):
         job = _current_job(adapter)
         label = _job_label(job)
+        from kiln.print_keeping import keeps
+
+        if not keeps(name, label):
+            # A print the person asked not to keep: its start record was
+            # deleted as it ended (observe_state), and nothing is banked.
+            adapter._cutter_print = None
+            forget_job_start(adapter)
+            return
         adapter._reconcile_cutter_print(label or "")
         if label:
             progress = {

@@ -60,7 +60,7 @@ def served(monkeypatch):
     calls: list[tuple[str, dict]] = []
     answers: list[Any] = []
 
-    def fake(tool_name, _timeout=None, _asked_by_user=True, **kwargs):
+    def fake(tool_name, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
         calls.append((tool_name, kwargs))
         answer = answers.pop(0) if answers else {}
         if isinstance(answer, BaseException):
@@ -202,7 +202,8 @@ class TestAMissAnswersWithGenericSettings:
         assert "generic settings worked out from the nozzle size, not settings tuned to PLA" in line
         assert "Kiln can't" in line and "right now because" in line and ", so it" in line
         if CAUSE[miss] in FIX_WORDS:
-            assert line.endswith(f"{FIX_WORDS[CAUSE[miss]]} and ask again.")
+            free = " (a free account is enough)" if CAUSE[miss] == "signed_out" else ""
+            assert line.endswith(f"{FIX_WORDS[CAUSE[miss]]} and ask again{free}.")
         if door == "profile":
             assert out["profile"]["top_surface_layers"] is None
             assert out["profile"]["overhang_max_angle"] == _floor_angle()
@@ -228,7 +229,7 @@ class TestAMissAnswersWithGenericSettings:
         _, answers = served
         answers.append(MISSES["signed_out"])
         out = doors.quick_adaptive_plan(material, 10.0, nozzle_diameter_mm=0.4)
-        assert out["message"].endswith("Sign in and ask again.")
+        assert out["message"].endswith("Sign in and ask again (a free account is enough).")
         assert "ask again for settings" not in out["message"]
         assert f"check whether it has settings tuned to {material.upper()}" in out["message"]
 
@@ -448,12 +449,21 @@ def test_a_fault_in_kiln_pro_here_is_a_generic_answer_that_names_nothing(served,
 # ---------------------------------------------------------------------------
 
 
+#: The per-material table's name, and the slicer's two readers of it, by
+#: digest (tests/_moved_away.py).
+_TABLE_NAME = frozenset({"d2e48bb0ab1871174ce3d34b082e45f391970ba90735737bfbb5844992c323ef"})
+_TABLE_READERS = frozenset({
+    "066b1796370cdf19af3bb32850f2c362906035f05e7d63739537366c6753dadb",
+    "fe1ae58bc2c12551bf1f7e5fa691e38528e043871c308a8c2798d6e2bbca3424",
+})
+
+
 def test_the_per_material_table_is_not_in_this_package():
     import kiln.adaptive_slicer as eng
+    from tests._moved_away import attributes_back
 
-    assert not hasattr(eng, "_MATERIAL_PROFILES")
-    assert not hasattr(eng.AdaptiveSlicer, "get_material_profile")
-    assert not hasattr(eng.AdaptiveSlicer, "list_supported_materials")
+    assert attributes_back(eng, _TABLE_NAME) == []
+    assert attributes_back(eng.AdaptiveSlicer, _TABLE_READERS) == []
     spec = importlib.util.spec_from_file_location(
         "audit_public_material_tables_for_adaptive", REPO / "scripts" / "audit_public_material_tables.py"
     )

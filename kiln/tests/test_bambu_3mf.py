@@ -2589,7 +2589,7 @@ def test_a_bambu_studio_slice_is_wrapped_like_a_prusaslicer_one(tmp_path):
     assert _count_layers(BAMBU_STUDIO_GCODE_BODY) == _count_layers(MINIMAL_GCODE_BODY) == 2
     assert _find_max_z(BAMBU_STUDIO_GCODE_BODY) == _find_max_z(MINIMAL_GCODE_BODY) == 0.4
     body = _postprocess_prusa_body(BAMBU_STUDIO_GCODE_BODY, total_layers=2, est_time_sec=600)
-    assert body.count("M73 L") == 2 and body.count("M991 S0 P0") == 2
+    assert body.count("M73 L") == 2 and body.count("M991 S0 P0") == body.count("M991 S0 P1") == 1
     assert "M73 P50 R6" not in body, "the slicer's own progress lines are replaced"
     assert "M109 S220" not in body and "G1 X10 Y10 E0.5" in body
     out = tmp_path / "bambu_studio.gcode.3mf"
@@ -2597,3 +2597,45 @@ def test_a_bambu_studio_slice_is_wrapped_like_a_prusaslicer_one(tmp_path):
          patch("kiln.printers.bambu_3mf._select_end_gcode", return_value=(FAKE_END_GCODE, "bambu_a1")):
         result = build_bambu_3mf(BAMBU_STUDIO_GCODE_BODY, str(out))
     assert result.total_layers == 2 and out.is_file()
+
+
+def _layer_lines(body: str, prefix: str) -> list[str]:
+    return [line.split(";")[0].strip() for line in body.split("\n") if line.strip().startswith(prefix)]
+
+
+class TestTheLayerEachLayerIsOn:
+    """Every layer of a wrapped print tells the printer which layer it is on:
+    the layer its screen shows (``M73 L``, from 1) and the firmware's layer
+    notice (``M991 S0 P``, from 0).  A body whose slicer wrote them itself
+    keeps its own and is given none of the wrapper's."""
+
+    def test_each_layer_notice_names_its_own_layer(self):
+        body = "".join(f";LAYER_CHANGE\n;Z:{0.2 * n:.1f}\nG1 X{n} Y1 E1\n" for n in range(1, 4))
+        out = _postprocess_prusa_body(body, total_layers=3, est_time_sec=180)
+        assert _layer_lines(out, "M991") == ["M991 S0 P0", "M991 S0 P1", "M991 S0 P2"]
+        assert _layer_lines(out, "M73 L") == ["M73 L1", "M73 L2", "M73 L3"]
+
+    def test_a_body_that_says_its_layers_itself_keeps_its_lines_and_gets_none_of_the_wrappers(self):
+        body = "".join(
+            f"; CHANGE_LAYER\n; Z_HEIGHT: {0.2 * n:.1f}\nG92 E0\n; MAKER LAYER\nM73 L{n}\n"
+            f"M991 S0 P{n - 1} ;notify layer change\nINVENTED FRAME\nM73 P{n} R9\nG1 X{n} Y1 E1\n"
+            for n in range(1, 4)
+        )
+        out = _postprocess_prusa_body(body, total_layers=3, est_time_sec=180)
+        assert _layer_lines(out, "M991") == ["M991 S0 P0", "M991 S0 P1", "M991 S0 P2"]
+        assert _layer_lines(out, "M73 L") == ["M73 L1", "M73 L2", "M73 L3"]
+        assert out.count("INVENTED FRAME") == out.count("; MAKER LAYER") == 3
+        assert "; update layer progress" not in out
+        # The progress lines are the wrapper's own, one a layer.
+        assert _layer_lines(out, "M73 P") == ["M73 P33 R2", "M73 P66 R1", "M73 P99 R1"]
+
+    def test_the_package_says_each_layer_once(self, tmp_path):
+        body = "".join(f";LAYER_CHANGE\n;Z:{0.2 * n:.1f}\nG1 X{n} Y1 E1\n" for n in range(1, 4))
+        out = tmp_path / "three.gcode.3mf"
+        with patch("kiln.printers.bambu_3mf._load_a1_start_gcode", return_value=FAKE_START_GCODE), \
+             patch("kiln.printers.bambu_3mf._select_end_gcode", return_value=(FAKE_END_GCODE, "bambu_a1")):
+            build_bambu_3mf(body, str(out))
+        with zipfile.ZipFile(out) as zf:
+            gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
+        start = gcode.index(";LAYER_CHANGE")
+        assert _layer_lines(gcode[start:], "M991 S0 P") == ["M991 S0 P0", "M991 S0 P1", "M991 S0 P2"]

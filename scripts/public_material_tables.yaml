@@ -13,6 +13,9 @@ keep:
   'catalog_keys.py::_MATERIAL_ABBREVIATIONS':
     door: every material lookup
     why: a spelling map from short names to catalogue ids; it carries no figure or judgement
+  'material_safety.py::_REFUSED_PAIRS':
+    door: the multi-colour composer and the print doors that load several materials into one print
+    why: with no server they must still refuse loading two plastics whose nozzle temperatures cannot share one print, a clog and failed-print floor
 baseline:
   - 'ambient_safety.py::_ALIASES'
   - 'ambient_safety.py::_MATERIAL_THERMAL_PROFILES'

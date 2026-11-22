@@ -50,6 +50,9 @@ __all__ = [
     "file_code",
     "file_hash_code",
     "job_code",
+    "team_printer_id",
+    "is_team_printer_id",
+    "printer_label",
     "is_listing_link",
     "redact_text",
     "scrub",
@@ -149,6 +152,61 @@ def job_code(value: Any) -> str | None:
     return _labelled_code("pj:", b"job", str(value or "").strip())
 
 
+#: Rounds of the slow one-way function behind :func:`team_printer_id`.
+TEAM_PRINTER_ID_ROUNDS = 200_000
+_TEAM_PRINTER_ID = re.compile(r"\Atp:[0-9a-f]{32}\Z")
+
+
+def team_printer_id(fingerprint: Any, team_key: Any) -> str | None:
+    """One id for one physical printer inside one team.
+
+    *fingerprint* is the machine's stable identity
+    (:func:`kiln.registry.stable_machine_fingerprint`: its serial when the
+    printer reports one, else its address); *team_key* is the team's own
+    key, which Kiln's account serves only to the team's members.  The same
+    machine gives the same id on every member's computer, so a team's list
+    of printers follows the machine and never a name; another team's key
+    gives another id, so two teams' lists never share one.  ``"tp:"`` and
+    32 hex digits of PBKDF2-SHA256 with the identity as the password and
+    the key in the salt, slow so that a guessed serial or address costs
+    real work to test against an id.  ``None`` without an identity or a key.
+    """
+    text = str(fingerprint or "").strip().lower()
+    key = str(team_key or "").strip()
+    if not text or not key:
+        return None
+    salt = f"kiln-team-printer-v1|{key}".encode()
+    digest = hashlib.pbkdf2_hmac("sha256", text.encode("utf-8"), salt, TEAM_PRINTER_ID_ROUNDS)
+    return "tp:" + digest.hex()[:32]
+
+
+def is_team_printer_id(value: Any) -> bool:
+    """Whether *value* has the shape :func:`team_printer_id` makes."""
+    return isinstance(value, str) and bool(_TEAM_PRINTER_ID.match(value))
+
+
+def printer_label(name: Any, *, cap: int | None = None, also: Any = ()) -> str | None:
+    """The person's name for a printer as it may be sent: one line, cut to
+    *cap* characters when one is given.  ``None`` for a name that holds one
+    of the addresses, serials or codes this computer keeps for its printers
+    (or one of *also*, values the caller holds for the same printer), or one
+    that cannot be checked against them."""
+    text = " ".join(str(name or "").split())
+    if not text:
+        return None
+    try:
+        own = [str(held) for _phrase, held in _own_printer_values()]
+    except Exception:  # noqa: BLE001 -- a name that cannot be checked is not sent
+        return None
+    own.extend(str(value) for value in also or () if value)
+    lowered = text.lower()
+    for held in own:
+        mine = held.strip().lower()
+        if mine and mine in lowered:
+            return None
+    return text[:cap] if cap else text
+
+
 def redact_text(text: str) -> str:
     """*text* read off a machine, as it may leave for Kiln's servers
     (:func:`kiln.redaction.redact_machine_text`).  A report keeps the links
@@ -158,8 +216,61 @@ def redact_text(text: str) -> str:
     return redact_machine_text(text)
 
 
+#: What a saved printer's identity values are called (``kiln.printer_names``):
+#: each leaves a log tail as its one-way code, never as itself.
+_IDENTITY_PHRASES = frozenset({
+    "the printer's serial number", "the printer's mainboard id", "the printer's machine id",
+})
+
+
+def redact_log_text(text: str) -> str:
+    """A log tail as it leaves for Kiln's servers.
+
+    Each serial or board id this computer holds for its printers becomes its
+    one-way code (:func:`machine_code`) wherever it appears, labelled or not;
+    each address or code becomes what it is.  Then :func:`redact_text`.
+    """
+    try:
+        own = _own_printer_values()
+    except Exception:  # noqa: BLE001 -- the general rules still apply
+        logger.debug("outbound guard: own printer values unreadable", exc_info=True)
+        own = []
+    lowered = text.lower()
+    for phrase, value in own:
+        if value.lower() not in lowered:
+            continue
+        said = machine_code(value) if phrase in _IDENTITY_PHRASES else f"[{phrase}]"
+        text = re.sub(_own_pattern(phrase, value), lambda _m, s=said: s, text, flags=re.IGNORECASE)
+        lowered = text.lower()
+    return redact_text(text)
+
+
 #: The one key a link to a model's public listing page travels under.
 LISTING_LINK_KEY = "listing_url"
+
+#: Keys whose value is a name from one of Kiln's own lists, judged by key
+#: AND value like a listing link: it goes as it is only when it is on that
+#: list, and nowhere otherwise.  ``reported_model`` is the catalogue model a
+#: printer names itself, sent beside its serial number's one-way code;
+#: ``upgrade`` is an upgrade from Kiln's list of those a printer's maker
+#: sells.  Neither can carry a serial number, an address or free text.
+_LISTED_VALUE_KEYS = ("reported_model", "upgrade")
+
+
+def _listed_value(key: str, value: Any) -> str | None:
+    """*value* when it is a name on the list *key* is judged against, else ``None``."""
+    if not isinstance(value, str) or not value or len(value) > 80:
+        return None
+    try:
+        if key == "reported_model":
+            from kiln.motion_facts import catalogue_keys
+
+            return value if value in catalogue_keys() else None
+        from kiln.printer_model_check import maker_upgrades
+
+        return value if value in maker_upgrades() else None
+    except Exception:  # noqa: BLE001 -- a list that cannot be read lets nothing through
+        return None
 
 
 def is_listing_link(value: Any) -> bool:
@@ -365,6 +476,8 @@ VERSION_FIELDS: dict[str, frozenset[str]] = {
     "kiln/outcome_courier.py": frozenset({"firmware"}),
     "kiln/served_steps.py": frozenset({"firmware"}),
     "kiln/_pro_printer_checkin_bridge.py": frozenset({"firmware"}),
+    "kiln/sliced_routines.py": frozenset({"p_slicer_version", "version"}),
+    "kiln/printers/motion_walk.py": frozenset({"firmware"}),
 }
 
 
@@ -432,6 +545,11 @@ def scrub(value: Any, _depth: int = 0, *, version_keys: frozenset[str] = frozens
                 if is_listing_link(item):
                     out[key] = item.strip()
                 continue
+            if name in _LISTED_VALUE_KEYS:
+                listed = _listed_value(name, item)
+                if listed is not None:
+                    out[key] = listed
+                continue
             if _IDENTITY.match(name):
                 out[key] = machine_code(item) if isinstance(item, (str, int)) and not isinstance(item, bool) else None
                 continue
@@ -466,7 +584,11 @@ SENDERS: dict[str, tuple[str, str]] = {
         "sent by kiln/_pro_goal_bridge.py: the tool, the model's fingerprint, the "
         "kept id, the call's naming arguments and the made file's own name, each "
         "cleaned and capped there first; never the model, its source or a folder, "
-        "and nothing at all from a signed-out install)",
+        "and nothing at all from a signed-out install); and a step of a walked "
+        "home or park (kiln/printers/motion_walk.py, cleaned there first: the "
+        "printer's model, the step number, the person's two answers, four "
+        "temperature readings and the firmware version, declared in "
+        "VERSION_FIELDS; never a serial number)",
     ),
     "kiln/terms.py": ("own_schema", "the terms version and when it was accepted"),
     "kiln/community_sync.py": (
@@ -533,7 +655,13 @@ SENDERS: dict[str, tuple[str, str]] = {
         "file_hash_code(), the material word, the nozzle size, a one-way code of the "
         "sliced settings, the spool as spool_code(), how far the print got, and the "
         "firmware version, declared in VERSION_FIELDS -- never a file's name, path or "
-        "fingerprint, a job id, a serial, an address, a note, or settings",
+        "fingerprint, a job id, a serial, an address, a note, or settings; "
+        "and kiln/print_keeping.py's team printer changes, built field by field: a printer "
+        "put on a team's list goes as its team_printer_id() (a slow one-way function of the "
+        "machine's identity under the team's key), the person's name for it through "
+        "printer_label() (left out when it holds one of this computer's printer addresses, "
+        "serials or codes), its model word and whether it is known by serial or address; "
+        "one taken off goes as that id -- never the serial, the address or the access code",
     ),
     "kiln/account_plan.py": ("own_schema", "asks which plan the signed-in account holds; sends only the sign-in"),
     "kiln/plugins/spend_cap_tools.py": (
@@ -545,6 +673,32 @@ SENDERS: dict[str, tuple[str, str]] = {
         "made coming back; machine-read values ride the call through the served door",
     ),
     "kiln/stage_cache.py": ("own_schema", "fetches the 3D stage's own page; sends nothing of the person's"),
+    "kiln/bench.py": (
+        "own_schema",
+        "what a printer was seen to do on a pause, a cancel or an end, built field by field "
+        "(kiln.bench.observation): words from fixed vocabularies, numbers, the one-way hash of "
+        "the printer's serial and the firmware's own version label",
+    ),
+    "kiln/printer_motion_report.py": (
+        "own_schema",
+        "a Klipper-family printer's motion sections as kiln.machine_motion.motion_settings "
+        "builds them (serials, pins, paths and addresses removed there), the model key, the "
+        "board's chip name and the one-way hash of its serial",
+    ),
+    "kiln/printer_bed_report.py": (
+        "own_schema",
+        "for a printer outside the catalogue: the model key, its bed's three numbers, the "
+        "source's class, a maker page's web host, and the heartbeat's own install id",
+    ),
+    "kiln/sliced_routines.py": (
+        "scrubbed",
+        "a printer's own routines read from a print file a slicer made for it: each routine's "
+        "text and SHA-256, its word, the model key, the slicer's name and version (declared in "
+        "VERSION_FIELDS) and the one-way hash of the printer's serial -- signed in, to Kiln's API "
+        "as the person (kiln/history_courier.py's request helper), signed out, through the "
+        "database door with the install id; a payload scrub would change is not sent at all, and "
+        "a routine the file lists as changed from its preset is never sent",
+    ),
     "kiln/served_public.py": (
         "person's_own",
         "a public tool's own call run on Kiln's servers, with the files it names; the "

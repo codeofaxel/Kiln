@@ -702,3 +702,79 @@ class TestMatrixDisguises:
 
     def test_the_shipped_tree_still_passes(self) -> None:
         assert _load_gate().judge_data(today=_TODAY)["failures"] == []
+
+
+# --- the Python half: a per-printer table read by shape -------------------
+
+
+def _py_tree(tmp_path: Path, module: str) -> Path:
+    """A package tree holding the test roster and one module; returns src."""
+    src = tmp_path / "kiln" / "src" / "kiln"
+    _plant(src / "data", "printer_intelligence.json", _roster())
+    (src / "speeds.py").write_text(module, encoding="utf-8")
+    return src
+
+
+class TestPythonTables:
+    """A mapping in public Python keyed by several catalogued printers from
+    more than one maker, with numbers in its rows, is a per-printer table,
+    whatever it and its fields are called and whether or not the module
+    also loads an overlay."""
+
+    def test_a_per_printer_table_of_numbers_is_flagged(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        src = _py_tree(
+            tmp_path,
+            "_merge_pro_overlay_if_available = None\n"
+            "TABLE = {\n"
+            '    "kt_one": {"a": 1, "b": 2.5},\n'
+            '    "kt_two": {"a": 3, "b": 4.5},\n'
+            '    "kt_three": {"a": 5, "b": 6.5},\n'
+            "}\n",
+        )
+        found = gate.scan_python_tables(src)
+        assert [(f["name"], f["printers"], f["allowlisted"]) for f in found] == [("TABLE", 3, False)]
+        assert found[0]["file"] == "kiln/src/kiln/speeds.py"
+
+    def test_a_table_inside_a_function_is_read_too(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        src = _py_tree(
+            tmp_path,
+            "def speeds():\n"
+            '    return {"kt_one": 1, "kt_two": 2, "kt_three": 3}[0]\n',
+        )
+        assert len(gate.scan_python_tables(src)) == 1
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            # One maker: a vendor protocol table, not a cross-maker dataset.
+            'T = {"kt_one": 1, "kt_one_b": 2, "kt_one_c": 3}\n',
+            # No numbers: a set of names, or a dispatch on printer.
+            'T = {"kt_one": "a", "kt_two": "b", "kt_three": "c"}\n',
+            # Two printers only.
+            'T = {"kt_one": 1, "kt_two": 2}\n',
+            # Keyed by ecosystem, not by catalogued printer.
+            'T = {"bambu": 1, "prusa": 2, "creality": 3, "klipper": 4}\n',
+        ],
+    )
+    def test_shapes_that_are_not_a_per_printer_table_pass(self, tmp_path: Path, module: str) -> None:
+        gate = _load_gate()
+        roster = _roster()
+        roster["kt_one_b"] = {"display_name": "Bambu Lab Test One B"}
+        roster["kt_one_c"] = {"display_name": "Bambu Lab Test One C"}
+        src = tmp_path / "kiln" / "src" / "kiln"
+        _plant(src / "data", "printer_intelligence.json", roster)
+        (src / "speeds.py").write_text(module, encoding="utf-8")
+        assert gate.scan_python_tables(src) == []
+
+    def test_an_allowlisted_table_is_reported_not_failed(self, tmp_path: Path, monkeypatch) -> None:
+        gate = _load_gate()
+        src = _py_tree(tmp_path, 'T = {"kt_one": 1, "kt_two": 2, "kt_three": 3}\n')
+        monkeypatch.setitem(gate._PY_TABLE_ALLOWLIST, "kiln/src/kiln/speeds.py::T", "a test floor")
+        assert [f["allowlisted"] for f in gate.scan_python_tables(src)] == [True]
+
+    def test_the_shipped_source_holds_no_per_printer_table(self) -> None:
+        gate = _load_gate()
+        leaks = [f for f in gate.scan_python_tables() if not f["allowlisted"]]
+        assert leaks == [], leaks

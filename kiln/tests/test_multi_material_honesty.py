@@ -30,7 +30,9 @@ real adapter when it is up on ``localhost:7125``.
 
 from __future__ import annotations
 
+import contextlib
 import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -542,6 +544,363 @@ class TestPerObjectPrintsRefuse:
         err = result.get("error")
         assert not (isinstance(err, dict) and err.get("code") == "MULTI_MATERIAL_NOT_DRIVEN")
         reslice.assert_called_once()
+
+
+# ===========================================================================
+# The doors that compose AND print say what the composer says about the
+# plate's materials: the hardware each needs, and a check made without Kiln's
+# answer, before and after the print.
+# ===========================================================================
+
+
+class TestPrintingDoorsSayTheComposersSafety:
+    @pytest.fixture(autouse=True)
+    def _signed_out_plain_install(self, monkeypatch):
+        import kiln.server as srv
+        from kiln import _pro_material_pairing_bridge as pairing
+
+        monkeypatch.setattr(srv, "_served_bearer", lambda: ("", None))
+        monkeypatch.setattr(pairing, "_local_mix_check", lambda *a, **k: pairing._NOT_HERE)
+
+    @staticmethod
+    def _driven():
+        class _Ams(_MmuPrinter):
+            name = "bambu"
+
+        return _Ams(mm.from_bambu_ams(
+            {"ams_exist_bits": "1", "tray_exist_bits": "3", "units": [{"unit_id": 0, "trays": [
+                {"slot": 0, "tray_type": "PETG-CF", "tray_color": "FF0000FF"},
+                {"slot": 1, "tray_type": "PETG", "tray_color": "00FF00FF"}]}]},
+            printer_model="bambu_a1",
+        ))
+
+    def _assert_said(self, reply):
+        assert any("PETG-CF" in w and "hardened" in w for w in reply.get("hardware_warnings") or []), reply
+        assert reply.get("safety_basic") is True, reply
+        assert "signed out" in reply.get("safety_caution", ""), reply
+
+    def test_multi_material_print_says_it_after_the_print(self, tmp_path, monkeypatch):
+        from kiln import server
+
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print", return_value={"success": True}):
+            result = server.multi_material_print(objects_json=json.dumps([
+                {"file_path": stl, "material_id": "PETG-CF", "color": "#ff0000"},
+                {"file_path": stl, "material_id": "PETG", "color": "#00ff00"},
+            ]))
+        assert result["success"] is True
+        self._assert_said(result)
+
+    def test_multi_material_print_says_it_beside_the_plate_it_shows_first(self, tmp_path, monkeypatch):
+        from kiln import server
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print") as reslice:
+            result = server.multi_material_print(objects_json=json.dumps([
+                {"file_path": stl, "material_id": "PETG-CF", "color": "#ff0000"},
+                {"file_path": stl, "material_id": "PETG", "color": "#00ff00"},
+            ]))
+        assert result["error"]["code"] == "PREVIEW_NOT_CONFIRMED", result
+        reslice.assert_not_called()
+        self._assert_said(result)
+
+    def test_multi_material_print_prints_the_plate_it_showed_and_says_it_again(self, tmp_path, monkeypatch):
+        """The two documented calls through the real preview gate: the first
+        builds the plate and hands it back, a real token is issued on that
+        plate, and the second call, with the person's go, prints it and says
+        what the first said."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+        from kiln.print_consent import reset_consent
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        objects = json.dumps([
+            {"file_path": stl, "material_id": "PETG-CF", "color": "#ff0000"},
+            {"file_path": stl, "material_id": "PETG", "color": "#00ff00"},
+        ])
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print", return_value={"success": True}) as reslice:
+            shown = server.multi_material_print(objects_json=objects)
+            assert shown["error"]["code"] == "PREVIEW_NOT_CONFIRMED", shown
+            reslice.assert_not_called()
+            token = get_preview_gate().issue(shown["plate_path"]).token
+            said_go = TestMultiMaterialPrintWaitsForTheGo._said_go(shown["plate_path"])
+            try:
+                printed = server.multi_material_print(objects_json=objects, preview_token=token)
+            finally:
+                reset_consent(said_go)
+
+        assert printed["success"] is True, printed
+        reslice.assert_called_once()
+        assert reslice.call_args.kwargs["model_path"] == shown["plate_path"]
+        self._assert_said(printed)
+        assert printed["hardware_warnings"] == shown["hardware_warnings"]
+        assert printed["safety_caution"] == shown["safety_caution"]
+        spots = {(o["x_mm"], o["y_mm"]) for o in printed["objects"]}
+        assert len(spots) == 2, printed["objects"]
+
+    def test_multi_color_copies_prints_with_a_real_token_and_says_it(self, tmp_path, monkeypatch):
+        """multi_color_copies takes its token on the model it copies: the call
+        carrying it and the person's yes prints the plate and says the
+        hardware the plastic needs."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+        from kiln.print_consent import PrintConsent, reset_consent, set_consent
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        kwargs = dict(
+            model_path=stl, copies=2, ams_slots=[0, 1], material="PETG-CF",
+            colors=["#ff0000", "#00ff00"], printer_id="bambu_a1",
+        )
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print", return_value={"success": True}) as reslice:
+            refused = server.multi_color_copies(**kwargs)
+            assert refused["error"]["code"] == "PREVIEW_NOT_CONFIRMED", refused
+            reslice.assert_not_called()
+            token = get_preview_gate().issue(stl).token
+            said_go = set_consent(PrintConsent(tool="multi_color_copies", file_name=stl, printer_name=None))
+            try:
+                printed = server.multi_color_copies(**kwargs, preview_token=token)
+            finally:
+                reset_consent(said_go)
+
+        assert printed["success"] is True, printed
+        reslice.assert_called_once()
+        assert any("PETG-CF" in w and "hardened" in w for w in printed.get("hardware_warnings") or []), printed
+        assert printed.get("safety_basic") is True and printed.get("safety_caution"), printed
+
+    def test_multi_color_copies_says_it_after_the_print(self, tmp_path, monkeypatch):
+        from kiln import server
+
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=self._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "run_reslice_and_print", return_value={"success": True}):
+            result = server.multi_color_copies(
+                model_path=stl, copies=2, ams_slots=[0, 1], material="PETG-CF",
+                colors=["#ff0000", "#00ff00"], printer_id="bambu_a1",
+            )
+        assert result["success"] is True, result
+        assert any("PETG-CF" in w and "hardened" in w for w in result.get("hardware_warnings") or []), result
+        assert result.get("safety_basic") is True and result.get("safety_caution"), result
+
+
+# ===========================================================================
+# multi_material_print starts the plate it showed, and only on the go
+# ===========================================================================
+
+
+class TestMultiMaterialPrintWaitsForTheGo:
+    """The first call builds the plate and hands it back; the call carrying
+    its preview token prints it.  That call is a print like any other: the
+    person's go is needed beside the token, and it prints only the plate
+    the same objects made.  multi_color_copies, whose yes is given on the
+    model it copies, is walked the same way.  The preview token, the door's
+    gate and the inner start's gate are all real; only the slice and the
+    printer are stood in."""
+
+    @pytest.fixture(autouse=True)
+    def _real_gates(self, monkeypatch):
+        import kiln.server as srv
+        from kiln import _pro_material_pairing_bridge as pairing
+        from kiln import print_signoff
+
+        monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+        monkeypatch.setattr(srv, "_served_bearer", lambda: ("", None))
+        monkeypatch.setattr(pairing, "_local_mix_check", lambda *a, **k: pairing._NOT_HERE)
+        print_signoff.clear()
+        yield
+        print_signoff.clear()
+
+    @staticmethod
+    def _objects(stl: str, first: str = "PETG-CF", first_colour: str = "#ff0000") -> str:
+        return json.dumps([
+            {"file_path": stl, "material_id": first, "color": first_colour},
+            {"file_path": stl, "material_id": "PETG", "color": "#00ff00"},
+        ])
+
+    @contextlib.contextmanager
+    def _printer(self):
+        """A Bambu with an AMS, and a slice-and-start step that records what
+        it was handed instead of slicing."""
+        from kiln import server
+
+        started: list[dict[str, Any]] = []
+
+        def _slice_and_start(**kw):
+            started.append(kw)
+            return SimpleNamespace(success=True, steps=[], to_dict=lambda: {})
+
+        with patch.object(server, "_check_auth", side_effect=_no_auth), \
+                patch.object(server, "_resolve_adapter", return_value=TestPrintingDoorsSayTheComposersSafety._driven()), \
+                patch.object(server, "ams_status", return_value={"success": False}), \
+                patch.object(server, "_pipeline_reslice_and_print", side_effect=_slice_and_start):
+            yield started
+
+    @staticmethod
+    def _said_go(plate: str):
+        """The yes the approval dialog records for the plate."""
+        from kiln.print_consent import PrintConsent, set_consent
+
+        return set_consent(PrintConsent(tool="multi_material_print", file_name=plate, printer_name=None))
+
+    def test_the_token_alone_starts_nothing_and_the_go_prints_the_plate(self, tmp_path):
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+        from kiln.print_consent import reset_consent
+
+        objects = self._objects(TestPerObjectPrintsRefuse()._stl(tmp_path))
+        with self._printer() as started:
+            shown = server.multi_material_print(objects_json=objects)
+            assert shown["error"]["code"] == "PREVIEW_NOT_CONFIRMED", shown
+            plate = shown["plate_path"]
+            token = get_preview_gate().issue(plate, door="stage").token
+
+            unasked = server.multi_material_print(objects_json=objects, preview_token=token)
+            assert started == [], "the plate started with nobody's go"
+            assert unasked["error"]["code"] == "PREVIEW_NOT_CONFIRMED", unasked
+
+            # The refusal leaves the token good for the call that carries the yes.
+            said_go = self._said_go(plate)
+            try:
+                printed = server.multi_material_print(objects_json=objects, preview_token=token)
+            finally:
+                reset_consent(said_go)
+
+        assert printed["success"] is True, printed
+        assert [s["model_path"] for s in started] == [plate]
+        # The start rides the person's yes, through the door they saw it in.
+        assert started[0]["signoff"]["source"] == "derived", started[0]["signoff"]
+        assert started[0]["signoff"]["door"] == "stage", started[0]["signoff"]
+
+    @pytest.mark.parametrize("changed", [{"first": "PETG"}, {"first_colour": "#0000ff"}], ids=["material", "colour"])
+    def test_the_token_prints_only_the_plate_those_objects_made(self, tmp_path, changed):
+        """The plate on disk is what the person saw; other objects with its
+        token would print it at their temperatures and through their trays."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+        from kiln.print_consent import reset_consent
+
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        objects = self._objects(stl)
+        with self._printer() as started:
+            plate = server.multi_material_print(objects_json=objects)["plate_path"]
+            token = get_preview_gate().issue(plate, door="stage").token
+            said_go = self._said_go(plate)
+            try:
+                other = server.multi_material_print(objects_json=self._objects(stl, **changed), preview_token=token)
+                assert started == [], "a plate printed for objects it was not built from"
+                assert other["error"]["code"] == "PREVIEW_TOKEN_INVALID", other
+                same = server.multi_material_print(objects_json=objects, preview_token=token)
+            finally:
+                reset_consent(said_go)
+
+        assert same["success"] is True, same
+        assert [s["model_path"] for s in started] == [plate]
+
+    def test_multi_color_copies_starts_its_plate_on_the_yes_its_model_got(self, tmp_path):
+        """The yes and the door the model was shown through reach the plate
+        of copies, and the inner start's own gate accepts them."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+        from kiln.print_consent import PrintConsent, reset_consent, set_consent
+
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with self._printer() as started:
+            token = get_preview_gate().issue(stl, door="stage").token
+            said_go = set_consent(PrintConsent(tool="multi_color_copies", file_name=stl, printer_name=None))
+            try:
+                printed = server.multi_color_copies(
+                    model_path=stl, copies=2, ams_slots=[0, 1], material="PETG",
+                    colors=["#ff0000", "#00ff00"], printer_id="bambu_a1", preview_token=token,
+                )
+            finally:
+                reset_consent(said_go)
+
+        assert printed["success"] is True, printed
+        assert len(started) == 1 and started[0]["model_path"] == printed["multi_color_3mf"], started
+        assert started[0]["signoff"]["source"] == "derived", started[0]["signoff"]
+        assert started[0]["signoff"]["door"] == "stage", started[0]["signoff"]
+
+    @staticmethod
+    def _window_for(monkeypatch, tmp_path, printer: str | None = None):
+        """A window a person opened at a terminal, for *printer* (the default
+        printer when not given): ``(the printer it names, the window)``."""
+        from kiln import consent_windows, server
+        from kiln.print_consent import SOURCE_TERMINAL
+
+        monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+        named = printer or server._resolve_effective_printer_name(None)
+        return named, consent_windows._open_window(seconds=600, scope=(named,), source=SOURCE_TERMINAL)
+
+    def test_a_window_for_the_printer_a_plate_is_aimed_at_prints_it_with_no_printer_named(self, tmp_path, monkeypatch):
+        """Inside a window opened for the default printer, the plate a call
+        naming no printer prints there starts once, carrying that window and
+        the printers it names, nothing wider."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+
+        aimed, window = self._window_for(monkeypatch, tmp_path)
+        objects = self._objects(TestPerObjectPrintsRefuse()._stl(tmp_path))
+        with self._printer() as started:
+            plate = server.multi_material_print(objects_json=objects)["plate_path"]
+            token = get_preview_gate().issue(plate, door="stage").token
+            printed = server.multi_material_print(objects_json=objects, preview_token=token)
+
+        assert printed["success"] is True, printed
+        assert [s["model_path"] for s in started] == [plate]
+        assert started[0]["signoff"]["window_id"] == window.id, started[0]["signoff"]
+        assert started[0]["signoff"]["scope"] == [aimed], started[0]["signoff"]
+
+    def test_a_window_for_another_printer_prints_nothing_on_the_default_one(self, tmp_path, monkeypatch):
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+
+        self._window_for(monkeypatch, tmp_path, printer="not_the_default")
+        objects = self._objects(TestPerObjectPrintsRefuse()._stl(tmp_path))
+        with self._printer() as started:
+            plate = server.multi_material_print(objects_json=objects)["plate_path"]
+            token = get_preview_gate().issue(plate, door="stage").token
+            refused = server.multi_material_print(objects_json=objects, preview_token=token)
+
+        assert started == [], "a window started a print on a printer it does not name"
+        assert refused["error"]["code"] == "PREVIEW_NOT_CONFIRMED", refused
+
+    def test_multi_color_copies_prints_inside_a_window_for_its_printer(self, tmp_path, monkeypatch):
+        """The copies door takes no printer name, so it prints on the default
+        printer: a window that names it covers the plate of copies."""
+        from kiln import server
+        from kiln.preview_gate import get_preview_gate
+
+        _aimed, window = self._window_for(monkeypatch, tmp_path)
+        stl = TestPerObjectPrintsRefuse()._stl(tmp_path)
+        with self._printer() as started:
+            token = get_preview_gate().issue(stl, door="stage").token
+            printed = server.multi_color_copies(
+                model_path=stl, copies=2, ams_slots=[0, 1], material="PETG",
+                colors=["#ff0000", "#00ff00"], printer_id="bambu_a1", preview_token=token,
+            )
+
+        assert printed["success"] is True, printed
+        assert len(started) == 1, started
+        assert started[0]["signoff"]["source"] == "derived", started[0]["signoff"]
+        assert started[0]["signoff"]["window_id"] == window.id, started[0]["signoff"]
 
 
 # ===========================================================================

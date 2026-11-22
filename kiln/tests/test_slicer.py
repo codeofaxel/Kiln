@@ -183,8 +183,9 @@ class TestSliceFile:
                 path="/usr/bin/prusa-slicer", name="prusa-slicer"
             )
             with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 300)):
-                with pytest.raises(SlicerError, match="timed out"):
+                with pytest.raises(SlicerError, match="took too long") as refused:
                     slice_file(str(stl), timeout=300)
+        assert refused.value.code == "SLICE_TOOK_TOO_LONG"
 
     def test_profile_not_found(self, tmp_path):
         """SlicerError when profile file doesn't exist."""

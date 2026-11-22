@@ -11,6 +11,9 @@ Contract
   profile, size).
 * :func:`note_wrapped` is called where a G-code is wrapped into a printer
   package, so the package's name and content hash join the same record.
+* :func:`note_soft_nozzle` is called when the owner said to print an
+  abrasive filament through a nozzle that is not wear-resistant, so the
+  record keeps who said so, when, and which filament and nozzle.
 * :func:`resolve` is the ONE answer to "what is this print file a print of".
   It is called at the print-start chokepoint
   (``kiln.auto_record_hook.print_identity_at_start``, reached only from
@@ -268,6 +271,32 @@ def _stamps_of_print_file(path: str) -> list[str] | None:
 # ---------------------------------------------------------------------------
 
 
+def forget_files(file_names: set[str] | list[str]) -> int:
+    """Delete the slice records of the sliced files named in *file_names*
+    (base names), and every print start that names one.  For a print the
+    person asked not to keep, once it ends (:mod:`kiln.print_keeping`): the
+    names are the ones its start record joined to it.  Returns how many
+    records went.  Never raises."""
+    names = {os.path.basename(str(n)) for n in file_names if n}
+    if not names:
+        return 0
+    try:
+        with _lock:
+            data = _load()
+            kept = [
+                r for r in data["records"]
+                if not ({str(f.get("name")) for f in r.get("files") or [] if isinstance(f, dict)} & names)
+            ]
+            gone = len(data["records"]) - len(kept)
+            starts = [s for s in data["starts"] if s.get("name") not in names]
+            if gone or len(starts) != len(data["starts"]):
+                _save({"records": kept, "starts": starts})
+        return gone
+    except Exception:  # noqa: BLE001
+        logger.debug("slice records not forgotten", exc_info=True)
+        return 0
+
+
 def record_slice(
     model_path: str | None,
     output_path: str | None,
@@ -317,6 +346,46 @@ def record_slice(
         return None
 
 
+def note_sliced_with(output_path: str | None, sliced_with: dict[str, Any] | None) -> bool:
+    """Keep, on the record of the sliced file at *output_path*, the slicer a
+    slice for more than one nozzle was made with (its name and version, and
+    the settings bundle its routines were read from): ``sliced_with`` on the
+    record, and in every answer about a print of that file
+    (:func:`resolve`).  ``False`` when the file has no record.  Never
+    raises."""
+    return _note_on_record(output_path, "sliced_with", sliced_with)
+
+
+def note_one_nozzle(output_path: str | None, one_nozzle: dict[str, Any] | None) -> bool:
+    """Keep, on the record of the sliced file at *output_path*, that a print
+    Kiln would slice for more than one nozzle was sliced for one, and whether
+    its colours were lost (:mod:`kiln.maker_slicer_notes`): ``one_nozzle`` on
+    the record and in every answer about a print of that file
+    (:func:`resolve`).  ``False`` when the file has no record.  Never
+    raises."""
+    return _note_on_record(output_path, "one_nozzle", one_nozzle)
+
+
+def _note_on_record(output_path: str | None, key: str, value: dict[str, Any] | None) -> bool:
+    if not output_path or not isinstance(value, dict) or _hosted():
+        return False
+    try:
+        stamps = read_stamps(output_path)
+        if not stamps:
+            return False
+        with _lock:
+            data = _load()
+            for record in data["records"]:
+                if record.get("id") in stamps:
+                    record[key] = dict(value)
+                    _save(data)
+                    return True
+        return False
+    except Exception:  # noqa: BLE001 -- a record never costs a slice
+        logger.debug("%s not kept on the slice's record", key, exc_info=True)
+        return False
+
+
 def _fill_signatures(lineage_id: str, model_path: str) -> None:
     try:
         from kiln.community_autofire import signatures_of_model
@@ -353,7 +422,7 @@ def note_wrapped(gcode_path: str | None, wrapped_path: str | None) -> None:
         return
     try:
         stamps = read_stamps(gcode_path)
-        gcode_sha = _sha256(gcode_path) if not stamps else None
+        gcode_sha = _sha256(gcode_path) if len(stamps) != 1 else None
         entry = {"name": os.path.basename(wrapped_path), "sha256": _sha256(wrapped_path), "kind": "wrap"}
         with _lock:
             data = _load()
@@ -367,17 +436,61 @@ def note_wrapped(gcode_path: str | None, wrapped_path: str | None) -> None:
         logger.debug("wrap lineage not recorded", exc_info=True)
 
 
+def note_soft_nozzle(gcode_path: str | None, block: dict[str, Any] | None) -> None:
+    """The slice at *gcode_path* was made on the owner's say-so with an
+    abrasive filament through a nozzle that is not wear-resistant: *block*
+    (:meth:`kiln.slicer.SoftNozzleRun.confirmed`) joins its record, with the
+    moment it was said.  A print of the file then answers it
+    (:func:`resolve`'s ``soft_nozzle``).  Never raises."""
+    if not gcode_path or not isinstance(block, dict) or _hosted():
+        return
+    try:
+        stamps = read_stamps(gcode_path)
+        gcode_sha = _sha256(gcode_path) if len(stamps) != 1 else None
+        kept = {
+            "at": time.time(),
+            "confirmed_by": "owner",
+            "filaments": [
+                {"filament": f.get("filament"), "material": str(f.get("material") or "")[:40]}
+                for f in block.get("filaments") or () if isinstance(f, dict)
+            ],
+            "nozzles": [
+                {"position": n.get("position"), "material": str(n.get("material") or "")[:40] or None}
+                for n in block.get("nozzles") or () if isinstance(n, dict)
+            ],
+        }
+        with _lock:
+            data = _load()
+            record = _find(data, stamps=stamps, sha=gcode_sha, name=None)
+            if record is None:
+                return
+            record["soft_nozzle"] = kept
+            _save(data)
+    except Exception:  # noqa: BLE001 -- a record never costs a slice
+        logger.debug("soft-nozzle confirmation not recorded", exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # The one resolver
 # ---------------------------------------------------------------------------
 
 
 def _find(data: dict[str, Any], *, stamps: list[str], sha: str | None, name: str | None) -> dict[str, Any] | None:
+    """The record a print file is, by its one stamp, else its content, else
+    its name.  A file carrying several stamps (slices merged into one file)
+    is the record that names that whole file by content, and only when
+    exactly one record does: never a record of one of the slices inside it."""
     records = data["records"]
     if len(stamps) == 1:
         for record in reversed(records):
             if record.get("id") == stamps[0]:
                 return record
+    if sha and len(stamps) > 1:
+        claims = [
+            record for record in records
+            if any(isinstance(f, dict) and f.get("sha256") == sha for f in record.get("files", []))
+        ]
+        return claims[0] if len(claims) == 1 else None
     if sha:
         for record in reversed(records):
             if any(isinstance(f, dict) and f.get("sha256") == sha for f in record.get("files", [])):
@@ -401,16 +514,21 @@ def _answer(record: dict[str, Any], matched_by: str) -> dict[str, Any]:
         "signature_v2": model.get("signature_v2") or "",
         "profile": record.get("profile"),
         "stated": record.get("stated") if isinstance(record.get("stated"), dict) else {},
+        "soft_nozzle": record.get("soft_nozzle") if isinstance(record.get("soft_nozzle"), dict) else None,
+        **({"sliced_with": record["sliced_with"]} if isinstance(record.get("sliced_with"), dict) else {}),
+        **({"one_nozzle": record["one_nozzle"]} if isinstance(record.get("one_nozzle"), dict) else {}),
     }
 
 
 _NOTHING: dict[str, Any] = {
     "part": PART_UNKNOWN, "lineage_id": None, "matched_by": None, "model_sha256": None,
-    "signature": "", "signature_v2": "", "profile": None, "stated": {},
+    "signature": "", "signature_v2": "", "profile": None, "stated": {}, "soft_nozzle": None,
 }
 
 
-def resolve(file_name: str | None, *, local_paths: list[str] | tuple[str, ...] = ()) -> dict[str, Any]:
+def resolve(
+    file_name: str | None, *, local_paths: list[str] | tuple[str, ...] = (), keep_foreign: bool = True,
+) -> dict[str, Any]:
     """What *file_name* (as the printer knows it) is a print of.
 
     *local_paths* are copies of that file on this disk, most trusted first.
@@ -420,7 +538,10 @@ def resolve(file_name: str | None, *, local_paths: list[str] | tuple[str, ...] =
     the file states) or :data:`PART_UNKNOWN`.  ``matched_by`` says how:
     ``stamp``, ``content``, ``name`` or ``start`` (the record pinned when
     this name last started).  A file carrying the stamps of several slices
-    is not one part and is answered by content or name only.  Never raises.
+    is answered by the one record that names that whole file by content,
+    else by name only.  *keep_foreign*
+    ``False`` answers a file Kiln did not slice without keeping a record of
+    it, for a reader that only looks.  Never raises.
     """
     if _hosted():
         return dict(_NOTHING)
@@ -438,7 +559,7 @@ def resolve(file_name: str | None, *, local_paths: list[str] | tuple[str, ...] =
                 record = _find(data, stamps=stamps, sha=None, name=None)
                 if record is not None:
                     return _answer(record, "stamp")
-            record = _find(data, stamps=[], sha=_sha256(path), name=None)
+            record = _find(data, stamps=stamps, sha=_sha256(path), name=None)
             if record is not None:
                 return _answer(record, "content")
             stamped_elsewhere = stamped_elsewhere or bool(stamps)
@@ -457,7 +578,7 @@ def resolve(file_name: str | None, *, local_paths: list[str] | tuple[str, ...] =
             record = _find(data, stamps=[], sha=None, name=base)
             if record is not None:
                 return _answer(record, "name")
-        if local:
+        if local and keep_foreign:
             return _keep_foreign(local[0], base or os.path.basename(local[0]))
     except Exception:  # noqa: BLE001 -- an unanswerable file is an unknown part
         logger.debug("print lineage not resolved", exc_info=True)
@@ -482,6 +603,22 @@ def _keep_foreign(path: str, name: str) -> dict[str, Any]:
         data["records"].append(record)
         _save(data)
     return _answer(record, "content")
+
+
+def soft_nozzle_of(lineage_id: str | None) -> dict[str, Any] | None:
+    """What the owner said to print anyway in the slice record *lineage_id*
+    names (:func:`note_soft_nozzle`), or ``None``.  Never raises."""
+    if not isinstance(lineage_id, str) or not _ID.match(lineage_id) or _hosted():
+        return None
+    try:
+        with _lock:
+            data = _load()
+        record = next((r for r in reversed(data["records"]) if r.get("id") == lineage_id), None)
+    except Exception:  # noqa: BLE001 -- an unread record says nothing
+        logger.debug("slice record %s not read", lineage_id, exc_info=True)
+        return None
+    kept = (record or {}).get("soft_nozzle")
+    return kept if isinstance(kept, dict) else None
 
 
 def note_print_started(file_name: str | None, lineage_id: str | None) -> None:
@@ -550,8 +687,10 @@ __all__ = [
     "flush",
     "local_copies",
     "note_print_started",
+    "note_soft_nozzle",
     "note_wrapped",
     "read_stamps",
+    "soft_nozzle_of",
     "record_slice",
     "resolve",
     "signatures_for",

@@ -2041,6 +2041,44 @@ class TestFromTheAccountPage:
         assert asyncio.run(_through_the_door()) is None
         assert _always_entries() == [] and self._sent(account, RECORD) == []
 
+    @pytest.mark.parametrize("seen", ["more than the part on record", "a verdict Kiln does not know"])
+    def test_a_bed_no_eyes_vouch_for_gives_no_yes_and_reports_no_start(self, account, monkeypatch, seen):
+        """The account's door reads the look the way every other door does:
+        a bed seen holding more than the part on record, or a verdict it
+        does not know, is no yes, and no start is reported."""
+        from kiln import bridge_client, plate_state
+
+        printer = _CameraPrinter("SERIAL-A")
+        server._get_registry().register("garage", printer)
+        consent_windows.mirror_account_always(
+            grant_id=GRANT, printer_name="garage", set_by="account:uid-1", set_at=ISSUED,
+        )
+        self._accepts_starts(account)
+        if seen == "more than the part on record":
+            plate_state.mark_occupied(
+                printer, plate_state.PlateJob(file="jar_v2.gcode.3mf", footprint_mm=[20.0, 20.0, 80.0, 80.0], max_z_mm=42.0),
+            )
+            _call("look_at_plate", printer_name="garage")
+            _call("look_at_plate", printer_name="garage", seen="occupied")
+        else:
+            monkeypatch.setattr(
+                consent_windows, "look_at_bed", lambda name: plate_state.UnaskedStartLook("seen_sideways", "printer"),
+            )
+        answer = bridge_client.AccountAnswer(
+            allowed=True, kind=bridge_client.KIND_MACHINE_ALWAYS, id=GRANT, grantor="account:uid-1", issued_at=ISSUED,
+        )
+
+        async def _through_the_door():
+            token = await server._consent_from_account_always(
+                "start_print", "part.gcode", "garage", "garage", "ab" * 32, answer,
+            )
+            if token is not None:
+                print_consent.reset_consent(token)
+            return token
+
+        assert asyncio.run(_through_the_door()) is None
+        assert self._sent(account, RECORD) == [] and printer.started == []
+
     def test_the_bed_is_looked_at_and_the_start_is_reported_once(self, account, at_terminal, tmp_path, no_rate_limit):
         printer = _CameraPrinter("SERIAL-A")
         server._get_registry().register("garage", printer)

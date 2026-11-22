@@ -29,6 +29,11 @@ from kiln.served_answer import Miss
 logger = logging.getLogger(__name__)
 
 
+class RequestRefused(ValueError):
+    """Kiln's material recommendation could not read the request: a ruling
+    on the input, which the door relays as a refusal, never a basic list."""
+
+
 # ---------------------------------------------------------------------------
 # The replies
 # ---------------------------------------------------------------------------
@@ -232,7 +237,8 @@ def recommend_material(
     capabilities and the budget, and returns the top recommendation with
     alternatives.  When it gives no answer the result is
     :class:`BasicMaterials`: no pick, the plastics the printer can melt, and
-    the sentence saying why.
+    the sentence saying why.  A request it could not read raises
+    :class:`RequestRefused` with its own sentence.
 
     :param intent: User intent text (e.g. ``"make it strong"``).
     :param printer_capabilities: Optional dict with ``has_enclosure`` and
@@ -290,6 +296,9 @@ def recommend_material(
         inventory_recorded=bool(on_hand),
     )
     if answer is None:
+        refused = _pro_routing_bridge.input_refusal(miss)
+        if refused is not None:
+            raise RequestRefused(refused)
         return basic_materials(intent, miss or Miss("unanswered"), printer_id=printer_id, on_hand=on_hand)
 
     top = dict(answer["pick"])
@@ -536,8 +545,10 @@ def basic_materials(
     on_hand: list[dict[str, Any]] | None = None,
 ) -> BasicMaterials:
     """The answer when Kiln's material recommendation gives none: no pick,
-    the plastics the printer can melt (unranked), the food-contact floor and
-    the skin-contact caution, and one sentence saying why and what fixes it.
+    the plastics the printer can melt (unranked), the food-contact floor,
+    the plastics Kiln's public rules for the part leave out (said in one
+    line), the skin-contact caution, and one sentence saying why and what
+    fixes it.
 
     When *on_hand* was asked, the plastics are the person's own, as recorded
     and unranked, with where each one is, past the food-contact floor and
@@ -546,7 +557,7 @@ def basic_materials(
     hand.
     """
     from kiln._pro_routing_bridge import FEATURE
-    from kiln.material_basics import basic_pick_line, basic_plastics
+    from kiln.material_basics import basic_list, basic_pick_line
 
     cautions: list[str] = []
     try:
@@ -559,21 +570,25 @@ def basic_materials(
 
     shelf = _shelf_basics(intent, on_hand) if on_hand is not None else None
     if shelf:
-        names, rows = shelf
+        names, rows, rules_line = shelf
+        if rules_line:
+            cautions.insert(0, rules_line)
         for name in names:
             caution = _abrasive_caution(name)
             if caution:
                 cautions.append(caution)
-        note = _basic_line(miss, wont="lists the materials you have on hand instead")
+        note = _shelf_line(miss)
         return BasicMaterials(plastics=names, note=note, miss=miss, cautions=cautions, on_hand=rows)
 
     limit = _hotend_limit_c(printer_id)
-    plastics = basic_plastics(intent, limit)
+    listed = basic_list(intent, limit)
+    if listed.rules_line:
+        cautions.insert(0, listed.rules_line)
     if on_hand is not None:
         cautions.append(_not_on_hand_line(on_hand))
     note = basic_pick_line(miss, feature=FEATURE, hotend_known=limit is not None)
     return BasicMaterials(
-        plastics=plastics, note=note, miss=miss, hotend_limit_c=limit, cautions=cautions,
+        plastics=listed.plastics, note=note, miss=miss, hotend_limit_c=limit, cautions=cautions,
         on_hand=[] if on_hand is not None else None,
     )
 
@@ -589,9 +604,13 @@ _NOTHING_RECORDED = (
 
 def _shelf_basics(
     intent: str, on_hand: list[dict[str, Any]],
-) -> tuple[list[str], list[dict[str, Any]]] | None:
+) -> tuple[list[str], list[dict[str, Any]], str] | None:
     """The materials on hand as recorded, unranked, past the food-contact
-    floor, and where each one is; ``None`` when none is left."""
+    floor and the plastics Kiln's public rules for the part leave out, where
+    each one is, and the line saying what those rules did
+    (:func:`kiln.material_basics.requirement_floor`); ``None`` when none is
+    left."""
+    from kiln.material_basics import requirement_floor
     from kiln.material_safety import filter_food_safe_materials, use_case_implies_food_contact
 
     index: dict[str, list[dict[str, Any]]] = {}
@@ -602,6 +621,7 @@ def _shelf_basics(
     names = list(index)
     if use_case_implies_food_contact(intent):
         names = filter_food_safe_materials(names, require="yes_or_conditional")
+    names, rules_line = requirement_floor(intent, names)
     if not names:
         return None
     rows = []
@@ -613,7 +633,7 @@ def _shelf_basics(
             "loaded_on": [r.get("printer_name") for r in where["loaded_on"]],
             "shelf_spools": len(where["shelf_spools"]),
         })
-    return names, rows
+    return names, rows, rules_line
 
 
 def _not_on_hand_line(on_hand: list[dict[str, Any]]) -> str:
@@ -639,23 +659,21 @@ def _abrasive_caution(name: str) -> str:
         return ""
 
 
-def _basic_line(miss: Miss, *, wont: str) -> str:
-    """The one line a basic answer says, for a list other than the printer's
-    plastics."""
+def _shelf_line(miss: Miss) -> str:
+    """The one line a basic answer from the materials on hand says: they are
+    the person's own, as recorded, and nothing judged them against the part."""
     from kiln import served_answer
     from kiln._pro_routing_bridge import FEATURE
+    from kiln.material_basics import pick_then
 
     return served_answer.sentence(
         miss,
         feature=FEATURE,
-        on_the_line="Kiln did not pick a plastic for this part",
-        cannot="pick one",
-        wont=wont,
-        then=(
-            "Kiln picks the plastic for this part"
-            if miss.cause == "signed_out"
-            else "ask again for Kiln's pick for this part"
-        ),
+        on_the_line="These are the materials you have on hand, not checked against this part",
+        cannot="pick one for this part",
+        wont="lists them as recorded",
+        safe_remedy="check each one against what the part has to do",
+        then=pick_then(miss),
     )
 
 
@@ -702,7 +720,7 @@ def basic_material_list(miss: Miss) -> dict[str, Any]:
         on_the_line="Kiln did not list each material's properties",
         cannot="list them",
         wont="lists common plastics by name and category only",
-        then="ask again for the full list",
+        then="ask again for the full list" + served_answer.free_account_note(miss),
     )
     out: dict[str, Any] = {
         "success": True,

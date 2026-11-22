@@ -380,6 +380,13 @@ def _empty_day() -> dict[str, Any]:
         # file works on the machine it was derived for: the walk happens
         # on the owner's own printer and never touches a server.
         "motion_outcomes": {},
+        # How far the lessons that teach Kiln a printer get, as counts:
+        # {"<stage>|<lesson>[|<detail>]": count} over the closed vocabulary
+        # BENCH_FUNNEL below -- offered (and through which door), started,
+        # finished, learned something (in a lesson, or from a real print),
+        # later, declined, held (a sign-in, an allowance).  Never a printer
+        # model: which models are taught is not a fact this map carries.
+        "bench_funnel": {},
         # Print-counting bookkeeping — see _PENDING_STARTS_MAX above.
         # Local only: get_daily_stats() never returns these, so nothing
         # here reaches the heartbeat.
@@ -416,6 +423,7 @@ _ROLLOVER_MAPS = (
     "video_outcomes",
     "motion_refusals",
     "motion_outcomes",
+    "bench_funnel",
 )
 
 
@@ -722,8 +730,12 @@ def _take_pending_start(
     return claimed
 
 
-def record_print_start(printer_name: str, file_name: str | None = None) -> None:
+def record_print_start(printer_name: str, file_name: str | None = None, *, token: bool = True) -> None:
     """Count a print at the moment it starts.  Never raises.
+
+    *token* ``False`` (a print the person asked not to keep) counts it and
+    leaves no pending token naming its file: no outcome will ever consume
+    one, so a token would outlive the print.
 
     This is the only print signal every adapter emits.  Counting outcomes
     instead undercounted by construction: ``record_print_outcome`` is an
@@ -738,6 +750,9 @@ def record_print_start(printer_name: str, file_name: str | None = None) -> None:
         with _lock:
             data = _read()
             data["prints"] = data.get("prints", 0) + 1
+            if not token:
+                _write(data)
+                return
 
             pending = data.get("pending_starts")
             if not isinstance(pending, list):
@@ -1417,24 +1432,28 @@ _MOTION_REFUSALS_MAX_DISTINCT = 100
 #: The closed vocabularies of the last two slots.  The dashboard reads them
 #: from here rather than keeping a copy, so a refusal added later is read,
 #: never dropped as junk.
-MOTION_REFUSAL_CODES: tuple[str, ...] = ("PRINTER_MODEL_REQUIRED", "PLATE_CLEAR_REQUIRED")
-MOTION_REFUSAL_REASONS: tuple[str, ...] = ("undeclared", "unknown_key", "unknown_method", "on_plate", "plate_occupied")
+MOTION_REFUSAL_CODES: tuple[str, ...] = ("PRINTER_MODEL_REQUIRED", "PLATE_CLEAR_REQUIRED", "PRINTER_MODEL_DISAGREES")
+MOTION_REFUSAL_REASONS: tuple[str, ...] = (
+    "undeclared", "unknown_key", "unknown_method", "on_plate", "plate_occupied", "another_model",
+)
 
 
 def record_motion_refusal(model: object, code: str, reason: str) -> None:
     """Count one refusal of a head move today, by model, code and cause.
 
-    Written only by the home/park gate in :mod:`kiln.printers.base`, the
+    Written only by the move gates in :mod:`kiln.printers.base`, the
     one seam every door reaches.  ``code`` is the tool error code the
-    person saw (``PRINTER_MODEL_REQUIRED``, ``PLATE_CLEAR_REQUIRED``);
+    person saw (``PRINTER_MODEL_REQUIRED``, ``PLATE_CLEAR_REQUIRED``,
+    ``PRINTER_MODEL_DISAGREES``);
     ``reason`` says why -- ``undeclared`` (no model set), ``unknown_key``
     (a model the catalogue does not know), ``unknown_method`` (a blank
-    Z-home cell decided it), ``on_plate`` (the vendor's own descent) or
+    Z-home cell decided it), ``on_plate`` (the vendor's own descent),
     ``plate_occupied`` (a sideways move over a part the plate record
-    holds).  The first three are the only evidence that a machine people
-    own is missing from the catalogue, or that a blank cell is what
-    stopped them; the last two are the gate doing its job.  Silent by
-    contract.
+    holds) or ``another_model`` (the printer reports itself as another
+    model than it was set up as).  The first three are the only evidence
+    that a machine people own is missing from the catalogue, or that a
+    blank cell is what stopped them; the others are the gate doing its
+    job.  Silent by contract.
     """
     if code not in MOTION_REFUSAL_CODES or reason not in MOTION_REFUSAL_REASONS:
         return
@@ -1619,6 +1638,53 @@ def record_motion_fault(model: object, verb: str, code: object) -> None:
         _logger.debug("motion walk reset failed: %s", exc)
 
 
+# ---------------------------------------------------------------------------
+# The lesson funnel -- how far a lesson that teaches Kiln a printer gets
+# ---------------------------------------------------------------------------
+
+#: The lessons (:mod:`kiln.bench`).
+BENCH_LESSONS: tuple[str, ...] = ("motion", "limits", "walk")
+#: Each stage, and the details it may carry (an empty tuple: none).  The
+#: dashboard reads this rather than keeping a copy.
+BENCH_FUNNEL: dict[str, tuple[str, ...]] = {
+    "offered": ("first_print", "print_beside", "setup_check", "motion_refusal", "lesson"),
+    "started": (),
+    "finished": (),
+    "learned": ("session", "real_print"),
+    "later": (),
+    "declined": (),
+    "held": ("signin", "limit", "other"),
+}
+_BENCH_FUNNEL_KEY_RE = re.compile(r"^[a-z]{1,16}\|[a-z]{1,16}(\|[a-z_]{1,24})?$")
+_BENCH_FUNNEL_MAX_DISTINCT = 64
+
+
+def record_bench_funnel(stage: str, lesson: str, detail: str | None = None) -> None:
+    """Count one step of a lesson that teaches Kiln a printer, for today.
+
+    Written only by :mod:`kiln.bench` (the one offer every door makes, and
+    the counts the session and real prints report through it).  A stage,
+    a lesson or a detail outside :data:`BENCH_FUNNEL` is dropped, and so is
+    a detail on a stage that takes none.  No printer model, name or unit:
+    which printers are taught is not a fact this map carries.  Silent by
+    contract.
+    """
+    details = BENCH_FUNNEL.get(stage)
+    if details is None or lesson not in BENCH_LESSONS:
+        return
+    if detail is None:
+        if details:
+            return
+        key = f"{stage}|{lesson}"
+    else:
+        if detail not in details:
+            return
+        key = f"{stage}|{lesson}|{detail}"
+    _record_name_count(
+        "bench_funnel", key, pattern=_BENCH_FUNNEL_KEY_RE, max_distinct=_BENCH_FUNNEL_MAX_DISTINCT,
+    )
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -1670,6 +1736,8 @@ def get_daily_stats() -> dict[str, Any]:
         "motion_refusals": data.get("motion_refusals", {}),
         # Same contract again: recorded, rolled over, returned.
         "motion_outcomes": data.get("motion_outcomes", {}),
+        # Same contract again: recorded, rolled over, returned.
+        "bench_funnel": data.get("bench_funnel", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.

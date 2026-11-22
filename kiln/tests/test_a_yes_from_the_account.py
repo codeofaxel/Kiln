@@ -1415,3 +1415,138 @@ def test_the_card_sends_only_what_fits_the_route():
 )
 def test_the_computer_an_ask_comes_from(platform, word):
     assert bridge_client.asked_from(platform) == word
+
+
+def _mixed_sizes_gcode(path: pathlib.Path) -> pathlib.Path:
+    """A sliced file that states two nozzle sizes: an experimental print."""
+    path.write_text("G28\nG1 X1 Y1 E1\n; CONFIG_BLOCK_START\n; nozzle_diameter = 0.4,0.6\n; CONFIG_BLOCK_END\n")
+    return path
+
+
+def test_every_door_a_person_reads_says_what_the_print_is(signed_in, tmp_path, monkeypatch, observed):
+    """The approval dialog, the screen's banner and the account's card each
+    carry the experimental row, in the words the dialog shows it in."""
+    from kiln.print_consent import what_the_print_is
+
+    model = _mixed_sizes_gcode(tmp_path / "pair.gcode")
+    [(name, row)] = what_the_print_is(model.name, str(model)).items()
+    assert name == "experimental" and row.startswith("This print uses nozzles of different sizes")
+    shown: list[screen_code.Issued] = []
+    monkeypatch.setattr(screen_code, "_show_hook", lambda issued: shown.append(issued) or True)
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
+        mock.add(responses.GET, MAY_I, json={"success": True, "allowed": False, "authority": None, "pending": None})
+        mock.add(responses.POST, PENDING, json={"success": True, "pending": {
+            "id": "pa_1", "expires_at": time.time() + 600, "page": "/monitor", "state": "waiting", "repeat": False,
+        }})
+        mock.add(responses.POST, f"{PENDING}/pa_1/withdraw", json={"success": True})
+        _ask(model)
+        card = json.loads(next(c for c in mock.calls if c.request.url == PENDING).request.body)
+        asked: list[str] = []
+
+        async def no(ctx, message, **kw):
+            asked.append(message)
+            return print_consent.DialogAnswer("decline")
+
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+        monkeypatch.setattr(server, "ask_user_to_confirm", no)
+        with pytest.raises(RuntimeError, match="declined"):
+            _ask(model)
+    # The card carries the facts the account's server says the row from,
+    # never the row's text.
+    assert card["owner_words"] == {"mixed_nozzle_experiment": {"sizes": [0.4, 0.6]}}
+    assert "experimental" not in card and "colours" not in card
+    _title, _subtitle, message = screen_code.banner_text(shown[0])
+    assert message.startswith(f"Experimental: {row} Type the code")
+    assert f"  Experimental: {row}" in asked[0]
+
+
+@responses.activate
+def test_a_print_that_is_nothing_special_carries_no_rows(signed_in, model, observed):
+    _may_i()
+    _held()
+    _ask(model)
+    body = _posted()
+    assert not {"owner_words", "experimental", "colours", "print_anyway"} & set(body)
+
+
+def test_the_card_sends_facts_that_say_a_row_and_never_a_rows_text():
+    words = {"mixed_nozzle_experiment": {"sizes": [0.4, 0.6]}}
+    assert bridge_client.AskCard(facts={"owner_words": words}).fields() == {"owner_words": words}
+    colours = {"printed": 1, "slicer": "Bambu Studio", "need": "install", "floor": ""}
+    assert bridge_client.AskCard(facts={"colours": colours}).fields() == {"colours": colours}
+    for facts in (
+        {"owner_words": {"some_other_word": {}}},
+        {"colours": {"printed": 1, "slicer": "Any slicer at all"}},
+        {"experimental": "This print is fine.", "print_anyway": "Nothing unusual."},
+    ):
+        assert bridge_client.AskCard(facts=facts).fields() == {}, facts
+    # An owner's word whose facts do not check is still sent, with its plain
+    # facts and never the ones that did not check: it holds the print there too.
+    assert bridge_client.AskCard(facts={"owner_words": {
+        "soft_nozzle_confirmed": {"filaments": ["nothing unusual"], "nozzles": []},
+        "mixed_nozzle_experiment": {"sizes": [0.4]},
+    }}).fields() == {"owner_words": {
+        "soft_nozzle_confirmed": {"filaments": [], "nozzles": []},
+        "mixed_nozzle_experiment": {"sizes": []},
+    }}
+
+
+def _said_anyway(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
+    """A sliced file whose record keeps the owner's word to print it anyway."""
+    from tests.test_print_anyway_needs_its_own_yes import said_anyway
+
+    monkeypatch.setenv("HOME", str(tmp_path / "lineage_home"))
+    return pathlib.Path(said_anyway(tmp_path))
+
+
+def test_every_door_a_person_reads_says_print_anyway(signed_in, tmp_path, monkeypatch, observed):
+    """The approval dialog, the screen's banner and the account's card each
+    carry the print-anyway row, under one label, in one wording."""
+    from kiln.print_consent import what_the_print_is
+
+    model = _said_anyway(tmp_path, monkeypatch)
+    [(name, row)] = what_the_print_is(model.name, str(model)).items()
+    assert name == "print_anyway" and row.startswith("PLA-CF through the brass nozzle")
+    shown: list[screen_code.Issued] = []
+    monkeypatch.setattr(screen_code, "_show_hook", lambda issued: shown.append(issued) or True)
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
+        mock.add(responses.GET, MAY_I, json={"success": True, "allowed": False, "authority": None, "pending": None})
+        mock.add(responses.POST, PENDING, json={"success": True, "pending": {
+            "id": "pa_1", "expires_at": time.time() + 600, "page": "/monitor", "state": "waiting", "repeat": False,
+        }})
+        mock.add(responses.POST, f"{PENDING}/pa_1/withdraw", json={"success": True})
+        _ask(model)
+        card = json.loads(next(c for c in mock.calls if c.request.url == PENDING).request.body)
+        asked: list[str] = []
+
+        async def no(ctx, message, **kw):
+            asked.append(message)
+            return print_consent.DialogAnswer("decline")
+
+        monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+        monkeypatch.setattr(server, "ask_user_to_confirm", no)
+        with pytest.raises(RuntimeError, match="declined"):
+            _ask(model)
+    assert card["owner_words"] == {"soft_nozzle_confirmed": {
+        "filaments": ["PLA-CF"], "nozzles": [{"position": None, "material": "brass"}],
+    }}
+    assert "print_anyway" not in card and "experimental" not in card
+    _title, _subtitle, message = screen_code.banner_text(shown[0])
+    assert message.startswith(f"Print anyway: {row} Type the code")
+    assert f"  Print anyway: {row}" in asked[0]
+
+
+@responses.activate
+def test_a_window_on_the_account_does_not_start_a_print_the_owner_said_to_print_anyway(
+    signed_in, tmp_path, monkeypatch, observed,
+):
+    """The account's window for this machine answers prints in general; a
+    print the owner said to print anyway is put to the person instead."""
+    model = _said_anyway(tmp_path, monkeypatch)
+    until = time.time() + 7200
+    _may_i(True, {"kind": "machine_window", "id": "dl_9", "grantor": "account:acct-1", "expires_at": until, "via": "web_button"})
+    responses.add(responses.POST, RECORD, json={"success": True, "event": {"id": "ev_2"}, "repeat": False})
+    _held()
+    r = _ask(model)
+    assert r.consent is None and _calls(RECORD) == []
+    assert "soft_nozzle_confirmed" in json.loads(_calls(PENDING)[0].request.body)["owner_words"]

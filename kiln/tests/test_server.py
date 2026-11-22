@@ -2027,7 +2027,6 @@ class TestRegisterPrinterUnderASavedName:
         registry = PrinterRegistry()
         monkeypatch.setattr(mod, "_registry", registry)
         monkeypatch.setattr(mod, "_adapter", None)
-        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
         built: list = []
 
         class FakeBambuAdapter:
@@ -2106,7 +2105,6 @@ class TestRegisterPrinterReplacedName:
         monkeypatch.setattr(mod, "_registry", registry)
         monkeypatch.setattr(mod, "_adapter", None)
         monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
-        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
         built: list = []
 
         class FakeMoonrakerAdapter:
@@ -2175,7 +2173,6 @@ class TestRegisterPrinterMatchedByMachineId:
         monkeypatch.setattr(mod, "_registry", registry)
         monkeypatch.setattr(mod, "_adapter", None)
         monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
-        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
         # The address answers; what the machine then reports is the fake's.
         monkeypatch.setattr(mod, "_check_printer_url", lambda host, *, printer_type: (host, [], True))
         built: list = []
@@ -2307,7 +2304,6 @@ class TestRegisterPrinterSessionOnly:
         monkeypatch.setattr(mod, "_registry", registry)
         monkeypatch.setattr(mod, "_adapter", None)
         monkeypatch.setattr(mod, "_SESSION_PRINTERS", {}, raising=False)
-        monkeypatch.setattr(kiln.bench, "offer_after_registration", lambda *_a, **_k: None)
         built: list = []
 
         class FakeBambuAdapter:

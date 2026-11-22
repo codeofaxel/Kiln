@@ -133,7 +133,7 @@ def servers(monkeypatch):
 
     asks: list[dict[str, Any]] = []
 
-    def answer(name, /, _timeout=None, _asked_by_user=True, question=None, params=None, **rows):
+    def answer(name, /, _timeout=None, _asked_by_user=True, _feature=None, question=None, params=None, **rows):
         asks.append({"tool": name, "question": question, "params": params, "rows": rows})
         value: Any = {"stood_in": True} if question == "forecast" else []
         return {"success": True, "status": "ok", "question": question, "answer": value}

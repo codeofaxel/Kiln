@@ -384,6 +384,8 @@ def set_printer_model(
     bed_mm: Any = None,
     bed_source: str | None = None,
     bed_confirmed: bool = False,
+    owner_says_so: bool = False,
+    said_by: dict[str, str] | None = None,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Set which model a saved printer is, from a name or a slicer file.
@@ -403,6 +405,16 @@ def set_printer_model(
     outside the catalogue is recorded as ``<make>_<model>`` under the
     generic limits; one given by a file that states its bed is set up on
     this machine, and *replace* also lets a newer file correct that bed.
+    A catalogue model is refused for a saved Bambu Lab printer whose own
+    serial number names another catalogue model
+    (``MODEL_DISAGREES_WITH_PRINTER``); nothing is written.  Its owner can
+    say the model is right for that machine (*owner_says_so*): the answer is
+    then ``OWNER_MUST_SAY_SO`` with the ``statement`` and the ``question`` a
+    person confirms, and a door that has proven a person answered calls
+    again with *said_by* (:func:`person_said`), which writes the model and
+    the statement on the printer's record
+    (:data:`kiln.printer_model_check.STATEMENT_FIELD`).  Any later change of
+    its model takes the statement back.
     A printer outside the catalogue with no file gets its bed from
     *bed_mm*: the size its maker publishes, *bed_source* saying where, and
     *bed_confirmed* the person's yes (:func:`_bed_given`); *replace* also
@@ -580,7 +592,19 @@ def set_printer_model(
             f"Kiln already holds a {_mm(stated)} bed for {key}, and this says {_mm(bed)}.  Nothing was "
             "changed; pass replace=True if the new size is right.",
         )
-    if previous == key and not refresh:
+    disagreement = _serial_check(entry, key) if in_catalogue else None
+    statement: dict[str, Any] | None = None
+    if disagreement is not None and (owner_says_so or said_by is not None):
+        statement, question = _statement(entry, key, disagreement, target)
+        if said_by is None or said_by.get("how") not in _PERSON_PROOFS:
+            return {**refused(
+                "OWNER_MUST_SAY_SO",
+                f"Only the printer's owner can say this, and only after reading it: {question}.  Nothing "
+                "was changed yet.",
+            ), "statement": statement, "question": question}
+        statement = {**statement, **said_by}
+        replace = True
+    if previous == key and not refresh and statement is None:
         said = [_record_bed(key, bed, str(bed_source))] if bed is not None else []
         out["applied"] = bool(said)
         out["message"] = " ".join([f"{target} is already set up as {key}.", *said, *notes])
@@ -593,6 +617,8 @@ def set_printer_model(
             f"{target} is saved as a {kind} connection, and {key} is not a printer that connection "
             "reaches.  Nothing was changed; name the printer this model belongs to.",
         )
+    if disagreement is not None and statement is None:
+        return refused("MODEL_DISAGREES_WITH_PRINTER", _disagreement_sentence(disagreement, target))
     if previous_key and previous_key != key and not replace:
         return refused(
             "MODEL_ALREADY_SET",
@@ -615,8 +641,8 @@ def set_printer_model(
         said = declared.note
     else:
         said = "Kiln lays its slices out on the bed saved for it on this machine, under its generic limits."
-    if previous != key:
-        _write(target, key, config_path=config_path)
+    if previous != key or statement is not None:
+        _write(target, key, config_path=config_path, statement=statement)
         invalidate_cache()
     if bed is not None:
         said = f"{said} {_record_bed(key, bed, str(bed_source))}"
@@ -649,9 +675,82 @@ def set_printer_model(
     if support is not None and said_support:
         out["support"] = support.state
         notes = [*notes, said_support]
+    # A model sliced for more than one nozzle whose maker's slicer is missing
+    # or too old here: said once per printer, at every door that sets one up.
+    from kiln.maker_slicer_notes import setup_line
+
+    two_nozzles = setup_line(key)
+    if two_nozzles:
+        out["two_nozzles"] = two_nozzles
+        notes = [*notes, two_nozzles]
     was = f" (was {previous})" if previous and previous != key else ""
+    if statement is not None:
+        from kiln.printer_model_check import statement_text
+
+        out["statement"] = statement
+        notes = [
+            f"Kiln has recorded its owner's word that {statement_text(statement, target)}; setting its model "
+            "to what it reports takes that back.",
+            *notes,
+        ]
     out["message"] = " ".join([f"{target} is now set up as {key}{was}.", said, *notes])
     return out
+
+
+#: The proofs a person's statement may rest on: a person at a terminal, or a
+#: code shown on this computer's screen and typed back.
+_PERSON_PROOFS = ("user_terminal", "user_code")
+
+
+def person_said(how: str) -> dict[str, str]:
+    """``said_by`` for a door that has proven a person answered, *how* naming the proof."""
+    from datetime import datetime, timezone
+
+    from kiln.consent_windows import local_identity
+
+    return {"how": how, "by": local_identity(), "said_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+
+
+def _serial_check(entry: dict[str, Any], key: str) -> Any:
+    """The disagreement between *key* and the model a saved Bambu Lab printer's serial number names, or ``None``.
+
+    Only a serial number whose prefix Kiln knows says anything, only when it
+    names a catalogue model other than *key*, and not when the printer's
+    owner has said *key* is right for this machine.
+    """
+    if str(entry.get("type") or "").strip().lower() != "bambu":
+        return None
+    try:
+        from kiln.printer_model_check import ModelCheck, _row, entry_statement, statement_covers
+        from kiln.printers.bambu import model_of_serial
+
+        named = _row(model_of_serial(entry.get("serial")))
+        if named is None or named == key or statement_covers(entry_statement(entry), key, named):
+            return None
+        return ModelCheck("differs", key, key, named)
+    except Exception:  # noqa: BLE001 -- a serial number Kiln cannot read says nothing
+        return None
+
+
+def _disagreement_sentence(check: Any, target: str) -> str:
+    from kiln.printer_model_check import settle
+
+    return (
+        f"{target}'s serial number is {check.reported_name}'s, and this says {check.declared_name}.  "
+        "Nothing was changed: the model decides the moves Kiln sends and the limits it checks prints "
+        f"against, and another printer's are wrong for this one.  " + settle(check, target)
+    )
+
+
+def _statement(entry: dict[str, Any], key: str, check: Any, target: str) -> tuple[dict[str, Any], str]:
+    """The statement a person confirms for *key* on this printer, and its words."""
+    from kiln.printer_model_check import statement_text, upgrade_between
+
+    statement: dict[str, Any] = {"serial": str(entry.get("serial") or "").strip(), "model": key}
+    upgrade = upgrade_between(check.reported_row, key)
+    if upgrade is not None:
+        statement["upgrade"] = upgrade
+    return statement, statement_text(statement, target)
 
 
 def _refused(code: str, message: str, **extra: Any) -> dict[str, Any]:

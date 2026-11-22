@@ -1,13 +1,12 @@
 """A Bambu estimate runs at the acceleration the machine will really run.
 
-Kiln slices a Bambu print with no acceleration commands of its own and wraps
-it after the maker's start sequence, so the printer prints at whatever that
-sequence set.  The estimate is timed at the acceleration that start sequence
-sets.
+Kiln wraps a Bambu print after the maker's start sequence, and the print
+runs at the acceleration that sequence sets: the profile states it, and the
+estimate is timed at it.
 
-The limits ride in the estimate only.  The slicer-backed half proves the
-G-code is untouched by them: every feedrate identical, and no motion
-command written.
+The machine limits ride in the estimate only.  The slicer-backed half proves
+the G-code is untouched by them: every feedrate and every acceleration
+identical, and no machine limit written.
 """
 
 from __future__ import annotations
@@ -36,6 +35,12 @@ from kiln.slicer_profiles import (
 def _needs_the_a1_record() -> None:
     if get_slicer_profile("bambu_a1").id != "bambu_a1":
         pytest.skip("no record for the A1 here: public CI holds no real printer's profile")
+
+def _working(settings: dict[str, str], motion: dict[str, float]) -> float:
+    """The start sequence's acceleration, raised to any role the settings state."""
+    stated = [float(settings[key]) for key in sp_mod._ROLE_ACCELERATIONS if settings.get(key)]
+    return max(motion["accel"], *stated)
+
 
 _LIMIT_KEYS = (
     "machine_max_acceleration_extruding",
@@ -102,7 +107,7 @@ class TestTheEstimateCarriesIt:
                 assert not set(_LIMIT_KEYS) & set(settings), pid
                 continue
             checked += 1
-            accel = f"{motion['accel']:g}"
+            accel = f"{_working(settings, motion):g}"
             assert settings["machine_max_acceleration_extruding"] == f"{accel},{accel}", pid
             x = f"{motion['max_accel_x']:g}"
             assert settings["machine_max_acceleration_x"] == f"{x},{x}", pid
@@ -112,13 +117,14 @@ class TestTheEstimateCarriesIt:
         """Stated accelerations are written into the print and the machine
         runs them, so the estimate must not clamp them down."""
         _needs_the_a1_record()
-        settings = _ini(resolve_slicer_profile("bambu_a1", overrides={"infill_acceleration": "8000"}))
-        assert settings["machine_max_acceleration_extruding"] == "8000,8000"
+        settings = _ini(resolve_slicer_profile("bambu_a1", overrides={"infill_acceleration": "30000"}))
+        assert settings["machine_max_acceleration_extruding"] == "30000,30000"
 
     def test_the_multi_extruder_door(self) -> None:
         _needs_the_a1_record()
         settings = _ini(resolve_multiextruder_profile("bambu_a1", 4))
-        assert settings["machine_max_acceleration_extruding"] == "6000,6000"
+        accel = f"{_working(settings, start_sequence_motion('bambu_a1')):g}"
+        assert settings["machine_max_acceleration_extruding"] == f"{accel},{accel}"
 
     def test_a_callers_own_limit_is_theirs(self) -> None:
         settings = _ini(
@@ -187,11 +193,15 @@ def _feedrates(gcode: str) -> set[str]:
     return set(re.findall(r"^G1 [^;\n]*F(\d+(?:\.\d+)?)", gcode, re.MULTILINE))
 
 
+def _accelerations(gcode: str) -> set[float]:
+    return {float(v) for v in re.findall(r"^M204\s+S(\d+(?:\.\d+)?)\s*$", gcode, re.MULTILINE)}
+
+
 @pytest.mark.skipif(_PRUSA is None, reason="PrusaSlicer not installed")
 class TestOnlyTheEstimateMoves:
     def test_faster_estimate_same_gcode(self, tmp_path: Path, served_roster_records) -> None:
         """A/B against the slicer's own defaults -- what a Bambu profile that
-        states no acceleration is timed with."""
+        states no machine limit is timed with."""
         model = _plate(tmp_path / "plate.stl")
         own = resolve_slicer_profile("bambu_a1")
         defaults = resolve_slicer_profile(
@@ -206,4 +216,11 @@ class TestOnlyTheEstimateMoves:
         fast, slow = _slice(own, model), _slice(defaults, model)
         assert _seconds(fast) < 0.95 * _seconds(slow), (_seconds(fast), _seconds(slow))
         assert _feedrates(fast) == _feedrates(slow), "a machine limit changed the G-code"
-        assert not re.search(r"^(M201|M203|M204|M205)\b", fast, re.MULTILINE)
+        assert _accelerations(fast) == _accelerations(slow), "a machine limit changed the G-code"
+        stated = {
+            float(value)
+            for key, value in ini_to_settings(own).items()
+            if key in sp_mod._ROLE_ACCELERATIONS and float(value) > 0
+        }
+        assert _accelerations(fast) <= stated, (_accelerations(fast), stated)
+        assert not re.search(r"^(M201|M203|M205|M204(?![^;\n]*\bS))\b", fast, re.MULTILINE)

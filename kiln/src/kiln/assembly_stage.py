@@ -262,6 +262,37 @@ def record(
         return None
 
 
+def keep_block(file_path: str, block: Any) -> bool:
+    """Write the note beside *file_path* from a ``kiln.assembly.v1`` block
+    made for that file elsewhere (the parts of a file made in one piece of
+    source, read where its motion was proved).  The block is read as data
+    (:func:`checked_block`); one that is not in shape, or not in the file's
+    own frame, writes nothing.  ``True`` when the note was written.  Never
+    raises."""
+    try:
+        read = checked_block(block)
+        if read is None or read.get("frame") != "mesh" or not read.get("parts"):
+            return False
+        identity = _identity(file_path)
+        if identity is None:
+            return False
+        body = {
+            "schema": SCHEMA_VERSION,
+            "file": identity,
+            "total_triangles": int(read["total_triangles"]),
+            "parts": read["parts"],
+            "pieces": read["pieces"],
+            "kept_apart": read.get("kept_apart", []),
+        }
+        if read.get("take_apart"):
+            body["take_apart"] = read["take_apart"]
+        _write(file_path, body)
+        return True
+    except Exception:  # noqa: BLE001
+        logger.debug("assembly note not kept for %s", file_path, exc_info=True)
+        return False
+
+
 def _write(file_path: str, body: dict[str, Any]) -> None:
     with open(note_path_for(file_path), "w", encoding="utf-8") as fh:
         json.dump(body, fh, indent=2)

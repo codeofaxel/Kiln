@@ -269,6 +269,32 @@ def _food_ratings() -> dict[str, str]:
     return ratings
 
 
+@lru_cache(maxsize=1)
+def _catalog_ventilation() -> tuple[frozenset[str], frozenset[str]]:
+    """``(catalog keys, keys whose record says ventilation is required)``,
+    read straight from the public catalog for the same reason as
+    :func:`_food_ratings`.  An unreadable catalog gives two empty sets."""
+    try:
+        data = json.loads(_materials_json_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset(), frozenset()
+    keys = frozenset(k for k, v in data.items() if not k.startswith("_") and isinstance(v, dict))
+    vented = frozenset(k for k in keys if (data[k].get("chemical") or {}).get("ventilation_required") is True)
+    return keys, vented
+
+
+def needs_ventilation(material: str) -> bool:
+    """True when the public catalog's record for *material* says printing it
+    needs ventilation.  The name is matched as the catalog spells it
+    (:func:`kiln.catalog_keys.resolve_material_key`, never a family); a
+    material the catalog does not hold is ``False``."""
+    from kiln.catalog_keys import resolve_material_key
+
+    keys, vented = _catalog_ventilation()
+    key = resolve_material_key(material, keys) if isinstance(material, str) else None
+    return key in vented
+
+
 def food_catalog_key(material: str) -> str:
     """A material name in the catalog's key form: ``"PETG-HF"`` -> ``"petg_hf"``,
     ``"PLA+"`` -> ``"pla_plus"``."""
@@ -449,6 +475,10 @@ _REFUSED_PAIRS: dict[frozenset, dict[str, Any]] = {
 #: Purge (mm³) between two loaded slots when Kiln's check gave no figure for
 #: them: the conservative default, never a judged one.
 _CONSERVATIVE_PURGE_MM3 = 800
+#: Purge (mm³) between two colours of one material when Kiln's check gave no
+#: figure for them: the default a slicer's own project carries for a change
+#: of filament, never a judged one.
+_COLOUR_CHANGE_PURGE_MM3 = 280
 
 
 def nozzle_range(material: str) -> tuple[str, float, float] | None:
@@ -468,18 +498,26 @@ def nozzle_range(material: str) -> tuple[str, float, float] | None:
 def basic_pair_finding(material_a: str, material_b: str) -> tuple[str, bool, str, str]:
     """What the nozzle temperature table alone shows about two materials.
 
-    ``(sentence, temperatures_judged, label_a, label_b)``.  Ranges that do not
-    overlap mean the two can't share one nozzle temperature; ranges that
-    overlap say nothing about how well they stick together or how much to
-    purge between them; a material the table lacks is said, and nothing is
-    judged.  Never says a pair is compatible.
+    ``(sentence, temperatures_judged, label_a, label_b)``.  Two spellings of
+    one material share its own temperature and bond to themselves.  Ranges
+    that do not overlap mean the two can't share one nozzle temperature;
+    ranges that overlap say nothing about how well they stick together or how
+    much to purge between them; a material the table lacks is said, and
+    nothing is judged.  Never says a pair is compatible.
     """
-    from kiln.catalog_keys import material_label
+    from kiln.catalog_keys import material_label, same_material_spelling
 
     range_a = nozzle_range(material_a)
     range_b = nozzle_range(material_b)
     label_a = range_a[0] if range_a else (material_label(material_a) or "an unnamed material")
     label_b = range_b[0] if range_b else (material_label(material_b) or "an unnamed material")
+    if same_material_spelling(material_a, material_b):
+        return (
+            f"Both are {label_a}: one material shares its own nozzle temperature and bonds to itself.",
+            True,
+            label_a,
+            label_a,
+        )
     if range_a and range_b:
         span_a = f"{label_a} ({range_a[1]:g}-{range_a[2]:g} °C)"
         span_b = f"{label_b} ({range_b[1]:g}-{range_b[2]:g} °C)"
@@ -499,7 +537,7 @@ def basic_pair_finding(material_a: str, material_b: str) -> tuple[str, bool, str
         label for label, known in ((label_a, range_a), (label_b, range_b)) if not known
     ))
     sentence = (
-        f"Kiln has no nozzle temperature range for {unknown} on this computer, so "
+        f"Kiln's nozzle temperature table has no range for {unknown}, so "
         "neither their temperatures nor how well they stick together was judged."
     )
     return sentence, False, label_a, label_b
@@ -528,9 +566,11 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
 
         When Kiln's check cannot be had, the answer is basic (``basic:
         True``, :func:`_basic_mix_check`): the pairs that must never share a
-        print are still refused, every other pair reads ``"caution"`` with
-        the conservative purge and a warning saying what the nozzle
-        temperature ranges alone show, and ``caution`` says why the check is
+        print are still refused, every other pair of different materials
+        reads ``"caution"`` with the conservative purge and a warning saying
+        what the nozzle temperature ranges alone show, the same material in
+        two slots reads ``"ok"`` with a slicer's default purge between its
+        colours, and ``caution`` says why the check is
         missing and how to get it, with ``why`` / ``why_code`` /
         ``why_detail`` beside it.
     """
@@ -555,13 +595,15 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
 def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, Any] | None:
     """The multi-material check for *clean* (one name per loaded part, in
     order), built from Kiln's answer for every pair of its distinct names
-    (:func:`kiln._pro_material_pairing_bridge.mix_check`).  ``None`` when the answer
-    leaves out a pair the parts need."""
+    (:func:`kiln._pro_material_pairing_bridge.mix_check`).  A filled filament
+    (:func:`is_abrasive_filament`) gets the hardened-nozzle line whatever the
+    answer says, as it does with no answer.  ``None`` when the answer leaves
+    out a pair the parts need."""
     names = entries["names"]
     by_pair: dict[frozenset, dict[str, Any]] = {
         frozenset({names[i], names[j]}): entry for i, j, entry in entries["pairs"]
     }
-    flags = dict(zip(names, entries["hardware"]))
+    flags = dict(zip(names, entries["hardware"], strict=False))
 
     def entry_for(mat_a: str, mat_b: str) -> dict[str, Any] | None:
         entry = by_pair.get(frozenset({mat_a, mat_b}))
@@ -614,8 +656,8 @@ def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, 
     hardware_warnings: list[str] = []
     for mat in clean:
         flag = flags.get(mat) or {}
-        if flag.get("hardened_nozzle"):
-            msg = f"{mat} requires a hardened/wear-resistant nozzle (not standard brass)."
+        if flag.get("hardened_nozzle") or is_abrasive_filament(mat):
+            msg = hardened_nozzle_line(mat)
             if msg not in hardware_warnings:
                 hardware_warnings.append(msg)
         if flag.get("enclosure"):
@@ -666,12 +708,21 @@ def _check_from_entries(clean: list[str], entries: dict[str, Any]) -> dict[str, 
 def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
     """The multi-material check this computer can make alone: the refused
     pairs from :data:`_REFUSED_PAIRS`, the conservative purge, the abrasive
-    floor, and a warning per other pair from :func:`basic_pair_finding`."""
-    from kiln.served_answer import Miss, fields, sentence
+    floor, the enclosure line for a material the catalog says needs
+    ventilation (:func:`needs_ventilation`), and a warning per other pair
+    from :func:`basic_pair_finding`.  The same material in two slots is
+    ``"ok"`` with a slicer's default purge between its colours
+    (:data:`_COLOUR_CHANGE_PURGE_MM3`).  With one material loaded there is
+    no pair of different materials, and ``caution`` speaks of its hardware
+    alone."""
+    from kiln.catalog_keys import same_material_spelling
+    from kiln.served_answer import Miss, fields, free_account_note, sentence
 
     if not isinstance(miss, Miss):
         miss = Miss("unanswered", detail="no multi-material check")
+    then = "compose again" + free_account_note(miss)
     n = len(clean)
+    one_material = all(same_material_spelling(clean[0], m) for m in clean[1:])
     pairs: list[dict[str, Any]] = []
     seen: set[frozenset] = set()
     for i in range(n):
@@ -690,6 +741,16 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
                     "mitigations": list(refused["mitigations"]),
                     "purge_volume_mm3": refused["purge_volume_mm3"],
                 }
+            elif same_material_spelling(clean[i], clean[j]):
+                # One material in two slots: it shares its own temperature and
+                # bonds to itself; only the purge between colours is unjudged.
+                entry = {
+                    "level": "ok",
+                    "warning": basic_pair_finding(clean[i], clean[j])[0]
+                    + " The purge between its colours was not judged.",
+                    "mitigations": [],
+                    "purge_volume_mm3": _COLOUR_CHANGE_PURGE_MM3,
+                }
             else:
                 entry = {
                     "level": "caution",
@@ -702,7 +763,11 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
     hardware_warnings: list[str] = []
     for mat in clean:
         if is_abrasive_filament(mat):
-            msg = f"{mat} requires a hardened/wear-resistant nozzle (not standard brass)."
+            msg = hardened_nozzle_line(mat)
+            if msg not in hardware_warnings:
+                hardware_warnings.append(msg)
+        if needs_ventilation(mat):
+            msg = f"{mat} requires an enclosure to prevent warping and fume issues."
             if msg not in hardware_warnings:
                 hardware_warnings.append(msg)
 
@@ -715,6 +780,8 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
                 row.append(0.0)
             elif refused is not None:
                 row.append(float(refused["purge_volume_mm3"]))
+            elif same_material_spelling(clean[i], clean[j]):
+                row.append(float(_COLOUR_CHANGE_PURGE_MM3))
             else:
                 row.append(float(_CONSERVATIVE_PURGE_MM3))
         purge_matrix.append(row)
@@ -727,27 +794,48 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
             + "; ".join(f"{p['material_a']} + {p['material_b']}" for p in incompatible_pairs)
             + ". Do not print — see warnings for details."
         )
-    elif pairs:
+    elif any(p["level"] != "ok" for p in pairs):
         level = "caution"
         message = "⚠️  Printable with precautions. Review warnings before starting."
+    elif pairs:
+        level = "ok"
+        message = "One material in every slot, so there are no pairs of different materials to check."
     else:
         level = "ok"
         message = "One material, so there are no pairs to check."
-    caution = sentence(
-        miss,
-        feature="multi-material check",
-        on_the_line=(
-            "Kiln's multi-material check says which loaded materials work together "
-            "and how much to purge between them"
-        ),
-        cannot="check how these materials pair",
-        wont=(
-            "refused only the pairs that must never share a print and set the "
-            "conservative purge between the others"
-        ),
-        safe_remedy="run a small test piece before a long print",
-        then="compose again",
-    )
+    if one_material:
+        # One material: no pair to judge, only the hardware it needs.
+        caution = sentence(
+            miss,
+            feature="material check",
+            on_the_line="Kiln's material check says what hardware a loaded material needs",
+            cannot="check what hardware this material needs",
+            wont=(
+                "warned only from the material's name and the catalog on this computer"
+                + (", and set a slicer's default purge between its colours" if n > 1 else "")
+            ),
+            then=then,
+        )
+    else:
+        did = ["refused only the pairs that must never share a print"]
+        if any(p["level"] == "caution" for p in pairs):
+            did.append(
+                f"set the conservative purge of {_CONSERVATIVE_PURGE_MM3} mm³ a change between different materials"
+            )
+        if any(p["level"] == "ok" for p in pairs):
+            did.append("set a slicer's default purge between colours of one material")
+        caution = sentence(
+            miss,
+            feature="multi-material check",
+            on_the_line=(
+                "Kiln's multi-material check says which loaded materials work together "
+                "and how much to purge between them"
+            ),
+            cannot="check how these materials pair",
+            wont=", ".join(did[:-1]) + " and " + did[-1] if len(did) > 1 else did[0],
+            safe_remedy="run a small test piece before a long print",
+            then=then,
+        )
     return {
         "safe": not incompatible_pairs,
         "level": level,
@@ -765,17 +853,29 @@ def _basic_mix_check(clean: list[str], miss: Any) -> dict[str, Any]:
 # Abrasive-filament floor
 # ---------------------------------------------------------------------------
 
+#: The fillers a filled filament is named for, as they appear before "fill".
+_FILLERS = (
+    r"COPPER|BRONZE|BRASS|STEEL|IRON|ALUMINI?UM|TITANIUM|TUNGSTEN|METAL|MAGNET(?:IC)?"
+    r"|WOOD|TIMBER|BAMBOO|HEMP|CORK|STONE|MARBLE|MINERAL|CERAMIC|GLASS|CARBON|GLOW"
+)
+
 #: Fill wording in a filled filament's own name.  Whole words, because
 #: "CARBON" as a bare substring reads POLYCARBONATE as carbon-filled, and
-#: "GLASS" alone reads a sea-glass colourway as glass fibre.  Metal fill
-#: is left to the ``FILL`` rule below: "Copper" on a spool is far more
-#: often a colour than a filler, but "Copperfill" never is.
+#: "GLASS" alone reads a sea-glass colourway as glass fibre; "carbon black"
+#: is a pigment, not a filler.  Metal fill is matched with its "fill":
+#: "Copper" on a spool is far more often a colour than a filler, but
+#: "Copperfill" never is.  "Fill" on its own is a product word ("Refill", or
+#: the name of a product line or a maker), so it counts only after a filler
+#: or as "filled".
 _ABRASIVE_FILL_PATTERNS = (
-    r"\bCARBON\b",
+    r"\bCARBON\b(?!\s*-?\s*BLACK)",
     r"\bWOOD\b",
     r"\bMETAL\b",
+    r"\bMAGNETIC\b",
+    r"\bGLOW\b",
     r"GLASS\s*-?\s*FIB",
-    r"FILL",
+    rf"(?:{_FILLERS})\s*-?\s*FILL",
+    r"\bFILLED\b",
 )
 
 #: Fill suffixes, matched as whole tokens so "PETG" never reads as "GF"
@@ -798,9 +898,11 @@ def is_abrasive_filament(material: str) -> bool:
     Read from the fill wording in the name itself, with no table: the
     filled-filament market moves faster than any fixed list, and a lookup
     miss must not read as "not abrasive".  Errs toward warning: a needless
-    caution costs a moment, a missed one costs a nozzle.
+    caution costs a moment, a missed one costs a nozzle.  An underscore is
+    a word break, so a catalogue id (``wood_pla``) reads as the name it
+    stands for.
     """
-    name = _normalise(material)
+    name = _normalise(material).replace("_", " ")
     if not name:
         return False
     if any(re.search(p, name) for p in _ABRASIVE_FILL_PATTERNS):
@@ -812,6 +914,28 @@ def is_abrasive_filament(material: str) -> bool:
             if token == prefix:
                 return True
     return False
+
+
+def hardened_nozzle_line(material: str) -> str:
+    """The hardware line a multi-material answer gives a material that needs a
+    hardened nozzle, naming it as written."""
+    return f"{material} requires a hardened/wear-resistant nozzle (not standard brass)."
+
+
+#: The nozzle materials an abrasive filament may print through, in the words
+#: Kiln's nozzle record uses.  Any other material, or none on record, is not
+#: one of them.
+WEAR_RESISTANT_NOZZLE_MATERIALS: frozenset[str] = frozenset(
+    {"hardened_steel", "cht_hardened", "ruby_tip", "tungsten_carbide"}
+)
+
+
+def is_wear_resistant_nozzle(material: Any) -> bool:
+    """True when the nozzle material *material* is in
+    :data:`WEAR_RESISTANT_NOZZLE_MATERIALS`, in any case or with spaces or
+    hyphens for underscores.  ``None`` or an unknown word is ``False``."""
+    word = str(material or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return word in WEAR_RESISTANT_NOZZLE_MATERIALS
 
 
 def abrasive_nozzle_floor(material: str) -> str:
