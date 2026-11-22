@@ -439,11 +439,13 @@ def _loaded_material(adapter: Any, material: str | None) -> str | None:
     return loaded_filament_type(adapter)
 
 
-def _owner_asks(soft_nozzle_confirmed: Any, filament_map: Any, mixed_nozzle_experiment: Any = False) -> dict[str, Any]:
+def _owner_asks(
+    soft_nozzle_confirmed: Any, filament_map: Any, mixed_nozzle_experiment: Any = False, speed_by_height: Any = None,
+) -> dict[str, Any]:
     """:func:`kiln.slicer.owner_asks`, imported when a pipeline slices."""
     from kiln.slicer import owner_asks
 
-    return owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
+    return owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height)
 
 
 def _slice_step_data(result: Any) -> dict[str, Any]:

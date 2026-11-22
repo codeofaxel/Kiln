@@ -3752,7 +3752,8 @@ class TestDisableNozzleDetection:
     ) -> None:
         """start_print(nozzle_clog_detect=False) disables detection before sending print."""
         three_mf = tmp_path / "test.gcode.3mf"
-        three_mf.write_bytes(b"PK\x03\x04" + b"\x00" * 26)
+        with zipfile.ZipFile(three_mf, "w") as zf:
+            zf.writestr("Metadata/plate_1.gcode", "; HEADER_BLOCK_START\n; HEADER_BLOCK_END\nG28\n")
 
         # Simulate print_active state so we skip _wait_for_print_start
         with adapter_with_mqtt._state_lock:
@@ -3781,7 +3782,8 @@ class TestDisableNozzleDetection:
     ) -> None:
         """By default (nozzle_clog_detect=True), no disable commands are sent."""
         three_mf = tmp_path / "test.gcode.3mf"
-        three_mf.write_bytes(b"PK\x03\x04" + b"\x00" * 26)
+        with zipfile.ZipFile(three_mf, "w") as zf:
+            zf.writestr("Metadata/plate_1.gcode", "; HEADER_BLOCK_START\n; HEADER_BLOCK_END\nG28\n")
 
         with adapter_with_mqtt._state_lock:
             adapter_with_mqtt._last_status["gcode_state"] = "RUNNING"

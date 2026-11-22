@@ -147,7 +147,7 @@ class TestShortMappingIsSuperseded:
         )
         assert result.success is False
         assert result.refused_before_send is True
-        assert "could not read which filaments" in result.message
+        assert "could not read" in result.message
         assert adapter._mqtt_client.publish.call_args is None
 
     def test_the_user_is_told_when_their_mapping_was_replaced(

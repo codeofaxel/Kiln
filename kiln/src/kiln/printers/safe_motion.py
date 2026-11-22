@@ -112,8 +112,9 @@ _MOVE_Z_RE = re.compile(rf"(?<![A-Za-z])Z({GCODE_NUMBER})")
 _MOVE_E_RE = re.compile(rf"(?<![A-Za-z])E({GCODE_NUMBER})")
 
 
-def _job_gcode_lines(job_path: str):
-    """Iterator over the job's gcode lines, or ``None`` for non-gcode files."""
+def _job_gcode_lines(job_path: str, plate_number: int | None = None):
+    """Iterator over the job's gcode lines (a sliced 3MF's plate
+    *plate_number*, or its only plate), or ``None`` for non-gcode files."""
     import io
     import zipfile
 
@@ -124,10 +125,10 @@ def _job_gcode_lines(job_path: str):
     if ext == ".3mf":
         try:
             from kiln.gcode import _MAX_SCAN_BYTES
-            from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+            from kiln.gcode_metadata import plate_gcode_member, read_member_text
 
             with UntrustedZipFile(path) as zf:
-                member = sliced_gcode_member(zf)
+                member = plate_gcode_member(zf, plate_number)
                 if member is None:
                     return None
                 data = read_member_text(zf, member, _MAX_SCAN_BYTES)
@@ -142,13 +143,32 @@ def occupied_regions_for_job(
     *,
     margin_mm: float = DEFAULT_OCCUPIED_MARGIN_MM,
     stop_after_line: int | None = None,
+    plate_number: int | None = None,
 ) -> list[OccupiedRegion] | None:
-    """Per-object occupied regions, with per-object heights where the gcode reveals them."""
+    """Per-object occupied regions, with per-object heights where the gcode reveals them.
+
+    A sliced 3MF is read as plate *plate_number*; with none named, a 3MF of
+    several plates is every plate's regions together (which one is on the
+    bed is not known), and unknown when any plate's are."""
     path = Path(job_path)
     if not path.is_file():
         return None
+    if plate_number is None and path.suffix.lower() == ".3mf":
+        from kiln.printers.bed_fit import _plates_to_judge
 
-    lines = _job_gcode_lines(job_path)
+        plates = _plates_to_judge(job_path, None)
+        if len(plates) > 1:
+            every: list[OccupiedRegion] = []
+            for plate in plates:
+                found = occupied_regions_for_job(
+                    job_path, margin_mm=margin_mm, stop_after_line=stop_after_line, plate_number=plate,
+                )
+                if found is None:
+                    return None
+                every.extend(found)
+            return every
+
+    lines = _job_gcode_lines(job_path, plate_number)
     define_boxes: dict[str, tuple[float, float, float, float]] = {}
     observed: dict[str, dict[str, float]] = {}
     truncated = False
@@ -280,7 +300,7 @@ def occupied_regions_for_job(
         )
     if regions:
         return regions
-    single = occupied_region_for_job(job_path, margin_mm=margin_mm)
+    single = occupied_region_for_job(job_path, margin_mm=margin_mm, plate_number=plate_number)
     return [single] if single is not None else None
 
 
@@ -289,8 +309,11 @@ def occupied_region_for_job(
     *,
     margin_mm: float = DEFAULT_OCCUPIED_MARGIN_MM,
     z_top_mm: float | None = None,
+    plate_number: int | None = None,
 ) -> OccupiedRegion | None:
-    """Occupied XY region derived from the job artifact's own moves."""
+    """Occupied XY region derived from the job artifact's own moves (a
+    sliced 3MF's plate *plate_number*, or its only plate; unknown for a 3MF
+    of several with none named)."""
     from kiln.printers import bed_fit
 
     path = Path(job_path)
@@ -303,7 +326,9 @@ def occupied_region_for_job(
         bbox = bed_fit.compute_gcode_bbox(job_path, max_lines=_OCCUPANCY_MAX_LINES)
         source = "gcode_bbox"
     elif ext == ".3mf":
-        bbox = bed_fit.compute_3mf_bbox(job_path, max_lines=_OCCUPANCY_MAX_LINES)
+        if plate_number is None and len(bed_fit._plates_to_judge(job_path, None)) > 1:
+            return None
+        bbox = bed_fit.compute_3mf_bbox(job_path, max_lines=_OCCUPANCY_MAX_LINES, plate_number=plate_number)
         source = "3mf_gcode_bbox"
         if bbox is None:
             bbox = bed_fit.compute_mesh_bbox(job_path)

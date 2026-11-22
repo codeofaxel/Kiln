@@ -4886,9 +4886,13 @@ def emergency_trip_cmd(
 
 @cli.command()
 @click.argument("commands", nargs=-1, required=True)
+@click.option(
+    "--past-the-melt-limit", "past_the_melt_limit", is_flag=True,
+    help="Send a speed-up (M220) as written even past what the nozzle can melt, this once.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
+def gcode(ctx: click.Context, commands: tuple, past_the_melt_limit: bool, json_mode: bool) -> None:
     """Send raw G-code commands to the printer.
 
     Commands are validated before sending.  Pass multiple commands as
@@ -4920,14 +4924,21 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
             )
             sys.exit(1)
 
-        adapter.send_gcode(validation.commands)
+        from kiln import live_speed_floor
+
+        with live_speed_floor.collect() as floor, live_speed_floor.past_the_melt_limit(past_the_melt_limit):
+            adapter.send_gcode(validation.commands)
+        sent = live_speed_floor.guarded_lines(list(validation.commands), floor)
 
         data = {
-            "commands_sent": validation.commands,
+            "commands_sent": sent,
             "count": len(validation.commands),
         }
         if validation.warnings:
             data["warnings"] = validation.warnings
+        live_speed_floor.reply(
+            data, floor, changed=live_speed_floor.changes_speed(validation.commands), door=live_speed_floor.TERMINAL,
+        )
 
         click.echo(format_response("success", data=data, json_mode=json_mode))
     except click.ClickException:
@@ -5210,6 +5221,15 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
     ),
 )
 @click.option(
+    "--speed-by-height", "speed_by_height", default=None,
+    help=(
+        "Your own speeds for height ranges of the part, as JSON: "
+        '\'[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6, "speed_mm_s": 120}]\'. '
+        "Heights are mm up from the plate; to_mm left out means to the top. Your slicer applies "
+        "them, the sliced file is read back, and a range it did not apply refuses the slice."
+    ),
+)
+@click.option(
     "--mixed-nozzle-experiment", "mixed_nozzle_experiment", is_flag=True,
     help=(
         "The person says yes, for this print, to slicing for nozzles of different sizes at once, "
@@ -5253,6 +5273,7 @@ def slice(
     placement: str | None,
     plate_number: int | None,
     soft_nozzle_confirmed: bool,
+    speed_by_height: str | None,
     mixed_nozzle_experiment: bool,
     filament_map: str | None,
     json_mode: bool,
@@ -5353,6 +5374,17 @@ def slice(
             and len(parsed_ams_mapping) == copies
         )
 
+        if multicolor_mode and speed_by_height:
+            click.echo(
+                format_error(
+                    "--speed-by-height is not put into a plate of copies in different colours. "
+                    "Slice it without --ams-mapping, or without --speed-by-height.",
+                    code="SPEED_BY_HEIGHT_REFUSED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+
         # Multi-copy: use PrusaSlicer --duplicate or STL mesh duplication
         actual_input = input_file
         copy_strategy = None
@@ -5411,7 +5443,9 @@ def slice(
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
                 **fill_kwargs,
-                **owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                **owner_asks(
+                    soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height,
+                ),
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,
@@ -8510,12 +8544,17 @@ def ingest_service_status_cmd(config_path: str | None, tail_lines: int, json_mod
 )
 @click.option("--electricity-rate", default=0.12, type=float, help="USD per kWh.")
 @click.option("--printer-wattage", default=200.0, type=float, help="Printer watts.")
+@click.option(
+    "--plate", "plate_number", default=None, type=click.IntRange(min=1),
+    help="For a sliced 3MF of several plates, the plate to price. Default: every plate together.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def cost(
     file_path: str,
     material: str | None,
     electricity_rate: float,
     printer_wattage: float,
+    plate_number: int | None,
     json_mode: bool,
 ) -> None:
     """Estimate print cost from a G-code file."""
@@ -8530,12 +8569,13 @@ def cost(
             material=material,
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
+            plate_number=plate_number,
         )
         data = estimate.to_dict()
         from kiln._pro_cost_bridge import attach_cost_intelligence
         from kiln.learned_print_time import attach_learned_time
 
-        attach_cost_intelligence(data, file_path)
+        attach_cost_intelligence(data, file_path, plate_number=plate_number)
         learned = attach_learned_time(data)
 
         if json_mode:
@@ -8550,6 +8590,8 @@ def cost(
             )
         else:
             click.echo(f"File:       {estimate.file_name}")
+            if estimate.covers:
+                click.echo(f"Priced:     {estimate.covers}")
             click.echo(f"Material:   {estimate.material}")
             click.echo(f"Filament:   {estimate.filament_length_meters:.2f} m ({estimate.filament_weight_grams:.1f} g)")
             click.echo(f"Filament $: ${estimate.filament_cost_usd:.2f}")
@@ -14125,9 +14167,13 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
 
 @cli.command()
 @click.argument("profile", required=False)
+@click.option(
+    "--past-the-melt-limit", "past_the_melt_limit", is_flag=True,
+    help="Set the preset even past what the nozzle can melt, this once.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
+def speed(ctx: click.Context, profile: str | None, past_the_melt_limit: bool, json_mode: bool) -> None:
     """Get or set printer speed profile (silent/standard/sport/ludicrous)."""
     try:
         adapter = _get_adapter_from_ctx(ctx)
@@ -14143,19 +14189,29 @@ def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
                     )
                 )
                 sys.exit(1)
-            verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
+            from kiln import live_speed_floor
+
+            with live_speed_floor.collect() as floor, live_speed_floor.past_the_melt_limit(past_the_melt_limit):
+                verdict = CommandVerdict.coerce(adapter.set_speed_profile(profile), what="speed profile")
+            asked = profile.strip().lower()
+            set_as = next((j.preset for j in floor if j.preset), asked)
             data = {
                 "action": "set_speed_profile",
-                "profile": profile.strip().lower(),
+                "profile": set_as,
                 **verdict.to_dict(),
             }
+            terminal = live_speed_floor.TERMINAL
+            said = live_speed_floor.sentences(floor, changed=verdict.ok and asked != "standard", door=terminal)
+            live_speed_floor.reply(data, floor, changed=verdict.ok and asked != "standard", door=terminal)
             if json_mode:
                 click.echo(format_response("success", data=data, json_mode=True))
             else:
                 click.echo(
-                    f"Speed profile '{profile.strip().lower()}' "
+                    f"Speed profile '{set_as}' "
                     f"{'confirmed by the printer' if verdict.confirmed else 'sent, not yet confirmed'}."
                 )
+                for line in said:
+                    click.echo(line)
         else:
             # --- get speed profile ---
             if not hasattr(adapter, "get_speed_profile"):

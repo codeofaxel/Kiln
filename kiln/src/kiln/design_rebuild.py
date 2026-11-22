@@ -38,6 +38,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln.quoted_text import fence
+from kiln.slicer_estimate import estimate_sentence, keep_estimate
 
 _logger = logging.getLogger(__name__)
 
@@ -51,6 +52,20 @@ def normalize_color(color: str) -> str:
     """Normalize a color string — strip whitespace, apply aliases."""
     color = color.strip().lower()
     return _COLOR_ALIASES.get(color, color)
+
+
+def _print_time(recipe: Any) -> dict[str, str]:
+    """``{"print_time": <sentence>}`` when the rebuilt version keeps the
+    slicer's estimate, and ``{"sliced_speeds": <sentence>}`` when it keeps
+    the person's own speed ranges it was sliced with; else nothing."""
+    from kiln.speed_by_height import wish_sentence
+
+    sentence = estimate_sentence(recipe.provenance)
+    speeds = wish_sentence(recipe.provenance)
+    return {
+        **({"print_time": sentence} if sentence is not None else {}),
+        **({"sliced_speeds": speeds} if speeds is not None else {}),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -390,12 +405,16 @@ def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | Non
     recipe.stl_path = compiled_stl
     if artifact.get("output_3mf"):
         recipe.final_3mf = artifact["output_3mf"]
+    from kiln.speed_by_height import keep_wish
+
+    recipe.provenance = keep_wish(keep_estimate(recipe.provenance, gcode_path), gcode_path)
     try:
         save_recipe(recipe, design_dir)
     except Exception as exc:
         _logger.warning("Failed to save updated recipe: %s", exc)
 
     return {
+        **_print_time(recipe),
         "status": "success",
         "mode": "parametric",
         "message": (
@@ -490,6 +509,9 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
 
     if artifact.get("output_3mf"):
         recipe.final_3mf = artifact["output_3mf"]
+    from kiln.speed_by_height import keep_wish
+
+    recipe.provenance = keep_wish(keep_estimate(recipe.provenance, merged_gcode), merged_gcode)
     try:
         save_recipe(recipe, design_dir)
     except Exception as exc:
@@ -497,6 +519,7 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
 
     n = len(part_results) or 1
     result = {
+        **_print_time(recipe),
         "status": "success",
         "mode": "mesh",
         "message": f"Design rebuilt — {n} part(s) sliced and packaged.",

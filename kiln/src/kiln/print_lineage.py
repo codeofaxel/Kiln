@@ -56,6 +56,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: Where a slice's record, and a design version's, keeps the person's own
+#: speed ranges the slice was made with (:mod:`kiln.speed_by_height`).
+SPEED_BY_HEIGHT_KEY = "speed_by_height"
+
 #: The stamp line's key; the whole line is ``; kiln_lineage = <id>``.
 STAMP_KEY = "kiln_lineage"
 _STAMP = re.compile(r"^\s*;\s*kiln_lineage\s*=\s*([0-9a-f]{16})\s*$")
@@ -151,23 +155,30 @@ def _number(value: Any) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def stated_facts(path: str) -> dict[str, Any]:
-    """What the print file at *path* says about itself.
+def stated_facts(path: str, plate_number: int | None = None) -> dict[str, Any]:
+    """What the plate of the print file at *path* that prints says about itself.
 
     Read by the readers Kiln already has (``kiln.gcode_metadata`` for the
     slicer's own comments, ``kiln.printers.bed_fit`` for the size of the
-    toolpath).  Every figure is a finite number or ``None``; a word is a
-    short string or ``None``.  Never raises.
+    toolpath).  A sliced 3MF is read as plate *plate_number*; with no plate
+    named, a 3MF of several plates states nothing
+    (:func:`kiln.file_metadata.plate_of_print`).  Every figure is a finite
+    number or ``None``; a word is a short string or ``None``.  Never raises.
     """
     facts: dict[str, Any] = {
         "material": None, "layer_height_mm": None, "nozzle_temp_c": None, "bed_temp_c": None,
         "printer_model": None, "slicer": None, "size_mm": None,
     }
+    from kiln.file_metadata import plate_of_print
+
+    plate = plate_of_print(path, plate_number)
+    if plate is None:
+        return facts
     try:
-        from kiln.file_metadata import sliced_gcode_lines
+        from kiln.file_metadata import printed_gcode_lines
         from kiln.gcode_metadata import _extract_from_lines
 
-        lines = sliced_gcode_lines(path)
+        lines = printed_gcode_lines(path, plate)
         if lines:
             meta = _extract_from_lines(lines)
             for key, value in (("material", meta.material), ("printer_model", meta.printer_model), ("slicer", meta.slicer)):
@@ -179,7 +190,7 @@ def stated_facts(path: str) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 -- a file that cannot be read states nothing
         logger.debug("print file's own figures not read", exc_info=True)
     try:
-        facts["size_mm"] = _toolpath_size(path)
+        facts["size_mm"] = _toolpath_size(path, plate)
     except Exception:  # noqa: BLE001
         logger.debug("print file's size not read", exc_info=True)
     return facts
@@ -190,7 +201,7 @@ def _positive(value: Any) -> float | None:
     return round(value, 3) if value is not None and 0 < value < 1e5 else None
 
 
-def _toolpath_size(path: str) -> dict[str, float] | None:
+def _toolpath_size(path: str, plate_number: int = 1) -> dict[str, float] | None:
     """The print's extent as ``{"x", "y", "z"}`` in mm: the width and depth
     of its toolpath (``bed_fit``, only when the scan read the whole file)
     and its height (``plate_state.geometry_of``).  Each figure is present
@@ -199,13 +210,17 @@ def _toolpath_size(path: str) -> dict[str, float] | None:
     from kiln.printers import bed_fit
 
     out: dict[str, float] = {}
-    box = bed_fit.compute_3mf_bbox(path) if path.lower().endswith(".3mf") else bed_fit.compute_gcode_bbox(path)
+    box = (
+        bed_fit.compute_3mf_bbox(path, plate_number=plate_number)
+        if path.lower().endswith(".3mf")
+        else bed_fit.compute_gcode_bbox(path)
+    )
     if isinstance(box, dict) and not box.get("truncated"):
         for axis in ("x", "y"):
             low, high = _number(box.get(f"{axis}_min")), _number(box.get(f"{axis}_max"))
             if low is not None and high is not None and 0 < high - low < 1e5:
                 out[axis] = round(high - low, 2)
-    top = _number(geometry_of(path)[1])
+    top = _number(geometry_of(path, plate_number=plate_number)[1])
     if top is not None and 0 < top < 1e5:
         out["z"] = round(top, 2)
     return out or None
@@ -245,15 +260,26 @@ def read_stamps(path: str) -> list[str]:
     return _stamps_of_print_file(path) or []
 
 
-def _stamps_of_print_file(path: str) -> list[str] | None:
+def _stamps_of_print_file(path: str, plate_number: int | None = None) -> list[str] | None:
     """The stamps in *path*, or ``None`` when it is not a file a printer
-    prints (a model, a missing or unreadable file).  One read of the file."""
+    prints (a model, a missing or unreadable file).  A sliced 3MF is read
+    as plate *plate_number* (no stamps when it lacks that plate); with no
+    plate named, every plate's, in plate order."""
     try:
-        from kiln.file_metadata import sliced_gcode_lines
+        from kiln.file_metadata import every_plate_gcode_lines, printed_gcode_lines
 
-        lines = sliced_gcode_lines(path) if os.path.isfile(path) else None
-        if lines is None:
+        if not os.path.isfile(path):
             return None
+        if plate_number is None:
+            plates = every_plate_gcode_lines(path)
+            if plates is None:
+                return None
+            lines = [line for plate in plates for line in plate]
+        else:
+            lines = printed_gcode_lines(path, plate_number)
+            if lines is None:
+                # A plate the archive lacks has no stamps; a model has none to read.
+                return [] if every_plate_gcode_lines(path) is not None else None
         found: list[str] = []
         for line in lines:
             if STAMP_KEY not in line:
@@ -364,6 +390,35 @@ def note_one_nozzle(output_path: str | None, one_nozzle: dict[str, Any] | None) 
     (:func:`resolve`).  ``False`` when the file has no record.  Never
     raises."""
     return _note_on_record(output_path, "one_nozzle", one_nozzle)
+
+
+def note_speed_by_height(output_path: str | None, wish: dict[str, Any] | None) -> bool:
+    """Keep, on the record of the sliced file at *output_path*, the person's
+    own speed ranges the slice was made with and each range's outcome
+    (:func:`kiln.speed_by_height.kept_form`): ``speed_by_height`` on the
+    record.  ``False`` when the file has no record.  Never raises."""
+    return _note_on_record(output_path, SPEED_BY_HEIGHT_KEY, wish)
+
+
+def speed_by_height_of(path: str | None) -> dict[str, Any] | None:
+    """The speed ranges Kiln's record says the sliced file at *path* was
+    made with, or ``None``: for a file that carries no stamp or several, one
+    this computer keeps no record of, and one sliced with no ranges.  The
+    answer is the record's, never the file's own words.  Never raises."""
+    if not path or _hosted():
+        return None
+    try:
+        stamps = read_stamps(path)
+        if len(stamps) != 1:
+            return None
+        with _lock:
+            data = _load()
+        record = _find(data, stamps=stamps, sha=None, name=None)
+        wish = record.get(SPEED_BY_HEIGHT_KEY) if record is not None else None
+        return dict(wish) if isinstance(wish, dict) else None
+    except Exception:  # noqa: BLE001 -- an unreadable record states no wish
+        logger.debug("speed ranges not read from the slice's record", exc_info=True)
+        return None
 
 
 def _note_on_record(output_path: str | None, key: str, value: dict[str, Any] | None) -> bool:
@@ -528,6 +583,7 @@ _NOTHING: dict[str, Any] = {
 
 def resolve(
     file_name: str | None, *, local_paths: list[str] | tuple[str, ...] = (), keep_foreign: bool = True,
+    plate_number: int | None = None,
 ) -> dict[str, Any]:
     """What *file_name* (as the printer knows it) is a print of.
 
@@ -541,13 +597,14 @@ def resolve(
     is answered by the one record that names that whole file by content,
     else by name only.  *keep_foreign*
     ``False`` answers a file Kiln did not slice without keeping a record of
-    it, for a reader that only looks.  Never raises.
+    it, for a reader that only looks.  *plate_number* names the plate a
+    start prints, for a sliced 3MF of several plates.  Never raises.
     """
     if _hosted():
         return dict(_NOTHING)
     try:
         base = os.path.basename(str(file_name or ""))
-        read = [(p, _stamps_of_print_file(p)) for p in local_paths if isinstance(p, str) and p]
+        read = [(p, _stamps_of_print_file(p, plate_number)) for p in local_paths if isinstance(p, str) and p]
         local = [p for p, stamps in read if stamps is not None]
         with _lock:
             data = _load()
@@ -579,13 +636,13 @@ def resolve(
             if record is not None:
                 return _answer(record, "name")
         if local and keep_foreign:
-            return _keep_foreign(local[0], base or os.path.basename(local[0]))
+            return _keep_foreign(local[0], base or os.path.basename(local[0]), plate_number)
     except Exception:  # noqa: BLE001 -- an unanswerable file is an unknown part
         logger.debug("print lineage not resolved", exc_info=True)
     return dict(_NOTHING)
 
 
-def _keep_foreign(path: str, name: str) -> dict[str, Any]:
+def _keep_foreign(path: str, name: str, plate_number: int | None = None) -> dict[str, Any]:
     """Keep and answer a print file Kiln did not slice: no model, and what
     the file states."""
     record: dict[str, Any] = {
@@ -596,7 +653,7 @@ def _keep_foreign(path: str, name: str) -> dict[str, Any]:
         "files": [{"name": name, "sha256": _sha256(path), "kind": "foreign"}],
         "model": {"sha256": None, "signature": "", "signature_v2": ""},
         "profile": None,
-        "stated": stated_facts(path),
+        "stated": stated_facts(path, plate_number),
     }
     with _lock:
         data = _load()

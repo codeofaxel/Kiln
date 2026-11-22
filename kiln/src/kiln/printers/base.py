@@ -1550,6 +1550,131 @@ def _wrap_cancel_gives_back(cls: type) -> None:
     cls.cancel_print = _cancel_and_give_back
 
 
+def _command_took(result: Any) -> bool:
+    """Whether a command's result says the printer took it."""
+    ok = getattr(result, "ok", None)
+    if isinstance(ok, bool):
+        return ok
+    success = getattr(result, "success", None)
+    if isinstance(success, bool):
+        return success
+    return result is not False and result is not None
+
+
+def _note_commands_not_as_sliced(adapter: Any, commands: Any) -> None:
+    try:
+        from kiln.ran_as_sliced import note_commands
+
+        note_commands(adapter, commands)
+    except Exception:  # noqa: BLE001 — bookkeeping never changes a command
+        pass
+
+
+#: Adapter commands that change how the running print runs, by the reason
+#: each writes (:mod:`kiln.ran_as_sliced`).
+_NOT_AS_SLICED_COMMANDS: dict[str, str] = {
+    "set_speed_profile": "speed_changed",
+    "skip_objects": "objects_skipped",
+    "firmware_resume_print": "resumed",
+}
+
+
+def _wrap_not_as_sliced(cls: type) -> None:
+    """Wrap *cls*'s own commands that change how a print runs so a command
+    the printer took writes its reason on the open print."""
+    import functools
+
+    for action, kind in _NOT_AS_SLICED_COMMANDS.items():
+        original = cls.__dict__.get(action)
+        if (
+            original is None
+            or not callable(original)
+            or getattr(original, "_kiln_as_sliced_wrapped", False)
+            or getattr(original, "__isabstractmethod__", False)
+        ):
+            continue
+
+        def _make(original: Any, kind: str) -> Any:
+            @functools.wraps(original)
+            def _noted(self, *args, **kwargs):
+                result = original(self, *args, **kwargs)
+                if _command_took(result):
+                    try:
+                        from kiln.ran_as_sliced import note
+
+                        note(self, kind)
+                    except Exception:  # noqa: BLE001 — bookkeeping never changes a command
+                        pass
+                return result
+
+            _noted._kiln_as_sliced_wrapped = True  # type: ignore[attr-defined]
+            return _noted
+
+        setattr(cls, action, _make(original, kind))
+
+
+def _floor_gcode(adapter: Any, commands: Any) -> Any:
+    from kiln.live_speed_floor import guard_gcode
+
+    return guard_gcode(adapter, commands)
+
+
+def _floor_preset(adapter: Any, profile: Any) -> Any:
+    from kiln.live_speed_floor import guard_preset
+
+    return guard_preset(adapter, profile)
+
+
+#: Adapter commands that change a running print's speed, by the floor that
+#: judges each (:mod:`kiln.live_speed_floor`).
+_LIVE_SPEED_COMMANDS: dict[str, Any] = {
+    "send_gcode": _floor_gcode,
+    "set_speed_profile": _floor_preset,
+}
+
+
+def _wrap_live_speed_floor(cls: type) -> None:
+    """Wrap *cls*'s own speed commands so a speed-up above what the running
+    print's file lets the nozzle melt is lowered before it is sent
+    (:mod:`kiln.live_speed_floor`).  Every door that changes a speed reaches
+    the printer through one of these."""
+    import functools
+
+    for action, guard in _LIVE_SPEED_COMMANDS.items():
+        original = cls.__dict__.get(action)
+        if (
+            original is None
+            or not callable(original)
+            or getattr(original, "_kiln_speed_floor_wrapped", False)
+            or getattr(original, "__isabstractmethod__", False)
+        ):
+            continue
+
+        def _make(original: Any, guard: Any) -> Any:
+            @functools.wraps(original)
+            def _floored(self, *args, **kwargs):
+                judged: Any = contextlib.nullcontext()
+                try:
+                    from kiln import live_speed_floor
+
+                    if args:
+                        args = (guard(self, args[0]), *args[1:])
+                    else:
+                        for key in ("commands", "profile"):
+                            if key in kwargs:
+                                kwargs[key] = guard(self, kwargs[key])
+                    judged = live_speed_floor.inside()
+                except Exception:  # noqa: BLE001 -- the floor never breaks a command
+                    pass
+                with judged:
+                    return original(self, *args, **kwargs)
+
+            _floored._kiln_speed_floor_wrapped = True  # type: ignore[attr-defined]
+            return _floored
+
+        setattr(cls, action, _make(original, guard))
+
+
 def _wrap_head_moves(cls: type) -> None:
     """Wrap *cls*'s own ``pause_print`` and ``cancel_print`` so a printer that says where its head is."""
     import functools
@@ -2009,7 +2134,10 @@ class PrinterAdapter(ABC):
             @functools.wraps(gcode_original)
             def _watched_send_gcode(self, commands, *args, **kwargs):
                 _note_resume_raw_commands(self, commands)
-                return gcode_original(self, commands, *args, **kwargs)
+                result = gcode_original(self, commands, *args, **kwargs)
+                if _command_took(result):
+                    _note_commands_not_as_sliced(self, commands)
+                return result
 
             _watched_send_gcode._kiln_files_watched = True  # type: ignore[attr-defined]
             cls.send_gcode = _watched_send_gcode
@@ -2048,6 +2176,12 @@ class PrinterAdapter(ABC):
                         "outcome lifecycle feed failed", exc_info=True
                     )
                 try:
+                    from kiln.ran_as_sliced import observe_state
+
+                    observe_state(self, state)
+                except Exception:  # noqa: BLE001 — bookkeeping never breaks status
+                    pass
+                try:
                     _feed_slot_observer(self, state)
                 except Exception:  # noqa: BLE001 — bookkeeping never breaks status
                     import logging as _logging
@@ -2065,6 +2199,8 @@ class PrinterAdapter(ABC):
         _wrap_cancel_gives_back(cls)
         _wrap_emergency_reads_nothing(cls)
         _wrap_head_moves(cls)
+        _wrap_not_as_sliced(cls)
+        _wrap_live_speed_floor(cls)
 
         # ------------------------------------------------------------------
         # ------------------------------------------------------------------
@@ -2235,6 +2371,18 @@ class PrinterAdapter(ABC):
         from kiln import print_keeping
 
         keep_record = print_keeping.requested(kwargs.pop("keep_record", None))
+        # The plate printed is worked out once, here: the gate, every reader
+        # and the printer's own command all read this value.
+        from kiln.printers.print_gate import PLATE_NUMBER_REFUSED, printed_plate_number
+
+        try:
+            plate_number = printed_plate_number(kwargs)
+        except ValueError as exc:
+            return CodedPrintResult(
+                success=False, message=str(exc), refused_before_send=True, code=PLATE_NUMBER_REFUSED,
+            )
+        if "plate_number" in kwargs:
+            kwargs = {**kwargs, "plate_number": plate_number}
         quiet_contract = _quiet_start_contract(file_name, kwargs)
         if quiet_contract is not None:
             from kiln.plate_state import quiet_start_flags
@@ -2321,6 +2469,12 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug("repair warning not read", exc_info=True)
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
+            try:
+                from kiln.ran_as_sliced import started as _as_sliced_started
+
+                _as_sliced_started(self)
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
+                pass
             try:
                 from kiln.printers.progress_motion import note_job_start
 
@@ -2469,9 +2623,16 @@ class PrinterAdapter(ABC):
                     ),
                     identity=identity,
                 )
+                from kiln import ran_as_sliced
                 from kiln.learned_print_time import note_start_estimate
 
-                note_start_estimate(opened, file_name)
+                ran_as_sliced.open_record(opened)
+                if continuing:
+                    ran_as_sliced.note_on_job(opened, ran_as_sliced.RESUMED)
+                from kiln.printers.print_gate import _plate_number
+
+                # The plate the printer prints: the one named, else plate 1.
+                note_start_estimate(opened, file_name, plate_number=_plate_number(kwargs))
                 from kiln.print_evidence import note_start_firmware
 
                 note_start_firmware(opened, self)
@@ -2520,6 +2681,15 @@ class PrinterAdapter(ABC):
                     )
             _fire_print_started_hooks(self, file_name)
         elif getattr(result, "success", False):
+            try:
+                from kiln import ran_as_sliced
+
+                base = os.path.basename(str(file_name)).lower()
+                ran_as_sliced.note(
+                    self, ran_as_sliced.RESUMED if base.startswith("original_resume") else ran_as_sliced.EDITED,
+                )
+            except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
+                pass
             try:
                 from kiln.spool_usage import resume_print as _spools_resume
 
@@ -2572,6 +2742,13 @@ class PrinterAdapter(ABC):
             from kiln.hardware_stops import note_resumed
 
             note_resumed(self, waiting)
+        if getattr(result, "success", False):
+            try:
+                from kiln.ran_as_sliced import PAUSED, note
+
+                note(self, PAUSED)
+            except Exception:  # noqa: BLE001 — bookkeeping never changes a resume
+                pass
         return result
 
     def _not_paused_refusal(self) -> PrintResult | None:

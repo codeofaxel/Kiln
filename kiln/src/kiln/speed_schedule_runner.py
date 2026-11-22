@@ -57,6 +57,9 @@ class RunState:
     segments: tuple[Segment, ...]
     printer_name: str | None
     watching: Any = None  # the job identity the run was started on
+    #: Each segment is set as asked even past the melt limit: the person
+    #: chose to when starting this run.  Never carried to another run.
+    past_the_melt_limit: bool = False
     applied: list[tuple[int, int]] = field(default_factory=list)  # (layer, percent)
     active_segment: int | None = None
     error: str | None = None
@@ -143,6 +146,35 @@ def set_speed(adapter: Any, percent: int) -> Any:
     return adapter.send_gcode([f"M220 S{percent}"])
 
 
+def floor_schedule(
+    adapter: Any, schedule: Any, *, past_the_melt_limit: bool = False,
+) -> tuple[list[dict[str, int]], list[Any]]:
+    """*schedule* with each segment's speed-up lowered to what the running
+    print's file lets the nozzle melt on that segment's own layers
+    (:func:`kiln.live_speed_floor.judge`), and the judgements made; with
+    *past_the_melt_limit* each is kept as asked and judged only to say what
+    it costs.  Raises :class:`ScheduleRefused` for a schedule that is not
+    well formed."""
+    from kiln.live_speed_floor import judging_layers, judge
+    from kiln.live_speed_floor import past_the_melt_limit as past
+
+    presets = takes_presets(adapter)
+    out: list[dict[str, int]] = []
+    judgements: list[Any] = []
+    for segment in parse_segments(schedule):
+        percent = segment.speed_percent
+        if percent > 100:
+            preset = nearest_preset(percent) if presets else None
+            asked = PRESET_PERCENT[preset] if preset else percent
+            with judging_layers(segment.from_layer, segment.to_layer), past(past_the_melt_limit):
+                verdict = judge(adapter, asked, preset=preset)
+            judgements.append(verdict)
+            if verdict.lowered:
+                percent = verdict.allowed
+        out.append({"from_layer": segment.from_layer, "to_layer": segment.to_layer, "speed_percent": percent})
+    return out, judgements
+
+
 def _identity(job: Any) -> Any:
     """What the printer is printing, as a comparable identity."""
     from kiln.printers import job_identity
@@ -178,9 +210,13 @@ def _tick(run: RunState, adapter: Any) -> bool:
     index = segment_for(run.segments, int(layer))
     if index is None or index == run.active_segment:
         return True
-    percent = run.segments[index].speed_percent
+    segment = run.segments[index]
+    percent = segment.speed_percent
     try:
-        verdict = set_speed(adapter, percent)
+        from kiln.live_speed_floor import judging_layers, past_the_melt_limit
+
+        with judging_layers(segment.from_layer, segment.to_layer), past_the_melt_limit(run.past_the_melt_limit):
+            verdict = set_speed(adapter, percent)
     except Exception as exc:  # noqa: BLE001 — said, and the next poll tries the next segment
         run.error = f"Kiln couldn't set the speed to {percent}% at layer {layer}: {_plain_words.said(exc)}."
         return True
@@ -211,6 +247,7 @@ def start(
     *,
     printer_name: str | None = None,
     poll_s: float = POLL_INTERVAL_S,
+    past_the_melt_limit: bool = False,
 ) -> RunState:
     """Start running *schedule* against the printer *resolve* returns, in a
     daemon thread.  Refuses (``ScheduleRefused``) a schedule that is not
@@ -220,7 +257,14 @@ def start(
     adapter = resolve()
     if _state_word(adapter) in _ENDED:
         raise ScheduleRefused("the printer is not printing, so there is nothing to pace")
-    run = RunState(segments=segments, printer_name=printer_name, watching=_identity(adapter.get_job()))
+    run = RunState(
+        segments=segments, printer_name=printer_name, watching=_identity(adapter.get_job()),
+        past_the_melt_limit=bool(past_the_melt_limit),
+    )
+    if any(segment.speed_percent != 100 for segment in segments):
+        from kiln.ran_as_sliced import SPEED_CHANGED, note
+
+        note(adapter, SPEED_CHANGED)
     run.thread = threading.Thread(
         target=_loop, args=(run, resolve, poll_s), daemon=True, name="kiln-speed-schedule",
     )
@@ -242,6 +286,7 @@ __all__ = [
     "RunState",
     "ScheduleRefused",
     "Segment",
+    "floor_schedule",
     "nearest_preset",
     "parse_segments",
     "segment_for",

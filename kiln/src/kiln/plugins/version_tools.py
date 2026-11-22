@@ -296,6 +296,7 @@ class _VersionToolsPlugin:
             parent_version_id: str = "",
             goal_id: str = "",
             intent_hash: str = "",
+            gcode_path: str = "",
         ) -> dict:
             """Save a new version of a parametric design.
 
@@ -334,6 +335,18 @@ class _VersionToolsPlugin:
                 intent_hash: Optional content hash of the brief's derived
                     intent payload, paired with ``goal_id``.  Same
                     inheritance fall-back as ``goal_id``.
+                gcode_path: Optional sliced file of this version (G-code, or
+                    a 3MF carrying a sliced plate).  The slicer's own time
+                    estimate in it is kept on the version, and the reply's
+                    ``print_time`` says it ("About 3h 1m, the slicer's
+                    estimate.").  A file stating no time keeps nothing.  A
+                    ``slicer_estimate`` in ``provenance`` is never kept: the
+                    estimate is read from the file.  The person's own speed
+                    ranges the file was sliced with (``speed_by_height``) are
+                    kept the same way, from Kiln's record of that slice on
+                    this computer, and the reply's ``sliced_speeds`` says
+                    them; a ``speed_by_height`` in ``provenance`` is never
+                    kept.
 
             Returns:
                 The saved version record including version number, diff, and
@@ -354,6 +367,18 @@ class _VersionToolsPlugin:
             import difflib
 
             from kiln.curve_resolution import apply_rule
+            from kiln.slicer_estimate import RECORD_KEY, estimate_sentence, keep_estimate
+            from kiln.speed_by_height import RECORD_KEY as SPEED_BY_HEIGHT_KEY
+            from kiln.speed_by_height import keep_wish, wish_sentence
+
+            # The slicer's estimate is read from the version's own sliced
+            # file, and the speed ranges that file was sliced with from
+            # Kiln's record of the slice: neither is taken from a caller's
+            # provenance.
+            if isinstance(provenance, dict):
+                provenance = {
+                    k: v for k, v in provenance.items() if k not in (RECORD_KEY, SPEED_BY_HEIGHT_KEY)
+                } or None
 
             # Keep the source the part was compiled from: Kiln's engine
             # wrote its curve rule into it, so the kept copy carries it too
@@ -448,6 +473,9 @@ class _VersionToolsPlugin:
                     recipe.brief_id = goal_id or parent.brief_id
                     recipe.intent_hash = intent_hash or parent.intent_hash
 
+                recipe.provenance = keep_wish(
+                    keep_estimate(recipe.provenance, gcode_path or None), gcode_path or None,
+                )
                 taken = recipe.version
                 saved_path = save_recipe(recipe, design_directory)
                 if diff_text and recipe.version != taken:
@@ -474,6 +502,10 @@ class _VersionToolsPlugin:
                         "intent_hash": recipe.intent_hash,
                     },
                 }
+                if (print_time := estimate_sentence(recipe.provenance)) is not None:
+                    result["version"]["print_time"] = print_time
+                if (sliced_speeds := wish_sentence(recipe.provenance)) is not None:
+                    result["version"]["sliced_speeds"] = sliced_speeds
                 if left_out:
                     # Stated names this version's source does not set: they
                     # describe another source, so they are not recorded.
@@ -567,9 +599,14 @@ class _VersionToolsPlugin:
                 version_id_b: The "to" version in ``design_id:N`` format.
 
             Returns:
-                A unified diff string showing changes from version A to B.
+                A unified diff string showing changes from version A to B,
+                and ``print_time_change`` when both versions keep the
+                slicer's estimate ("At the sliced speed, the slicer's estimate
+                went from about 2h 50m to about 3h 1m, 11m longer.").
             """
             import difflib
+
+            from kiln.slicer_estimate import estimate_change
 
             try:
                 design_id_a, ver_a = _parse_version_ref(version_id_a)
@@ -592,7 +629,10 @@ class _VersionToolsPlugin:
                         tofile=version_id_b,
                     )
                 )
-                return {"ok": True, "diff": "".join(diff_lines)}
+                result = {"ok": True, "diff": "".join(diff_lines)}
+                if (change := estimate_change(recipe_a.provenance, recipe_b.provenance)) is not None:
+                    result["print_time_change"] = change
+                return result
             except HostedUnavailableError as exc:
                 return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except ValueError as exc:
@@ -747,15 +787,21 @@ class _VersionToolsPlugin:
 
             Returns:
                 The version record including source_scad, prompt,
-                parameters, notes, and parent_version.
+                parameters, notes, and parent_version, and ``print_time``
+                when the version keeps the slicer's estimate ("About 3h 1m
+                at the sliced speed, the slicer's estimate.").  ``sliced_speeds``
+                when it keeps the person's own speed ranges its file was
+                sliced with.
                 Returns an error if the version does not exist.
             """
+            from kiln.slicer_estimate import estimate_sentence
+            from kiln.speed_by_height import wish_sentence
 
             try:
                 design_id, ver = _parse_version_ref(version_id)
                 design_directory = _design_dir(design_id)
                 recipe, path = _load_versioned_recipe(design_directory, ver)
-                return {
+                result = {
                     "ok": True,
                     "version": {
                         "design_id": design_id,
@@ -772,6 +818,11 @@ class _VersionToolsPlugin:
                         "provenance": recipe.provenance,
                     },
                 }
+                if (print_time := estimate_sentence(recipe.provenance)) is not None:
+                    result["version"]["print_time"] = print_time
+                if (sliced_speeds := wish_sentence(recipe.provenance)) is not None:
+                    result["version"]["sliced_speeds"] = sliced_speeds
+                return result
             except HostedUnavailableError as exc:
                 return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except ValueError as exc:

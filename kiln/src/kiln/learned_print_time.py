@@ -19,8 +19,11 @@ their computer, and never sent anywhere.
 
 What counts.  Only prints that finished (a cancelled or failed one stopped
 short of the time it was estimated for), whose start Kiln sent with a file it
-could read the slicer's time from, and whose length Kiln watched or the
-printer's own clock reported.  A print that ended unseen is not a sample,
+could read the slicer's time from, whose length Kiln watched or the
+printer's own clock reported, and that carries no reason it did not run as
+its file was sliced (:mod:`kiln.ran_as_sliced`: a speed or flow change, a
+pause, skipped objects, a resumed or edited file).  A print started before
+those reasons were kept carries none and counts.  A print that ended unseen is not a sample,
 never a guess.  The last :data:`WINDOW` count; each is real time over slicer
 time, a reading outside :data:`RATIO_BOUNDS` is left out (a print paused
 overnight, a file whose estimate was for another machine), and the middle
@@ -28,7 +31,8 @@ reading is the printer's pace, so one odd print moves nothing.  Below
 :data:`MIN_PRINTS` the slicer's time is said as the slicer's, with how many
 prints Kiln has timed so far.
 
-Honest bounds.  A pause the printer's clock counts is in the time.  A print
+Honest bounds.  A change made while no Kiln process watched is not known,
+so a pause the printer's clock counts can still be in the time.  A print
 started outside Kiln, or from a file Kiln never read, teaches nothing.  One
 figure per printer: a printer that runs slow on small parts and on time on
 large ones is told the middle of the two.
@@ -83,24 +87,39 @@ class Pace:
 # ---------------------------------------------------------------------------
 
 
-def _sent_file_lines(file_name: str | None) -> list[str] | None:
-    """The slicer's own lines of the file a start sent, or ``None``.
-
-    Read from the G-code Kiln sliced or uploaded under *file_name*: the slice
-    ledger's file behind the printer-side name, else the copy this session
-    uploaded.  Never raises.
-    """
+def sent_file_path(file_name: str | None) -> str | None:
+    """The file on this disk Kiln sent under the printer-side *file_name*:
+    the slice ledger's file behind the name, else the copy this session
+    uploaded.  ``None`` when Kiln did not send it.  Never raises."""
     if not file_name:
         return None
     try:
         from kiln._pro_cutter_bridge import local_sliced_path
-        from kiln.file_metadata import sliced_gcode_lines
         from kiln.spool_usage import _uploaded_copy
 
-        path = local_sliced_path(file_name) or _uploaded_copy(file_name)
+        return local_sliced_path(file_name) or _uploaded_copy(file_name)
+    except Exception:  # noqa: BLE001 -- a name Kiln cannot place names nothing
+        logger.debug("no sent file found for %s", file_name, exc_info=True)
+        return None
+
+
+def _sent_file_lines(file_name: str | None, plate_number: int | None = None) -> list[str] | None:
+    """The slicer's own lines of the plate a start printed, or ``None``.
+
+    Read from the file Kiln sent (:func:`sent_file_path`).  A sliced 3MF gives
+    plate *plate_number*'s lines, and with no plate named only a 3MF of one
+    plate gives any (:func:`kiln.file_metadata.printed_gcode_lines`).  Never
+    raises.
+    """
+    if not file_name:
+        return None
+    try:
+        from kiln.file_metadata import printed_gcode_lines
+
+        path = sent_file_path(file_name)
         if not path:
             return None
-        return sliced_gcode_lines(path) or None
+        return printed_gcode_lines(path, plate_number) or None
     except Exception:  # noqa: BLE001 -- a file Kiln cannot read says nothing
         logger.debug("the sent file was not read for %s", file_name, exc_info=True)
         return None
@@ -115,22 +134,28 @@ def _seconds_in(lines: list[str] | None) -> float | None:
     return float(printed.seconds) if printed is not None and printed.seconds > 0 else None
 
 
-def slicer_seconds_for(file_name: str | None) -> float | None:
-    """The slicer's own time for the file a start sent, or ``None``.  Never raises."""
+def slicer_seconds_for(file_name: str | None, plate_number: int | None = None) -> float | None:
+    """The slicer's own time for the plate a start sent, or ``None``: plate
+    *plate_number* of a sliced 3MF, and none for a 3MF of several plates
+    when no plate is named.  Never raises."""
     try:
-        return _seconds_in(_sent_file_lines(file_name))
+        return _seconds_in(_sent_file_lines(file_name, plate_number))
     except Exception:  # noqa: BLE001 -- a file Kiln cannot read has no time
         logger.debug("no slicer time read for %s", file_name, exc_info=True)
         return None
 
 
-def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
-    """Write what the sent file says onto the outcome row a start just opened:
-    the slicer's time for it, which slicer made it, and a one-way code of the
-    settings it was sliced with (:func:`kiln.print_evidence.settings_code`).
+def note_start_estimate(job_id: str | None, file_name: str | None, plate_number: int | None = None) -> None:
+    """Write the plate a start printed, and what that plate says, onto the
+    outcome row the start just opened: the slicer's time for it, which slicer made it, and a one-way
+    code of the settings it was sliced with
+    (:func:`kiln.print_evidence.settings_code`).
 
-    Called from ``PrinterAdapter.start_print``.  The file is read once; a
-    figure the file does not state is left empty, never guessed.  Never raises.
+    Called from ``PrinterAdapter.start_print`` with the plate it printed.
+    For a sliced 3MF only that plate is read; with no plate named a 3MF of
+    several plates writes nothing, never one plate's figures or their sum.
+    The file is read once; a figure it does not state is left empty, never
+    guessed.  Never raises.
     """
     if not job_id or _hosted():
         return
@@ -138,9 +163,17 @@ def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
         from kiln.gcode import slicer_made_by
         from kiln.persistence import get_db
 
-        lines = _sent_file_lines(file_name)
+        if plate_number is not None:
+            get_db().set_outcome_plate(job_id, plate_number)
+        lines = _sent_file_lines(file_name, plate_number)
         if not lines:
             return
+        from kiln.gcode import continues_a_print
+
+        if continues_a_print(lines):
+            from kiln.ran_as_sliced import START_FILE_EDITED, note_on_job
+
+            note_on_job(job_id, START_FILE_EDITED)
         seconds = _seconds_in(lines)
         if seconds is not None:
             get_db().set_outcome_estimate(job_id, seconds)
@@ -195,8 +228,12 @@ def pace_for(printer_name: str | None) -> Pace | None:
     except Exception:  # noqa: BLE001 -- no records is no pace
         logger.debug("print times unread for %s", printer_name, exc_info=True)
         return None
+    from kiln.ran_as_sliced import known_not_as_sliced
+
     ratios = []
     for row in rows:
+        if known_not_as_sliced(row):
+            continue
         estimate, actual = row.get("estimated_seconds"), row.get("print_seconds")
         if not estimate or not actual or estimate < MIN_ESTIMATE_SECONDS:
             continue
@@ -314,7 +351,11 @@ def attach_learned_time(
     return learned
 
 
-def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = None) -> dict[str, Any] | None:
+def learned_time_left(
+    printer_name: str | None,
+    elapsed_seconds: float | None = None,
+    printer_seconds_left: float | None = None,
+) -> dict[str, Any] | None:
     """When the print running now on *printer_name* should end, from its own pace.
 
     Read from the print Kiln started: the slicer's time for its file, scaled
@@ -325,11 +366,14 @@ def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = 
     time (the printer's own countdown is then the better word).  Otherwise::
 
         {"seconds_left", "printer", "prints", "said"}
+
+    A print with a recorded reason it is not running as sliced
+    (:mod:`kiln.ran_as_sliced`) gets no figure worked from the slicer's
+    time: ``said`` is :data:`kiln.ran_as_sliced.NOT_AT_SLICED_SPEED`,
+    ``ran_as_sliced`` is ``False``, and ``seconds_left`` is the printer's own
+    countdown (*printer_seconds_left*) when it gives one, else ``None``.
     """
     if not printer_name or _hosted():
-        return None
-    pace = pace_for(printer_name)
-    if pace is None or not pace.usable:
         return None
     names, fingerprint = _machine(printer_name)
     try:
@@ -340,6 +384,23 @@ def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = 
         running = get_db().running_print_estimate(names, fingerprint)
         if not running:
             return None
+        from kiln.ran_as_sliced import NOT_AT_SLICED_SPEED, known_not_as_sliced
+
+        if known_not_as_sliced(running):
+            countdown = (
+                round(float(printer_seconds_left))
+                if isinstance(printer_seconds_left, (int, float))
+                and not isinstance(printer_seconds_left, bool)
+                and printer_seconds_left > 0
+                else None
+            )
+            return {
+                "seconds_left": countdown,
+                "from": "printer" if countdown is not None else None,
+                "printer": printer_name,
+                "ran_as_sliced": False,
+                "said": NOT_AT_SLICED_SPEED,
+            }
         elapsed = (
             float(elapsed_seconds)
             if isinstance(elapsed_seconds, (int, float)) and not isinstance(elapsed_seconds, bool) and elapsed_seconds >= 0
@@ -347,6 +408,9 @@ def learned_time_left(printer_name: str | None, elapsed_seconds: float | None = 
         )
     except Exception:  # noqa: BLE001 -- no record is no time
         logger.debug("running print unread for %s", printer_name, exc_info=True)
+        return None
+    pace = pace_for(printer_name)
+    if pace is None or not pace.usable:
         return None
     left = float(running["estimated_seconds"]) * pace.factor - elapsed
     if left <= 0:
@@ -372,7 +436,9 @@ def attach_time_left(job_block: dict[str, Any] | None, adapter: Any) -> dict[str
             return None
         from kiln.printers.base import outcome_printer_name
 
-        left = learned_time_left(outcome_printer_name(adapter), job_block.get("print_time_seconds"))
+        left = learned_time_left(
+            outcome_printer_name(adapter), job_block.get("print_time_seconds"), job_block.get("print_time_left_seconds"),
+        )
     except Exception:  # noqa: BLE001 -- a status read never fails on a forecast
         logger.debug("learned time left not attached", exc_info=True)
         return None

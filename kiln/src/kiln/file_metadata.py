@@ -46,6 +46,8 @@ from kiln.gcode import (
 )
 from kiln.gcode_metadata import (
     head_and_tail,
+    plate_gcode_member,
+    plate_gcode_members,
     read_head,
     read_head_and_tail,
     read_member_text,
@@ -715,6 +717,74 @@ def sliced_gcode_lines(file_path: str) -> list[str] | None:
                 return head_and_tail(read_member_text(zf, member, _MAX_SCAN_BYTES).splitlines())
     except Exception as exc:  # noqa: BLE001 — an unreadable file carries no figures
         logger.debug("No sliced G-code read from %s: %s", os.path.basename(str(file_path)), exc)
+    return None
+
+
+def printed_gcode_lines(file_path: str, plate_number: int | None) -> list[str] | None:
+    """The lines a slicer writes its own figures in, of the plate that is
+    printed: a G-code file's own top and end, or those of plate
+    *plate_number* of a sliced 3MF (:func:`kiln.gcode_metadata.plate_gcode_member`).
+
+    With no plate named, a 3MF holding several plates gives ``None``: which
+    plate prints is not known, so no plate's figures are taken for it.  A
+    plate the archive lacks, a mesh and an unreadable file give ``None``
+    too.  Never raises.
+    """
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in _GCODE_EXTENSIONS:
+            return read_head_and_tail(file_path)
+        if ext in _3MF_EXTENSIONS:
+            with UntrustedZipFile(file_path) as zf:
+                member = plate_gcode_member(zf, plate_number)
+                if member is None:
+                    return None
+                return head_and_tail(read_member_text(zf, member, _MAX_SCAN_BYTES).splitlines())
+    except Exception as exc:  # noqa: BLE001 — an unreadable file carries no figures
+        logger.debug("No printed plate read from %s: %s", os.path.basename(str(file_path)), exc)
+    return None
+
+
+def plate_of_print(file_path: str, plate_number: int | None) -> int | None:
+    """The plate a reader of the print at *file_path* reads: 1 for a G-code
+    file; for a sliced 3MF, plate *plate_number* when the archive holds it,
+    else with no plate named its only plate.  ``None`` when the plate is not
+    known or not there, or the file cannot be read.  Never raises."""
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in _GCODE_EXTENSIONS:
+            return 1
+        if ext in _3MF_EXTENSIONS:
+            with UntrustedZipFile(file_path) as zf:
+                plates = plate_gcode_members(zf)
+            if plate_number is None:
+                return plates[0][0] if len(plates) == 1 else None
+            return plate_number if any(number == plate_number for number, _ in plates) else None
+    except Exception as exc:  # noqa: BLE001 — an unreadable file has no plate
+        logger.debug("No plate read from %s: %s", os.path.basename(str(file_path)), exc)
+    return None
+
+
+def every_plate_gcode_lines(file_path: str) -> list[list[str]] | None:
+    """Each plate's figure lines, in plate order: one entry for a G-code
+    file, one per plate for a sliced 3MF.  ``None`` for a file that prints
+    no G-code, an unreadable one, or a 3MF one of whose plates cannot be
+    read, so a caller adding them up never adds a part.  Never raises."""
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in _GCODE_EXTENSIONS:
+            return [read_head_and_tail(file_path)]
+        if ext in _3MF_EXTENSIONS:
+            with UntrustedZipFile(file_path) as zf:
+                plates = plate_gcode_members(zf)
+                if not plates:
+                    return None
+                return [
+                    head_and_tail(read_member_text(zf, member, _MAX_SCAN_BYTES).splitlines())
+                    for _number, member in plates
+                ]
+    except Exception as exc:  # noqa: BLE001 — an unreadable file carries no figures
+        logger.debug("No plates read from %s: %s", os.path.basename(str(file_path)), exc)
     return None
 
 

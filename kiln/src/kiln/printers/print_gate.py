@@ -39,7 +39,7 @@ def _classify_file(job_path: str) -> str:
 
 
 def _fit_verdict(
-    job_path: str, printer_id: str | None, *, bed: Any = None,
+    job_path: str, printer_id: str | None, *, bed: Any = None, plate_number: int | None = None,
 ) -> tuple[bool, str | None, str | None, dict[str, Any] | None]:
     """Geometry-fit half."""
     try:
@@ -50,7 +50,7 @@ def _fit_verdict(
     kind = _classify_file(job_path)
     try:
         if kind == "threemf":
-            r = bed_fit.validate_3mf_for_printer(job_path, printer_id, bed=bed)
+            r = bed_fit.validate_3mf_for_printer(job_path, printer_id, bed=bed, plate_number=plate_number)
         elif kind == "gcode":
             r = bed_fit.validate_gcode_for_printer(job_path, printer_id, bed=bed)
         else:
@@ -309,13 +309,15 @@ def evaluate_pre_print_gate(
     *,
     material_id: str | None = None,
     allow_oversize: bool = False,
+    plate_number: int | None = None,
 ) -> dict[str, Any]:
-    """Deterministic 'is this print physically possible?' verdict."""
+    """Deterministic 'is this print physically possible?' verdict, of plate
+    *plate_number* of a sliced 3MF (every plate when none is named)."""
     if not job_path or not os.path.isfile(job_path):
         return {"ok": True, "blocked": False, "reason": "no local job to inspect — soft-pass"}
 
     # Fit and temperature only
-    fit_blocked, fit_code, fit_msg, fit_detail = _fit_verdict(job_path, printer_id)
+    fit_blocked, fit_code, fit_msg, fit_detail = _fit_verdict(job_path, printer_id, plate_number=plate_number)
     temp_blocked, temp_code, temp_msg = _temp_verdict(printer_id, material_id)
 
     if not (fit_blocked or temp_blocked):
@@ -717,11 +719,12 @@ def _plate_scan_verdict(
 
 def _nozzle_size_verdict(
     adapter: Any, job_path: str, file_name: str, printer_id: str | None, override: bool,
+    plate_number: int | None = None,
 ) -> dict[str, Any] | None:
     """The verdict when the file and the printer state different nozzle sizes (:func:`kiln.nozzle_size_check.check_nozzle_size`), or ``None``."""
     from kiln.nozzle_size_check import check_nozzle_size
 
-    check = check_nozzle_size(adapter, job_path)
+    check = check_nozzle_size(adapter, job_path, plate_number)
     if not check.refuses:
         return None
     reason = check.sentence(os.path.basename(str(file_name)))
@@ -798,12 +801,13 @@ def _bed_the_printer_states(adapter: Any, printer_id: str | None) -> tuple[str, 
 
 def _unknown_bed_verdict(
     adapter: Any, job_path: str, file_name: str, printer_id: str | None, override: bool,
+    plate_number: int | None = None,
 ) -> dict[str, Any] | None:
     """The verdict for a start whose printer has no bed Kiln knows, or ``None`` to let the start through."""
     stated = _bed_the_printer_states(adapter, printer_id)
     if stated is not None:
         judged_as, how, bed = stated
-        blocked, code, msg, detail = _fit_verdict(job_path, judged_as, bed=bed)
+        blocked, code, msg, detail = _fit_verdict(job_path, judged_as, bed=bed, plate_number=plate_number)
         if (detail or {}).get("error_code") != "VOLUME_UNKNOWN":
             if not blocked:
                 return {"ok": True, "blocked": False, "reason": "pre-print gate passed", "fit": detail}
@@ -856,7 +860,7 @@ def _unknown_bed_verdict(
 
 
 def _printer_model_verdict(
-    adapter: Any, job_path: str, file_name: str, override: bool,
+    adapter: Any, job_path: str, file_name: str, override: bool, plate_number: int | None = None,
 ) -> dict[str, Any] | None:
     """The verdict when the printer reports itself as another model than it was set up as."""
     from kiln.printer_model_check import check_printer_model
@@ -864,7 +868,7 @@ def _printer_model_verdict(
     check = check_printer_model(adapter)
     if check.status != "differs":
         return None
-    blocked, _code, fit_msg, fit_detail = _fit_verdict(job_path, check.reported_row)
+    blocked, _code, fit_msg, fit_detail = _fit_verdict(job_path, check.reported_row, plate_number=plate_number)
     if not blocked:
         return None
     name = getattr(adapter, "_kiln_registered_name", None)
@@ -920,11 +924,82 @@ _CHUTE_MATCH_MM = 0.5
 _PAIRING_CODES = frozenset({NOZZLE_SIZE_MISMATCH, FILAMENT_SLOTS_CODE, CHUTE_MISMATCH_CODE, PRINTER_MODEL_MISMATCH})
 
 
-def _plate_number(kwargs: dict[str, Any]) -> int:
-    try:
-        return max(1, int(kwargs.get("plate_number") or 1))
-    except (TypeError, ValueError):
+#: The code a start carries when its plate number is not a plate number.
+PLATE_NUMBER_REFUSED = "PLATE_NUMBER_REFUSED"
+
+#: The code a start carries when the file holds no plate the printer would
+#: print under the number asked for, or two members that could be it.
+PLATE_NOT_IN_FILE = "PLATE_NOT_IN_FILE"
+
+
+def printed_plate_number(kwargs: dict[str, Any]) -> int:
+    """The plate a start prints, the one value every gate, reader and printer
+    command uses: ``plate_number`` as given, 1 when none is.
+
+    :raises ValueError: in plain words, for anything but a whole number from 1 up.
+    """
+    value = kwargs.get("plate_number")
+    if value is None:
         return 1
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            f"The plate to print has to be a whole number from 1 up, the plate's number as the slicer "
+            f"shows it; {value!r} is not one, so nothing was started."
+        )
+    return value
+
+
+def _plate_number(kwargs: dict[str, Any]) -> int:
+    return printed_plate_number(kwargs)
+
+
+def _printed_plate_verdict(job_path: str, file_name: str, plate_number: int) -> dict[str, Any] | None:
+    """A refusal when the sliced 3MF at *job_path* holds G-code but not the
+    member the printer asks for plate *plate_number*, or holds two members
+    that could answer to it, or cannot be opened or that plate read;
+    ``None`` for anything else.  The printer would fail on a missing plate,
+    or print a plate no check has read."""
+    if not str(job_path).lower().endswith(".3mf"):
+        return None
+    from kiln.gcode import _MAX_SCAN_BYTES
+    from kiln.gcode_metadata import plate_gcode_member, plate_gcode_members, plate_member_ambiguous, read_member_text
+    from kiln.untrusted_zip import UntrustedZipFile
+
+    name = os.path.basename(str(file_name))
+    try:
+        with UntrustedZipFile(job_path) as zf:
+            if not any(n.lower().endswith(".gcode") for n in zf.namelist()):
+                return None
+            ambiguous = plate_member_ambiguous(zf, plate_number)
+            plates = [number for number, _ in plate_gcode_members(zf)]
+            member = plate_gcode_member(zf, plate_number)
+            if member is not None:
+                # Every check after this one reads this plate: it has to be readable.
+                read_member_text(zf, member, _MAX_SCAN_BYTES)
+    except Exception as exc:  # noqa: BLE001 -- an archive Kiln cannot read is never passed unchecked
+        _logger.debug("print_gate: %s could not be read as a print file", name, exc_info=True)
+        return {
+            "ok": False, "blocked": True, "code": PLATE_NOT_IN_FILE,
+            "reason": (
+                f"Kiln could not read {name} ({' '.join(str(exc).split())[:160]}), so none of its checks could "
+                "run and it was not started: the printer cannot be trusted with a file Kiln cannot read. "
+                "Slice or export it again."
+            ),
+        }
+    if plate_number in plates:
+        return None
+    if ambiguous:
+        reason = (
+            f"{name} holds more than one file that could be plate {plate_number}, so Kiln cannot tell which "
+            "one the printer would print; it was not started. Save the project again from its slicer."
+        )
+    else:
+        listed = ", ".join(str(n) for n in plates) or "none Kiln can read"
+        reason = (
+            f"{name} has no plate {plate_number} (its plates: {listed}), so the printer would have nothing "
+            "to print, or another plate than the one checked; it was not started. Name one of its plates."
+        )
+    return {"ok": False, "blocked": True, "code": PLATE_NOT_IN_FILE, "reason": reason}
 
 
 def _plate_colours(job_path: str, plate_number: int) -> list[str]:
@@ -939,16 +1014,18 @@ def _plate_colours(job_path: str, plate_number: int) -> list[str]:
     return _declared_filament_colors(text) or []
 
 
-def _kiln_colour_change_chute(job_path: str) -> tuple[float | None, float | None] | None:
-    """Where the first colour change Kiln wrote into this plate sends the head to purge, as ``(x, y)``."""
+def _kiln_colour_change_chute(
+    job_path: str, plate_number: int | None = None,
+) -> tuple[float | None, float | None] | None:
+    """Where the first colour change Kiln wrote into plate *plate_number* (or the only plate) sends the head to purge, as ``(x, y)``."""
     from kiln.gcode import axis_value
-    from kiln.gcode_metadata import sliced_gcode_member, unpacks_in_chunks
+    from kiln.gcode_metadata import plate_gcode_member, unpacks_in_chunks
     from kiln.printers.bambu_3mf import KILN_COLOUR_CHANGE_NOTE
 
     note = KILN_COLOUR_CHANGE_NOTE.encode("ascii")
     try:
         with UntrustedZipFile(job_path) as zf:
-            member = sliced_gcode_member(zf)
+            member = plate_gcode_member(zf, plate_number)
             if member is None:
                 return None
             info = zf.getinfo(member)
@@ -989,18 +1066,27 @@ def _chute_words(point: tuple[float | None, float | None]) -> str:
     return " ".join(f"{axis}{value:g}" for axis, value in zip("XY", point, strict=True) if value is not None)
 
 
-def _chute_verdict(adapter: Any, job_path: str, name: str) -> dict[str, Any] | None:
-    """Refuse a plate whose Kiln colour change purges at a chute this printer does not have there."""
+def _chute_verdict(
+    adapter: Any, job_path: str, name: str, plate_number: int | None = None,
+) -> dict[str, Any] | None:
+    """Refuse a plate whose Kiln colour change purges at a chute this printer does not have there.
+
+    Plate *plate_number* is judged; with none named, every plate, the first
+    that purges elsewhere answering."""
     declared = _declared_model(adapter)
     if not declared:
         return None
-    found = _kiln_colour_change_chute(job_path)
-    if found is None:
-        return None
     from kiln.printers.bambu_3mf import flush_station_for
+    from kiln.printers.bed_fit import _plates_to_judge
 
     station = flush_station_for(declared)
-    if station is not None and _same_chute(found, station):
+    found = None
+    for plate in _plates_to_judge(job_path, plate_number):
+        here = _kiln_colour_change_chute(job_path, plate)
+        if here is not None and not (station is not None and _same_chute(here, station)):
+            found = here
+            break
+    if found is None:
         return None
     from kiln.printers.bed_fit import get_printer_display_name
 
@@ -1073,7 +1159,7 @@ def _filament_path_verdict(
     if len(colours) < 2:
         return None
     name = os.path.basename(str(file_name)) or os.path.basename(str(job_path))
-    return _chute_verdict(adapter, job_path, name) or _slots_verdict(adapter, name, colours)
+    return _chute_verdict(adapter, job_path, name, _plate_number(kwargs)) or _slots_verdict(adapter, name, colours)
 
 
 # ---------------------------------------------------------------------------
@@ -1130,17 +1216,21 @@ def same_bed_machine_id(adapter: Any) -> str:
     return registered if isinstance(registered, str) and registered else ""
 
 
-def _gcode_head(path: str, max_lines: int) -> list[str] | None:
-    """The first *max_lines* of the job's gcode text, or ``None`` if unreadable."""
+def _gcode_head(path: str, max_lines: int, plate_number: int | None = None) -> list[str] | None:
+    """The first *max_lines* of the job's gcode text, or ``None`` if unreadable.
+
+    A sliced 3MF is read as plate *plate_number*; with none named, as its
+    only plate, and not at all when it holds several: a header found on one
+    plate is never taken as another's."""
     low = path.lower()
     try:
         if low.endswith(".3mf"):
 
             from kiln.gcode import _MAX_SCAN_BYTES
-            from kiln.gcode_metadata import read_member_text, sliced_gcode_member
+            from kiln.gcode_metadata import plate_gcode_member, read_member_text
 
             with UntrustedZipFile(path) as zf:
-                member = sliced_gcode_member(zf)
+                member = plate_gcode_member(zf, plate_number)
                 if member is None:
                     return None
                 text = read_member_text(zf, member, _MAX_SCAN_BYTES)
@@ -1156,9 +1246,9 @@ def _gcode_head(path: str, max_lines: int) -> list[str] | None:
         return None
 
 
-def read_same_bed_contract(path: str) -> dict[str, str] | None:
-    """The ``; key: value`` lines of the same-bed safe-startup header, or ``None`` when the file carries no such header at all."""
-    head = _gcode_head(path, _SAME_BED_HEADER_MAX_LINES)
+def read_same_bed_contract(path: str, plate_number: int | None = None) -> dict[str, str] | None:
+    """The ``; key: value`` lines of the same-bed safe-startup header (of plate *plate_number* of a sliced 3MF), or ``None`` when the file carries no such header at all."""
+    head = _gcode_head(path, _SAME_BED_HEADER_MAX_LINES, plate_number)
     if not head:
         return None
     start = next(
@@ -1182,13 +1272,15 @@ def read_same_bed_contract(path: str) -> dict[str, str] | None:
     return fields
 
 
-def read_quiet_start_contract(path: str) -> dict[str, str] | None:
-    """The ``; key: value`` lines of Kiln's quiet-start header, or ``None`` when the file carries no such header."""
-    return _read_contract(path, QUIET_START_HEADER_START, QUIET_START_HEADER_END)
+def read_quiet_start_contract(path: str, plate_number: int | None = None) -> dict[str, str] | None:
+    """The ``; key: value`` lines of Kiln's quiet-start header (of plate *plate_number* of a sliced 3MF), or ``None`` when the file carries no such header."""
+    return _read_contract(path, QUIET_START_HEADER_START, QUIET_START_HEADER_END, plate_number)
 
 
-def _read_contract(path: str, start_marker: str, end_marker: str) -> dict[str, str] | None:
-    head = _gcode_head(path, _SAME_BED_HEADER_MAX_LINES)
+def _read_contract(
+    path: str, start_marker: str, end_marker: str, plate_number: int | None = None,
+) -> dict[str, str] | None:
+    head = _gcode_head(path, _SAME_BED_HEADER_MAX_LINES, plate_number)
     if not head:
         return None
     start = next(
@@ -1214,7 +1306,7 @@ def _read_contract(path: str, start_marker: str, end_marker: str) -> dict[str, s
 def evaluate_quiet_start(adapter: Any, job_path: str, kwargs: dict[str, Any] | None = None) -> dict[str, Any]:
     """Judge a quiet-start file against the machine and the plate, live."""
     name = os.path.basename(str(job_path))
-    contract = read_quiet_start_contract(job_path)
+    contract = read_quiet_start_contract(job_path, _plate_number(kwargs or {}))
     machine = same_bed_machine_id(adapter)
     verdict: dict[str, Any] = {
         "ok": False, "blocked": True, "accepted": False, "code": None, "condition": None, "reason": "",
@@ -1396,10 +1488,10 @@ def _latch_status(printer_name: str) -> dict[str, Any] | None:
         return None
 
 
-def evaluate_same_bed_retry(adapter: Any, job_path: str) -> dict[str, Any]:
-    """Judge a no-homing file as a same-bed retry, against the machine, live."""
+def evaluate_same_bed_retry(adapter: Any, job_path: str, plate_number: int | None = None) -> dict[str, Any]:
+    """Judge a no-homing file (plate *plate_number* of a sliced 3MF) as a same-bed retry, against the machine, live."""
     name = os.path.basename(str(job_path))
-    contract = read_same_bed_contract(job_path)
+    contract = read_same_bed_contract(job_path, plate_number)
     machine = same_bed_machine_id(adapter)
     verdict: dict[str, Any] = {
         "ok": False,
@@ -1576,16 +1668,17 @@ def _same_bed_or_original(
     original: dict[str, Any],
     printer_id: str | None,
     material_id: str | None,
+    plate_number: int | None = None,
 ) -> dict[str, Any]:
-    """A no-homing block, re-judged as a same-bed retry when the file claims to be one; every other file gets *original* back untouched."""
-    if read_same_bed_contract(job_path) is None:
+    """A no-homing block, re-judged as a same-bed retry when the file (plate *plate_number*) claims to be one; every other file gets *original* back untouched."""
+    if read_same_bed_contract(job_path, plate_number) is None:
         return original
     temp_blocked, temp_code, temp_msg = _temp_verdict(printer_id, material_id)
     if temp_blocked:
         block = dict(original)
         block.update(code=temp_code, reason=temp_msg, suggestions=_suggestions(None, temp_code))
         return block
-    verdict = evaluate_same_bed_retry(adapter, job_path)
+    verdict = evaluate_same_bed_retry(adapter, job_path, plate_number)
     if verdict.get("accepted"):
         return {
             "ok": True,
@@ -1611,6 +1704,10 @@ def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any], *, keep: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Universal print-time backstop, called from ``PrinterAdapter.start_print``."""
+    try:
+        plate_number = printed_plate_number(kwargs)
+    except ValueError as exc:
+        return {"ok": False, "blocked": True, "code": PLATE_NUMBER_REFUSED, "reason": str(exc)}
     if _is_resume_print(file_name, kwargs, adapter=adapter):
         return None
 
@@ -1627,11 +1724,13 @@ def run_adapter_gate(
         except _ReadBackFailed as exc:
             return _read_back_refusal(file_name, printer_id, str(exc), override)
     inspected = job if job is not None else fetched
+    if inspected and (missing := _printed_plate_verdict(inspected, file_name, plate_number)):
+        return missing
     from kiln.hardware_stops import stage as _stage_hardware_plan
 
     _stage_hardware_plan(adapter, file_name, inspected)
     material_id = _resolve_material(kwargs)
-    if inspected and read_quiet_start_contract(inspected) is not None:
+    if inspected and read_quiet_start_contract(inspected, plate_number) is not None:
         quiet = evaluate_quiet_start(adapter, inspected, kwargs)
         if quiet.get("blocked"):
             return {
@@ -1644,9 +1743,10 @@ def run_adapter_gate(
             printer_id,
             material_id=material_id,
             allow_oversize=override,
+            plate_number=plate_number,
         )
         if inspected and verdict.get("blocked") and verdict.get("code") == "NO_HOMING_SEQUENCE":
-            verdict = _same_bed_or_original(adapter, inspected, verdict, printer_id, material_id)
+            verdict = _same_bed_or_original(adapter, inspected, verdict, printer_id, material_id, plate_number)
         if inspected and not verdict.get("blocked"):
             scanned = _plate_scan_verdict(adapter, inspected, file_name, printer_id, _plate_number(kwargs))
             if scanned is not None:
@@ -1683,7 +1783,7 @@ def run_adapter_gate(
                     ),
                 }
         if inspected and not verdict.get("blocked") and _bed_was_unknown(verdict):
-            judged = _unknown_bed_verdict(adapter, inspected, file_name, printer_id, override)
+            judged = _unknown_bed_verdict(adapter, inspected, file_name, printer_id, override, plate_number)
             if judged is not None and (judged.get("blocked") or not verdict.get("overridden")):
                 verdict = judged
             elif judged is not None:
@@ -1693,11 +1793,13 @@ def run_adapter_gate(
             if paired is not None:
                 verdict = paired
         if inspected and not verdict.get("blocked"):
-            sized = _nozzle_size_verdict(adapter, inspected, file_name, printer_id, override)
+            sized = _nozzle_size_verdict(
+                adapter, inspected, file_name, printer_id, override, _plate_number(kwargs)
+            )
             if sized is not None:
                 verdict = sized
         if inspected and not verdict.get("blocked"):
-            disagrees = _printer_model_verdict(adapter, inspected, file_name, override)
+            disagrees = _printer_model_verdict(adapter, inspected, file_name, override, plate_number)
             if disagrees is not None:
                 verdict = disagrees
     finally:

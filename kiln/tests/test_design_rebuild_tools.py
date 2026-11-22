@@ -30,6 +30,19 @@ from kiln.design_recipe import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _own_slice_folder(tmp_path):
+    """Each test slices into its own folder: a slice is written to a path
+    fixed by the part's name, so tests running side by side would otherwise
+    read each other's file."""
+    from kiln.output_paths import REQUEST_OUTPUT_ROOT
+
+    (tmp_path / "slices").mkdir(exist_ok=True)
+    token = REQUEST_OUTPUT_ROOT.set(str(tmp_path / "slices"))
+    yield
+    REQUEST_OUTPUT_ROOT.reset(token)
+
+
 def _load(design_dir: Path | str) -> DesignRecipe:
     recipe_file = find_recipe(str(design_dir))
     assert recipe_file, f"no recipe in {design_dir}"

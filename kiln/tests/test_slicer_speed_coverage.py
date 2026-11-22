@@ -120,7 +120,10 @@ SLICER_DEFAULT: dict[str, str] = {
         "open decision, not an oversight."
     ),
     "support_material_interface_speed": "100% of the support speed.",
-    "first_layer_infill_speed": "0 means the first-layer speed, which is stated.",
+    "first_layer_infill_speed": (
+        "0 means the first-layer speed, which is stated; the Orca family, "
+        "which has its own default for it, is handed that speed."
+    ),
     "first_layer_speed_over_raft": "Only over a raft, where adhesion sets the pace.",
     "travel_speed_z": "0 means the travel speed, which is stated.",
     "deretract_speed": "0 means the retract speed, which is stated.",
@@ -468,6 +471,23 @@ class TestOrcaCarriesThePace:
             process = settings_to_orca_presets(settings).process
             for src, dst in orca_key.items():
                 assert process.get(dst) == settings[src], f"{pid}: {dst}"
+
+    def test_the_first_layers_infill_is_handed_the_first_layer_speed(self) -> None:
+        """PrusaSlicer prints the first layer's infill at the first-layer
+        speed; the Orca family states that infill apart, with a default of
+        its own, so the same speed is handed over."""
+        for pid in _profiles_in_hand():
+            settings = _ini(resolve_slicer_profile(pid))
+            first = speed_mm_s(settings, "first_layer_speed")
+            assert first, pid
+            process = settings_to_orca_presets(settings).process
+            assert process.get("initial_layer_infill_speed") == f"{round(first, 2):g}", pid
+
+    def test_a_stated_first_layer_infill_speed_is_the_one_handed_over(self) -> None:
+        process = settings_to_orca_presets({"first_layer_speed": "20", "first_layer_infill_speed": "35"}).process
+        assert process["initial_layer_infill_speed"] == "35"
+        unset = settings_to_orca_presets({"first_layer_speed": "20", "first_layer_infill_speed": "0"}).process
+        assert unset["initial_layer_infill_speed"] == "20"
 
     def test_a_percentage_is_translated_as_prusaslicer_reads_it(self) -> None:
         """Orca reads a small perimeter's "40%" against the outer wall;
@@ -1161,6 +1181,57 @@ class TestEverySlicerWritesTheAccelerationsKilnStates:
             if len({tuple(v) for v in written.values()}) > 1:
                 differing[case] = written
         assert not differing, differing
+
+
+_FIRST_LAYER_INFILL = re.compile(r"infill|surface", re.IGNORECASE)
+
+
+def _first_layer_infill_speeds(gcode: str) -> set[float]:
+    """The speeds, in mm/s, of every extruding infill move on the first
+    layer, as each slicer marks its layers and line types."""
+    layer = 0
+    feature = ""
+    feed = 0.0
+    found: set[float] = set()
+    for raw in gcode.splitlines():
+        line = raw.strip()
+        if line.startswith((";LAYER_CHANGE", "; CHANGE_LAYER")):
+            layer += 1
+            if layer > 1:
+                break
+            continue
+        marked = re.match(r";\s*(?:TYPE|FEATURE):\s*(.+)", line)
+        if marked:
+            feature = marked.group(1).strip()
+            continue
+        if layer != 1 or not re.match(r"G[123]\b", line):
+            continue
+        words = dict(_WORD.findall(line.split(";", 1)[0]))
+        if "F" in words:
+            feed = float(words["F"]) / 60.0
+        if _FIRST_LAYER_INFILL.search(feature) and float(words.get("E", 0)) > 0 and ("X" in words or "Y" in words):
+            found.add(round(feed, 1))
+    return found
+
+
+class TestEverySlicerPrintsTheFirstLayerAtItsSpeed:
+    """The first layer's infill prints no faster than the first-layer speed
+    on every installed slicer, judged on the file each one writes."""
+
+    @pytest.mark.parametrize("slicer", list(_SLICERS))
+    def test_the_first_layers_infill_keeps_the_first_layer_speed(self, slicer: str, door_slices) -> None:
+        if not _SLICERS[slicer]:
+            pytest.skip(f"{slicer} not installed")
+        faster = {}
+        for (name, case), (settings, gcode) in door_slices.items():
+            if name != slicer:
+                continue
+            first = speed_mm_s(settings, "first_layer_speed")
+            speeds = _first_layer_infill_speeds(gcode)
+            assert speeds, f"{slicer} {case}: no first-layer infill read"
+            if first and max(speeds) > first + 0.5:
+                faster[case] = (first, sorted(speeds))
+        assert not faster, faster
 
 
 # ---------------------------------------------------------------------------

@@ -906,8 +906,12 @@ def print_identity_at_start(
     # the same record.
     try:
         from kiln import print_lineage
+        from kiln.printers.print_gate import _plate_number
 
-        part = print_lineage.resolve(file_name, local_paths=print_lineage.local_copies(file_name, kwargs))
+        part = print_lineage.resolve(
+            file_name, local_paths=print_lineage.local_copies(file_name, kwargs),
+            plate_number=_plate_number(kwargs or {}),
+        )
         if part.get("lineage_id"):
             out["lineage_id"] = part["lineage_id"]
             out["part_source"] = part["part"]

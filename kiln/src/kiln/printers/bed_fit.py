@@ -548,21 +548,26 @@ def compute_gcode_bbox(
 
 
 def compute_3mf_bbox(
-    threemf_path: str, *, max_lines: int = 200_000
+    threemf_path: str, *, max_lines: int = 200_000, plate_number: int | None = None
 ) -> dict[str, Any] | None:
-    """Extract embedded gcode from a Bambu .gcode.3mf and compute its XY bounding box from the G0/G1 moves."""
-    with _plate_gcode_file(threemf_path) as gcode_path:
+    """Extract embedded gcode from a Bambu .gcode.3mf and compute its XY bounding box from the G0/G1 moves (plate *plate_number*'s when named)."""
+    with _plate_gcode_file(threemf_path, plate_number) as gcode_path:
         return compute_gcode_bbox(gcode_path, max_lines=max_lines) if gcode_path else None
 
 
 @contextlib.contextmanager
-def _plate_gcode_file(threemf_path: str) -> Any:
+def _plate_gcode_file(threemf_path: str, plate_number: int | None = None) -> Any:
     """The plate a .gcode.3mf prints, unpacked to a temp G-code file for the readers that take a path -- ``None`` when the archive has none."""
     gcode_bytes: bytes | None = None
     if Path(threemf_path).is_file():
         try:
             with UntrustedZipFile(threemf_path) as zf:
-                member = sliced_gcode_member(zf)
+                if plate_number is None:
+                    member = sliced_gcode_member(zf)
+                else:
+                    from kiln.gcode_metadata import plate_gcode_member
+
+                    member = plate_gcode_member(zf, plate_number)
                 if member is not None:
                     gcode_bytes = read_member_text(zf, member, _MAX_SCAN_BYTES).encode("utf-8")
         except (zipfile.BadZipFile, KeyError, ValueError) as exc:
@@ -933,35 +938,74 @@ def validate_gcode_for_printer(
 
 
 def _check_3mf_plate(
-    threemf_path: str, printer_id: str | None, bed: PrinterBed | None = None,
+    threemf_path: str, printer_id: str | None, bed: PrinterBed | None = None, plate_number: int | None = None,
 ) -> dict[str, Any]:
-    """:func:`check_bed_fit` on a .gcode.3mf's plate against *bed*, else :func:`printer_bed`, its refusal worded by its cause (:func:`_say_what_prints_past_the_bed`)."""
-    with _plate_gcode_file(threemf_path) as gcode_path:
+    """:func:`check_bed_fit` on a .gcode.3mf's plate (plate *plate_number*'s when named) against *bed*, else :func:`printer_bed`, its refusal worded by its cause (:func:`_say_what_prints_past_the_bed`)."""
+    with _plate_gcode_file(threemf_path, plate_number) as gcode_path:
         bed = bed or sliced_file_bed(gcode_path, printer_id)
         fit = _fit_on(compute_gcode_bbox(gcode_path) if gcode_path else None, bed, printer_id, source="3mf")
         _say_what_prints_past_the_bed(fit, gcode_path, bed.volume if bed is not None else None)
     return fit
 
 
+#: Fit answers that say the size could not be read, not that the part fails.
+_UNREAD_FIT_CODES = frozenset({"BBOX_UNKNOWN", "VOLUME_UNKNOWN", "UNKNOWN_FILE"})
+
+
+def _plates_to_judge(threemf_path: str, plate_number: int | None) -> list[int | None]:
+    """The plates a safety check of *threemf_path* reads: the one named, else
+    every plate of a 3MF of several (which one prints is not known), else
+    the archive's one plate."""
+    if plate_number is not None:
+        return [plate_number]
+    try:
+        from kiln.gcode_metadata import plate_gcode_members
+
+        with UntrustedZipFile(threemf_path) as zf:
+            numbers = [number for number, _ in plate_gcode_members(zf)]
+    except (OSError, ValueError, zipfile.BadZipFile):
+        numbers = []
+    return list(numbers) if len(numbers) > 1 else [None]
+
+
+def _worst(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """The answer that refuses, when any does: a failure first, then one that
+    could not read the plate, then the first."""
+    failed = [r for r in results if not r.get("ok") and r.get("error_code") not in _UNREAD_FIT_CODES]
+    unread = [r for r in results if not r.get("ok")]
+    return (failed or unread or results)[0]
+
+
+def _judge_3mf_plates(
+    threemf_path: str, printer_id: str | None, bed: PrinterBed | None, plate_number: int | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """``(fit, homing)`` for the plate printed, or the worst over every plate."""
+    plates = _plates_to_judge(threemf_path, plate_number)
+    fits = [_check_3mf_plate(threemf_path, printer_id, bed, plate) for plate in plates]
+    homings = [check_gcode_has_homing(threemf_path, source="3mf", plate_number=plate) for plate in plates]
+    return _worst(fits), _worst(homings)
+
+
 def validate_3mf_for_printer(
     threemf_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
+    plate_number: int | None = None,
 ) -> dict[str, Any]:
-    """Validate a .gcode.3mf file's embedded gcode against a printer's bed."""
-    fit = _check_3mf_plate(threemf_path, printer_id, bed)
+    """Validate a .gcode.3mf file's embedded gcode against a printer's bed:
+    plate *plate_number*, or with none named every plate, the first that
+    fails answering."""
+    fit, homing = _judge_3mf_plates(threemf_path, printer_id, bed, plate_number)
     # Also run the homing-sequence check — separate bug class from bbox.
-    if fit["ok"]:
-        homing = check_gcode_has_homing(threemf_path, source="3mf")
-        if not homing["ok"]:
-            return homing  # promote homing failure to the top-level error
+    if fit["ok"] and not homing["ok"]:
+        return homing  # promote homing failure to the top-level error
     return fit
 
 
 def verify_3mf_is_safe_to_print(
-    threemf_path: str, printer_id: str | None,
+    threemf_path: str, printer_id: str | None, *, plate_number: int | None = None,
 ) -> dict[str, Any]:
-    """Comprehensive safety verification for a 3MF about to be sent to a printer."""
-    fit = _check_3mf_plate(threemf_path, printer_id)
-    homing = check_gcode_has_homing(threemf_path, source="3mf")
+    """Comprehensive safety verification for a 3MF about to be sent to a
+    printer: plate *plate_number*, or with none named every plate."""
+    fit, homing = _judge_3mf_plates(threemf_path, printer_id, None, plate_number)
     checks: list[dict[str, Any]] = []
     checks.append({
         "name": "bed_fit",
@@ -995,9 +1039,10 @@ def verify_3mf_is_safe_to_print(
 # ---------------------------------------------------------------------------
 
 def check_gcode_has_homing(
-    path: str, *, source: str = "gcode",
+    path: str, *, source: str = "gcode", plate_number: int | None = None,
 ) -> dict[str, Any]:
-    """Verify that a gcode / .3mf file contains a homing sequence (G28) BEFORE its first print move."""
+    """Verify that a gcode / .3mf file contains a homing sequence (G28) BEFORE its first print move
+    (a .3mf's plate *plate_number* when named)."""
     from pathlib import Path
     p = Path(path)
     if not p.is_file():
@@ -1009,7 +1054,12 @@ def check_gcode_has_homing(
     if p.suffix.lower() == ".3mf" or str(p).lower().endswith(".gcode.3mf"):
         try:
             with UntrustedZipFile(p) as zf:
-                member = sliced_gcode_member(zf)
+                if plate_number is None:
+                    member = sliced_gcode_member(zf)
+                else:
+                    from kiln.gcode_metadata import plate_gcode_member
+
+                    member = plate_gcode_member(zf, plate_number)
                 if member is not None:
                     gcode_text = read_member_text(zf, member, _MAX_SCAN_BYTES)
         except (zipfile.BadZipFile, KeyError, ValueError):

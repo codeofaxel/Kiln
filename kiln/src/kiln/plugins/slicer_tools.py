@@ -3063,10 +3063,27 @@ class _SlicerToolsPlugin:
             time_limit_seconds: int | None = None,
             soft_nozzle_confirmed: bool = False,
             mixed_nozzle_experiment: bool = False,
+            speed_by_height: list[dict[str, Any]] | str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
             Args:
+                speed_by_height: The person's own speeds for height ranges of the
+                    part, only when they ask for them: a list like
+                    ``[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6,
+                    "speed_mm_s": 120}]``.  Heights are millimetres up from the
+                    plate; ``to_mm`` left out means to the top of the part; each
+                    range has one speed, ``percent`` (of the profile's own speeds)
+                    or ``speed_mm_s``.  Their slicer applies the ranges and the
+                    sliced file is read back: the response's ``speed_by_height``
+                    says, for each range, what was asked, what the file commands,
+                    and whether it was applied, was already that slow, or was held
+                    by the slicer (at what the nozzle can melt, or to let short
+                    layers cool), with the slicer's time with and without the
+                    ranges.  Refused, with no file kept: ranges that overlap, have
+                    no height or hold no layer of the part
+                    (``SPEED_BY_HEIGHT_OUTSIDE_PART``), and a range the slicer did
+                    not apply (``SPEED_BY_HEIGHT_NOT_APPLIED``).
                 soft_nozzle_confirmed: The owner has said to print anyway a
                     slice refused with ``ABRASIVE_ON_SOFT_NOZZLE`` (an
                     abrasive filament through a nozzle on record that is not
@@ -3246,7 +3263,9 @@ class _SlicerToolsPlugin:
                     loaded_material=_loaded_material_for(printer_name, material),
                     plate_number=plate_number,
                     **({"timeout": time_limit_seconds} if time_limit_seconds is not None else {}),
-                    **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                    **_owner_asks(
+                        soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height,
+                    ),
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3822,6 +3841,7 @@ class _SlicerToolsPlugin:
             mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
             keep_record: bool | None = None,
+            speed_by_height: list[dict[str, Any]] | str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -3871,6 +3891,10 @@ class _SlicerToolsPlugin:
             bypass (e.g. for already-validated meshes or pre-sliced 3MFs).
 
             Args:
+                speed_by_height: The person's own speeds for height ranges of the part, only when they ask
+                    for them: a list like ``[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6,
+                    "speed_mm_s": 120}]`` (millimetres up from the plate; ``to_mm`` left out means to the
+                    top; one speed per range).  ``slice_model`` says what is read back and what is refused.
                 mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
                     with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
                     experiment). Only on their yes, each time; ``slice_model`` says what follows.
@@ -4269,7 +4293,9 @@ class _SlicerToolsPlugin:
                     profile_path=effective_profile, auto_center=auto_center,
                     material_id=material, material=declared_material,
                     loaded_material=loaded_material,
-                    **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                    **_owner_asks(
+                        soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height,
+                    ),
                 )
                 if slice_err is not None:
                     return slice_err

@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln.print_lineage import SPEED_BY_HEIGHT_KEY
+from kiln.slicer_estimate import RECORD_KEY as SLICER_ESTIMATE_KEY
+
 _RECIPE_FILENAME = ".kiln_recipe.json"
 
 
@@ -404,9 +407,13 @@ def create_new_version(
     return new
 
 
-#: Provenance keys that tell how ONE version was made.  A new version states
-#: its own or none, and never shows its parent's as its own.
-VERSION_STORY_KEYS = ("tools_used", "change_summary", "source_files", "edit")
+#: Provenance keys that tell how ONE version was made, or what its own slice
+#: says (:data:`kiln.slicer_estimate.RECORD_KEY`) and was made with
+#: (:data:`kiln.print_lineage.SPEED_BY_HEIGHT_KEY`).  A new version states its
+#: own or none, and never shows its parent's as its own.
+VERSION_STORY_KEYS = (
+    "tools_used", "change_summary", "source_files", "edit", SLICER_ESTIMATE_KEY, SPEED_BY_HEIGHT_KEY,
+)
 
 
 #: Provenance keys that describe the part itself: what it is made of, where
@@ -511,8 +518,11 @@ def list_recipe_versions(directory: str) -> list[dict[str, Any]]:
     """List all versioned recipe snapshots in *directory*, sorted by version.
 
     Returns a list of dicts with ``version``, ``path``, ``created``, and
-    ``name`` for each snapshot found.
+    ``name`` for each snapshot found, and ``print_time`` for a version that
+    keeps the slicer's estimate (:func:`kiln.slicer_estimate.estimate_sentence`).
     """
+    from kiln.slicer_estimate import estimate_sentence
+
     results: list[dict[str, Any]] = []
     if not os.path.isdir(directory):
         return results
@@ -521,14 +531,17 @@ def list_recipe_versions(directory: str) -> list[dict[str, Any]]:
             path = os.path.abspath(os.path.join(directory, fname))
             try:
                 recipe = load_recipe(path)
-                results.append({
+                entry = {
                     "version": recipe.version,
                     "path": path,
                     "created": recipe.created,
                     "name": recipe.name,
                     "notes": recipe.notes,
                     "changes": recipe.changes,
-                })
+                }
+                if (print_time := estimate_sentence(recipe.provenance)) is not None:
+                    entry["print_time"] = print_time
+                results.append(entry)
             except Exception:  # noqa: BLE001
                 results.append({"path": path, "error": "Kiln couldn't read this version's record."})
     results.sort(key=lambda r: r["version"] if isinstance(r.get("version"), int) else 0)

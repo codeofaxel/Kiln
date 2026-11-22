@@ -27,6 +27,7 @@ Example::
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -337,6 +338,10 @@ class SliceResult:
     #: (:func:`kiln.slicer_profiles.mixed_size_experiment`); ``None`` for
     #: any other slice.
     experimental: dict[str, Any] | None = None
+    #: The person's own speed ranges this slice was made with and what the
+    #: sliced file commands in each (:func:`kiln.speed_by_height.sliced`);
+    #: ``None`` for a slice made with none.
+    speed_by_height: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -369,6 +374,8 @@ class SliceResult:
             d["soft_nozzle"] = self.soft_nozzle
         if self.experimental is not None:
             d["experimental"] = self.experimental
+        if self.speed_by_height is not None:
+            d["speed_by_height"] = self.speed_by_height
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -629,6 +636,11 @@ def _drawn_mesh_for(input_abs: str) -> str:
         return input_abs
 
 
+#: Set while a slice is made only to be read and thrown away: it is not
+#: counted and leaves no record.
+_unrecorded: contextvars.ContextVar[bool] = contextvars.ContextVar("kiln_slice_unrecorded", default=False)
+
+
 def _record_slice(
     profile: str | None,
     input_abs: str | None = None,
@@ -652,6 +664,8 @@ def _record_slice(
     :func:`_drawn_mesh_for`), with the file the slicer read beside it when
     the two differ.
     """
+    if _unrecorded.get():
+        return
     try:
         from kiln.daily_stats import record_event
 
@@ -886,13 +900,17 @@ MAP_ADVICE = "give a filament-to-nozzle map with "
 
 def owner_asks(
     soft_nozzle_confirmed: Any = False, filament_map: Any = None, mixed_nozzle_experiment: Any = False,
+    *, speed_by_height: Any = None,
 ) -> dict[str, Any]:
     """The slice keywords a door hands on for the owner's word to print
     anyway (``soft_nozzle_confirmed``), the filament-to-nozzle map
-    (``filament_map``) and the person's yes to nozzles of different sizes
-    for this print (``mixed_nozzle_experiment``): only what was given, so
-    a door passes all three the same way (:func:`slice_file`)."""
+    (``filament_map``), the person's yes to nozzles of different sizes
+    for this print (``mixed_nozzle_experiment``) and their own speeds for
+    height ranges (``speed_by_height``): only what was given, so a door
+    passes all of them the same way (:func:`slice_file`)."""
     out: dict[str, Any] = {}
+    if speed_by_height:
+        out["speed_by_height"] = speed_by_height
     if soft_nozzle_confirmed is True:
         out["soft_nozzle_confirmed"] = True
     if filament_map:
@@ -1682,8 +1700,12 @@ def _slice_with_orca(
     nozzles: dict[str, Any] | None = None,
     filament_map: list[int] | None = None,
     routines: Mapping[str, str] | None = None,
+    part_path: str | None = None,
 ) -> SliceResult:
     """Slice through the BambuStudio/OrcaSlicer command line.
+
+    *part_path* is the part the slice is of when *input_abs* is a copy of
+    it made for the slicer: the slice's record and message name the part.
 
     A different argv and a different preset format from
     :func:`slice_file`'s Slic3r path: ``--slice 0 --outputdir DIR
@@ -1936,10 +1958,10 @@ def _slice_with_orca(
             made_package = out_file + ".made.3mf"
             shutil.move(str(written), made_package)
 
-    _record_slice(profile, input_abs, out_file, drawn_as=drawn_as)
+    _record_slice(profile, part_path or input_abs, out_file, drawn_as=drawn_as)
     if made_package is not None:
         _keep_print_package(made_package, out_file)
-    message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
+    message = f"Sliced {Path(part_path or input_abs).name} -> {Path(out_file).name}"
     if crashed_after_finishing:
         message += (
             f" (the slicer crashed on exit AFTER writing complete G-code — "
@@ -1952,7 +1974,7 @@ def _slice_with_orca(
     try:
         from kiln.declared_color import carry as _carry_colour
 
-        _carry_colour(input_abs, out_file)
+        _carry_colour(part_path or input_abs, out_file)
     except Exception:  # noqa: BLE001 -- a note never costs a slice
         logger.debug("colour note not carried to %s", out_file, exc_info=True)
     return SliceResult(
@@ -2019,8 +2041,12 @@ def slice_file(input_path: str, **kwargs: Any) -> SliceResult:
     only fault is its unit, so it is said as what it means at that size;
     any other failure keeps the slicer's words.
     """
+    from kiln.speed_by_height import SpeedByHeightError
+
     try:
         return _slice_file(input_path, **kwargs)
+    except SpeedByHeightError:
+        raise
     except (
         SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal, ProjectPlateError, NozzleMapError,
         SliceTimeLimitError,
@@ -2275,10 +2301,17 @@ def _slice_file(
     filament_map: Sequence[int] | str | None = None,
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
+    speed_by_height: Any = None,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
 
     Args:
+        speed_by_height: The person's own speeds for height ranges of the
+            part (:func:`kiln.speed_by_height.checked` reads and refuses
+            them).  The slicer applies them, the sliced file is read back,
+            and the result's ``speed_by_height`` says what each range
+            commands; a range the slicer did not apply refuses the slice
+            (:class:`kiln.speed_by_height.SpeedByHeightError`).
         soft_nozzle_confirmed: The owner has said to print anyway a slice
             refused because an abrasive filament would print through a
             nozzle on record that is not wear-resistant
@@ -2346,6 +2379,10 @@ def _slice_file(
     ext = Path(input_abs).suffix.lower()
     if ext not in _INPUT_EXTENSIONS:
         raise SlicerError(f"Unsupported input format '{ext}'. Supported: {', '.join(sorted(_INPUT_EXTENSIONS))}")
+
+    from kiln import speed_by_height as _speed_by_height
+
+    speed_ranges = _speed_by_height.checked(speed_by_height)
 
     # A project of several plates is sliced one plate at a time: the plate
     # named is taken out as a file of its own, and that file is what every
@@ -2644,14 +2681,56 @@ def _slice_file(
                 if painted is not None:
                     sliced_input, faces = painted
                     supports = replace(supports, kept_off_painted=faces)
-    try:
-        result = _say_left_out(say_project_plate(_slice_decided(
-            slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,
-            profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
+    def _decided(out_path: str, *, with_profile: str | None, prepare: Any = None) -> SliceResult:
+        return _slice_decided(
+            slicer, input_abs, sliced_input, out_path, ext=ext, input_path=input_path,
+            profile=profile, slicer_profile=with_profile, extra_args=extra_args, timeout=timeout,
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
-            nozzles=nozzles, filament_map=asked_map, several=several, maker=maker,
-        ), taken), left_out)
+            nozzles=nozzles, filament_map=asked_map, several=several, maker=maker, prepare=prepare,
+        )
+
+    def _with_ranges() -> SliceResult:
+        # A mesh is placed where the slicer would have arranged it, the
+        # bed's centre; one the caller placed stays where it is.
+        placed = "--dont-arrange" in (extra_args or [])
+        bambu = slicer_cli_family(slicer) == _CLI_BAMBU
+        bed = None if placed else _bed_xy_bounds_from_profile(slicer_profile)
+        if bed is None and not placed and not sliced_input.lower().endswith(".3mf"):
+            raise _speed_by_height.SpeedByHeightError(
+                "Speed ranges need the printer's bed to place the part on, and this slice has no profile that "
+                "states one. Name the printer, or slice without speed_by_height."
+            )
+        centre = None if bed is None else ((bed[0] + bed[2]) / 2.0, (bed[1] + bed[3]) / 2.0)
+
+        def _run(out_path: str, *, prepare: Any, first_layer_speed: float | None = None, record: bool) -> SliceResult:
+            with_profile = slicer_profile
+            if first_layer_speed is not None:
+                slower = f"{round(first_layer_speed, 2):g}"
+                with_profile = profile_with_overrides(
+                    slicer_profile,
+                    {"first_layer_speed": slower},
+                    prefix=f"{Path(slicer_profile).stem}_" if slicer_profile else None, stated=False,
+                )
+            quiet = _unrecorded.set(not record)
+            try:
+                return _decided(
+                    out_path, with_profile=with_profile,
+                    prepare=lambda path, out_dir: prepare(path, out_dir, centre),
+                )
+            finally:
+                _unrecorded.reset(quiet)
+
+        return _speed_by_height.sliced(
+            speed_ranges,
+            family=_speed_by_height.BAMBU if bambu else _speed_by_height.PRUSA,
+            out_file=out_file, run=_run,
+        )
+
+    try:
+        result = _say_left_out(say_project_plate(
+            _with_ranges() if speed_ranges else _decided(out_file, with_profile=slicer_profile), taken,
+        ), left_out)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
         if soft_run is not None:
@@ -2733,9 +2812,13 @@ def _slice_decided(
     filament_map: list[int] | None = None,
     several: Any = None,
     maker: Any = None,
+    prepare: Any = None,
 ) -> SliceResult:
     """Run the slicer on *sliced_input* with everything :func:`_slice_file`
-    decided; *input_abs* is the part as the caller named it.  *several* is
+    decided; *input_abs* is the part as the caller named it.  *prepare*,
+    when given, is called with the file about to be handed to the slicer
+    and a scratch folder, and returns the file to hand over in its place
+    (:func:`kiln.speed_by_height.sliced`).  *several* is
     the slicer chosen for a slice for more than one nozzle, and *maker* the
     printer's maker's slicer making a slice for one nozzle with the
     printer's own routines (:class:`kiln.maker_slicer.SeveralNozzleSlicer`
@@ -2748,20 +2831,26 @@ def _slice_decided(
     # swap.  The branch is here — at the one place all twelve slicing doors
     # funnel through — so none of them has to know which slicer is installed.
     if slicer_cli_family(slicer) == _CLI_BAMBU:
-        result = _slice_with_orca(
-            slicer,
-            sliced_input,
-            out_file,
-            profile=slicer_profile,
-            extra_args=extra_args,
-            timeout=timeout,
-            multicolor=multicolor,
-            drawn_as=drawn,
-            # Named only for a slice for more than one nozzle, and for one
-            # carrying the printer's own routines read from its maker's slicer.
-            **({"nozzles": nozzles, "filament_map": filament_map} if nozzles else {}),
-            **({"routines": chosen.routines} if chosen is not None else {}),
-        )
+        prepared_dir = tempfile.mkdtemp(prefix="kiln_prepared_") if prepare is not None else None
+        try:
+            result = _slice_with_orca(
+                slicer,
+                sliced_input if prepare is None else prepare(sliced_input, prepared_dir),
+                out_file,
+                profile=slicer_profile,
+                extra_args=extra_args,
+                timeout=timeout,
+                multicolor=multicolor,
+                drawn_as=drawn,
+                # Named only for a slice for more than one nozzle, and for one
+                # carrying the printer's own routines read from its maker's slicer.
+                **({"nozzles": nozzles, "filament_map": filament_map} if nozzles else {}),
+                **({"routines": chosen.routines} if chosen is not None else {}),
+                **({"part_path": sliced_input} if prepare is not None else {}),
+            )
+        finally:
+            if prepared_dir is not None:
+                shutil.rmtree(prepared_dir, ignore_errors=True)
         result.filament = filament
         result.nozzle = nozzle
         result.supports = witnessed(supports, result.output_path)
@@ -2788,7 +2877,13 @@ def _slice_decided(
             slic3r_input = joined_copy
         if several is not None:
             slic3r_input, slicer_profile = _stand_the_tower(slic3r_input, slicer_profile, input_abs, parts_dir)
+    if prepare is not None and parts_dir is None:
+        parts_dir = tempfile.mkdtemp(prefix="kiln_prusa_parts_")
     try:
+        if prepare is not None:
+            prepared_dir = os.path.join(parts_dir, "prepared")
+            os.makedirs(prepared_dir, exist_ok=True)
+            slic3r_input = prepare(slic3r_input, prepared_dir)
         result = _slice_with_slic3r(
             slicer,
             input_abs,

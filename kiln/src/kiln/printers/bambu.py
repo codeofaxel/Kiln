@@ -3656,7 +3656,11 @@ class BambuAdapter(PrinterAdapter):
         warnings: list[str] = []
 
         if basename.lower().endswith(".3mf"):
-            plate_num = kwargs.get("plate_number", 1)
+            from kiln.printers.print_gate import printed_plate_number
+
+            # The same resolution the start gate checked: the plate asked
+            # for is the plate whose file was read.
+            plate_num = printed_plate_number(kwargs)
             ams_mapping = kwargs.get("ams_mapping")
             use_ams = kwargs.get("use_ams", False)
 

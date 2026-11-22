@@ -268,6 +268,8 @@ _NATIVE_HOME: dict[str, tuple[str, str]] = {
     # Orca's process-level flow ratio and its own spelling of the retraction
     # a filament carries.
     "print_flow_ratio": ("process", _NATIVE_SCALAR),
+    # The first layer's infill, which Orca states apart from its walls.
+    "initial_layer_infill_speed": ("process", _NATIVE_SCALAR),
     "filament_retraction_length": ("filament", _NATIVE_LIST),
 }
 
@@ -854,6 +856,13 @@ def settings_to_orca_presets(
             raw = f"{round(resolved, 2):g}"
         if raw:
             process[dst] = raw
+    # The first layer's infill: PrusaSlicer prints it at first_layer_infill_speed,
+    # where 0 or unstated means the first-layer speed.  The Orca family states
+    # it apart from the first layer's walls, with a default of its own, so the
+    # same speed is handed over.
+    first_infill = speed_mm_s(settings, "first_layer_infill_speed") or speed_mm_s(settings, "first_layer_speed")
+    if first_infill:
+        process["initial_layer_infill_speed"] = f"{round(first_infill, 2):g}"
 
     # Every role is written out, stated or not: the stated value, else its
     # fallback, down to the default; "0" throughout when no default is
