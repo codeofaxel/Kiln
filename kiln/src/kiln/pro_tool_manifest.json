@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-22T08:14:16.908225+00:00",
+  "generated": "2026-11-22T08:16:03.671364+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -30879,6 +30879,7 @@
           "nozzle_mm"
         ]
       },
+      "analyze_design_requirements": {},
       "analyze_printability": {
         "inputs": {
           "files": {
@@ -30920,6 +30921,15 @@
           "nozzle_mm"
         ]
       },
+      "audit_original_design": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          }
+        }
+      },
+      "build_generation_prompt": {},
+      "build_parametric_prompt": {},
       "check_print_readiness": {
         "inputs": {
           "files": {
@@ -30982,6 +30992,7 @@
           }
         }
       },
+      "match_design_requirements": {},
       "recommend_design_material": {},
       "recommend_material": {
         "reads_first": [

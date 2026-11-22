@@ -160,7 +160,7 @@ class _DesignToolsPlugin:
                 material: Optional material override (e.g. "petg"). If not
                     provided, the system recommends the best material.
             """
-            from kiln.design_intelligence import get_design_constraints
+            from kiln.design_intelligence import get_design_constraints, with_design_notes_note
 
             try:
                 analysis = get_design_constraints(
@@ -169,7 +169,7 @@ class _DesignToolsPlugin:
                 )
                 result = analysis.to_dict()
                 result["success"] = True
-                return result
+                return with_design_notes_note(result)
             except Exception as exc:
                 _logger.error(
                     "analyze_design_requirements failed: %s", exc, exc_info=True,
@@ -202,6 +202,7 @@ class _DesignToolsPlugin:
                 provider: Optional generation provider (e.g. "openscad", "meshy",
                     "gemini"). Controls prompt length budget.
             """
+            from kiln.design_intelligence import with_design_notes_note
             from kiln.generation_feedback import enhance_prompt_with_design_intelligence
 
             try:
@@ -211,7 +212,7 @@ class _DesignToolsPlugin:
                     printer_model=printer_model,
                     provider=provider,
                 )
-                return {
+                return with_design_notes_note({
                     "success": True,
                     "prompt": prompt.to_dict(),
                     "message": (
@@ -219,7 +220,7 @@ class _DesignToolsPlugin:
                         f"{len(prompt.constraints_added)} constraints"
                         f"{f' for {provider} provider' if provider else ''}."
                     ),
-                }
+                })
             except Exception as exc:
                 _logger.error("Build generation prompt failed: %s", exc, exc_info=True)
                 return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
@@ -273,6 +274,7 @@ class _DesignToolsPlugin:
                 max_overhang_angle: Supportless overhang threshold in degrees.
                     Left out, the material's own limit.
             """
+            from kiln.design_intelligence import with_design_notes_note
             from kiln.original_design import audit_original_design as _audit
 
             try:
@@ -321,7 +323,7 @@ class _DesignToolsPlugin:
                         r if r.endswith((".", "!", "?")) else f"{r}." for r in rest
                     )
                 result["message"] = f"{said}  {outcome}".strip()
-                return result
+                return with_design_notes_note(result)
             except ValueError as exc:
                 return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
@@ -981,15 +983,15 @@ class _DesignToolsPlugin:
                 description: What the object needs to do (e.g. "outdoor
                     hook that holds a heavy hanging planter").
             """
-            from kiln.design_intelligence import match_requirements
+            from kiln.design_intelligence import match_requirements, with_design_notes_note
 
             try:
                 matched = match_requirements(description)
-                return {
+                return with_design_notes_note({
                     "success": True,
                     "matched_requirements": [m.to_dict() for m in matched],
                     "count": len(matched),
-                }
+                })
             except Exception as exc:
                 _logger.error("Match requirements failed: %s", exc, exc_info=True)
                 return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
@@ -1488,6 +1490,7 @@ class _DesignToolsPlugin:
                 material: Optional material override (e.g. "petg").
                 printer_model: Optional printer model ID (e.g. "bambu_a1").
             """
+            from kiln.design_intelligence import with_design_notes_note
             from kiln.generation_feedback import build_parametric_generation_prompt
 
             try:
@@ -1496,14 +1499,14 @@ class _DesignToolsPlugin:
                     material=material,
                     printer_model=printer_model,
                 )
-                return {
+                return with_design_notes_note({
                     "success": True,
                     "prompt": prompt.to_dict(),
                     "message": (
                         f"Built parametric OpenSCAD prompt with "
                         f"{len(prompt.constraints_added)} design constraints."
                     ),
-                }
+                })
             except Exception as exc:
                 _logger.error("Build parametric prompt failed: %s", exc, exc_info=True)
                 return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
