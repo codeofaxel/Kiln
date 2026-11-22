@@ -1913,10 +1913,14 @@ class TestPrepareAiModelAutoScale:
         """Model already at correct size gets no scaling."""
         stl = _make_normal_size_stl(tmp_path, width=50.0, depth=40.0, height=30.0)
 
+        # Which way up the part stands is judged by Kiln's servers; this test
+        # is about scaling, so that judgment gives no answer here, whatever
+        # this machine can import.
         with (
             patch("kiln.generation.validation.analyze_mesh", side_effect=ImportError),
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
+            patch("kiln._pro_arrival_pose_bridge.judge", return_value=(None, None)),
         ):
             result = _invoke_ai_tool(stl)
 
