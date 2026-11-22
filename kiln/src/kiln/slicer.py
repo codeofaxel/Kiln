@@ -2706,8 +2706,7 @@ def _slice_file(
                 slower = f"{round(first_layer_speed, 2):g}"
                 with_profile = profile_with_overrides(
                     slicer_profile,
-                    # One speed for every line of the first layer, in both families.
-                    {"first_layer_speed": slower, **({"initial_layer_infill_speed": slower} if bambu else {})},
+                    {"first_layer_speed": slower},
                     prefix=f"{Path(slicer_profile).stem}_" if slicer_profile else None, stated=False,
                 )
             quiet = _unrecorded.set(not record)
