@@ -3308,19 +3308,18 @@ def _fixes_not_on_this_computer() -> tuple[str, dict[str, Any]]:
     from kiln import served_public
     from kiln.served_answer import fields, sentence
 
-    if served_public.already_missed():
-        _, miss = served_public.answer_or_missed("troubleshoot_print_issue", {})
-        if miss is not None:
-            note = sentence(
-                miss,
-                feature="servers",
-                on_the_line=_FIXES_ON_THE_LINE,
-                cannot=_FIXES_CANNOT,
-                wont=_FIXES_WONT,
-                then="ask again",
-            )
-            return note, fields(miss)
-    return _FIXES_NOT_ASKED, {}
+    miss = served_public.missed_here()
+    if miss is None:
+        return _FIXES_NOT_ASKED, {}
+    note = sentence(
+        miss,
+        feature="servers",
+        on_the_line=_FIXES_ON_THE_LINE,
+        cannot=_FIXES_CANNOT,
+        wont=_FIXES_WONT,
+        then="ask again",
+    )
+    return note, fields(miss)
 
 
 def list_troubleshooting_materials() -> list[str]:
