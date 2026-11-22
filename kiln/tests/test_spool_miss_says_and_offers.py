@@ -148,9 +148,10 @@ class TestStartPrint:
         reslice, load = out["options"]
         assert reslice["action"] == "reslice_for" and reslice["slot"] == "A4" and reslice["tray_id"] == 3
         assert (reslice["material"], reslice["color"]) == ("PLA", "red")
-        assert reslice["call"]["tool"] == "run_reslice_and_print"
-        assert reslice["call"]["arguments"] == {"material": "pla", "ams_mapping": [3]}
-        assert "model_path" in reslice["call"]["needs"]
+        assert reslice["call"]["tool"] == "reprint_with_material"
+        assert reslice["call"]["arguments"] == {
+            "material_id": "pla", "ams_mapping": [3], "in_place_of": "PETG", "chosen_by": "person"}
+        assert "file_path" in reslice["call"]["needs"]
         assert (load["action"], load["material"], load["color"], load["slot"]) == ("load_spool", "PETG", "red", None)
 
     def test_one_piece_missing_and_the_chosen_slot_then_prints(self, tmp_path):
@@ -248,7 +249,8 @@ class TestSliceAndPrint:
         load, reslice = out["options"]
         assert (load["action"], load["material"], load["color"]) == ("load_spool", "PETG", None)
         assert (reslice["action"], reslice["material"]) == ("reslice_for", "PLA")
-        assert reslice["call"] == {"tool": "slice_and_print", "arguments": {"input_path": model, "material": "pla"}}
+        assert reslice["call"] == {"tool": "reprint_with_material", "arguments": {
+            "file_path": model, "material_id": "pla", "ams_mapping": [0], "in_place_of": "PETG", "chosen_by": "person"}}
         assert "suits_goal" not in reslice
 
 
@@ -282,8 +284,8 @@ class TestThePipeline:
         assert step["message"] == S3
         load, reslice = out["options"]
         assert load["action"] == "load_spool" and load["material"] == "PETG"
-        assert reslice["call"] == {"tool": "run_reslice_and_print", "arguments": {
-            "model_path": model, "material": "pla", "ams_mapping": [0]}}
+        assert reslice["call"] == {"tool": "reprint_with_material", "arguments": {
+            "file_path": model, "material_id": "pla", "ams_mapping": [0], "in_place_of": "PETG", "chosen_by": "person"}}
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +324,8 @@ class TestSmartReprint:
             "the file is sliced for PETG's temperatures", "this print is set up for PETG's temperatures",
         ).replace("re-slice it for PLA and print from A4?", "slice it for PLA and print from A4 instead?")
         reslice, load = out["options"]
-        assert reslice["call"] == {"tool": "smart_reprint", "arguments": {"file_name": model, "material_id": "pla"}}
+        assert reslice["call"] == {"tool": "reprint_with_material", "arguments": {
+            "file_path": model, "material_id": "pla", "ams_mapping": [3], "in_place_of": "petg", "chosen_by": "person"}}
         assert load["action"] == "load_spool" and load["material"] == "petg"
 
     def test_the_right_plastic_in_the_wrong_colour_prints_from_the_slot_chosen(self, tmp_path):
@@ -379,16 +382,18 @@ class TestMultiColorCopies:
         assert green["call"] == {"tool": "multi_color_copies", "arguments": {
             "model_path": model, "copies": 2, "material": "PLA", "ams_slots": [0, 1]}}
 
-    def test_the_plastic_not_loaded(self, tmp_path):
+    def test_the_plastic_not_loaded_offers_no_re_slice(self, tmp_path):
+        # Copies of a part in another plastic would not land on its history
+        # with the plastic it stood in for: this door offers loading only.
         model = _stl(tmp_path / "part.stl")
         doors = _Doors(FOUR_PLA)
         out = doors.run("multi_color_copies", model_path=model, material="PETG")
         assert out["error"]["code"] == "NO_MATERIAL" and doors.calls == []
-        assert out["error"]["message"] == S3.replace(
-            "re-slice it for PLA,", "slice it for PLA instead,",
+        assert out["error"]["message"] == (
+            "This print needs PETG, and none of your spools are PETG (you have white, black, grey and red PLA). "
+            "Load a PETG spool and I'll start it."
         )
-        reslice = _by(out["options"], "reslice_for")[0]
-        assert reslice["call"] == {"tool": "multi_color_copies", "arguments": {"model_path": model, "material": "pla"}}
+        assert _by(out["options"], "reslice_for") == []
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +402,8 @@ class TestMultiColorCopies:
 
 
 class TestTheGoal:
+    """The saved goal's answer, as the bridge carries it to the sentence."""
+
     def _resolve(self, reading: dict[str, Any], **kw: Any) -> dict[str, Any]:
         from kiln.server import _resolve_use_ams
 
@@ -404,73 +411,69 @@ class TestTheGoal:
         adapter.get_ams_status.return_value = reading
         return _resolve_use_ams("auto", None, adapter, material="PETG", **kw)
 
-    def test_a_loaded_plastic_the_goal_rules_out_is_said_and_load_comes_first(self, monkeypatch):
+    def test_a_loaded_plastic_unsafe_for_the_part_is_steered_away_and_load_comes_first(self, monkeypatch):
         import kiln._pro_print_fix_bridge as bridge
 
         asked: list[tuple] = []
-        monkeypatch.setattr(bridge, "stand_in_fit", lambda *a, **k: asked.append((a, k)) or {
-            "verdicts": {"PLA": {"suits": False, "why": "PLA would soften where this part lives"}}})
-        out = self._resolve(FOUR_PLA, goal={"version_id": "v-dash"})
-        assert asked[0][0] == ("PETG", ["PLA"]) and asked[0][1]["version_id"] == "v-dash"
+        monkeypatch.setattr(bridge, "stand_in_fit", lambda *a, **k: asked.append((a, k)) or {"verdicts": {"PLA": {
+            "suits": False, "why": "this part holds weight, and PLA would soften where it lives", "offer": False}}})
+        out = self._resolve(FOUR_PLA, goal={"version_id": "v-shelf"})
+        assert asked[0][0] == ("PETG", ["PLA"]) and asked[0][1]["version_id"] == "v-shelf"
         assert out["warnings"] == [
             "This print needs PETG, and none of your spools are PETG (you have white, black, grey and red PLA). "
-            "PLA would soften where this part lives, so I'd load a PETG spool and start it as is."
+            "Re-slicing for PLA isn't a good idea here: this part holds weight, and PLA would soften where it "
+            "lives. Load a PETG spool and I'll start it."
         ]
         load, reslice = out["options"]
         assert load["action"] == "load_spool"
-        assert reslice["suits_goal"] is False and reslice["why"] == "PLA would soften where this part lives"
+        assert reslice["suits_goal"] is False and reslice["offered"] is False
 
     def test_a_loaded_plastic_the_goal_allows_drops_the_hedge(self, monkeypatch):
         import kiln._pro_print_fix_bridge as bridge
 
-        monkeypatch.setattr(bridge, "stand_in_fit", lambda *a, **k: {"verdicts": {"PLA": {"suits": True, "why": None}}})
+        monkeypatch.setattr(bridge, "stand_in_fit", lambda *a, **k: {
+            "verdicts": {"PLA": {"suits": True, "why": None, "offer": True}}})
         out = self._resolve(FOUR_PLA, goal={"goal_id": "b-shelf"})
         assert out["warnings"][0].endswith("Load a PETG spool and I'll start it. Or I can re-slice it for PLA.")
         assert out["options"][1]["suits_goal"] is True
 
-    def test_no_goal_asks_nothing_and_keeps_the_hedge(self, monkeypatch):
+    def test_no_goal_asks_nothing_keeps_the_hedge_and_says_why_beside_it(self, monkeypatch):
+        import kiln._pro_print_fix_bridge as bridge
         import kiln.server as srv
 
         monkeypatch.setattr(srv, "_pro_api_call", mock.MagicMock(side_effect=AssertionError("asked")))
         out = self._resolve(FOUR_PLA)
         assert out["warnings"] == [S3]
+        assert out["options"][1]["goal_check_missed"] == bridge.NO_GOAL
 
     def test_a_goal_check_that_did_not_answer_keeps_the_hedge_and_says_why_beside_it(self, monkeypatch):
         import kiln._pro_print_fix_bridge as bridge
         import kiln.server as srv
 
         monkeypatch.setattr(bridge, "_local_stand_ins", lambda *a: bridge._NOT_HERE)
-        monkeypatch.setattr(bridge, "_plan_note", lambda m: None)
         monkeypatch.setattr(srv, "_pro_api_call", mock.MagicMock(side_effect=OSError("offline")))
         out = self._resolve(FOUR_PLA, goal={"version_id": "v-1"})
         assert out["warnings"] == [S3]
         missed = out["options"][1]["goal_check_missed"]
         assert missed.startswith("Whether a loaded filament suits what this part is for is checked by Kiln's servers.")
 
-    def test_a_plan_below_kiln_pro_asks_nothing(self, monkeypatch):
+    def test_the_served_answer_is_asked_at_every_plan_and_carried_as_said(self, monkeypatch):
         import kiln._pro_print_fix_bridge as bridge
         import kiln.server as srv
 
         monkeypatch.setattr(bridge, "_local_stand_ins", lambda *a: bridge._NOT_HERE)
-        monkeypatch.setattr(bridge, "_plan_note", lambda m: "Kiln can also ... Your plan is Free.")
-        monkeypatch.setattr(srv, "_pro_api_call", mock.MagicMock(side_effect=AssertionError("asked")))
-        out = self._resolve(FOUR_PLA, goal={"version_id": "v-1"})
-        assert out["warnings"] == [S3] and "goal_check_missed" not in out["options"][1]
-
-    def test_the_served_answer_is_carried_as_said(self, monkeypatch):
-        import kiln._pro_print_fix_bridge as bridge
-        import kiln.server as srv
-
-        monkeypatch.setattr(bridge, "_local_stand_ins", lambda *a: bridge._NOT_HERE)
-        monkeypatch.setattr(bridge, "_plan_note", lambda m: None)
+        monkeypatch.setattr(bridge, "_stand_in_plan_note", lambda: "Kiln can also check ... Your plan is Free.")
         sent: dict[str, Any] = {}
         monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: sent.update(tool=tool, **kw) or {
-            "success": True, "status": "ok", "known": True,
-            "stand_ins": [{"material": "PLA", "suits": False, "why": "PLA isn't food-safe for what this part is for"}]})
+            "success": True, "status": "ok", "known": True, "purpose_known": True,
+            "stand_ins": [{"material": "PLA", "suits": False, "offer": False,
+                           "why": "this part touches food, and PLA isn't food-safe for that"}]})
         out = self._resolve(FOUR_PLA, goal={"version_id": "v-mug"})
         assert sent["tool"] == "material_pick" and sent["blocked_material"] == "PETG"
         assert sent["stand_ins"] == ["PLA"] and sent["version_id"] == "v-mug" and sent["_asked_by_user"] is False
-        assert "PLA isn't food-safe for what this part is for, so I'd load a PETG spool" in out["warnings"][0]
+        assert ("Re-slicing for PLA isn't a good idea here: this part touches food, and PLA isn't food-safe "
+                "for that. Load a PETG spool and I'll start it.") in out["warnings"][0]
+        assert "Your plan is Free" not in out["warnings"][0], "nothing was left unjudged, so no plan line"
 
 
 # ---------------------------------------------------------------------------
