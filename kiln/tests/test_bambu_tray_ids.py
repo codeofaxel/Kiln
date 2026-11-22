@@ -291,10 +291,11 @@ class TestTheServerSelection:
         assert out["ams_mapping"] == [129]
         assert out["selection"] == {"slot": 129, "name": "HT-B", "type": "ABS", "color": "111111FF"}
 
-    def test_the_no_match_warning_names_the_unit(self):
+    def test_no_spool_of_the_material_is_refused_naming_the_unit(self):
         out = self._resolve(_ams("255", _B), material="PLA")
-        assert out["ams_mapping"] == [5]
-        assert out["warnings"] == ["No AMS tray matches material 'PLA'; using tray 5 (slot B2) (PETG) instead."]
+        assert out["blocked"] is True and out["ams_mapping"] is None
+        assert out["code"] == "AMS_MATERIAL_NOT_LOADED"
+        assert "PETG in slot B2" in out["warnings"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -451,6 +452,13 @@ def _ams_status_reply(*units: dict[str, Any]) -> dict[str, Any]:
     return {"success": True, **_ams("255", *units)}
 
 
+def _ams_adapter(*units: dict[str, Any]) -> mock.MagicMock:
+    """A printer whose AMS reads *units*."""
+    adapter = mock.MagicMock()
+    adapter.get_ams_status.return_value = _ams("255", *units)
+    return adapter
+
+
 class TestTheCompositeDoors:
     """smart_reprint, multi_material_print and multi_color_copies scan the
     AMS report themselves; each used to keep the unit's slot (0-3) and send
@@ -467,7 +475,7 @@ class TestTheCompositeDoors:
 
         model = _square_stl(str(tmp_path / "part.stl"))
         calls: list[dict[str, Any]] = []
-        with mock.patch.object(srv, "ams_status", return_value=_ams_status_reply(_A, _B)), \
+        with mock.patch.object(srv, "_resolve_adapter", return_value=_ams_adapter(_A, _B)), \
                 mock.patch.object(srv, "run_reslice_and_print",
                                   side_effect=lambda **kw: calls.append(kw) or {"success": True}):
             result = srv.smart_reprint(file_name=model, material_id="petg", auto_ams=True)
@@ -482,7 +490,7 @@ class TestTheCompositeDoors:
         paths = [_square_stl(str(tmp_path / f"p{i}.stl")) for i in range(2)]
         ht_petg = _unit(129, (0, "PETG", "111111FF"))  # PLA + PETG share a nozzle window; PLA + ABS do not
         calls: list[dict[str, Any]] = []
-        with mock.patch.object(srv, "ams_status", return_value=_ams_status_reply(_A, ht_petg)), \
+        with mock.patch.object(srv, "_resolve_adapter", return_value=_ams_adapter(_A, ht_petg)), \
                 mock.patch.object(srv, "run_reslice_and_print",
                                   side_effect=lambda **kw: calls.append(kw) or {"success": True}), \
                 mock.patch.object(srv, "_refuse_undriven_multi_material", return_value=None):

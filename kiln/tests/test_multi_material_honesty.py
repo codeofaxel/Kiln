@@ -492,7 +492,7 @@ class TestPerObjectPrintsRefuse:
         driven = mm.from_bambu_ams(
             {"ams_exist_bits": "1", "tray_exist_bits": "3", "units": [{"unit_id": 0, "trays": [
                 {"slot": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
-                {"slot": 1, "tray_type": "PETG", "tray_color": "00FF00FF"}]}]},
+                {"slot": 1, "tray_type": "PLA", "tray_color": "00FF00FF"}]}]},
             printer_model="bambu_a1",
         )
         stl = self._stl(tmp_path)
@@ -1320,14 +1320,13 @@ class TestUnreadMaterialIsNotADisagreement:
         assert plan.ok
         assert not any("material differs" in w for w in plan.warnings)
 
-    def test_a_real_material_disagreement_is_still_reported(self):
+    def test_a_real_material_disagreement_is_not_a_match(self):
         from kiln.ams_routing import Filament, Tray, plan_ams_mapping
 
         trays = [Tray(slot=0, material="PETG", hex6="FF0000")]
         plan = plan_ams_mapping([Filament(hex6="FF0000", material="PLA")], trays)
-        assert any("material differs" in w for w in plan.warnings), (
-            "loosening the unread case must not blind the real one"
-        )
+        assert not plan.ok, "loosening the unread case must not blind the real one"
+        assert plan.warnings == ["no loaded spool is PLA"]
 
     def test_an_unread_material_reads_as_filament_not_as_a_material_name(self):
         from kiln.ams_routing import UNREAD_MATERIAL, Tray
