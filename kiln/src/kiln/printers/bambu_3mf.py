@@ -2714,9 +2714,8 @@ def repackage_gcode_as_bambu_3mf(
     """Wrap already-Bambu gcode in a minimal 3MF container.
 
     *taken_from_plate* names the plate of *source_3mf_path* the G-code was
-    taken out of (one object of it): the plate's own metadata is copied,
-    and its slice record keeps that plate alone, states no print time, and
-    weighs the filament the G-code itself lays down.
+    taken out of: its metadata is copied, and its slice record keeps that
+    plate alone, with no print time and the G-code's own filament.
     """
     abs_path = os.path.abspath(gcode_path)
     if not os.path.isfile(abs_path):
