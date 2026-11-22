@@ -65,15 +65,21 @@ def read_ask(wish: Any) -> dict[str, Any] | None:
     return None
 
 
-def with_context(wish: Any, *, printer: Any = None, material: Any = None) -> Any:
+def with_context(wish: Any, *, printer: Any = None, material: Any = None, fleet: Any = None) -> Any:
     """*wish* unchanged, unless it asks for Kiln's own speeds: then the ask
-    carrying the printer and material a door knows, where it names none."""
+    carrying the printer and material a door knows, where it names none,
+    and under ``fleet`` every printer the part is being sliced for: the
+    ask's own printers first, then any of *fleet* it does not name."""
     ask = read_ask(wish)
     if ask is None:
         return wish
     for key, value in (("printer", printer), ("material", material)):
         if value and not ask.get(key):
             ask[key] = str(value)
+    if fleet:
+        named = [str(p) for p in (ask.get("fleet") or []) if p]
+        named += [str(p) for p in fleet if p and str(p) not in named]
+        ask["fleet"] = list(dict.fromkeys(named))
     return {"by": ASK, **ask}
 
 

@@ -59,6 +59,35 @@ class JobWatch:
         return max(0.0, now - self.last_contact)
 
 
+def _plate_speeds(job: Any, printer_name: str) -> Any:
+    """The speed-by-height wish a plate of *job* is sliced with on
+    *printer_name*: the run's own ranges as they were given, or, for
+    ``"kiln"``, the ask carrying this printer, the run's material and every
+    printer of the run.  ``None`` when the run asked for none."""
+    fill = (job.metadata or {}).get("fill") or {}
+    wish = fill.get("speed_by_height")
+    if not wish:
+        return None
+    from kiln import _pro_speed_plan_bridge as speed_plan
+
+    if speed_plan.read_ask(wish) is None:
+        return wish
+    from kiln.job_splitter import run_printers
+    from kiln.pipelines import _target_printer_id
+
+    plan_id = str((job.metadata or {}).get("split_plan_id") or "")
+    try:
+        fleet = sorted(run_printers(plan_id)) if plan_id else []
+    except Exception:  # noqa: BLE001 -- the run's kept printers still count
+        fleet = []
+    return speed_plan.with_context(
+        wish,
+        printer=_target_printer_id(fill.get("printer_id"), printer_name) or printer_name,
+        material=fill.get("material"),
+        fleet=[*fleet, printer_name],
+    )
+
+
 def _no_contact_note(printer_name: str, silent_seconds: float, cause: str) -> str:
     minutes = int(silent_seconds // 60)
     what = {
@@ -802,9 +831,10 @@ class JobScheduler:
                 still_wanted=lambda: self._cancelled_sentence(job.id),
                 **({"keep_record": (job.metadata or {}).get("keep_record")}
                    if isinstance((job.metadata or {}).get("keep_record"), bool) else {}),
-                # The owner's word and map the run was asked with.
+                # The owner's word, map and speeds the run was asked with.
                 **owner_asks(
                     fill.get("soft_nozzle_confirmed"), fill.get("filament_map"), fill.get("mixed_nozzle_experiment"),
+                    speed_by_height=_plate_speeds(job, printer_name),
                 ),
             )
         except Exception as exc:  # noqa: BLE001 -- said on the job, never lost
@@ -840,6 +870,10 @@ class JobScheduler:
         placed = block.get("placed") if isinstance(block.get("placed"), int) else None
         with self._lock:
             self._preparing.discard(job.id)
+        speeds = (getattr(sliced, "data", None) or {}).get("speed_by_height") if sliced is not None else None
+        if isinstance(speeds, dict):
+            # What this printer's slice made of the run's speeds, per range.
+            self._queue.update_metadata(job.id, {"speed_by_height": speeds})
         if result is not None and getattr(result, "success", False):
             started_file = start_data.get("file_name")
             if started_file:
@@ -872,6 +906,8 @@ class JobScheduler:
             return
         with self._lock:
             self._active_jobs.pop(job.id, None)
+        if self._speeds_refused(job, printer_name, sliced):
+            return
         code = turn_code or str(start_data.get("code") or "")
         if code in _TURN_CODES:
             self._wait_turn(job, printer_name, sorted(self._last_idle), code, {})
@@ -889,6 +925,27 @@ class JobScheduler:
             why, confirm=QUEUED_PLATE_CONFIRM, map_with=QUEUED_PLATE_MAP, experiment=QUEUED_PLATE_EXPERIMENT,
         )
         self._requeue_or_fail(job.id, f"The next plate of copies did not start on {printer_name}: {why}", [])
+
+    def _speeds_refused(self, job: Any, printer_name: str, sliced: Any) -> bool:
+        """Whether this plate's slice refused the run's speed-by-height wish.
+        Then the job fails for this printer only, with no retry and nothing
+        printed, and ``speed_by_height_refused`` on the job says why; the
+        run's other printers go on."""
+        data = (getattr(sliced, "data", None) or {}) if sliced is not None else {}
+        code = str(data.get("code") or "")
+        if getattr(sliced, "success", True) or not code.startswith("SPEED_BY_HEIGHT"):
+            return False
+        why = str(data.get("error") or getattr(sliced, "message", "") or "the speeds asked for could not be used")
+        message = (
+            f"Kiln did not slice or print the copies on {printer_name}, because the speeds by height asked for "
+            f"this run could not be used there: {why}"
+        )
+        self._queue.update_metadata(job.id, {"speed_by_height_refused": {
+            "printer": printer_name, "code": code, "message": message,
+            **({"ranges": data["ranges"]} if data.get("ranges") else {}),
+        }})
+        self._fail_permanently(job.id, message, [])
+        return True
 
     def _settle_fill_plate(self, job_id: str) -> None:
         """A plate of copies the printer reported failed goes back in the run."""

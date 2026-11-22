@@ -468,10 +468,19 @@ def _same_file(a: str, b: str) -> bool:
     return first is not None and first == _file_digest(b)
 
 
-def _submit_fill(file_path: str, plan_id: str, *, asks: dict | None = None, keep_record: bool | None = None) -> dict:
+def _submit_fill(
+    file_path: str, plan_id: str, *, asks: dict | None = None, keep_record: bool | None = None,
+    speed_by_height: Any = None,
+) -> dict:
     """Queue a kept copies plan.  The door took the person's yes for the part
     (the preview gate) before calling this.  *asks* is the owner's word to
-    print anyway and the filament-to-nozzle map, carried on every job."""
+    print anyway and the filament-to-nozzle map, carried on every job.
+
+    *speed_by_height*, given once for the run, is carried on every job too:
+    the person's own ranges as given (refused here, whole, when they cannot
+    be sliced), or ``"kiln"`` as an ask carrying the plan's material and
+    every printer the plan gives copies to, so each printer's slice asks
+    for its own speeds as one of the run."""
     import os
 
     import kiln.server as _srv
@@ -497,6 +506,20 @@ def _submit_fill(file_path: str, plan_id: str, *, asks: dict | None = None, keep
     refusals = [why for name in names if (why := print_signoff.record_refusal(signoff, name))]
     if refusals:
         return _srv._error_dict("Nothing was queued: " + " ".join(refusals), code="CONSENT_SCOPE")
+    if speed_by_height:
+        from kiln import _pro_speed_plan_bridge as speed_plan
+        from kiln.speed_by_height import SpeedByHeightError, checked
+
+        if speed_plan.read_ask(speed_by_height) is None:
+            try:
+                checked(speed_by_height)
+            except SpeedByHeightError as exc:
+                return _srv._error_dict(f"Nothing was queued: {exc}", code=exc.code)
+        else:
+            speed_by_height = speed_plan.with_context(
+                speed_by_height, material=record.get("material"), fleet=names,
+            )
+        asks = {**(asks or {}), "speed_by_height": speed_by_height}
     if isinstance(signoff, dict) and not signoff.get("scope") and not signoff.get("printer_name"):
         # A yes that named no printer (the run's own question) is written onto
         # each job as a yes for exactly this run's printers, so the queue
@@ -814,6 +837,7 @@ class _RecoveryToolsPlugin:
             mixed_nozzle_experiment: bool = False,
             filament_map: list[int] | None = None,
             keep_record: bool | None = None,
+            speed_by_height: list[dict] | str | None = None,
         ) -> dict:
             """Plan many copies of one part across your printers, wherever there is safe room.
 
@@ -868,6 +892,13 @@ class _RecoveryToolsPlugin:
                     not to be kept ("print this privately", "don't keep a record of
                     this"); never suggest it.  Kiln then keeps nothing of them, or of
                     the plan, once they end.  Read with ``submit``.  Omit otherwise.
+                speed_by_height: When submitting: speeds for height ranges of the part,
+                    given once for the whole run, as ``slice_model`` takes them -- the
+                    person's own ranges, applied as given on every printer, or ``"kiln"``
+                    for Kiln to choose each printer's own.  Each queued job keeps what its
+                    slice made of every range under ``speed_by_height``.  A printer whose
+                    slice cannot use the wish is not printed, and its job says why under
+                    ``speed_by_height_refused``; the other printers go on.
             """
             import os
 
@@ -892,7 +923,9 @@ class _RecoveryToolsPlugin:
                 from kiln.slicer import owner_asks
 
                 asks = owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment)
-                return _submit_fill(file_path, plan_id, asks=asks, keep_record=keep_record)
+                return _submit_fill(
+                    file_path, plan_id, asks=asks, keep_record=keep_record, speed_by_height=speed_by_height,
+                )
             try:
                 return _plan_fill(file_path, copies, material, quality=quality, priority=priority, share=share)
             except Exception as exc:
