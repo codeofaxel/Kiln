@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln.print_lineage import SPEED_BY_HEIGHT_KEY
 from kiln.slicer_estimate import RECORD_KEY as SLICER_ESTIMATE_KEY
 
 _RECIPE_FILENAME = ".kiln_recipe.json"
@@ -407,9 +408,12 @@ def create_new_version(
 
 
 #: Provenance keys that tell how ONE version was made, or what its own slice
-#: says (:data:`kiln.slicer_estimate.RECORD_KEY`).  A new version states its
+#: says (:data:`kiln.slicer_estimate.RECORD_KEY`) and was made with
+#: (:data:`kiln.print_lineage.SPEED_BY_HEIGHT_KEY`).  A new version states its
 #: own or none, and never shows its parent's as its own.
-VERSION_STORY_KEYS = ("tools_used", "change_summary", "source_files", "edit", SLICER_ESTIMATE_KEY)
+VERSION_STORY_KEYS = (
+    "tools_used", "change_summary", "source_files", "edit", SLICER_ESTIMATE_KEY, SPEED_BY_HEIGHT_KEY,
+)
 
 
 #: Provenance keys that describe the part itself: what it is made of, where

@@ -55,9 +55,16 @@ def normalize_color(color: str) -> str:
 
 def _print_time(recipe: Any) -> dict[str, str]:
     """``{"print_time": <sentence>}`` when the rebuilt version keeps the
-    slicer's estimate, else nothing."""
+    slicer's estimate, and ``{"sliced_speeds": <sentence>}`` when it keeps
+    the person's own speed ranges it was sliced with; else nothing."""
+    from kiln.speed_by_height import wish_sentence
+
     sentence = estimate_sentence(recipe.provenance)
-    return {"print_time": sentence} if sentence is not None else {}
+    speeds = wish_sentence(recipe.provenance)
+    return {
+        **({"print_time": sentence} if sentence is not None else {}),
+        **({"sliced_speeds": speeds} if speeds is not None else {}),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +401,9 @@ def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | Non
     recipe.stl_path = compiled_stl
     if artifact.get("output_3mf"):
         recipe.final_3mf = artifact["output_3mf"]
-    recipe.provenance = keep_estimate(recipe.provenance, gcode_path)
+    from kiln.speed_by_height import keep_wish
+
+    recipe.provenance = keep_wish(keep_estimate(recipe.provenance, gcode_path), gcode_path)
     try:
         save_recipe(recipe, design_dir)
     except Exception as exc:
@@ -493,7 +502,9 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
 
     if artifact.get("output_3mf"):
         recipe.final_3mf = artifact["output_3mf"]
-    recipe.provenance = keep_estimate(recipe.provenance, merged_gcode)
+    from kiln.speed_by_height import keep_wish
+
+    recipe.provenance = keep_wish(keep_estimate(recipe.provenance, merged_gcode), merged_gcode)
     try:
         save_recipe(recipe, design_dir)
     except Exception as exc:
