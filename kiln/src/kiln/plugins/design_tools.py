@@ -1145,6 +1145,15 @@ class _DesignToolsPlugin:
                         out["note"] = reason["line"]
                         if reason.get("why_generic"):
                             out["why_generic"] = reason["why_generic"]
+                            # The miss this note names, set as an answer made
+                            # here carries it, so it is said once.
+                            out["why"] = reason["why_generic"]
+                            out["why_code"] = reason.get("why_code", "")
+                else:
+                    # This printer's verdict without its notes: say why.
+                    from kiln.design_intelligence import compat_notes_note
+
+                    out.update(compat_notes_note(report))
                 return out
             except Exception as exc:
                 _logger.error("Compatibility check failed: %s", exc, exc_info=True)

@@ -319,6 +319,28 @@ def missed_here() -> Any:
     return held or Miss("unanswered")
 
 
+def why_made_here(on_the_line: str, *, cannot: str, wont: str, not_asked: str) -> tuple[str, dict[str, Any]]:
+    """``(note, miss fields)`` for an answer made on this computer that
+    lacks what Kiln's servers add to it: the sentence for the miss this call
+    is running for (:func:`missed_here`), in :func:`kiln.served_answer.sentence`'s
+    parts, with ``why`` / ``why_code`` / ``why_detail`` to set beside it.
+    When no served ask was made for this call (the tool's engine called
+    directly), *not_asked* and no fields: there is no cause to name.  With
+    kiln-pro in the process (Kiln's servers) the answer is made whole here,
+    so ``("", {})``."""
+    from kiln.served_answer import fields, sentence
+
+    if _kiln_pro_here():
+        return "", {}
+    miss = missed_here()
+    if miss is None:
+        return not_asked, {}
+    note = sentence(
+        miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont, then="ask again",
+    )
+    return note, fields(miss)
+
+
 def already_missed() -> bool:
     """Whether this call is one Kiln's servers were already asked for and did
     not answer (it is running inside :func:`here_after`), so nothing inside
@@ -553,4 +575,5 @@ def _reset_for_tests() -> None:
 
 __all__ = [
     "NOTE_KEY", "SCHEMA_VERSION", "already_missed", "ask", "first_this_session", "load", "plan", "say_once",
+    "why_made_here",
 ]

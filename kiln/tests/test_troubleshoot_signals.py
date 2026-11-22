@@ -472,10 +472,17 @@ def _free_install():
 
 
 def _free_troubleshoot(**kwargs):
-    """Call the tool the way a free install would — kiln_pro unimportable."""
+    """Call the tool for a free caller with none of Kiln's curated data in the
+    answer, where the nudge is still said: a process with kiln-pro in it
+    (Kiln's servers) whose data did not reach this printer.  On an install
+    without kiln-pro the answer says instead why the known failures are
+    missing and names no plan (tests/test_printer_notes_served_note.py)."""
+    from unittest import mock
+
+    from kiln import served_public
     from kiln.server import troubleshoot_printer as tool
 
-    with _free_install():
+    with _free_install(), mock.patch.object(served_public, "_kiln_pro_here", lambda: True):
         return getattr(tool, "fn", tool)(**kwargs)
 
 
