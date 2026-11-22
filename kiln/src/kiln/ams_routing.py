@@ -592,7 +592,7 @@ def _option(action: str, *, tray: Tray | None = None, material: str | None = Non
     out: dict[str, Any] = {"action": action, "slot": tray.name or str(tray.slot + 1) if tray else None}
     if tray is not None:
         out["tray_id"] = tray.tray_id
-    out.update({"material": material, "color": colour, "hex": f"#{hex6}" if hex6 else None, **more})
+    out.update({"material": material, "color": colour, "hex": f"#{hex6.upper()}" if hex6 else None, **more})
     return out
 
 
