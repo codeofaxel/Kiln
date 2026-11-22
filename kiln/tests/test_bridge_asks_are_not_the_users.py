@@ -81,6 +81,10 @@ _PERSONS_OWN_ASK = {
         "plan, a fix plan, a failure analysis), on a plan that includes Kiln Pro; the "
         "plan is the feature they reached for"
     ),
+    "_pro_speed_plan_bridge": (
+        "asked only when a slice is asked for with speed_by_height=\"kiln\": the person asked Kiln to "
+        "choose the speeds, which is exactly what this fetches"
+    ),
     "_pro_load_bridge": (
         "runs only when the person asks estimate_structural_load for a part at "
         "Kiln Pro; the part's load figure is the feature they reached for"
