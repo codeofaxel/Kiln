@@ -160,12 +160,4 @@ def _note(miss: Miss) -> None:
     logger.debug("printability reading not served (%s %s)", miss.cause, miss.code)
 
 
-def _reset_for_tests() -> None:
-    global _down_until, _down_miss
-    with _lock:
-        _kept.clear()
-    _down_until = 0.0
-    _down_miss = None
-
-
 __all__ = ["ASK_TIMEOUT_S", "WIRE_TOOL", "miss_note", "reading_or_miss"]

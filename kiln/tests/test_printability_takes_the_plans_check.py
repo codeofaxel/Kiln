@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections import OrderedDict
 
 import pytest
 
@@ -91,13 +92,16 @@ def servers(monkeypatch, tmp_path):
     sign_in(monkeypatch, tmp_path)
     monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
     monkeypatch.setattr(served_public, "_said", set())
-    _pro_printability_bridge._reset_for_tests()
+    # The bridge's per-process memory (answers kept, a rest after a miss)
+    # starts empty for every test and is put back after it.
+    monkeypatch.setattr(_pro_printability_bridge, "_kept", OrderedDict())
+    monkeypatch.setattr(_pro_printability_bridge, "_down_until", 0.0)
+    monkeypatch.setattr(_pro_printability_bridge, "_down_miss", None)
     fake = _Servers()
     monkeypatch.setattr(srv, "_pro_api_call", fake.door)
     monkeypatch.setattr(httpx, "post", fake.post)
     monkeypatch.setattr(httpx, "get", fake.get)
     yield fake
-    _pro_printability_bridge._reset_for_tests()
     served_public._reset_for_tests()
 
 
