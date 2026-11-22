@@ -3781,9 +3781,12 @@ def get_print_diagnostic(
         )
     if ts_result.storage_requirements:
         sr = ts_result.storage_requirements
-        if sr.get("humidity_sensitive"):
+        # Said for every plastic with a drying temperature, quick to take up
+        # water or not: it is a temperature the spool dries at without softening.
+        if sr.get("humidity_sensitive") or sr.get("drying_temp_c") is not None:
+            method = str(sr.get("storage_method") or "sealed container").rstrip(". ")
             combined.append(
-                f"Storage: {sr.get('storage_method', 'sealed container')}. "
+                f"Storage: {method}. "
                 f"Max humidity {sr.get('max_humidity_pct', 'N/A')}%. "
                 f"Dry at {sr.get('drying_temp_c', 'N/A')}C for "
                 f"{sr.get('drying_time_hours', 'N/A')} hours if wet."
