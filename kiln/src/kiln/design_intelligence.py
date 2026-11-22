@@ -2876,16 +2876,14 @@ def _build_design_template(template_id: str, data: dict[str, Any]) -> DesignTemp
         caution=(
             ""
             if (reason or guidance)
-            else unestablished_caution(
+            else _design_notes_caution(
                 "design_templates",
                 "The print orientation for this pattern is named here, but "
                 "not why it matters, what dimensions the pattern needs, or "
                 "how it usually fails. Treat the label as a starting point "
                 "rather than a checked design, and print a test piece before "
                 "committing to it.",
-                curated_entry_exists=curated_entry_exists(
-                    "design_templates", template_id
-                ),
+                template_id,
             )
         ),
     )
@@ -2991,7 +2989,7 @@ def _requirement_caution(
     stated = data.get("caution", "")
     if stated or guidance:
         return stated
-    return unestablished_caution(
+    return _design_notes_caution(
         "functional_requirements",
         "Only the starting rules for this requirement are given here: which "
         "materials to use or avoid and the minimum settings. Why they apply, "
@@ -2999,10 +2997,76 @@ def _requirement_caution(
         "the part were not established here. Treat them as a starting point "
         "rather than a clearance, and test the part for this use before you "
         "depend on it.",
-        curated_entry_exists=curated_entry_exists(
-            "functional_requirements", req_id
-        ),
+        req_id,
     )
+
+
+#: Where an answer made on this computer, after Kiln's servers missed the
+#: call, says why the design notes are not in it (:func:`with_design_notes_note`).
+DESIGN_NOTES_KEY = "guidance_note"
+
+#: The running call's memo key for the miss behind a design note left out.
+_DESIGN_NOTES_LEFT_OUT = "design_notes_left_out"
+
+#: :func:`kiln.served_answer.sentence`'s parts for that note.  The same notes
+#: come from Kiln's servers for any signed-in account.
+_DESIGN_NOTES_ON_THE_LINE = (
+    "Kiln's design notes for each pattern and requirement come from Kiln's "
+    "servers, free with any Kiln account"
+)
+_DESIGN_NOTES_CANNOT = "get them"
+_DESIGN_NOTES_WONT = "gives only the starting rules kept on this computer"
+
+
+def _design_notes_caution(overlay_kind: str, what_is_unknown: str, entity_id: str) -> str:
+    """The caution for a pattern or requirement whose notes were not read.
+
+    In a call Kiln's servers did not answer (:func:`kiln.served_public.missed_here`),
+    the notes are what any signed-in account is given there, so the caution
+    names no plan: it is said alone, and the miss is kept on the call for the
+    answer to say once (:func:`with_design_notes_note`).  Any other call
+    words it through :func:`unestablished_caution`.
+    """
+    from kiln import served_public
+
+    miss = served_public.missed_here()
+    if miss is None:
+        return unestablished_caution(
+            overlay_kind,
+            what_is_unknown,
+            curated_entry_exists=curated_entry_exists(overlay_kind, entity_id),
+        )
+    from kiln.tool_context import call_memo
+
+    memo = call_memo()
+    if memo is not None:
+        memo[_DESIGN_NOTES_LEFT_OUT] = miss
+    return what_is_unknown
+
+
+def with_design_notes_note(result: Any) -> Any:
+    """*result* with one sentence under :data:`DESIGN_NOTES_KEY` saying why
+    the design notes are not in it, and the miss behind it (``why``,
+    ``why_code``, ``why_detail``), when this call left one out
+    (:func:`_design_notes_caution`).  Otherwise *result* unchanged."""
+    from kiln.tool_context import call_memo
+
+    memo = call_memo()
+    miss = memo.get(_DESIGN_NOTES_LEFT_OUT) if memo is not None else None
+    if miss is None or not isinstance(result, dict) or result.get("success") is False:
+        return result
+    from kiln.served_answer import fields, sentence
+
+    result[DESIGN_NOTES_KEY] = sentence(
+        miss,
+        feature="servers",
+        on_the_line=_DESIGN_NOTES_ON_THE_LINE,
+        cannot=_DESIGN_NOTES_CANNOT,
+        wont=_DESIGN_NOTES_WONT,
+        then="ask again",
+    )
+    result.update(fields(miss))
+    return result
 
 
 def get_design_constraints(
