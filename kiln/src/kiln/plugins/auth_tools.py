@@ -31,6 +31,7 @@ import time
 from typing import Any
 
 from kiln import plain_words as _plain_words
+from kiln.plan_proof import proof_fields as _plan_proof_fields
 from kiln.tool_annotations import creates, destructive
 
 
@@ -207,6 +208,7 @@ class _AuthToolsPlugin:
                         "auth_uid": resp.get("auth_uid") or "",
                         "tier": tier,
                         "has_entitlement": bool(resp.get("has_entitlement")),
+                        **_plan_proof_fields(resp),
                         "signed_in_at": int(time.time()),
                         **credential_fields(resp),
                     }, door="chat")

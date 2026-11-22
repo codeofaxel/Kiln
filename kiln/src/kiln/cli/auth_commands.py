@@ -61,6 +61,7 @@ from typing import Any
 import click
 
 from kiln import run_program
+from kiln.plan_proof import proof_fields as _plan_proof_fields
 
 
 # Default API base — override with ``KILN_API_URL`` for local dev.
@@ -573,6 +574,7 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
             "auth_uid": result.get("auth_uid") or "",
             "tier": tier,
             "has_entitlement": bool(result.get("has_entitlement")),
+            **_plan_proof_fields(result),
             "signed_in_at": int(time.time()),
             **credential_fields(result),
         }, door="cli")
@@ -696,9 +698,17 @@ def auth_whoami(as_json: bool) -> None:
     # put the superseded secret on disk.  The next renewal would present it,
     # which the server reads as this computer's sign-in in use in two places.
     tokens = _read_tokens()
-    if str(tokens.get("tier") or "").lower() != tier or not tokens.get("signed_in_at"):
+    proof = _plan_proof_fields(body)
+    stale_proof = proof and tokens.get("plan_proof") != proof["plan_proof"]
+    if (
+        str(tokens.get("tier") or "").lower() != tier
+        or not tokens.get("signed_in_at")
+        or stale_proof
+    ):
         tokens["tier"] = tier
         tokens["signed_in_at"] = int(time.time())
+        tokens.pop("plan_proof", None)
+        tokens.update(proof)
         if email:
             tokens["email"] = email
         _write_tokens(tokens)
@@ -1095,6 +1105,7 @@ def auth_pair(code: str, client: str | None) -> None:
         "auth_uid": auth_uid,
         "tier": tier,
         "has_entitlement": bool(resp.get("has_entitlement")),
+        **_plan_proof_fields(resp),
         "signed_in_at": int(time.time()),
         **credential_fields(resp),
     }, door="pair")
