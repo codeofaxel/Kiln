@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-22T04:31:26.913787+00:00",
+  "generated": "2026-11-22T08:14:16.908225+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -30939,6 +30939,8 @@
         ],
         "printer_param": "printer_id"
       },
+      "check_printer_material_compatibility": {},
+      "check_printer_material_support": {},
       "compile_scad": {
         "inputs": {
           "text": {
@@ -30968,6 +30970,7 @@
         ],
         "printer_param": "printer_id"
       },
+      "get_material_recommendation": {},
       "get_print_diagnostic": {},
       "import_step_file": {
         "inputs": {
@@ -31009,7 +31012,8 @@
       "tax_estimate": {},
       "tax_jurisdiction_lookup": {},
       "tax_jurisdictions": {},
-      "troubleshoot_print_issue": {}
+      "troubleshoot_print_issue": {},
+      "troubleshoot_printer": {}
     }
   },
   "edit_lineage": {
