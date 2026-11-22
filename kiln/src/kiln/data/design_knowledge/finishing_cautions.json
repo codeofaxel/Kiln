@@ -22,7 +22,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it (PLA starts warping above about 70°C), so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -44,7 +44,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it (PLA starts warping above about 70°C), so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -130,7 +130,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -152,7 +152,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it (PLA starts warping above about 70°C), so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -174,7 +174,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -196,7 +196,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -218,7 +218,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -252,7 +252,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -274,7 +274,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -296,7 +296,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -322,7 +322,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -344,7 +344,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -378,7 +378,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it (PLA starts warping above about 70°C), so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -400,7 +400,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -422,7 +422,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it, and PLA warps above about 70°C: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it (PLA starts warping above about 70°C), so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -488,7 +488,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },
@@ -500,7 +500,7 @@
       },
       {
         "name": "Annealing",
-        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       },
       {
         "name": "Drilling and tapping",
@@ -552,7 +552,7 @@
       },
       {
         "name": "Annealing",
-        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       },
       {
         "name": "Drilling and tapping",
@@ -588,7 +588,7 @@
       },
       {
         "name": "Annealing",
-        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       },
       {
         "name": "Drilling and tapping",
@@ -648,7 +648,7 @@
       },
       {
         "name": "Annealing",
-        "safety_notes": "Support the part; annealing runs far above this material's glass transition and unsupported thin sections can sag. Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Support the part; annealing runs far above this material's glass transition and unsupported thin sections can sag. Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       },
       {
         "name": "Heat-set inserts and bonding",
@@ -658,7 +658,7 @@
     "strengthening": [
       {
         "method": "Annealing",
-        "safety_notes": "Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
+        "safety_notes": "Annealing means baking a finished print in an oven, which can make it stronger and better at handling heat. Never use a gas oven: use an electric oven that holds an even temperature, and stay with it the whole time. Annealing can also shrink the part along its length and warp it, so only do it to a part where a small change in size is fine."
       }
     ]
   },

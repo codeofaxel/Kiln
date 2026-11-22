@@ -86,6 +86,15 @@ class TestHintCopyHygiene:
             f"got: {hint!r}"
         )
 
+    def test_finishing_hint_says_what_the_plan_adds_word_for_word(self):
+        """The finishing guide's hint, word for word, with the plan's name
+        in front."""
+        assert _UPGRADE_HINT_TEMPLATES["post_processing"] == (
+            "{product} adds checked steps for annealing (baking a finished print "
+            "in an oven to make it tougher) and the trade-offs of each way to "
+            "strengthen a part. See https://kiln3d.com/pricing"
+        )
+
     @pytest.mark.parametrize("hint", [
         _UPGRADE_HINT_TROUBLESHOOTING,
         _UPGRADE_HINT_POST_PROCESSING,

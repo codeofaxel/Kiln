@@ -118,7 +118,8 @@ def test_a_suggested_annealing_is_said_with_its_caution(guide, monkeypatch, post
     annealing = [c for c in out["strengthening_cautions"] if c["method"] == "Annealing"]
     assert annealing, out
     note = annealing[0]["safety_notes"]
-    assert "warp" in note and "70" in note and "small change of size" in note
+    assert "warp" in note and "70" in note and "small change in size" in note
+    assert "Never use a gas oven" in note and "baking a finished print" in note
 
 
 @pytest.mark.parametrize("posture", _POSTURES)
@@ -128,7 +129,8 @@ def test_an_annealing_finish_says_how_annealing_can_change_a_part(guide, monkeyp
     annealing = [t for t in out["techniques"] if t["name"] == "Annealing"]
     assert annealing, out
     note = annealing[0]["safety_notes"]
-    assert "warp" in note and "small change of size" in note, note
+    assert "warp" in note and "small change in size" in note, note
+    assert "Never use a gas oven" in note, note
 
 
 @pytest.mark.parametrize("posture", _POSTURES)

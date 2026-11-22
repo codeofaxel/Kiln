@@ -336,9 +336,9 @@ _UPGRADE_HINT_TEMPLATES: dict[str, str] = {
     # overstates itself costs more trust than the sale is worth, and on safety
     # guidance it is the wrong claim to make at all.
     "post_processing": (
-        "{product} adds step-by-step procedures "
-        "and strengthening tradeoffs. "
-        "See https://kiln3d.com/pricing"
+        "{product} adds checked steps for annealing (baking a finished print "
+        "in an oven to make it tougher) and the trade-offs of each way to "
+        "strengthen a part. See https://kiln3d.com/pricing"
     ),
     "environment_compatibility": (
         "{product} adds curated SME notes on what each rating means "
@@ -352,7 +352,7 @@ _UPGRADE_HINT_TEMPLATES: dict[str, str] = {
 #: pays for the plan.
 _HINT_SUBJECTS: dict[str, str] = {
     "material_troubleshooting": "A diagnostic playbook for this symptom",
-    "post_processing": "The step-by-step procedure",
+    "post_processing": "The checked annealing steps",
     "environment_compatibility": "The curated note on each rating",
 }
 
