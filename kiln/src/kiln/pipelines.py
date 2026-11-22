@@ -468,7 +468,31 @@ def _slice_step_data(result: Any) -> dict[str, Any]:
     soft = getattr(result, "soft_nozzle", None)
     if isinstance(soft, dict):
         data["soft_nozzle"] = soft
+    speeds = getattr(result, "speed_by_height", None)
+    if isinstance(speeds, dict):
+        data["speed_by_height"] = speeds
     return data
+
+
+def _failed_slice_step(exc: Exception, step_start: float) -> PipelineStep:
+    """The slice step when the slicer raised.  A speed-by-height wish that
+    could not be planned or applied keeps its code and ranges in the data,
+    so a caller can say which wish was refused; nothing is sliced without
+    it."""
+    from kiln.speed_by_height import SpeedByHeightError
+
+    data: dict[str, Any] | None = None
+    if isinstance(exc, SpeedByHeightError):
+        data = {"code": exc.code, "error": str(exc)}
+        if exc.ranges:
+            data["ranges"] = list(exc.ranges)
+    return PipelineStep(
+        name="slice",
+        success=False,
+        message=f"The slicing didn't finish: {_plain_words.said(exc)}.",
+        data=data,
+        duration_seconds=time.time() - step_start,
+    )
 
 
 def _refused_step(name: str, err: dict[str, Any], step_start: float) -> PipelineStep:
@@ -702,6 +726,7 @@ def quick_print(
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
     keep_record: bool | None = None,
+    speed_by_height: Any = None,
 ) -> PipelineResult:
     """Validate → slice → preflight → upload → start print in one call.
 
@@ -711,6 +736,13 @@ def quick_print(
     ``mixed_nozzle_experiment`` is the person's yes, for this print, to a
     slice refused with ``MULTI_NOZZLE_MIXED_SIZES``
     (:func:`kiln.slicer.slice_file`, all three).
+
+    ``speed_by_height`` is the person's own speeds for height ranges of the
+    part, or ``"kiln"`` for Kiln to choose them for this printer
+    (:func:`kiln.slicer.slice_file`).  The slice step's data carries what
+    each range commands under ``speed_by_height``; a wish that cannot be
+    planned or applied fails the slice step with its ``code``, and nothing
+    is sliced or printed without it.
 
     ``placement`` is where the part goes when the plate still holds the
     last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
@@ -840,18 +872,15 @@ def quick_print(
                 slicer_path=slicer_path,
                 material=material,
                 loaded_material=_loaded_material(ctx.get("adapter"), material),
-                **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                **_owner_asks(
+                    soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height,
+                ),
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
             return step
         except Exception as exc:
-            return PipelineStep(
-                name="slice",
-                success=False,
-                message=f"The slicing didn't finish: {_plain_words.said(exc)}.",
-                duration_seconds=time.time() - step_start,
-            )
+            return _failed_slice_step(exc, step_start)
 
     def _prepare(adapter: Any) -> tuple[str, bool]:
         # Bambu printers take a wrapped 3MF, not raw gcode: uploading the
@@ -1105,6 +1134,7 @@ def reslice_and_print(
     mixed_nozzle_experiment: bool = False,
     filament_map: list[int] | None = None,
     keep_record: bool | None = None,
+    speed_by_height: Any = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
 
@@ -1114,6 +1144,10 @@ def reslice_and_print(
     ``mixed_nozzle_experiment`` is the person's yes, for this print, to a
     slice refused with ``MULTI_NOZZLE_MIXED_SIZES``
     (:func:`kiln.slicer.slice_file`, all three).
+
+    ``speed_by_height`` is read as in :func:`quick_print`: the person's own
+    ranges, or ``"kiln"``; a refused wish fails the slice step with its
+    ``code`` and prints nothing.
 
     ``still_wanted``, when given, is asked right before the upload and again
     right before the start; a sentence back means the print is no longer
@@ -1274,7 +1308,9 @@ def reslice_and_print(
                 extra_args=extra_args,
                 material=material,
                 loaded_material=_loaded_material(adapter, material),
-                **_owner_asks(soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment),
+                **_owner_asks(
+                    soft_nozzle_confirmed, filament_map, mixed_nozzle_experiment, speed_by_height=speed_by_height,
+                ),
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
@@ -1283,12 +1319,7 @@ def reslice_and_print(
             ctx["stage_mesh_path"] = (step.data or {}).get("stage_mesh_path")
             return step
         except Exception as exc:
-            return PipelineStep(
-                name="slice",
-                success=False,
-                message=f"The slicing didn't finish: {_plain_words.said(exc)}.",
-                duration_seconds=time.time() - step_start,
-            )
+            return _failed_slice_step(exc, step_start)
 
     def _prepare(adapter: Any) -> tuple[str, bool]:
         # Bambu printers need gcode wrapped in a 3MF with proprietary

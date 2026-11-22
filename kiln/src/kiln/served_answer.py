@@ -719,6 +719,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_nozzle_bridge": ("served_answer", "the pre-print nozzle-life verdict for the pre-flight, a start and a slice; the nozzle on record, for the pre-flight's comparison and for the size a check or a slice runs with"),
     "kiln._pro_placement_bridge": ("served_answer", "the plate-clearance verdict for slicing beside a part left on the plate"),
     "kiln._pro_adaptive_bridge": ("served_answer", "Kiln's adaptive slicing settings tuned to one material, the layer plan built from them and the list of materials it tunes, free at every plan, asked per call and kept nowhere; a miss plans with generic settings worked out from the nozzle size, marks the answer basic and says why in one line, never as tuned"),
+    "kiln._pro_speed_plan_bridge": ("served_answer", "the speeds Kiln chooses by height for a slice asked with them; a miss slices nothing and says which of the four it was, and the person's own ranges never come here"),
     "kiln._pro_cost_bridge": ("served_answer", "cost intelligence for a print file's estimate; the estimate itself is the floor"),
     "kiln._pro_melt_bridge": ("served_answer", "a printer's own melt rates for a slice; the material's cautious figure is the floor"),
     "kiln._pro_material_rules_bridge": ("served_answer", "whether a material meets the rules a part must meet; a miss judges no requirement met"),

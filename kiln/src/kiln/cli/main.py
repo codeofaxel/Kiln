@@ -5226,7 +5226,8 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
         "Your own speeds for height ranges of the part, as JSON: "
         '\'[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6, "speed_mm_s": 120}]\'. '
         "Heights are mm up from the plate; to_mm left out means to the top. Your slicer applies "
-        "them, the sliced file is read back, and a range it did not apply refuses the slice."
+        "them, the sliced file is read back, and a range it did not apply refuses the slice. "
+        'Or "kiln" to have Kiln choose them from the part\'s shape (Kiln Pro).'
     ),
 )
 @click.option(

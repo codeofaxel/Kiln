@@ -1959,6 +1959,13 @@ def _placed_slice(
     """
     from kiln.slicer import say_project_plate, take_project_plate
 
+    if slice_kwargs.get("speed_by_height") is not None:
+        from kiln._pro_speed_plan_bridge import with_context
+
+        # Speeds Kiln is asked to choose are chosen for this printer and material.
+        slice_kwargs["speed_by_height"] = with_context(
+            slice_kwargs["speed_by_height"], printer=effective_printer_id, material=material_id,
+        )
     taken = take_project_plate(input_path, plate_number, profile_path)
     if taken is not None:
         input_path = taken.path
@@ -3074,7 +3081,15 @@ class _SlicerToolsPlugin:
                     "speed_mm_s": 120}]``.  Heights are millimetres up from the
                     plate; ``to_mm`` left out means to the top of the part; each
                     range has one speed, ``percent`` (of the profile's own speeds)
-                    or ``speed_mm_s``.  Their slicer applies the ranges and the
+                    or ``speed_mm_s``, or ``max_mm_s`` (no line in the range
+                    faster than that); ``"lines": "inside"`` keeps a speed to the
+                    infill and inner walls; ``max_acceleration_mm_s2`` asks for
+                    gentler acceleration in the range, on a slicer that can hold
+                    it by height (Bambu Studio).  Or ``"kiln"``: Kiln chooses the
+                    ranges from the part's own shape, gentle where it would sway
+                    and quicker where there is room, and says why (Kiln Pro,
+                    https://kiln3d.com/pricing; no plan is ever guessed when the
+                    answer does not arrive).  Their slicer applies the ranges and the
                     sliced file is read back: the response's ``speed_by_height``
                     says, for each range, what was asked, what the file commands,
                     and whether it was applied, was already that slow, or was held
@@ -3894,7 +3909,8 @@ class _SlicerToolsPlugin:
                 speed_by_height: The person's own speeds for height ranges of the part, only when they ask
                     for them: a list like ``[{"from_mm": 0, "to_mm": 6, "percent": 50}, {"from_mm": 6,
                     "speed_mm_s": 120}]`` (millimetres up from the plate; ``to_mm`` left out means to the
-                    top; one speed per range).  ``slice_model`` says what is read back and what is refused.
+                    top; one speed per range), or ``"kiln"`` to have Kiln choose them from the part's shape
+                    (Kiln Pro).  ``slice_model`` says what is read back and what is refused.
                 mixed_nozzle_experiment: The person has said yes, for this print, to a slice refused
                     with ``MULTI_NOZZLE_MIXED_SIZES`` (nozzles of different sizes at once, an
                     experiment). Only on their yes, each time; ``slice_model`` says what follows.
