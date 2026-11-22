@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-22T10:30:00.828265+00:00",
+  "generated": "2026-11-22T22:17:26.892520+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -25,7 +25,7 @@
     },
     "drawing_intake": {
       "label": "Drawing Intake & DFM",
-      "pitch": "Hand Kiln a customer engineering drawing and get a per-dimension manufacturability verdict grounded in your machines' measured capability: pass/marginal/fail per characteristic, conservative predicted yield, and concrete orientation / tolerance / compensation recommendations."
+      "pitch": "Hand Kiln a customer engineering drawing and get a per-dimension verdict against your own machines: which of them can hold it, pass / marginal / fail per characteristic, how many parts will pass, and what to change to improve the odds."
     },
     "print_intelligence": {
       "label": "Print Intelligence",
@@ -105,7 +105,7 @@
     },
     "technical_drawings": {
       "label": "Technical Drawings",
-      "pitch": "Turn any design into a clean, dimensioned production drawing \u2014 front, top, and side views with real measurements, a title block, and PNG / PDF / DXF files a machine shop or client can use. Built for client and custom-order work."
+      "pitch": "Turn any design into a dimensioned drawing with front, top and side views and a title block, as PDF and PNG: the outline with its outside sizes on every plan, exact sizes from your own design on Kiln Pro, and a DXF for fab shops on Kiln Business."
     },
     "design_session": {
       "label": "Design Sessions",
@@ -12040,11 +12040,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "drawing_manufacturability_v1",
+        "copy_version": "drawing_manufacturability_v2",
         "variant": "drawing_manufacturability",
         "feature": "Drawing manufacturability and quoting",
         "headline": "Turn this customer drawing into a machine-specific quoting decision.",
-        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "outcome_preview": "Kiln Business would check every tolerance on this drawing against your machines and material, say which of them can hold it and how many parts will pass, and prepare the quote.",
         "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       },
       "offline": {
@@ -12086,11 +12086,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "drawing_manufacturability_v1",
+        "copy_version": "drawing_manufacturability_v2",
         "variant": "drawing_manufacturability",
         "feature": "Drawing manufacturability and quoting",
         "headline": "Turn this customer drawing into a machine-specific quoting decision.",
-        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "outcome_preview": "Kiln Business would check every tolerance on this drawing against your machines and material, say which of them can hold it and how many parts will pass, and prepare the quote.",
         "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       },
       "offline": {
@@ -12166,11 +12166,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "drawing_manufacturability_v1",
+        "copy_version": "drawing_manufacturability_v2",
         "variant": "drawing_manufacturability",
         "feature": "Drawing manufacturability and quoting",
         "headline": "Turn this customer drawing into a machine-specific quoting decision.",
-        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "outcome_preview": "Kiln Business would check every tolerance on this drawing against your machines and material, say which of them can hold it and how many parts will pass, and prepare the quote.",
         "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       },
       "offline": {
@@ -12220,11 +12220,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "drawing_manufacturability_v1",
+        "copy_version": "drawing_manufacturability_v2",
         "variant": "drawing_manufacturability",
         "feature": "Drawing manufacturability and quoting",
         "headline": "Turn this customer drawing into a machine-specific quoting decision.",
-        "outcome_preview": "Kiln Business would check the extracted requirements against the selected machine and material, flag what needs review, and prepare recommendations for the quote.",
+        "outcome_preview": "Kiln Business would check every tolerance on this drawing against your machines and material, say which of them can hold it and how many parts will pass, and prepare the quote.",
         "free_included": "Printability checks on meshes you already have stay available outside this workflow."
       },
       "offline": {
@@ -29542,9 +29542,9 @@
     },
     {
       "name": "generate_technical_drawing",
-      "description": "Generate a dimensioned production drawing from a 3D model.\n\nNeeds Kiln Business.",
-      "tier": "business",
-      "access": "business",
+      "description": "Generate a dimensioned production drawing from a 3D model.\n\nFree door, tiered answer \u2014 Free: Outline sheet, outside sizes measured \u00b7 PNG \u00b7 PDF \u00b7 Pro: Exact sizes from your own design \u00b7 holes at the size they print \u00b7 PNG \u00b7 PDF \u00b7 Business: + DXF for fab shops \u00b7 Enterprise: + your industry\u2019s drawing standard.",
+      "tier": "free",
+      "access": "free_banded",
       "category": "technical_drawings",
       "parameters": {
         "properties": {
@@ -29594,7 +29594,7 @@
             ],
             "default": null,
             "title": "Formats",
-            "description": "Output formats \u2014 any of ``\"png\"``, ``\"pdf\"``, ``\"dxf\"``.  Defaults to all three."
+            "description": "Output formats \u2014 any of ``\"png\"``, ``\"pdf\"``, ``\"dxf\"``.  Defaults to every format the plan writes (PNG and PDF; the DXF too on Kiln Business).  A format the plan does not write is left out, and ``band.withheld`` says so."
           },
           "title": {
             "default": "",
@@ -29617,6 +29617,13 @@
         "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
+      },
+      "band": {
+        "domain": "technical_drawing",
+        "free": "Outline sheet, outside sizes measured \u00b7 PNG \u00b7 PDF",
+        "pro": "Exact sizes from your own design \u00b7 holes at the size they print \u00b7 PNG \u00b7 PDF",
+        "business": "+ DXF for fab shops",
+        "enterprise": "+ your industry\u2019s drawing standard"
       },
       "offline": {
         "schema_version": 1,
