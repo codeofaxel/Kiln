@@ -708,6 +708,12 @@ class TestRequirementMatching:
         ids = {r.requirement_id for r in results}
         assert "heat_exposure" in ids
 
+    def test_heat_rules_recommend_no_annealing(self):
+        """A bare flag cannot say how annealing can change a part, and the
+        plastics these rules prefer gain little from it."""
+        rules = next(r for r in match_requirements("bracket next to a heater") if r.requirement_id == "heat_exposure")
+        assert not any("anneal" in key for key in rules.constraint_rules), rules.constraint_rules
+
     def test_flexible_match(self):
         results = match_requirements("soft flexible phone case")
         ids = {r.requirement_id for r in results}

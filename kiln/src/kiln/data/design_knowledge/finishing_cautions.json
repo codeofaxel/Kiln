@@ -500,7 +500,7 @@
       },
       {
         "name": "Annealing",
-        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature."
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       },
       {
         "name": "Drilling and tapping",
@@ -552,7 +552,7 @@
       },
       {
         "name": "Annealing",
-        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature."
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       },
       {
         "name": "Drilling and tapping",
@@ -588,7 +588,7 @@
       },
       {
         "name": "Annealing",
-        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature."
+        "safety_notes": "Use an oven rated for the temperature and never a domestic food oven. Ventilate; ramping and cooling slowly matters more than hitting an exact soak temperature. Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       },
       {
         "name": "Drilling and tapping",
@@ -648,7 +648,7 @@
       },
       {
         "name": "Annealing",
-        "safety_notes": "Support the part; annealing runs far above this material's glass transition and unsupported thin sections can sag."
+        "safety_notes": "Support the part; annealing runs far above this material's glass transition and unsupported thin sections can sag. Annealing can shrink a part along its length and warp it: anneal only a part where a small change of size is acceptable."
       },
       {
         "name": "Heat-set inserts and bonding",

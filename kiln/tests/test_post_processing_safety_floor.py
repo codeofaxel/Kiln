@@ -122,6 +122,16 @@ def test_a_suggested_annealing_is_said_with_its_caution(guide, monkeypatch, post
 
 
 @pytest.mark.parametrize("posture", _POSTURES)
+@pytest.mark.parametrize("material", ["peek", "pekk", "pps", "pa612_esd"])
+def test_an_annealing_finish_says_how_annealing_can_change_a_part(guide, monkeypatch, posture, material):
+    out = _ask(guide, monkeypatch, posture, material)
+    annealing = [t for t in out["techniques"] if t["name"] == "Annealing"]
+    assert annealing, out
+    note = annealing[0]["safety_notes"]
+    assert "warp" in note and "small change of size" in note, note
+
+
+@pytest.mark.parametrize("posture", _POSTURES)
 def test_a_named_acetone_smoothing_says_acetone_is_flammable(guide, monkeypatch, posture):
     out = _ask(guide, monkeypatch, posture, "abs", "Acetone Vapor Smoothing")
     assert [t["name"] for t in out["techniques"]] == ["Acetone Vapor Smoothing"]
