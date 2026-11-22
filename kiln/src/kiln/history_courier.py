@@ -69,6 +69,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import math
 import os
 import stat
 import time
@@ -118,6 +119,21 @@ CLOUD_REQUEST_LIMIT = 128 * 1024 * 1024
 #: The field the "which models do you keep" question asks for each model's
 #: notes with, and the field the answer lists them in.
 _MODEL_NOTES = "notes"
+
+#: How the "which models do you keep" question asks for the largest model the
+#: account keeps, and where the answer states it: ``{"max_bytes": ...,
+#: "keeps_record": True}``.  The limit is the account's to state; this
+#: computer holds no copy of it.
+_MODEL_LIMIT = "model_limit"
+
+#: How a push names a version whose model stays on this computer because it
+#: is past that limit: ``{"sha256": ..., "bytes": ...}`` on the version, and
+#: no model named.  The account keeps the version's record without the file.
+_STAYS_HERE = "model_stays_here"
+
+#: The account's note, inside a version's recipe, on a version it keeps
+#: without its model: ``{"sha256", "bytes", "limit_bytes"}``.
+_NOT_KEPT = "model_not_kept"
 
 _DESIGN_KEYS = ("design_id",)
 _ARTIFACT_KEY = "artifact_id"
@@ -1065,6 +1081,11 @@ def push(
         held_here = vault.version_ids(design_id)
         versions, sidecars = [], []
         meshes: dict[str, Path] = {}
+        # Models in the design's folder that this computer's history does
+        # not keep (each is larger than it keeps): never sent, and said.
+        left_out: dict[str, Path] = {}
+        from kiln.history_vault import _design_folder, library_mesh_not_kept
+
         for m in members:
             v = vault.version(m["version_id"])
             if v is None:
@@ -1074,6 +1095,8 @@ def push(
             if mesh is not None:
                 meshes[v["version_id"]] = mesh
                 recipe["stl_path"] = mesh.name
+            elif (big := library_mesh_not_kept(_design_folder(design_id), recipe.get("stl_path"))) is not None:
+                left_out[v["version_id"]] = big
             versions.append({
                 "version_id": v["version_id"],
                 "parent_version_id": v["parent_version_id"],
@@ -1084,7 +1107,7 @@ def push(
         if own:
             vault.close()
     from kiln import design_tie
-    from kiln.history_vault import _design_folder, _without_local_paths
+    from kiln.history_vault import _without_local_paths
 
     body = {
         "branch": branch,
@@ -1100,7 +1123,7 @@ def push(
     }
     if make_room_for:
         body["make_room_for"] = make_room_for
-    refused, listed = _send_models(tool, body, meshes, design_id=design_id)
+    refused, listed, stayed = _send_models(tool, body, meshes, design_id=design_id, left_out=left_out)
     if refused is not None:
         return refused
     _carry_notes(body, meshes, listed)
@@ -1147,6 +1170,11 @@ def push(
             # Which of their designs was archived to make room, said at the
             # top of the answer so an agent tells the person what moved.
             out["made_room"] = made_room
+    if stayed and not out.get("behind"):
+        # Said once: which version went as a record, its size, the limit,
+        # and where its model is.
+        out["models_stayed_here"] = _said_models_stayed(body, stayed)
+        out["said_models"] = " ".join(out["models_stayed_here"])
     # The numbers the account gave the versions it now holds, taken here;
     # the proven recipes are read after, so each goes to the account under
     # its version's number there.
@@ -1373,7 +1401,8 @@ def _carry_models(body: dict[str, Any], meshes: dict[str, Path]) -> None:
 
 def _send_models(
     tool: str, body: dict[str, Any], meshes: dict[str, Path], *, design_id: str = "",
-) -> tuple[dict[str, Any] | None, dict[str, dict[str, str]] | None]:
+    left_out: dict[str, Path] | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, dict[str, str]] | None, dict[str, dict[str, int]]]:
     """Put each model a push uses in the person's account once, by fingerprint.
 
     Asks which of them the account keeps, sends only the missing ones, one a
@@ -1384,11 +1413,18 @@ def _send_models(
     folder's tie when *body* does, so a folder synced with a different
     design is refused before any model is sent (:mod:`kiln.design_tie`).
 
-    Returns ``(refusal, listed)``: *refusal* is ``None`` when the push may
-    go, or the answer to give when a model was not kept (nothing is pushed
-    then).  *listed* is the account's notes, ``{sha256: {suffix:
+    A model past the largest the account keeps (the account says how large,
+    in its answer) is not sent: its version goes as a record without the
+    model (:data:`_STAYS_HERE`), and the rest of the branch goes as usual.
+    So does a version whose model is in the design's folder and not in this
+    computer's history (*left_out*), when the account states its limit.
+
+    Returns ``(refusal, listed, stayed)``: *refusal* is ``None`` when the
+    push may go, or the answer to give when a model was not kept (nothing is
+    pushed then).  *listed* is the account's notes, ``{sha256: {suffix:
     fingerprint}}``, or ``None`` when any answer listed none (or the models
-    went inside *body*): then no note is carried.
+    went inside *body*): then no note is carried.  *stayed* is ``{version_id:
+    {"bytes", "limit_bytes"}}`` for each version sent without its model.
     """
     shas: dict[str, str] = {}
     for version_id, mesh in meshes.items():
@@ -1399,35 +1435,49 @@ def _send_models(
                 tool, "MODEL_UNREADABLE",
                 f"Kiln could not read the model of version {version_id} on this computer "
                 f"({_plain_words.said(exc)}), so nothing was pushed.",
-            ), None
+            ), None, {}
     from kiln import design_tie
 
     wanted = sorted(set(shas.values()))
     kept: set[str] = set()
     listed: dict[str, dict[str, str]] | None = {}
+    limit = 0
+    # Asked even with no model to send, when one was left out of this
+    # computer's history: the answer states the account's limit.
+    asks = range(0, max(len(wanted), 1 if left_out else 0), _MAX_FINGERPRINTS_ASKED)
     tied = (
         {"design_id": design_id, **{k: body[k] for k in (design_tie.KEY_FIELD, design_tie.LINE_FIELD, design_tie.HISTORY_FIELD) if k in body}}
         if design_id and _judged_push(body) else {}
     )
-    for start in range(0, len(wanted), _MAX_FINGERPRINTS_ASKED):
+    for start in asks:
         answer = _request(
             tool, "POST", "/api/cloud/meshes/stored",
-            {"sha256s": wanted[start:start + _MAX_FINGERPRINTS_ASKED], _MODEL_NOTES: True, **tied},
+            {"sha256s": wanted[start:start + _MAX_FINGERPRINTS_ASKED], _MODEL_NOTES: True, _MODEL_LIMIT: True, **tied},
         )
         if tied and answer.get("http_status") == design_tie.REFUSED_STATUS:
-            return _push_refusal(tool, design_id, body, answer), None
+            return _push_refusal(tool, design_id, body, answer), None, {}
         if answer.get("status") == "error" and answer.get("http_status") not in (404, 405):
-            return answer, None
+            return answer, None, {}
         stored = answer.get("stored")
         if not isinstance(stored, list):
             _carry_models(body, meshes)
-            return None, None
+            return None, None, {}
         kept |= {s for s in stored if isinstance(s, str)}
         batch = _notes_listed(answer)
         listed = None if batch is None or listed is None else {**listed, **batch}
+        limit = _model_limit(answer) or limit
+    stayed: dict[str, dict[str, int]] = {}
     for version_id, sha in shas.items():
         if sha in kept:
             continue
+        if limit:
+            try:
+                size = meshes[version_id].stat().st_size
+            except OSError:
+                size = 0
+            if size > limit:
+                stayed[version_id] = {"bytes": size, "limit_bytes": limit}
+                continue
         answer = _request(tool, "PUT", f"/api/cloud/meshes/{sha}", content=meshes[version_id].read_bytes())
         if answer.get("status") == "error":
             return {
@@ -1437,12 +1487,86 @@ def _send_models(
                     f"The model of version {version_id} was not kept in your Kiln account, so "
                     f"nothing was pushed: {answer.get('error') or 'Kiln did not say why.'}"
                 ),
-            }, None
+            }, None, {}
         kept.add(sha)
+    for version_id, path in (left_out or {}).items():
+        if not limit or version_id in shas:
+            continue
+        try:
+            size = path.stat().st_size
+            if size > limit:
+                shas[version_id] = _file_sha256(path)
+                stayed[version_id] = {"bytes": size, "limit_bytes": limit}
+        except OSError:
+            continue
     for version in body["versions"]:
-        if version["version_id"] in shas:
-            version["mesh_sha256"] = shas[version["version_id"]]
-    return None, listed
+        version_id = version["version_id"]
+        if version_id in stayed:
+            version[_STAYS_HERE] = {"sha256": shas[version_id], "bytes": stayed[version_id]["bytes"]}
+        elif version_id in shas:
+            version["mesh_sha256"] = shas[version_id]
+    return None, listed, stayed
+
+
+def _model_limit(answer: dict[str, Any]) -> int:
+    """The largest model the account keeps, in bytes, when its answer states
+    one and says it keeps a version past it as a record; else ``0``."""
+    said = answer.get(_MODEL_LIMIT)
+    if not isinstance(said, dict) or said.get("keeps_record") is not True:
+        return 0
+    most = said.get("max_bytes")
+    return most if isinstance(most, int) and not isinstance(most, bool) and most > 0 else 0
+
+
+def _megabytes(size: int) -> str:
+    """*size* bytes in megabytes, rounded up to a tenth."""
+    return f"{math.ceil(size / (1024 * 1024) * 10) / 10:.1f}"
+
+
+def _version_label(recipe: Any, version_id: Any) -> str:
+    number = recipe.get("version") if isinstance(recipe, dict) else None
+    if isinstance(number, int) and not isinstance(number, bool) and number > 0:
+        return f"version {number}"
+    return f"version {str(version_id)[:12]}"
+
+
+def _said_models_stayed(body: dict[str, Any], stayed: dict[str, dict[str, int]]) -> list[str]:
+    """One sentence for each version a push sent without its model."""
+    recipes = {s["version_id"]: s.get("recipe_dict") for s in body.get("provenance_sidecars") or []}
+    said = []
+    for version_id, fact in stayed.items():
+        label = _version_label(recipes.get(version_id), version_id)
+        said.append(
+            f"The model of {label} is {_megabytes(fact['bytes'])} MB and your Kiln account keeps "
+            f"models of up to {fact['limit_bytes'] // (1024 * 1024)} MB, so {label} went to your "
+            "account as a record without its model. The model stays on this computer; a pull or "
+            "clone on another computer brings the record and says the same. Everything else on "
+            "the branch was pushed."
+        )
+    return said
+
+
+def _said_models_elsewhere(answer: dict[str, Any]) -> list[str]:
+    """One sentence for each version an answer brought as a record without
+    its model: the model is on the computer that made it."""
+    said = []
+    for sidecar in answer.get("provenance_sidecars") or []:
+        recipe = sidecar.get("recipe_dict") if isinstance(sidecar, dict) else None
+        note = recipe.get(_NOT_KEPT) if isinstance(recipe, dict) else None
+        size = note.get("bytes") if isinstance(note, dict) else None
+        if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+            continue
+        limit = note.get("limit_bytes")
+        kept_up_to = (
+            f", which keeps models of up to {limit // (1024 * 1024)} MB"
+            if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0 else ""
+        )
+        said.append(
+            f"The model of {_version_label(recipe, sidecar.get('version_id'))} ({_megabytes(size)} MB) "
+            f"is not in your Kiln account{kept_up_to}. It is kept on the computer it was made on; "
+            "its record is here without the model."
+        )
+    return said
 
 
 def _notes_listed(answer: dict[str, Any]) -> dict[str, dict[str, str]] | None:
@@ -1638,6 +1762,10 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any, *, doing: str) 
         out["models"] = models
     if notes:
         out["notes"] = notes
+    elsewhere = _said_models_elsewhere(answer)
+    if elsewhere:
+        out["models_kept_elsewhere"] = elsewhere
+        out["said_models"] = " ".join(elsewhere)
     return out
 
 

@@ -337,6 +337,21 @@ def _library_mesh(folder: Path, stl_path: Any) -> Path | None:
     return Path(real)
 
 
+def library_mesh_not_kept(folder: Path | None, stl_path: Any) -> Path | None:
+    """The mesh a library recipe names when it is this design's own file and
+    larger than this history keeps (so :func:`_library_mesh` left it out);
+    ``None`` for any other path.  The file is on this computer and nowhere
+    in the history: a push says so instead of sending the version bare."""
+    if folder is None or not isinstance(stl_path, str) or not stl_path:
+        return None
+    real = os.path.realpath(stl_path)
+    if os.path.dirname(real) != os.path.realpath(folder):
+        return None
+    if Path(real).suffix.lower() not in _MESH_SUFFIXES or not os.path.isfile(real):
+        return None
+    return Path(real) if os.path.getsize(real) > _MAX_LIBRARY_MESH else None
+
+
 #: Each library kind's record keys: the interface contract of the records.
 LIBRARY_KINDS: dict[str, dict[str, str]] = {
     "features": {"id": "feature_id", "version": "feature_version_id", "head": "head_feature_version_id"},
