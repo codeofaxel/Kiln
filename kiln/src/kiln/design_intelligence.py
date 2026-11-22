@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -798,11 +799,17 @@ class TroubleshootingResult:
     """Matched print issues with fixes for a material+symptom query.
 
     ``upgrade_hint`` is set (with the canonical Kiln Pro upsell + pricing
-    URL) only when the kiln-pro engineering overlay didn't merge — i.e.
-    free tier, missing license, or overlay endpoint unreachable past
-    grace.  Pro+ tier with a valid license sees this field empty.  Lets
-    an MCP agent surface the upgrade path verbatim without having to
-    invent the copy.
+    URL) only where kiln-pro runs in this process and its engineering
+    overlay didn't merge.  Pro+ tier with a valid license sees this field
+    empty.  Lets an MCP agent surface the upgrade path verbatim without
+    having to invent the copy.
+
+    ``fixes_note`` is set on an install without kiln-pro whose answer was
+    made on this computer: the step-by-step fixes come from Kiln's servers
+    (https://kiln3d.com) for any signed-in account, and the note says, in
+    one sentence, why they are not in this answer.  When a served ask
+    missed, ``to_dict`` carries the miss beside it as ``why``,
+    ``why_code`` and ``why_detail`` (:func:`kiln.served_answer.fields`).
     """
 
     material: str
@@ -810,9 +817,11 @@ class TroubleshootingResult:
     storage_requirements: dict[str, Any] | None
     break_in_tips: list[str]
     upgrade_hint: str = ""
+    fixes_note: str = ""
+    fixes_why: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _with_fixes_note(asdict(self))
 
 
 @dataclass
@@ -920,9 +929,23 @@ class PrintDiagnostic:
     storage_requirements: dict[str, Any] | None
     post_processing_tips: list[str]
     combined_guidance: list[str]
+    #: As on :class:`TroubleshootingResult`.
+    fixes_note: str = ""
+    fixes_why: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _with_fixes_note(asdict(self))
+
+
+def _with_fixes_note(out: dict[str, Any]) -> dict[str, Any]:
+    """*out* with ``fixes_note`` only when it says something, and the miss
+    behind it (``why``, ``why_code``, ``why_detail``) at the top level."""
+    why = out.pop("fixes_why", None) or {}
+    if not out.get("fixes_note"):
+        out.pop("fixes_note", None)
+        return out
+    out.update(why)
+    return out
 
 
 @dataclass
@@ -3237,17 +3260,67 @@ def troubleshoot_print_issue(
         key=lambda i: severity_order.get(i.get("severity", "minor"), 2),
     )
 
+    hint, fixes_note, fixes_why = "", "", {}
+    if not _engineering_overlay_loaded("material_troubleshooting"):
+        if _kiln_pro_in_process():
+            hint = _upgrade_hint("material_troubleshooting")
+        else:
+            fixes_note, fixes_why = _fixes_not_on_this_computer()
+
     return TroubleshootingResult(
         material=material_key,
         matched_issues=issues,
         storage_requirements=data.get("storage_requirements"),
         break_in_tips=data.get("break_in_tips", []),
-        upgrade_hint=(
-            ""
-            if _engineering_overlay_loaded("material_troubleshooting")
-            else _upgrade_hint("material_troubleshooting")
-        ),
+        upgrade_hint=hint,
+        fixes_note=fixes_note,
+        fixes_why=fixes_why,
     )
+
+
+#: What a troubleshooting answer made on an install without kiln-pro says
+#: about the fixes it does not carry, in :func:`kiln.served_answer.sentence`'s
+#: parts.  The same answer comes from Kiln's servers for any signed-in account.
+_FIXES_ON_THE_LINE = (
+    "Kiln's step-by-step fixes for this print problem come from Kiln's servers, "
+    "free with any Kiln account"
+)
+_FIXES_CANNOT = "get them"
+_FIXES_WONT = "gives only the advice kept on this computer"
+#: Said when no served ask was made for this answer (the engine called
+#: directly, not through Kiln's tools), so no cause can be named.
+_FIXES_NOT_ASKED = (
+    f"{_FIXES_ON_THE_LINE}. This answer {_FIXES_WONT}; "
+    "ask through Kiln's troubleshooting tools while signed in to get them."
+)
+
+
+def _kiln_pro_in_process() -> bool:
+    """Whether kiln-pro is loaded in this process (Kiln's servers), where a
+    troubleshooting answer is always made here."""
+    return sys.modules.get("kiln_pro") is not None
+
+
+def _fixes_not_on_this_computer() -> tuple[str, dict[str, Any]]:
+    """``(note, miss fields)`` for an answer made here instead of on Kiln's
+    servers: the served ask's miss, worded once, when this call is the one
+    the servers did not answer (:func:`kiln.served_public.here_after`)."""
+    from kiln import served_public
+    from kiln.served_answer import fields, sentence
+
+    if served_public.already_missed():
+        _, miss = served_public.answer_or_missed("troubleshoot_print_issue", {})
+        if miss is not None:
+            note = sentence(
+                miss,
+                feature="servers",
+                on_the_line=_FIXES_ON_THE_LINE,
+                cannot=_FIXES_CANNOT,
+                wont=_FIXES_WONT,
+                then="ask again",
+            )
+            return note, fields(miss)
+    return _FIXES_NOT_ASKED, {}
 
 
 def list_troubleshooting_materials() -> list[str]:
@@ -3801,6 +3874,8 @@ def get_print_diagnostic(
         storage_requirements=ts_result.storage_requirements,
         post_processing_tips=pp_tips,
         combined_guidance=combined,
+        fixes_note=ts_result.fixes_note,
+        fixes_why=dict(ts_result.fixes_why),
     )
 
 

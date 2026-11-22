@@ -108,8 +108,11 @@ class TestFreeTierHintAttached:
     """When _engineering_overlay_loaded() returns False, every consumer
     tool attaches the corresponding upgrade_hint string."""
 
+    @patch("kiln.design_intelligence._kiln_pro_in_process", return_value=True)
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_troubleshoot_attaches_hint(self, _mock):
+    def test_troubleshoot_attaches_hint(self, _mock, _pro_here):
+        """Where kiln-pro runs in the process.  An install without it is
+        served the fixes instead (TestPlainInstallTroubleshootingNote)."""
         result = troubleshoot_print_issue("pla")
         assert result is not None, "pla should resolve in the catalog"
         assert result.upgrade_hint == _UPGRADE_HINT_TROUBLESHOOTING
@@ -166,8 +169,9 @@ class TestToDictIncludesHint:
     missing field would silently strip the hint before it reaches the
     agent)."""
 
+    @patch("kiln.design_intelligence._kiln_pro_in_process", return_value=True)
     @patch("kiln.design_intelligence._engineering_overlay_loaded", return_value=False)
-    def test_troubleshoot_dict_carries_hint(self, _mock):
+    def test_troubleshoot_dict_carries_hint(self, _mock, _pro_here):
         result = troubleshoot_print_issue("pla")
         d = result.to_dict()
         assert "upgrade_hint" in d
