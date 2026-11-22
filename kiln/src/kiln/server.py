@@ -25527,8 +25527,8 @@ def multi_color_copies(
                 )
                 if miss is None:
                     return _error_dict(
-                        f"No spool is loaded. Load {material} spools, or name the trays yourself "
-                        "with ams_slots.",
+                        f"No spool is loaded. Load {material} spools, or give the slots yourself "
+                        "in `ams_slots`.",
                         code="NO_MATERIAL",
                     )
                 return _error_dict(miss.message, code="NO_MATERIAL", retryable=False, extra={
