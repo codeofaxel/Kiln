@@ -15633,6 +15633,9 @@ def license_status() -> dict:
             from kiln.licensing import get_license_manager
         except ImportError:
             return _plan_status_from_account()
+        served = _plan_status_for_served_caller()
+        if served is not None:
+            return served
 
         info = get_license_manager().get_info()
         payload = {"success": True, **info.to_dict()}
@@ -15641,6 +15644,29 @@ def license_status() -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in license_status")
         return _error_dict(f"Kiln couldn't check the license: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
+
+
+def _plan_status_for_served_caller() -> dict | None:
+    """``license_status`` when a server is answering for a signed-in caller:
+    that account's plan, never the plan of the machine the server runs on.
+    ``None`` when no caller's plan was set for this request."""
+    try:
+        from kiln.licensing import _caller_tier_override
+
+        override = _caller_tier_override.get()
+    except Exception:  # noqa: BLE001 -- no per-request plan to read is "not served"
+        return None
+    if override is None:
+        return None
+    tier = str(getattr(override, "value", override))
+    return {
+        "success": True,
+        "tier": tier,
+        "is_valid": True,
+        "is_expired": False,
+        "source": "oauth",
+        "agent_summary": f"Your Kiln account is on the {tier.title()} plan.",
+    }
 
 
 def _plan_status_from_account() -> dict:
