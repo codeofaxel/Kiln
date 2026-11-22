@@ -1,9 +1,8 @@
 """The slicer a slice for more than one nozzle is made with.
 
 Covered here, with an invented machine, an invented settings bundle and
-placeholder extras: a nozzle record names its maker's slicer and the lowest
-version accepted; that slicer is used when installed and never swapped for
-one the caller named; with that slicer missing or too old the print is
+placeholder extras: the maker's slicer is used when a version Kiln accepts
+is installed, and never swapped for one the caller named; with that slicer missing or too old the print is
 sliced for one nozzle instead, and the result says how many filament swaps
 the file makes and, the first time on a printer or for many swaps, what to
 install; a map, a slicer named while the maker's one is installed, or a
