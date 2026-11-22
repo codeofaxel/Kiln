@@ -14,6 +14,7 @@ import json
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, read_only
 from kiln.tool_args import parse_json_object
 
@@ -82,7 +83,7 @@ class _AssemblyToolsPlugin:
                 return {"success": True, "data": assembly.to_dict()}
             except Exception as exc:
                 _logger.exception("Unexpected error in create_assembly")
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Add a part to an assembly"))
         def add_assembly_part(
@@ -157,12 +158,12 @@ class _AssemblyToolsPlugin:
                 assembly.add_part(part)
                 return {"success": True, "data": assembly.to_dict()}
             except json.JSONDecodeError as exc:
-                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": "Kiln couldn't read the assembly description: check its brackets and quotes.", **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("Unexpected error in add_assembly_part")
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Add an assembly joint"))
         def add_assembly_interface(
@@ -300,12 +301,12 @@ class _AssemblyToolsPlugin:
                 _declare_mechanism_place(assembly, index, mechanism)
                 return {"success": True, "data": assembly.to_dict(), "interface": index}
             except json.JSONDecodeError as exc:
-                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": "Kiln couldn't read the assembly description: check its brackets and quotes.", **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("Unexpected error in add_assembly_interface")
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Validate assembly"))
         def validate_assembly(
@@ -363,10 +364,10 @@ class _AssemblyToolsPlugin:
                     attach_load_bearing_nudge(response, force=True)
                 return response
             except json.JSONDecodeError as exc:
-                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": "Kiln couldn't read the assembly description: check its brackets and quotes.", **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("Unexpected error in validate_assembly")
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Check assembly clearances"))
         def check_assembly_clearances(
@@ -396,10 +397,10 @@ class _AssemblyToolsPlugin:
                     "data": [c.to_dict() for c in checks],
                 }
             except json.JSONDecodeError as exc:
-                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": "Kiln couldn't read the assembly description: check its brackets and quotes.", **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("Unexpected error in check_assembly_clearances")
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=creates("Compose assembly into one file"))
         def compose_assembly_parts(
@@ -474,10 +475,10 @@ class _AssemblyToolsPlugin:
                 except ImportError:
                     return response
             except json.JSONDecodeError as exc:
-                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": "Kiln couldn't read the assembly description: check its brackets and quotes.", **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.exception("Unexpected error in compose_assembly_parts")
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Recommend joint clearance"))
         def get_joint_recommendation(
@@ -546,7 +547,7 @@ class _AssemblyToolsPlugin:
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in get_joint_recommendation")
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
         _logger.debug("Registered assembly tools")
 
@@ -640,9 +641,9 @@ def _parse_record_arg(value: Any, record_cls: Any, label: str) -> Any | None:
         try:
             value = json.loads(value)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid {label} JSON: {exc}") from exc
+            raise ValueError(f"Kiln couldn't read `{label}`: check its brackets and quotes.") from exc
     if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a JSON object or JSON object string")
+        raise ValueError(f"`{label}` must be a set of named values.")
     return record_cls.from_dict(value)
 
 

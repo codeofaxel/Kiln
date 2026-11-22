@@ -30,6 +30,7 @@ from typing import Any
 
 import click
 
+from kiln import plain_words as _plain_words
 from kiln import run_program
 from kiln._pro_order_bridge import ServedRefusal as _ServedOrderRefusal
 from kiln.auto_record_hook import note_cancel_requested
@@ -783,7 +784,7 @@ def _get_adapter_from_ctx(ctx: click.Context):
     try:
         cfg = load_printer_config(printer_name)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_plain_words.sentence(exc)) from exc
 
     ok, err = validate_printer_config(cfg)
     if not ok:
@@ -1527,7 +1528,7 @@ def _run_prusa_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
             )
             root_ok = True
         except Exception as exc:
-            summary["storage_roots"][root] = {"ok": False, "error": str(exc)}
+            summary["storage_roots"][root] = {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
             checks.append(
                 {
                     "name": f"storage_{root}",
@@ -1724,7 +1725,7 @@ class _DidYouMeanGroup(click.Group):
                     )
                     if word_matches and word_matches[0] not in matches:
                         hint += f"\n  (Hint: try 'kiln {word_matches[0]}')"
-                raise click.UsageError(str(exc) + hint) from None
+                raise click.UsageError(_plain_words.sentence(exc) + hint) from None
             raise
 
 
@@ -2171,7 +2172,7 @@ def _saved_printer(ctx: click.Context, printer: str | None) -> tuple[Any, str | 
     try:
         cfg = load_printer_config(aimed)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_plain_words.sentence(exc)) from exc
     name = None
     if not os.environ.get("KILN_PRINTER_HOST"):
         raw = _read_config_file(get_config_path()) or {}
@@ -2491,7 +2492,7 @@ def auth(
             try:
                 validate_external_camera_url(_url, what=_label)
             except ValueError as exc:
-                raise click.UsageError(str(exc)) from exc
+                raise click.UsageError(_plain_words.sentence(exc)) from exc
     try:
         # The save reads the id the printer reports for itself once the
         # address answers, so a printer that moved is matched to its saved
@@ -2708,7 +2709,7 @@ def auth(
                 )
             click.echo("Creality connectivity check passed. Run: kiln doctor-creality for full diagnostics.")
     except PrinterNameTaken as exc:
-        raise click.UsageError(str(exc)) from exc
+        raise click.UsageError(_plain_words.sentence(exc)) from exc
     except OSError as exc:
         click.echo(
             format_error(
@@ -4824,7 +4825,7 @@ def machine_repair_cmd(machine_name: str, status: str | None, kind: str | None, 
                         if synced.get("questions"):
                             result["questions"] = synced["questions"]
                 except Exception as exc:  # noqa: BLE001 -- the account is a copy; the record is here
-                    result["account"] = {"synced": False, "why": "not_reached", "error": str(exc)}
+                    result["account"] = {"synced": False, "why": "not_reached", "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
         except RepairRefused as exc:
             click.echo(format_error(exc.message, code=exc.code, json_mode=json_mode))
             sys.exit(1)
@@ -4970,7 +4971,7 @@ def use(name: str) -> None:
         set_active_printer(name)
         click.echo(f"Active printer set to '{name}'.")
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_plain_words.sentence(exc)) from exc
 
 
 @cli.command("set-model")
@@ -5082,7 +5083,7 @@ def remove(name: str) -> None:
         remove_printer(name)
         click.echo(f"Removed printer '{name}'.")
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_plain_words.sentence(exc)) from exc
 
 
 @cli.command("rename-printer")
@@ -6385,7 +6386,7 @@ def _get_fulfillment_provider(service: Any) -> Any:
         return service.get_provider()
     except (KeyError, RuntimeError, ValueError) as exc:
         raise click.ClickException(
-            f"Fulfillment provider not configured: {exc}. "
+            f"Fulfillment provider not configured: {_plain_words.said(exc)}. "
             "Set KILN_FULFILLMENT_PROVIDER and the matching API key env var."
         ) from exc
 
@@ -6668,7 +6669,7 @@ def _save_shipping_profile_from_cli(
         save_shipping_profile(profile_name, shipping_address)
     except ValueError as exc:
         if "already exists" not in str(exc):
-            raise click.ClickException(str(exc)) from exc
+            raise click.ClickException(_plain_words.sentence(exc)) from exc
         if not click.confirm(
             f"Shipping profile '{profile_name}' already exists. Replace it?",
             default=False,
@@ -6740,7 +6741,7 @@ def _order_fee_tools() -> tuple[Any, Any, type[Exception]]:
         ledger = BillingLedger(db=get_db())
     except Exception as exc:
         raise click.ClickException(
-            f"Kiln couldn't open its fee ledger ({exc}), so the order was not "
+            f"Kiln couldn't open its fee ledger ({_plain_words.said(exc)}), so the order was not "
             "placed and nothing was sent to the print service."
         ) from exc
     return ledger, PaymentManager, PaymentError
@@ -8781,9 +8782,9 @@ def compare_cost(
         attach_learned_time(local)
         result["local"] = {"available": True, "estimate": local}
     except ValueError as exc:
-        result["local"] = {"available": False, "error": str(exc)}
+        result["local"] = {"available": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
-        result["local"] = {"available": False, "error": str(exc)}
+        result["local"] = {"available": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
     # Fulfillment quote (optional): the order service kiln-pro installs, else
     # the one that quotes through Kiln's servers.
@@ -8864,9 +8865,9 @@ def compare_cost(
             if priced.pose:
                 result["fulfillment"]["pose"] = priced.block()
         except FulfillmentError as exc:
-            result["fulfillment"] = {"available": False, "error": str(exc)}
+            result["fulfillment"] = {"available": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
         except Exception as exc:
-            result["fulfillment"] = {"available": False, "error": str(exc)}
+            result["fulfillment"] = {"available": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     else:
         result["fulfillment"] = {"available": False, "error": "No --fulfillment-material specified"}
 
@@ -10291,11 +10292,11 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
             "printers": [{"name": p.name, "host": p.host, "type": p.printer_type} for p in discovered],
         }
     except OSError as exc:
-        results["discover"] = {"count": 0, "error": str(exc)}
+        results["discover"] = {"count": 0, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
         if not json_mode:
             click.echo(click.style(f"    Discovery failed: {exc}", fg="yellow"))
     except Exception as exc:
-        results["discover"] = {"count": 0, "error": str(exc)}
+        results["discover"] = {"count": 0, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
         if not json_mode:
             click.echo(click.style(f"    Discovery failed: {exc}", fg="yellow"))
 
@@ -10435,7 +10436,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         if _camera_line and not json_mode:
             click.echo(f"    {_camera_line}")
     except ValueError as exc:
-        results["status"] = {"error": str(exc), "connected": False}
+        results["status"] = {"error": _plain_words.sentence(exc), "connected": False, **_plain_words.detail_field(exc)}
         if not json_mode:
             click.echo(f"    No printer configured: {exc}")
     except PrinterError as exc:
@@ -10446,11 +10447,11 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
             if not json_mode:
                 click.echo(click.style(f"    Status not checked: {why}", fg="yellow"))
         else:
-            results["status"] = {"error": str(exc), "connected": False}
+            results["status"] = {"error": _plain_words.sentence(exc), "connected": False, **_plain_words.detail_field(exc)}
             if not json_mode:
                 click.echo(click.style(f"    Status check failed: {exc}", fg="yellow"))
     except Exception as exc:
-        results["status"] = {"error": str(exc), "connected": False}
+        results["status"] = {"error": _plain_words.sentence(exc), "connected": False, **_plain_words.detail_field(exc)}
         if not json_mode:
             click.echo(click.style(f"    Status check failed: {exc}", fg="yellow"))
 

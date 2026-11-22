@@ -32,6 +32,7 @@ clause in everyday words, for a failure whose own text is Python's.
 from __future__ import annotations
 
 import errno
+import re
 import struct
 import zipfile
 from collections.abc import Iterator
@@ -145,8 +146,34 @@ _KILN_FAULTS: tuple[type[BaseException], ...] = (
 INSIDE_KILN = "something went wrong inside Kiln (not something you did)"
 
 
+#: A web service's answer named in a failure's text ("HTTP 401", "status
+#: 503", "404 Client Error"), by what it means for the person.
+_HTTP_STATUS = re.compile(r"\b(?:HTTP|status)[ :]*([1-5]\d\d)\b|\b([45]\d\d) (?:Client|Server) Error\b", re.IGNORECASE)
+
+
+def _status_in_words(code: int) -> str | None:
+    if code in (401, 403):
+        return "the other service didn't accept Kiln's sign-in"
+    if code == 404:
+        return "what was asked for wasn't found"
+    if code in (408, 504):
+        return "it took too long to answer"
+    if code == 429:
+        return "too many requests went out at once; try again shortly"
+    if 400 <= code < 500:
+        return "the other service didn't accept the request"
+    if 500 <= code < 600:
+        return "the other service had a problem on its side"
+    return None
+
+
 def _one_in_words(exc: BaseException) -> str | None:
     name = type(exc).__name__
+    status = _HTTP_STATUS.search(str(exc))
+    if status is not None:
+        said = _status_in_words(int(status.group(1) or status.group(2)))
+        if said is not None:
+            return said
     if isinstance(exc, FileNotFoundError):
         return "the file wasn't found"
     if isinstance(exc, (NotADirectoryError, IsADirectoryError)):

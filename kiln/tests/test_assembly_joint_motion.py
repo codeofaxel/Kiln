@@ -210,7 +210,7 @@ def test_the_tool_reports_a_bad_motion_instead_of_recording_it(tools):
         motion="{not json",
     )
     assert broken_json["success"] is False
-    assert "Invalid motion JSON" in broken_json["error"]
+    assert "couldn't read `motion`" in broken_json["error"]
 
     bad_kind = tools["add_assembly_interface"](
         assembly_json=_assembly_json(), part_a_id="box", part_b_id="lid",
@@ -224,7 +224,7 @@ def test_the_tool_reports_a_bad_motion_instead_of_recording_it(tools):
         assembly_json=_assembly_json(), part_a_id="box", part_b_id="lid",
         fastener="{not json",
     )
-    assert "Invalid fastener JSON" in bad_fastener["error"]
+    assert "couldn't read `fastener`" in bad_fastener["error"]
 
 
 # ---------------------------------------------------------------------------

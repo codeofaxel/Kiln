@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kiln import _fonts
+from kiln import plain_words as _plain_words
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
 from kiln.openscad_runner import run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
@@ -951,7 +952,7 @@ def visualize_model(
             try:
                 openscad = _find_openscad()
             except FileNotFoundError as exc:
-                return {"success": False, "error": str(exc), "code": "OPENSCAD_NOT_FOUND"}
+                return {"success": False, "error": _plain_words.sentence(exc), "code": "OPENSCAD_NOT_FOUND", **_plain_words.detail_field(exc)}
             # Detect version once for manifold flag — safe to fail
             try:
                 _ver = get_openscad_version(openscad)
@@ -1243,7 +1244,7 @@ def compare_renders(
     if not isinstance(paths, list) or len(paths) < 2:
         return {
             "success": False,
-            "error": "compare_renders requires 2-4 file paths.",
+            "error": "`compare_renders` requires 2-4 file paths.",
             "code": "INVALID_COUNT",
         }
     if len(paths) > 4:

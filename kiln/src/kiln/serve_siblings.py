@@ -68,6 +68,7 @@ import subprocess
 import sys
 import time
 
+from kiln import plain_words as _plain_words
 from kiln import proc_alive, run_program
 from kiln.cli_command import kiln_command
 
@@ -960,7 +961,7 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
         except ProcessLookupError:
             trimmed.append({**cand, "reason": cand["reason"] + " (already gone)"})
         except Exception as exc:
-            failed.append({**cand, "error": str(exc)})
+            failed.append({**cand, "error": _plain_words.sentence(exc)})
 
     term_survivors = _await_exit(
         [c["pid"] for c in signalled], _TERM_GRACE_S
@@ -982,7 +983,7 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
             trimmed.append(cand)
         except Exception as exc:
             failed.append(
-                {**cand, "error": f"ignored SIGTERM, and SIGKILL failed: {exc}"}
+                {**cand, "error": f"ignored SIGTERM, and SIGKILL failed: {_plain_words.said(exc)}"}
             )
 
     unkillable = _await_exit([c["pid"] for c in kill_pending], _KILL_GRACE_S)
@@ -992,10 +993,10 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
                 {
                     **cand,
                     "error": (
-                        "still running after SIGTERM and SIGKILL "
-                        f"({_TERM_GRACE_S + _KILL_GRACE_S:g}s) — likely stuck "
-                        "in an uninterruptible kernel wait; it should clear "
-                        "when the machine or the blocking I/O does"
+                        "It's still running after Kiln asked it to stop and "
+                        f"then forced it ({_TERM_GRACE_S + _KILL_GRACE_S:g}s). "
+                        "It's probably waiting on the disk or the network, and "
+                        "should clear when that does."
                     ),
                 }
             )

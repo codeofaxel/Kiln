@@ -156,9 +156,9 @@ def find_holes(file_path: str, *, diagnostics: dict[str, int] | None = None) -> 
         if exc.cause == TIME_LIMIT:
             exc.time_limit_s = limit
         raise
-    if "error" in answer:
+    if "failed_as" in answer:
         kinds = {"ValueError": ValueError, "FileNotFoundError": FileNotFoundError}
-        raise kinds.get(answer["error"], OSError)(answer["message"])
+        raise kinds.get(answer["failed_as"], OSError)(answer["text"])
     if diagnostics is not None:
         for key, count in answer["diagnostics"].items():
             diagnostics[key] = diagnostics.get(key, 0) + count
@@ -172,7 +172,9 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
     try:
         holes = detect_holes(request["path"], diagnostics=diagnostics)
     except (ValueError, OSError) as exc:
-        return {"error": type(exc).__name__, "message": str(exc)}
+        # The failure crosses back to the parent as it was raised there; the
+        # door that catches it says it to the person.
+        return {"failed_as": type(exc).__name__, "text": str(exc)}
     return {"holes": holes, "diagnostics": diagnostics}
 
 

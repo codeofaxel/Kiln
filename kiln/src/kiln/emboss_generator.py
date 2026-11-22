@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import _vec
+from kiln import plain_words as _plain_words
 from kiln.openscad_runner import crashed_on_startup, run_openscad
 from kiln.quoted_text import fence
 
@@ -2672,7 +2673,8 @@ def compile_embossed_model(
             "file_size": 0,
             "compile_time_seconds": 0.0,
             "success": False,
-            "error": str(exc),
+            "error": _plain_words.sentence(exc),
+            **_plain_words.detail_field(exc),
         }
 
     import os as _os

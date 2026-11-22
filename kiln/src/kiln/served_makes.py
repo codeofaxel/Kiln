@@ -49,6 +49,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 #: Refuse to move a model larger than this in either direction (the same
@@ -790,9 +792,9 @@ def keep(artifact_token: str) -> dict[str, Any]:
             "code": "INVALID_INPUT",
             "tool": tool,
             "error": (
-                "keep_design takes the artifact_token of a make from Kiln's "
+                "`keep_design` takes the `artifact_token` of a make from Kiln's "
                 "servers (it is in that make's answer, under "
-                "made_on_kiln_servers)."
+                "`made_on_kiln_servers`)."
             ),
         }
     known = _known(token) or {}
@@ -852,9 +854,10 @@ def keep(artifact_token: str) -> dict[str, Any]:
             "tool": tool,
             "error": (
                 f"The make was kept, but the file could not be saved to {folder}: "
-                f"{exc}. Fix that and call keep_design again; a make is only "
+                f"{_plain_words.said(exc)}. Fix that and call `keep_design` again; a make is only "
                 "charged once."
             ),
+            **_plain_words.detail_field(exc),
         }
     lay_notes_beside(token, path, bearer=bearer)
     _remember(token, kept=str(path), kind=kind)

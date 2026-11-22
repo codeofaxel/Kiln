@@ -20,6 +20,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ class _FirmwareToolsPlugin:
             asked = sum((machine is not None, machines is not None, bool(all_machines)))
             if asked > 1:
                 return _srv._error_dict(
-                    "Name one machine, a list of machines, or all_machines=true, not more than one of these.",
+                    "Name one machine, a list of machines, or `all_machines=true`, not more than one of these.",
                     code="INVALID_ARGS",
                 )
             if machines is not None:
@@ -113,7 +114,7 @@ class _FirmwareToolsPlugin:
             names = _srv._get_registry().list_machines()
             if not names:
                 return _srv._error_dict(
-                    "No machines are registered with Kiln yet. Add one with register_printer.",
+                    "No machines are registered with Kiln yet. Add one with `register_printer`.",
                     code="NO_PRINTERS",
                 )
             return list(names), True
@@ -133,7 +134,7 @@ class _FirmwareToolsPlugin:
                 try:
                     answer = do(_srv._resolve_adapter(name))
                 except Exception as exc:
-                    answer = _srv._error_dict(f"{fail}: {exc}", code="FIRMWARE_ERROR")
+                    answer = _srv._error_dict(f"{fail}: {_plain_words.said(exc)}", code="FIRMWARE_ERROR")
                 results.append({"machine": name, **answer})
             done = sum(1 for r in results if r.get("success"))
             return {
@@ -196,10 +197,10 @@ class _FirmwareToolsPlugin:
             try:
                 answer = do(_srv._resolve_adapter(target))
             except expected as exc:
-                return _srv._error_dict(f"{fail}: {exc}. {hint}")
+                return _srv._error_dict(f"{fail}: {_plain_words.said(exc)}. {hint}")
             except Exception as exc:
                 _logger.exception("Unexpected error in machine firmware tool")
-                return _srv._error_dict(f"{fail}: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"{fail}: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
             return {"machine": target, **answer} if target else answer
 
         # ------------------------------------------------------------------

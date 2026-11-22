@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.generic_limits import OVERHANG_UNSUPPORTED_DEG
 from kiln.plugins.slicer_tools import plate_choice_refusal
 from kiln.project_plates import PlateChoiceError
@@ -216,13 +217,13 @@ class _PrintabilityToolsPlugin:
                 return plate_choice_refusal(exc)
             except ValueError as exc:
                 return _srv._error_dict(
-                    f"Failed to analyze printability: {exc}",
+                    f"Failed to analyze printability: {_plain_words.said(exc)}",
                     code="VALIDATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in analyze_printability")
                 return _srv._error_dict(
-                    f"Unexpected error in analyze_printability: {exc}",
+                    f"Unexpected error in `analyze_printability`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -325,13 +326,13 @@ class _PrintabilityToolsPlugin:
                 return resp
             except ValueError as exc:
                 return _srv._error_dict(
-                    f"Failed to auto-orient model: {exc}",
+                    f"Failed to auto-orient model: {_plain_words.said(exc)}",
                     code="VALIDATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in auto_orient_model")
                 return _srv._error_dict(
-                    f"Unexpected error in auto_orient_model: {exc}",
+                    f"Unexpected error in `auto_orient_model`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -385,13 +386,13 @@ class _PrintabilityToolsPlugin:
                 return plate_choice_refusal(exc)
             except ValueError as exc:
                 return _srv._error_dict(
-                    f"Failed to estimate supports: {exc}",
+                    f"Failed to estimate supports: {_plain_words.said(exc)}",
                     code="VALIDATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in estimate_supports")
                 return _srv._error_dict(
-                    f"Unexpected error in estimate_supports: {exc}",
+                    f"Unexpected error in `estimate_supports`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -442,13 +443,13 @@ class _PrintabilityToolsPlugin:
                 }
             except ValueError as exc:
                 return _srv._error_dict(
-                    f"Failed to analyze adhesion: {exc}",
+                    f"Failed to analyze adhesion: {_plain_words.said(exc)}",
                     code="VALIDATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in recommend_adhesion_settings")
                 return _srv._error_dict(
-                    f"Unexpected error in recommend_adhesion_settings: {exc}",
+                    f"Unexpected error in `recommend_adhesion_settings`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -546,7 +547,7 @@ class _PrintabilityToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in diagnose_print_failure_live")
                 return _srv._error_dict(
-                    f"Unexpected error in diagnose_print_failure_live: {exc}",
+                    f"Unexpected error in `diagnose_print_failure_live`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 

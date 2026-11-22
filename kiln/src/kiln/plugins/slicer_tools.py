@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln import plate_state as _plate_state
 from kiln import print_keeping
 from kiln.plate_state import pretty_job_name as _pretty_job_name
@@ -1116,7 +1117,7 @@ def _fill_plate_placement(
     if ext != ".stl":
         return input_path, _srv._error_dict(
             f"Kiln can fill a plate with copies of an STL, not {ext or 'this format'}; "
-            "convert it first (import_external_mesh), or ask for one copy.",
+            "convert it first (`import_external_mesh`), or ask for one copy.",
             code="PLACEMENT_UNPLACEABLE",
         ), {"plate": "unknown"}
 
@@ -1237,7 +1238,7 @@ def _fill_plate_placement(
         except Exception as exc:  # noqa: BLE001 -- copies that could not be written are not sliced
             _logger.warning("Fill copy failed for %s: %s", input_path, exc)
             return input_path, _srv._error_dict(
-                f"Kiln could not lay the copies out ({exc}), so nothing was sliced.", code="PLACEMENT_UNPLACEABLE",
+                f"Kiln could not lay the copies out ({_plain_words.said(exc)}), so nothing was sliced.", code="PLACEMENT_UNPLACEABLE",
             ), {"plate": status}
         return merged, None, {"plate": status, "fill": _fill_info(len(corners), "engine")}
     bed_w, bed_d = (bed[0], bed[1]) if bed else (_FILL_DEFAULT_BED_MM, _FILL_DEFAULT_BED_MM)
@@ -1258,7 +1259,7 @@ def _fill_plate_placement(
         )
     except ValueError as exc:
         return input_path, _srv._error_dict(
-            f"Kiln could not lay the copies out ({exc}), so nothing was sliced.", code="PLACEMENT_UNPLACEABLE",
+            f"Kiln could not lay the copies out ({_plain_words.said(exc)}), so nothing was sliced.", code="PLACEMENT_UNPLACEABLE",
         ), {"plate": status}
     return placed, None, {"plate": status, "fill": _fill_info(count, "grid")}
 
@@ -3213,7 +3214,7 @@ class _SlicerToolsPlugin:
                 or not 1 <= time_limit_seconds <= SLICE_TIME_LIMIT_S
             ):
                 return _srv._error_dict(
-                    f"time_limit_seconds is how long the slicer may run, in whole seconds from 1 to "
+                    f"`time_limit_seconds` is how long the slicer may run, in whole seconds from 1 to "
                     f"{SLICE_TIME_LIMIT_S}; it can shorten Kiln's own limit, never lengthen it. Give one in "
                     "that range, or leave it out for Kiln's own limit.",
                     code="INVALID_INPUT",
@@ -3371,20 +3372,20 @@ class _SlicerToolsPlugin:
                 return plate_choice_refusal(exc)
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Failed to slice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
+                    f"Failed to slice model: {_plain_words.said(exc)}. Ensure PrusaSlicer or OrcaSlicer is installed.",
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
                 why = getattr(exc, "why", None)
                 return _srv._error_dict(
-                    f"Failed to slice model: {exc}", code=getattr(exc, "code", "SLICER_ERROR"),
+                    f"Failed to slice model: {_plain_words.said(exc)}", code=getattr(exc, "code", "SLICER_ERROR"),
                     **({"extra": {"why": why}} if why else {}),
                 )
             except FileNotFoundError as exc:
-                return _srv._error_dict(f"Failed to slice model: {exc}", code="FILE_NOT_FOUND")
+                return _srv._error_dict(f"Failed to slice model: {_plain_words.said(exc)}", code="FILE_NOT_FOUND")
             except Exception as exc:
                 _logger.exception("Unexpected error in slice_model")
-                return _srv._error_dict(f"Unexpected error in slice_model: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Unexpected error in `slice_model`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # reslice_with_overrides
@@ -3546,7 +3547,7 @@ class _SlicerToolsPlugin:
                 refuse_unsafe_settings(stated_overrides)
                 parsed_overrides: dict[str, str] = one_spelling(stated_overrides) or {}
             except UnsafeSettingError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
 
             try:
                 from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError
@@ -3744,25 +3745,25 @@ class _SlicerToolsPlugin:
                 return plate_choice_refusal(exc)
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Failed to reslice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
+                    f"Failed to reslice model: {_plain_words.said(exc)}. Ensure PrusaSlicer or OrcaSlicer is installed.",
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
                 return _srv._error_dict(
-                    f"Failed to reslice model: {exc}",
+                    f"Failed to reslice model: {_plain_words.said(exc)}",
                     code=getattr(exc, "code", "SLICER_ERROR"),
                 )
             except FileNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Failed to reslice model: {exc}",
+                    f"Failed to reslice model: {_plain_words.said(exc)}",
                     code="FILE_NOT_FOUND",
                 )
             except UnsafeSettingError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
                 _logger.exception("Unexpected error in reslice_with_overrides")
                 return _srv._error_dict(
-                    f"Unexpected error in reslice_with_overrides: {exc}",
+                    f"Unexpected error in `reslice_with_overrides`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -3787,12 +3788,12 @@ class _SlicerToolsPlugin:
                 }
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Failed to find slicer: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
+                    f"Failed to find slicer: {_plain_words.said(exc)}. Ensure PrusaSlicer or OrcaSlicer is installed.",
                     code="SLICER_NOT_FOUND",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in find_slicer_tool")
-                return _srv._error_dict(f"Unexpected error in find_slicer_tool: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Unexpected error in `find_slicer_tool`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # slice_and_print
@@ -4452,14 +4453,13 @@ class _SlicerToolsPlugin:
                 # one — never silent external-spool fallthrough".
                 if ams_decision.get("ambiguous") and not ams_decision.get("use_ams"):
                     return _srv._error_dict(
-                        "AMS routing is ambiguous — hardware reports AMS "
-                        "present but no tray state is available.  Refusing "
-                        "to silently route to external spool (which would "
-                        "fail with Bambu error 0300-8015 if nothing is "
-                        "loaded there).  Retry in a few seconds for the "
-                        "MQTT cache to refresh, or call start_print() "
-                        "directly with use_ams='true' and an explicit "
-                        "ams_mapping=[<tray id>]. "
+                        "The printer says it has an AMS but hasn't said "
+                        "what's loaded in it yet, so Kiln won't guess the "
+                        "filament: feeding from the outside spool would "
+                        "stop the print if nothing is loaded there.  Try "
+                        "again in a few seconds, or call `start_print` "
+                        "with `use_ams='true'` and the tray to use, "
+                        "`ams_mapping=[<tray id>]`. "
                         + " ".join(ams_routing_warnings),
                         code="AMS_STATE_AMBIGUOUS",
                     )
@@ -4647,20 +4647,20 @@ class _SlicerToolsPlugin:
                 return resp
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Failed to slice and print: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
+                    f"Failed to slice and print: {_plain_words.said(exc)}. Ensure PrusaSlicer or OrcaSlicer is installed.",
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
-                return _srv._error_dict(f"Failed to slice and print: {exc}", code=getattr(exc, "code", "SLICER_ERROR"))
+                return _srv._error_dict(f"Failed to slice and print: {_plain_words.said(exc)}", code=getattr(exc, "code", "SLICER_ERROR"))
             except PrinterNotFoundError:
                 return _srv._error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
             except (PrinterError, RuntimeError, FileNotFoundError) as exc:
                 return _srv._error_dict(
-                    f"Failed to slice and print: {exc}. Check the input file and printer connection."
+                    f"Failed to slice and print: {_plain_words.said(exc)}. Check the input file and printer connection."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in slice_and_print")
-                return _srv._error_dict(f"Unexpected error in slice_and_print: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Unexpected error in `slice_and_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # list_slicer_profiles
@@ -4691,7 +4691,7 @@ class _SlicerToolsPlugin:
                 return {"success": True, "count": len(profiles), "profiles": profiles}
             except Exception as exc:
                 _logger.exception("Unexpected error in list_slicer_profiles_tool")
-                return _srv._error_dict(f"Unexpected error in list_slicer_profiles_tool: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Unexpected error in `list_slicer_profiles_tool`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # get_slicer_profile
@@ -4736,7 +4736,7 @@ class _SlicerToolsPlugin:
                             return {
                                 "success": False,
                                 "error": f"{offer.words} Free-tier profiles available: default, "
-                                "ender3, prusa_mk3s, klipper_generic.",
+                                "ender3, `prusa_mk3s`, `klipper_generic`.",
                                 "code": "LICENSE_REQUIRED",
                                 **signin_hint_fields(),
                                 **paywall_fields("pro"),
@@ -4764,7 +4764,7 @@ class _SlicerToolsPlugin:
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in get_slicer_profile_tool")
-                return _srv._error_dict(f"Unexpected error in get_slicer_profile_tool: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Unexpected error in `get_slicer_profile_tool`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
         _logger.debug("Registered slicer tools")
 

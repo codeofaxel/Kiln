@@ -24,6 +24,7 @@ import logging
 import os
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -78,12 +79,12 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
         return payload
     except PlateClearRequired as exc:
         return _srv._error_dict(
-            str(exc), code="PLATE_CLEAR_REQUIRED",
+            _plain_words.sentence(exc), code="PLATE_CLEAR_REQUIRED",
             extra={"outcome": "failed", "snapshot_path": exc.snapshot_path, "plate_clear_required": True},
         )
     except ModelDeclarationRequired as exc:
         return _srv._error_dict(
-            str(exc), code="PRINTER_MODEL_REQUIRED",
+            _plain_words.sentence(exc), code="PRINTER_MODEL_REQUIRED",
             extra={"outcome": "failed", "printer_model_required": True, **_learn(adapter, action)},
         )
     except PrinterModelDisagrees as exc:
@@ -93,14 +94,14 @@ def run_home(*, axes: str = "XYZ", printer_name: str | None = None, action: str 
         # rides beside the sentence, never inside it.
         why = getattr(exc, "why_fields", None)
         return _srv._error_dict(
-            str(exc), code="UNSUPPORTED",
+            _plain_words.sentence(exc), code="UNSUPPORTED",
             extra={"outcome": "failed", **(why if isinstance(why, dict) else {}), **_learn(adapter, action)},
         )
     except (PrinterError, RuntimeError) as exc:
-        return _srv._error_dict(f"Failed to {action}: {exc}", extra={"outcome": "failed"})
+        return _srv._error_dict(f"Failed to {action}: {_plain_words.said(exc)}", extra={"outcome": "failed"})
     except Exception as exc:
         _logger.exception("Unexpected error in %s", tool_name)
-        return _srv._error_dict(f"Unexpected error in {tool_name}: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error in {tool_name}: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 def _learn(adapter: Any, action: str) -> dict[str, Any]:
@@ -313,7 +314,7 @@ def run_plate(*, printer_name: str | None = None) -> dict[str, Any]:
         return _plate_answer(adapter, target_name, plate_occupancy(adapter))
     except Exception as exc:
         _logger.exception("Unexpected error in plate status")
-        return _srv._error_dict(f"Unexpected error reading the plate record: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error reading the plate record: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 def clear_plate(*, printer_name: str | None = None, note: str = "") -> dict[str, Any]:
@@ -344,7 +345,7 @@ def clear_plate(*, printer_name: str | None = None, note: str = "") -> dict[str,
         return answer
     except Exception as exc:
         _logger.exception("Unexpected error in plate clear")
-        return _srv._error_dict(f"Unexpected error reading the plate record: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error reading the plate record: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 def plate_status(printer_name: str | None = None) -> dict[str, Any]:
@@ -479,7 +480,7 @@ def look_at_plate(
         if person_says is not None:
             if seen is not None:
                 return _srv._error_dict(
-                    "Pass seen (what you saw in the picture) or person_says (what the person told you), not both.",
+                    "Pass seen (what you saw in the picture) or `person_says` (what the person told you), not both.",
                     code="INVALID_INPUT",
                 )
             return _record_persons_word(adapter, target_name, str(person_says))
@@ -515,8 +516,8 @@ def look_at_plate(
 
         if seen not in plate_state.SEEN_VERDICTS:
             return _srv._error_dict(
-                'seen must be "clear" (nothing on the plate), "occupied" (something is on it), or '
-                '"as_recorded" (only the parts the plate record names).',
+                '`seen` must be `clear` (nothing on the plate), `occupied` (something is on it), or '
+                '`as_recorded` (only the parts the plate record names).',
                 code="INVALID_INPUT",
             )
         before = plate_state.read(adapter)
@@ -561,7 +562,7 @@ def look_at_plate(
         return answer
     except Exception as exc:
         _logger.exception("Unexpected error in look_at_plate")
-        return _srv._error_dict(f"Unexpected error looking at the plate: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error looking at the plate: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 def _record_persons_word(adapter: Any, target_name: str, words: str) -> dict[str, Any]:
@@ -585,7 +586,7 @@ def _record_persons_word(adapter: Any, target_name: str, words: str) -> dict[str
         return _srv._error_dict(
             f"Kiln's record does not say a part is on {target_name}'s bed, so there is nothing for the "
             "person's word to settle. Before a print starts with nobody asked, the bed is looked at: call "
-            "look_at_plate with no arguments, look at the picture, and say what you see.",
+            "`look_at_plate` with no arguments, look at the picture, and say what you see.",
             code="PLATE_NOTHING_TO_SETTLE", extra={"plate": state.to_dict()},
         )
     answered = plate_state.plate_word_answer()

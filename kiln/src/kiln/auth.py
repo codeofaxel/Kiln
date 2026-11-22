@@ -41,6 +41,8 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Literal
 
+from kiln import plain_words as _plain_words
+
 logger = logging.getLogger(__name__)
 
 # Prefix for generated keys
@@ -458,7 +460,8 @@ class AuthManager:
             return {
                 "authenticated": False,
                 "auth_enabled": True,
-                "error": str(exc),
+                "error": _plain_words.sentence(exc),
+                **_plain_words.detail_field(exc),
             }
 
     def create_key_with_role(

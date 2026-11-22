@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import read_only
 
 _logger = logging.getLogger(__name__)
@@ -410,7 +411,8 @@ class _TierDiagnosticPlugin:
                         "This shouldn't happen; please report at "
                         "https://github.com/codeofaxel/Kiln/issues."
                     ),
-                    "error": str(exc),
+                    "error": _plain_words.sentence(exc),
+                    **_plain_words.detail_field(exc),
                 }
 
         _logger.debug("Registered tier-diagnostic tools")

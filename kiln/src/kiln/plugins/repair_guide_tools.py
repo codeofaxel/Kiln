@@ -47,6 +47,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 
 _logger = logging.getLogger(__name__)
@@ -353,8 +354,8 @@ def run_repair_guide(
     model = _resolve_printer_id(printer_id, printer_name)
     if not model:
         return _srv._error_dict(
-            "Say which printer: pass printer_id (e.g. bambu_a1_mini), or name a registered printer "
-            "whose config declares printer_model.",
+            "Say which printer: pass `printer_id` (e.g. `bambu_a1_mini`), or name a registered printer "
+            "whose config declares `printer_model`.",
             code="PRINTER_MODEL_REQUIRED", extra={"printer_model_required": True},
         )
     # A code anywhere in ``topic`` is read as the fault code it is.
@@ -362,8 +363,8 @@ def run_repair_guide(
     code = codes[0].replace("_", "") if codes else ""
     if not topic.strip() and not code and not guide.strip():
         return _srv._error_dict(
-            "Say what to repair: a topic (cutter, nozzle, hotend, ptfe_tube, extruder_gears, belts, "
-            "bed_level, lubrication, firmware_recovery, filament_sensor) or the fault code on the screen.",
+            "Say what to repair: a topic (cutter, nozzle, hotend, `ptfe_tube`, `extruder_gears`, belts, "
+            "`bed_level`, lubrication, `firmware_recovery`, `filament_sensor`) or the fault code on the screen.",
             code="INVALID_INPUT",
         )
     maker_name, index_url = maker_index(model)
@@ -583,7 +584,7 @@ def repair_guide(
         )
     except Exception as exc:
         _logger.exception("Unexpected error in repair_guide")
-        return _srv._error_dict(f"Unexpected error in repair_guide: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error in `repair_guide`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 def coverage_line(printer_id: str) -> tuple[str, bool]:

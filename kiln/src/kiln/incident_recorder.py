@@ -45,6 +45,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 # Module-level lock serializing incident-id generation + dir creation.
 # Fleet deployments can have many printers anomaly at once; perf_counter_ns
 # + sha1 makes collisions astronomically unlikely, but a mutex around the
@@ -478,7 +480,7 @@ def _load_incident_meta(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return {"incident_id": path.name, "warning": f"parse error: {exc}"}
+        return {"incident_id": path.name, "warning": f"parse error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
     return {
         "incident_id": raw.get("incident_id", path.name),
         "incident_type": raw.get("incident_type"),

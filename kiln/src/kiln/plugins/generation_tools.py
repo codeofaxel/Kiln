@@ -16,6 +16,7 @@ import os
 from dataclasses import asdict as _asdict
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -214,16 +215,16 @@ class _GenerationToolsPlugin:
                 except ImportError:
                     return result
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_INPUT")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_INPUT")
             except GenerationError as exc:
                 return _srv._error_dict(
-                    str(exc),
+                    _plain_words.sentence(exc),
                     code=exc.code or "GENERATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_model_with_provider")
                 return _srv._error_dict(
-                    f"Unexpected error in generate_model_with_provider: {exc}",
+                    f"Unexpected error in `generate_model_with_provider`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -298,8 +299,8 @@ class _GenerationToolsPlugin:
                                 "Check the BOTTOM view to verify flat bed adhesion surface. "
                                 "Check for: thin walls, floating geometry, missing features, "
                                 "incorrect proportions, and overhangs needing supports. "
-                                "Use recommend_material for material guidance and "
-                                "analyze_printability for printability."
+                                "Use `recommend_material` for material guidance and "
+                                "`analyze_printability` for printability."
                             ),
                         }
                     # No per-face colors — fall through to VisualVerifier's
@@ -337,14 +338,14 @@ class _GenerationToolsPlugin:
                         "Check the BOTTOM view to verify flat bed adhesion surface. "
                         "Check for: thin walls, floating geometry, missing features, "
                         "incorrect proportions, and overhangs needing supports. "
-                        "Use recommend_material for material guidance and "
-                        "analyze_printability for printability."
+                        "Use `recommend_material` for material guidance and "
+                        "`analyze_printability` for printability."
                     ),
                 }
             except Exception as exc:
                 _logger.exception("Failed to render preview")
                 return _srv._error_dict(
-                    f"Failed to render preview: {exc}",
+                    f"Failed to render preview: {_plain_words.said(exc)}",
                     code="RENDER_ERROR",
                 )
 
@@ -426,14 +427,14 @@ class _GenerationToolsPlugin:
                     file_path, with_record=True
                 )
             except NoBackendError as exc:
-                err = _srv._error_dict(str(exc), code="NO_BACKEND")
+                err = _srv._error_dict(_plain_words.sentence(exc), code="NO_BACKEND")
                 # Structured remedy: tells the agent whether the user can fix
                 # this (kiln install-step-backend) or is on a hosted server.
                 err["remedy"] = exc.remedy
                 return err
             except Exception as exc:
                 return _srv._error_dict(
-                    f"STEP conversion failed: {exc}",
+                    f"STEP conversion failed: {_plain_words.said(exc)}",
                     code="STEP_CONVERSION_FAILED",
                 )
 
@@ -505,10 +506,10 @@ class _GenerationToolsPlugin:
 
                 if isinstance(exc, UnknownPrinterError):
                     # A refusal about the argument, not a fault to retry.
-                    return _srv._error_dict(str(exc), code="UNKNOWN_PRINTER", retryable=False)
+                    return _srv._error_dict(_plain_words.sentence(exc), code="UNKNOWN_PRINTER", retryable=False)
                 _logger.exception("Unexpected error in validate_and_prepare_mesh")
                 return _srv._error_dict(
-                    f"Unexpected error in validate_and_prepare_mesh: {exc}",
+                    f"Unexpected error in `validate_and_prepare_mesh`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -573,10 +574,10 @@ class _GenerationToolsPlugin:
                     "success": True,
                     "job": job.to_dict(),
                     "message": (
-                        f"Retexture job submitted to {gen.display_name}. "
-                        f"Use generation_status('{job.id}', provider='meshy') to poll, "
-                        f"then download_generated_model('{job.id}', provider='meshy') "
-                        "to retrieve the textured model with OBJ + MTL + PNG textures."
+                        f"Sent to {gen.display_name} for new textures. Check on it "
+                        f"with `generation_status('{job.id}', provider='meshy')`, then "
+                        f"fetch it with `download_generated_model('{job.id}', provider='meshy')`; "
+                        "it comes back as OBJ, MTL and PNG files."
                     ),
                     "next_steps": [
                         f"generation_status('{job.id}', provider='meshy')",
@@ -586,19 +587,19 @@ class _GenerationToolsPlugin:
                 }
             except GenerationAuthError as exc:
                 return _srv._error_dict(
-                    f"Failed to generate texture (auth): {exc}. "
+                    f"Failed to generate texture (auth): {_plain_words.said(exc)}. "
                     "Check that KILN_MESHY_API_KEY is set.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
                 return _srv._error_dict(
-                    f"Failed to generate texture: {exc}",
+                    f"Failed to generate texture: {_plain_words.said(exc)}",
                     code=exc.code or "GENERATION_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in generate_texture")
                 return _srv._error_dict(
-                    f"Unexpected error in generate_texture: {exc}",
+                    f"Unexpected error in `generate_texture`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 

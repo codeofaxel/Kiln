@@ -3542,7 +3542,7 @@ def predict_print_failures(
             "type": "non_manifold",
             "severity": "medium",
             "detail": "Mesh is not watertight — slicers may produce artifacts",
-            "suggestion": "Run repair_mesh(close_holes=True) to fix topology",
+            "suggestion": "Run `repair_mesh` with `close_holes=True` to close the holes.",
         })
         risk_score += 10
 

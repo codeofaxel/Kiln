@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.colour_availability import attach_colour_availability
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
 from kiln.tool_annotations import creates
@@ -1227,7 +1228,7 @@ def _build_result(
             "upload_file() + start_print() to print."
         )
         result["next_action"] = {
-            "hint": "Use compose_multicolor_3mf to combine zone STLs, "
+            "hint": "Use `compose_multicolor_3mf` to combine zone STLs, "
             "or slice each zone separately.",
         }
 
@@ -1620,7 +1621,7 @@ class _ColorToolsPlugin:
                 return {"success": False, "error": f"File not found: {input_path}"}
 
             if num_colors < 1:
-                return {"success": False, "error": "num_colors must be >= 1"}
+                return {"success": False, "error": "`num_colors` must be >= 1"}
 
             palette = color_palette or _DEFAULT_PALETTE
             if len(palette) < num_colors:
@@ -1630,7 +1631,7 @@ class _ColorToolsPlugin:
             try:
                 triangles = _read_triangles(input_path)
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
             if not triangles:
                 return {"success": False, "error": "No triangles found in STL"}
@@ -1743,7 +1744,7 @@ class _ColorToolsPlugin:
                 return {"success": False, "error": f"File not found: {input_path}"}
 
             if num_colors < 1:
-                return {"success": False, "error": "num_colors must be >= 1"}
+                return {"success": False, "error": "`num_colors` must be >= 1"}
 
             palette = color_palette or _DEFAULT_PALETTE
             if len(palette) < num_colors:
@@ -1752,7 +1753,7 @@ class _ColorToolsPlugin:
             try:
                 triangles = _read_triangles(input_path)
             except ValueError as exc:
-                return {"success": False, "error": str(exc)}
+                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
             if not triangles:
                 return {"success": False, "error": "No triangles found in STL"}
@@ -1936,7 +1937,7 @@ class _ColorToolsPlugin:
                     return {
                         "success": False,
                         "error": (
-                            "step_colors paints whole decoration steps — "
+                            "`step_colors` paints whole decoration steps — "
                             "it cannot be combined with a floors/walls target"
                         ),
                     }
@@ -1946,7 +1947,7 @@ class _ColorToolsPlugin:
                     except (TypeError, ValueError):
                         return {
                             "success": False,
-                            "error": f"step_colors key {raw_key!r} is not a step index",
+                            "error": f"`step_colors` key {raw_key!r} is not a step index",
                         }
                     if not 0 <= idx_key < len(steps):
                         return {
@@ -1964,7 +1965,7 @@ class _ColorToolsPlugin:
                         return {
                             "success": False,
                             "error": (
-                                f"step_colors[{idx_key}] must be a #RRGGBB hex "
+                                f"`step_colors`[{idx_key}] must be a #RRGGBB hex "
                                 f"color, got {raw_val!r}"
                             ),
                         }
@@ -1972,7 +1973,7 @@ class _ColorToolsPlugin:
                 if not coerced_steps:
                     return {
                         "success": False,
-                        "error": "step_colors is empty — name at least one step",
+                        "error": "`step_colors` is empty — name at least one step",
                         "decorations": _describe_steps(steps, {}),
                     }
                 indices = sorted(
@@ -2003,7 +2004,7 @@ class _ColorToolsPlugin:
             try:
                 triangles = load_mesh_triangles(model_path)
             except Exception as exc:  # noqa: BLE001 — loader errors vary by format
-                return {"success": False, "error": f"could not load mesh: {exc}"}
+                return {"success": False, "error": f"could not load mesh: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
             if len(triangles) != record.get("triangle_count"):
                 # The sha256 gate should catch any edit first; this is a
                 # belt-and-braces refusal against loader disagreement.

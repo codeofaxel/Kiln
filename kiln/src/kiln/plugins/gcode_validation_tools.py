@@ -16,6 +16,7 @@ import re
 import tempfile
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, read_only
 
 _logger = logging.getLogger(__name__)
@@ -147,7 +148,7 @@ class _GcodeValidationToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in validate_gcode_safe")
                 return _srv._error_dict(
-                    f"Unexpected error in validate_gcode_safe: {exc}",
+                    f"Unexpected error in `validate_gcode_safe`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -198,7 +199,7 @@ class _GcodeValidationToolsPlugin:
                             break
                     if target_job is None:
                         return _srv._error_dict(
-                            "No completed jobs found. Provide a job_id explicitly.",
+                            "No completed jobs found. Provide a `job_id` explicitly.",
                             code="NO_COMPLETED_JOB",
                         )
 
@@ -230,7 +231,7 @@ class _GcodeValidationToolsPlugin:
                                 _tmpdir = os.path.realpath(tempfile.gettempdir())
                                 if not (_safe.startswith(_home) or _safe.startswith(_tmpdir)):
                                     return _srv._error_dict(
-                                        "save_snapshot path must be under home directory or temp directory.",
+                                        "`save_snapshot` path must be under home directory or temp directory.",
                                         code="VALIDATION_ERROR",
                                     )
                                 os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
@@ -240,7 +241,7 @@ class _GcodeValidationToolsPlugin:
                             else:
                                 snapshot_info["image_base64"] = base64.b64encode(image_data).decode("ascii")
                     except Exception as snap_exc:
-                        snapshot_info = {"available": False, "error": str(snap_exc)}
+                        snapshot_info = {"available": False, "error": _plain_words.sentence(snap_exc), **_plain_words.detail_field(snap_exc)}
 
                 # Gather related events
                 all_events = _srv._get_event_bus().recent_events(limit=200)
@@ -323,12 +324,12 @@ class _GcodeValidationToolsPlugin:
                 return _srv._error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to validate print quality: {exc}. Check that the printer is online."
+                    f"Failed to validate print quality: {_plain_words.said(exc)}. Check that the printer is online."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in validate_print_quality")
                 return _srv._error_dict(
-                    f"Unexpected error in validate_print_quality: {exc}",
+                    f"Unexpected error in `validate_print_quality`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 

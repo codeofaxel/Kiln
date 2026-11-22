@@ -42,6 +42,7 @@ from typing import Any
 import requests
 from requests.exceptions import ConnectionError, ReadTimeout, RequestException
 
+from kiln import plain_words as _plain_words
 from kiln.tiers_and_terms import NO_REVERSE_ENGINEERING_LINE, OFFER_FIRST_LINE, TIERS_AND_TERMS
 
 logger = logging.getLogger(__name__)
@@ -513,9 +514,10 @@ def _execute_tool(name: str, arguments: dict[str, Any]) -> str:
         logger.exception("Tool execution failed: %s", name)
         return json.dumps(
             {
-                "error": f"Tool execution error: {exc}",
+                "error": f"Tool execution error: {_plain_words.said(exc)}",
                 "tool": name,
                 "success": False,
+                **_plain_words.detail_field(exc),
             }
         )
 
@@ -613,7 +615,8 @@ def _execute_tool_call(tool_call: dict) -> str:
     except json.JSONDecodeError:
         return json.dumps(
             {
-                "error": f"Invalid JSON in tool arguments: {raw_args[:200]}",
+                "error": "The tool call's settings couldn't be read; send them again as named values.",
+                "detail": raw_args[:200],
                 "success": False,
             }
         )

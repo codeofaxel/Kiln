@@ -46,6 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
@@ -848,7 +849,8 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
         return {
             "success": False,
             "code": "PUBLISH_FAILED",
-            "message": f"Couldn't publish the print twin: {exc}",
+            "message": f"Couldn't publish the print twin: {_plain_words.said(exc)}",
+            **_plain_words.detail_field(exc),
         }
 
     if answer.get("status") != "success":

@@ -289,8 +289,8 @@ def _http_post(
         # continue to signal success/failure via the JSON body — hiding
         # that under a blanket 401 branch would break the login flow.
         raise click.ClickException(
-            "Your session is not accepted by the Kiln API (HTTP 401). "
-            "Run `kiln signin` to refresh, then retry."
+            "Kiln's servers didn't accept your sign-in. "
+            "Run `kiln signin` to sign in again, then retry."
         )
     if resp.status_code >= 500:
         raise _ApiUnavailable(
@@ -301,7 +301,7 @@ def _http_post(
         return resp.json()
     except ValueError as exc:
         raise click.ClickException(
-            f"Kiln API returned non-JSON for {path}: {resp.text[:200]}"
+            "Kiln's servers sent back a reply Kiln couldn't read. Try again in a moment."
         ) from exc
 
 
@@ -1082,7 +1082,7 @@ def auth_pair(code: str, client: str | None) -> None:
     if not access_token:
         raise click.ClickException(
             "Pairing claim succeeded but the server response carried no "
-            "access_token.  Nothing was written locally.  This is a "
+            "`access_token`.  Nothing was written locally.  This is a "
             "server-side bug — please retry with a fresh code from "
             "app.kiln3d.com/connect, and if it persists: adam@kiln3d.com."
         )
@@ -1114,11 +1114,9 @@ def auth_pair(code: str, client: str | None) -> None:
         smoke_status = 0  # network / unexpected — skip the warning
     if smoke_status == 401:
         click.echo(
-            "  ⚠ Tokens written, but /api/auth/whoami rejected them "
-            "(HTTP 401).  Tools may still work if the gate accepts this "
-            "token shape — verify with a real call.  If every tool "
-            "fails: adam@kiln3d.com (server-side issuer/validator "
-            "mismatch).",
+            "  ⚠ You're signed in, but Kiln's servers didn't accept the "
+            "new sign-in when Kiln checked it.  Tools may still work, so "
+            "try one.  If every tool fails, email adam@kiln3d.com.",
             err=True,
         )
     elif smoke_status and smoke_status >= 400:

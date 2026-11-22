@@ -366,7 +366,7 @@ def cmd_approve_order(order_id: str, max_dollars: float) -> None:
     order_id = (order_id or "").strip()
     if not order_id or max_dollars <= 0:
         raise click.ClickException(
-            "Need a non-empty <order_id> and --max > 0."
+            "Give the order id and a `--max` above 0."
         )
 
     resp = _http_post_authed(

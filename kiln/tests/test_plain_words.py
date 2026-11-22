@@ -83,3 +83,43 @@ def test_unplain_reads_every_field_a_person_reads():
     reply = {"success": False, "error": {"message": "minkowski() has no analytic B-rep form"},
              "remedy": {"message": "Try a simpler shape."}, "detail": "KeyError: 'x'"}
     assert [field for field, _s, _k in unplain(reply)] == ["error.message"]
+
+
+def test_a_reply_gains_a_detail_only_when_its_sentence_was_reworded():
+    from kiln.plain_words import detail_field
+
+    assert detail_field(ValueError("That size is too large for the bed.")) == {}
+    try:
+        {}["x"]
+    except KeyError as exc:
+        assert detail_field(exc) == {"detail": "KeyError: 'x'"}
+    assert detail_field(None) == {}
+
+
+@pytest.mark.parametrize("text, words", [
+    ("Awin answered HTTP 401", "didn't accept Kiln's sign-in"),
+    ("404 Client Error: Not Found for url: https://x.test/a", "wasn't found"),
+    ("status 503 from the store", "had a problem on its side"),
+    ("HTTP 429", "too many requests"),
+])
+def test_a_web_service_answer_is_said_by_what_it_means(text, words):
+    assert words in said(RuntimeError(text))
+
+
+def test_a_failure_that_is_the_whole_message_reads_as_a_sentence():
+    from kiln.plain_words import sentence
+
+    assert sentence(RuntimeError("Awin answered HTTP 401")) == "The other service didn't accept Kiln's sign-in."
+    assert sentence(ValueError("That size is too large for the bed.")) == "That size is too large for the bed."
+    # A failure's own plain words are shown exactly as written.
+    assert sentence(ValueError("model_path must name a file")) == "model_path must name a file"
+    assert sentence(RuntimeError("boom")) == "boom"
+    assert sentence(None)[0].isupper()
+
+
+def test_a_lookup_failure_with_a_written_message_is_said_as_written():
+    assert said(KeyError("No interception session for printer 'shop-a1'")) == (
+        "No interception session for printer 'shop-a1'"
+    )
+    # Only the missing key: that is a slip in the code, said as one.
+    assert said(KeyError("nominal_size_mm")) == "something went wrong inside Kiln (not something you did)"

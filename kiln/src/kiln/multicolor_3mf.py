@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.preview_render import downscale_png, effective_supersample
 from kiln.untrusted_zip import UntrustedZipFile
 
@@ -1067,7 +1068,7 @@ def compose_multicolor_3mf(
                     f"same mesh ({Path(part.stl_path).name}) at the same position "
                     f"({part.x:.1f}, {part.y:.1f}, {part.z:.1f}) — they would print "
                     "stacked on top of each other. Run the parts through "
-                    "auto_arrange_parts() or give each copy distinct x/y."
+                    "`auto_arrange_parts` or give each copy distinct x/y."
                 ),
             }
         seen_placements[placement] = i
@@ -1121,7 +1122,8 @@ def compose_multicolor_3mf(
         except Exception as exc:
             return {
                 "success": False,
-                "error": f"Failed to parse STL for part '{part.name or part.stl_path}': {exc}",
+                "error": f"Failed to parse STL for part '{part.name or part.stl_path}': {_plain_words.said(exc)}",
+                **_plain_words.detail_field(exc),
             }
 
     # -----------------------------------------------------------------------
@@ -1205,7 +1207,7 @@ def compose_multicolor_3mf(
                 ))
                 _write_archive(output_path, members)
     except Exception as exc:
-        return {"success": False, "error": f"Failed to write 3MF archive: {exc}"}
+        return {"success": False, "error": f"Failed to write 3MF archive: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
     total_v = sum(len(v) for _, v, _ in parsed)
     total_t = sum(len(t) for _, _, t in parsed)
@@ -1647,7 +1649,7 @@ def compose_painted_3mf(
         return {
             "success": False,
             "error": (
-                f"triangle_colors length {len(triangle_colors)} != "
+                f"`triangle_colors` length {len(triangle_colors)} != "
                 f"triangle count {len(triangles)}"
             ),
         }
@@ -1809,7 +1811,7 @@ def compose_painted_3mf(
             if thumbnail:
                 zf.writestr("Metadata/plate_1.png", thumbnail)
     except Exception as exc:  # noqa: BLE001 — mirror compose_multicolor_3mf
-        return {"success": False, "error": f"Failed to write 3MF archive: {exc}"}
+        return {"success": False, "error": f"Failed to write 3MF archive: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
     logger.info(
         "compose_painted_3mf: wrote %s (1 object, %d triangles, %d colors)",

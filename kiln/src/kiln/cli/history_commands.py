@@ -292,7 +292,7 @@ def cloud_push(design_id: str, branch_id: str | None, make_room: str | None, jso
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
-            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
+            click.echo("Run again with `--make-room <design_id>` to archive one of them.", err=True)
         sys.exit(1)
     _finish(answer, json_mode, lambda a: _with_recipes(
         _shown(a["said"]) if a.get("kept_as") else f"Pushed {design_id} to your Kiln account.", a, sent=True,
@@ -750,7 +750,7 @@ def fork_command(address: str, to_propose: bool, make_room: str | None, json_mod
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
-            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
+            click.echo("Run again with `--make-room <design_id>` to archive one of them.", err=True)
         sys.exit(1)
 
     def say(a: dict[str, Any]) -> str:
@@ -821,7 +821,7 @@ def design_keep(design_id: str, make_room: str | None, json_mode: bool) -> None:
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
-            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
+            click.echo("Run again with `--make-room <design_id>` to archive one of them.", err=True)
         sys.exit(1)
 
     def say(a: dict[str, Any]) -> str:

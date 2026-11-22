@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import _pro_order_bridge as _served
+from kiln import plain_words as _plain_words
 from kiln.fulfillment_profiles import (
     delete_shipping_profile as _delete_shipping_profile,
 )
@@ -205,9 +206,9 @@ def _served_quote(
             sent_file=priced.sent, as_sent=True,
         )
     except FileNotFoundError as exc:
-        return _srv._error_dict(f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND")
+        return _srv._error_dict(f"Failed to get fulfillment quote: {_plain_words.said(exc)}", code="FILE_NOT_FOUND")
     except ValueError as exc:
-        return _srv._error_dict(str(exc), code="UNSUPPORTED_FILE_TYPE")
+        return _srv._error_dict(_plain_words.sentence(exc), code="UNSUPPORTED_FILE_TYPE")
     if not answer.ok:
         return _served_miss("quote", answer)
     reply: dict[str, Any] = {"success": True}
@@ -243,8 +244,8 @@ def _served_order_checks(*, quote_id: str, quote_token: str, preview_file_path: 
         )
     if quote_token and quote_token != remembered:
         return "", _srv._error_dict(
-            f"The quote_token handed in is not the one Kiln holds for quote {quote_id!r}, so the "
-            "order was not placed. Pass the token that quote returned, or quote_id alone.",
+            f"The `quote_token` handed in is not the one Kiln holds for quote {quote_id!r}, so the "
+            "order was not placed. Pass the token that quote returned, or `quote_id` alone.",
             code="QUOTE_TOKEN_MISMATCH",
         )
     if not preview_file_path or not _same_file(quoted_file, preview_file_path):
@@ -609,12 +610,12 @@ class _FulfillmentToolsPlugin:
                 }
             except (FulfillmentError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to list fulfillment materials: {exc}. Check fulfillment provider credentials or license."
+                    f"Failed to list fulfillment materials: {_plain_words.said(exc)}. Check fulfillment provider credentials or license."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in fulfillment_materials")
                 return _srv._error_dict(
-                    f"Unexpected error in fulfillment_materials: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error in `fulfillment_materials`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=creates("Get a manufacturing quote"))
@@ -691,8 +692,8 @@ class _FulfillmentToolsPlugin:
             if token := _model_on_kiln_servers(file_path):
                 if order_service() is not None:
                     return _srv._error_dict(
-                        "That model is on Kiln's servers; this install quotes files on this "
-                        "computer. Keep it first (keep_design), then quote the kept file.",
+                        "That model is on Kiln's servers, and this install quotes files on "
+                        "this computer. Keep it here first (`keep_design`), then quote the kept file.",
                         code="MODEL_NOT_ON_THIS_COMPUTER",
                     )
                 return _served_quote_of_token(
@@ -819,16 +820,16 @@ class _FulfillmentToolsPlugin:
                 return _said_about_the_model(reply, priced)
             except FileNotFoundError as exc:
                 return _srv._error_dict(
-                    f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND"
+                    f"Failed to get fulfillment quote: {_plain_words.said(exc)}", code="FILE_NOT_FOUND"
                 )
             except (FulfillmentError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to get fulfillment quote: {exc}. Check fulfillment provider credentials or license."
+                    f"Failed to get fulfillment quote: {_plain_words.said(exc)}. Check fulfillment provider credentials or license."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in fulfillment_quote")
                 return _srv._error_dict(
-                    f"Unexpected error in fulfillment_quote: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error in `fulfillment_quote`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=destructive("Save a shipping profile"))
@@ -860,7 +861,7 @@ class _FulfillmentToolsPlugin:
                 return _srv._error_dict(
                     "Shipping profiles store personal contact/address data. "
                     "Only call this after the user explicitly asks Kiln to remember it, "
-                    "then pass consent_to_store=True.",
+                    "then pass `consent_to_store=True`.",
                     code="CONSENT_REQUIRED",
                 )
             try:
@@ -876,11 +877,11 @@ class _FulfillmentToolsPlugin:
                     "message": "Shipping profile saved locally with user-only file permissions.",
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in save_shipping_profile")
                 return _srv._error_dict(
-                    f"Unexpected error in save_shipping_profile: {exc}",
+                    f"Unexpected error in `save_shipping_profile`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -908,7 +909,7 @@ class _FulfillmentToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in list_shipping_profiles")
                 return _srv._error_dict(
-                    f"Unexpected error in list_shipping_profiles: {exc}",
+                    f"Unexpected error in `list_shipping_profiles`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -935,11 +936,11 @@ class _FulfillmentToolsPlugin:
                     ),
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in delete_shipping_profile")
                 return _srv._error_dict(
-                    f"Unexpected error in delete_shipping_profile: {exc}",
+                    f"Unexpected error in `delete_shipping_profile`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -995,15 +996,15 @@ class _FulfillmentToolsPlugin:
                         return _srv._error_dict(
                             "Before issuing a shipping confirmation token, ask the user "
                             "whether Kiln should save this shipping contact/address as a "
-                            "local profile. Then pass save_profile_decision='save' or "
-                            "save_profile_decision='do_not_save'.",
+                            "local profile. Then pass `save_profile_decision='save'` or "
+                            "`save_profile_decision='do_not_save'`.",
                             code="SAVE_PROFILE_DECISION_REQUIRED",
                         )
                     if normalized_decision == "save":
                         profile_name = save_profile_name.strip()
                         if not profile_name:
                             return _srv._error_dict(
-                                "Profile name is required when save_profile_decision='save'.",
+                                "Profile name is required when `save_profile_decision='save'`.",
                                 code="PROFILE_NAME_REQUIRED",
                             )
                         saved_profile = _save_shipping_profile(
@@ -1034,11 +1035,11 @@ class _FulfillmentToolsPlugin:
                 }
                 return result
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in issue_shipping_confirmation_token")
                 return _srv._error_dict(
-                    f"Unexpected error in issue_shipping_confirmation_token: {exc}",
+                    f"Unexpected error in `issue_shipping_confirmation_token`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -1150,7 +1151,7 @@ class _FulfillmentToolsPlugin:
                     shipping_profile_name,
                 )
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
 
             preview_ok, preview_reason = _validate_preview_confirmation(
                 preview_token=preview_token,
@@ -1159,11 +1160,11 @@ class _FulfillmentToolsPlugin:
             )
             if not preview_ok:
                 return _srv._error_dict(
-                    "Fulfillment order requires a human-approved rendered preview. "
-                    "Show the user the preview for preview_file_path, call "
-                    "issue_preview_token(file_path=preview_file_path) after approval, "
-                    "then pass preview_token and preview_file_path to fulfillment_order. "
-                    f"Preview check failed: {preview_reason}.",
+                    "Kiln places an order only after a person has seen and approved "
+                    "a preview of it. Show the person the preview of `preview_file_path`; "
+                    "once they approve, call `issue_preview_token(file_path=preview_file_path)`, "
+                    "then pass `preview_token` and `preview_file_path` to `fulfillment_order`. "
+                    f"The preview check said: {preview_reason}.",
                     code="PREVIEW_NOT_CONFIRMED",
                 )
 
@@ -1177,9 +1178,9 @@ class _FulfillmentToolsPlugin:
             if not shipping_ok:
                 return _srv._error_dict(
                     "Fulfillment order requires user-confirmed contact/shipping details. "
-                    "Show the user the normalized shipping_address and selected shipping "
-                    "option, call issue_shipping_confirmation_token after approval, then "
-                    "pass shipping_confirmation_token to fulfillment_order. "
+                    "Show the user the normalized `shipping_address` and selected shipping "
+                    "option, call `issue_shipping_confirmation_token` after approval, then "
+                    "pass `shipping_confirmation_token` to `fulfillment_order`. "
                     f"Shipping confirmation failed: {shipping_reason}.",
                     code="SHIPPING_NOT_CONFIRMED",
                 )
@@ -1250,7 +1251,7 @@ class _FulfillmentToolsPlugin:
                     )
                 except FulfillmentError as exc:
                     return _srv._error_dict(
-                        f"Quote validation failed: {exc}",
+                        f"Quote validation failed: {_plain_words.said(exc)}",
                         code=getattr(exc, "code", None) or "QUOTE_INVALID",
                     )
 
@@ -1347,9 +1348,9 @@ class _FulfillmentToolsPlugin:
                             else:
                                 return _srv._error_dict(
                                     "Cannot place order: no payment hold and no "
-                                    "quoted_price provided.  Re-run fulfillment_quote "
-                                    "to get pricing, then pass payment_hold_id or "
-                                    "quoted_price.",
+                                    "`quoted_price` provided.  Re-run `fulfillment_quote` "
+                                    "to get pricing, then pass `payment_hold_id` or "
+                                    "`quoted_price`.",
                                     code="MISSING_PRICE",
                                 )
                         else:
@@ -1363,7 +1364,7 @@ class _FulfillmentToolsPlugin:
                                 )
                     except PaymentError as pe:
                         return _srv._error_dict(
-                            f"Payment failed: {pe}. Order was NOT placed. Please update your payment method and try again.",
+                            f"Payment failed: {_plain_words.said(pe)}. Order was NOT placed. Please update your payment method and try again.",
                             code="PAYMENT_ERROR",
                         )
 
@@ -1492,7 +1493,7 @@ class _FulfillmentToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in fulfillment_order")
                 return _srv._error_dict(
-                    f"Unexpected error in fulfillment_order: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error in `fulfillment_order`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("Order status"))
@@ -1553,12 +1554,12 @@ class _FulfillmentToolsPlugin:
                 return reply
             except (FulfillmentError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to check order status: {exc}. Verify the order_id is correct."
+                    f"Failed to check order status: {_plain_words.said(exc)}. Verify the `order_id` is correct."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in fulfillment_order_status")
                 return _srv._error_dict(
-                    f"Unexpected error in fulfillment_order_status: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error in `fulfillment_order_status`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=destructive("Cancel a manufacturing order"))
@@ -1627,14 +1628,14 @@ class _FulfillmentToolsPlugin:
                 code = getattr(exc, "code", None)
                 if code in WORDED_CANCEL_REFUSALS:
                     # Already worded for the person, with what to do next.
-                    return _srv._error_dict(str(exc), code=code)
+                    return _srv._error_dict(_plain_words.sentence(exc), code=code)
                 return _srv._error_dict(
-                    f"Failed to cancel order: {exc}. The order may have already shipped."
+                    f"Failed to cancel order: {_plain_words.said(exc)}. The order may have already shipped."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in fulfillment_cancel")
                 return _srv._error_dict(
-                    f"Unexpected error in fulfillment_cancel: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error in `fulfillment_cancel`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("Order alerts"))
@@ -1656,7 +1657,7 @@ class _FulfillmentToolsPlugin:
                 alerts = monitor.get_alerts()
                 return {"success": True, "alerts": alerts, "count": len(alerts)}
             except Exception as exc:
-                return _srv._error_dict(f"Failed to check fulfillment alerts: {exc}")
+                return _srv._error_dict(f"Failed to check fulfillment alerts: {_plain_words.said(exc)}")
 
         _logger.debug("Registered fulfillment tools")
 

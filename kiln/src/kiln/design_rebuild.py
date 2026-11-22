@@ -36,6 +36,7 @@ import logging
 import os
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.quoted_text import fence
 
 _logger = logging.getLogger(__name__)
@@ -108,8 +109,9 @@ def load_recipe_or_error(recipe_path: str) -> tuple[Any, str] | dict[str, Any]:
     except Exception as exc:
         return {
             "status": "error",
-            "error": f"Failed to load recipe: {exc}",
+            "error": f"Failed to load recipe: {_plain_words.said(exc)}",
             "code": "RECIPE_LOAD_ERROR",
+            **_plain_words.detail_field(exc),
         }
     return recipe, design_dir
 
@@ -360,11 +362,12 @@ def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | Non
     except Exception as exc:
         return {
             "status": "error",
-            "error": f"OpenSCAD re-derivation failed: {exc}",
+            "error": f"OpenSCAD re-derivation failed: {_plain_words.said(exc)}",
             "code": "COMPILE_ERROR",
             "parameters_applied": applied,
             "parameters_not_in_source": not_in_source,
             "parameters_skipped": skipped,
+            **_plain_words.detail_field(exc),
         }
 
     try:
@@ -372,8 +375,9 @@ def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | Non
     except Exception as exc:
         return {
             "status": "error",
-            "error": f"Slicing failed for re-derived model: {exc}",
+            "error": f"Slicing failed for re-derived model: {_plain_words.said(exc)}",
             "code": "SLICE_ERROR",
+            **_plain_words.detail_field(exc),
         }
 
     artifact = wrap_or_gcode(gcode_path, recipe, stl_path=compiled_stl)
@@ -431,8 +435,9 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
             except Exception as exc:
                 return {
                     "status": "error",
-                    "error": f"Slicing failed for part {fence(part.name)}: {exc}",
+                    "error": f"Slicing failed for part {fence(part.name)}: {_plain_words.said(exc)}",
                     "code": "SLICE_ERROR",
+                    **_plain_words.detail_field(exc),
                 }
             part_results.append({
                 "part": part.name,
@@ -449,8 +454,9 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
             except Exception as exc:
                 return {
                     "status": "error",
-                    "error": f"Gcode merge failed: {exc}",
+                    "error": f"Gcode merge failed: {_plain_words.said(exc)}",
                     "code": "MERGE_ERROR",
+                    **_plain_words.detail_field(exc),
                 }
     else:
         stl_path = recipe.stl_path
@@ -468,8 +474,9 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
         except Exception as exc:
             return {
                 "status": "error",
-                "error": f"Slicing failed: {exc}",
+                "error": f"Slicing failed: {_plain_words.said(exc)}",
                 "code": "SLICE_ERROR",
+                **_plain_words.detail_field(exc),
             }
 
     # A single mesh (a lone part, or the primary STL) can also become the

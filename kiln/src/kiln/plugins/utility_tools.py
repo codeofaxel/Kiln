@@ -15,6 +15,7 @@ import os
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.printer_setup import AGENT_REMEDY
 from kiln.tiers_and_terms import NO_REVERSE_ENGINEERING_LINE
 from kiln.tool_annotations import destructive, read_only
@@ -48,7 +49,7 @@ def _add_addon(addon: str, *, confirm: bool) -> dict[str, Any]:
         result = camera_addon.install(confirm=confirm)
     except Exception as exc:  # noqa: BLE001 -- never surface a raw traceback
         _logger.exception("Unexpected error adding the camera add-on")
-        return _srv._error_dict(f"Unexpected error in upgrade_kiln: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error in `upgrade_kiln`: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
     answered = bool(result.get("ok")) or result.get("status") == "needs_confirmation"
     return {"success": answered, **result}
 
@@ -155,7 +156,7 @@ class _UtilityToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in get_session_log")
                 return _srv._error_dict(
-                    f"Unexpected error in get_session_log: {exc}",
+                    f"Unexpected error in `get_session_log`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -213,7 +214,7 @@ class _UtilityToolsPlugin:
                 from kiln import self_update
             except Exception as exc:  # noqa: BLE001
                 return _srv._error_dict(
-                    f"Upgrade is unavailable in this build: {exc}",
+                    f"Upgrade is unavailable in this build: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -236,7 +237,7 @@ class _UtilityToolsPlugin:
                         "Want me to update Kiln for you now? It takes a few "
                         "seconds, then one quick restart at a safe moment (not "
                         "mid-print) and I'll pick up right where we left off. "
-                        "Confirm and I'll run it (upgrade_kiln with confirm=true)."
+                        "Confirm and I'll run it (`upgrade_kiln` with `confirm=true`)."
                     ),
                 }
 
@@ -262,7 +263,7 @@ class _UtilityToolsPlugin:
                 _logger.exception("Unexpected error in upgrade_kiln")
                 _stage("upgrade_failed")
                 return _srv._error_dict(
-                    f"Update failed unexpectedly: {exc}. You can run it yourself: "
+                    f"Update failed unexpectedly: {_plain_words.said(exc)}. You can run it yourself: "
                     f"{self_update.UPGRADE_COMMAND}",
                     code="INTERNAL_ERROR",
                 )
@@ -1369,7 +1370,7 @@ class _UtilityToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in get_skill_manifest")
                 return _srv._error_dict(
-                    f"Failed to generate manifest: {exc}", code="INTERNAL_ERROR"
+                    f"Failed to generate manifest: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         # ------------------------------------------------------------------
@@ -1400,7 +1401,7 @@ class _UtilityToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in verify_audit_integrity")
                 return _srv._error_dict(
-                    f"Unexpected error in verify_audit_integrity: {exc}",
+                    f"Unexpected error in `verify_audit_integrity`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -1446,12 +1447,12 @@ class _UtilityToolsPlugin:
                 }
             except BackupError as exc:
                 return _srv._error_dict(
-                    f"Failed to back up database: {exc}", code="BACKUP_ERROR"
+                    f"Failed to back up database: {_plain_words.said(exc)}", code="BACKUP_ERROR"
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in backup_database")
                 return _srv._error_dict(
-                    f"Unexpected error in backup_database: {exc}",
+                    f"Unexpected error in `backup_database`: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 

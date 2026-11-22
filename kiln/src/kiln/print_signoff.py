@@ -769,7 +769,7 @@ def adapter_verdict(adapter: Any, file_name: str, kwargs: dict[str, Any] | None 
     return {
         "reason": (
             f"{name} was not started: no preview sign-off reached the printer. Every door that "
-            "starts a print clears it first — pass preview_token from issue_preview_token "
+            "starts a print clears it first — pass `preview_token` from `issue_preview_token` "
             "(CLI: --preview-token) so the person sees the stage, the link, or the renders "
             "before the machine moves."
         ),

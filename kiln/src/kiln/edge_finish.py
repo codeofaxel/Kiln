@@ -30,6 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.edge_plan import CHAMFER, FILLET, Choice, EdgePlan, PrintFrame, plan_edges
 from kiln.mesh_edit_check import EDIT_REFUSED, TOO_LARGE_TO_CHECK, guarded_edit
 
@@ -205,7 +206,7 @@ def _on_the_cad(
         return {
             "success": False,
             "code": NO_KERNEL,
-            "message": f"Kiln did not {_VERB[kind]} the edges: the CAD kernel that does it is not installed. {install_help()}",
+            "message": f"Kiln did not {_VERB[kind]} the edges: the CAD add-on that does it isn't installed. {install_help()}",
         }
     if output_path is None:
         base = Path(file_path)
@@ -219,7 +220,8 @@ def _on_the_cad(
         return {
             "success": False,
             "code": EDIT_REFUSED,
-            "message": f"Kiln did not {_VERB[kind]} the edges: {exc}. Your file is unchanged.",
+            "message": f"Kiln did not {_VERB[kind]} the edges: {_plain_words.said(exc)}. Your file is unchanged.",
+            **_plain_words.detail_field(exc),
         }
     plan = plan_edges(
         survey, kind=kind, size_mm=size_mm, frame=frame, edges=edges, min_turn_deg=angle_threshold_deg, choose=choose,
@@ -268,7 +270,7 @@ def _on_the_cad(
         except CadEdgeError as exc:
             return {
                 "success": False, "code": EDIT_REFUSED, **common, "edges": plan.to_dict(),
-                "message": f"Kiln did not {_VERB[kind]} the edges: {exc}. Your file is unchanged. {_INSTEAD_FROM_CAD}",
+                "message": f"Kiln did not {_VERB[kind]} the edges: {_plain_words.said(exc)}. Your file is unchanged. {_INSTEAD_FROM_CAD}",
             }
         kernel = reply.pop("engine", None) or {k: reply.pop(k) for k in list(reply) if k in _KERNEL_KEYS}
         _fold_in_dropped(plan, kernel)

@@ -78,6 +78,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import callers_printers, run_program
+from kiln import plain_words as _plain_words
 
 logger = logging.getLogger(__name__)
 
@@ -1277,7 +1278,7 @@ def _act(
         answered = unwrap_tool_result(door(**args))
     except Exception as exc:  # noqa: BLE001 — the tool's own failure is its answer
         logger.debug("served steps: %s raised", name, exc_info=True)
-        answered = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+        answered = {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     return _act_result(answered), None
 
 
@@ -1461,7 +1462,7 @@ def propose(
         "error": (
             opening + "\n" + "\n".join(lines) + "\n\nShow these to the user. "
             f"To carry them out, call {tool} again with the same arguments and "
-            f"run_actions=\"{digest}\". That names exactly this list: if the "
+            f"`run_actions=\"{digest}\"`. That names exactly this list: if the "
             "servers decide differently on that call, nothing runs and you are "
             "shown the new list. Each action goes through Kiln's own tool on "
             "this computer, with every check that tool makes (consent, the "

@@ -14,6 +14,7 @@ import logging
 import threading
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -670,7 +671,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in analyze_print_failure_smart")
                 return _srv._error_dict(
-                    f"Unexpected error analyzing failure: {exc}",
+                    f"Unexpected error analyzing failure: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -790,7 +791,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in failure_history")
                 return _srv._error_dict(
-                    f"Unexpected error fetching failure history: {exc}",
+                    f"Unexpected error fetching failure history: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -886,7 +887,7 @@ class _RecoveryToolsPlugin:
                 )
             if submit:
                 if not plan_id:
-                    return _srv._error_dict("submit needs the plan_id the plan answered.", code="VALIDATION_ERROR")
+                    return _srv._error_dict("submit needs the `plan_id` the plan answered.", code="VALIDATION_ERROR")
                 if block := _srv._preview_gate_error("plan_multi_copy_split", file_path, preview_token):
                     return block
                 from kiln.slicer import owner_asks
@@ -897,7 +898,7 @@ class _RecoveryToolsPlugin:
                 return _plan_fill(file_path, copies, material, quality=quality, priority=priority, share=share)
             except Exception as exc:
                 _logger.exception("Unexpected error in plan_multi_copy_split")
-                return _srv._error_dict(f"Unexpected error planning copies: {exc}", code="INTERNAL_ERROR")
+                return _srv._error_dict(f"Unexpected error planning copies: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
         @mcp.tool(annotations=read_only("Plan an assembly split"))
         def plan_assembly_split(
@@ -920,7 +921,7 @@ class _RecoveryToolsPlugin:
                 return err
             if not file_paths:
                 return _srv._error_dict(
-                    "file_paths must not be empty",
+                    "`file_paths` must not be empty",
                     code="VALIDATION_ERROR",
                 )
             try:
@@ -936,7 +937,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in plan_assembly_split")
                 return _srv._error_dict(
-                    f"Unexpected error planning assembly split: {exc}",
+                    f"Unexpected error planning assembly split: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -968,7 +969,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in split_plan_status")
                 return _srv._error_dict(
-                    f"Unexpected error checking split progress: {exc}",
+                    f"Unexpected error checking split progress: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -990,7 +991,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in cancel_split_plan")
                 return _srv._error_dict(
-                    f"Unexpected error cancelling split plan: {exc}",
+                    f"Unexpected error cancelling split plan: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -1086,7 +1087,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in analyze_generation_feedback")
                 return _srv._error_dict(
-                    f"Unexpected error analyzing feedback: {exc}",
+                    f"Unexpected error analyzing feedback: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -1203,7 +1204,7 @@ class _RecoveryToolsPlugin:
                         f"Prompt sanity gate failed with "
                         f"{len(improved.sanity.failures)} issue(s); "
                         "refusing to forward a contradictory prompt to "
-                        "the generator.  Pass enforce_sanity=False to "
+                        "the generator.  Pass `enforce_sanity=False` to "
                         "receive the prompt anyway.",
                         code="SANITY_GATE_FAILED",
                     )
@@ -1223,7 +1224,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in improve_generation_prompt")
                 return _srv._error_dict(
-                    f"Unexpected error improving prompt: {exc}",
+                    f"Unexpected error improving prompt: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -1258,7 +1259,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in generation_feedback_loop_status")
                 return _srv._error_dict(
-                    f"Unexpected error checking feedback loop: {exc}",
+                    f"Unexpected error checking feedback loop: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -1331,11 +1332,11 @@ class _RecoveryToolsPlugin:
                     ),
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+                return _srv._error_dict(_plain_words.sentence(exc), code="VALIDATION_ERROR")
             except Exception as exc:
                 _logger.exception("Unexpected error in detect_print_failure")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("Plan failure recovery"))
@@ -1447,7 +1448,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in plan_failure_recovery")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=destructive("Start a print recovery"))
@@ -1555,7 +1556,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in start_print_recovery")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=destructive("Confirm a print recovery"))
@@ -1582,11 +1583,11 @@ class _RecoveryToolsPlugin:
                     "message": f"Recovery session {session_id} confirmed.",
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_STATE")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_STATE")
             except Exception as exc:
                 _logger.exception("Unexpected error in confirm_print_recovery")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=destructive("Cancel a print recovery"))
@@ -1611,11 +1612,11 @@ class _RecoveryToolsPlugin:
                     "message": f"Recovery session {session_id} cancelled.",
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_STATE")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_STATE")
             except Exception as exc:
                 _logger.exception("Unexpected error in cancel_print_recovery")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("Recovery session status"))
@@ -1642,7 +1643,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in get_recovery_session_status")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("Recovery G-code steps"))
@@ -1662,11 +1663,11 @@ class _RecoveryToolsPlugin:
                 steps = engine.get_recovery_steps(session_id)
                 return {"success": True, "steps": steps, "count": len(steps)}
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="NOT_FOUND")
+                return _srv._error_dict(_plain_words.sentence(exc), code="NOT_FOUND")
             except Exception as exc:
                 _logger.exception("Unexpected error in get_recovery_gcode_steps")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=creates("Record a recovery check"))
@@ -1702,11 +1703,11 @@ class _RecoveryToolsPlugin:
                     "monitoring_passed": session.monitoring_passed,
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_STATE")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_STATE")
             except Exception as exc:
                 _logger.exception("Unexpected error in record_recovery_check")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=destructive("Complete a print recovery"))
@@ -1858,15 +1859,15 @@ class _RecoveryToolsPlugin:
             except MonitoringThresholdNotMet as exc:
                 # The structured error includes the deficit
                 # so the orchestrator/UI can prompt for additional checks.
-                err = _srv._error_dict(str(exc), code=exc.to_dict()["code"])
+                err = _srv._error_dict(_plain_words.sentence(exc), code=exc.to_dict()["code"])
                 err.update(exc.to_dict())
                 return err
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_STATE")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_STATE")
             except Exception as exc:
                 _logger.exception("Unexpected error in complete_print_recovery")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("Recovery statistics"))
@@ -1889,7 +1890,7 @@ class _RecoveryToolsPlugin:
             except Exception as exc:
                 _logger.exception("Unexpected error in get_recovery_statistics")
                 return _srv._error_dict(
-                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         _logger.debug("Registered recovery, splitting, feedback, and AI recovery tools")

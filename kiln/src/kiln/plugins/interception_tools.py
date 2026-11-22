@@ -15,6 +15,7 @@ import time
 import uuid
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -67,10 +68,10 @@ def start_gcode_interception(
             "message": message,
         }
     except ValueError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in start_gcode_interception")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def stop_gcode_interception(
@@ -94,10 +95,10 @@ def stop_gcode_interception(
             "message": f"Interception session ended. Processed {session.commands_processed} commands.",
         }
     except KeyError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in stop_gcode_interception")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def add_interception_rule(
@@ -178,10 +179,10 @@ def add_interception_rule(
             "message": f"Rule '{name}' added to session.",
         }
     except (KeyError, ValueError) as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in add_interception_rule")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def remove_interception_rule(
@@ -203,10 +204,10 @@ def remove_interception_rule(
             return {"success": True, "message": f"Rule {rule_id} removed."}
         return {"success": False, "error": f"Rule {rule_id} not found in session."}
     except KeyError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in remove_interception_rule")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def intercept_gcode_command(
@@ -260,10 +261,10 @@ def intercept_gcode_command(
             "result": result.to_dict(),
         }
     except (KeyError, ValueError) as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in intercept_gcode_command")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def update_interception_telemetry(
@@ -331,10 +332,10 @@ def update_interception_telemetry(
             "telemetry": telemetry.to_dict(),
         }
     except KeyError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in update_interception_telemetry")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def get_interception_status(
@@ -357,10 +358,10 @@ def get_interception_status(
             "stats": stats,
         }
     except KeyError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in get_interception_status")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def list_interception_sessions() -> dict[str, Any]:
@@ -381,7 +382,7 @@ def list_interception_sessions() -> dict[str, Any]:
         }
     except Exception as exc:
         _logger.exception("Unexpected error in list_interception_sessions")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def load_safety_interception_rules(
@@ -423,10 +424,10 @@ def load_safety_interception_rules(
             "message": message,
         }
     except (KeyError, ValueError) as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in load_safety_interception_rules")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def get_interception_history(
@@ -454,10 +455,10 @@ def get_interception_history(
             "count": len(history),
         }
     except KeyError as exc:
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
     except Exception as exc:
         _logger.exception("Unexpected error in get_interception_history")
-        return {"success": False, "error": f"Unexpected error: {exc}"}
+        return {"success": False, "error": f"Unexpected error: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 # ---------------------------------------------------------------------------

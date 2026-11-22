@@ -14,6 +14,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.events import EventType
 
 logger = logging.getLogger(__name__)
@@ -381,12 +382,14 @@ class BedLevelManager:
                     EventType.LEVELING_FAILED,
                     data={
                         "printer_name": printer_name,
-                        "error": str(exc),
+                        "error": _plain_words.sentence(exc),
+                        **_plain_words.detail_field(exc),
                     },
                     source=f"printer:{printer_name}",
                 )
 
             return {
                 "success": False,
-                "message": f"Bed leveling failed: {exc}",
+                "message": f"Bed leveling failed: {_plain_words.said(exc)}",
+                **_plain_words.detail_field(exc),
             }

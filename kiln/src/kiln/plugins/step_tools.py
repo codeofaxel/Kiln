@@ -13,6 +13,8 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
+from kiln import plain_words as _plain_words
+
 # Eager, unlike the conversion imports below, which stay lazy for plugin
 # load time.  An exception class referenced in an `except` clause has to be
 # bound before the clause is evaluated: import it inside the `try` and a
@@ -174,22 +176,23 @@ class _StepToolsPlugin:
                     return response
 
             except FileNotFoundError as exc:
-                return {"error": str(exc), "code": "FILE_NOT_FOUND"}
+                return {"error": _plain_words.sentence(exc), "code": "FILE_NOT_FOUND", **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"error": str(exc), "code": "INVALID_INPUT"}
+                return {"error": _plain_words.sentence(exc), "code": "INVALID_INPUT", **_plain_words.detail_field(exc)}
             except NoBackendError as exc:
                 # NOT a conversion error — the file was never opened.  Its own
                 # code, so an agent can tell "your STEP is bad" (which the user
                 # must fix) from "this install has no converter" (which is a
                 # one-command fix, or ours to fix if they're on hosted).
                 return {
-                    "error": str(exc),
+                    "error": _plain_words.sentence(exc),
                     "code": "NO_BACKEND",
                     "remedy": exc.remedy,
+                    **_plain_words.detail_field(exc),
                 }
             except Exception as exc:
                 _logger.error("STEP import failed: %s", exc, exc_info=True)
-                return {"error": str(exc), "code": "CONVERSION_ERROR"}
+                return {"error": _plain_words.sentence(exc), "code": "CONVERSION_ERROR", **_plain_words.detail_field(exc)}
 
         @mcp.tool(annotations=read_only("Check STEP support"))
         def check_step_support() -> dict:
@@ -235,12 +238,12 @@ class _StepToolsPlugin:
                 return {"status": "ok", **metadata}
 
             except FileNotFoundError as exc:
-                return {"error": str(exc), "code": "FILE_NOT_FOUND"}
+                return {"error": _plain_words.sentence(exc), "code": "FILE_NOT_FOUND", **_plain_words.detail_field(exc)}
             except ValueError as exc:
-                return {"error": str(exc), "code": "INVALID_INPUT"}
+                return {"error": _plain_words.sentence(exc), "code": "INVALID_INPUT", **_plain_words.detail_field(exc)}
             except Exception as exc:
                 _logger.error("STEP metadata extraction failed: %s", exc)
-                return {"error": str(exc), "code": "PARSE_ERROR"}
+                return {"error": _plain_words.sentence(exc), "code": "PARSE_ERROR", **_plain_words.detail_field(exc)}
 
 
 plugin = _StepToolsPlugin()

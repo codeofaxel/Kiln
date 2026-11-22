@@ -46,6 +46,13 @@ _SENTENCE_CALLS: dict[str, tuple[int | None, tuple[str, ...]]] = {
     "UsageError": (0, ("message",)),
     "BadParameter": (0, ("message",)),
 }
+#: Keys that make a dict a reply; ``message``, ``note`` and ``reason`` are
+#: judged only in one (a commit's message or an op's reason is data).
+_REPLY_KEYS = frozenset({"success", "status", "ok", "code", "error", "retryable", "refused"})
+#: Fields that are a sentence for a person in any dict.
+_ALWAYS_SAID = frozenset({"error", "remedy", "hint", "warning", "suggestion"})
+#: An exception's parts that are Python's text, not Kiln's words.
+_RAW_PARTS = frozenset({"args", "msg", "strerror", "doc", "lineno", "colno", "pos", "filename"})
 #: Where a sentence passes the chokepoint that rewords it.
 _REWORDED_AT_THE_CHOKEPOINT = frozenset({"_error_dict()", "_error_dict(message=)", "error_dict()", "error_dict(message=)"})
 #: Paths that are not shipped code a person meets.
@@ -106,12 +113,24 @@ class _Scan(ast.NodeVisitor):
         caught = self._caught_names()
 
         def is_exc(n: ast.AST) -> bool:
-            base = n
-            while isinstance(base, (ast.Attribute, ast.Subscript)):
-                base = base.value
-            if isinstance(base, ast.Call) and _name(base.func) in ("str", "repr", "format"):
-                return any(is_exc(a) for a in base.args)
-            return isinstance(base, ast.Name) and base.id in caught
+            # The exception's own text, its class name or Python's parts of
+            # it.  Another attribute (``exc.verdict``, ``exc.remedy``) is a
+            # field Kiln's own failure carries in words and is not raw.
+            if isinstance(n, ast.Attribute):
+                if n.attr == "__name__":
+                    return is_exc(n.value) or (
+                        isinstance(n.value, ast.Call) and _name(n.value.func) == "type"
+                        and any(is_exc(a) for a in n.value.args)
+                    ) or (isinstance(n.value, ast.Attribute) and n.value.attr == "__class__"
+                          and is_exc(n.value.value))
+                return n.attr in _RAW_PARTS and is_exc(n.value)
+            if isinstance(n, ast.Subscript):
+                return is_exc(n.value)
+            if isinstance(n, ast.BoolOp):
+                return any(is_exc(v) for v in n.values)
+            if isinstance(n, ast.Call) and _name(n.func) in ("str", "repr", "format", "type"):
+                return any(is_exc(a) for a in n.args)
+            return isinstance(n, ast.Name) and n.id in caught
 
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return node.value, False
@@ -133,8 +152,12 @@ class _Scan(ast.NodeVisitor):
         return None, is_exc(node)
 
     def visit_Dict(self, node: ast.Dict) -> None:
+        keys = {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        reply = bool(keys & _REPLY_KEYS)
         for key, value in zip(node.keys, node.values):
-            if isinstance(key, ast.Constant) and key.value in PERSON_FIELDS:
+            if isinstance(key, ast.Constant) and key.value in PERSON_FIELDS and (
+                reply or key.value in _ALWAYS_SAID
+            ):
                 if isinstance(value, ast.Dict):
                     for k2, v2 in zip(value.keys, value.values):
                         if isinstance(k2, ast.Constant) and k2.value in ("message", "error", "sentence"):

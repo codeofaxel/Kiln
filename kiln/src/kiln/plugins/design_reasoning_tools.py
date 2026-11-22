@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -153,9 +154,9 @@ class _DesignReasoningToolsPlugin:
                     **({"units_question": plan.units_question} if plan.units_question else {}),
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Structural analysis failed: {exc}")
+                return _srv._error_dict(f"Structural analysis failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # recommend_design_reinforcements
@@ -202,9 +203,9 @@ class _DesignReasoningToolsPlugin:
                     **({"units_question": plan.units_question} if plan.units_question else {}),
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Reinforcement analysis failed: {exc}")
+                return _srv._error_dict(f"Reinforcement analysis failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # assess_load_bearing
@@ -242,9 +243,9 @@ class _DesignReasoningToolsPlugin:
                     "scope_note": SHAPE_ONLY_NOTE,
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Load analysis failed: {exc}")
+                return _srv._error_dict(f"Load analysis failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # design_improvement_plan
@@ -296,9 +297,9 @@ class _DesignReasoningToolsPlugin:
                     **plan.to_dict(),
                 }
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Improvement plan failed: {exc}")
+                return _srv._error_dict(f"Improvement plan failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # apply_design_reinforcements
@@ -410,9 +411,9 @@ class _DesignReasoningToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Reinforcement application failed: {exc}")
+                return _srv._error_dict(f"Reinforcement application failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # infer_print_settings
@@ -451,9 +452,9 @@ class _DesignReasoningToolsPlugin:
                 result = _infer(file_path, material=material)
                 return {"success": True, **result.to_dict()}
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Print settings inference failed: {exc}")
+                return _srv._error_dict(f"Print settings inference failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # design_advisor
@@ -716,9 +717,9 @@ class _DesignReasoningToolsPlugin:
                     response["bed_dims_mm"] = [plate_width_mm, plate_depth_mm]
                 return response
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Plate arrangement failed: {exc}")
+                return _srv._error_dict(f"Plate arrangement failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # auto_arrange_parts_on_plate
@@ -793,7 +794,7 @@ class _DesignReasoningToolsPlugin:
             try:
                 from kiln.multicolor_3mf import auto_arrange_parts as _arrange
             except ImportError as exc:
-                return {"success": False, "error": f"multicolor_3mf module unavailable: {exc}"}
+                return {"success": False, "error": f"`multicolor_3mf` module unavailable: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
             try:
                 resolved_model_id = None
@@ -808,7 +809,7 @@ class _DesignReasoningToolsPlugin:
                     gap_mm=gap_mm,
                 )
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
 
             groups_seen: set = set()
             for spec in part_specs:
@@ -925,9 +926,9 @@ class _DesignReasoningToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Template optimization failed: {exc}")
+                return _srv._error_dict(f"Template optimization failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # solve_template_constraints
@@ -963,7 +964,7 @@ class _DesignReasoningToolsPlugin:
                     _json.loads(constraints) if isinstance(constraints, str) else constraints
                 )
             except _json.JSONDecodeError:
-                return _srv._error_dict("constraints must be valid JSON.", code="INVALID_ARGS")
+                return _srv._error_dict("Kiln couldn't read `constraints`: check its brackets and quotes.", code="INVALID_ARGS")
 
             try:
                 from kiln.design_reasoning import solve_constraints
@@ -971,7 +972,7 @@ class _DesignReasoningToolsPlugin:
                 result = solve_constraints(template_id, constraint_dict)
                 return {"success": True, **result.to_dict()}
             except Exception as exc:
-                return _srv._error_dict(f"Constraint solving failed: {exc}")
+                return _srv._error_dict(f"Constraint solving failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # iterate_design
@@ -1022,7 +1023,7 @@ class _DesignReasoningToolsPlugin:
             try:
                 gen = _srv._get_generation_provider(provider)
             except Exception as exc:
-                return _srv._error_dict(f"Provider error: {exc}", code="PROVIDER_ERROR")
+                return _srv._error_dict(f"Provider error: {_plain_words.said(exc)}", code="PROVIDER_ERROR")
 
             current_prompt = prompt
             material_basic: dict[str, Any] | None = None
@@ -1226,7 +1227,7 @@ class _DesignReasoningToolsPlugin:
                     return response
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Orientation optimization failed: {exc}", code="ORIENT_ERROR"
+                    f"Orientation optimization failed: {_plain_words.said(exc)}", code="ORIENT_ERROR"
                 )
 
         # ------------------------------------------------------------------
@@ -1290,7 +1291,7 @@ class _DesignReasoningToolsPlugin:
                 stated = (bed_x_mm, bed_y_mm, bed_z_mm)
                 if any(v < 0 for v in stated) or (any(stated) and not all(stated)):
                     return _srv._error_dict(
-                        "Give all three bed dimensions in mm (bed_x_mm, bed_y_mm, bed_z_mm), or none of them.",
+                        "Give all three bed dimensions in mm (`bed_x_mm`, `bed_y_mm`, `bed_z_mm`), or none of them.",
                         code="INVALID_ARGS",
                     )
                 printer_bed_mm = stated if all(stated) else None
@@ -1333,9 +1334,9 @@ class _DesignReasoningToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
+                return _srv._error_dict(_plain_words.sentence(exc), code="INVALID_ARGS")
             except Exception as exc:
-                return _srv._error_dict(f"Print readiness check failed: {exc}")
+                return _srv._error_dict(f"Print readiness check failed: {_plain_words.said(exc)}")
 
         # ------------------------------------------------------------------
         # estimate_support_material
@@ -1375,7 +1376,7 @@ class _DesignReasoningToolsPlugin:
                 return {"success": True, **result, "message": message}
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Support estimation failed: {exc}", code="SUPPORT_ERROR"
+                    f"Support estimation failed: {_plain_words.said(exc)}", code="SUPPORT_ERROR"
                 )
 
         _logger.debug("Registered design reasoning tools")

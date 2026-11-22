@@ -801,7 +801,7 @@ class EmergencyCoordinator:
                 "cleared": False,
                 "reason": "invalid_printer_id",
                 "status": None,
-                "message": "printer_id is required",
+                "message": "`printer_id` is required",
             }
 
         actor = (acknowledged_by or "").strip() or "operator"

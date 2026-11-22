@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from kiln import plain_words as _plain_words
 from kiln.events import Event, EventType
 from kiln.quoted_text import fence
 from kiln.tool_annotations import destructive, read_only
@@ -258,8 +259,8 @@ def submit_job(
     except Exception as exc:
         _logger.exception("Unexpected error in submit_job")
         return _srv._error_dict(
-            f"Failed to submit job for {fence(file_name)}: {exc}. "
-            "Verify the file exists on the printer with 'printer_files()'.",
+            f"Kiln couldn't queue {fence(file_name)}: {_plain_words.said(exc)}. "
+            "Check the file is on the printer with `printer_files`.",
             code="INTERNAL_ERROR",
         )
 
@@ -394,7 +395,7 @@ def job_status(job_id: str) -> dict:
         return _srv._error_dict(f"Job not found: {job_id!r}", code="NOT_FOUND")
     except Exception as exc:
         _logger.exception("Unexpected error in job_status")
-        return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 def queue_summary() -> dict:
@@ -512,7 +513,7 @@ def queue_summary() -> dict:
         return response
     except Exception as exc:
         _logger.exception("Unexpected error in queue_summary")
-        return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 def _being_prepared(job_id: str) -> bool:
@@ -559,7 +560,7 @@ def cancel_queued_job(job_id: str) -> dict:
             return _srv._error_dict(
                 f"Job {job_id!r} is already at the printer (status: "
                 f"{current.status.value}), so removing it from the queue "
-                f"would not stop it. Use cancel_print() to stop the "
+                f"would not stop it. Use `cancel_print` to stop the "
                 f"running print.",
                 code="PRINT_IN_PROGRESS",
             )
@@ -579,7 +580,7 @@ def cancel_queued_job(job_id: str) -> dict:
                 "job": job.to_dict(),
                 "message": (
                     f"Job {job_id!r} was being laid out for the printer; nothing more of this run is queued. If "
-                    "the printer has already started that plate, cancel_print() stops it."
+                    "the printer has already started that plate, `cancel_print` stops it."
                 ),
             }
         return {
@@ -591,12 +592,12 @@ def cancel_queued_job(job_id: str) -> dict:
         return _srv._error_dict(f"Job not found: {job_id!r}", code="NOT_FOUND")
     except ValueError as exc:
         return _srv._error_dict(
-            f"Cannot cancel job {job_id!r}: {exc}. Only a job still in the QUEUED state can be cancelled here.",
+            f"Cannot cancel job {job_id!r}: {_plain_words.said(exc)}. Only a job still in the QUEUED state can be cancelled here.",
             code="INVALID_STATE",
         )
     except Exception as exc:
         _logger.exception("Unexpected error in cancel_queued_job")
-        return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 def cancel_queued_jobs(
@@ -648,7 +649,7 @@ def cancel_queued_jobs(
     except Exception as exc:
         _logger.exception("Unexpected error in cancel_queued_jobs (queue read)")
         return _srv._error_dict(
-            f"Could not read the print queue: {exc}", code="INTERNAL_ERROR"
+            f"Could not read the print queue: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
         )
 
     scope = f" on {printer_name}" if printer_name else ""
@@ -810,7 +811,7 @@ def _job_history(limit: int = 20, status: str | None = None) -> dict:
         )
     except Exception as exc:
         _logger.exception("Unexpected error in job_history")
-        return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _srv._error_dict(f"Unexpected error: {_plain_words.said(exc)}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------

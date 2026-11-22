@@ -23,6 +23,7 @@ import threading
 import time
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln import print_keeping
 from kiln.auto_record_hook import note_cancel_requested
 from kiln.errors import HostedUnavailableError
@@ -628,7 +629,7 @@ class _PrintWatcher:
                         "snapshots": list(self._snapshots),
                         "snapshot_failures": self._snapshot_failures,
                         "final_state": state.to_dict(),
-                        "message": ("Print is paused. Call resume_print to continue, or cancel_print to abort."),
+                        "message": ("Print is paused. Call `resume_print` to continue, or `cancel_print` to abort."),
                     }
                     if hardware and hardware["stage"] == "now":
                         # Stopped for hardware: what goes in, never an
@@ -843,8 +844,8 @@ class _PrintWatcher:
                         "message": (
                             f"Captured {snap_count} snapshots. "
                             "Review them for print quality issues. "
-                            "Call pause_print or cancel_print if problems are detected, "
-                            "then call watch_print again to continue monitoring."
+                            "Call `pause_print` or `cancel_print` if problems are detected, "
+                            "then call `watch_print` again to continue monitoring."
                         ),
                     }
                     self._finish(result)
@@ -882,11 +883,12 @@ class _PrintWatcher:
                     "success": False,
                     "watch_id": self._watch_id,
                     "outcome": "error",
-                    "error": str(exc),
+                    "error": _plain_words.sentence(exc),
                     "elapsed_seconds": round(time.time() - self._start_time, 1),
                     "progress_log": list(self._progress_log[-20:]),
                     "snapshots": list(self._snapshots),
                     "snapshot_failures": self._snapshot_failures,
+                    **_plain_words.detail_field(exc),
                 }
             )
 
@@ -1025,7 +1027,7 @@ class _MonitoringToolsPlugin:
                                 _tmpdir = os.path.realpath(tempfile.gettempdir())
                                 if not (_safe.startswith(_home) or _safe.startswith(_tmpdir)):
                                     return _srv._error_dict(
-                                        "save_snapshot path must be under home directory or temp directory.",
+                                        "`save_snapshot` path must be under home directory or temp directory.",
                                         code="VALIDATION_ERROR",
                                     )
                                 os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
@@ -1143,12 +1145,12 @@ class _MonitoringToolsPlugin:
                 )
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to run vision monitoring: {exc}. Check that the printer is online and has a webcam."
+                    f"Failed to run vision monitoring: {_plain_words.said(exc)}. Check that the printer is online and has a webcam."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in monitor_print_vision")
                 return _srv._error_dict(
-                    f"Unexpected error in monitor_print_vision: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error in `monitor_print_vision`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=destructive("Watch a print"))
@@ -1297,8 +1299,8 @@ class _MonitoringToolsPlugin:
                     "cancel_at_percent": cancel_at_percent,
                     "message": (
                         f"Background watcher started (id={watch_id}). "
-                        "Use watch_print_status to check progress, "
-                        "or stop_watch_print to cancel."
+                        "Use `watch_print_status` to check progress, "
+                        "or `stop_watch_print` to cancel."
                     ),
                 }
                 if save_to_disk and watcher._save_dir:
@@ -1316,16 +1318,16 @@ class _MonitoringToolsPlugin:
                 )
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to start print watcher: {exc}. Check that the printer is online."
+                    f"Failed to start print watcher: {_plain_words.said(exc)}. Check that the printer is online."
                 )
             except HostedUnavailableError as exc:
                 # The frames-store refusal, verbatim — not an "unexpected
                 # error": it tells the caller where saving frames DOES work.
-                return _srv._error_dict(str(exc), code="HOSTED_UNAVAILABLE")
+                return _srv._error_dict(_plain_words.sentence(exc), code="HOSTED_UNAVAILABLE")
             except Exception as exc:
                 _logger.exception("Unexpected error in watch_print")
                 return _srv._error_dict(
-                    f"Unexpected error in watch_print: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error in `watch_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("Print watcher status"))
@@ -1400,7 +1402,7 @@ class _MonitoringToolsPlugin:
             except ValueError as exc:
                 valid = sorted(t.value for t in EventType)
                 return _srv._error_dict(
-                    f"Unknown event type: {exc}. Valid types: {valid}",
+                    f"Unknown event type: {_plain_words.said(exc)}. Valid types: {valid}",
                     code="VALIDATION_ERROR",
                 )
 
@@ -1700,12 +1702,12 @@ class _MonitoringToolsPlugin:
                 )
             except (PrinterError, RuntimeError) as exc:
                 return _srv._error_dict(
-                    f"Failed to start monitored print: {exc}. Check that the printer is online and idle."
+                    f"Failed to start monitored print: {_plain_words.said(exc)}. Check that the printer is online and idle."
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error in start_monitored_print")
                 return _srv._error_dict(
-                    f"Unexpected error in start_monitored_print: {exc}", code="INTERNAL_ERROR"
+                    f"Unexpected error in `start_monitored_print`: {_plain_words.said(exc)}", code="INTERNAL_ERROR"
                 )
 
         @mcp.tool(annotations=read_only("First-layer status"))

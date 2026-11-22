@@ -69,6 +69,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.mcp_compat import (
     capture_request_context,
     client_capabilities,
@@ -1106,7 +1107,7 @@ def _register_payload_verb(mcp: Any) -> bool:
             try:
                 payload = _payload_for_mesh(mesh)
             except Exception as exc:  # noqa: BLE001
-                return {"success": False, "error": f"Could not read that mesh: {exc}"}
+                return {"success": False, "error": f"Could not read that mesh: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
             # The panel fetched this geometry: the strongest evidence the
             # stage showed it.  Recorded by this door, for the print gate.
             from kiln.preview_evidence import record as _record_evidence

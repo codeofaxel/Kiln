@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL, resolve_material
 from kiln.mesh_errors import UnreadableMeshError
 
@@ -2565,7 +2566,7 @@ def _apply_thicken(
 
         return thicken_part(part_path, amount_mm=amount_mm, output_path=str(Path(work_dir) / "thickened.stl"))
     except Exception as exc:  # noqa: BLE001 -- a reinforcement that cannot run is skipped, and says why
-        return {"success": False, "message": f"Wall thickening could not run: {exc}"}
+        return {"success": False, "message": f"Wall thickening could not run: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
 
 
 def _apply_edge_finish(
@@ -2594,7 +2595,7 @@ def _apply_edge_finish(
             output_path=str(Path(work_dir) / f"{kind}ed.stl"), choose=choose, **printer,
         )
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": f"Edge finishing could not run: {exc}"}
+        return {"success": False, "message": f"Edge finishing could not run: {_plain_words.said(exc)}", **_plain_words.detail_field(exc)}
     if reply.get("code") == NOTHING_FINISHED and not reply.get("edges", {}).get("left_sharp"):
         verb = "round" if kind == "fillet" else "bevel"
         reply["message"] = (

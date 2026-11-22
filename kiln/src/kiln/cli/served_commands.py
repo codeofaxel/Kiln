@@ -22,6 +22,7 @@ from typing import Any
 
 import click
 
+from kiln import plain_words as _plain_words
 from kiln.cli.history_commands import _finish, _shown
 
 _ARTIFACT_TYPES = click.Choice(["design", "preset", "feature"])
@@ -595,7 +596,8 @@ def _verify_file(path: str, *, release_id: str | None = None, design_id: str | N
                               data=fields, timeout=120.0)
     except OSError as exc:
         return {"status": "error", "success": False, "code": "PDF_UNREADABLE",
-                "error": f"Could not read {path}: {exc.strerror or exc}"}
+                "error": f"Could not read {path}: {_plain_words.said(exc)}",
+                **_plain_words.detail_field(exc),}
     except Exception as exc:  # noqa: BLE001 — no answer is worded, never a yes
         return envelope_for_transport(tool, exc, host=_api_base(), kind="verdict")
     try:

@@ -194,7 +194,7 @@ def apply_decoration_spec(
             "success": False,
             "error": (
                 "procedural-texture presets are not yet rendered via "
-                "apply_decoration_spec — use apply_procedural_texture"
+                "`apply_decoration_spec` — use `apply_procedural_texture`"
             ),
             "code": "PROCEDURAL_NOT_SUPPORTED",
         }
@@ -214,14 +214,14 @@ def apply_decoration_spec(
         # A word has no image behind it, whatever the caller passed along.
         image_asset_path = None
     elif family not in _IMAGE_FAMILIES:
-        return {"success": False, "error": f"unknown pattern_family: {family!r}"}
+        return {"success": False, "error": f"unknown `pattern_family`: {family!r}"}
 
     resolved_content = content or image_asset_path
     if not resolved_content:
         return {
             "success": False,
             "error": (
-                f"image-based pattern {family!r} requires image_asset_path "
+                f"image-based pattern {family!r} requires `image_asset_path` "
                 "or content"
             ),
         }

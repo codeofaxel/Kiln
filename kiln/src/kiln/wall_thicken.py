@@ -27,6 +27,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.mesh_edit_check import EDIT_REFUSED, guarded_edit
 
 #: More than this per surface is a redesign, not a thickening: it fills
@@ -112,7 +113,8 @@ def thicken_part(
         reply = {
             "success": False,
             "code": EDIT_REFUSED,
-            "message": f"Kiln did not thicken the walls: {exc}. Your file is unchanged. {_INSTEAD_ON_A_MESH}",
+            "message": f"Kiln did not thicken the walls: {_plain_words.said(exc)}. Your file is unchanged. {_INSTEAD_ON_A_MESH}",
+            **_plain_words.detail_field(exc),
         }
     reply["method"] = "mesh"
     if cad_failure:

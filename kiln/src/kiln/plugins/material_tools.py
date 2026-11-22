@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln import plain_words as _plain_words
 from kiln.quoted_text import fence
 from kiln.tool_annotations import read_only
 
@@ -158,7 +159,7 @@ class _MaterialToolsPlugin:
                 )
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Could not connect to printer: {exc}",
+                    f"Could not connect to printer: {_plain_words.said(exc)}",
                     code="CONNECTION_ERROR",
                 )
 
@@ -174,13 +175,13 @@ class _MaterialToolsPlugin:
                 ams = adapter.get_ams_status()
             except PrinterError as exc:
                 return _srv._error_dict(
-                    f"Failed to query AMS status: {exc}",
+                    f"Failed to query AMS status: {_plain_words.said(exc)}",
                     code="PRINTER_ERROR",
                 )
             except Exception as exc:
                 _logger.exception("Unexpected error querying AMS status")
                 return _srv._error_dict(
-                    f"Unexpected error querying AMS status: {exc}",
+                    f"Unexpected error querying AMS status: {_plain_words.said(exc)}",
                     code="INTERNAL_ERROR",
                 )
 
@@ -247,8 +248,8 @@ class _MaterialToolsPlugin:
                     "message": (
                         "AMS trays are loaded, but the printer did not report "
                         "a current slot. A1/AMS Lite firmware can report "
-                        "tray_now=255 in this state; pass an explicit "
-                        "ams_mapping to start_print when color matters."
+                        "`tray_now=255` in this state; pass an explicit "
+                        "`ams_mapping` to `start_print` when color matters."
                     ),
                 }
                 if colors:
@@ -391,7 +392,7 @@ class _MaterialToolsPlugin:
                 )
             except Exception as exc:
                 return _srv._error_dict(
-                    f"Could not resolve printer adapter: {exc}",
+                    f"Could not resolve printer adapter: {_plain_words.said(exc)}",
                     code="CONNECTION_ERROR",
                 )
 
@@ -473,7 +474,7 @@ class _MaterialToolsPlugin:
                 if refusal_in_flight(exc) is not None:
                     # Kiln declined to read this printer: that is not a
                     # health finding about it, and "critical" would say it is.
-                    return _srv._error_dict(str(exc))
+                    return _srv._error_dict(_plain_words.sentence(exc))
                 checks["printer_connected"] = {
                     "status": "critical",
                     "detail": f"Failed to read printer state: {exc}",
