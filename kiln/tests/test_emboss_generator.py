@@ -53,6 +53,13 @@ class TestGetDefaultDepth:
 
         assert get_default_depth("UnknownMaterial") == 0.8
 
+    def test_a_name_is_matched_whatever_its_case(self):
+        from kiln.emboss_generator import MATERIAL_DEPTHS, get_default_depth
+
+        for name, depth in MATERIAL_DEPTHS.items():
+            assert get_default_depth(name.lower()) == depth
+            assert get_default_depth(f" {name.upper()} ") == depth
+
 
 # ---------------------------------------------------------------------------
 # Tests: generate_emboss_scad

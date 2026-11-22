@@ -1498,6 +1498,21 @@ class TestPrintDiagnostic:
         assert result.storage_requirements is not None
         assert any("stor" in g.lower() or "dry" in g.lower() for g in result.combined_guidance)
 
+    @pytest.mark.parametrize("material", ["pla_esd", "pp"])
+    def test_the_drying_line_is_said_for_a_plastic_that_takes_up_little_water(self, material):
+        result = get_print_diagnostic(material)
+        assert result is not None
+        dry_at = result.storage_requirements["drying_temp_c"]
+        lines = [g for g in result.combined_guidance if g.startswith("Storage:")]
+        assert len(lines) == 1, result.combined_guidance
+        assert f"Dry at {dry_at}C" in lines[0]
+        assert ".." not in lines[0]
+
+    def test_the_spool_softening_caution_reaches_the_guidance(self):
+        result = get_print_diagnostic("pla_esd")
+        assert result is not None
+        assert any("soften the spool" in g for g in result.combined_guidance), result.combined_guidance
+
     def test_unknown_material_returns_none(self):
         assert get_print_diagnostic("unobtainium") is None
 

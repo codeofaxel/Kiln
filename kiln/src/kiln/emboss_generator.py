@@ -199,9 +199,15 @@ _DEFAULT_DEPTH_MM = 0.8
 def get_default_depth(material: str) -> float:
     """Return the recommended emboss/deboss depth for *material*.
 
-    Falls back to 0.8 mm if the material is not in :data:`MATERIAL_DEPTHS`.
+    The name is matched whatever its case and surrounding spaces ("tpu",
+    " Nylon ").  Falls back to 0.8 mm if the material is not in
+    :data:`MATERIAL_DEPTHS`.
     """
-    return MATERIAL_DEPTHS.get(material, _DEFAULT_DEPTH_MM)
+    wanted = str(material or "").strip().lower()
+    for name, depth in MATERIAL_DEPTHS.items():
+        if name.lower() == wanted:
+            return depth
+    return _DEFAULT_DEPTH_MM
 
 
 # ---------------------------------------------------------------------------
