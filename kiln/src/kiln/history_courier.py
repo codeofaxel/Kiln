@@ -2330,13 +2330,19 @@ _LIBRARY_ROUTE = {"features": "features", "presets": "presets"}
 
 def push_library(tool: str, kind: str, item_id: str, branch_id: str, *, design_id: str | None = None,
                  vault: Any = None) -> dict[str, Any]:
-    """Send one branch of a feature or preset from this computer to the account."""
-    from kiln.history_vault import HistoryVault
+    """Send one branch of a feature or preset from this computer to the account.
+
+    A picture or part that does not fit in what one push carries stays here:
+    its version goes without it, and the answer names each under
+    ``assets_stayed_here`` (and in ``said_assets``, one line to show).
+    """
+    from kiln.history_vault import LIBRARY_KINDS, HistoryVault
 
     own = vault is None
     vault = vault or HistoryVault()
+    stayed: list[dict[str, Any]] = []
     try:
-        payload = vault.library_branch_payload(kind, item_id, branch_id)
+        payload = vault.library_branch_payload(kind, item_id, branch_id, left_out=stayed)
         if payload is None:
             return _refused(tool, "BRANCH_NOT_FOUND", f"No branch {branch_id} of {item_id} on this computer.")
         design_id, payload, left_out = without_locked_designs(design_id, payload, kind, vault=vault)
@@ -2350,7 +2356,33 @@ def push_library(tool: str, kind: str, item_id: str, branch_id: str, *, design_i
     out = {"status": "success", "push": answer, "item_id": item_id, "branch_id": branch_id}
     if left_out:
         out["design_left_out"] = left_out
+    went = {v.get(LIBRARY_KINDS[kind]["version"]) for v in body.get("versions") or []}
+    said = _said_assets_stayed([fact for fact in stayed if fact["version_id"] in went], answer)
+    if said:
+        out["assets_stayed_here"] = said
+        out["said_assets"] = " ".join(said)
     return out
+
+
+def _said_assets_stayed(stayed: list[dict[str, Any]], answer: dict[str, Any]) -> list[str]:
+    """One sentence for each version a library push sent without its picture
+    or part.  A version the account already held (not in the answer's
+    ``pushed_versions``, when it lists them) went nowhere and is not named."""
+    listed = answer.get("pushed_versions") if isinstance(answer, dict) else None
+    said = []
+    for fact in stayed:
+        if isinstance(listed, list) and fact["version_id"] not in listed:
+            continue
+        label = _version_label({"version": fact.get("version_number")}, fact["version_id"])
+        what = fact["what"]
+        said.append(
+            f"The {what} of {label} is {_megabytes(fact['bytes'])} MB and one push carries up to "
+            f"{fact['limit_bytes'] // (1024 * 1024)} MB of parts and pictures in all, so {label} went "
+            f"to your Kiln account without its {what}. The {what} stays on this computer; a pull or "
+            f"clone on another computer brings {label} without it. Everything else on the branch was "
+            "pushed."
+        )
+    return said
 
 
 def pull_library(tool: str, kind: str, item_id: str, branch_id: str | None = None,
