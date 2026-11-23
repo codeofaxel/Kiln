@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-23T20:17:45.795120+00:00",
+  "generated": "2026-11-23T20:55:02.229616+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -18425,7 +18425,8 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      }
+      },
+      "served": false
     },
     {
       "name": "maintenance_due",
