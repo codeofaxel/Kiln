@@ -54,6 +54,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Edit a CAD file, get a CAD file back.** Round, bevel or thicken a STEP part in Kiln, and the new version still downloads as an exact STEP, on the web too.
+
 - **A model sent lying down is priced standing up.** Quotes stand the part upright first, so the price and size match what you meant.
 
 - **A print's ending shows in your Kiln account right away, even when Kiln closes the moment the print finishes.**
