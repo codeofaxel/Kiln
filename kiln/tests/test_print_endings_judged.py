@@ -273,6 +273,7 @@ _NOT_A_JUDGE = {
     "mcp_tasks.py": "task states",
     "model_visualizer.py": "rendered views",
     "plugins/fleet_tools.py": "queue job states",
+    "model_search.py": "model search results (which sites answered and which failed)",
     "plugins/marketplace_tools.py": "marketplace search results",
     "plugins/queue_tools.py": "queue job states",
     "print_dna.py": "the words a print DNA record may carry",

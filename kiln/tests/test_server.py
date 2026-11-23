@@ -2862,53 +2862,76 @@ class TestGetThingiverse:
 # ---------------------------------------------------------------------------
 
 class TestSearchModels:
-    """Tests for the search_models MCP tool."""
+    """``search_models`` is the one model search (tests/test_one_model_search.py
+    holds its cases); here, that a connected Thingiverse is one of the sites
+    it searches and a missing one is never a refusal."""
 
-    @patch("kiln.server._get_thingiverse")
-    def test_success(self, mock_get_tv):
-        client = MagicMock(spec=ThingiverseClient)
-        client.search.return_value = [
-            ThingSummary(id=1, name="Benchy", url="/t/1", creator="u"),
-            ThingSummary(id=2, name="Cube", url="/t/2", creator="v"),
-        ]
-        mock_get_tv.return_value = client
+    @staticmethod
+    def _only_thingiverse(monkeypatch, summaries, *, fails=False):
+        import kiln.server as mod
+        from kiln import model_search
+        from kiln.marketplaces import MarketplaceRegistry
+        from kiln.marketplaces.base import MarketplaceAdapter, MarketplaceError, ModelSummary
 
+        class Site(MarketplaceAdapter):
+            name = "thingiverse"
+            display_name = "Thingiverse"
+
+            def search(self, query, *, page=1, per_page=10, sort="relevant"):
+                if fails:
+                    raise MarketplaceError("rate limit")
+                return [ModelSummary(id=str(i), name=n, url=f"/t/{i}", creator="u", source="thingiverse")
+                        for i, n in enumerate(summaries, start=1)]
+
+            def get_details(self, model_id):
+                raise NotImplementedError
+
+            def get_files(self, model_id):
+                raise NotImplementedError
+
+            def download_file(self, file_id, dest_dir, *, file_name=None):
+                raise NotImplementedError
+
+        registry = MarketplaceRegistry()
+        registry.register(Site())
+        monkeypatch.setattr(mod, "_marketplace_registry", registry)
+        monkeypatch.setattr(mod, "_init_marketplace_registry", lambda: None)
+        monkeypatch.setattr(model_search, "_kiln_search_door", lambda: None)
+
+    def test_success(self, monkeypatch):
+        self._only_thingiverse(monkeypatch, ["Benchy", "Cube"])
         result = search_models("benchy")
         assert result["success"] is True
         assert result["count"] == 2
         assert result["query"] == "benchy"
         assert result["models"][0]["name"] == "Benchy"
-        client.search.assert_called_once_with(
-            "benchy", page=1, per_page=10, sort="relevant",
-        )
+        assert result["searched"] == ["thingiverse"]
 
-    @patch("kiln.server._get_thingiverse")
-    def test_empty_results(self, mock_get_tv):
-        client = MagicMock(spec=ThingiverseClient)
-        client.search.return_value = []
-        mock_get_tv.return_value = client
-
+    def test_empty_results(self, monkeypatch):
+        self._only_thingiverse(monkeypatch, [])
         result = search_models("noresults")
         assert result["success"] is True
         assert result["count"] == 0
 
-    @patch("kiln.server._get_thingiverse")
-    def test_api_error(self, mock_get_tv):
-        client = MagicMock(spec=ThingiverseClient)
-        client.search.side_effect = ThingiverseError("rate limit")
-        mock_get_tv.return_value = client
-
+    def test_api_error(self, monkeypatch):
+        self._only_thingiverse(monkeypatch, [], fails=True)
         result = search_models("test")
         assert result["success"] is False
+        assert result["error"]["code"] == "SEARCH_UNAVAILABLE"
 
     def test_missing_token(self, monkeypatch):
         import kiln.server as mod
-        monkeypatch.setattr(mod, "_thingiverse", None)
-        monkeypatch.setattr(mod, "_THINGIVERSE_TOKEN", "")
+        from kiln import model_search
+        from kiln.marketplaces import MarketplaceRegistry
+
+        monkeypatch.setattr(mod, "_marketplace_registry", MarketplaceRegistry())
+        monkeypatch.setattr(mod, "_init_marketplace_registry", lambda: None)
+        monkeypatch.setattr(model_search, "_kiln_search_door", lambda: None)
 
         result = search_models("test")
         assert result["success"] is False
-        assert "KILN_THINGIVERSE_TOKEN" in result["error"]["message"]
+        assert result["error"]["code"] == "NO_MODEL_SOURCES"
+        assert "KILN_THINGIVERSE_TOKEN" not in result["error"]["message"]
 
 
 # ---------------------------------------------------------------------------

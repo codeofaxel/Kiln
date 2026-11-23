@@ -145,124 +145,73 @@ class _MarketplaceToolsPlugin:
             sort: str = "relevant",
             sources: list[str] | None = None,
         ) -> dict:
-            """Search across all connected 3D model marketplaces simultaneously.
+            """Search for a model to print: Kiln's public designs first, then every connected model site.
 
-            Searches Thingiverse, MyMiniFactory, Cults3D, and MakerWorld in
-            parallel and returns interleaved results from all sources.  Note
-            that MakerWorld returns a search URL (no direct API access) while
-            other sources return actual model results.
+            One search.  It looks in the designs people have made public on
+            Kiln (the same search as kiln3d.com/search), then in every model
+            site this Kiln is connected to (Thingiverse, MyMiniFactory,
+            Cults3D, MakerWorld), and answers with all of them together,
+            Kiln's first.  MakerWorld answers with a search link.
 
             Args:
                 query: Search keywords (e.g. "raspberry pi case", "benchy").
                 page: Page number (1-based, default 1).
                 per_page: Results per source (default 10).
-                sort: Sort order — "relevant", "popular", or "newest".
-                sources: Optional list to restrict search (e.g. ["thingiverse",
-                    "myminifactory"]).  Omit to search all connected sources.
+                sort: Sort order for the model sites: "relevant", "popular",
+                    or "newest".
+                sources: Optional list to restrict the search (e.g. ["kiln"],
+                    ["thingiverse", "myminifactory"]).  Omit to search
+                    everything.
 
-            Each result includes a ``source`` field identifying the marketplace.
-            Results also include ``is_free``, ``has_printable_files`` (has G-code),
-            and ``has_sliceable_files`` (has STL/3MF) hints.
-
-            Use ``model_details`` with the ``id`` to inspect, ``model_files``
-            to see downloadable files, and ``download_model`` to save locally.
+            Each result's ``source`` says where it is from.  A result from
+            Kiln (``source: "kiln"``) opens with
+            ``get_public_design(username, slug)``.  For a model site's
+            result, use ``model_details`` with the ``id`` to inspect,
+            ``model_files`` to see its files, and ``download_model`` to save
+            one.  ``searched`` lists what answered; ``not_searched`` and
+            ``failed`` say what did not, and why.
             """
-            from kiln.marketplaces.base import MarketplaceError
-            from kiln.server import (
-                _MARKETPLACE_SETUP_GUIDE,
-                _THINGIVERSE_DEPRECATION_NOTICE,
-                _error_dict,
-                _init_marketplace_registry,
-                _marketplace_registry,
-                logger,
-            )
+            from kiln import model_search
+            from kiln.server import _error_dict, logger
 
             try:
-                if _marketplace_registry.count == 0:
-                    _init_marketplace_registry()
-
-                if _marketplace_registry.count == 0:
-                    return _error_dict(
-                        _MARKETPLACE_SETUP_GUIDE,
-                        code="NO_MARKETPLACES",
-                    )
-
-                results = _marketplace_registry.search_all(
-                    query,
-                    page=page,
-                    per_page=per_page,
-                    sort=sort,
-                    sources=sources,
-                )
-                resp = {
-                    "success": True,
-                    "query": query,
-                    "models": [r.to_dict() for r in results.models],
-                    "count": len(results.models),
-                    "page": page,
-                    "sources": _marketplace_registry.connected,
-                    "searched": results.searched,
-                    "skipped": results.skipped,
-                    "failed": results.failed,
-                    "health_summary": results.summary,
-                }
-                # Surface deprecation notice when Thingiverse results are included.
-                _tv_sources = results.searched or _marketplace_registry.connected
-                if "thingiverse" in _tv_sources:
-                    resp["deprecation_notices"] = {
-                        "thingiverse": _THINGIVERSE_DEPRECATION_NOTICE,
-                    }
-                return resp
-            except MarketplaceError as exc:
-                return _error_dict(f"Kiln couldn't search the models: {_plain_words.said(exc)}. Check that a model site's key is set.")
+                return model_search.search(query, page=page, per_page=per_page, sort=sort, sources=sources)
             except Exception as exc:
                 logger.exception("Unexpected error in search_all_models")
-                return _error_dict(f"Kiln couldn't search the model sites: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
+                return _error_dict(f"Kiln couldn't search for models: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
 
         # ---------------------------------------------------------------
         # Thingiverse-specific tools
         # ---------------------------------------------------------------
 
-        @mcp.tool(annotations=read_only("Search Thingiverse", open_world=True))
+        @mcp.tool(annotations=read_only("Search for models", open_world=True))
         def search_models(
             query: str,
             page: int = 1,
             per_page: int = 10,
             sort: str = "relevant",
         ) -> dict:
-            """Search Thingiverse for 3D-printable models.
+            """Search for a model to print.  The same search as ``search_all_models``.
+
+            Looks in the designs people have made public on Kiln first, then
+            in every model site this Kiln is connected to, and answers with
+            all of them together.
 
             Args:
                 query: Search keywords (e.g. "raspberry pi case", "benchy").
                 page: Page number for pagination (1-based, default 1).
-                per_page: Results per page (default 10, max 100).
-                sort: Sort order — "relevant", "popular", "newest", or "makes".
+                per_page: Results per source (default 10, max 100).
+                sort: Sort order for the model sites: "relevant", "popular",
+                    "newest", or "makes".
 
-            Returns a list of model summaries including name, creator, thumbnail,
-            and download/like counts.  Use ``model_details`` with the ``id`` to
-            get full information, and ``model_files`` to see downloadable files.
+            Each result's ``source`` says where it is from; see
+            ``search_all_models`` for how to open one.
             """
-            from kiln.marketplaces.thingiverse import ThingiverseError
-            from kiln.server import (
-                _THINGIVERSE_DEPRECATION_NOTICE,
-                _error_dict,
-                _get_thingiverse,
-                logger,
-            )
+            from kiln import model_search
+            from kiln.server import _error_dict, logger
 
             try:
-                client = _get_thingiverse()
-                results = client.search(query, page=page, per_page=per_page, sort=sort)
-                return {
-                    "success": True,
-                    "query": query,
-                    "models": [r.to_dict() for r in results],
-                    "count": len(results),
-                    "page": page,
-                    "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
-                }
-            except (ThingiverseError, RuntimeError) as exc:
-                return _error_dict(f"Kiln couldn't search Thingiverse: {_plain_words.said(exc)}. Check that KILN_THINGIVERSE_TOKEN is set.")
+                return model_search.search(query, page=page, per_page=per_page, sort=sort)
             except Exception as exc:
                 logger.exception("Unexpected error in search_models")
                 return _error_dict(f"Kiln couldn't search for models: {_plain_words.said(exc)}.", code="INTERNAL_ERROR")
