@@ -343,7 +343,9 @@ def run(name: str, call: dict[str, Any], forward: Forward) -> Any:
     """Carry out the delete tool *name* for *call*.  *forward* asks Kiln's
     servers; it is the only way anything of the account is touched."""
     if _shared_server():
-        return forward(**call)   # only the account's copy exists there
+        # Only the account's copy exists there: nothing of this disk is
+        # read, so no records ride with the call.
+        return forward(**call, **{NO_RECORDS: True})
     if name == "delete_design":
         return _design(dict(call), forward)
     return _library(dict(call), forward)

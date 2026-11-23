@@ -61,7 +61,8 @@ class _Servers:
         self.calls: list[dict] = []
 
     def __call__(self, **call):
-        self.calls.append(call)
+        self.calls.append(dict(call))
+        call.pop(served_delete.NO_RECORDS, None)
         if self.offline:
             return {"status": "error", "success": False, "why": "offline",
                     "error": "This computer is offline, so Kiln could not ask its servers."}
@@ -233,6 +234,7 @@ class TestOnASharedServer:
         servers = _Servers(held=None)
         said = _delete(servers, design_id="mug", permanent=True, where="computer", confirm="mug")
         assert said["code"] == "NOT_FOUND" and folder.is_dir()
+        assert all(c.get(served_delete.NO_RECORDS) is True for c in servers.calls)
         assert served_delete.copy_here("mug") is None
         with pytest.raises(RuntimeError):
             served_delete.erase_here("mug")
