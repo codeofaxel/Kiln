@@ -204,6 +204,9 @@ def ask(
         if isinstance(answer, dict) and answer.get("code") == _FILE_GONE_CODE:
             return None, Miss("unanswered", _FILE_GONE_CODE, str(answer.get("error") or ""))
         answer, whole = _bring_home(answer, trip)
+        if trip.get("packed_from") and isinstance(answer, dict) and answer.get("success") is True:
+            # A file that travelled packed is told about as the one given.
+            answer = served_makes._told_about_the_file_given(answer, trip["packed_from"][0])
         if not whole:
             # The servers made a file this computer did not receive: an
             # answer pointing at it would open nothing.

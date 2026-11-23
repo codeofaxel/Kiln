@@ -239,3 +239,35 @@ class TestALargeModelTravelsPacked:
         assert upload["data"][:2] == b"PK"
         assert mine.read_bytes() == b"the person's own file"
         assert sorted(p.name for p in scratch.iterdir()) == ["lamp.3mf"], "the trip's folder was left behind"
+
+
+class TestTheReplyNamesThePersonsOwnFile:
+    """A large STL travels packed as a 3MF; the reply names the person's own
+    file, its size before, and no note about a format they never had."""
+
+    def test_a_packed_stl_is_told_about_as_the_stl_it_was(self, servers, tmp_path, monkeypatch):
+        import struct
+
+        from kiln import served_makes
+
+        triangle = struct.pack("<12fH", 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0)
+        part = tmp_path / "lamp.stl"
+        part.write_bytes(b"\x00" * 80 + struct.pack("<I", 400) + triangle * 400)
+        monkeypatch.setattr(served_makes, "_PACK_PAST_BYTES", 1024)
+        servers.answer = {
+            "success": True, "path": str(part), "size_before_bytes": 999, "size_after_bytes": 2 * 1024 * 1024,
+            "summary": "As an STL, lamp was 0.0 MB and the slimmer copy is 2.0 MB. It looks the same within 0.01 mm.",
+            "format_note": "Read lamp.3mf and wrote a binary STL, which carries no colors or materials.",
+        }
+
+        result = _call(TOOL, file_path=str(part))
+
+        assert result["summary"].startswith("lamp.stl was ")
+        assert result["summary"].endswith("the slimmer copy is 2.0 MB. It looks the same within 0.01 mm.")
+        assert result["size_before_bytes"] == part.stat().st_size
+        assert "format_note" not in result
+
+    def test_a_file_that_travelled_as_it_is_keeps_the_servers_words(self, servers, part):
+        servers.answer = {"success": True, "path": str(part), "summary": "part.stl was 0.0 MB and the slimmer copy is 0.0 MB."}
+
+        assert _call(TOOL, file_path=str(part))["summary"] == "part.stl was 0.0 MB and the slimmer copy is 0.0 MB."

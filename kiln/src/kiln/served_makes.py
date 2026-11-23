@@ -711,6 +711,29 @@ def _without_server_files(answer: dict) -> dict:
     return answer
 
 
+def _told_about_the_file_given(answer: dict[str, Any], file_path: str) -> dict[str, Any]:
+    """*answer* told about the file the person gave, not the packed copy that
+    travelled (:func:`_packed_for_the_trip`): the size before is their own
+    file's, and a note about formats names it."""
+    name = os.path.basename(file_path)
+    try:
+        was = os.path.getsize(file_path)
+    except OSError:
+        return answer
+    out = dict(answer)
+    summary = out.get("summary")
+    if isinstance(summary, str) and " and the slimmer copy is " in summary:
+        rest = summary.split(" and the slimmer copy is ", 1)[1]
+        out["summary"] = f"{name} was {was / (1024 * 1024):.1f} MB and the slimmer copy is {rest}"
+        out["size_before_bytes"] = was
+    if out.get("format_note"):
+        if name.lower().endswith(".stl"):
+            out.pop("format_note")  # an STL in, an STL out: nothing to say
+        else:
+            out["format_note"] = f"Read {name} and wrote a binary STL, which carries no colors or materials."
+    return out
+
+
 def arrive(
     tool: str,
     answer: Any,
@@ -740,6 +763,8 @@ def arrive(
             return answer
         if answer.get("success") is False or answer.get("status") == "error":
             return answer
+        if trip and trip.get("packed_from"):
+            answer = _told_about_the_file_given(answer, trip["packed_from"][0])
         # Documents first: once saved here their paths are real, and the
         # sweep for server-only paths below leaves them alone.
         _bring_documents(answer)
@@ -1157,6 +1182,8 @@ class _Sending:
         #: The name a file travelled under, when it is not its own (a model
         #: sent packed), so the servers lay it down as what it now is.
         self.names: dict[str, str] = {}
+        #: The files on this computer that travelled packed.
+        self.packed: list[str] = []
         #: Why the last upload got no token (a ``kiln.served_answer.Miss``).
         self.miss: Any = None
 
@@ -1191,6 +1218,7 @@ class _Sending:
             self.tokens[key] = token
             if packed is not None:
                 self.names[key] = packed.name
+                self.packed.append(str(local))
         return {"token": token, "name": self.names.get(key, local.name)}, None
 
     def one(self, value: Any) -> tuple[Any, dict[str, Any] | None]:
@@ -1238,7 +1266,7 @@ class _Sending:
 
 
 def _send_files(
-    tool: str, kwargs: dict[str, Any], files: dict[str, str],
+    tool: str, kwargs: dict[str, Any], files: dict[str, str], trip: dict | None = None,
 ) -> tuple[int, dict[str, Any] | None]:
     """Upload every file the call names in a ``files`` parameter and swap
     the parameter for its token(s).  ``(how many were sent, refusal)``."""
@@ -1281,6 +1309,8 @@ def _send_files(
         tokens[param] = entries if (many or how == "many") else entries[0]
     if tokens:
         kwargs["file_tokens"] = tokens
+    if trip is not None and sending.packed:
+        trip["packed_from"] = list(sending.packed)
     return len(tokens), None
 
 
@@ -1436,7 +1466,7 @@ def send_inputs(
 
     files = inputs.get("files")
     if isinstance(files, dict) and files:
-        sent, refusal = _send_files(tool, kwargs, files)
+        sent, refusal = _send_files(tool, kwargs, files, trip)
         if refusal is not None:
             return kwargs, refusal
         if trip is not None and sent:
