@@ -48,6 +48,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
+from kiln.served_makes import MAX_MODEL_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,10 @@ _MAX_SLICE_ENTRIES = 8
 #: retained above the server's cap can only ever be uploaded and refused,
 #: which spends the user's uplink to earn a 413.  G-code compresses ~10x,
 #: so 512 MB raw is the honest twin of the 48 MB compressed cap; the mesh
-#: is uploaded as-is, so its ceiling is the server's own, to the byte.
+#: is uploaded as-is, so its ceiling is the largest model Kiln's servers
+#: keep, read from the one place this computer states it.
 _MAX_GCODE_BYTES = 512 * 1024 * 1024
-_MAX_MESH_BYTES = 64 * 1024 * 1024
+_MAX_MESH_BYTES = MAX_MODEL_BYTES
 
 #: Upload ceiling for the compressed toolpath — mirrors the server's cap.
 _MAX_GCODE_GZ_UPLOAD = 48 * 1024 * 1024

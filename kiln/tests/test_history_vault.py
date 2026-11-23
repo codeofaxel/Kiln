@@ -751,6 +751,97 @@ class TestALibraryPush:
         assert sent["body"]["branch"]["branch_id"] == "fb1"
         assert [v["feature_version_id"] for v in sent["body"]["versions"]] == ["fv2"]
 
+    def _two_parts(self, home):
+        """A feature of two versions: a part that fits in one push, then one past it."""
+        import kiln.history_vault as hv
+
+        small = b"solid clip\nendsolid clip\n"
+        big = b"solid big\n" + b"\0" * hv._ART_BUDGET
+        versions = []
+        for number, data in enumerate((small, big), start=1):
+            name = f"{hashlib.sha256(data).hexdigest()}.stl"
+            versions.append({
+                "feature_version_id": f"fv{number}", "feature_id": "f1", "name": "clip",
+                "version_number": number, "part_asset_name": name,
+                "part_asset_b64": base64.b64encode(data).decode(),
+            })
+        vault = _vault(home)
+        vault.apply_library_remote("features", "f1", {
+            "branches": [{"branch_id": "fb1", "feature_id": "f1", "name": "main", "head_feature_version_id": "fv2"}],
+            "versions": versions,
+            "memberships": [{"branch_id": "fb1", "feature_version_id": f"fv{n}", "position": n} for n in (1, 2)],
+        })
+        vault.close()
+        return len(big)
+
+    def test_a_part_past_what_one_push_carries_stays_here_and_the_push_says_so(self, home, monkeypatch):
+        import kiln.history_vault as hv
+
+        big_bytes = self._two_parts(home)
+        sent = {}
+
+        def fake_request(tool, method, path, body=None):
+            sent.update(body=body)
+            return {"pushed_versions": ["fv1", "fv2"]}
+
+        monkeypatch.setattr(courier, "_request", fake_request)
+
+        answer = courier.run_local("cloud_push_feature_branch", "feature_push", {"feature_id": "f1", "branch_id": "fb1"})
+
+        assert answer["status"] == "success", answer
+        carried = {v["feature_version_id"]: "part_asset_b64" in v for v in sent["body"]["versions"]}
+        assert carried == {"fv1": True, "fv2": False}
+        (said,) = answer["assets_stayed_here"]
+        assert f"The part of version 2 is {courier._megabytes(big_bytes)} MB" in said
+        assert f"up to {hv._ART_BUDGET // (1024 * 1024)} MB of parts and pictures" in said
+        assert "went to your Kiln account without its part" in said and "stays on this computer" in said
+        assert answer["said_assets"] == said
+
+    def test_a_picture_past_what_one_push_carries_is_said_the_same_way(self, home, monkeypatch):
+        import kiln.history_vault as hv
+
+        art = b"\x89PNG" + b"\0" * hv._ART_BUDGET
+        vault = _vault(home)
+        vault.apply_library_remote("presets", "p1", {
+            "branches": [{"branch_id": "pb", "preset_id": "p1", "name": "main", "head_preset_version_id": "pv1"}],
+            "versions": [{"preset_version_id": "pv1", "preset_id": "p1", "version_number": 1,
+                          "image_asset_bytes_b64": base64.b64encode(art).decode(), "image_asset_path": "logo.png"}],
+            "memberships": [{"branch_id": "pb", "preset_version_id": "pv1", "position": 0}],
+        })
+        vault.close()
+        sent = {}
+        monkeypatch.setattr(courier, "_request", lambda tool, method, path, body=None: sent.update(body=body) or {})
+
+        answer = courier.push_library("cloud_push_preset_branch", "presets", "p1", "pb")
+
+        assert "image_asset_bytes_b64" not in sent["body"]["versions"][0]
+        (said,) = answer["assets_stayed_here"]
+        assert said.startswith("The picture of version 1 is ")
+        assert "without its picture" in said and "The picture stays on this computer" in said
+
+    def test_a_version_the_account_already_held_is_not_named(self, home, monkeypatch):
+        self._two_parts(home)
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: {"pushed_versions": [], "skipped_versions": ["fv1", "fv2"]})
+
+        answer = courier.push_library("cloud_push_feature_branch", "features", "f1", "fb1")
+
+        assert answer["status"] == "success", answer
+        assert "assets_stayed_here" not in answer
+
+    def test_the_terminal_shows_what_stayed(self, home, monkeypatch):
+        from click.testing import CliRunner
+
+        from kiln.cli.history_commands import cloud_group
+
+        self._two_parts(home)
+        monkeypatch.setattr(courier, "_request", lambda *a, **k: {"pushed_versions": ["fv1", "fv2"]})
+
+        shown = CliRunner().invoke(cloud_group, ["feature", "push", "f1", "fb1"])
+
+        assert shown.exit_code == 0, shown.output
+        assert "Pushed f1 to your Kiln account." in shown.output
+        assert "The part of version 2 is " in shown.output and "stays on this computer" in shown.output
+
     def test_a_pulled_preset_is_kept_here(self, home, monkeypatch):
         monkeypatch.setattr(courier, "_request", lambda *a, **k: {
             "branch": {"branch_id": "pb", "preset_id": "p9", "name": "main", "head_preset_version_id": "pv"},

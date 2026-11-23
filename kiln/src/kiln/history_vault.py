@@ -352,6 +352,34 @@ def library_mesh_not_kept(folder: Path | None, stl_path: Any) -> Path | None:
     return Path(real) if os.path.getsize(real) > _MAX_LIBRARY_MESH else None
 
 
+def model_kept_elsewhere(recipe_path: str | os.PathLike[str]) -> str | None:
+    """What a person is told about the version whose recipe file is
+    *recipe_path* when its record came from their Kiln account without its
+    model: the account keeps models up to a size, this one is past it, and
+    the model is kept on the computer it was made on.  The sentence a pull
+    says for it, one wording at every door that reads the version.
+
+    ``None`` for any other version, for one whose model is on this computer,
+    and for a recipe that cannot be read.
+    """
+    path = Path(recipe_path)
+    try:
+        recipe = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(recipe, dict):
+        return None
+    model = recipe.get("stl_path")
+    if isinstance(model, str) and model and (path.parent / model).is_file():
+        return None
+    from kiln.history_courier import _said_models_elsewhere
+
+    said = _said_models_elsewhere(
+        {"provenance_sidecars": [{"version_id": recipe.get("version_id"), "recipe_dict": recipe}]}
+    )
+    return said[0] if said else None
+
+
 #: Each library kind's record keys: the interface contract of the records.
 LIBRARY_KINDS: dict[str, dict[str, str]] = {
     "features": {"id": "feature_id", "version": "feature_version_id", "head": "head_feature_version_id"},
@@ -1582,27 +1610,41 @@ class HistoryVault:
                 return path
         return None
 
-    def _with_art(self, record: dict[str, Any], budget: list[int]) -> dict[str, Any]:
-        record = self._with_part(record, budget)
+    def _with_art(
+        self, record: dict[str, Any], budget: list[int], left_out: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """A version with its picture and its part attached while *budget*
+        lasts; each one kept here that does not fit is added to *left_out*
+        as ``{"what": "picture" | "part", "bytes": size}``."""
+        record = self._with_part(record, budget, left_out)
         path = self._art_path(record.get("image_asset_sha256"))
         if path is None:
             return record
         size = path.stat().st_size
         if size > budget[0]:
+            if left_out is not None:
+                left_out.append({"what": "picture", "bytes": size})
             return record
         budget[0] -= size
         return {**record, _ART_KEY: base64.b64encode(path.read_bytes()).decode("ascii"),
                 "image_asset_path": path.name}
 
-    def _with_part(self, record: dict[str, Any], budget: list[int]) -> dict[str, Any]:
+    def _with_part(
+        self, record: dict[str, Any], budget: list[int], left_out: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """A feature version with the part mesh it imports, when it is kept here."""
         name = record.get("part_asset_name")
         if not _part_name(name):
             return record
         path = self._art_dir / name
-        if not path.is_file() or path.stat().st_size > budget[0]:
+        if not path.is_file():
             return record
-        budget[0] -= path.stat().st_size
+        size = path.stat().st_size
+        if size > budget[0]:
+            if left_out is not None:
+                left_out.append({"what": "part", "bytes": size})
+            return record
+        budget[0] -= size
         return {**record, _PART_KEY: base64.b64encode(path.read_bytes()).decode("ascii")}
 
     def library_bundle(self, kind: str, item_id: str, *, budget: list[int] | None = None) -> dict[str, Any]:
@@ -1617,8 +1659,16 @@ class HistoryVault:
             "releases": self._lib_rows(kind, "release", item_id),
         }
 
-    def library_branch_payload(self, kind: str, item_id: str, branch_id: str) -> dict[str, Any] | None:
-        """A branch, its versions (art attached) and memberships: what a push sends."""
+    def library_branch_payload(
+        self, kind: str, item_id: str, branch_id: str, *, left_out: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """A branch, its versions (art attached) and memberships: what a push sends.
+
+        A picture or part that does not fit in what one push carries
+        (:data:`_ART_BUDGET`, all of them together) stays here; each is added
+        to *left_out* as ``{"version_id", "version_number", "what", "bytes",
+        "limit_bytes"}`` for the push to say.
+        """
         keys = LIBRARY_KINDS[kind]
         branch = next((b for b in self._lib_rows(kind, "branch", item_id) if b.get("branch_id") == branch_id), None)
         if branch is None:
@@ -1627,10 +1677,18 @@ class HistoryVault:
         members.sort(key=lambda m: (int(m.get("position") or 0), float(m.get("added_at") or 0.0)))
         wanted = {m.get(keys["version"]) for m in members}
         budget = [_ART_BUDGET]
-        versions = [
-            self._with_art(v, budget) for v in self._lib_rows(kind, "version", item_id)
-            if v.get(keys["version"]) in wanted
-        ]
+        versions = []
+        for v in self._lib_rows(kind, "version", item_id):
+            if v.get(keys["version"]) not in wanted:
+                continue
+            stayed: list[dict[str, Any]] = []
+            versions.append(self._with_art(v, budget, stayed))
+            if left_out is not None:
+                left_out.extend(
+                    {"version_id": v.get(keys["version"]), "version_number": v.get("version_number"),
+                     "limit_bytes": _ART_BUDGET, **fact}
+                    for fact in stayed
+                )
         return {"branch": branch, "versions": versions, "memberships": members}
 
     def _put_library(self, kind: str, item_id: str, payload: dict[str, Any], *, expected: dict[str, Any] | None) -> list[str]:

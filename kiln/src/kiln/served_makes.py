@@ -53,9 +53,12 @@ from kiln import plain_words as _plain_words
 
 logger = logging.getLogger(__name__)
 
-#: Refuse to move a model larger than this in either direction (the same
-#: ceiling the servers apply to an upload).
-MAX_MODEL_BYTES = 64 * 1024 * 1024
+#: The largest model Kiln's servers keep, so the largest one moved in either
+#: direction: a model past it is said here, never sent up to be refused.
+#: Every door on this computer that sends a model to them reads this one
+#: number.  Kiln's servers state it only in answer to a history push (the
+#: account's model limit), so this is a copy of their number, kept equal to it.
+MAX_MODEL_BYTES = 50 * 1024 * 1024
 #: The image door's ceiling.
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
