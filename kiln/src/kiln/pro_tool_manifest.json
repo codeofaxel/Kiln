@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-22T22:17:26.892520+00:00",
+  "generated": "2026-11-23T06:23:16.789007+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -31112,14 +31112,18 @@
         "inputs": [
           "input_path"
         ],
-        "outputs": []
+        "outputs": [
+          "multicolor_3mf"
+        ]
       },
       "auto_color_by_region": {
         "says": "Painted by region",
         "inputs": [
           "input_path"
         ],
-        "outputs": []
+        "outputs": [
+          "multicolor_3mf"
+        ]
       },
       "auto_recess_pocket": {
         "says": "Recessed a pocket",
@@ -31184,7 +31188,9 @@
         "inputs": [
           "input_path"
         ],
-        "outputs": []
+        "outputs": [
+          "prepared.stl_path"
+        ]
       },
       "remove_mesh_floating_regions": {
         "says": "Removed loose pieces",
