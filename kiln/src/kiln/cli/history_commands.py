@@ -273,6 +273,15 @@ def _with_recipes(said: str, answer: dict[str, Any], *, sent: bool) -> str:
     return f"{said}\n{'Sent' if sent else 'Brought'} {count} {noun} with it."
 
 
+def _with_stayed(said: str, answer: dict[str, Any]) -> str:
+    """*said*, and what a push left on this computer: a model, a part or a
+    picture that went to the account without its file."""
+    for key in ("said_models", "said_assets"):
+        if answer.get(key):
+            said += f"\n{_shown(answer[key])}"
+    return said
+
+
 @cloud_group.command("push")
 @click.argument("design_id")
 @click.argument("branch_id", required=False)
@@ -294,9 +303,9 @@ def cloud_push(design_id: str, branch_id: str | None, make_room: str | None, jso
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
             click.echo("Run again with `--make-room <design_id>` to archive one of them.", err=True)
         sys.exit(1)
-    _finish(answer, json_mode, lambda a: _with_recipes(
+    _finish(answer, json_mode, lambda a: _with_stayed(_with_recipes(
         _shown(a["said"]) if a.get("kept_as") else f"Pushed {design_id} to your Kiln account.", a, sent=True,
-    ) + (f"\n{_shown(a['made_room']['note'])}" if isinstance(a.get("made_room"), dict) else ""))
+    ), a) + (f"\n{_shown(a['made_room']['note'])}" if isinstance(a.get("made_room"), dict) else ""))
 
 
 @cloud_group.command("auto-push")
@@ -394,7 +403,7 @@ def _library_group(kind: str, word: str, id_name: str) -> click.Group:
         from kiln.history_courier import push_library
 
         answer = push_library(f"cloud_push_{kind[:-1]}_branch", kind, item_id, branch_id, design_id=design_id)
-        _finish(answer, json_mode, lambda a: f"Pushed {item_id} to your Kiln account.")
+        _finish(answer, json_mode, lambda a: _with_stayed(f"Pushed {item_id} to your Kiln account.", a))
 
     @group.command("pull")
     @click.argument("item_id", metavar=id_name.upper())
