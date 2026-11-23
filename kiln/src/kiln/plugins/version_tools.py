@@ -655,7 +655,13 @@ class _VersionToolsPlugin:
                     ``design_id:N`` ref to restore.
 
             Returns:
-                The newly created rollback version record.
+                The newly created rollback version record.  A target version
+                whose model is kept on the computer it was made on (it came
+                from the person's Kiln account without it), with no source
+                here to make it from, is refused with
+                ``MODEL_KEPT_ELSEWHERE`` and nothing changes; one with its
+                source is restored, and ``model_kept_elsewhere`` says where
+                its model is.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("cache"):
@@ -671,6 +677,7 @@ class _VersionToolsPlugin:
                 part_facts,
                 save_recipe,
             )
+            from kiln.history_vault import model_kept_elsewhere
 
             saving = ExitStack()
             try:
@@ -695,6 +702,21 @@ class _VersionToolsPlugin:
                             f"Version {target_ver} of {design_id} is one piece of a split of it, "
                             f"not a version of the whole part, so {design_id} was not rolled back "
                             "to it and nothing changed. Roll back to a version of the whole part."
+                        ),
+                        "design_id": design_id,
+                        "changed": False,
+                    }
+
+                # A version whose model stayed on the computer that made it
+                # has nothing here to restore unless its source makes it.
+                elsewhere = model_kept_elsewhere(target_path)
+                if elsewhere is not None and not target_recipe.source_scad and not target_recipe.parts:
+                    return {
+                        "ok": False,
+                        "code": "MODEL_KEPT_ELSEWHERE",
+                        "error": (
+                            f"{elsewhere} There is nothing on this computer to roll back to, "
+                            f"so {design_id} was not rolled back and nothing changed."
                         ),
                         "design_id": design_id,
                         "changed": False,
@@ -747,6 +769,8 @@ class _VersionToolsPlugin:
                         "stl_path": new_recipe.stl_path,
                     },
                 }
+                if elsewhere is not None:
+                    result["version"]["model_kept_elsewhere"] = elsewhere
                 # A rollback is a new version: it is filed the way a save
                 # is, under the number on its recipe.
                 _file_version_here(result, design_id, new_recipe, new_recipe.source_scad, saving)
@@ -791,9 +815,13 @@ class _VersionToolsPlugin:
                 when the version keeps the slicer's estimate ("About 3h 1m
                 at the sliced speed, the slicer's estimate.").  ``sliced_speeds``
                 when it keeps the person's own speed ranges its file was
-                sliced with.
+                sliced with.  ``model_kept_elsewhere`` when the version
+                came from the person's Kiln account without its model (too
+                large for the account): its model is kept on the computer it
+                was made on, and the sentence says so, to tell as written.
                 Returns an error if the version does not exist.
             """
+            from kiln.history_vault import model_kept_elsewhere
             from kiln.slicer_estimate import estimate_sentence
             from kiln.speed_by_height import wish_sentence
 
@@ -822,6 +850,8 @@ class _VersionToolsPlugin:
                     result["version"]["print_time"] = print_time
                 if (sliced_speeds := wish_sentence(recipe.provenance)) is not None:
                     result["version"]["sliced_speeds"] = sliced_speeds
+                if (elsewhere := model_kept_elsewhere(path)) is not None:
+                    result["version"]["model_kept_elsewhere"] = elsewhere
                 return result
             except HostedUnavailableError as exc:
                 return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}

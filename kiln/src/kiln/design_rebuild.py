@@ -430,12 +430,16 @@ def _rebuild_parametric(recipe: Any, design_dir: str, asks: dict[str, Any] | Non
     }
 
 
-def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = None) -> dict[str, Any]:
+def _rebuild_mesh(
+    recipe: Any, design_dir: str, asks: dict[str, Any] | None = None, *, recipe_file: str = "",
+) -> dict[str, Any]:
     """Re-slice the recipe's recorded meshes exactly as they are.
 
     No parametric source, so the geometry on disk IS the design.  Slices
     every part (or the primary STL for a part-less recipe), merges
-    multi-part gcode, and packages for print.
+    multi-part gcode, and packages for print.  A version whose model is
+    kept on the computer it was made on (*recipe_file* is its recipe) says
+    so, rather than that there is nothing to rebuild.
     """
     from kiln.design_recipe import save_recipe
 
@@ -480,6 +484,14 @@ def _rebuild_mesh(recipe: Any, design_dir: str, asks: dict[str, Any] | None = No
     else:
         stl_path = recipe.stl_path
         if not stl_path or not os.path.exists(stl_path):
+            from kiln.history_vault import model_kept_elsewhere
+
+            if recipe_file and (elsewhere := model_kept_elsewhere(recipe_file)) is not None:
+                return {
+                    "status": "error",
+                    "error": f"{elsewhere} There is nothing on this computer to rebuild it from.",
+                    "code": "MODEL_KEPT_ELSEWHERE",
+                }
             return {
                 "status": "error",
                 "error": (
@@ -599,4 +611,5 @@ def rebuild_design_from_recipe(recipe_path: str, *, asks: dict[str, Any] | None 
 
     if recipe.source_scad and not recipe.parts:
         return _rebuild_parametric(recipe, design_dir, asks)
-    return _rebuild_mesh(recipe, design_dir, asks)
+    resolved = resolve_recipe(recipe_path)
+    return _rebuild_mesh(recipe, design_dir, asks, recipe_file=resolved[0] if resolved else "")

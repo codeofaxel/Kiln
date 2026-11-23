@@ -352,6 +352,34 @@ def library_mesh_not_kept(folder: Path | None, stl_path: Any) -> Path | None:
     return Path(real) if os.path.getsize(real) > _MAX_LIBRARY_MESH else None
 
 
+def model_kept_elsewhere(recipe_path: str | os.PathLike[str]) -> str | None:
+    """What a person is told about the version whose recipe file is
+    *recipe_path* when its record came from their Kiln account without its
+    model: the account keeps models up to a size, this one is past it, and
+    the model is kept on the computer it was made on.  The sentence a pull
+    says for it, one wording at every door that reads the version.
+
+    ``None`` for any other version, for one whose model is on this computer,
+    and for a recipe that cannot be read.
+    """
+    path = Path(recipe_path)
+    try:
+        recipe = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(recipe, dict):
+        return None
+    model = recipe.get("stl_path")
+    if isinstance(model, str) and model and (path.parent / model).is_file():
+        return None
+    from kiln.history_courier import _said_models_elsewhere
+
+    said = _said_models_elsewhere(
+        {"provenance_sidecars": [{"version_id": recipe.get("version_id"), "recipe_dict": recipe}]}
+    )
+    return said[0] if said else None
+
+
 #: Each library kind's record keys: the interface contract of the records.
 LIBRARY_KINDS: dict[str, dict[str, str]] = {
     "features": {"id": "feature_id", "version": "feature_version_id", "head": "head_feature_version_id"},
