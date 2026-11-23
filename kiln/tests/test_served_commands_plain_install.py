@@ -76,6 +76,8 @@ CASES: list[tuple[list[str], str, dict[str, Any]]] = [
 FILE_COMMANDS = {("merge", "source"), ("visual-diff",), ("manual", "verify"), ("manual", "verify-batch")}
 #: Commands that open a page of Kiln's web app and ask no tool.
 PAGE_COMMANDS = {("subscribe",), ("manage-billing",)}
+#: Commands that ask their tool twice (what will happen, then the go-ahead), run in their own tests.
+ASKS_TWICE = {("design", "delete")}
 
 
 def _root() -> click.Group:
@@ -405,7 +407,7 @@ def test_every_served_command_has_a_case():
         else:
             registered.add((command.name,))
     covered = {tuple(argv[:2]) if tuple(argv[:2]) in registered else (argv[0],) for argv, _, _ in CASES}
-    assert registered - covered - FILE_COMMANDS - PAGE_COMMANDS == set()
+    assert registered - covered - FILE_COMMANDS - PAGE_COMMANDS - ASKS_TWICE == set()
 
 
 def test_a_plain_install_has_every_one():
@@ -546,3 +548,89 @@ def test_a_business_or_enterprise_plan_never_asks_about_the_pro_trial(account, t
     assert out.exit_code == 0, out.output
     assert account["asked"] == 0
     assert BILLING in out.output and "trial" not in out.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# kiln design delete: archive by default, erase on --permanent, by place
+# ---------------------------------------------------------------------------
+
+
+def _asked(calls):
+    return [(tool, {k: kw.get(k) for k in ("design_id", "permanent", "where", "confirm") if kw.get(k)})
+            for tool, kw in calls]
+
+
+def test_delete_asks_first_and_archives_when_the_id_is_typed(server, mug_here):
+    calls, answers = server
+    script = iter([
+        {"status": "success", "confirm_required": True, "message": "This will archive design 'mug'.",
+         "in_your_account": {"held": True, "versions": 2}},
+        {"status": "success", "deleted": True, "reversible": True,
+         "what_happened": {"account": "archived", "computer": "not touched"},
+         "bring_back": "All of it, any time."},
+    ])
+    import kiln.server as kiln_server
+
+    def scripted(tool, /, **kwargs):
+        calls.append((tool, {k: v for k, v in kwargs.items() if not k.startswith("_")}))
+        return next(script)
+
+    kiln_server._pro_api_call = scripted   # the fixture restores it
+
+    out = CliRunner().invoke(_root(), ["design", "delete", "mug"], input="mug\n")
+
+    assert out.exit_code == 0, out.output
+    assert _asked(calls) == [
+        ("delete_design", {"design_id": "mug", "where": "everywhere"}),
+        ("delete_design", {"design_id": "mug", "where": "everywhere", "confirm": "mug"}),
+    ]
+    assert _archived(mug_here) == [True, True]
+    assert "In your Kiln account: archived." in out.output
+    assert "On this computer: archived." in out.output
+
+
+def test_delete_with_a_wrong_id_typed_deletes_nothing(server, mug_here):
+    calls, answers = server
+    answers["delete_design"] = {"status": "success", "confirm_required": True, "message": "This will archive it."}
+
+    out = CliRunner().invoke(_root(), ["design", "delete", "mug"], input="mugg\n")
+
+    assert out.exit_code == 0, out.output
+    assert "nothing was deleted" in out.output
+    assert len(calls) == 1 and _archived(mug_here) == [None, None]
+
+
+def test_delete_from_this_computer_needs_no_answer_from_the_servers(server, mug_here):
+    calls, answers = server
+    answers["delete_design"] = {"status": "error", "why": "offline", "error": "This computer is offline."}
+
+    out = CliRunner().invoke(
+        _root(), ["design", "delete", "mug", "--permanent", "--where", "computer", "--yes", "--json"],
+    )
+
+    assert out.exit_code == 0, out.output
+    said = json.loads(out.output)
+    assert said["deleted"] is True and said["what_happened"] == {"computer": "erased", "account": "not touched"}
+    assert not mug_here.exists()
+    # The servers were only ever asked what the account holds.
+    assert {kw.get("where") for _, kw in calls} == {"computer"}
+
+
+def test_a_delete_of_a_saved_feature_from_the_account_sends_no_records(server):
+    calls, answers = server
+    from kiln.server import served_tool
+
+    answers["delete_feature"] = {"status": "success", "deleted": True}
+    served_tool("delete_feature")(feature_id="f1", permanent=True, where="account", confirm="f1")
+    (_, kwargs), = calls
+    assert "history_records" not in kwargs and kwargs["where"] == "account"
+
+
+def test_a_delete_of_a_saved_feature_here_sends_this_computers_records(server):
+    calls, answers = server
+    from kiln.server import served_tool
+
+    answers["delete_feature"] = {"status": "success", "deleted": True}
+    served_tool("delete_feature")(feature_id="f1", permanent=True, where="computer", confirm="f1")
+    (_, kwargs), = calls
+    assert "history_records" in kwargs

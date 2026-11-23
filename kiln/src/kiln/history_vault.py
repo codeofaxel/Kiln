@@ -677,6 +677,36 @@ class HistoryVault:
                 for r in self._conn.execute("SELECT version_id FROM versions WHERE design_id = ?", (design_id,))
             }
 
+    def forget_design(self, design_id: str) -> dict[str, int]:
+        """Remove every record this computer keeps of *design_id*.
+
+        Its branches, versions, memberships, releases, checked-out branch,
+        lock and history-log entries.  Models are kept once each by SHA-256
+        and may be shared with another design, so they stay.  Returns how
+        many branches and versions were removed.
+        """
+        with self._lock:
+            branch_ids = [r["branch_id"] for r in self._conn.execute(
+                "SELECT branch_id FROM branches WHERE design_id = ?", (design_id,)
+            ).fetchall()]
+            for branch_id in branch_ids:
+                self._conn.execute("DELETE FROM memberships WHERE branch_id = ?", (branch_id,))
+                self._conn.execute("DELETE FROM branch_ids_before WHERE branch_id = ?", (branch_id,))
+            versions = self._conn.execute(
+                "DELETE FROM versions WHERE design_id = ?", (design_id,)
+            ).rowcount
+            self._conn.execute("DELETE FROM branches WHERE design_id = ?", (design_id,))
+            self._conn.execute("DELETE FROM releases WHERE design_id = ?", (design_id,))
+            self._conn.execute("DELETE FROM checkouts WHERE design_id = ?", (design_id,))
+            self._conn.execute("DELETE FROM design_locks WHERE design_id = ?", (design_id,))
+            for table in ("log_entries", "bisect_sessions"):
+                self._conn.execute(
+                    f"DELETE FROM {table} WHERE artifact_type = 'design' AND artifact_id = ?",
+                    (design_id,),
+                )
+            self._conn.commit()
+        return {"branches": len(branch_ids), "versions": max(versions, 0)}
+
     def version_count(self, design_id: str) -> int:
         """How many versions of *design_id* this computer keeps."""
         row = self._conn.execute(

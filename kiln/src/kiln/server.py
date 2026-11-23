@@ -22477,7 +22477,19 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             _file_limits: dict | None = None,
         ):
             def _stub(**kwargs):
-                from kiln import served_makes, served_steps
+                from kiln import served_delete, served_makes, served_steps
+
+                # A delete has a half only this computer can do (its own
+                # copy); the servers do the account's.  kiln.served_delete
+                # decides which calls go to the servers, and makes them
+                # through this same stub.
+                if _name in served_delete.TOOLS and not kwargs.pop(served_delete.PASS, False):
+                    return served_delete.run(
+                        _name, kwargs, lambda **call: _stub(**call, **{served_delete.PASS: True}),
+                    )
+                # A delete of the account's copy carries no records of this
+                # computer's: records would name this computer's copy.
+                without_records = bool(kwargs.pop(served_delete.NO_RECORDS, False))
 
                 if _history and _history != "served":
                     # A cloud door this computer runs itself, from its own
@@ -22535,7 +22547,8 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 # Likewise a blade-status request carries this install's
                 # recent fault codes: the hosted side has no event log.
                 call = with_recent_faults(_name, with_local_reading(_name, kwargs))
-                if _history == "served":
+                sends_records = _history == "served" and not without_records
+                if sends_records:
                     # The design history this call is about lives here; it
                     # rides with the call and what changed comes back.
                     from kiln.history_courier import records_for_call, served_refusal
@@ -22574,7 +22587,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 from kiln import action_yes
 
                 answer = action_yes.with_offer(_name, ask(), host=_host_label(None))
-                if _history == "served":
+                if sends_records:
                     from kiln.history_courier import take_delta
 
                     answer = take_delta(answer, history_sent, tool=_name)

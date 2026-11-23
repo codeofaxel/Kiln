@@ -564,6 +564,56 @@ def design_unarchive(design_id: str, json_mode: bool) -> None:
     _finish(_ask("unarchive_design", design_id=design_id), json_mode, _say_archive)
 
 
+def _say_delete(answer: dict[str, Any]) -> str:
+    """What happened in each place, and what can be brought back."""
+    if answer.get("confirm_required"):
+        lines = [str(answer.get("message") or "")]
+        lines += [f"  - {line}" for line in answer.get("goes_with_it") or []]
+        return _shown("\n".join(lines), lines=True)
+    happened = answer.get("what_happened") if isinstance(answer.get("what_happened"), dict) else {}
+    lines = [f"In your Kiln account: {happened['account']}." for _ in [0] if happened.get("account")]
+    lines += [f"On this computer: {happened['computer']}." for _ in [0] if happened.get("computer")]
+    if answer.get("bring_back"):
+        lines.append(f"What can be brought back: {answer['bring_back']}")
+    return _shown("\n".join(lines) or "Deleted.", lines=True)
+
+
+@click.command("delete")
+@click.argument("design_id")
+@click.option("--permanent", is_flag=True, help="Erase it for good instead of archiving it.")
+@click.option(
+    "--where", type=click.Choice(["everywhere", "account", "computer"]), default="everywhere",
+    show_default=True,
+    help="With --permanent: remove it from your Kiln account, from this computer, or both.",
+)
+@click.option("--yes", is_flag=True, help="Do it without being asked to type the design's id.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def design_delete(design_id: str, permanent: bool, where: str, yes: bool, json_mode: bool) -> None:
+    """Delete DESIGN_ID.  Archives it by default: hidden, kept whole, brought back any time.
+
+    With --permanent it is erased for good, from your Kiln account, this
+    computer, or both (--where).  It first says what will happen and asks
+    you to type the design's id.
+    """
+    asked = _ask("delete_design", design_id=design_id, permanent=permanent, where=where)
+    if not asked.get("confirm_required"):
+        _finish(asked, json_mode, _say_delete)
+        return
+    if not yes:
+        if json_mode:
+            _finish(asked, json_mode, _say_delete)
+            return
+        click.echo(_say_delete(asked))
+        typed = click.prompt("Type the design's id to go on", default="", show_default=False)
+        if typed.strip() != design_id:
+            click.echo("That does not match, so nothing was deleted.")
+            return
+    _finish(
+        _ask("delete_design", design_id=design_id, permanent=permanent, where=where, confirm=design_id),
+        json_mode, _say_delete,
+    )
+
+
 # ---------------------------------------------------------------------------
 # kiln manual (the history of a design's assembly manuals)
 # ---------------------------------------------------------------------------
@@ -835,7 +885,7 @@ _INTO_GROUPS: dict[str, tuple[click.Command, ...]] = {
     "release": (release_yank,),
     "merge": (merge_source,),
     "versions": (versions_best,),
-    "design": (design_archive, design_unarchive),
+    "design": (design_archive, design_unarchive, design_delete),
 }
 
 _TOP_LEVEL: tuple[click.Command, ...] = (
