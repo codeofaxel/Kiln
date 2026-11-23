@@ -202,8 +202,8 @@ def _from_this_computer(design_id: str, permanent: bool, confirm: str, forward: 
             "confirm_with": design_id,
             "message": (
                 f"This removes design '{design_id}' ({here['versions']} versions) from this "
-                f"computer. {lost} To proceed, call again with permanent=True, "
-                f"where='computer' and confirm='{design_id}'."
+                f"computer. {lost} To proceed, call again with `permanent=True`, "
+                f"`where='computer'` and `confirm='{design_id}'`."
             ),
         }
         if confirm:
