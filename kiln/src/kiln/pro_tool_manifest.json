@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-23T20:55:02.229616+00:00",
+  "generated": "2026-11-23T22:59:02.972293+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -4884,6 +4884,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       }
     },
     {
@@ -6228,8 +6232,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
-      },
-      "served": false
+      }
     },
     {
       "name": "describe_design",
@@ -9457,6 +9460,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
       },
       "inputs": {
         "mesh": "mesh_path"
