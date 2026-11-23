@@ -194,3 +194,30 @@ def test_an_account_that_makes_no_offer_gets_none_said(lamp, monkeypatch):
     pushed = courier.push("cloud_push_branch", "lamp")
 
     assert "slim_offers" not in pushed
+
+
+
+def test_a_model_too_detailed_for_the_servers_to_slim_is_told_the_way_out_and_offered_nothing(home, monkeypatch):  # noqa: F811
+    """A binary STL past the most triangles the account's servers slim at
+    once: offering a slim that would then be refused is a broken promise."""
+    import struct
+
+    big = struct.pack("<80sI", b"\0" * 80, 40) + b"\0" * 50 * 40
+    _library(home, "lamp", [SMALL, big, OTHER])
+    offer = {**OFFER, "max_triangles": 10, "too_detailed_said": "Too detailed: export it again with less detail."}
+
+    class Account(_Account):
+        def __call__(self, tool, method, path, body=None, **kw):
+            answer = super().__call__(tool, method, path, body, **kw)
+            if path.endswith("/meshes/stored") and "model_limit" in answer:
+                answer["model_limit"] = {"max_bytes": len(big) - 1, "keeps_record": True, "offer": offer}
+            return answer
+
+    monkeypatch.setattr(courier, "_request", Account())
+
+    pushed = courier.push("cloud_push_branch", "lamp")
+
+    assert pushed["status"] == "success", pushed
+    assert "slim_offers" not in pushed
+    assert "Too detailed: export it again with less detail." in pushed["said_models"]
+    assert OFFER["said"] not in pushed["said_models"]

@@ -1177,9 +1177,13 @@ def push(
         out["said_models"] = " ".join(out["models_stayed_here"])
         offers = _slim_offers(stayed)
         if offers:
-            # The account's offer of a slimmer copy, said once.
-            out["slim_offers"] = offers
-            out["said_models"] += " " + offers[0]["said"]
+            # The account's offer of a slimmer copy, said once; a model too
+            # detailed to slim there is told the way out, and offered nothing.
+            callable_offers = [o for o in offers if not o.get("withheld")]
+            if callable_offers:
+                out["slim_offers"] = callable_offers
+            for sentence in dict.fromkeys(o["said"] for o in offers):
+                out["said_models"] += " " + sentence
     # The numbers the account gave the versions it now holds, taken here;
     # the proven recipes are read after, so each goes to the account under
     # its version's number there.
@@ -1536,7 +1540,24 @@ def _slim_offer(answer: dict[str, Any]) -> dict[str, str]:
     if not isinstance(offer, dict):
         return {}
     wanted = {key: offer.get(key) for key in ("said", "tool", "size_param")}
-    return wanted if all(isinstance(v, str) and v for v in wanted.values()) else {}
+    if not all(isinstance(v, str) and v for v in wanted.values()):
+        return {}
+    most, instead = offer.get("max_triangles"), offer.get("too_detailed_said")
+    if isinstance(most, int) and not isinstance(most, bool) and most > 0 and isinstance(instead, str) and instead:
+        wanted.update(max_triangles=most, too_detailed_said=instead)
+    return wanted
+
+
+def _stated_triangles(path: str) -> int | None:
+    """The triangle count a binary STL states in its header, when its size
+    agrees; ``None`` for any other file."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(84)
+        count = int.from_bytes(head[80:84], "little") if len(head) == 84 else -1
+        return count if count >= 0 and 84 + 50 * count == os.path.getsize(path) else None
+    except OSError:
+        return None
 
 
 def _slim_offers(stayed: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1546,6 +1567,13 @@ def _slim_offers(stayed: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     for version_id, fact in stayed.items():
         offer = fact.get("offer") or {}
         if not offer:
+            continue
+        most = offer.get("max_triangles")
+        count = _stated_triangles(fact["path"]) if most else None
+        if count is not None and count > most:
+            # More detail than the account's servers slim at once: the way
+            # out is said instead, and no call is offered that would refuse.
+            offers.append({"version_id": version_id, "said": offer["too_detailed_said"], "withheld": "too_detailed"})
             continue
         offers.append({
             "version_id": version_id,
