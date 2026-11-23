@@ -16879,7 +16879,8 @@ def rotate_model(
             ``<input>_rotated.<ext>``.
 
     Returns dict with ``output_path`` (path to rotated file) and
-    ``rotations_applied``.
+    ``rotations_applied``; ``step_path`` is the turned CAD when the part's
+    CAD file sat beside it.
 
     Pair with ``reslice_with_overrides`` to re-slice the rotated model with
     adjusted settings (e.g., stronger brim after rotation).
@@ -16907,6 +16908,10 @@ def rotate_model(
             p = Path(input_path)
             output_path = str(p.with_stem(p.stem + "_rotated"))
 
+        from kiln.auto_orient import _build_rotation_matrix
+        from kiln.cad_follow import watch
+
+        watched = watch(input_path)
         if ext == ".stl":
             rotate_stl_file(
                 input_path,
@@ -16932,6 +16937,7 @@ def rotate_model(
                 "y": rotation_y,
                 "z": rotation_z,
             },
+            **watched.follow(output_path, turn=_build_rotation_matrix(rotation_x, rotation_y, rotation_z)),
         }
         try:
             from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
