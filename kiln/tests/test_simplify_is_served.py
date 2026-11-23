@@ -154,3 +154,120 @@ class TestNoSimplifierIsLeftHere:
         from kiln.served_answer import HOSTED_DOORS
 
         assert HOSTED_DOORS["kiln._pro_simplify_bridge"][0] == "served_answer"
+
+
+class TestASizeAskedFor:
+    def test_the_size_asked_for_goes_to_the_servers(self, servers, part):
+        servers.answer = {"success": True, "path": str(part), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(part), max_megabytes=40)
+
+        ((_name, sent),) = servers.calls
+        assert sent["max_megabytes"] == 40
+
+    def test_no_size_asked_for_sends_none(self, servers, part):
+        servers.answer = {"success": True, "path": str(part), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(part))
+
+        ((_name, sent),) = servers.calls
+        assert not sent.get("max_megabytes")
+
+
+class TestALargeModelTravelsPacked:
+    def test_a_large_stl_goes_up_as_a_smaller_3mf_and_is_left_as_it_was(self, servers, tmp_path, monkeypatch):
+        import struct
+
+        from kiln import served_makes
+
+        # A real binary STL: many copies of one triangle pack far smaller.
+        triangle = struct.pack("<12fH", 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0)
+        big = tmp_path / "lamp.stl"
+        big.write_bytes(b"\x00" * 80 + struct.pack("<I", 400) + triangle * 400)
+        before = big.read_bytes()
+        monkeypatch.setattr(served_makes, "_PACK_PAST_BYTES", 1024)
+        servers.answer = {"success": True, "path": str(big), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(big), max_megabytes=1)
+
+        (upload,) = servers.uploads
+        assert upload["data"][:2] == b"PK", "the model did not travel packed"
+        assert len(upload["data"]) < len(before)
+        assert big.read_bytes() == before
+
+    def test_a_small_stl_travels_as_it_is(self, servers, part):
+        servers.answer = {"success": True, "path": str(part), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(part))
+
+        (upload,) = servers.uploads
+        assert upload["data"] == STL
+
+    def test_another_tool_never_gets_a_packed_model(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        from kiln import served_makes
+
+        monkeypatch.setattr(served_makes, "_PACK_PAST_BYTES", 1)
+        model = tmp_path / "m.stl"
+        model.write_bytes(STL)
+
+        assert served_makes._packed_for_the_trip("repair_mesh", Path(model)) is None
+
+    def test_the_packed_copy_never_lands_on_a_file_already_there(self, servers, tmp_path, monkeypatch):
+        """The packed copy is written in a folder made for the one trip: a
+        file of the same name in Kiln's own files folder is neither written
+        over nor removed."""
+        import struct
+
+        from kiln import output_paths, served_makes
+
+        scratch = tmp_path / "kiln-files"
+        scratch.mkdir()
+        monkeypatch.setattr(output_paths, "kiln_temp_dir", lambda: str(scratch))
+        mine = scratch / "lamp.3mf"
+        mine.write_bytes(b"the person's own file")
+        triangle = struct.pack("<12fH", 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0)
+        big = tmp_path / "lamp.stl"
+        big.write_bytes(b"\x00" * 80 + struct.pack("<I", 400) + triangle * 400)
+        monkeypatch.setattr(served_makes, "_PACK_PAST_BYTES", 1024)
+        servers.answer = {"success": True, "path": str(big), "method": "unchanged"}
+
+        _call(TOOL, file_path=str(big))
+
+        (upload,) = servers.uploads
+        assert upload["data"][:2] == b"PK"
+        assert mine.read_bytes() == b"the person's own file"
+        assert sorted(p.name for p in scratch.iterdir()) == ["lamp.3mf"], "the trip's folder was left behind"
+
+
+class TestTheReplyNamesThePersonsOwnFile:
+    """A large STL travels packed as a 3MF; the reply names the person's own
+    file, its size before, and no note about a format they never had."""
+
+    def test_a_packed_stl_is_told_about_as_the_stl_it_was(self, servers, tmp_path, monkeypatch):
+        import struct
+
+        from kiln import served_makes
+
+        triangle = struct.pack("<12fH", 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0)
+        part = tmp_path / "lamp.stl"
+        part.write_bytes(b"\x00" * 80 + struct.pack("<I", 400) + triangle * 400)
+        monkeypatch.setattr(served_makes, "_PACK_PAST_BYTES", 1024)
+        servers.answer = {
+            "success": True, "path": str(part), "size_before_bytes": 999, "size_after_bytes": 2 * 1024 * 1024,
+            "summary": "As an STL, lamp was 0.0 MB and the slimmer copy is 2.0 MB. It looks the same within 0.01 mm.",
+            "format_note": "Read lamp.3mf and wrote a binary STL, which carries no colors or materials.",
+        }
+
+        result = _call(TOOL, file_path=str(part))
+
+        assert result["summary"].startswith("lamp.stl was ")
+        assert result["summary"].endswith("the slimmer copy is 2.0 MB. It looks the same within 0.01 mm.")
+        assert result["size_before_bytes"] == part.stat().st_size
+        assert "format_note" not in result
+
+    def test_a_file_that_travelled_as_it_is_keeps_the_servers_words(self, servers, part):
+        servers.answer = {"success": True, "path": str(part), "summary": "part.stl was 0.0 MB and the slimmer copy is 0.0 MB."}
+
+        assert _call(TOOL, file_path=str(part))["summary"] == "part.stl was 0.0 MB and the slimmer copy is 0.0 MB."

@@ -752,7 +752,7 @@ class TestSimplifyMeshModel:
         assert result["reduction_pct"] == 50.0
         assert result["path"] == "/tmp/model_simplified.stl"
         mock_simplify.assert_called_once_with(
-            "/tmp/model.stl", target_ratio=0.5, output_path="",
+            "/tmp/model.stl", target_ratio=0.5, output_path="", max_megabytes=0,
         )
 
     @patch("kiln.server._check_auth", return_value=None)
@@ -764,8 +764,16 @@ class TestSimplifyMeshModel:
         )
 
         mock_simplify.assert_called_once_with(
-            "/tmp/m.stl", target_ratio=0.25, output_path="/tmp/out.stl",
+            "/tmp/m.stl", target_ratio=0.25, output_path="/tmp/out.stl", max_megabytes=0,
         )
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln._pro_simplify_bridge.simplify")
+    def test_a_size_asked_for_reaches_the_simplifier(self, mock_simplify, _auth, mesh_tools) -> None:
+        mock_simplify.return_value = {"success": True, "path": "/tmp/out.stl"}
+        mesh_tools["simplify_mesh_model"](file_path="/tmp/m.stl", max_megabytes=50)
+
+        assert mock_simplify.call_args.kwargs["max_megabytes"] == 50
 
     @patch("kiln.server._check_auth", return_value=None)
     @patch("kiln._pro_simplify_bridge.simplify")

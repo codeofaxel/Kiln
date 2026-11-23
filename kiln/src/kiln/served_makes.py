@@ -60,6 +60,14 @@ MAX_MODEL_BYTES = 64 * 1024 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 _SENDABLE_MODEL_TYPES = frozenset({".stl", ".3mf", ".obj"})
+#: Tools whose answer reads only a model's triangles, so a large STL or OBJ
+#: may travel to them packed as a 3MF: the same triangles in a fraction of
+#: the bytes.  The file on this computer is never changed.
+_TRAVELS_PACKED = frozenset({"simplify_mesh_model"})
+#: Packing is tried past this size: the courier's own choice of when it pays
+#: for itself, not a limit of the servers'.
+_PACK_PAST_BYTES = 16 * 1024 * 1024
+_PACKABLE = frozenset({".stl", ".obj"})
 _SENDABLE_IMAGE_TYPES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".svg"})
 _KIND_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "obj": ".obj", "step": ".step"}
 
@@ -163,6 +171,48 @@ def _remember(token: str, **facts: Any) -> None:
 def _known(token: str) -> dict | None:
     entry = _read_record().get(token)
     return entry if isinstance(entry, dict) else None
+
+
+def _packed_for_the_trip(tool: str, local: Path) -> Path | None:
+    """*local* packed as a 3MF, when *tool* takes one and the 3MF is smaller;
+    else ``None`` and the file travels as it is.
+
+    The packed copy is written into a folder made for this one trip, which
+    only this user can read, so it never lands on a file already there.  The
+    caller removes it with :func:`_unpack_after_the_trip`.
+    """
+    if tool not in _TRAVELS_PACKED or local.suffix.lower() not in _PACKABLE:
+        return None
+    folder: str | None = None
+    try:
+        if local.stat().st_size <= _PACK_PAST_BYTES:
+            return None
+        import tempfile
+
+        from kiln.generation.validation import export_3mf
+        from kiln.output_paths import kiln_temp_dir
+
+        folder = tempfile.mkdtemp(prefix="kiln-packed-", dir=kiln_temp_dir())
+        packed = Path(folder) / f"{local.stem}.3mf"
+        export_3mf(str(local), output_path=str(packed))
+        if packed.stat().st_size < local.stat().st_size:
+            return packed
+    except Exception:  # noqa: BLE001 - a file that will not pack travels as it is
+        pass
+    if folder is not None:
+        import shutil
+
+        shutil.rmtree(folder, ignore_errors=True)
+    return None
+
+
+def _unpack_after_the_trip(packed: Path | None) -> None:
+    """Remove a packed copy and the folder made for it."""
+    if packed is None:
+        return
+    import shutil
+
+    shutil.rmtree(packed.parent, ignore_errors=True)
 
 
 def token_for_path(path: str) -> str | None:
@@ -661,6 +711,29 @@ def _without_server_files(answer: dict) -> dict:
     return answer
 
 
+def _told_about_the_file_given(answer: dict[str, Any], file_path: str) -> dict[str, Any]:
+    """*answer* told about the file the person gave, not the packed copy that
+    travelled (:func:`_packed_for_the_trip`): the size before is their own
+    file's, and a note about formats names it."""
+    name = os.path.basename(file_path)
+    try:
+        was = os.path.getsize(file_path)
+    except OSError:
+        return answer
+    out = dict(answer)
+    summary = out.get("summary")
+    if isinstance(summary, str) and " and the slimmer copy is " in summary:
+        rest = summary.split(" and the slimmer copy is ", 1)[1]
+        out["summary"] = f"{name} was {was / (1024 * 1024):.1f} MB and the slimmer copy is {rest}"
+        out["size_before_bytes"] = was
+    if out.get("format_note"):
+        if name.lower().endswith(".stl"):
+            out.pop("format_note")  # an STL in, an STL out: nothing to say
+        else:
+            out["format_note"] = f"Read {name} and wrote a binary STL, which carries no colors or materials."
+    return out
+
+
 def arrive(
     tool: str,
     answer: Any,
@@ -690,6 +763,8 @@ def arrive(
             return answer
         if answer.get("success") is False or answer.get("status") == "error":
             return answer
+        if trip and trip.get("packed_from"):
+            answer = _told_about_the_file_given(answer, trip["packed_from"][0])
         # Documents first: once saved here their paths are real, and the
         # sweep for server-only paths below leaves them alone.
         _bring_documents(answer)
@@ -1104,6 +1179,11 @@ class _Sending:
     def __init__(self, tool: str) -> None:
         self.tool = tool
         self.tokens: dict[str, str] = {}
+        #: The name a file travelled under, when it is not its own (a model
+        #: sent packed), so the servers lay it down as what it now is.
+        self.names: dict[str, str] = {}
+        #: The files on this computer that travelled packed.
+        self.packed: list[str] = []
         #: Why the last upload got no token (a ``kiln.served_answer.Miss``).
         self.miss: Any = None
 
@@ -1122,7 +1202,13 @@ class _Sending:
                     "more than one call to Kiln's servers carries.",
                 )
             self.miss = None
-            token, said = _upload_file(local, on_miss=self._missed)
+            # A large STL or OBJ travels packed where the tool reads only
+            # its triangles; the file here is never changed.
+            packed = _packed_for_the_trip(self.tool, local)
+            try:
+                token, said = _upload_file(packed or local, on_miss=self._missed)
+            finally:
+                _unpack_after_the_trip(packed)
             if token is None:
                 return None, _not_sent(
                     self.tool, "FILE_NOT_SENT", self.miss,
@@ -1130,7 +1216,10 @@ class _Sending:
                     f"sent there first, which did not work: {said}",
                 )
             self.tokens[key] = token
-        return {"token": token, "name": local.name}, None
+            if packed is not None:
+                self.names[key] = packed.name
+                self.packed.append(str(local))
+        return {"token": token, "name": self.names.get(key, local.name)}, None
 
     def one(self, value: Any) -> tuple[Any, dict[str, Any] | None]:
         """What to send for one value of a file parameter: an entry, or the
@@ -1177,7 +1266,7 @@ class _Sending:
 
 
 def _send_files(
-    tool: str, kwargs: dict[str, Any], files: dict[str, str],
+    tool: str, kwargs: dict[str, Any], files: dict[str, str], trip: dict | None = None,
 ) -> tuple[int, dict[str, Any] | None]:
     """Upload every file the call names in a ``files`` parameter and swap
     the parameter for its token(s).  ``(how many were sent, refusal)``."""
@@ -1220,6 +1309,8 @@ def _send_files(
         tokens[param] = entries if (many or how == "many") else entries[0]
     if tokens:
         kwargs["file_tokens"] = tokens
+    if trip is not None and sending.packed:
+        trip["packed_from"] = list(sending.packed)
     return len(tokens), None
 
 
@@ -1375,7 +1466,7 @@ def send_inputs(
 
     files = inputs.get("files")
     if isinstance(files, dict) and files:
-        sent, refusal = _send_files(tool, kwargs, files)
+        sent, refusal = _send_files(tool, kwargs, files, trip)
         if refusal is not None:
             return kwargs, refusal
         if trip is not None and sent:

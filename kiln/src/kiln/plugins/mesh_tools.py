@@ -1687,6 +1687,7 @@ class _MeshToolsPlugin:
             file_path: str,
             target_ratio: float = 0.5,
             output_path: str = "",
+            max_megabytes: float = 0,
         ) -> dict:
             """Reduce a mesh's triangle count, keeping its shape, for faster slicing or a smaller file.
 
@@ -1714,8 +1715,21 @@ class _MeshToolsPlugin:
             STL.  A 3MF with more than one color or object is refused,
             since the STL would lose them.
 
+            To make a model fit a size limit (the largest model a Kiln
+            account keeps, the largest file a print service quotes), pass
+            ``max_megabytes``: the file written is at most that large, as
+            close to the original as that allows, or nothing is written and
+            the reply says how close it came.  ``summary`` says the size
+            before and after and how closely the two look the same: show
+            it, with the before and after pictures, and save the slimmer
+            copy as the next version only once the person says yes.  The
+            original is never replaced.
+
             :param file_path: Path to the mesh.
             :param target_ratio: Fraction of the triangles to keep (0.01-1.0).
+                Not read when ``max_megabytes`` is given.
+            :param max_megabytes: The largest the file written may be, in
+                megabytes.  Left at 0, ``target_ratio`` decides.
             :param output_path: Where to write the result.  Left empty, it
                 is named ``<name>_simplified`` and ``path`` says where it
                 was saved (Kiln's own files folder when the servers made it).
@@ -1737,7 +1751,10 @@ class _MeshToolsPlugin:
             try:
                 from kiln._pro_simplify_bridge import simplify
 
-                reply = simplify(file_path, target_ratio=target_ratio, output_path=output_path)
+                reply = simplify(
+                    file_path, target_ratio=target_ratio, output_path=output_path,
+                    max_megabytes=max_megabytes,
+                )
                 if reply.get("success") is not True:
                     if "message" not in reply:
                         # A miss worded for a person, or the servers' own
@@ -1745,7 +1762,7 @@ class _MeshToolsPlugin:
                         return reply
                     return _error_dict(
                         reply["message"], code=reply["code"],
-                        extra={k: reply[k] for k in ("attempts",) if k in reply},
+                        extra={k: reply[k] for k in ("attempts", "asked_bytes", "reached_bytes") if k in reply},
                     )
                 response = {**reply, "success": True}
                 try:
