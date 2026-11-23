@@ -585,8 +585,9 @@ def test_delete_asks_first_and_archives_when_the_id_is_typed(server, mug_here):
         ("delete_design", {"design_id": "mug", "where": "everywhere", "confirm": "mug"}),
     ]
     assert _archived(mug_here) == [True, True]
-    assert "In your Kiln account: archived." in out.output
-    assert "On this computer: archived." in out.output
+    assert "Archive 'mug'?" in out.output and "call again" not in out.output
+    assert "Your Kiln account: archived." in out.output
+    assert "This computer: archived." in out.output
 
 
 def test_delete_with_a_wrong_id_typed_deletes_nothing(server, mug_here):
@@ -596,7 +597,7 @@ def test_delete_with_a_wrong_id_typed_deletes_nothing(server, mug_here):
     out = CliRunner().invoke(_root(), ["design", "delete", "mug"], input="mugg\n")
 
     assert out.exit_code == 0, out.output
-    assert "nothing was deleted" in out.output
+    assert "Nothing was deleted." in out.output
     assert len(calls) == 1 and _archived(mug_here) == [None, None]
 
 
@@ -634,3 +635,20 @@ def test_a_delete_of_a_saved_feature_here_sends_this_computers_records(server):
     served_tool("delete_feature")(feature_id="f1", permanent=True, where="computer", confirm="f1")
     (_, kwargs), = calls
     assert "history_records" in kwargs
+
+
+def test_one_place_without_permanent_is_said_before_asking_anything(server, mug_here):
+    calls, _ = server
+    out = CliRunner().invoke(_root(), ["design", "delete", "mug", "--where", "computer"])
+    assert out.exit_code == 1 and "needs --permanent" in out.output
+    assert calls == [] and _archived(mug_here) == [None, None]
+
+
+def test_signed_out_it_says_how_to_remove_only_this_computers_copy(server, mug_here):
+    _, answers = server
+    answers["delete_design"] = {"status": "error", "why": "signed_out", "error": "Sign in to Kiln first."}
+    out = CliRunner().invoke(_root(), ["design", "delete", "mug"])
+    assert out.exit_code == 1
+    assert "Nothing was deleted." in out.output
+    assert "kiln design delete mug --permanent --where computer" in out.output
+    assert mug_here.is_dir() and _archived(mug_here) == [None, None]

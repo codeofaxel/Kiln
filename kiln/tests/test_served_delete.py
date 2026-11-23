@@ -97,7 +97,7 @@ class TestRemoveItFromThisComputer:
         assert said["confirm_required"] is True and said["where"] == "computer"
         assert said["on_this_computer"]["versions"] == 2
         assert said["in_your_account"]["held"] is True and said["not_in_your_account"] == 0
-        assert "account still keeps" in said["message"]
+        assert "account keeps every version" in said["message"] and "(2 versions)" in said["message"]
         assert folder.is_dir()
 
     def test_versions_never_saved_to_the_account_are_named(self, home):
@@ -119,7 +119,7 @@ class TestRemoveItFromThisComputer:
         _recorded("mug")
         said = _delete(_Servers(offline=True), design_id="mug", permanent=True, where="computer")
         assert said["confirm_required"] is True and said["in_your_account"] == {"held": None}
-        assert "could not check" in said["message"]
+        assert "couldn't check" in said["message"] and "(1 version)" in said["message"]
         done = _delete(_Servers(offline=True), design_id="mug", permanent=True, where="computer", confirm="mug")
         assert done["deleted"] is True and not folder.exists()
 

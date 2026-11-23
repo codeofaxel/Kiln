@@ -138,21 +138,30 @@ def _missing_from_account(here: dict[str, Any], facts: dict[str, Any]) -> int | 
 def _what_is_lost(here: dict[str, Any], facts: dict[str, Any]) -> str:
     missing = _missing_from_account(here, facts)
     if missing is None:
-        return (
-            "Kiln could not check your Kiln account, so this may be the only copy: "
-            "removing it here may be for good."
-        )
+        return "Kiln couldn't check your Kiln account, so this may be the only copy."
     if not facts.get("held"):
-        return "This is the only copy: your Kiln account does not keep this design, so it will be gone for good."
+        return "This is the only copy: your Kiln account doesn't keep this design."
     if missing:
         return (
-            f"{missing} of the {here['versions']} versions here were never saved to your "
+            f"{missing} of its {here['versions']} versions were never saved to your "
             "Kiln account and will be gone for good."
         )
-    return (
-        "Your Kiln account still keeps every version, so it can be brought back "
-        "to this computer any time."
-    )
+    return "Your Kiln account keeps every version, so you can bring it back here any time."
+
+
+def _brought_back(here: dict[str, Any], facts: dict[str, Any], design_id: str) -> str:
+    missing = _missing_from_account(here, facts)
+    if missing == 0 and facts.get("held"):
+        return f"All of it: your Kiln account keeps every version. `kiln cloud clone {design_id}` brings it back here."
+    if missing is None:
+        return "Whatever your Kiln account keeps of it, if anything: Kiln couldn't check."
+    if not facts.get("held"):
+        return "Nothing: this was the only copy."
+    return f"The versions your Kiln account keeps; the {missing} that were only here are gone."
+
+
+def _versions(n: int) -> str:
+    return f"{n} version" if n == 1 else f"{n} versions"
 
 
 def _shown(here: dict[str, Any]) -> dict[str, Any]:
@@ -199,9 +208,10 @@ def _from_this_computer(design_id: str, permanent: bool, confirm: str, forward: 
             "on_this_computer": _shown(here),
             "in_your_account": {k: v for k, v in facts.items() if k != "version_ids"},
             "not_in_your_account": _missing_from_account(here, facts),
+            "what_is_lost": lost,
             "confirm_with": design_id,
             "message": (
-                f"This removes design '{design_id}' ({here['versions']} versions) from this "
+                f"This removes design '{design_id}' ({_versions(here['versions'])}) from this "
                 f"computer. {lost} To proceed, call again with `permanent=True`, "
                 f"`where='computer'` and `confirm='{design_id}'`."
             ),
@@ -216,12 +226,7 @@ def _from_this_computer(design_id: str, permanent: bool, confirm: str, forward: 
         "artifact_id": design_id, "where": COMPUTER, "reversible": kept,
         "what_happened": {"computer": "erased", "account": "not touched"},
         "removed_here": removed,
-        "bring_back": (
-            f"All of it: your Kiln account keeps every version. `kiln cloud clone {design_id}` "
-            "brings it back to this computer."
-            if kept else
-            "Only what your Kiln account keeps of it, if anything: " + lost
-        ),
+        "bring_back": _brought_back(here, facts, design_id),
     }
 
 
@@ -261,7 +266,7 @@ def _everywhere(design_id: str, permanent: bool, confirm: str, call: dict[str, A
                 "on_this_computer": _shown(here), "in_your_account": {"held": False},
                 "confirm_with": design_id,
                 "message": (
-                    f"Design '{design_id}' ({here['versions']} versions) is on this computer only. "
+                    f"Design '{design_id}' ({_versions(here['versions'])}) is on this computer only. "
                     + ("This is the only copy: it will be gone for good. " if permanent
                        else "It will be archived here: hidden, kept whole, and brought back any time. ")
                     + f"To proceed, call again with confirm='{design_id}'."

@@ -564,17 +564,37 @@ def design_unarchive(design_id: str, json_mode: bool) -> None:
     _finish(_ask("unarchive_design", design_id=design_id), json_mode, _say_archive)
 
 
+def _delete_question(answer: dict[str, Any], design_id: str) -> str:
+    """The first answer, said to a person at a terminal (the answer's own
+    ``message`` is worded for an agent's second call)."""
+    where = answer.get("where") or "everywhere"
+    name = _shown(design_id)
+    if answer.get("action") != "permanent_delete":
+        lines = [f"Archive '{name}'? It is hidden everywhere, kept whole, and can be brought back any time."]
+    elif where == "computer":
+        lines = [f"Remove '{name}' from this computer?"]
+    elif where == "account":
+        lines = [f"Erase '{name}' from your Kiln account for good? The copy on this computer is kept."]
+    else:
+        lines = [f"Erase '{name}' for good, from your Kiln account and this computer?"]
+    if answer.get("what_is_lost"):
+        lines.append(_shown(answer["what_is_lost"]))
+    lines += [f"  - {_shown(line)}" for line in answer.get("goes_with_it") or []]
+    return "\n".join(lines)
+
+
 def _say_delete(answer: dict[str, Any]) -> str:
     """What happened in each place, and what can be brought back."""
     if answer.get("confirm_required"):
-        lines = [str(answer.get("message") or "")]
-        lines += [f"  - {line}" for line in answer.get("goes_with_it") or []]
-        return _shown("\n".join(lines), lines=True)
+        return _shown(str(answer.get("message") or ""), lines=True)
     happened = answer.get("what_happened") if isinstance(answer.get("what_happened"), dict) else {}
-    lines = [f"In your Kiln account: {happened['account']}." for _ in [0] if happened.get("account")]
-    lines += [f"On this computer: {happened['computer']}." for _ in [0] if happened.get("computer")]
+    lines = []
+    if happened.get("account"):
+        lines.append(f"Your Kiln account: {happened['account']}.")
+    if happened.get("computer"):
+        lines.append(f"This computer: {happened['computer']}.")
     if answer.get("bring_back"):
-        lines.append(f"What can be brought back: {answer['bring_back']}")
+        lines.append(f"Can be brought back: {answer['bring_back']}")
     return _shown("\n".join(lines) or "Deleted.", lines=True)
 
 
@@ -595,7 +615,24 @@ def design_delete(design_id: str, permanent: bool, where: str, yes: bool, json_m
     computer, or both (--where).  It first says what will happen and asks
     you to type the design's id.
     """
+    if where != "everywhere" and not permanent:
+        click.echo(
+            "Removing it from one place is permanent there, so it needs --permanent. "
+            "Leave --where out to archive it everywhere instead (that can be undone).",
+            err=True,
+        )
+        sys.exit(1)
     asked = _ask("delete_design", design_id=design_id, permanent=permanent, where=where)
+    if asked.get("this_computer") and not json_mode:
+        # The servers gave no answer (offline, signed out): nothing was
+        # deleted anywhere.  Say how to remove only the copy here.
+        click.echo(_shown(str(asked.get("error") or "Kiln's servers didn't answer."), lines=True), err=True)
+        click.echo(
+            "Nothing was deleted. To remove only this computer's copy, without your account: "
+            f"kiln design delete {design_id} --permanent --where computer",
+            err=True,
+        )
+        sys.exit(1)
     if not asked.get("confirm_required"):
         _finish(asked, json_mode, _say_delete)
         return
@@ -603,10 +640,12 @@ def design_delete(design_id: str, permanent: bool, where: str, yes: bool, json_m
         if json_mode:
             _finish(asked, json_mode, _say_delete)
             return
-        click.echo(_say_delete(asked))
-        typed = click.prompt("Type the design's id to go on", default="", show_default=False)
+        click.echo(_delete_question(asked, design_id))
+        typed = click.prompt(
+            f"Type {design_id} to confirm, or press Enter to cancel", default="", show_default=False,
+        )
         if typed.strip() != design_id:
-            click.echo("That does not match, so nothing was deleted.")
+            click.echo("Nothing was deleted.")
             return
     _finish(
         _ask("delete_design", design_id=design_id, permanent=permanent, where=where, confirm=design_id),
