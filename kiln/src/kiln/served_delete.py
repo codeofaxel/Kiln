@@ -56,10 +56,20 @@ def _refusal(code: str, message: str, **more: Any) -> dict[str, Any]:
     return {"status": "error", "success": False, "code": code, "error": message, **more}
 
 
+def _shared_server() -> bool:
+    """Whether this process serves many accounts.  Such a process keeps no
+    person's own copy, so this module reads and removes nothing there."""
+    from kiln.runtime_env import is_hosted_multitenant
+
+    return bool(is_hosted_multitenant())
+
+
 def copy_here(design_id: str) -> dict[str, Any] | None:
     """What this computer keeps of *design_id*, or ``None`` when it keeps none."""
     from kiln.history_vault import HistoryVault, _design_folder
 
+    if _shared_server():
+        return None
     folder = _design_folder(design_id)
     if folder is None:
         return None
@@ -82,6 +92,8 @@ def erase_here(design_id: str) -> dict[str, Any]:
     """Remove this computer's copy of *design_id*: its folder and its records."""
     from kiln.history_vault import HistoryVault, _design_folder, _open_version_store
 
+    if _shared_server():
+        raise RuntimeError("a shared server keeps no copy of a person's design to remove")
     folder = _design_folder(design_id)
     removed_folder = False
     if folder is not None and folder.is_dir():
@@ -158,6 +170,8 @@ def _not_in_account(answer: Any) -> bool:
 def _lock_here(design_id: str) -> bool:
     from kiln.history_vault import HistoryVault
 
+    if _shared_server():
+        return False
     vault = HistoryVault()
     try:
         return bool(vault.set_locked(design_id, True))
@@ -328,6 +342,8 @@ def _library(call: dict[str, Any], forward: Forward) -> Any:
 def run(name: str, call: dict[str, Any], forward: Forward) -> Any:
     """Carry out the delete tool *name* for *call*.  *forward* asks Kiln's
     servers; it is the only way anything of the account is touched."""
+    if _shared_server():
+        return forward(**call)   # only the account's copy exists there
     if name == "delete_design":
         return _design(dict(call), forward)
     return _library(dict(call), forward)

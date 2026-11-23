@@ -219,3 +219,21 @@ class TestDeleteItEverywhere:
     def test_a_design_in_neither_place_is_the_servers_not_found(self, home):
         said = _delete(_Servers(held=None), design_id="mug", confirm="mug")
         assert said["code"] == "NOT_FOUND"
+
+
+class TestOnASharedServer:
+    """A process serving many accounts keeps no person's own copy: nothing
+    there is read, locked or removed, whatever the call asks."""
+
+    def test_nothing_on_its_disk_is_touched(self, home, monkeypatch):
+        from kiln import runtime_env
+
+        folder = _library(home, "mug", [MESH_V1])
+        monkeypatch.setattr(runtime_env, "is_hosted_multitenant", lambda: True)
+        servers = _Servers(held=None)
+        said = _delete(servers, design_id="mug", permanent=True, where="computer", confirm="mug")
+        assert said["code"] == "NOT_FOUND" and folder.is_dir()
+        assert served_delete.copy_here("mug") is None
+        with pytest.raises(RuntimeError):
+            served_delete.erase_here("mug")
+        assert folder.is_dir()
