@@ -162,6 +162,8 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
     if request.get("out_step"):
         k.write_step(result, request["out_step"])
     return {
+        # How far the thickened solid was lifted to sit where the part sat.
+        "lift_mm": before[2] - after[2],
         "holes_held_mm": sorted(round(2 * h["radius"], 3) for h in held),
         "holes_recut_mm": sorted(round(2 * h["radius"], 3) for h in recut),
         "growth_mm": growth,

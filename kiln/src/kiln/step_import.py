@@ -889,8 +889,11 @@ def step_converted_from(mesh_path: str) -> str | None:
     # disk ``part.STEP`` "exists" whenever ``part.step`` does.
     beside = sorted(
         c for c in path.parent.iterdir()
-        if c.stem == stem and c.suffix.lower() in _VALID_EXTENSIONS and c.is_file()
+        if _BESIDE_RE.sub("", c.stem) == stem and c.suffix.lower() in _VALID_EXTENSIONS and c.is_file()
     )
+    # The CAD an edit left beside a file of the caller's own (``part.kiln.step``
+    # next to their ``part.step``) is asked first: it is the newer one.
+    beside.sort(key=lambda c: (c.stem == stem, c.name))
     for candidate in beside:
         try:
             converted, _note = ensure_mesh_path(str(candidate))

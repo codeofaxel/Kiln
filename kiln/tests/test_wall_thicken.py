@@ -133,6 +133,42 @@ def test_a_mesh_beside_its_step_is_thickened_from_the_cad(tmp_path):
     _thicker_and_intact(reply, 0.4)
 
 
+@needs_cad_kernel
+def test_a_cad_thickening_says_what_it_did_as_data(tmp_path):
+    """The reply carries the amount, the hole choice, where the thickened CAD
+    was placed, and the hash of the CAD it was made from; the placement,
+    applied to the part's CAD thickened in place, lands on the CAD kept."""
+    import hashlib
+
+    from kiln import cad_kernel as k
+    from kiln.step_import import convert_step_to_stl
+    from kiln.wall_thicken import thicken_part
+
+    step = _step_block_with_hole(tmp_path / "bracket.step")
+    convert_step_to_stl(step, output_dir=str(tmp_path))
+    reply = thicken_part(str(tmp_path / "bracket.stl"), amount_mm=0.4, output_path=str(tmp_path / "out.stl"))
+    change = reply["cad_change"]
+    assert change["kind"] == "thickened"
+    assert change["amount_mm"] == 0.4 and change["keep_hole_size"] is True
+    assert change["from_sha256"] == hashlib.sha256(Path(step).read_bytes()).hexdigest()
+    m = change["matrix"]
+    assert len(m) == 16 and m[12:] == [0.0, 0.0, 0.0, 1.0]
+    assert [m[0], m[5], m[10]] == [1.0, 1.0, 1.0] and m[3] == 0.0 and m[7] == 0.0
+    # The part grew 0.4 below its floor and was lifted back onto it.
+    assert m[11] == pytest.approx(0.4, abs=1e-6)
+    before, _ = k.read_one_solid(step, verb="reads")
+    after, _ = k.read_one_solid(reply["step_path"], verb="reads")
+    assert k.box(after)[2] == pytest.approx(k.box(before)[2], abs=1e-6)
+    assert "lift_mm" not in reply
+
+
+def test_a_mesh_thickening_carries_no_cad_change(tmp_path):
+    from kiln.wall_thicken import thicken_part
+
+    reply = thicken_part(_block_with_hole(tmp_path / "lone.stl"), amount_mm=0.4, output_path=str(tmp_path / "out.stl"))
+    assert "cad_change" not in reply
+
+
 def test_a_lone_mesh_gets_a_true_offset_with_its_hole_kept(tmp_path):
     """No CAD file: the part is grown by a ball and the hole cut back to size.
     The old vertex push on this box lost the hole and pushed the 1 mm walls
