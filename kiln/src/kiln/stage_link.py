@@ -53,15 +53,18 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln.served_makes import MAX_MODEL_BYTES
+
 logger = logging.getLogger(__name__)
 
 #: Opt out entirely (air-gapped installs, tests, anyone who would rather not
 #: have geometry leave the machine for a preview link).
 _OPT_OUT_ENV = "KILN_NO_STAGE_LINKS"
 
-#: Matches the API route's own ceiling.  A mesh past it gets no link rather
-#: than a doomed multi-minute upload.
-_MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+#: The largest model Kiln's servers keep, read from the one place this
+#: computer states it.  A mesh past it gets no link rather than a doomed
+#: multi-minute upload.
+_MAX_UPLOAD_BYTES = MAX_MODEL_BYTES
 
 #: The upload's own ceiling, per socket operation.  Generous, because it runs
 #: on its own thread and holds up nobody: a large mesh on a slow line gets
