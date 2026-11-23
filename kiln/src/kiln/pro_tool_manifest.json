@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-23T06:23:16.789007+00:00",
+  "generated": "2026-11-23T09:10:35.585938+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -19311,13 +19311,19 @@
             "default": false,
             "title": "Permanent",
             "type": "boolean",
-            "description": "``False`` (default) retires; ``True`` erases."
+            "description": "``False`` (default) archives; ``True`` erases."
           },
           "confirm": {
             "default": "",
             "title": "Confirm",
             "type": "string",
-            "description": "Echo ``preset_id`` here to execute. Omit on the first call to see the confirmation prompt."
+            "description": "Echo ``preset_id`` here to do it. Leave empty on the first call to see what will happen."
+          },
+          "where": {
+            "default": "everywhere",
+            "title": "Where",
+            "type": "string",
+            "description": "``\"everywhere\"`` (default), ``\"account\"`` (the copy in the Kiln account) or ``\"computer\"`` (the copy on the computer the call runs on).  Naming one place needs ``permanent=True``."
           }
         },
         "required": [
@@ -19346,7 +19352,7 @@
     },
     {
       "name": "delete_design",
-      "description": "Delete a design \u2014 retire it (default, recoverable) or erase it permanently.",
+      "description": "Delete a design: archive it (default, brought back any time) or erase it for good.",
       "tier": "free",
       "access": "free",
       "category": "other",
@@ -19361,13 +19367,19 @@
             "default": false,
             "title": "Permanent",
             "type": "boolean",
-            "description": "``False`` (default) retires; ``True`` permanently erases."
+            "description": "``False`` (default) archives; ``True`` erases for good."
           },
           "confirm": {
             "default": "",
             "title": "Confirm",
             "type": "string",
-            "description": "Echo ``design_id`` here to execute. Omit on the first call to see the confirmation prompt."
+            "description": "Echo ``design_id`` here to do it.  Leave empty on the first call to see what will happen."
+          },
+          "where": {
+            "default": "everywhere",
+            "title": "Where",
+            "type": "string",
+            "description": "``\"everywhere\"`` (default), ``\"account\"`` or ``\"computer\"``.  Naming one place needs ``permanent=True``."
           }
         },
         "required": [
@@ -19404,13 +19416,19 @@
             "default": false,
             "title": "Permanent",
             "type": "boolean",
-            "description": "``False`` (default) retires; ``True`` erases."
+            "description": "``False`` (default) archives; ``True`` erases."
           },
           "confirm": {
             "default": "",
             "title": "Confirm",
             "type": "string",
-            "description": "Echo ``feature_id`` here to execute. Omit on the first call to see the confirmation prompt."
+            "description": "Echo ``feature_id`` here to do it. Leave empty on the first call to see what will happen."
+          },
+          "where": {
+            "default": "everywhere",
+            "title": "Where",
+            "type": "string",
+            "description": "``\"everywhere\"`` (default), ``\"account\"`` (the copy in the Kiln account) or ``\"computer\"`` (the copy on the computer the call runs on).  Naming one place needs ``permanent=True``."
           }
         },
         "required": [
