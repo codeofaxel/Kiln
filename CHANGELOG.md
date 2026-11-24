@@ -31,6 +31,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Assembly manuals can name the exact screws and tools a kit uses (Business+).** See https://kiln3d.com/pricing.
 
+- **Hardware Kiln doesn't know is no longer a dead end.** Ask about a screw, nut or heat-set insert size that isn't on file and Kiln tells you what to measure with calipers. Kiln Pro sizes the hole or pocket from your measurement and remembers it for the next time you ask.
+
 - **Your Bambu camera, without the homework.** The X1, X2, P2 and H series need one free add-on before Kiln can show their camera. Kiln now tells you the moment you add one of those printers, and adds it for you when you say yes. No restart. If it can't, it walks you through adding it yourself, step by step, on a Mac, Windows or Linux computer.
 - **Publish just the version you want.** Making a design public is one choice — just this version, from a version onward, or the full journey — and versions you save afterwards stay private until you publish them.
 
