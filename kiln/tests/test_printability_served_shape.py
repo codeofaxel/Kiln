@@ -312,9 +312,14 @@ def test_the_warping_door_serves_its_block_without_the_deduction(tuned):
 # ---------------------------------------------------------------------------
 
 
+#: Bookkeeping a check keeps beside what it serves: whether Kiln Pro tuned
+#: it, and the bed contact's own band, which ``adhesion_risk`` restates.
+NEVER_SERVED = frozenset({"tuned", "contact_risk"})
+
+
 def _without_tuned(node: Any) -> Any:
     if isinstance(node, dict):
-        return {k: _without_tuned(v) for k, v in node.items() if k != "tuned"}
+        return {k: _without_tuned(v) for k, v in node.items() if k not in NEVER_SERVED}
     if isinstance(node, list):
         return [_without_tuned(v) for v in node]
     return node

@@ -299,7 +299,13 @@ class BedAdhesionAnalysis:
 
     contact_area_mm2: float
     contact_percentage: float  # % of bounding box footprint
-    adhesion_risk: str  # "low", "medium", "high"
+    #: How likely the part is to come off the bed: ``"low"``, ``"medium"`` or
+    #: ``"high"``.  In a report it is the worse of what the contact reads
+    #: (:func:`contact_band`) and what the report's adhesion-force check
+    #: expects (:func:`adhesion_risk_of`), so it never reads ``"low"`` beside
+    #: a force check that expects the part to come off.  On a block with no
+    #: force check beside it, it is the contact's band.
+    adhesion_risk: str
     score_deduction: int = 0  # what this block took off the score; see _score_terms
     # % of the bounding box footprint that the contact's own bounding
     # rectangle covers: near 100 for a tube or a frame, whose contact runs
@@ -315,13 +321,19 @@ class BedAdhesionAnalysis:
     # ``contact_percentage``.  ``None`` on reports built directly by a
     # client; read it through :func:`graded_contact`.
     graded_contact_percentage: float | None = None
+    #: The band the contact alone reads, kept beside ``adhesion_risk`` for the
+    #: checks that judge contact (:func:`contact_band`).  Never served; empty
+    #: on a block built directly by a client, whose ``adhesion_risk`` is it.
+    contact_risk: str = field(default="", repr=False, compare=False)
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
     _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
     def to_dict(self) -> dict[str, Any]:
-        return _served(self)
+        out = _served(self)
+        out.pop("contact_risk", None)
+        return out
 
 
 @dataclass
@@ -385,7 +397,9 @@ class AdhesionRecommendation:
 
     brim_width_mm: int
     use_raft: bool
-    adhesion_risk: str  # "low", "medium", "high" — from BedAdhesionAnalysis
+    #: How likely the part is to come off the bed, the one reading
+    #: ``BedAdhesionAnalysis.adhesion_risk`` gives (:func:`adhesion_risk_of`).
+    adhesion_risk: str
     contact_percentage: float
     rationale: str
     slicer_overrides: dict[str, str] = field(default_factory=dict)
@@ -5296,15 +5310,67 @@ def _adhesion_risk_for_contact(contact_pct: float) -> str:
     """The adhesion band for a contact percentage: ``low`` / ``medium`` / ``high``.
 
     The one place the bands are drawn.  :func:`_analyze_bed_adhesion`
-    labels a part with it and :func:`recommend_adhesion` decides the brim
-    from that label, so the label and the advice cannot describe two
-    different parts.
+    labels a part's contact with it (:func:`contact_band`) and
+    :func:`recommend_adhesion` decides the brim from that label, so the
+    label and the advice cannot describe two different parts.
     """
     if contact_pct > 30.0:
         return "low"
     if contact_pct > 10.0:
         return "medium"
     return "high"
+
+
+def contact_band(bed: BedAdhesionAnalysis) -> str:
+    """The adhesion band *bed*'s contact alone reads: ``low`` / ``medium`` /
+    ``high``.
+
+    What every check that judges CONTACT reads (the score, the brim rows,
+    the small-spot sentence), because ``adhesion_risk`` in a report also
+    carries the adhesion-force check's answer.  A block built directly by a
+    client has only ``adhesion_risk``, and that is its contact band.
+    """
+    return getattr(bed, "contact_risk", "") or bed.adhesion_risk
+
+
+#: The adhesion-force verdicts that speak of the part coming off the bed, in
+#: the words ``adhesion_risk`` uses.
+_FORCE_AS_RISK = {"likely_detach": "high", "marginal": "medium"}
+_RISK_ORDER = ("low", "medium", "high")
+
+
+def _worse_risk(*risks: str) -> str:
+    """The worst of *risks*; a word outside the three bands is left out."""
+    known = [r for r in risks if r in _RISK_ORDER]
+    return max(known, key=_RISK_ORDER.index) if known else (risks[0] if risks else "")
+
+
+def adhesion_risk_of(bed: BedAdhesionAnalysis, force: AdhesionForceEstimate | None = None) -> str:
+    """How likely a part is to come off the bed, as the one word a reply
+    says: the worse of what its contact reads (:func:`contact_band`) and what
+    the adhesion-force check expects (``likely_detach`` is ``high``,
+    ``marginal`` is ``medium``).
+
+    The one reading both ``adhesion_risk`` fields of a report carry, so the
+    word never disagrees with the force check beside it.
+    """
+    expects = _FORCE_AS_RISK.get(getattr(force, "risk_level", "") or "", "low") if force is not None else "low"
+    return _worse_risk(contact_band(bed), expects)
+
+
+def _settle_adhesion_risk(report: PrintabilityReport) -> None:
+    """Make both ``adhesion_risk`` fields of *report* say one thing, and the
+    worst the report found: never lower than either already reads, and never
+    lower than its adhesion-force check expects.  Safe to run again after a
+    block is replaced."""
+    bed = report.bed_adhesion
+    if bed is None:
+        return
+    said = _worse_risk(bed.adhesion_risk, adhesion_risk_of(bed, report.adhesion_force))
+    if report.adhesion is not None:
+        said = _worse_risk(said, report.adhesion.adhesion_risk)
+        report.adhesion.adhesion_risk = said
+    bed.adhesion_risk = said
 
 
 def graded_contact(bed: BedAdhesionAnalysis) -> float:
@@ -5683,12 +5749,14 @@ def _analyze_bed_adhesion(
         held = _held_area(contact.xy, bbox["z_max"] - bbox["z_min"])
         graded_pct = min(100.0, max(contact_pct, held / footprint * 100.0))
 
+    band = _adhesion_risk_for_contact(graded_pct)
     return BedAdhesionAnalysis(
         contact_area_mm2=round(contact_area, 2),
         contact_percentage=round(contact_pct, 1),
-        adhesion_risk=_adhesion_risk_for_contact(graded_pct),
+        adhesion_risk=band,
         contact_span_percentage=round(span_pct, 1),
         graded_contact_percentage=round(graded_pct, 1),
+        contact_risk=band,
     )
 
 
@@ -7908,7 +7976,7 @@ def _score_terms(
             else 0
         ),
         # Bed adhesion (max -15)
-        "bed_adhesion": {"high": -15, "medium": -7}.get(bed_adhesion.adhesion_risk, 0),
+        "bed_adhesion": {"high": -15, "medium": -7}.get(contact_band(bed_adhesion), 0),
     }
     # The verdicts that grade themselves carry their deduction already.
     for key, verdict in (
@@ -8378,7 +8446,7 @@ def _build_recommendations(
         )
         between_parts = ""
 
-    if bed_adhesion.adhesion_risk == "high":
+    if contact_band(bed_adhesion) == "high":
         recs.append(
             "Low bed contact area.  Re-orienting the model can increase the contact surface."
         )
@@ -8817,6 +8885,9 @@ def _take_servers_reading(report: PrintabilityReport, served: dict[str, Any]) ->
         else:
             report.score = min(report.score, _PRINTABLE_SCORE_MIN - 1)
         report.grade = _score_to_grade(report.score)
+    # The blocks taken above may be from a reading that states the risk
+    # apart from the force check; the report says one word for both.
+    _settle_adhesion_risk(report)
     _mark_tuned(report)
 
 
@@ -10585,6 +10656,9 @@ def _analyze_printability_here(
         units_question=units_question(bbox),
         pieces=parts,
     )
+    # One word for the risk of coming off the bed, in both blocks that say
+    # it: the worse of the contact and the adhesion-force check.
+    _settle_adhesion_risk(report)
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
     # installed, material-aware thresholds and SME-tuned scoring
@@ -10865,7 +10939,7 @@ def footing(report: PrintabilityReport) -> str:
     only the report's own verdict and brim decision vary.
     """
     bed = report.bed_adhesion
-    if bed is not None and bed.adhesion_risk == "high" and _on_a_small_spot(bed):
+    if bed is not None and contact_band(bed) == "high" and _on_a_small_spot(bed):
         dims = report.dimensions_mm or {}
         width_mm, depth_mm = dims.get("width_mm"), dims.get("depth_mm")
         under = f" under a part {width_mm:.0f} x {depth_mm:.0f} mm across" if width_mm and depth_mm else ""
@@ -11041,11 +11115,13 @@ def recommend_adhesion(
 
     The one brim / raft decision for a part.  Uses the share of the
     footprint the contact holds down (:func:`graded_contact`) and the
-    adhesion risk read from it, from :class:`BedAdhesionAnalysis`, combined with
+    band read from it (:func:`contact_band`), from :class:`BedAdhesionAnalysis`, combined with
     material warping tendency and printer type, then raises the brim when
     the part's own warping or adhesion-force verdict calls for one.  Those
     two analyses describe their risk and leave the brim to this function,
     so a report can never say "no brim needed" and "add a brim" at once.
+    The ``adhesion_risk`` it returns is :func:`adhesion_risk_of`: it never
+    reads lower than the adhesion-force verdict that raised the brim.
 
     :param bed_adhesion: Output from ``_analyze_bed_adhesion()``.
     :param material: Filament type (PLA, ABS, PETG, etc.).
@@ -11064,7 +11140,9 @@ def recommend_adhesion(
     # a part standing on its outline is told that, not handed a share of
     # its footprint it barely touches.
     pct = graded_contact(bed_adhesion)
-    risk = bed_adhesion.adhesion_risk
+    # The brim rows below are drawn on contact; the force check raises the
+    # brim after them, and the risk the result states is the worse of the two.
+    risk = contact_band(bed_adhesion)
     outlined = pct > bed_adhesion.contact_percentage
     said = f"{pct:.1f}% of the footprint, inside the outline it stands on" if outlined else f"{pct:.1f}%"
 
@@ -11167,7 +11245,7 @@ def recommend_adhesion(
     return AdhesionRecommendation(
         brim_width_mm=brim,
         use_raft=raft,
-        adhesion_risk=risk,
+        adhesion_risk=adhesion_risk_of(bed_adhesion, adhesion_force),
         contact_percentage=bed_adhesion.contact_percentage,
         rationale=rationale,
         slicer_overrides=overrides,
@@ -11333,18 +11411,30 @@ def diagnose_from_signals(
         category = "adhesion"
         confidence = 0.85 if (contact_pct is not None and contact_pct < 3.0) else 0.70
         pct_str = f"{contact_pct:.1f}%" if contact_pct is not None else "unknown"
-        causes.append(
-            f"Insufficient bed contact area ({pct_str} of bounding box footprint). "
-            f"Model likely has small or lattice-like contact points."
-        )
-        fixes.append("Add a brim (5-8mm) to increase first-layer adhesion surface.")
-        fixes.append("Re-orient the model to maximize the flat base area.")
+        # The risk is high for too little contact, or for a part too tall
+        # for the contact it has; the cause names the one the part has.
+        too_tall = contact_pct is not None and _adhesion_risk_for_contact(contact_pct) != "high"
+        if too_tall:
+            causes.append(
+                "The part is tall for the area it stands on, so the bed holds "
+                "too little of it for its height."
+            )
+            fixes.append("Add an 8mm brim to widen what holds it to the bed.")
+            fixes.append("Re-orient the model so it stands lower, or lay it down.")
+        else:
+            causes.append(
+                f"Insufficient bed contact area ({pct_str} of bounding box footprint). "
+                f"Model likely has small or lattice-like contact points."
+            )
+            fixes.append("Add a brim (5-8mm) to increase first-layer adhesion surface.")
+            fixes.append("Re-orient the model to maximize the flat base area.")
         if is_warp:
             fixes.append(f"{mat_upper} is prone to warping — consider a raft or enclosed printer.")
             confidence = min(confidence + 0.10, 0.95)
 
-        # Compute slicer override
-        if contact_pct is not None and contact_pct < 5.0:
+        # The brim the cause above names: 8 mm for a part too tall for its
+        # contact, the width the report's own brim decision gives it.
+        if too_tall or (contact_pct is not None and contact_pct < 5.0):
             slicer_overrides["brim_width"] = "8"
         else:
             slicer_overrides["brim_width"] = "5"

@@ -535,13 +535,19 @@ class _MaterialToolsPlugin:
                         printer_id=printer_id or None,
                     )
                     if report.bed_adhesion is not None:
+                        from kiln.printability import footing as _footing
+
+                        # The report's one word for the risk of coming off
+                        # the bed, and why when it is not the contact.
                         risk = report.bed_adhesion.adhesion_risk
                         adhesion_status = "ok" if risk == "low" else ("warning" if risk == "medium" else "critical")
+                        why = _footing(report)
                         checks["adhesion_risk"] = {
                             "status": adhesion_status,
                             "detail": (
                                 f"Bed adhesion risk: {risk} "
                                 f"(contact area: {report.bed_adhesion.contact_percentage:.1f}%)."
+                                + (f" {why}" if why else "")
                             ),
                         }
                         if risk in ("medium", "high"):

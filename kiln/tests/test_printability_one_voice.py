@@ -367,8 +367,12 @@ class TestOneBrimDecision:
         tower = _box_stl(tmp_path / "tower.stl", 4.0, 4.0, 200.0)
         report = analyze_printability(tower, material="pla")
 
-        assert report.bed_adhesion.adhesion_risk == "low"
+        from kiln.printability import contact_band
+
+        assert contact_band(report.bed_adhesion) == "low"
         assert report.adhesion_force.risk_level == "likely_detach"
+        # The risk the report states is the force check's, in both blocks.
+        assert report.bed_adhesion.adhesion_risk == report.adhesion.adhesion_risk == "high"
         assert report.adhesion.brim_width_mm >= 8
         brim_lines = [line for line in _all_advice(report) if _speaks_of_brim(line)]
         assert len(brim_lines) == 1, brim_lines

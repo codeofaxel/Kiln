@@ -148,10 +148,13 @@ def test_a_part_on_its_outline_is_graded_as_standing_on_it(outline_part, tier):
     bed = report["bed_adhesion"]
     # It touches a small share of its footprint all the same.
     assert bed["contact_percentage"] < 30.0, bed
-    assert bed["adhesion_risk"] == "low", bed
+    # Its contact reads low risk.  The word the reply states is the worse of
+    # that and the adhesion-force check, which calls a frame's hold borderline.
+    assert bed["adhesion_risk"] == ("medium" if "frame" in outline_part else "low"), bed
+    assert report["adhesion"]["adhesion_risk"] == bed["adhesion_risk"], report["adhesion"]
     # Charged nothing where the charge is served; a reply about a check Kiln
     # Pro tuned leaves the number out (kiln.printability._served), and the
-    # low risk above is what charges nothing.
+    # contact, graded on its outline, is what charges nothing.
     assert bed.get("score_deduction", 0) == 0, bed
     assert not any(_says_low_contact(r) for r in report["recommendations"]), report["recommendations"]
     assert reply["verdict"] == "ready", reply["message"]
