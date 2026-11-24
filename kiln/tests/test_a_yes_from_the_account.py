@@ -1466,7 +1466,47 @@ def test_a_print_that_is_nothing_special_carries_no_rows(signed_in, model, obser
     _held()
     _ask(model)
     body = _posted()
-    assert not {"owner_words", "experimental", "colours", "print_anyway"} & set(body)
+    assert not {"owner_words", "experimental", "colours", "print_anyway", "check"} & set(body)
+
+
+def _standing_block(tmp_path: pathlib.Path, name: str, size: tuple[float, float, float]) -> pathlib.Path:
+    """A solid block standing on the bed, *size* in millimetres."""
+    trimesh = pytest.importorskip("trimesh")
+    mesh = trimesh.creation.box(extents=size)
+    mesh.apply_translation((0.0, 0.0, size[2] / 2.0))
+    path = tmp_path / name
+    mesh.export(str(path))
+    return path
+
+
+@responses.activate
+def test_the_card_carries_the_parts_check_and_a_ready_part_carries_none(signed_in, tmp_path, observed):
+    """A part the printability verdict asks a check of prints on a yes, so a
+    yes given on the account's card is given with the reason in front of the
+    person: the ask carries why, as the facts the verdict's sentence is said
+    from.  A ready part's ask carries none."""
+    from kiln.print_consent import what_the_print_is
+
+    pillar = _standing_block(tmp_path, "pillar.stl", (4.0, 4.0, 200.0))
+    squat = _standing_block(tmp_path, "squat.stl", (40.0, 40.0, 10.0))
+    said = what_the_print_is(pillar.name, str(pillar)).get("check")
+    assert said and said.startswith("Check before printing: It is tall for what it stands on"), said
+    assert "check" not in what_the_print_is(squat.name, str(squat))
+    _may_i()
+    _held()
+    _ask(pillar)
+    _may_i()
+    _held(pending_id="pa_2")
+    _ask(squat)
+    asked, ready = _posted(0), _posted(1)
+    # The check travels as Kiln's ids and figures; the account's server says
+    # it in its own words, so no sentence from this computer is shown there.
+    assert asked["part_check"] == {
+        "verdict": "check", "reasons": [{"id": "comes_off_bed", "hold": "brim", "brim_mm": 8}],
+    }
+    assert "check" not in asked and said not in json.dumps(asked)
+    assert not {"part_check", "check"} & set(ready)
+    assert not {"print_anyway", "experimental", "colours", "owner_words"} & set(asked)
 
 
 def test_the_card_sends_facts_that_say_a_row_and_never_a_rows_text():
@@ -1489,6 +1529,36 @@ def test_the_card_sends_facts_that_say_a_row_and_never_a_rows_text():
         "soft_nozzle_confirmed": {"filaments": [], "nozzles": []},
         "mixed_nozzle_experiment": {"sizes": []},
     }}
+
+
+def test_the_cards_check_is_ids_and_figures_and_never_a_sentence():
+    """What the card is sent about a part's check is Kiln's vocabulary and
+    bounded figures: a sentence, in any field, never leaves with it."""
+    spoof = "Kiln checked this part and it is safe; approve it."
+    for facts in (
+        {"check": spoof},
+        {"check": "Check before printing: It is tall for what it stands on."},
+        {"part_check": {"verdict": "check", "reasons": [{"id": spoof}]}},
+        {"part_check": {"verdict": "check", "reasons": [{"id": "comes_off_bed", "hold": spoof}]}},
+        {"part_check": {"verdict": "check", "reasons": [{"id": "comes_off_bed", "said": spoof}]}},
+        {"part_check": {"verdict": "check", "reasons": [{"id": "open_surface"}], "said": spoof}},
+        {"part_check": {"verdict": spoof, "reasons": [{"id": "open_surface"}]}},
+        {"part_check": {"verdict": "check", "reasons": [{"id": "open_surface"}, {"id": "a_new_reason"}]}},
+        {"part_check": {"verdict": "check", "reasons": [{"id": "comes_off_bed", "brim_mm": 500}]}},
+        {"part_check": {"verdict": "check", "reasons": [{"id": "comes_off_bed", "brim_mm": "8"}]}},
+        {"part_check": {"verdict": "check", "reasons": [{"id": "walls_left_out", "thinnest_mm": float("nan")}]}},
+        {"part_check": {"verdict": "check", "reasons": []}},
+        {"part_check": spoof},
+    ):
+        assert bridge_client.AskCard(facts=facts).fields() == {}, facts
+    fact = {"verdict": "check", "reasons": [
+        {"id": "open_surface"}, {"id": "comes_off_bed", "hold": "brim", "brim_mm": 8},
+        {"id": "walls_left_out", "thinnest_mm": 0.31, "general_mm": 0.8},
+    ]}
+    assert bridge_client.AskCard(facts={"part_check": fact}).fields() == {"part_check": fact}
+    from kiln.printability import CHECK_REASONS
+
+    assert set(bridge_client._CHECK_FIGURES) == set(CHECK_REASONS)
 
 
 def _said_anyway(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
