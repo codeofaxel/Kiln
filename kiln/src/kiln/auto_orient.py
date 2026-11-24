@@ -69,7 +69,10 @@ class OrientationResult:
     #: How much the best pose's bed-contact percentage differs from the
     #: original's, in percent of it: floor arithmetic at every tier, below
     #: zero when Kiln Pro's ranking trades bed contact for something else.
-    #: Whether a turn is worth making is :func:`worth_turning`'s question.
+    #: Whether a turn is worth making is :func:`worth_turning`'s question,
+    #: and what it gains is :func:`describe_orientation_change`'s sentence,
+    #: so this stays in the process: it is not part of the result's dict,
+    #: and no reply carries a figure for the turn beside that sentence.
     improvement_percentage: float = 0.0
     #: The part as it sits, measured the way every candidate is, so what a
     #: turn changes can be said in its own units
@@ -83,6 +86,7 @@ class OrientationResult:
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
         out.pop("ranking_miss", None)
+        out.pop("improvement_percentage", None)
         return out
 
 

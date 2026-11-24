@@ -217,7 +217,9 @@ class TestFindOptimalOrientation:
             assert "best" in d
             assert "alternatives" in d
             assert "original_score" in d
-            assert "improvement_percentage" in d
+            # What a turn gains is said in the message, in its own units;
+            # the result carries no figure for the turn beside it.
+            assert "improvement_percentage" not in d
 
     def test_candidate_has_reasoning(self):
         with tempfile.TemporaryDirectory() as tmpdir:

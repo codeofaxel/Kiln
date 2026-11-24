@@ -74,10 +74,30 @@ class TestTheTurnIsSaidInItsOwnUnits:
         assert "it stands lower (80.0 → 10.0 mm)" in said, said
         assert "more of it touches the bed (100 → 800 mm2)" in said, said
         assert said.endswith("Call again with apply=True to write the turned copy."), said
-        # The scores stay in the data, for comparing versions.
+        # The bed-contact readings stay in the data, for comparing versions.
+        # No figure for the turn sits beside the sentence that says its gains.
         result = reply["result"]
-        assert {"original_score", "improvement_percentage"} <= result.keys()
+        assert "original_score" in result and "improvement_percentage" not in result
         assert isinstance(result["best"]["score"], float)
+
+    def test_no_figure_beside_the_sentence_says_the_turn_gains_nothing(self, pillar):
+        """A block touches all of its footprint however it lies, so a figure
+        for the turn read from bed contact alone is zero for a turn the
+        message says lays the part lower on eight times the area.  The
+        reply carries the sentence and no such figure."""
+        reply = _call("auto_orient_model", file_path=pillar)
+        assert "more of it touches the bed (100 → 800 mm2)" in reply["message"], reply["message"]
+
+        def keys(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    yield key
+                    yield from keys(value)
+            elif isinstance(node, list):
+                for item in node:
+                    yield from keys(item)
+
+        assert [key for key in keys(reply) if "improvement" in key] == []
 
     def test_a_part_with_an_overhang_is_told_the_support_a_turn_saves(self, tee):
         said = _call("auto_orient_model", file_path=tee)["message"]
@@ -106,7 +126,7 @@ class TestTheTurnIsSaidInItsOwnUnits:
         assert rx.scores_said({"gates": [gate]}) == []
         orient = _call("auto_orient_model", file_path=pillar)["message"]
         assert orient.startswith(gate["message"]) and "it stands lower" in gate["message"], (gate, orient)
-        assert "improvement_percentage" in gate["details"]
+        assert "original_score" in gate["details"] and "improvement_percentage" not in gate["details"]
 
     def test_the_audit_warns_exactly_when_the_turn_it_names_gains_something(self, pillar, plate):
         """The gate's verdict is its own message's: a turn that gains
