@@ -662,7 +662,7 @@ def test_the_faces_are_kept_clear_when_kiln_reads_the_plate_as_needing_none_too(
     assert decision.note == "supports on, as the project saved them; Kiln's own check reads this plate as needing none"
     painted = replace(decision, kept_off_painted=3)
     assert painted.note == ("supports on, as the project saved them; Kiln's own check reads this plate as needing "
-                            "none; none on the parts that print on their own")
+                            "none; the slicer was asked to keep them off the parts that print on their own")
     # And when every face that would have taken a support was one of those:
     from kiln.slicer_supports import witnessed
 
