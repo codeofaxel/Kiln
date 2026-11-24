@@ -15,9 +15,10 @@ PrusaSlicer prints it past the edge and Kiln refuses with the width that
 fits; that refusal now comes from all three.  And on a multicolour plate the
 prime tower, placed clear of the part, sat on the part's now-real brim.
 
-The slicer cases read the sliced G-code's own feature labels and
-coordinates, never its config lines, and are skipped where the slicer is not
-installed; the preset cases at the end run everywhere.
+The slicer cases read what was drawn from the sliced G-code's own feature
+labels and coordinates, never its config lines (one case reads the width of a
+brim line there, to know how much a whole line is), and are skipped where the
+slicer is not installed; the preset cases at the end run everywhere.
 """
 
 from __future__ import annotations
@@ -174,15 +175,38 @@ def _two_colours(tmp_path: Path) -> str:
     return composed["output_path"]
 
 
+def _brim_line_pitch(gcode: str) -> float:
+    """How far apart the file's first-layer lines sit, from the line width
+    and first-layer height it states: a line that tall and that wide, laid
+    beside its neighbour."""
+    import math
+    import re
+
+    text = Path(gcode).read_text(encoding="utf-8", errors="replace")
+    width = float(re.search(r"^; initial_layer_line_width = ([\d.]+)", text, re.M).group(1))
+    height = float(re.search(r"^; initial_layer_print_height = ([\d.]+)", text, re.M).group(1))
+    return width - height * (1.0 - math.pi / 4.0)
+
+
 @pytest.mark.skipif(not _installed(_ORCA), reason="OrcaSlicer not installed")
-def test_a_multicolour_plate_draws_its_brim_clear_of_the_prime_tower(tmp_path):
+@pytest.mark.parametrize("asked", [3.0, 8.0])
+def test_a_multicolour_plate_draws_its_brim_clear_of_the_prime_tower(tmp_path, asked):
     """OrcaSlicer only: BambuStudio 02.08.02.61 refuses this plate with or
-    without a brim ("found slicing or export error", exit 156)."""
-    gcode = _slice(_two_colours(tmp_path), tmp_path, _ORCA, {"brim_width": "8"})
+    without a brim ("found slicing or export error", exit 156).
+
+    The brim is drawn in whole lines, two at a time on this plate, so it
+    reaches the width asked for or stops less than two lines short of it,
+    the same on every side, and never past it.  How wide a line is follows
+    the profile's first layer, so the bound is read from the file."""
+    gcode = _slice(_two_colours(tmp_path), tmp_path, _ORCA, {"brim_width": f"{asked:g}"})
     xs, ys, (x0, y0, x1, y1) = _brim(gcode)
     assert xs, "the file draws no brim"
     brim = (min(xs), min(ys), max(xs), max(ys))
-    assert min(x0 - brim[0], y0 - brim[1], brim[2] - x1, brim[3] - y1) == pytest.approx(8.0, abs=0.6)
+    sides = (x0 - brim[0], y0 - brim[1], brim[2] - x1, brim[3] - y1)
+    two_lines = 2.0 * _brim_line_pitch(gcode)
+    assert max(sides) - min(sides) < 0.05, f"the brim is not the same width all round: {sides}"
+    assert asked - two_lines - 0.02 < min(sides) <= asked + 0.02, (
+        f"asked for {asked:g} mm, drawn {min(sides):.3f} mm, two lines are {two_lines:.3f} mm")
     tower = parse_slicer_features(gcode).buckets["prime_tower"].segments
     tx, ty = tower[0::3], tower[1::3]
     apart = min(tx) > brim[2] or max(tx) < brim[0] or min(ty) > brim[3] or max(ty) < brim[1]
