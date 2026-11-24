@@ -147,6 +147,14 @@ class StructuralRisk:
         }
 
 
+#: The severities a summary counts as risks; an ``info`` finding is a
+#: borderline note.
+_COUNTED_SEVERITIES = ("critical", "warning")
+
+#: The priority of a recommendation that answers a borderline note.
+OPTIONAL_PRIORITY = "low"
+
+
 @dataclass
 class ReinforcementRecommendation:
     """A specific reinforcement recommendation tied to geometry."""
@@ -1384,10 +1392,16 @@ def _generate_reinforcements(
     A number the advice quotes ("redesign with a minimum X mm dimension",
     "below X:1") is the threshold its risk was flagged against
     (``risk.metric_threshold``), so the advice and the risk always agree,
-    and wording stays identical across tiers."""
+    and wording stays identical across tiers.
+
+    A recommendation is never more urgent than the risk it answers: one for
+    a borderline note (severity below a warning) has priority ``"low"``,
+    whatever its kind, so the list never asks for a high-priority fix to a
+    part the summary says has no warning."""
     recs: list[ReinforcementRecommendation] = []
 
     for risk in risks:
+        made = len(recs)
         if risk.risk_type == "thin_neck":
             recs.append(
                 ReinforcementRecommendation(
@@ -1506,6 +1520,10 @@ def _generate_reinforcements(
                     addresses_risk="weak_layer_adhesion",
                 )
             )
+
+        if risk.severity not in _COUNTED_SEVERITIES:
+            for rec in recs[made:]:
+                rec.priority = OPTIONAL_PRIORITY
 
     return recs
 
@@ -1858,7 +1876,7 @@ _RISK_WORDS: dict[str, tuple[str, str, str]] = {
 }
 
 #: The severities a sentence counts; an ``info`` finding is a borderline note.
-_COUNTED = ("critical", "warning")
+_COUNTED = _COUNTED_SEVERITIES
 
 
 def _risk_words(risk_type: str) -> tuple[str, str, str]:
@@ -1872,7 +1890,10 @@ def _plural(n: int, word: str) -> str:
 
 def structural_risk_counts(risks: Sequence[StructuralRisk]) -> str:
     """How many structural risks a part has, in words: ``"1 critical
-    structural risk and 3 warnings"``, or ``"no structural risks"``."""
+    structural risk and 3 warnings"``, ``"no structural risks"`` for a part
+    with nothing found, or ``"no structural warnings, 1 borderline feature
+    noted"`` for one whose only findings are notes.  A part the list beside
+    this sentence holds a finding for is never said to have none."""
     critical = sum(1 for r in risks if r.severity == "critical")
     warnings = sum(1 for r in risks if r.severity == "warning")
     if critical and warnings:
@@ -1881,7 +1902,29 @@ def structural_risk_counts(risks: Sequence[StructuralRisk]) -> str:
         return _plural(critical, "critical structural risk")
     if warnings:
         return _plural(warnings, "structural warning")
+    notes = _note_count(risks)
+    if notes:
+        return f"no structural warnings, {_plural(notes, 'borderline feature')} noted"
     return "no structural risks"
+
+
+def _note_count(risks: Sequence[StructuralRisk]) -> int:
+    """How many of *risks* are borderline notes: findings below a warning."""
+    return sum(1 for r in risks if r.severity not in _COUNTED)
+
+
+def _named_notes(risks: Sequence[StructuralRisk]) -> str:
+    """Each kind of borderline note named with how many, in the analysis's
+    own order: ``"a tipping risk, 2 thin necks"``."""
+    kinds: dict[str, int] = {}
+    for risk in risks:
+        if risk.severity not in _COUNTED:
+            kinds[risk.risk_type] = kinds.get(risk.risk_type, 0) + 1
+    named = []
+    for kind, n in kinds.items():
+        one, many, _ = _risk_words(kind)
+        named.append(f"{'an' if one[0] in 'aeiou' else 'a'} {one}" if n == 1 else f"{n} {many}")
+    return ", ".join(named)
 
 
 def _named_risks(
@@ -1919,7 +1962,7 @@ SHAPE_ONLY_NOTE = "This looks at the shape only: no load was checked."
 
 
 def _borderline_note(risks: Sequence[StructuralRisk]) -> str:
-    notes = sum(1 for r in risks if r.severity not in _COUNTED)
+    notes = _note_count(risks)
     if not notes:
         return ""
     return f" {_plural(notes, 'borderline feature')} {'is' if notes == 1 else 'are'} noted in the report."
@@ -1931,12 +1974,30 @@ def describe_structural_risks(risks: Sequence[StructuralRisk]) -> str:
 
     The one wording every door uses (the improvement plan, the reinforcement
     result, the slicer-settings note, the template sweep, the design audit's
-    structural gate).  It states no score or grade.
+    structural gate).  It states no score or grade.  It says "No structural
+    risks found." only for a part with no finding at all: a part whose only
+    findings are borderline notes is told there is no warning and each note
+    is named, so the sentence and the list under it tell one story.
     """
     if not any(r.severity in _COUNTED for r in risks):
-        return f"No structural risks found. {SHAPE_ONLY_NOTE}" + _borderline_note(risks)
+        if _note_count(risks):
+            noted = structural_risk_counts(risks)
+            return f"{noted[0].upper()}{noted[1:]}: {_named_notes(risks)}. {SHAPE_ONLY_NOTE}"
+        return f"No structural risks found. {SHAPE_ONLY_NOTE}"
     named, first = _named_risks(risks)
     return f"{structural_risk_counts(risks)}: {named}. First, {first}." + _borderline_note(risks)
+
+
+def _reinforcements_said(reinforcements: Sequence[ReinforcementRecommendation]) -> str:
+    """How many reinforcements a plan lists, said after its summary: the ones
+    that answer a risk are recommended, and the ones that answer a borderline
+    note (:data:`OPTIONAL_PRIORITY`) are optional and said as that."""
+    optional = sum(1 for r in reinforcements if r.priority == OPTIONAL_PRIORITY)
+    recommended = len(reinforcements) - optional
+    said = f" {_plural(recommended, 'reinforcement')} recommended." if recommended else ""
+    if optional:
+        said += f" {_plural(optional, 'optional reinforcement')} listed for the borderline {'feature' if optional == 1 else 'features'}."
+    return said
 
 
 def _carries_more_risk(before: DesignImprovementPlan, after: DesignImprovementPlan) -> bool:
@@ -1967,7 +2028,11 @@ def describe_structural_change(
     had = structural_risk_counts(before.risks)
     if not any(r.severity in _COUNTED for r in after.risks):
         if not any(r.severity in _COUNTED for r in before.risks):
-            return f"No structural risks before or after. {SHAPE_ONLY_NOTE}"
+            if not (_note_count(before.risks) or _note_count(after.risks)):
+                return f"No structural risks before or after. {SHAPE_ONLY_NOTE}"
+            return (
+                f"It had {had}; it now has {structural_risk_counts(after.risks)}. {SHAPE_ONLY_NOTE}"
+            )
         return f"It had {had}; none remain. {SHAPE_ONLY_NOTE}" + _borderline_note(after.risks)
     done = frozenset(
         kind for entry in applied for kind in [entry.get("addresses"), *entry.get("also_addresses", [])] if kind
@@ -2061,9 +2126,7 @@ def generate_improvement_plan(
 
     # The summary names the risks; the score and grade above stay in the
     # plan for comparing versions of the part.
-    summary = describe_structural_risks(risks)
-    if reinforcements:
-        summary += f" {_plural(len(reinforcements), 'reinforcement')} recommended."
+    summary = describe_structural_risks(risks) + _reinforcements_said(reinforcements)
 
     return DesignImprovementPlan(
         file_path=file_path,
@@ -2272,7 +2335,7 @@ def apply_reinforcements(
             after_score=plan.overall_structural_score,
             before_grade=plan.structural_grade,
             after_grade=plan.structural_grade,
-            summary=f"No reinforcements needed: no structural risks found. {SHAPE_ONLY_NOTE}",
+            summary=f"No reinforcements needed: {structural_risk_counts(plan.risks)} found. {SHAPE_ONLY_NOTE}",
         )
 
     # The edges are rounded or bevelled at the threshold the plan found them
