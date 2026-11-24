@@ -146,7 +146,7 @@ def _child(request: dict[str, Any]) -> dict[str, Any]:
     before, after = _box(solid), _box(result)
     growth = [round((after[i + 3] - after[i]) - (before[i + 3] - before[i]), 4) for i in range(3)]
     if any(abs(g - 2 * amount) > _GROWTH_TOLERANCE_MM for g in growth):
-        return {"refused": f"the outside grew {growth} mm instead of {2 * amount:g} on every axis: a face did not move"}
+        return {"refused": f"the outside grew {', '.join(f'{g:g}' for g in growth)} mm instead of {2 * amount:g} on every axis: a face did not move"}
 
     # Seated where the part was: the offset moved its underside down by the
     # amount, and a part below the plate is a part the bed-fit gate moves.

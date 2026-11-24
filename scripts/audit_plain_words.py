@@ -76,6 +76,9 @@ _BUILTIN_FAILURES = frozenset(
 _LOG_ROOTS = frozenset({"logger", "logging", "log", "_log", "_logger", "LOG", "LOGGER", "warnings"})
 #: A name that holds technical text on purpose.
 _TECHNICAL_NAME = re.compile(r"detail|cause|debug|trace|(?:^|_)tb(?:$|_)|(?:^|_)log(?:$|_)", re.IGNORECASE)
+#: Fields that hold code on purpose (a call to copy, the command sent to a
+#: printer): Python's own form is right there.
+_CODE_FIELDS = frozenset({"call", "wire", "command", "gcode"})
 #: Readers of a mapping, whose keyword is never a sentence.
 _LOOKUPS = frozenset({"get", "pop", "setdefault"})
 #: Paths that are not shipped code a person meets.
@@ -146,6 +149,25 @@ def _prints_a_collection(node: ast.AST) -> bool:
     return False
 
 
+def _collection_names(function: ast.AST) -> set[str]:
+    """The names *function* binds only to a collection (``valid = [...]``,
+    ``known = sorted(...)``): printed whole, each is a printed list too.  A
+    name also bound to anything else is left out, so it is never guessed."""
+    bound: dict[str, bool] = {}
+    for node in ast.walk(function):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound[target.id] = bound.get(target.id, True) and _prints_a_collection(node.value)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and isinstance(node.target, ast.Name):
+            value = getattr(node, "value", None)
+            bound[node.target.id] = (bound.get(node.target.id, True) and value is not None
+                                     and _prints_a_collection(value))
+        elif isinstance(node, (ast.For, ast.comprehension)) and isinstance(node.target, ast.Name):
+            bound[node.target.id] = False
+    return {name for name, always in bound.items() if always}
+
+
 class _Scan(ast.NodeVisitor):
     def __init__(self, rel: str) -> None:
         self.rel = rel
@@ -155,6 +177,7 @@ class _Scan(ast.NodeVisitor):
         self.judged: set[int] = set()   # nodes already read as a sentence
         self.quiet = 0                  # > 0 inside text that is technical on purpose
         self.raising_builtin = 0        # > 0 inside a builtin failure's message
+        self.collections: list[set[str]] = [set()]  # names a function binds to a collection
         self.spoken: list[set[str]] = [set()]   # names a person's message is built from, per function
 
     # -- where we are -------------------------------------------------------
@@ -162,7 +185,9 @@ class _Scan(ast.NodeVisitor):
         self.scope.append(name)
         self.caught.append(set())
         self.spoken.append(_spoken_names(node) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else set())
+        self.collections.append(_collection_names(node) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else set())
         self.generic_visit(node)
+        self.collections.pop()
         self.spoken.pop()
         self.caught.pop()
         self.scope.pop()
@@ -257,7 +282,8 @@ class _Scan(ast.NodeVisitor):
         if not self.quiet or self.raising_builtin:
             for part in node.values:
                 if (isinstance(part, ast.FormattedValue) and part.format_spec is None
-                        and _prints_a_collection(part.value)):
+                        and (_prints_a_collection(part.value)
+                             or (isinstance(part.value, ast.Name) and part.value.id in self.collections[-1]))):
                     self.found.append((
                         f"{self.rel}::{'.'.join(self.scope) or '<module>'}::printed list",
                         node.lineno, ast.unparse(part.value)[:120],
@@ -334,7 +360,7 @@ class _Scan(ast.NodeVisitor):
                             self._judge(f"{key.value}.{k2.value}", v2)
                 else:
                     self._judge(str(key.value), value)
-            elif isinstance(key, ast.Constant) and key.value == "detail":
+            elif isinstance(key, ast.Constant) and (key.value == "detail" or key.value in _CODE_FIELDS):
                 self._quietly(value)
                 continue
             if key is not None:
@@ -379,8 +405,8 @@ class _Scan(ast.NodeVisitor):
         for arg in node.args:
             self.visit(arg)
         for kw in node.keywords:
-            if kw.arg == "detail" and name != "HTTPException":
-                self._quietly(kw.value)   # technical on purpose
+            if (kw.arg == "detail" and name != "HTTPException") or kw.arg in _CODE_FIELDS:
+                self._quietly(kw.value)   # technical, or code, on purpose
             else:
                 self.visit(kw.value)
 

@@ -10,6 +10,8 @@ no manual imports needed.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import logging
 import os
 import time
@@ -1404,7 +1406,7 @@ class _GenerationAIToolsPlugin:
                 if not tpl:
                     available = [k for k in templates if not k.startswith("_")]
                     return _srv._error_dict(
-                        f"Unknown template '{template_id}'. Available: {available}",
+                        f"Unknown template '{template_id}'. Available: {_listed(available)}",
                         code="UNKNOWN_TEMPLATE",
                     )
 

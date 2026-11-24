@@ -23780,7 +23780,7 @@ def _substitutes_food_safety(material: str, sub_dicts: list[dict]) -> dict | Non
         "regressions": regressions,
         "warning": (
             "Source material is food_safe=yes but some substitutes are "
-            f"NOT: {regressions}. Do not silently swap for food-contact "
+            f"NOT: {_listed(regressions, last='and')}. Do not silently swap for food-contact "
             "products (pet bowls, kitchen items). Filter or disclose."
         ) if regressions else None,
     }

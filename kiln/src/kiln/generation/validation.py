@@ -10,6 +10,8 @@ other door sees it in.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import contextlib
 import itertools
 import json as _json
@@ -5598,7 +5600,7 @@ def list_plate_objects(
             if plates_available:
                 raise ValueError(
                     f"No plate metadata found for plate {plate_number} in "
-                    f"{file_path}. Available plates: {plates_available}"
+                    f"{file_path}. Available plates: {_listed(plates_available, last='and')}"
                 )
             raise ValueError(
                 f"No plate metadata found in {file_path}. "
@@ -5756,14 +5758,14 @@ def extract_plate_object_gcode(
             match_names = [m["name"] for m in substring_matches]
             raise ValueError(
                 f"Ambiguous match: {object_name!r} matches multiple objects: "
-                f"{match_names}. Please use a more specific name."
+                f"{_listed(match_names, last='and')}. Please use a more specific name."
             )
 
     if matched is None:
         available = [o["name"] for o in objects]
         raise ValueError(
             f"No object matching {object_name!r} found on the plate. "
-            f"Available objects: {available}"
+            f"Available objects: {_listed(available, last='and')}"
         )
 
     target_label_id = matched["label_id"]

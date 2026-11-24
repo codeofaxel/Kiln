@@ -882,7 +882,7 @@ def render_colored_mesh_multi_angle(
     unknown = [a for a in angles if a not in _CAMERA_ANGLES]
     if unknown:
         raise ValueError(
-            f"Unknown camera angles: {unknown}. "
+            f"Unknown camera angles: {_listed(unknown, last='and')}. "
             f"Valid angles: {_listed(list(_CAMERA_ANGLES.keys()), last='and')}"
         )
 
