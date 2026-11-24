@@ -187,10 +187,16 @@ class _MeshToolsPlugin:
             that verdict, and ``validate_and_prepare`` runs the whole
             pre-print check.
 
+            ``message`` calls the mesh valid only when it reads and is
+            closed.  ``validation.valid`` says the file reads as a mesh;
+            ``validation.is_manifold`` says whether its surface is closed,
+            and a mesh that is not closed is told so in ``message`` and in
+            ``validation.warnings``.
+
             Args:
                 file_path: Path to an STL, OBJ, GLB, or 3MF file.
             """
-            from kiln.generation.validation import validate_mesh
+            from kiln.generation.validation import validate_mesh, validation_said
             from kiln.server import _error_dict, logger
 
             try:
@@ -198,7 +204,7 @@ class _MeshToolsPlugin:
                 return {
                     "success": True,
                     "validation": result.to_dict(),
-                    "message": "Mesh is valid." if result.valid else f"Mesh has issues: {'; '.join(result.errors)}",
+                    "message": validation_said(result),
                 }
             except Exception as exc:
                 logger.exception("Unexpected error in validate_generated_mesh")

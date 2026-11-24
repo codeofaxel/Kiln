@@ -344,7 +344,9 @@ def _get_build_volume_for_printer(printer_id: str) -> tuple[float, float, float]
 
 def ready_phrase(report: dict[str, Any]) -> str:
     """How a validation result that passes opens: ``Print-ready``, and with
-    the supports it needs when it needs them.
+    the supports it needs when it needs them.  A result whose printability
+    verdict asks for a check opens with that verdict's own sentence, never
+    with ``Print-ready``.
 
     No number: the scores stay on the result for comparing versions of a
     part, and what a person is told is the printability verdict.  What the
@@ -355,6 +357,8 @@ def ready_phrase(report: dict[str, Any]) -> str:
     key = report.get("printability_verdict")
     said = str(report.get("printability_verdict_text") or "")
     head, _, tail = said.partition(". ")
+    if key == "check":
+        return said.rstrip(".") or "Check before printing"
     if key == "prints_with_supports":
         why = head[head.find("(") : head.rfind(")") + 1] if "(" in head else ""
         phrase = f"Print-ready with supports {why}".rstrip()

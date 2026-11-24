@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 #: checks that reconcile the score
 #: (``tests/test_printability_score_is_its_stated_deductions.py``).
 _SCORE_ARITHMETIC: frozenset[str] = frozenset({
-    "score_deduction", "stop_deduction", "material_stress_factor",
+    "score_deduction", "stop_deduction", "check_deduction", "material_stress_factor",
 })
 
 #: The report's rating, under every name a reply could carry it by: the
@@ -648,7 +648,10 @@ class PiecesAnalysis:
     reads them.  ``floating`` is what is said about the floating pieces (a
     reason the part will not print as it is, :func:`stops`) and ``note``
     what is said about separate parts that do print (:func:`verdict`); each
-    is ``""`` when there is nothing to say.
+    is ``""`` when there is nothing to say.  ``open_surface`` is what is said
+    about a surface that does not close (open edges in the same reading): a
+    reason to check the part before printing (:func:`checks_due`), ``""``
+    for a mesh whose every piece is closed.
     """
 
     piece_count: int
@@ -658,6 +661,7 @@ class PiecesAnalysis:
     captive_bodies: int = 0
     floating: str = ""
     note: str = ""
+    open_surface: str = ""
     #: Whether two or more of the separate parts stand a clearance apart on
     #: the plate.  Bookkeeping for the support advice; never served.
     stand_apart: bool = field(default=False, repr=False)
@@ -763,6 +767,10 @@ class PrintabilityReport:
     # the blocks' own ``score_deduction`` and the placement floor, so the
     # score stays the sum of what the report says it charged.
     stop_deduction: int = 0
+    # What a check the report itself names took off the score to keep it
+    # under the printable line (:func:`checks_due`), stated like the stops'
+    # charge so the score stays the sum of what the report says it charged.
+    check_deduction: int = 0
     # Whether the part prints as one solid or as separate parts, and which
     # pieces float (:class:`PiecesAnalysis`).  ``None`` when the mesh's
     # pieces could not be read, and on reports built directly by a client.
@@ -8291,6 +8299,18 @@ def adhesion_advice(adhesion: AdhesionRecommendation | None) -> list[str]:
     return []
 
 
+def _may_be_left_out_said(thin_walls: ThinWallAnalysis) -> str:
+    """What is said about the walls and pins the slice may leave out
+    (:attr:`ThinWallAnalysis.may_be_left_out_count`): the one sentence the
+    report's advice and its verdict both say."""
+    general = thin_walls.general_wall_mm
+    return (
+        f"A wall or pin as thin as {thin_walls.may_be_left_out_min_mm:.2f} mm is thinner than "
+        f"{general:g} mm, the general minimum wall, so it may be left out when sliced; make it "
+        f"at least {general:g} mm thick."
+    )
+
+
 def _thin_line_sentence(thin_walls: ThinWallAnalysis) -> str:
     """What happens to the walls thinner than the nozzle that Kiln's slicer
     still prints (:attr:`ThinWallAnalysis.thin_line_count`), and the setting
@@ -8405,12 +8425,7 @@ def _build_recommendations(
                 f"thick."
             )
         if getattr(thin_walls, "may_be_left_out_count", 0):
-            general = thin_walls.general_wall_mm
-            recs.append(
-                f"A wall or pin as thin as {thin_walls.may_be_left_out_min_mm:.2f} mm is thinner than "
-                f"{general:g} mm, the general minimum wall, so it may be left out when sliced; make it "
-                f"at least {general:g} mm thick."
-            )
+            recs.append(_may_be_left_out_said(thin_walls))
             if slicer_note:
                 recs.append(slicer_note)
     elif below_nozzle:
@@ -8888,6 +8903,7 @@ def _take_servers_reading(report: PrintabilityReport, served: dict[str, Any]) ->
     # The blocks taken above may be from a reading that states the risk
     # apart from the force check; the report says one word for both.
     _settle_adhesion_risk(report)
+    _hold_for_checks(report)
     _mark_tuned(report)
 
 
@@ -9798,6 +9814,17 @@ def _moves_apart(reading: Any, solid_of: list[int], motion: _MotionOnRecord | No
     return moves_apart
 
 
+def _open_surface_said(open_edges: int) -> str:
+    """What is said about a mesh whose surface does not close, or ``""``."""
+    if open_edges <= 0:
+        return ""
+    edges = "1 open edge" if open_edges == 1 else f"{open_edges:,} open edges"
+    return (
+        f"Its surface has holes in it ({edges}), so a slicer has to guess what is "
+        "solid there. Close them first: `repair_mesh` does it."
+    )
+
+
 def _judge_pieces(
     triangles: list[tuple[tuple[float, ...], ...]], reading: Any, *, motion: Any = None,
 ) -> PiecesAnalysis | None:
@@ -9831,6 +9858,7 @@ def _judge_pieces(
         piece_count=reading.piece_count,
         solid_count=len(size_of),
         parts_mm=[size_of[s] for s in largest_first[:_PARTS_LISTED]],
+        open_surface=_open_surface_said(int(getattr(reading, "open_edges", 0) or 0)),
     )
     if block.solid_count < 2:
         return block
@@ -10659,6 +10687,8 @@ def _analyze_printability_here(
     # One word for the risk of coming off the bed, in both blocks that say
     # it: the worse of the contact and the adhesion-force check.
     _settle_adhesion_risk(report)
+    # A check the report names holds its flag and rating from here on.
+    _hold_for_checks(report)
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
     # installed, material-aware thresholds and SME-tuned scoring
@@ -10789,6 +10819,13 @@ def _analyze_printability_here(
         if stop not in report.recommendations:
             report.recommendations.insert(0, stop)
 
+    # A check the report itself names is in its advice and holds its flag:
+    # the verdict, the flag and the advice say one thing (:func:`checks_due`).
+    open_surface = report.pieces.open_surface if report.pieces is not None else ""
+    if open_surface and open_surface not in report.recommendations:
+        report.recommendations.insert(len(stops), open_surface)
+    _hold_for_checks(report)
+
     # A report any of Kiln Pro's data shaped is served without the numbers
     # that data worked out; one on the floor alone is served whole
     # (:func:`_served`).
@@ -10918,8 +10955,10 @@ def footing(report: PrintabilityReport) -> str:
     """What the way *report*'s part stands on the bed asks of the print, as
     one sentence, or ``""``.
 
-    Said after an answer that the part prints, so that answer is never an
-    all-clear for a part that comes off the bed.  It speaks when the part
+    Said with the verdict, so no answer is an all-clear for a part that
+    comes off the bed: it follows an answer that the part prints, and it is
+    the reason for a check when the adhesion-force verdict expects the part
+    to come off (:func:`checks_due`).  It speaks when the part
     stands on too little of the bed: its contact is in the ``high`` band.
     The fix is the report's own brim or raft decision
     (:func:`recommend_adhesion`), the one the slice applies.  A tube, a ring
@@ -10978,29 +11017,91 @@ def _hold_down(report: PrintabilityReport) -> str:
     return "print it with a brim"
 
 
+def checks_due(report: PrintabilityReport) -> list[str]:
+    """Why *report*'s part is not called ready though nothing stops it, each
+    a sentence, worst first; empty when the report asks for no check.
+
+    Each is something the report itself found that a print may not survive
+    and that nothing in the report settles: a surface that does not close
+    (:attr:`PiecesAnalysis.open_surface`), a part the adhesion-force verdict
+    expects to come off the bed (``likely_detach``, said as :func:`footing`
+    says it, with the brim that holds it), and walls or pins the slice may
+    leave out (:attr:`ThinWallAnalysis.may_be_left_out_count`).  The one
+    reading :func:`verdict` takes, so no door says a part is ready beside a
+    finding of the same report that says otherwise.  A hold that is only
+    borderline (``marginal``) asks for no check: the verdict says it prints
+    and how to hold it.
+    """
+    due: list[str] = []
+    pieces = report.pieces
+    if pieces is not None and getattr(pieces, "open_surface", ""):
+        due.append(pieces.open_surface)
+    force = report.adhesion_force
+    if force is not None and getattr(force, "risk_level", "") == "likely_detach":
+        due.append(footing(report))
+    walls = report.thin_walls
+    if walls is not None and getattr(walls, "may_be_left_out_count", 0):
+        due.append(_may_be_left_out_said(walls))
+    return [sentence for sentence in due if sentence]
+
+
+def _hold_for_checks(report: PrintabilityReport) -> None:
+    """Keep *report*'s own flag and rating on the side of its verdict: a
+    part with a check due (:func:`checks_due`) is not ``printable`` and rates
+    under the printable line, so no gate reads a pass the verdict did not
+    give.  It only ever lowers, so running it again changes nothing."""
+    if not report.printable or not checks_due(report):
+        return
+    report.printable = False
+    held = min(report.score, _PRINTABLE_SCORE_MIN - 1)
+    report.check_deduction -= report.score - held
+    report.score = held
+    report.grade = _score_to_grade(report.score)
+    placed = report.placement
+    if placed is not None and placed.score_if_placed is not None and not placed.faults:
+        placed.score_if_placed = report.score
+        placed.grade_if_placed = report.grade
+        placed.printable_if_placed = False
+
+
 def verdict(report: PrintabilityReport) -> tuple[str, str]:
     """The one thing the check says about a part, as ``(key, sentence)``.
 
-    Three answers, never a number first: ``ready`` ("Ready to print."),
+    Four answers, never a number first: ``ready`` ("Ready to print."),
     ``prints_with_supports`` (the part is fine with supports, which is a
     normal print, not a warning), ``wont_print`` (a placement fault or a
-    hard stop, named), and ``check`` for a score under the printable
-    line with no single cause to point at.  The score stays on the
-    report for comparing versions; it is not the headline.  An answer that
-    the part prints, or asks for a check, goes on to say how it must be held
-    down when it stands on one small spot or is expected to come off the bed
-    (:func:`footing`), after its first sentence, and then that it prints as
-    separate parts when it does (:class:`PiecesAnalysis`).
+    hard stop, named), and ``check``: a check the report itself names
+    (:func:`checks_due`), or a score under the printable line with no single
+    cause to point at.  The verdict agrees with the worst thing the report
+    found: a part with a check due is never ``ready`` or
+    ``prints_with_supports``, whatever it scores, and the sentence names
+    what is due, then the supports it needs when it needs them.  The score
+    stays on the report for comparing versions; it is not the headline.  An
+    answer that the part prints, or asks for a check, goes on to say how it
+    must be held down when it stands on one small spot or could come off the
+    bed (:func:`footing`), after its first sentence, and then that it prints
+    as separate parts when it does (:class:`PiecesAnalysis`).
     """
     found = stops(report)
     if found:
         return "wont_print", f"Won't print as it is: {found[0]}"
-    notes = (
-        footing(report),
+    held = footing(report)
+    after = (
         report.pieces.note if report.pieces is not None else "",
         (report.plan_check or {}).get("note", ""),
     )
     reason = support_verdict(report)
+    due = checks_due(report)
+    if due:
+        said = (
+            f"Check before printing: {due[0]}",
+            *due[1:],
+            f"It also needs supports ({reason})." if reason else "",
+            "" if held in due else held,
+            *after,
+        )
+        return "check", " ".join(filter(None, said))
+    notes = (held, *after)
     if reason:
         return "prints_with_supports", " ".join(filter(None, (f"Prints with supports ({reason}).", *notes)))
     if report.printable:
@@ -11027,15 +11128,24 @@ def verdict_of(report: PrintabilityReport) -> tuple[str, str]:
         return "check", "Check before printing: see the report."
 
 
-def verdict_block(report: PrintabilityReport) -> dict[str, str]:
+def verdict_block(report: PrintabilityReport, *, found: Iterable[str] = ()) -> dict[str, str]:
     """The two keys every door that judges a part carries in its reply.
 
     ``printability_verdict`` is the key (``ready``, ``prints_with_supports``,
     ``wont_print`` or ``check``) and ``printability_verdict_text`` the
     sentence that says it, both from :func:`verdict_of`, so every door
     names the same verdict in the same words.  Never raises.
+
+    *found* is what the door itself found wrong with the file that the
+    report does not hold (a fault in the mesh), as sentences, worst first.
+    A verdict that says the part prints gives way to the first of them and
+    becomes ``check``, so no reply carries "Ready to print." beside a fault
+    the same reply names.
     """
     key, text = verdict_of(report)
+    faults = [str(fault) for fault in found if fault]
+    if faults and key in PRINTS:
+        key, text = "check", f"Check before printing: {faults[0]}"
     return {"printability_verdict": key, "printability_verdict_text": text}
 
 

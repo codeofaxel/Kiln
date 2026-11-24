@@ -202,7 +202,9 @@ class TestSelfSupportingMicroFeatures:
         r = analyze_printability(p, material="pla")
         assert not r.overhangs.needs_supports
         assert not r.bridging.needs_supports_for_bridges
-        assert r.score >= 80
+        # What its blocks charged; a check the report names for another
+        # reason holds the score apart from them (``check_deduction``).
+        assert r.score - r.check_deduction >= 80
 
     def test_recess_ceiling_reports_depth_not_length(self, tmp_path):
         """A 1 mm-deep pocket in a wall (a debossed logo) has a ceiling

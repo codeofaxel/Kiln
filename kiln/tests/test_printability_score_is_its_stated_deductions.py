@@ -94,6 +94,7 @@ def _in_process(report) -> dict:
     out = report.to_dict()
     out["score"] = report.score
     out["stop_deduction"] = report.stop_deduction
+    out["check_deduction"] = report.check_deduction
     for key in _CHARGED:
         check = getattr(report, key, None)
         if check is not None and isinstance(out.get(key), dict):
@@ -114,6 +115,9 @@ def test_the_score_is_100_less_what_its_blocks_state(reports, name):
     # nozzle) is charged by the floor as well, and the report states that
     # charge too, so the sum still accounts for every point.
     stated["hard stops"] = report["stop_deduction"]
+    # A check the report names (the column: expected to come off the bed)
+    # holds the score under the printable line, and that charge is stated.
+    stated["a check due"] = report["check_deduction"]
     assert report["score"] == max(0, min(100, 100 + sum(stated.values()))), stated
 
 

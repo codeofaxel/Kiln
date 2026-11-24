@@ -135,7 +135,10 @@ class TestACornerIsNotAWall:
         walls = report.thin_walls
         assert (walls.thin_wall_count, walls.problematic_regions) == (0, []), walls
         assert walls.min_wall_thickness_mm >= NOZZLE, walls
-        assert verdict(report)[0] == "ready", verdict(report)
+        # No wall stops it or asks for a check.  A spike this tall on its
+        # footing is told how to hold it down, which is not a wall's doing.
+        key, said = verdict(report)
+        assert key != "wont_print" and "wall" not in said.lower(), (key, said)
 
     def test_the_crotch_of_a_sunk_letter_prints(self, tmp_path):
         report = _report(tmp_path, "crotch", _crotch())

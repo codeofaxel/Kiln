@@ -365,6 +365,9 @@ def run_full_validation_pipeline(
             warnings.append(_sanitize_summary_detail(c.details))
 
     ready = ready_phrase(vars(report))
+    # A check the opening already names is said once, there.
+    if report.printability_verdict == "check":
+        warnings = [w for w in warnings if not w.startswith("Check before printing")]
 
     # Build cost/time snippet for summary from model_info
     _est_snippet = ""

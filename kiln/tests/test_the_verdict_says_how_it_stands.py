@@ -1,17 +1,16 @@
-"""An answer that a part prints says how to hold it down when it stands on one
-small spot.
+"""The verdict says how a part must be held down when it stands on one small
+spot.
 
-A verdict (``kiln.printability.verdict``) that checks supports before
-anything else and stops there reads an 80 mm cap on a 3 mm stem as "Prints
-with supports (...)." and nothing more, while the report under it calls the
-bed contact high risk and its own brim decision says an 8 mm brim is
-mandatory.  A person reads the sentence; a caution only in the list below it
-is a caution not given.
+A person reads the verdict's sentence; a caution only in the list below it
+is a caution not given.  So the verdict names the brim or raft that holds
+the part down, from the report's own decision.  When the adhesion-force
+check expects the part to come off the bed, that sentence is the reason for
+a check and leads the verdict; when the hold is only borderline, it follows
+an answer that the part prints.
 
-Every part this sentence names is one that stands on a small contact area,
-and the verdict names the brim that holds it down.  Open tubes and rings,
-whose contact runs around their outline, are left alone.  The verdict key
-does not move, so no gate passes or fails differently.
+Every part this sentence names is one that stands on a small contact area.
+Open tubes and rings, whose contact runs around their outline, are left
+alone.
 """
 
 from __future__ import annotations
@@ -98,10 +97,13 @@ def _brim_named(reply: dict) -> str:
 
 def test_a_part_on_one_small_spot_is_told_how_to_hold_it_down(mushroom, tier):
     reply = _call("analyze_printability", file_path=mushroom)
-    assert reply["verdict"] == "prints_with_supports"
-    first, _, rest = reply["message"].partition(". ")
-    assert first.startswith("Prints with supports ("), reply["message"]
-    assert "9 mm2 of the bed" in rest and _brim_named(reply) in rest, reply["message"]
+    # The adhesion-force check expects a cap this wide to come off a stem
+    # this thin, so the answer is a check, and it leads with the hold-down.
+    assert reply["report"]["adhesion_force"]["risk_level"] == "likely_detach"
+    assert reply["verdict"] == "check"
+    said = reply["message"]
+    assert said.startswith("Check before printing: It stands on only 9 mm2 of the bed"), said
+    assert _brim_named(reply) in said and "It also needs supports (" in said, said
 
 
 def test_the_fix_is_the_report_s_own_decision(mushroom):
@@ -112,10 +114,11 @@ def test_the_fix_is_the_report_s_own_decision(mushroom):
     assert "print it on a raft" in reply["message"] and "brim" not in reply["message"], reply["message"]
 
 
-def test_a_part_that_prints_as_it_is_on_a_small_base_says_so(small_base, tier):
+def test_a_part_on_a_small_base_expected_to_come_off_says_so(small_base, tier):
     reply = _call("analyze_printability", file_path=small_base)
-    assert reply["verdict"] == "ready"
-    assert reply["message"].startswith("Ready to print. It stands on only 28 mm2"), reply["message"]
+    assert reply["report"]["adhesion_force"]["risk_level"] == "likely_detach"
+    assert reply["verdict"] == "check"
+    assert reply["message"].startswith("Check before printing: It stands on only 28 mm2"), reply["message"]
     assert _brim_named(reply) in reply["message"]
 
 
@@ -151,7 +154,8 @@ def test_every_door_says_it(mushroom):
     }
     for door, text in said.items():
         assert "It stands on only 9 mm2 of the bed" in text and "8 mm brim" in text, f"{door}: {text}"
-    assert said["validate_and_prepare"].startswith("Print-ready with supports ("), said
+    assert said["validate_and_prepare"].startswith("Check before printing: It stands on only"), said
+    assert said["validate_and_prepare"].count("Check before printing") == 1, said
 
 
 def test_the_estimate_says_the_brim_once(mushroom):

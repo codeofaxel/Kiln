@@ -36,12 +36,14 @@ def _box(lo, hi):
 
 @pytest.fixture()
 def mushroom(tmp_path) -> str:
-    """An 80 mm cap on a 3 mm stem: prints with supports, and scores 36."""
+    """An 80 mm cap on a 16 mm stem: prints with supports, scores under the
+    printable line, and holds the bed (a thinner stem is expected to come
+    off it, which asks for a check)."""
     cap = _box((-40, -40, 25), (40, 40, 27))
     for _ in range(4):
         cap = cap.subdivide()
     path = tmp_path / "mushroom.stl"
-    trimesh.util.concatenate([_box((-1.5, -1.5, 0), (1.5, 1.5, 25)), cap,
+    trimesh.util.concatenate([_box((-8, -8, 0), (8, 8, 25)), cap,
                               _box((-40, -40, 27), (-36, 40, 40))]).export(path)
     return str(path)
 
@@ -74,7 +76,7 @@ def test_the_fixtures_are_what_they_say(mushroom, cone_on_its_tip, block):
     from kiln.printability import analyze_printability, verdict
 
     tall = analyze_printability(mushroom)
-    assert verdict(tall)[0] == "prints_with_supports" and tall.score < 40
+    assert verdict(tall)[0] == "prints_with_supports" and tall.score < 60
     assert verdict(analyze_printability(cone_on_its_tip))[0] == "wont_print"
     assert verdict(analyze_printability(block))[0] == "ready"
 

@@ -328,7 +328,7 @@ def _without_tuned(node: Any) -> Any:
 #: The score's own arithmetic, which no reply carries at any tier
 #: (``kiln.printability._SCORE_ARITHMETIC``): the points each check took
 #: off and the thermal check's factor.  Nothing reads them from a reply.
-SCORE_ARITHMETIC = frozenset({"score_deduction", "stop_deduction", "material_stress_factor"})
+SCORE_ARITHMETIC = frozenset({"score_deduction", "stop_deduction", "check_deduction", "material_stress_factor"})
 
 
 def _keys_at_any_depth(node: Any) -> set[str]:

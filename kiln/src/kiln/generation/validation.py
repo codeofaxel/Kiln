@@ -122,6 +122,29 @@ def convert_to_stl(
     )
 
 
+def validation_said(result: MeshValidationResult) -> str:
+    """What a door says about *result*, in one sentence.
+
+    "Mesh is valid." is said only of a mesh that reads and whose every piece
+    is closed.  A mesh that reads but is not closed is told so, in the
+    reading's own words for what is open, and what closes it; a mesh with
+    errors is told its errors.  The one wording for every door that sums a
+    validation up, so none calls a mesh valid beside its own finding that
+    the surface is open.
+    """
+    if not result.valid:
+        return f"Mesh has issues: {'; '.join(result.errors)}"
+    if result.is_manifold:
+        return "Mesh is valid."
+    closure = next((w for w in result.warnings if w.startswith("Mesh is not manifold")), "")
+    found = closure.split(":", 1)[1].split(".  ", 1)[0].strip() if ":" in closure else ""
+    what = f": {found}" if found else ""
+    return (
+        f"The file reads as a mesh, but it is not a closed solid{what}. "
+        "Close it with `repair_mesh` before printing."
+    )
+
+
 def validate_mesh(file_path: str) -> MeshValidationResult:
     """Validate an STL, OBJ, GLB, or 3MF file for 3D printing readiness.
 
@@ -4556,7 +4579,11 @@ def can_print_now(
         verdict_of,
     )
 
-    report = analyze_printability(working_path, material=material, printer_id=printer_id)
+    # The verdict is read for the bed this check holds the part to, so it
+    # never says the part prints on a bed the check below says it exceeds.
+    report = analyze_printability(
+        working_path, material=material, printer_id=printer_id, build_volume=printer_bed_mm,
+    )
     support_reason = support_verdict(report)
     if support_reason:
         issues.append({
@@ -4627,9 +4654,11 @@ def can_print_now(
         "actions_taken": actions_taken,
         # The part's printability verdict and its sentence, the answer every
         # door gives; ``verdict`` above is this check's word for the mesh and
-        # that verdict together.  The rating behind them stays in the
-        # process (kiln.printability.RATING_KEYS).
-        **verdict_block(report),
+        # that verdict together.  A mesh fault found here is handed to it,
+        # so it never says the part is ready beside ``needs_fixes``.  The
+        # rating behind them stays in the process
+        # (kiln.printability.RATING_KEYS).
+        **verdict_block(report, found=[fault["detail"] for fault in faults]),
         "printability_material": material,
         "triangle_count": analysis.triangle_count,
         "dimensions_mm": analysis.dimensions_mm,
