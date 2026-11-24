@@ -189,3 +189,53 @@ def test_the_real_door_estimates_a_step_with_its_printability(tmp_path: Path, mo
     assert "score" not in result["printability"]
     assert result["printability"]["model_height_mm"] == pytest.approx(_SIZE[2], abs=0.01)
     assert "Kiln's mesh of this STEP file" in result["printability_note"]
+
+
+# ---------------------------------------------------------------------------
+# A STEP file and the slicers that do not open one
+# ---------------------------------------------------------------------------
+
+_NO_STEP_OF_THEIR_OWN = {
+    "OrcaSlicer": "/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer",
+    "Bambu Studio": "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio",
+}
+_INSTALLED = {name: path for name, path in _NO_STEP_OF_THEIR_OWN.items() if os.access(path, os.X_OK)}
+
+
+@pytest.mark.skipif(not _INSTALLED, reason="neither OrcaSlicer nor Bambu Studio is installed")
+@pytest.mark.parametrize("slicer", list(_INSTALLED) or ["none installed"])
+def test_a_step_is_sliced_by_a_slicer_that_cannot_open_one(tmp_path: Path, monkeypatch, slicer: str) -> None:
+    """The slicer is handed Kiln's mesh of the STEP, and the file it writes
+    is the part: layers up to the part's own height."""
+    import re
+
+    from kiln import monitor_twin
+    from kiln.slicer import slice_file
+    from kiln.slicer_profiles import resolve_slicer_profile
+
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+    twin = tmp_path / "twin"
+    monkeypatch.setattr(monitor_twin, "_TWIN_DIR", twin)
+    monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
+    monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
+    result = slice_file(_step(tmp_path / "plate.step"), output_dir=str(tmp_path / "out"),
+                        profile=resolve_slicer_profile("bambu_a1"), slicer_path=_INSTALLED[slicer], timeout=600)
+    assert result.success, result.message
+    text = Path(result.output_path).read_text(encoding="utf-8", errors="replace")
+    heights = [float(z) for z in re.findall(r"^;\s*(?:Z|Z_HEIGHT)\s*:\s*([\d.]+)", text, re.M)]
+    assert len(heights) > 40, f"{len(heights)} layers in the file"
+    assert max(heights) == pytest.approx(_SIZE[2], abs=0.3)
+
+
+def test_a_step_no_mesh_can_be_made_of_is_refused_in_plain_words(tmp_path: Path) -> None:
+    from kiln import slicer as slicer_module
+
+    orca = slicer_module.SlicerInfo(path="/opt/orca/orca-slicer", name="orcaslicer", version="2.3.2")
+    step = _step(tmp_path / "plate.step")
+    with patch.object(slicer_module, "find_slicer", return_value=orca), \
+         patch.object(slicer_module, "_drawn_mesh_for", side_effect=lambda path: path), \
+         pytest.raises(slicer_module.SlicerError) as refused:
+        slicer_module.slice_file(step, output_dir=str(tmp_path / "out"))
+    said = str(refused.value)
+    assert "can't open a STEP file by itself" in said and "so it wasn't sliced" in said
+    assert "Export the part as STL or 3MF" in said

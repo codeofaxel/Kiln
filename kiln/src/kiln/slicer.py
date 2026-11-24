@@ -2653,6 +2653,18 @@ def _slice_file(
     # handed over without it when this slice decided another layer: the
     # object's setting would win over the profile the reply names.
     sliced_input, layer_scratch = for_the_slicer(input_abs, layer)
+    # OrcaSlicer and Bambu Studio do not read a STEP file from the command
+    # line: they are handed Kiln's mesh of it, the one the slice is drawn as.
+    if slicer_cli_family(slicer) == _CLI_BAMBU and ext in (".step", ".stp"):
+        if drawn == input_abs:
+            from kiln.maker_slicer import said_name as _said_name
+
+            raise SlicerError(
+                f"{_said_name(slicer)} can't open a STEP file by itself, and Kiln couldn't turn this one "
+                "into a mesh on this computer, so it wasn't sliced. Export the part as STL or 3MF and slice "
+                "that, or slice with PrusaSlicer, which reads STEP."
+            )
+        sliced_input = drawn
     # A slice that carries supports keeps them off the faces the verdict
     # said print on their own: the mesh goes over as a 3MF with those faces
     # painted as blockers, or a thread beside the shelf that needs supports
