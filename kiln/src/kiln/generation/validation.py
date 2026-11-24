@@ -4426,8 +4426,9 @@ def can_print_now(
     - ``printable_with_supports``: sound, and it prints with the supports a
       slicer adds, which is a normal print.
     - ``check_before_printing``: sound, but the verdict asks for a check
-      (under the printable line, no single cause to name).  The print
-      pipeline prints such a part with a warning, so ``can_print`` is true.
+      (one the report names, or under the printable line with no single
+      cause to name).  The print pipeline holds such a part until the check
+      is made, so ``can_print`` is false.
     - ``wont_print``: sound, but the verdict says it won't print as it is
       (it rests on a point, a wall is thinner than the nozzle lays, ...).
     - ``needs_fixes``: the mesh has a fault to fix first; ``issues`` says
@@ -4635,10 +4636,10 @@ def can_print_now(
             "fix": "Change the part, or how it sits on the plate, as the verdict says",
         })
     elif not passes(verdict_key, report.score, bar=_MIN_PASS_SCORE):
-        # The pipeline fails this part's printability check with a warning
-        # and prints it, so it prints here too; the word says a check is due.
+        # The print pipeline holds this part until the check is made, so it
+        # is not called printable here either; the word says a check is due.
         verdict = "check_before_printing"
-        can_print = True
+        can_print = False
     elif issues:
         verdict = "printable_with_supports"
         can_print = True  # printable — just needs support enabled in slicer

@@ -359,7 +359,10 @@ def run_full_validation_pipeline(
     issues: list[str] = []
     warnings: list[str] = []
     for c in report.checks:
-        if not c.passed and c.severity == "error":
+        if not c.passed and c.name == "printability" and report.printability_verdict_text:
+            # The verdict's first sentence, whole: it ends with what to do.
+            issues.append(report.printability_verdict_text.partition(". ")[0].rstrip(".") + ".")
+        elif not c.passed and c.severity == "error":
             issues.append(_sanitize_summary_detail(c.details))
         elif not c.passed and c.severity == "warning":
             warnings.append(_sanitize_summary_detail(c.details))
@@ -389,7 +392,9 @@ def run_full_validation_pipeline(
         label = "issue" if count == 1 else "issues"
         brief = "; ".join(issues[:2])
         base = f"Not ready. {count} {label}: {brief}"
-        report.summary = base[:200]
+        # Room for a whole verdict sentence: what holds a part down comes
+        # at its end.
+        report.summary = base[:320]
 
     # ----------------------------------------------------------
     # Step 14: next_action

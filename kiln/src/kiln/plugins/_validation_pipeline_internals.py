@@ -1096,7 +1096,9 @@ def _step_printability(
         report.printability_verdict, report.printability_verdict_text = key, said
         passed = passes(key, score, bar=_MIN_PASS_SCORE)
         details = said.rstrip(".")
-        severity = "info" if passed else "error" if key == "wont_print" else "warning"
+        # A verdict that does not let the part print is this check's failure:
+        # the result is not ready, whichever of the two it is.
+        severity = "info" if passed else "error"
 
         if key != "wont_print" and getattr(pa_report, "thin_walls", None):
             tw = pa_report.thin_walls

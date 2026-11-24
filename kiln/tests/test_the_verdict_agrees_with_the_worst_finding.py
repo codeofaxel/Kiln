@@ -103,14 +103,40 @@ def test_every_door_carries_the_check_for_the_tall_part(tmp_path):
     pillar = _block(tmp_path, "pillar.stl", (4.0, 4.0, 200.0))
     readiness = _call("check_print_readiness", file_path=pillar)
     assert (readiness["verdict"], readiness["printability_verdict"]) == ("check_before_printing", "check"), readiness
+    assert readiness["can_print"] is False, readiness
     prepared = _call("validate_and_prepare", input_path=pillar)
     assert prepared["printability_verdict"] == "check", prepared
-    assert prepared["summary"].startswith("Check before printing: It is tall for what it stands on"), prepared["summary"]
-    assert prepared["summary"].count("Check before printing") == 1, prepared["summary"]
+    assert (prepared["ready_to_print"], prepared["status"]) == (False, "fail"), prepared
+    mesh = _call("validate_and_prepare_mesh", file_path=pillar, auto_repair=False)
+    assert (mesh["passed"], mesh["verdict"]) == (False, "check"), mesh
+    assert "PASSED" not in mesh["message"] and "FAILED validation. Check before printing:" in mesh["message"], mesh["message"]
+    assert prepared["summary"].startswith("Not ready. 1 issue: Check before printing: It is tall"), prepared["summary"]
     supports = _call("estimate_supports", file_path=pillar)
     assert supports["message"].startswith("Check before printing: "), supports["message"]
-    for reply in (readiness, prepared, supports):
+    for reply in (readiness, prepared, supports, mesh):
         assert _says_ready(reply) == [], reply
+
+
+def test_every_door_still_passes_the_squat_part(tmp_path):
+    """The good twin of the test above: the same doors, a part that holds."""
+    squat = _block(tmp_path, "squat.stl", (40.0, 40.0, 10.0))
+    readiness = _call("check_print_readiness", file_path=squat)
+    assert (readiness["can_print"], readiness["verdict"]) == (True, "ready_to_print"), readiness
+    prepared = _call("validate_and_prepare", input_path=squat)
+    assert (prepared["ready_to_print"], prepared["status"]) == (True, "pass"), prepared
+    assert prepared["summary"].startswith("Print-ready."), prepared["summary"]
+    mesh = _call("validate_and_prepare_mesh", file_path=squat, auto_repair=False)
+    assert mesh["passed"] is True and "PASSED validation. Ready to print." in mesh["message"], mesh
+
+
+def test_the_print_gate_holds_a_part_with_a_check_due(tmp_path):
+    from kiln.plugins.validation_pipeline_tools import gate_for_print
+
+    with rx.without_kiln_pro():
+        held = gate_for_print(_block(tmp_path, "pillar.stl", (4.0, 4.0, 200.0)))
+        clear = gate_for_print(_block(tmp_path, "squat.stl", (40.0, 40.0, 10.0)))
+    assert held.reason and "Check before printing" in held.reason and held.bypassable, held
+    assert clear.reason is None, clear
 
 
 # ---------------------------------------------------------------------------
@@ -155,14 +181,16 @@ def test_a_torn_mesh_is_not_called_ready_by_the_printability_check(tmp_path):
 
 def test_a_torn_mesh_is_not_called_valid(tmp_path):
     reply = _call("validate_generated_mesh", file_path=_torn(tmp_path))
-    assert reply["validation"]["is_manifold"] is False
+    assert reply["validation"]["valid"] is True, "the file still reads as a mesh"
+    assert reply["validation"]["closed_solid"] is False
     assert "not a closed solid: 4 open edges" in reply["message"], reply["message"]
     assert _says_ready(reply) == []
 
 
 def test_a_closed_mesh_is_still_valid_and_ready(tmp_path):
     closed = _block(tmp_path, "closed.stl", (20.0, 20.0, 20.0))
-    assert _call("validate_generated_mesh", file_path=closed)["message"] == "Mesh is valid."
+    valid = _call("validate_generated_mesh", file_path=closed)
+    assert valid["message"] == "Mesh is valid." and valid["validation"]["closed_solid"] is True
     assert _call("check_print_readiness", file_path=closed)["printability_verdict"] == "ready"
     report = _call("analyze_printability", file_path=closed)["report"]
     assert not report["pieces"].get("open_surface")

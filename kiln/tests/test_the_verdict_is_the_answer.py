@@ -86,7 +86,8 @@ def test_passes_reads_the_verdict_and_the_bar_only_where_no_cause_is_named():
 
     assert passes("ready", 61, bar=90) and passes("prints_with_supports", 5, bar=60)
     assert not passes("wont_print", 100, bar=0)
-    assert passes("check", 45, bar=40) and not passes("check", 39, bar=40)
+    # A check is no pass at any score or bar: the verdict decides alone.
+    assert not passes("check", 45, bar=40) and not passes("check", 100, bar=0)
     assert not passes("", 100, bar=0)  # the check never ran
 
 
@@ -346,13 +347,13 @@ def test_can_print_says_what_the_print_door_does(part, request):
     assert readiness["can_print"] is (gate.reason is None), (readiness, gate.reason)
 
 
-def test_a_part_the_verdict_asks_to_check_still_prints(block, monkeypatch):
-    """A part under the printable line with no single cause named (the
-    ``check`` verdict) is printed by the pre-print gate with a warning, not
-    refused, so ``can_print`` stays true for it: the readiness check refuses
-    only what the print door refuses.  It reads ``check_before_printing``,
-    the verdict's own words, rather than ``ready_to_print`` beside a sentence
-    asking for a check."""
+def test_a_part_the_verdict_asks_to_check_is_held_until_it_is_checked(block, monkeypatch):
+    """A part the verdict asks a check of (``check``) is not called
+    printable by any door: the pre-print gate holds it, with the verdict's
+    sentence as the reason and a way past for the person who has checked,
+    and ``can_print`` is false for it, so the readiness check refuses what
+    the print door refuses.  It reads ``check_before_printing``, the
+    verdict's own words."""
     import kiln.printability as printability
     from kiln.generation.validation import can_print_now
     from kiln.plugins.validation_pipeline_tools import gate_for_print
@@ -369,9 +370,10 @@ def test_a_part_the_verdict_asks_to_check_still_prints(block, monkeypatch):
     readiness = can_print_now(block, printer_id="bambu_x1c", material="pla")
     assert readiness["printability_verdict"] == "check", readiness
     assert readiness["verdict"] == "check_before_printing", readiness
-    assert readiness["can_print"] is True
+    assert readiness["can_print"] is False
     gate = gate_for_print(block, printer_id="bambu_x1c", material="pla")
-    assert gate.reason is None, gate.reason
+    assert gate.reason and "Check before printing" in gate.reason, gate.reason
+    assert gate.bypassable is True
     assert gate.report["printability_verdict"] == "check"
 
 

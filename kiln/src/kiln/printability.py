@@ -11183,21 +11183,17 @@ PRINTS: frozenset[str] = frozenset({"ready", "prints_with_supports"})
 def passes(verdict_key: str, score: int, *, bar: int) -> bool:
     """Whether a gate passes a part :func:`verdict` called *verdict_key*.
 
-    The verdict decides.  A part that prints, as it is or with supports,
-    passes whatever its score, and one that won't print (or was never
-    judged) fails whatever its score: the score is for comparing versions
-    of a part, not for telling a person whether it prints.  Only ``check``
-    (under the printable line with no single cause to name) has nothing but
-    the score to go on, so there the gate's own *bar* decides.  One rule
-    for every gate, so no door fails a part another door told the person
-    prints.  No caller sets the bar: a bar a caller could move would read
-    the score back to them one pass or fail at a time.
+    The verdict decides, alone.  A part that prints, as it is or with
+    supports, passes whatever its score.  One that won't print, one that
+    asks for a check, and one that was never judged do not pass, whatever
+    they score: the score is for comparing versions of a part, not for
+    telling a person whether it prints.  One rule for every gate and every
+    word a door says for a pass (ready, print-ready, passed, can print), so
+    no door calls ready a part another door told the person to check.
+    *score* and *bar* are taken and not read: no caller's bar moves the
+    answer.
     """
-    if verdict_key == "wont_print" or not verdict_key:
-        return False
-    if verdict_key in PRINTS:
-        return True
-    return score >= bar
+    return verdict_key in PRINTS
 
 
 # ---------------------------------------------------------------------------

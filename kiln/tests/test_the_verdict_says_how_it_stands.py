@@ -154,8 +154,7 @@ def test_every_door_says_it(mushroom):
     }
     for door, text in said.items():
         assert "It stands on only 9 mm2 of the bed" in text and "8 mm brim" in text, f"{door}: {text}"
-    assert said["validate_and_prepare"].startswith("Check before printing: It stands on only"), said
-    assert said["validate_and_prepare"].count("Check before printing") == 1, said
+    assert said["validate_and_prepare"].startswith("Not ready. 1 issue: Check before printing: It stands on only"), said
 
 
 def test_the_estimate_says_the_brim_once(mushroom):

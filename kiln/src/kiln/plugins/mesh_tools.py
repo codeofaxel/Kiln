@@ -189,9 +189,9 @@ class _MeshToolsPlugin:
 
             ``message`` calls the mesh valid only when it reads and is
             closed.  ``validation.valid`` says the file reads as a mesh;
-            ``validation.is_manifold`` says whether its surface is closed,
-            and a mesh that is not closed is told so in ``message`` and in
-            ``validation.warnings``.
+            ``validation.closed_solid`` says whether it is a closed solid
+            (it reads, and every piece is closed), and a mesh that is not is
+            told so in ``message`` and in ``validation.warnings``.
 
             Args:
                 file_path: Path to an STL, OBJ, GLB, or 3MF file.

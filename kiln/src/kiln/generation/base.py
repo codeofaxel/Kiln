@@ -138,8 +138,14 @@ class MeshValidationResult:
     is_manifold: bool = False
     bounding_box: dict[str, float] | None = None
 
+    @property
+    def closed_solid(self) -> bool:
+        """Whether the mesh is a closed solid: it reads, and every piece of
+        it is closed.  ``valid`` says only that the file reads as a mesh."""
+        return bool(self.valid and self.is_manifold)
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {**asdict(self), "closed_solid": self.closed_solid}
 
 
 @dataclass

@@ -472,13 +472,10 @@ def run_validation_pipeline(
         # with supports passes whatever it scores.
         from kiln.printability import passes as _passes
 
+        # A verdict that asks for a check says what is due in its own
+        # sentence, which the summary leads with.
         if not _passes(verdict_key, printability_score, bar=_CHECK_BAR):
             passed = False
-            if verdict_key == "check":
-                warnings.append(
-                    "No single cause is named, and the part is not clear to print "
-                    "as it is: check it before printing.",
-                )
 
         if fits_build_volume is False:
             passed = False

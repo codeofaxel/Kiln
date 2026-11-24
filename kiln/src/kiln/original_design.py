@@ -610,7 +610,7 @@ def audit_original_design(
             passed=mesh_validation.valid,
             severity="critical" if not mesh_validation.valid else "info",
             message=(
-                "Mesh validation passed."
+                "The file reads as a mesh."
                 if mesh_validation.valid
                 else "; ".join(mesh_validation.errors)
             ),
