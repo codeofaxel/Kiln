@@ -248,7 +248,8 @@ def _slicers() -> dict[str, str]:
 
     found = {}
     for name, path in (("PrusaSlicer", "/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer"),
-                       ("Bambu Studio", "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio")):
+                       ("Bambu Studio", "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio"),
+                       ("OrcaSlicer", "/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer")):
         if Path(path).is_file():
             found[name] = path
     if "PrusaSlicer" not in found and shutil.which("prusa-slicer"):
@@ -283,10 +284,90 @@ def test_the_slice_holds_up_a_piece_that_starts_a_layer_over_the_plate(tmp_path:
 
     result = sliced("held")
 
-    assert result.supports.enabled and result.supports.note == "supports on: starts in mid-air at 0.3mm"
+    # With a gap over the support or without one, whichever the profile's
+    # first layer leaves room for.
+    assert result.supports.enabled and result.supports.note.startswith("supports on: starts in mid-air at 0.3mm")
     assert gcode_support_lines(result.output_path) > 0
 
     monkeypatch.setattr(printability, "_starts_on_nothing", lambda *_a, **_k: ([], 0, 0.0))
     before = sliced("as_it_was")
     assert not before.supports.enabled and gcode_support_lines(before.output_path) == 0
 
+
+def _support_ends(gcode: str) -> list[tuple[float, float, float]]:
+    """Where each support extrusion ends, (x, y, z), in a file from any driven slicer."""
+    import re
+
+    ends, x, y, z, last_e, relative, support = [], 0.0, 0.0, 0.0, 0.0, True, False
+    number = re.compile(r"([XYZE])(-?\d*\.?\d+)")
+    with open(gcode, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if line.startswith(";"):
+                label = re.match(r";\s*(?:TYPE|FEATURE)\s*:\s*(.*)", line)
+                if label:
+                    support = bool(re.match(r"support\b", label.group(1), re.I))
+                continue
+            if line.startswith("M82"):
+                relative = False
+            elif line.startswith("M83"):
+                relative = True
+            elif line.startswith("G92"):
+                last_e = float(dict(number.findall(line.split(";")[0])).get("E", last_e))
+            if not re.match(r"G[0-3][ \t]", line):
+                continue
+            words = dict(number.findall(line.split(";")[0]))
+            nx, ny, z = float(words.get("X", x)), float(words.get("Y", y)), float(words.get("Z", z))
+            pushed = 0.0
+            if "E" in words:
+                pushed = float(words["E"]) if relative else float(words["E"]) - last_e
+                last_e = last_e if relative else float(words["E"])
+            if support and pushed > 0 and (nx, ny) != (x, y):
+                ends.append((nx, ny, z))
+            x, y = nx, ny
+    return ends
+
+
+@pytest.mark.skipif(not _SLICERS, reason="no slicer installed: public CI has none")
+@pytest.mark.parametrize("slicer", list(_SLICERS) or ["none installed"])
+def test_a_piece_that_starts_right_over_the_first_layer_stands_on_a_pad_joined_to_it(
+    tmp_path: Path, monkeypatch, slicer: str,
+):
+    """A first layer 0.25 mm tall under a piece that starts at 0.3 mm leaves
+    no room for a support with a gap, and a slicer asked for one lays none.
+    The slice comes back with a pad under the piece and nowhere else, laid
+    in the first layer with the gap closed, and the answer says the two are
+    joined.  A piece with room under it keeps its gap."""
+    from kiln import monitor_twin
+    from kiln.slicer import slice_file
+    from kiln.slicer_profiles import profile_with_overrides, resolve_slicer_profile
+    from kiln.slicer_supports import CONTACT_KEY
+
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+    twin = tmp_path / "twin"
+    monkeypatch.setattr(monitor_twin, "_TWIN_DIR", twin)
+    monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
+    monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
+    profile = profile_with_overrides(resolve_slicer_profile("bambu_a1"), {"first_layer_height": "0.25"}, stated=False)
+
+    def sliced(up: float, out: str):
+        _said, path = _read(tmp_path / out, _second_body(up))
+        return slice_file(path, output_dir=str(tmp_path / out / "sliced"), profile=profile,
+                          slicer_path=_SLICERS[slicer], timeout=600,
+                          extra_args=["--dont-arrange"] if slicer == "PrusaSlicer" else None)
+
+    (tmp_path / "low").mkdir()
+    low = sliced(0.3, "low")
+    assert low.supports.enabled, low.supports.note
+    assert low.supports.note == ("supports on: starts in mid-air at 0.3mm; that is too close to the plate for a "
+                                 "gap, so the support under it is joined to it")
+    assert low.supports.settings[CONTACT_KEY] == "0"
+    ends = _support_ends(low.output_path)
+    (x0, y0, _z0), (x1, y1, _z1) = _second_body(0.3)
+    assert len(ends) > 20, f"{len(ends)} support moves under the piece"
+    assert all(x0 - 3 <= x <= x1 + 3 and y0 - 3 <= y <= y1 + 3 for x, y, _z in ends), "support away from the piece"
+    assert max(z for _x, _y, z in ends) <= 0.3, "the pad is taller than the room under the piece"
+
+    (tmp_path / "room").mkdir()
+    room = sliced(0.6, "room")
+    assert room.supports.enabled and room.supports.note == "supports on: starts in mid-air at 0.6mm"
+    assert CONTACT_KEY not in room.supports.settings

@@ -59,6 +59,7 @@ from kiln.slicer_orca import (
     write_orca_presets,
 )
 from kiln.slicer_supports import (
+    CONTACT_KEY,
     DECIDED_ANALYSIS,
     PAINTED_ONLY_KEY,
     STAND_OFF_STYLE,
@@ -2764,11 +2765,31 @@ def _slice_file(
             eases_acceleration=slicer_id == "bambu_studio",
         )
 
+    def _sliced() -> SliceResult:
+        if speed_ranges or kiln_ask is not None:
+            return _with_ranges()
+        return _decided(out_file, with_profile=slicer_profile)
+
     try:
-        result = _say_left_out(say_project_plate(
-            _with_ranges() if speed_ranges or kiln_ask is not None
-            else _decided(out_file, with_profile=slicer_profile), taken,
-        ), left_out)
+        made = _sliced()
+        # Supports asked for under one piece, and the slicer laid none: the
+        # piece starts too low for a support with a gap over it.  The slice
+        # is made once more with the gap closed, unless the caller stated
+        # the gap; the first run is the one counted.
+        if (supports.under_painted and made.supports is not None and made.supports.placed_none
+                and CONTACT_KEY not in profile_origin(slicer_profile).stated):
+            closed = {CONTACT_KEY: "0"}
+            slicer_profile = profile_with_overrides(
+                slicer_profile, closed,
+                prefix=f"{Path(slicer_profile).stem}_" if slicer_profile else None, stated=False,
+            )
+            supports = replace(supports, settings={**supports.settings, **closed}, joined=True)
+            quiet = _unrecorded.set(True)
+            try:
+                made = _sliced()
+            finally:
+                _unrecorded.reset(quiet)
+        result = _say_left_out(say_project_plate(made, taken), left_out)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
         if soft_run is not None:
