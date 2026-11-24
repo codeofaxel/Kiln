@@ -41,6 +41,13 @@ The rule, in order:
   slice that asked for supports and got none says so, and the answer says
   the kept-off faces carry none only when the file shows none under them
   (:func:`supports_against`);
+* a file whose separate parts print in place a clearance apart gets those
+  supports from the plate alone wherever the plate reaches every point that
+  needs one (:attr:`kiln.printability.SupportJudgement.plate_reaches_supports`):
+  a support that stands on one part to hold up another ties the two
+  together.  Where the plate does not reach them all the supports stand on
+  the model as above, and the answer says to break out any that stands
+  between two parts;
 * when the one reason is a piece that starts on nothing (a foot a layer
   over the plate, a tooth hanging from the top of a hole), the supports
   are asked for under that piece and nowhere else: its faces are painted
@@ -74,6 +81,9 @@ logger = logging.getLogger(__name__)
 #: carries it, and the two :func:`support_settings` writes beside it, into
 #: the Orca dialect.
 SUPPORT_KEY = "support_material"
+
+#: The key that keeps supports standing on the plate alone, never the model.
+PLATE_ONLY_KEY = "support_material_buildplate_only"
 
 #: The suffix a witnessed decision's reason carries when the file has none.
 _PLACED_NONE = "; the slicer placed none"
@@ -129,6 +139,28 @@ class SliceSupports:
     #: (:func:`supports_against`); ``None`` until a sliced file has been
     #: read.  Never served: the sentence says it.
     on_kept_off: int | None = field(default=None, repr=False)
+    #: Whether the file's separate parts stand a clearance apart, printing
+    #: in place together (:attr:`kiln.printability.SupportJudgement.parts_apart`).
+    #: Never served: the sentence says it.
+    parts_apart: bool = field(default=False, repr=False)
+
+    @property
+    def _plate_only(self) -> bool:
+        return self.settings.get(PLATE_ONLY_KEY) == "1"
+
+    @property
+    def _parts_clause(self) -> str:
+        """What the answer adds for parts that print in place apart: that
+        the supports were asked for from the plate alone, or what to do
+        about one that stands between two parts."""
+        if not self.parts_apart:
+            return ""
+        if self._plate_only:
+            return "; asked for from the plate only, as its parts print in place apart from each other"
+        return (
+            "; its parts print in place apart from each other, so break out any support that stands on one "
+            "part to hold up another"
+        )
 
     @property
     def _kept_clear_clause(self) -> str:
@@ -164,18 +196,20 @@ class SliceSupports:
         if placed_none:
             return f"the part needs supports but the slicer placed none: {asked_for}"
         if self.enabled and self.kept_off_painted:
-            return f"supports on: {self.reason}; {self._kept_clear_clause}"
+            return f"supports on: {self.reason}; {self._kept_clear_clause}{self._parts_clause}"
         # Asked for under one piece alone, the answer says what was asked:
         # the support under that piece stands against the faces beside it.
         if self.enabled and self.under_painted and self.kept_off:
             return f"supports on: {self.reason}; asked for only under what starts in mid-air"
         if self.enabled:
-            return f"supports on: {self.reason}"
+            return f"supports on: {self.reason}{self._parts_clause}"
         return f"no supports: {self.reason}"
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        for bookkeeping in ("kept_off", "under", "under_painted", "own_angle", "kept_clear", "on_kept_off"):
+        for bookkeeping in (
+            "kept_off", "under", "under_painted", "own_angle", "kept_clear", "on_kept_off", "parts_apart",
+        ):
             d.pop(bookkeeping)
         if self.own_angle:
             d["settings"] = {k: v for k, v in d["settings"].items() if k != "support_material_threshold"}
@@ -198,12 +232,14 @@ def support_settings(overhang_threshold_deg: float, *, build_plate_only: bool = 
     supports, and PrusaSlicer's default leaves a bridge the verdict called
     too long unsupported (both measured, both zero support lines).
     *build_plate_only* is the caller's explicit choice (``kiln slice
-    --support-mode minimal``), never the engine's.
+    --support-mode minimal``), or the engine's for parts that print in
+    place apart when the plate reaches every point that needs a support
+    (:func:`_decide_supports`).
     """
     slope = max(1.0, min(89.0, 90.0 - float(overhang_threshold_deg)))
     return {
         SUPPORT_KEY: "1",
-        "support_material_buildplate_only": "1" if build_plate_only else "0",
+        PLATE_ONLY_KEY: "1" if build_plate_only else "0",
         "support_material_threshold": f"{slope:g}",
         "dont_support_bridges": "0",
     }
@@ -719,9 +755,15 @@ def _decide_supports(
         )
     reason = support_verdict(judged)
     if reason:
+        # Parts that print in place apart get their supports from the plate
+        # alone wherever the plate reaches everything that needs one, so
+        # none stands on one part to hold up another.
+        parts_apart = bool(getattr(judged, "parts_apart", False))
+        from_plate = parts_apart and bool(getattr(judged, "plate_reaches_supports", False))
         return SliceSupports(
             enabled=True, decided_by=DECIDED_ANALYSIS, reason=reason,
-            settings=support_settings(judged.overhang_threshold_deg),
+            settings=support_settings(judged.overhang_threshold_deg, build_plate_only=from_plate),
+            parts_apart=parts_apart,
             kept_off=tuple(judged.support_kept_off_faces),
             under=tuple(getattr(judged, "support_under_faces", ())),
             own_angle=bool(
@@ -806,7 +848,12 @@ def ensure_profile_supports(
     if project and SUPPORT_KEY in project:
         decision = _as_the_project_saved(project, decision)
     # A key the caller stated beside support_material (their own threshold,
-    # plate-only) is theirs and stays; the engine writes the rest.
+    # plate-only) is theirs and stays; the engine writes the rest.  Where
+    # the supports stand is said from the value the slice carries.
+    if PLATE_ONLY_KEY in origin.stated and PLATE_ONLY_KEY in decision.settings:
+        decision = replace(
+            decision, settings={**decision.settings, PLATE_ONLY_KEY: settings.get(PLATE_ONLY_KEY, "0").strip()},
+        )
     to_write = {key: value for key, value in decision.settings.items() if key not in origin.stated}
     if not to_write:
         return profile, decision

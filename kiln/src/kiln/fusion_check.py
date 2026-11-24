@@ -290,16 +290,19 @@ def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int
     pieces of the other standing solids whose boxes come within that reach,
     nearest first.  *unheld* are the pieces (from 1) in the air that nothing
     holds up; they and a hollow part's inner walls are left out.  Returns
-    ``{"pairs": [{"bodies": [a, b], "gap_mm": g}, ...], "measured": n,
-    "candidates": m, "unmeasured": [...]}`` with bodies numbered from 1;
-    ``unmeasured`` are the bodies in a candidate pair past the pair budget,
-    or one that could not be measured, that no measured pair found a
-    clearance for.  The pair table's limits hold here too: past its body or
-    triangle count nothing is measured and the reading is ``skipped``.
+    ``{"pairs": [{"bodies": [a, b], "gap_mm": g}, ...], "touching": [...],
+    "measured": n, "candidates": m, "unmeasured": [...]}`` with bodies
+    numbered from 1.  ``touching`` are the pairs, in the same shape, that
+    stand at or under :data:`TOUCH_GAP_MM` of one another without sharing
+    material: no clearance a printer keeps open.  ``unmeasured`` are the
+    bodies in a candidate pair past the pair budget, or one that could not
+    be measured, that no measured pair found a clearance for.  The pair
+    table's limits hold here too: past its body or triangle count nothing is
+    measured and the reading is ``skipped``.
     """
     triangles = sum(len(b.faces) for b in bodies)
     if len(bodies) > _PAIR_TABLE_MAX_BODIES or triangles > _PAIR_TABLE_MAX_TRIANGLES:
-        return {"pairs": [], "measured": 0, "candidates": 0, "unmeasured": [], "skipped": True}
+        return {"pairs": [], "touching": [], "measured": 0, "candidates": 0, "unmeasured": [], "skipped": True}
     volumes = [_signed_volume(b) for b in bodies]
     walls = {i for i, v in enumerate(volumes) if v < 0 and _within_bounds(bodies[i], bodies)}
     standing = [i for i in range(len(bodies)) if i + 1 not in unheld and i not in walls]
@@ -318,6 +321,7 @@ def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int
         return solids[i]
 
     pairs: list[dict[str, Any]] = []
+    touching: list[dict[str, Any]] = []
     measured = 0
     unread: set[int] = set()
     for n, (a, b) in enumerate(candidates):
@@ -337,9 +341,12 @@ def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int
         measured += 1
         if TOUCH_GAP_MM < gap <= NEAR_GAP_MM:
             pairs.append({"bodies": [a + 1, b + 1], "gap_mm": round(gap, 3)})
-    spaced = {body - 1 for pair in pairs for body in pair["bodies"]}
+        elif gap <= TOUCH_GAP_MM:
+            touching.append({"bodies": [a + 1, b + 1], "gap_mm": round(max(gap, 0.0), 3)})
+    spaced = {body - 1 for pair in pairs + touching for body in pair["bodies"]}
     return {
         "pairs": pairs,
+        "touching": touching,
         "measured": measured,
         "candidates": len(candidates),
         "unmeasured": sorted(i + 1 for i in unread - spaced),
