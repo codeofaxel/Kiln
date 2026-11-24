@@ -567,8 +567,9 @@ def _extents_of(path: str):
 class TestSlicerAdjacentFidelity:
     def test_reslice_override_moves_the_layer_count(self, tmp_path: Path):
         """The whole point of an override is that it CHANGES the bytes:
-        0.2 mm vs 0.4 mm layers over the same 10 mm box must roughly halve
-        the number of printed layers."""
+        0.2 mm vs 0.3 mm layers over the same 10 mm box must cut the number
+        of printed layers by about a third.  0.3 mm is the tallest layer
+        every driven slicer takes on a 0.4 mm nozzle."""
         import json
 
         from kiln.plugins.slicer_tools import _SlicerToolsPlugin
@@ -577,8 +578,9 @@ class TestSlicerAdjacentFidelity:
         stl = _make_box_stl(20.0, 20.0, 10.0)
 
         def _layers(gcode_path: str) -> int:
-            text = Path(gcode_path).read_text(encoding="utf-8")
-            return text.count(";LAYER_CHANGE")
+            from kiln.gcode import LAYER_CHANGE_LINE
+
+            return len(LAYER_CHANGE_LINE.findall(Path(gcode_path).read_text(encoding="utf-8", errors="replace")))
 
         try:
             with patch("kiln.server._check_auth", side_effect=_no_auth):
@@ -588,7 +590,7 @@ class TestSlicerAdjacentFidelity:
                 )
                 coarse = tools["reslice_with_overrides"](
                     input_path=stl, output_dir=str(tmp_path / "coarse"),
-                    overrides=json.dumps({"layer_height": "0.4"}),
+                    overrides=json.dumps({"layer_height": "0.3"}),
                 )
             assert fine.get("success") is True, fine.get("error")
             assert coarse.get("success") is True, coarse.get("error")
@@ -596,7 +598,7 @@ class TestSlicerAdjacentFidelity:
             n_coarse = _layers(coarse.get("raw_gcode_path") or coarse["output_path"])
             assert n_fine > 0 and n_coarse > 0
             ratio = n_fine / n_coarse
-            assert 1.7 <= ratio <= 2.3, (n_fine, n_coarse)
+            assert 1.35 <= ratio <= 1.65, (n_fine, n_coarse)
         finally:
             os.unlink(stl)
 
@@ -974,9 +976,15 @@ def _write_facets(facets: list[tuple]) -> str:
 
 
 def _support_lines(gcode_path: str) -> int:
-    """Support extrusions the file carries, in either slicer's spelling."""
-    text = Path(gcode_path).read_text(encoding="utf-8", errors="replace")
-    return text.count(";TYPE:Support material") + text.count(";TYPE:Support\n")
+    """Support features the file carries, as each slicer Kiln drives labels
+    them: support, its interface and its transition."""
+    from kiln.gcode import feature_label
+
+    with open(gcode_path, encoding="utf-8", errors="replace") as fh:
+        return sum(
+            1 for line in fh
+            if line.startswith(";") and re.match(r"support\b", feature_label(line) or "", re.IGNORECASE)
+        )
 
 
 @pytest.mark.skipif(not _slicer_available(), reason="no PrusaSlicer/OrcaSlicer installed")

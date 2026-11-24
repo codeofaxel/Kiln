@@ -67,7 +67,8 @@ def _what_the_gcode_does(gcode_path: str) -> tuple[list[str], int, bool, bool]:
     tools = re.findall(r"^T(\d+)\b", text, re.M)
     changes = sum(1 for a, b in zip(tools, tools[1:], strict=False) if a != b)
     relative = bool(re.search(r"^M83\b", text, re.M))
-    tower = bool(re.search(r"^;\s*TYPE:\s*Prime tower", text, re.M | re.I))
+    # OrcaSlicer labels the tower ``;TYPE:Prime tower``, Bambu Studio ``; FEATURE: Prime tower``.
+    tower = bool(re.search(r"^;\s*(?:TYPE|FEATURE)\s*:\s*Prime tower", text, re.M | re.I))
     return sorted(set(tools)), changes, relative, tower
 
 
