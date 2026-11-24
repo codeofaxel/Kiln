@@ -425,3 +425,22 @@ def test_a_read_that_follows_a_rename_reaches_no_write_once_the_queue_exists() -
     hits = scan.reach("ams_status", fn, changing, public_only=True)
     undecided = sorted(str(h) for h in hits if _decided_by(h) is None)
     assert not undecided, undecided
+
+
+def test_a_branch_on_a_modules_own_tool_table_is_decided_by_the_stubs_name() -> None:
+    """One stub serves every served tool, and its delete branch asks whether
+    the stub's own name is in ``served_delete.TOOLS``.  A read-only stub is
+    not in that table, so it never takes the branch and is not charged with
+    the delete; a stub that is in it stays undecided, both branches kept."""
+    import ast
+
+    from kiln import served_delete
+
+    test = ast.parse("_name in served_delete.TOOLS and not kwargs.pop(flag, False)", mode="eval").body
+    assert scan._settled(test, {"_name": "analyze_printability"}) is False
+    assert scan._settled(test, {"_name": next(iter(served_delete.TOOLS))}) is None
+    plain = ast.parse("_name in served_delete.TOOLS", mode="eval").body
+    assert scan._settled(plain, {"_name": next(iter(served_delete.TOOLS))}) is True
+    # A table the walk cannot read keeps both branches.
+    unknown = ast.parse("_name in nowhere.TOOLS", mode="eval").body
+    assert scan._settled(unknown, {"_name": "analyze_printability"}) is None

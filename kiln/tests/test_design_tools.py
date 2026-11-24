@@ -269,6 +269,18 @@ def free_plan(monkeypatch):
     _caller_plan(monkeypatch, False)
 
 
+@pytest.fixture
+def would_buy_pro(monkeypatch):
+    """The caller is on a free account that never held Kiln Pro, so the plan
+    check words the plan with its link."""
+    import kiln.licensing as licensing
+
+    monkeypatch.setattr(
+        licensing, "check_tier",
+        lambda required, *a, **k: (False, "This feature needs Kiln Pro. See what Pro includes at kiln3d.com/pricing"),
+    )
+
+
 class TestEstimateStructuralLoad:
     """Tests for estimate_structural_load MCP tool.
 
@@ -700,7 +712,7 @@ class TestGetPostProcessingGuide:
     the reply the door rebuilds from its answer."""
 
     @patch("kiln._pro_finishing_bridge.guide")
-    def test_happy_path(self, mock_fn, registered_tools):
+    def test_happy_path(self, mock_fn, registered_tools, would_buy_pro):
         from kiln._pro_finishing_bridge import Asked
 
         mock_fn.return_value = Asked(answer={
@@ -737,7 +749,7 @@ class TestGetPostProcessingGuide:
         mock_fn.assert_called_once_with("pla", None)
 
     @patch("kiln._pro_finishing_bridge.guide")
-    def test_goal_returns_only_requested_band(self, mock_fn, registered_tools):
+    def test_goal_returns_only_requested_band(self, mock_fn, registered_tools, would_buy_pro):
         from kiln._pro_finishing_bridge import Asked
 
         mock_fn.return_value = Asked(answer={

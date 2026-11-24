@@ -1200,6 +1200,7 @@ class _DesignToolsPlugin:
             """
             from kiln import _pro_finishing_bridge as finishing
             from kiln.design_intelligence import _upgrade_hint
+            from kiln.tiers_and_terms import plan_offer
 
             try:
                 refused = finishing.refusal_for(material, goal)
@@ -1211,7 +1212,8 @@ class _DesignToolsPlugin:
                         return {"success": False, "error": asked.error}
                     return finishing.basic_guide(asked.miss, material, goal)
                 reply = finishing.reply_from(asked.answer)
-                if not reply.get("general"):
+                # The hint rides only for a caller who would buy the plan.
+                if not reply.get("general") and plan_offer("pro", "Checked finishing steps").buying:
                     reply["upgrade_hint"] = _upgrade_hint("post_processing")
                 return reply
             except Exception as exc:

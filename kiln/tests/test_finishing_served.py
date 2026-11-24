@@ -100,8 +100,20 @@ def bridge_general_keys() -> tuple[str, ...]:
     return GENERAL_KEYS
 
 
+@pytest.fixture
+def would_buy_pro(monkeypatch):
+    """The caller is on a free account that never held Kiln Pro, so the plan
+    check words the plan with its link."""
+    import kiln.licensing as licensing
+
+    monkeypatch.setattr(
+        licensing, "check_tier",
+        lambda required, *a, **k: (False, "This feature needs Kiln Pro. See what Pro includes at kiln3d.com/pricing"),
+    )
+
+
 class TestTheGuide:
-    def test_the_overview_is_rebuilt_from_the_served_answer(self, monkeypatch):
+    def test_the_overview_is_rebuilt_from_the_served_answer(self, monkeypatch, would_buy_pro):
         sent = _serve(monkeypatch, _OVERVIEW)
         out = _tools()["get_post_processing_guide"]("abs")
         assert sent == [{"tool": "finishing_guide", "timeout": None, "asked_by_user": True, "material": "abs"}]
@@ -118,7 +130,18 @@ class TestTheGuide:
         assert out["techniques"][0]["safety_notes"] == _NOTE
         assert "status" not in out
 
-    def test_a_goal_is_sent_and_its_answer_relayed(self, monkeypatch):
+    def test_a_paying_caller_is_not_sold_the_plan_it_holds(self, monkeypatch):
+        """The hint names Kiln Pro, so it rides only for a caller who would
+        buy it: an account that already holds the plan gets the same guide
+        with no hint."""
+        import kiln.licensing as licensing
+
+        monkeypatch.setattr(licensing, "check_tier", lambda required, *a, **k: (True, None))
+        _serve(monkeypatch, _OVERVIEW)
+        out = _tools()["get_post_processing_guide"]("abs")
+        assert out["success"] is True and "upgrade_hint" not in out
+
+    def test_a_goal_is_sent_and_its_answer_relayed(self, monkeypatch, would_buy_pro):
         technique = {
             "name": "Technique A",
             "difficulty": "moderate",

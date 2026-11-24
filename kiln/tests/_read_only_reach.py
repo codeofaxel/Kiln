@@ -379,9 +379,44 @@ def _closed_over_text(fn: types.FunctionType) -> dict[str, str]:
     return found
 
 
-def _settled(test: ast.expr, closed: dict[str, str]) -> bool | None:
+def _named_texts(node: ast.expr, fn: types.FunctionType | None) -> set[str] | None:
+    """The texts a name stands for when it is a module's own table of them
+    (``served_delete.TOOLS``): the module is one *fn* can see, or one of
+    Kiln's by that name, and the table holds only text.  ``None`` when it
+    cannot be read that way."""
+    if not (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)):
+        return None
+    owner = (fn.__globals__.get(node.value.id) if fn is not None else None)
+    if not isinstance(owner, types.ModuleType):
+        try:
+            owner = importlib.import_module(f"kiln.{node.value.id}")
+        except Exception:  # noqa: BLE001 -- not a Kiln module: undecided
+            return None
+    table = getattr(owner, node.attr, None)
+    if isinstance(table, (dict, tuple, list, set, frozenset)) and table and all(
+        isinstance(item, str) for item in table
+    ):
+        return set(table)
+    return None
+
+
+def _settled(
+    test: ast.expr, closed: dict[str, str], fn: types.FunctionType | None = None,
+) -> bool | None:
     """The value of an ``if`` test that compares closed-over text with
-    literal text (``_name == "x"``, ``_name in ("x", "y")``), else ``None``."""
+    literal text (``_name == "x"``, ``_name in ("x", "y")``) or with a
+    module's own table of text (``_name in served_delete.TOOLS``), else
+    ``None``.  An ``and`` is false once one part is; an ``or`` true once one
+    part is."""
+    if isinstance(test, ast.BoolOp):
+        parts = [_settled(value, closed, fn) for value in test.values]
+        if isinstance(test.op, ast.And):
+            if any(part is False for part in parts):
+                return False
+            return True if all(part is True for part in parts) else None
+        if any(part is True for part in parts):
+            return True
+        return False if all(part is False for part in parts) else None
     if not (
         isinstance(test, ast.Compare)
         and len(test.ops) == 1
@@ -397,7 +432,10 @@ def _settled(test: ast.expr, closed: dict[str, str]) -> bool | None:
     ):
         literals = {e.value for e in right.elts}
     else:
-        return None
+        named = _named_texts(right, fn)
+        if named is None:
+            return None
+        literals = named
     value, op = closed[test.left.id], test.ops[0]
     if isinstance(op, (ast.Eq, ast.In)):
         return value in literals
@@ -422,7 +460,7 @@ def _taken_branches(fn: types.FunctionType, tree: ast.AST) -> ast.AST:
 
     class _Prune(ast.NodeTransformer):
         def visit_If(self, node: ast.If) -> Any:
-            verdict = _settled(node.test, closed)
+            verdict = _settled(node.test, closed, fn)
             if verdict is None:
                 return self.generic_visit(node)
             kept: list[ast.stmt] = []

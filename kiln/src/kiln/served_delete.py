@@ -152,7 +152,12 @@ def _what_is_lost(here: dict[str, Any], facts: dict[str, Any]) -> str:
 def _brought_back(here: dict[str, Any], facts: dict[str, Any], design_id: str) -> str:
     missing = _missing_from_account(here, facts)
     if missing == 0 and facts.get("held"):
-        return f"All of it: your Kiln account keeps every version. `kiln cloud clone {design_id}` brings it back here."
+        from kiln.cli_command import kiln_command
+
+        return (
+            "All of it: your Kiln account keeps every version. "
+            f"`{kiln_command('cloud clone', design_id)}` brings it back here."
+        )
     if missing is None:
         return "Whatever your Kiln account keeps of it, if anything: Kiln couldn't check."
     if not facts.get("held"):

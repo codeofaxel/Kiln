@@ -773,6 +773,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln.cli.spend_caps_commands": ("own_vocabulary", "spend caps CLI: a terminal door with its own errors"),
     "kiln.plugins.tier_diagnostic_tools": ("infrastructure", "names the host in prose only; reads local state"),
     "kiln.runtime_env": ("infrastructure", "names the host in prose only"),
+    "kiln.cli.app_wiring": ("infrastructure", "names the connector addresses the installer writes into an AI app's settings; it asks the servers nothing"),
     "kiln.errors": ("infrastructure", "names the host in prose only"),
     "kiln.api_device": ("infrastructure", "device headers for the served door; sends nothing itself"),
 }
