@@ -324,10 +324,6 @@ WEB_APPS: tuple[tuple[str, str], ...] = (
 )
 
 
-def app_ids() -> list[str]:
-    return [a.id for a in APPS]
-
-
 def normalize_id(raw: str) -> str:
     return raw.strip().lower().replace("-", "_")
 
