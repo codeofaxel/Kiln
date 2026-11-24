@@ -350,6 +350,10 @@ class SliceResult:
     #: sliced file commands in each (:func:`kiln.speed_by_height.sliced`);
     #: ``None`` for a slice made with none.
     speed_by_height: dict[str, Any] | None = None
+    #: Set when the slice asked for a brim round the part and the sliced
+    #: file draws none: the width asked for and the sentence that says so
+    #: (:func:`_brim_left_out`).  ``None`` for every other slice.
+    brim: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -384,6 +388,8 @@ class SliceResult:
             d["experimental"] = self.experimental
         if self.speed_by_height is not None:
             d["speed_by_height"] = self.speed_by_height
+        if self.brim is not None:
+            d["brim"] = self.brim
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -2739,6 +2745,22 @@ def _slice_file(
                 supports = replace(
                     supports, kept_clear=kept_clear_placed(unpainted, supports, bed_centre=centre),
                 )
+    # OrcaSlicer and Bambu Studio leave a brim out where their normal supports
+    # stand, Bambu Studio all of it.  A slice that asks for a brim round the
+    # part and whose supports Kiln decided asks those slicers for supports
+    # that stand off the model, which keep the brim; a style the caller
+    # stated is theirs.  The sliced file is read for the brim either way.
+    asked_brim = _asked_brim_mm(slicer_profile)
+    if (asked_brim and supports.enabled and supports.decided_by == DECIDED_ANALYSIS
+            and slicer_cli_family(slicer) == _CLI_BAMBU and STYLE_KEY not in supports.settings
+            and STYLE_KEY not in profile_origin(slicer_profile).stated):
+        stand_off = {STYLE_KEY: STAND_OFF_STYLE}
+        slicer_profile = profile_with_overrides(
+            slicer_profile, stand_off,
+            prefix=f"{Path(slicer_profile).stem}_" if slicer_profile else None, stated=False,
+        )
+        supports = replace(supports, settings={**supports.settings, **stand_off})
+
     def _decided(out_path: str, *, with_profile: str | None, prepare: Any = None) -> SliceResult:
         return _slice_decided(
             slicer, input_abs, sliced_input, out_path, ext=ext, input_path=input_path,
@@ -2820,6 +2842,7 @@ def _slice_file(
             finally:
                 _unrecorded.reset(quiet)
         result = _say_left_out(say_project_plate(made, taken), left_out)
+        _say_brim_left_out(result, asked_brim, slicer, slicer_profile)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
         if soft_run is not None:
@@ -2841,6 +2864,56 @@ def _slice_file(
         for scratch in (layer_scratch, kept_off_scratch):
             if scratch is not None:
                 shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _asked_brim_mm(profile: str | None) -> float:
+    """How wide a brim round the part *profile* asks for; 0 for none or for
+    a profile that cannot be read."""
+    if not profile:
+        return 0.0
+    try:
+        return outside_brim_mm(ini_to_settings(profile))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return 0.0
+
+
+def _say_brim_left_out(result: SliceResult, asked_mm: float, slicer: SlicerInfo, profile: str | None) -> None:
+    """Say on *result* that the sliced file draws no brim, when the slice
+    asked for one *asked_mm* wide round the part.
+
+    The file is read by its own feature labels.  A file with a brim, or one
+    whose labels cannot be read, is left as it is: nothing is claimed either
+    way.  Never raises.
+    """
+    if not asked_mm or not result.success or not result.output_path:
+        return
+    try:
+        from kiln.maker_slicer import said_name
+        from kiln.slicer_geometry import parse_slicer_features
+
+        parsed = parse_slicer_features(result.output_path)
+        if not parsed.labelled or "brim" in parsed.buckets:
+            return
+        name = said_name(slicer)
+        supports = result.supports
+        beside_supports = (
+            slicer_cli_family(slicer) == _CLI_BAMBU and supports is not None and supports.enabled
+            and ini_to_settings(profile).get(STYLE_KEY, "").strip().lower() != STAND_OFF_STYLE
+        )
+        if beside_supports:
+            fix = (
+                f"{name} leaves the brim out beside the supports it builds this way. Tree supports keep it "
+                "(`support_material_style=organic`, through reslice_with_overrides), and so does slicing "
+                "without supports."
+            )
+        else:
+            fix = "Look at the first layer in the slicer before printing: the part is held by its own footprint alone."
+        said = f"The sliced file has no brim, though a {asked_mm:g} mm brim was asked for. {fix}"
+    except Exception:  # noqa: BLE001 -- a file that cannot be read claims nothing
+        logger.debug("the sliced file's brim could not be read", exc_info=True)
+        return
+    result.brim = {"asked_mm": asked_mm, "drawn": False, "said": said}
+    result.message = f"{result.message} {said}".strip()
 
 
 def _say_sliced_with(result: SliceResult, several: Any) -> SliceResult:
