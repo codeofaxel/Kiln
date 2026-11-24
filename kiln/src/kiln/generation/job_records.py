@@ -51,6 +51,8 @@ kept only in this process would answer "not found" to the call that needs it.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import copy
 import hashlib
 import logging
@@ -183,12 +185,12 @@ def check_update(changes: dict[str, Any]) -> None:
     :data:`MADE_FROM_KEYS`.  Every store calls it."""
     unknown = set(changes) - UPDATABLE
     if unknown:
-        raise ValueError(f"a job record cannot change {sorted(unknown)}")
+        raise ValueError(f"a job record cannot change {_listed(sorted(unknown), last='and')}")
     made_from = changes.get("made_from")
     if made_from is not None and (
         not isinstance(made_from, dict) or set(made_from) - MADE_FROM_KEYS
     ):
-        raise ValueError(f"made_from may name only {sorted(MADE_FROM_KEYS)}")
+        raise ValueError(f"made_from may name only {_listed(sorted(MADE_FROM_KEYS), last='and')}")
 
 
 class MemoryJobRecords:

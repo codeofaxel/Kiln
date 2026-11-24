@@ -38,6 +38,9 @@ _TECHNICAL: tuple[tuple[str, str], ...] = (
     ("a CAD internal", r"\b(?:B-rep|BRep|analytic|faceted|transpil\w*|tessellat\w*|CSG|kernel)\b"),
     ("a server word", r"\b(?:HTTP ?[1-5]\d\d|status:? ?[1-5]\d\d|[45]\d\d (?:Client|Server) Error|status code|"
                       r"tenant|dispatch\w*|sha256|SHA-256|JSON|JWT|RPC)\b"),
+    # Python's printed form of a list, set, tuple or dict of words: say the
+    # items with :func:`listed` instead.
+    ("a printed list", r"""\[\s*['"][^'"\n]*['"]\s*[,\]]|\{\s*['"][^'"\n]*['"]\s*[,:}]|\(\s*['"][^'"\n]*['"]\s*,"""),
 )
 _PATTERNS = tuple((name, re.compile(rx)) for name, rx in _TECHNICAL)
 #: Text a person is meant to type or copy, which is not judged.
@@ -62,6 +65,12 @@ def technical_words(text: Any) -> list[str]:
 
 #: The kind a marked code name answers; every other kind is wording.
 CODE_NAME = "a code name"
+#: Python's printed form of a collection.  The source check refuses a new one
+#: (``scripts/audit_plain_words.py``); a failure already raised with one keeps
+#: its own words, because the same brackets are how a sentence shows the
+#: shape of an input (``{"driver": true}``), and Kiln's everyday words for a
+#: failure say less than that.
+PRINTED_LIST = "a printed list"
 #: Python's own failures whose text is never a sentence, whatever words it
 #: holds (a missing key's text is the key).  Matched by exact type: a failure
 #: Kiln defines on top of one of these speaks for itself.
@@ -100,7 +109,32 @@ def _is_plain(exc: BaseException) -> bool:
     never = type(exc) in _NEVER_A_SENTENCE or type(exc).__name__ in _NEVER_A_SENTENCE_NAMES
     if never and not _a_written_lookup_message(exc):
         return False
-    return not [kind for kind in technical_words(text) if kind != CODE_NAME]
+    return not [kind for kind in technical_words(text) if kind not in (CODE_NAME, PRINTED_LIST)]
+
+
+def listed(items: Any, *, last: str = "or", quoted: bool = True) -> str:
+    """*items* said in a sentence: ``"`a`, `b` or `c`"``.
+
+    For any list, set, tuple, dict (its keys) or other iterable of values a
+    person may type back, each in backticks.  *last* joins the final pair
+    ("or" for a choice, "and" for a set of things).  An enum member is said
+    by its value; a tuple of values (a pair of settings) as ``a + b``.
+    ``"none"`` when there is nothing to say.
+    """
+    if isinstance(items, str):
+        items = [items]
+    words: list[str] = []
+    for item in items or ():
+        item = getattr(item, "value", item)
+        if isinstance(item, tuple):
+            item = " + ".join(str(getattr(part, "value", part)) for part in item)
+        text = str(item)
+        words.append(f"`{text}`" if quoted else text)
+    if not words:
+        return "none"
+    if len(words) == 1:
+        return words[0]
+    return f"{', '.join(words[:-1])} {last} {words[-1]}"
 
 
 def said(exc: BaseException | None) -> str:
@@ -174,5 +208,5 @@ def reworded(message: str, exc: BaseException | None) -> tuple[str, str | None]:
 
 __all__ = [
     "CODE_NAME", "DETAIL_FIELD", "PERSON_FIELDS", "detail_field", "detail_of",
-    "reworded", "said", "sentence", "technical_words",
+    "listed", "reworded", "said", "sentence", "technical_words",
 ]

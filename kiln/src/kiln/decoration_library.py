@@ -14,6 +14,8 @@ back into the decoration's own folder (:mod:`kiln._pro_decoration_bridge`).
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import json
 import logging
 import os
@@ -382,7 +384,7 @@ def save_decoration(
     if content_type not in _VALID_CONTENT_TYPES:
         raise ValueError(
             f"Invalid content_type '{content_type}'; "
-            f"must be one of {sorted(_VALID_CONTENT_TYPES)}"
+            f"must be one of {_listed(sorted(_VALID_CONTENT_TYPES))}"
         )
     if not source_path and not content_path and not content_data:
         raise ValueError(

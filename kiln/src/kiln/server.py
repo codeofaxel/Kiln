@@ -47,6 +47,8 @@ Environment variables
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import asyncio
 import atexit
 
@@ -9510,7 +9512,7 @@ def _undriven_multi_material_decision(
     out["multi_material"] = mm.to_dict()
     if ams_mapping is not None:
         warnings_out.append(
-            f"ams_mapping {list(ams_mapping)} was ignored: Kiln does not drive "
+            f"ams_mapping {_listed(list(ams_mapping), last='and')} was ignored: Kiln does not drive "
             f"the {mm.label}'s slots — its own tool map routes each tool change."
         )
 
@@ -10088,7 +10090,7 @@ def _resolve_use_ams(
             if ams_mapping is not None and list(ams_mapping) != resolved:
                 warnings_out.append(
                     "Explicit ams_mapping "
-                    f"{list(ams_mapping)} differs from what the loaded spools "
+                    f"{_listed(list(ams_mapping), last='and')} differs from what the loaded spools "
                     f"suggest ({plan.summary}); using the explicit mapping."
                 )
             warnings_out.extend(plan.warnings)
@@ -12036,7 +12038,7 @@ def skip_print_objects(
             **verdict.to_dict(),
             "message": (
                 f"Asked the printer to skip {len(object_ids)} object(s): "
-                f"{list(object_ids)}. {tail}"
+                f"{_listed(list(object_ids), last='and')}. {tail}"
             ),
         }
     except (PrinterError, RuntimeError) as exc:
@@ -25502,7 +25504,7 @@ def multi_color_copies(
                     return _error_dict(
                         f"No filament is loaded in {', '.join(describe_tray_id(m) for m in missing)}. "
                         f"Loaded: {', '.join(loaded[t] for t in sorted(loaded))} "
-                        f"(tray ids {sorted(loaded)}). Pick loaded trays or load "
+                        f"(tray ids {_listed(sorted(loaded), last='and')}). Pick loaded trays or load "
                         f"filament first.",
                         code="NO_MATERIAL",
                     )

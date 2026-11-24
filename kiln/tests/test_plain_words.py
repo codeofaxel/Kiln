@@ -121,3 +121,57 @@ def test_the_english_none_is_not_mistaken_for_a_code_value():
     assert technical_words("None of the attempts worked.") == []
     assert technical_words("The layer height was None.") == ["a code value"]
 
+
+
+# --- a list said in words ---
+
+
+class TestListed:
+    """The items of a list, said in a sentence instead of printed as Python
+    prints them."""
+
+    def test_a_choice_is_joined_with_or_and_each_item_can_be_typed(self):
+        from kiln.plain_words import listed
+
+        assert listed(["pla", "petg", "abs"]) == "`pla`, `petg` or `abs`"
+
+    def test_a_set_of_things_is_joined_with_and(self):
+        from kiln.plain_words import listed
+
+        assert listed(["x", "y"], last="and") == "`x` and `y`"
+
+    def test_one_item_none_and_a_mapping(self):
+        from kiln.plain_words import listed
+
+        assert listed(["only"]) == "`only`"
+        assert listed([]) == "none"
+        assert listed({"a": 1, "b": 2}) == "`a` or `b`"
+
+    def test_an_enum_is_said_by_its_value(self):
+        import enum
+
+        from kiln.plain_words import listed
+
+        class Fit(enum.Enum):
+            SNUG = "snug"
+            LOOSE = "loose"
+
+        assert listed(list(Fit)) == "`snug` or `loose`"
+
+
+class TestAPrintedListIsNotPlainWords:
+    def test_the_check_names_it(self):
+        from kiln.plain_words import technical_words
+
+        assert "a printed list" in technical_words("Valid: ['a', 'b']")
+        assert "a printed list" in technical_words("keys {'x': 1}")
+        assert technical_words("Paused before step 2 ('slice')") == []
+        assert technical_words('Use `{"surface": "texture"}`') == []
+
+    def test_a_failure_showing_an_input_shape_keeps_its_own_words(self):
+        """A sentence that shows the shape of an input is better than Kiln's
+        everyday words for a failure: said() keeps it."""
+        from kiln.plain_words import said
+
+        exc = ValueError('Declare the driver first: add the joint with mechanism={"driver": true}.')
+        assert said(exc) == str(exc)

@@ -25,6 +25,8 @@ Nothing here raises.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -83,9 +85,9 @@ def refusal_for(material: Any, *, reason: Any = None, min_score: Any = 0.5, best
         return None
     if reason:
         if not isinstance(reason, str):
-            return f"Invalid reason: name it as text. Valid: {list(REASONS)}"
+            return f"Invalid reason: name it as text. Valid: {_listed(list(REASONS))}"
         if reason.lower() not in REASONS:
-            return f"Invalid reason: {reason[:MAX_MATERIAL_CHARS]!r}. Valid: {list(REASONS)}"
+            return f"Invalid reason: {reason[:MAX_MATERIAL_CHARS]!r}. Valid: {_listed(list(REASONS))}"
     if not isinstance(min_score, (int, float)):
         return "Invalid min_score: give a number; matches run from 0.0 to 1.0."
     return None

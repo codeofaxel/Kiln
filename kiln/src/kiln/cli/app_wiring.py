@@ -27,6 +27,8 @@ Contract:
 
 from __future__ import annotations
 
+from kiln import plain_words as _plain_words
+
 import hashlib
 import json
 import os
@@ -344,7 +346,7 @@ def _read_text(path: Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise SettingsUnreadable(f"couldn't read {path}: {exc}") from exc
+        raise SettingsUnreadable(f"couldn't read {path}: {_plain_words.said(exc)}") from exc
 
 
 #: How one server entry is spelled, per app.  Each takes the standard
@@ -558,7 +560,7 @@ class _TomlFormat:
         try:
             return tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
-            raise SettingsUnreadable(f"{path} isn't valid TOML ({exc})") from exc
+            raise SettingsUnreadable(f"{path} isn't valid TOML, so Kiln left it as it is") from exc
 
     def entries(self, path: Path, text: str | None) -> dict[str, Any]:
         servers = self.parse(path, text).get("mcp_servers") or {}
@@ -737,7 +739,7 @@ def _plan_one(app: App, entry: dict[str, Any], skill_text: str, to_local: bool =
         text = _read_text(path)
         current = fmt.entries(path, text)
     except SettingsUnreadable as exc:
-        return AppPlan(app, path, CANT_READ, reason=str(exc))
+        return AppPlan(app, path, CANT_READ, reason=_plain_words.said(exc))
 
     wanted = fmt.fragment(entry, skill_text)
     steps: list[Step] = []
@@ -1107,7 +1109,7 @@ def _undo_file_entries(path: Path, record: dict[str, Any], dry_run: bool) -> Und
     try:
         current = _read_text(path)
     except SettingsUnreadable as exc:
-        return UndoResult(str(path), app, "nothing to do", message=str(exc))
+        return UndoResult(str(path), app, "nothing to do", message=_plain_words.said(exc))
     untouched = current is not None and _sha(current) == record.get("sha256")
 
     if untouched and record["writes"] == 1:
@@ -1135,7 +1137,7 @@ def _undo_file_entries(path: Path, record: dict[str, Any], dry_run: bool) -> Und
                 continue
             text = fmt.put(path, text, name, entry["before"])
     except SettingsUnreadable as exc:
-        return UndoResult(str(path), app, "nothing to do", message=str(exc))
+        return UndoResult(str(path), app, "nothing to do", message=_plain_words.said(exc))
 
     if text == current:
         return UndoResult(str(path), app, "nothing to do", left_alone=left)

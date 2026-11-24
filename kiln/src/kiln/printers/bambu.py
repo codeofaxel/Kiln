@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import contextlib
 import ftplib
 import hashlib
@@ -1380,7 +1382,7 @@ class BambuAdapter(PrinterAdapter):
         self._timeout = timeout
         configured_tls_mode = (tls_mode or os.environ.get(_TLS_MODE_ENV, _DEFAULT_TLS_MODE)).strip().lower()
         if configured_tls_mode not in _VALID_TLS_MODES:
-            raise ValueError(f"tls_mode must be one of {sorted(_VALID_TLS_MODES)}, got {configured_tls_mode!r}")
+            raise ValueError(f"tls_mode must be one of {_listed(sorted(_VALID_TLS_MODES))}, got {configured_tls_mode!r}")
         self._tls_mode = configured_tls_mode
         configured_fp = tls_fingerprint or os.environ.get(_TLS_FINGERPRINT_ENV, "")
         self._tls_fingerprint = _normalize_fingerprint(configured_fp)

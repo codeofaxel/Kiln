@@ -19,7 +19,10 @@ Kiln refuses or fails (``kiln.plain_words``):
   ``detail``, ``debug``, ``trace``);
 * judged two ways: a TECHNICAL word in its literal text (``technical_words``),
   and a RAW error, a sentence built from a caught exception
-  (``str(exc)``, ``f"... {exc}"``), whose text is Python's, never Kiln's.
+  (``str(exc)``, ``f"... {exc}"``), whose text is Python's, never Kiln's;
+* and, in any f-string outside a log line or an ``assert``, a PRINTED LIST: a
+  list, set, dict or tuple put into the text whole, which prints as Python
+  writes it (``['a', 'b']``).  ``kiln.plain_words.listed`` says the items.
 
 A finding is keyed ``path::function::where::kind`` (no line numbers, so an
 edit above it does not move it).  ``--baseline FILE`` judges against the
@@ -123,6 +126,26 @@ def _spoken_names(func: ast.AST) -> set[str]:
     return names
 
 
+#: Calls whose answer is a collection, printed as Python prints it when put
+#: into text whole (``['a', 'b']``).  Say the items with ``kiln.plain_words.listed``.
+_COLLECTION_CALLS = frozenset({"sorted", "list", "set", "tuple", "dict", "frozenset"})
+
+
+def _prints_a_collection(node: ast.AST) -> bool:
+    """Whether *node*, put into an f-string whole, prints as a Python
+    collection: a list, set, dict or tuple display or comprehension, a call
+    that builds one, or a mapping's keys, values or items."""
+    if isinstance(node, (ast.List, ast.Set, ast.Dict, ast.Tuple, ast.ListComp, ast.SetComp, ast.DictComp)):
+        return True
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in _COLLECTION_CALLS:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr in ("keys", "values", "items"):
+            return True
+    return False
+
+
 class _Scan(ast.NodeVisitor):
     def __init__(self, rel: str) -> None:
         self.rel = rel
@@ -131,6 +154,7 @@ class _Scan(ast.NodeVisitor):
         self.found: list[tuple[str, int, str]] = []   # (key, line, text)
         self.judged: set[int] = set()   # nodes already read as a sentence
         self.quiet = 0                  # > 0 inside text that is technical on purpose
+        self.raising_builtin = 0        # > 0 inside a builtin failure's message
         self.spoken: list[set[str]] = [set()]   # names a person's message is built from, per function
 
     # -- where we are -------------------------------------------------------
@@ -230,6 +254,14 @@ class _Scan(ast.NodeVisitor):
 
     def visit_JoinedStr(self, node: ast.JoinedStr) -> None:
         self._built(node)
+        if not self.quiet or self.raising_builtin:
+            for part in node.values:
+                if (isinstance(part, ast.FormattedValue) and part.format_spec is None
+                        and _prints_a_collection(part.value)):
+                    self.found.append((
+                        f"{self.rel}::{'.'.join(self.scope) or '<module>'}::printed list",
+                        node.lineno, ast.unparse(part.value)[:120],
+                    ))
         self.generic_visit(node)
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
@@ -273,7 +305,11 @@ class _Scan(ast.NodeVisitor):
         name = _name(failure.func) if isinstance(failure, ast.Call) else ""
         if name in _BUILTIN_FAILURES or not name:
             if node.exc is not None:
+                # Its words are judged when said, and said() keeps a printed
+                # list as written, so that one is judged here.
+                self.raising_builtin += 1
                 self._quietly(node.exc)
+                self.raising_builtin -= 1
             if node.cause is not None:
                 self.visit(node.cause)
             return

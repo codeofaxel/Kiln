@@ -10,6 +10,8 @@ no manual imports needed.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import logging
 import threading
 from typing import Any
@@ -731,7 +733,7 @@ class _RecoveryToolsPlugin:
             except ValueError:
                 return _srv._error_dict(
                     f"Unknown failure type: {failure_type!r}. "
-                    f"Valid types: {[ft.value for ft in FailureType]}",
+                    f"Valid types: {_listed([ft.value for ft in FailureType], last='and')}",
                     code="VALIDATION_ERROR",
                 )
 

@@ -13,6 +13,8 @@ no manual imports needed.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import logging
 import math
 import os
@@ -1736,7 +1738,7 @@ class _ColorToolsPlugin:
             if method not in valid_methods:
                 return {
                     "success": False,
-                    "error": f"Unknown method '{method}'. Choose from: {sorted(valid_methods)}",
+                    "error": f"Unknown method '{method}'. Choose from: {_listed(sorted(valid_methods))}",
                 }
 
             path = Path(input_path)

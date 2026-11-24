@@ -109,8 +109,8 @@ class TestWhatIsSent:
         assert calls == []
         assert out["success"] is False and out["error"]["code"] == "VALIDATION_ERROR"
         assert out["error"]["message"] == (
-            "Invalid reason: 'cheap'. Valid: ['unavailable', 'cost', 'lead_time', 'strength', "
-            "'finish_quality', 'heat_resistance']"
+            "Invalid reason: 'cheap'. Valid: `unavailable`, `cost`, `lead_time`, `strength`, "
+            "`finish_quality` or `heat_resistance`"
         )
         # A reason the doors take is asked, in any case.
         answers.append(_ok([]))

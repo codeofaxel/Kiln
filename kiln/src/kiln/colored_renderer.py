@@ -8,6 +8,8 @@ back-face culling, and multiple camera angle presets.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import math
 import os
 import tempfile
@@ -413,7 +415,7 @@ def render_colored_mesh(
         raise ValueError("No triangles to render")
     if shading not in SHADING_MODES:
         raise ValueError(
-            f"unknown shading {shading!r}; choose from {list(SHADING_MODES)}"
+            f"unknown shading {shading!r}; choose from {_listed(list(SHADING_MODES))}"
         )
     if face_labels is not None and len(face_labels) != len(triangles):
         raise ValueError(
@@ -881,7 +883,7 @@ def render_colored_mesh_multi_angle(
     if unknown:
         raise ValueError(
             f"Unknown camera angles: {unknown}. "
-            f"Valid angles: {list(_CAMERA_ANGLES.keys())}"
+            f"Valid angles: {_listed(list(_CAMERA_ANGLES.keys()), last='and')}"
         )
 
     if output_dir is None:

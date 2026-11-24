@@ -351,7 +351,7 @@ class TestResolveUseAms:
 
         decision = _resolve_use_ams("auto", [0, 1], _MmuPrinter(_happy_hare()))
         assert decision["ams_mapping"] is None
-        assert any("ignored" in w and "[0, 1]" in w for w in decision["warnings"])
+        assert any("ignored" in w and "`0` and `1`" in w for w in decision["warnings"])
 
     def test_plain_printer_keeps_its_old_shape_exactly(self):
         from kiln.server import _resolve_use_ams

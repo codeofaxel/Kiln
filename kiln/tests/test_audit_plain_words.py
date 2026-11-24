@@ -182,3 +182,33 @@ def door():
         raise PrinterError(exc) from exc
 '''))
     assert _keys(found) == {"raise PrinterError::raw error"}
+
+
+# --- a collection printed whole into a sentence ---
+
+
+def test_a_collection_put_into_a_sentence_whole_is_caught(tmp_path):
+    """A list, set or dict put into an f-string whole prints as Python writes
+    it (``['a', 'b']``), in a reply and in a builtin failure's message alike:
+    both are findings."""
+    found = _audit().scan(_tree(tmp_path, '''
+def door(name):
+    choices = {"a", "b"}
+    if name not in choices:
+        return {"success": False, "error": f"Unknown {name!r}. Valid: {sorted(choices)}"}
+    raise ValueError(f"pick from {list(choices)}")
+'''))
+    assert sum(1 for key, _line, _text in found if key.endswith("printed list")) == 2, found
+
+
+def test_the_items_said_in_words_pass(tmp_path):
+    found = _audit().scan(_tree(tmp_path, '''
+from kiln.plain_words import listed
+
+def door(name):
+    choices = {"a", "b"}
+    if name not in choices:
+        return {"success": False, "error": f"Unknown {name!r}. Valid: {listed(sorted(choices))}"}
+    logger.warning(f"internal: {sorted(choices)}")
+'''))
+    assert not [key for key, _l, _t in found if key.endswith("printed list")], found

@@ -26,6 +26,8 @@ Compatibility levels
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import json
 import re
 from functools import lru_cache
@@ -321,7 +323,7 @@ def filter_food_safe_materials(
     """
     keep = FOOD_SAFE_KEEP.get(require)
     if keep is None:
-        raise ValueError(f"require must be one of {sorted(FOOD_SAFE_KEEP)}")
+        raise ValueError(f"require must be one of {_listed(sorted(FOOD_SAFE_KEEP))}")
     return [c for c in candidates if food_safe_rating(c) in keep]
 
 

@@ -18,6 +18,8 @@ Usage::
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import contextlib
 import logging
 import os
@@ -791,7 +793,7 @@ def visualize_model(
         if not selected:
             return {
                 "success": False,
-                "error": f"No valid angles in {angles}. Valid: {[a[0] for a in _CAMERA_ANGLES]}",
+                "error": f"No valid angles in {angles}. Valid: {_listed([a[0] for a in _CAMERA_ANGLES])}",
                 "code": "INVALID_ANGLES",
             }
     else:
@@ -1266,7 +1268,7 @@ def compare_renders(
     if angle.lower() not in valid_angles:
         return {
             "success": False,
-            "error": f"Invalid angle '{angle}'. Valid: {sorted(valid_angles)}",
+            "error": f"Invalid angle '{angle}'. Valid: {_listed(sorted(valid_angles))}",
             "code": "INVALID_ANGLE",
         }
 

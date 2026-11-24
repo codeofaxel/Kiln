@@ -25,6 +25,8 @@ Each cached entry may also store FDM-relevant metadata:
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import hashlib
 import json
 import logging
@@ -380,7 +382,7 @@ class DesignCache:
                 f"Cannot determine printer_type for format {file_format!r}. Provide printer_type explicitly."
             )
         if resolved_type not in _VALID_PRINTER_TYPES:
-            raise ValueError(f"Invalid printer_type {resolved_type!r}. Must be one of: {sorted(_VALID_PRINTER_TYPES)}")
+            raise ValueError(f"Invalid printer_type {resolved_type!r}. Must be one of: {_listed(sorted(_VALID_PRINTER_TYPES))}")
 
         file_hash = _compute_sha256(file_path)
 

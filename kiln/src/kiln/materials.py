@@ -7,6 +7,8 @@ preflight check system.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import logging
 import os
 import threading
@@ -197,7 +199,7 @@ class MaterialTracker:
         if determined_by not in vocabulary:
             raise ValueError(
                 f"Invalid determined_by {determined_by!r}. "
-                f"Must be one of: {sorted(vocabulary)}"
+                f"Must be one of: {_listed(sorted(vocabulary))}"
             )
         with self._lock:
             mat = LoadedMaterial(
@@ -459,7 +461,7 @@ class MaterialTracker:
         if determined_by not in vocabulary:
             raise ValueError(
                 f"Invalid determined_by {determined_by!r}. "
-                f"Must be one of: {sorted(vocabulary)}"
+                f"Must be one of: {_listed(sorted(vocabulary))}"
             )
         if remaining_grams < 0:
             raise ValueError("remaining_grams cannot be negative.")

@@ -1008,7 +1008,7 @@ def uninstall_mcp(
                 app_wiring._atomic_write(path, fmt.put(path, text, app_wiring.KILN_NAME, None))
         except app_wiring.SettingsUnreadable as exc:
             # Can't read it: leave it alone rather than clobber it.
-            click.echo(f"  ! {exc}", err=True)
+            click.echo(f"  ! {_plain_words.said(exc)}", err=True)
             continue
         if present:
             results.append((app.display, "would remove" if dry_run else "removed", path))

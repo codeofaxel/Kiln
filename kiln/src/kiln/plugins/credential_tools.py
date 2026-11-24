@@ -10,6 +10,8 @@ no manual imports needed.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import logging
 from typing import Any
 
@@ -73,7 +75,7 @@ class _CredentialToolsPlugin:
                     ctype = CredentialType(credential_type)
                 except ValueError:
                     return _srv._error_dict(
-                        f"Invalid type: {credential_type!r}. Valid: {[t.value for t in CredentialType]}",
+                        f"Invalid type: {credential_type!r}. Valid: {_listed([t.value for t in CredentialType])}",
                         code="VALIDATION_ERROR",
                     )
                 cred = _store(ctype, value, label=label)

@@ -8,6 +8,8 @@ PGM P5 (binary Portable Gray Map) is the format OpenSCAD's surface() reads.
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import contextlib
 import logging
 import math
@@ -305,7 +307,7 @@ def resolve_style(name: str | None) -> str:
     key = STYLE_ALIASES.get(key, key)
     if key not in IMAGE_STYLES:
         raise ValueError(
-            f"image style {name!r} is not one of {list(accepted_styles())}"
+            f"image style {name!r} is not one of {_listed(list(accepted_styles()))}"
         )
     return key
 

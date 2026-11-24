@@ -23,6 +23,8 @@ Example::
 
 from __future__ import annotations
 
+from kiln.plain_words import listed as _listed
+
 import contextlib
 import hashlib
 import hmac
@@ -1878,7 +1880,7 @@ class KilnDB:
         if determined_by and determined_by not in self.VALID_DETERMINED_BY:
             raise ValueError(
                 f"Invalid determined_by {determined_by!r}. "
-                f"Must be one of: {sorted(self.VALID_DETERMINED_BY)}"
+                f"Must be one of: {_listed(sorted(self.VALID_DETERMINED_BY))}"
             )
         with self._write_lock:
             self._conn.execute(
@@ -1999,7 +2001,7 @@ class KilnDB:
         if determined_by and determined_by not in self.VALID_DETERMINED_BY:
             raise ValueError(
                 f"Invalid determined_by {determined_by!r}. "
-                f"Must be one of: {sorted(self.VALID_DETERMINED_BY)}"
+                f"Must be one of: {_listed(sorted(self.VALID_DETERMINED_BY))}"
             )
         with self._write_lock:
             if determined_by:
@@ -3083,11 +3085,11 @@ class KilnDB:
         """
         outcome_val = outcome.get("outcome", "")
         if outcome_val not in self.VALID_OUTCOMES:
-            raise ValueError(f"Invalid outcome {outcome_val!r}. Must be one of: {sorted(self.VALID_OUTCOMES)}")
+            raise ValueError(f"Invalid outcome {outcome_val!r}. Must be one of: {_listed(sorted(self.VALID_OUTCOMES))}")
         determined_by = outcome.get("determined_by")
         if determined_by and determined_by not in self.PRINT_OUTCOME_DETERMINED_BY:
             raise ValueError(
-                f"Invalid determined_by {determined_by!r}. Must be one of: {sorted(self.VALID_DETERMINED_BY)}"
+                f"Invalid determined_by {determined_by!r}. Must be one of: {_listed(sorted(self.VALID_DETERMINED_BY))}"
             )
         if outcome.get("quality_grade") and outcome["quality_grade"] not in {"excellent", "good", "acceptable", "poor"}:
             raise ValueError(f"Invalid quality_grade {outcome['quality_grade']!r}")
