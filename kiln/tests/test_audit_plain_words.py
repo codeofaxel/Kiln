@@ -212,3 +212,27 @@ def door(name):
     logger.warning(f"internal: {sorted(choices)}")
 '''))
     assert not [key for key, _l, _t in found if key.endswith("printed list")], found
+
+
+def test_a_list_held_in_a_name_is_followed(tmp_path):
+    """A name a function binds only to a collection prints as one too; a name
+    also bound to anything else is not guessed at."""
+    found = _audit().scan(_tree(tmp_path, '''
+def door(reason, maybe):
+    valid = [r for r in ("cost", "finish")]
+    if reason not in valid:
+        return {"success": False, "error": f"Invalid reason. Valid: {valid}"}
+    either = []
+    either = "text"
+    return {"success": False, "error": f"Got {either}"}
+'''))
+    assert [text for key, _l, text in found if key.endswith("printed list")] == ["valid"], found
+
+
+def test_a_field_that_holds_code_is_read_as_code(tmp_path):
+    found = _audit().scan(_tree(tmp_path, '''
+def door(colors, ids):
+    sent(wire=f"skip_objects {list(ids)}")
+    return {"success": True, "call": f"save_palette(colors={list(colors)!r})"}
+'''))
+    assert not [key for key, _l, _t in found if key.endswith("printed list")], found
