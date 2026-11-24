@@ -557,7 +557,18 @@ def _sliced_project(path: str) -> bool:
 def check_due_before_printing(input_path: str, *, printer_id: str = "", material: str = "") -> str | None:
     """What a print's approval says about the part in *input_path*: the
     printability verdict's sentence when it asks for a check (:func:`check_due`),
-    else ``None``.
+    else ``None`` (:func:`check_before_printing`).  Never raises."""
+    found = check_before_printing(input_path, printer_id=printer_id, material=material)
+    return found[0] if found else None
+
+
+def check_before_printing(
+    input_path: str, *, printer_id: str = "", material: str = "",
+) -> tuple[str, list[dict[str, Any]]] | None:
+    """``(sentence, reasons)`` for the part in *input_path* when the
+    printability verdict asks for a check of it: the verdict's sentence
+    (:func:`check_due`) and why, as facts
+    (:func:`kiln.printability.check_reasons`).  ``None`` otherwise.
 
     The print door's own gate (:func:`gate_for_print`), for the same printer
     and material, so the approval says what the print door finds.  A file
@@ -575,7 +586,11 @@ def check_due_before_printing(input_path: str, *, printer_id: str = "", material
     except Exception:  # noqa: BLE001 -- the approval opens without the line
         _logger.debug("The approval says no check for %s: the check did not run", input_path, exc_info=True)
         return None
-    return check_due(gate.report) if gate.reason is None else None
+    said = check_due(gate.report) if gate.reason is None else None
+    if not said:
+        return None
+    reasons = ((gate.report or {}).get("model_info") or {}).get("check_reasons")
+    return said, [dict(r) for r in reasons] if isinstance(reasons, list) else []
 
 
 def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "") -> PrintGate:

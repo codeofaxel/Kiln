@@ -1076,7 +1076,7 @@ def _step_printability(
 ) -> None:
     """Step 5: printability analysis, for the pipeline's material and printer."""
     try:
-        from kiln.printability import analyze_printability, passes, support_verdict, verdict_of
+        from kiln.printability import analyze_printability, check_reasons, passes, support_verdict, verdict_of
 
         pa_report = analyze_printability(
             working_path, material=material, printer_id=printer_id,
@@ -1094,6 +1094,10 @@ def _step_printability(
         # scores, and one that won't print as it is stops the pipeline.
         key, said = verdict_of(pa_report)
         report.printability_verdict, report.printability_verdict_text = key, said
+        if key == "check":
+            # Why, as facts (kiln.printability.CHECK_REASONS), for a door that
+            # carries the check somewhere it cannot carry the sentence.
+            report.model_info["check_reasons"] = check_reasons(pa_report)
         passed = passes(key, score, bar=_MIN_PASS_SCORE)
         details = said.rstrip(".")
         # A verdict that does not let the part print is this check's failure:

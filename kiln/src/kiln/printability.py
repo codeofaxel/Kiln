@@ -11090,6 +11090,51 @@ def checks_due(report: PrintabilityReport) -> list[str]:
     return [sentence for sentence in due if sentence]
 
 
+#: Why a part's verdict is ``check``, as a fixed set of ids: one for each
+#: reason :func:`checks_due` names (a surface that does not close, a part
+#: expected to come off the bed, walls or pins the slice may leave out), and
+#: ``other`` for a check the report names no single cause for.
+CHECK_REASONS: tuple[str, ...] = ("open_surface", "comes_off_bed", "walls_left_out", "other")
+
+
+def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
+    """Why *report*'s verdict is ``check``, as facts rather than sentences,
+    worst first in the order of :func:`checks_due`: each ``{"id": ...}`` from
+    :data:`CHECK_REASONS`, ``comes_off_bed`` with how the part is held down
+    (``"hold"``: ``"raft"`` or ``"brim"``, and ``"brim_mm"`` when the brim
+    has a width) and ``walls_left_out`` with ``"thinnest_mm"`` and
+    ``"general_mm"`` when they are known.  ``[{"id": "other"}]`` for a check
+    with none of those causes, ``[]`` for any other verdict.  Never raises."""
+    try:
+        if verdict_of(report)[0] != "check":
+            return []
+        reasons: list[dict[str, Any]] = []
+        pieces = report.pieces
+        if pieces is not None and getattr(pieces, "open_surface", ""):
+            reasons.append({"id": "open_surface"})
+        force = report.adhesion_force
+        if force is not None and getattr(force, "risk_level", "") == "likely_detach":
+            rec = report.adhesion
+            if rec is not None and rec.use_raft:
+                hold: dict[str, Any] = {"hold": "raft"}
+            elif rec is not None and rec.brim_width_mm > 0:
+                hold = {"hold": "brim", "brim_mm": int(rec.brim_width_mm)}
+            else:
+                hold = {"hold": "brim"}
+            reasons.append({"id": "comes_off_bed", **hold})
+        walls = report.thin_walls
+        if walls is not None and getattr(walls, "may_be_left_out_count", 0):
+            sizes = {
+                "thinnest_mm": round(float(walls.may_be_left_out_min_mm), 2),
+                "general_mm": round(float(walls.general_wall_mm), 2),
+            }
+            reasons.append({"id": "walls_left_out", **{k: v for k, v in sizes.items() if v > 0}})
+        return reasons or [{"id": "other"}]
+    except Exception:  # noqa: BLE001 -- the reasons are said by the verdict's sentence too
+        logger.debug("check reasons unavailable", exc_info=True)
+        return []
+
+
 def _hold_for_checks(report: PrintabilityReport) -> None:
     """Keep *report*'s own flag and rating on the side of its verdict: a
     part with a check due (:func:`checks_due`) is not ``printable`` and rates

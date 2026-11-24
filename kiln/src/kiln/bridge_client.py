@@ -1542,6 +1542,10 @@ _CARD_PRINT_TIME_MAX_S = 30 * 24 * 3600
 _CARD_FILAMENT_MAX_G = 10_000.0
 _CARD_PRINTER_STATES = frozenset({"ready", "busy", "offline"})
 _CARD_ASKED_FROM = frozenset({"mac", "windows", "linux"})
+#: The most reasons a part's check carries, and the bounds of its figures.
+_CARD_CHECK_REASONS_MAX = 4
+_CARD_BRIM_MAX_MM = 50
+_CARD_WALL_MAX_MM = 20.0
 
 
 def _card_text(value: Any) -> str:
@@ -1594,7 +1598,9 @@ class AskCard:
     #: The checked facts of what the print itself is
     #: (:func:`kiln.print_consent.what_the_print_states`): the account's
     #: server says each row from them in the words every door uses, and
-    #: never takes a row's text from the ask.
+    #: never takes a row's text from the ask.  ``part_check`` is the
+    #: printability verdict's check as ids and figures
+    #: (:func:`kiln.printability.check_reasons`), never its sentence.
     facts: Mapping[str, Any] | None = None
 
     def fields(self) -> dict[str, Any]:
@@ -1642,7 +1648,65 @@ class AskCard:
         colours = facts.get("colours")
         if isinstance(colours, Mapping) and colours_row(colours):
             out["colours"] = dict(colours)
+        check = _part_check_fact(facts.get("part_check"))
+        if check:
+            out["part_check"] = check
         return out
+
+
+def _card_figure(value: Any, high: float, *, whole: bool = False) -> bool:
+    """Whether *value* is a number above zero and at most *high* (a whole
+    number when *whole*): never a bool, never NaN."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if whole and not isinstance(value, int):
+        return False
+    return 0 < value <= high
+
+
+#: The figures each reason of a part's check may carry
+#: (:func:`kiln.printability.check_reasons`), each with the test it must pass.
+_CHECK_FIGURES: dict[str, dict[str, Callable[[Any], bool]]] = {
+    "open_surface": {},
+    "comes_off_bed": {
+        "hold": lambda v: v in ("brim", "raft"),
+        "brim_mm": lambda v: _card_figure(v, _CARD_BRIM_MAX_MM, whole=True),
+    },
+    "walls_left_out": {
+        "thinnest_mm": lambda v: _card_figure(v, _CARD_WALL_MAX_MM),
+        "general_mm": lambda v: _card_figure(v, _CARD_WALL_MAX_MM),
+    },
+    "other": {},
+}
+
+
+def _part_check_fact(value: Any) -> dict[str, Any] | None:
+    """The printability verdict's check of the part as the card is sent it:
+    ``{"verdict": "check", "reasons": [...]}``, each reason an id from
+    :data:`kiln.printability.CHECK_REASONS` with only the figures its id
+    takes (:data:`_CHECK_FIGURES`), each in bounds.  No text leaves with it.
+    ``None`` for anything else, whole: a reason Kiln does not name, a figure
+    out of bounds, or a field no reason takes."""
+    try:
+        from kiln.printability import CHECK_REASONS
+    except Exception:  # noqa: BLE001 -- no vocabulary to send in: nothing is sent
+        return None
+    if not isinstance(value, Mapping) or set(value) != {"verdict", "reasons"} or value["verdict"] != "check":
+        return None
+    reasons = value["reasons"]
+    if not isinstance(reasons, list) or not 0 < len(reasons) <= _CARD_CHECK_REASONS_MAX:
+        return None
+    sent: list[dict[str, Any]] = []
+    for reason in reasons:
+        rid = reason.get("id") if isinstance(reason, Mapping) else None
+        if not isinstance(rid, str) or rid not in CHECK_REASONS or rid not in _CHECK_FIGURES:
+            return None
+        figures = {k: v for k, v in reason.items() if k != "id"}
+        takes = _CHECK_FIGURES[rid]
+        if any(k not in takes or not takes[k](v) for k, v in figures.items()):
+            return None
+        sent.append({"id": rid, **figures})
+    return {"verdict": "check", "reasons": sent}
 
 
 def asked_from(platform: str | None = None) -> str:
