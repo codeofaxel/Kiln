@@ -519,9 +519,9 @@ CALLERS = {
     "cli/main.py::validate": "door: kiln validate, tested above",
     "plugins/validation_pipeline_tools.py::gate_for_print": "the gate itself, tested above",
     "server.py::_preflight_model_row": "door: the pre-flight check's model row is the gate run early, tested above",
-    "plugins/validation_pipeline_tools.py::check_due_before_printing": (
-        "reads: the gate run early for a print's approval, which says its check sentence; "
-        "a file the gate refuses or cannot read says nothing"
+    "plugins/validation_pipeline_tools.py::check_before_printing": (
+        "reads: the gate run early for a print's approval, which says its check sentence "
+        "and carries its reasons as facts; a file the gate refuses or cannot read says nothing"
     ),
     # The verdict tools and engines.
     "plugins/validation_pipeline_tools.py::register.validate_and_prepare": "tool: tested above",

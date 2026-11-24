@@ -999,9 +999,12 @@ def what_the_print_states(
 ) -> dict[str, Any]:
     """The checked facts every door says a print's approval rows from:
     ``check`` (the printability verdict's sentence,
-    :func:`kiln.plugins.validation_pipeline_tools.check_due_before_printing`)
+    :func:`kiln.plugins.validation_pipeline_tools.check_before_printing`)
     for a part the verdict asks a check of, judged for *printer_id* and
-    *material* as the print door judges it, ``owner_words``
+    *material* as the print door judges it, with ``part_check``, the same
+    check as facts (``{"verdict": "check", "reasons": [...]}``,
+    :func:`kiln.printability.check_reasons`) for a door that carries facts
+    and never a sentence, ``owner_words``
     (``{word: facts}``, :func:`kiln.experimental_print.file_owner_words`)
     for a slice the owner said to print anyway and a print sliced for
     nozzles of different sizes, and ``colours``
@@ -1010,11 +1013,12 @@ def what_the_print_states(
     copy of the file on this computer, when there is one.  Never raises."""
     states: dict[str, Any] = {}
     try:
-        from kiln.plugins.validation_pipeline_tools import check_due_before_printing
+        from kiln.plugins.validation_pipeline_tools import check_before_printing
 
-        check = check_due_before_printing(local_path or "", printer_id=printer_id, material=material)
-        if check:
-            states["check"] = check
+        found = check_before_printing(local_path or "", printer_id=printer_id, material=material)
+        if found:
+            states["check"], reasons = found
+            states["part_check"] = {"verdict": "check", "reasons": reasons}
     except Exception:  # noqa: BLE001 -- the approval opens without the row
         logger.debug("the part's check skipped for %s", file_name, exc_info=True)
     try:
