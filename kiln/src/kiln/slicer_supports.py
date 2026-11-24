@@ -46,7 +46,11 @@ The rule, in order:
   are asked for under that piece and nowhere else: its faces are painted
   to be supported (:func:`asked_under_input`) and the slicer supports only
   what is painted.  Where the file cannot be painted the slice keeps the
-  supports above, for the whole part;
+  supports above, for the whole part.  A piece that starts in the layer
+  right over the first has no room under it for a support with a gap, and
+  a slicer asked for one lays nothing: the slice is then made again with
+  the gap closed (:data:`CONTACT_KEY`), so the piece stands on a pad it is
+  joined to, and the answer says so;
 * a part the engine cannot read is sliced as it was, and the answer says
   the check was not made rather than reading like a part that needs none.
 
@@ -83,6 +87,10 @@ _PLACED_NONE = "; the slicer placed none"
 #: the Orca family's tree: :mod:`kiln.slicer_orca` carries it across).
 STYLE_KEY = "support_material_style"
 STAND_OFF_STYLE = "organic"
+
+#: The key that sets the gap a slicer leaves between a support's top and
+#: the face it holds; ``0`` joins the two.
+CONTACT_KEY = "support_material_contact_distance"
 
 #: Who decided the answer.
 DECIDED_STATED = "stated"        # the caller's own key, left alone
@@ -129,6 +137,16 @@ class SliceSupports:
     #: (:func:`supports_against`); ``None`` until a sliced file has been
     #: read.  Never served: the sentence says it.
     on_kept_off: int | None = field(default=None, repr=False)
+    #: Whether the slice was made with no gap over its supports, because
+    #: the piece they are for starts too low for one.  Never served: the
+    #: sentence says it.
+    joined: bool = field(default=False, repr=False)
+
+    @property
+    def placed_none(self) -> bool:
+        """Whether the sliced file was read and carries no support that
+        was asked for."""
+        return self.reason.endswith(_PLACED_NONE)
 
     @property
     def _kept_clear_clause(self) -> str:
@@ -163,6 +181,9 @@ class SliceSupports:
             return f"no supports; whether the part needs them was {self.reason}"
         if placed_none:
             return f"the part needs supports but the slicer placed none: {asked_for}"
+        if self.enabled and self.joined:
+            return (f"supports on: {self.reason}; that is too close to the plate for a gap, "
+                    "so the support under it is joined to it")
         if self.enabled and self.kept_off_painted:
             return f"supports on: {self.reason}; {self._kept_clear_clause}"
         # Asked for under one piece alone, the answer says what was asked:
@@ -175,7 +196,7 @@ class SliceSupports:
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        for bookkeeping in ("kept_off", "under", "under_painted", "own_angle", "kept_clear", "on_kept_off"):
+        for bookkeeping in ("kept_off", "under", "under_painted", "own_angle", "kept_clear", "on_kept_off", "joined"):
             d.pop(bookkeeping)
         if self.own_angle:
             d["settings"] = {k: v for k, v in d["settings"].items() if k != "support_material_threshold"}
