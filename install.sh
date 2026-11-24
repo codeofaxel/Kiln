@@ -15,7 +15,7 @@ set -eu
 
 # The Kiln release this installer installs by default.  A test keeps it
 # equal to the package version.
-KILN_DEFAULT_VERSION="1.5.1"
+KILN_DEFAULT_VERSION="1.6.0"
 PKG="kiln3d"
 # The Python Kiln runs on, which uv fetches when needed: the one Kiln's own
 # tests run on, so every part Kiln depends on has a ready-made build for it.

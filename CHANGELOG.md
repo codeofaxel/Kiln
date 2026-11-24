@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-24
+
 ### Added
 
 - **Install Kiln with one line, and it connects itself to your AI apps.** `curl -fsSL https://www.kiln3d.com/install.sh | sh` (Windows: `irm https://www.kiln3d.com/install.ps1 | iex`) installs Kiln, connects it to Claude Code, Claude Desktop, Codex, Cursor and the other AI apps it finds, keeps a copy of every settings file it changes, and takes it all back with `--uninstall`.

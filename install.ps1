@@ -32,7 +32,7 @@ function Install-Kiln {
 
     # The Kiln release this installer installs by default.  A test keeps it
     # equal to the package version and to install.sh.
-    $KilnDefaultVersion = "1.5.1"
+    $KilnDefaultVersion = "1.6.0"
     $Pkg = "kiln3d"
     # The Python Kiln runs on, which uv fetches when needed: the one Kiln's
     # own tests run on, so every part Kiln depends on has a ready-made build.

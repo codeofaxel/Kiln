@@ -266,7 +266,7 @@ STYLE_ALIASES: dict[str, str] = {
 RETIRED_STYLES: dict[str, str] = {
     "lithophane": (
         "a lithophane is a back-lit panel printed on edge, not a relief carved into a part; "
-        "Kiln's lithophane maker is its own tool, coming after 1.5.1"
+        "Kiln's lithophane maker is its own tool, and it is not built yet"
     ),
 }
 #: The styles that sculpt a photograph: kiln-pro's relief engine where it

@@ -2,10 +2,10 @@
 
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
-<!-- kiln-highlights: 1.5.1
-* fill the plate with copies: ask for as many as fit, and Kiln prints them and queues the rest, plate after plate
-* turn a photo into a relief with the subject cut out of the background, so the field around it prints flat
-* your designs can have a public page anyone can open, star or copy, and a fix someone proposes lands in your history on your yes
+<!-- kiln-highlights: 1.6.0
+* install Kiln with one line, and it connects itself to your AI apps
+* two-nozzle printers print with both nozzles
+* error messages are in plain words: what happened, what still works, and what to do next
 kiln-highlights:end -->
 <!-- The block above is machine-read, not rendered: installed Kilns parse it
      out of the PyPI JSON description so their update nudge can say what the
