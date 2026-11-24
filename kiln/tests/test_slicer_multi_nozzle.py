@@ -2093,8 +2093,8 @@ class TestMultiMaterialPrintHeatsEachNozzleForItsOwn:
 
 
 class TestCopiesInSeveralColoursKeepTheOwnersWord:
-    """Copies sliced one filament each and merged into one file: the merged
-    file is the one that prints, so its record keeps the owner's word."""
+    """Copies sliced as one plate, a filament each: the file handed over is
+    the one that prints, so its record keeps the owner's word."""
 
     _SAID = "On the owner's say-so, PLA-CF, an abrasive filament, prints through the nozzle on record."
 
@@ -2104,12 +2104,14 @@ class TestCopiesInSeveralColoursKeepTheOwnersWord:
 
         def one_copy(path, *, output_dir, soft_nozzle_confirmed=False, **_kw):
             out = Path(output_dir) / f"{Path(path).stem}.gcode"
-            out.write_text("; header\n;LAYER_CHANGE\nG1 X1 Y1 E1\n")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text("; header\n;LAYER_CHANGE\nT0\nG1 X1 Y1 E1\nT1\nG1 X2 Y2 E1\n")
             print_lineage.record_slice(path, str(out))
             result = slicer_mod.SliceResult(success=True, output_path=str(out), slicer="x", message="Sliced")
             if soft_nozzle_confirmed:
                 result.soft_nozzle = {
-                    "confirmed_by": "owner", "filaments": [{"filament": 1, "material": "PLA-CF"}],
+                    "confirmed_by": "owner",
+                    "filaments": [{"filament": 1, "material": "PLA-CF"}, {"filament": 2, "material": "PLA-CF"}],
                     "nozzles": [{"position": None, "material": "brass"}], "said": self._SAID,
                 }
             return result

@@ -485,7 +485,7 @@ class TestSliceFileCarriesTheIdentity:
         assert estimates["filament_weight_g"] == 2.55
         assert estimates["filament"]["material"] == "ASA"
 
-    def test_slice_multicolor_copies_hands_the_identity_to_every_copy(self, tmp_path):
+    def test_slice_multicolor_copies_hands_the_identity_to_the_plate_of_copies(self, tmp_path):
         from kiln.slicer import slice_multicolor_copies
         from kiln.slicer_filament import resolve_slice_filament
 
@@ -495,12 +495,13 @@ class TestSliceFileCarriesTheIdentity:
         def fake(path, **kw):
             calls.append(kw)
             out = Path(kw["output_dir"]) / "copy.gcode"
-            out.write_text(";LAYER_CHANGE\nG1 X1 E1\n")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(";LAYER_CHANGE\nT0\nG1 X1 E1\nT1\nG1 X2 E1\n")
             return SliceResult(success=True, output_path=str(out), slicer="prusa-slicer", filament=resolve_slice_filament("ABS"))
 
         with patch("kiln.slicer.slice_file", side_effect=fake):
             result = slice_multicolor_copies(stl, 2, material="ABS", loaded_material=None, output_dir=str(tmp_path / "out"))
-        assert len(calls) == 2 and all(c["material"] == "ABS" for c in calls)
+        assert len(calls) == 1 and calls[0]["material"] == "ABS"
         assert result.to_dict()["filament"]["material"] == "ABS"
 
 

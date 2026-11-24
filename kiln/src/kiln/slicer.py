@@ -45,6 +45,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln import run_program
+from kiln.gcode import LAYER_CHANGE_LINE
 from kiln.openscad_runner import present_signals
 from kiln.output_paths import kiln_output_dir
 from kiln.slicer_filament import LOADED_OBSERVED, SOURCE_PROFILE, SliceFilament, ensure_profile_filament
@@ -3423,38 +3424,40 @@ def slice_multicolor_copies(
         profile, input_path, material=_supports_plastic(material, loaded_material), stated=True,
     )
 
-    # Create positioned STL copies and slice each
-    work_dir = _tempfile.mkdtemp(prefix="kiln_multicolor_")
-    gcode_bodies: list[str] = []
-    slicer_name: str | None = None
-    filament: SliceFilament | None = None
+    # Each copy is written where it stands, the copies are put on one plate
+    # with a filament each, and the plate is sliced once.  The slicer then
+    # writes one start, one end, every layer once and its own change of
+    # filament between the copies.
+    from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
 
-    said_anyway: list[tuple[int, dict[str, Any]]] = []
-    placed = 0
-    for row in range(actual_rows):
-        for col in range(actual_cols):
-            if placed >= count:
-                break
+    work_dir = _tempfile.mkdtemp(prefix="kiln_multicolor_")
+    stem = Path(input_path).stem
+    try:
+        copies: list[ColorPart] = []
+        for placed in range(count):
+            row, col = divmod(placed, actual_cols)
             offset_x = start_x + col * cell_w
             offset_y = start_y + row * cell_d
-
-            # Translate centered mesh to this grid position
-            positioned = []
-            for tri in centered:
-                tv = tuple((v[0] + offset_x, v[1] + offset_y, v[2]) for v in tri)
-                positioned.append(tv)
-
-            # Write positioned copy as STL
+            positioned = [
+                tuple((v[0] + offset_x, v[1] + offset_y, v[2]) for v in tri) for tri in centered
+            ]
             copy_stl = os.path.join(work_dir, f"copy_{placed}.stl")
             _write_binary_stl(positioned, copy_stl)
+            copies.append(ColorPart(copy_stl, extruder=placed + 1, name=f"copy {placed + 1}"))
 
-            # Slice it
-            copy_out_dir = os.path.join(work_dir, f"slice_{placed}")
-            os.makedirs(copy_out_dir, exist_ok=True)
-
+        plate = os.path.join(work_dir, f"{stem}_copies.3mf")
+        composed = compose_multicolor_3mf(copies, output_path=plate, printer_id=printer_id)
+        if not composed.get("success"):
+            raise SlicerError(
+                f"Kiln couldn't put the {count} copies on one plate: "
+                f"{composed.get('error') or 'the plate could not be written'}"
+            )
+        # The plate is scratch: the file handed over is the one recorded.
+        quiet = _unrecorded.set(True)
+        try:
             result = slice_file(
-                copy_stl,
-                output_dir=copy_out_dir,
+                plate,
+                output_dir=os.path.join(work_dir, "sliced"),
                 profile=profile,
                 slicer_path=slicer_path,
                 extra_args=list(extra_args) if extra_args else None,
@@ -3464,134 +3467,88 @@ def slice_multicolor_copies(
                 loaded_determined_by=loaded_determined_by,
                 soft_nozzle_confirmed=soft_nozzle_confirmed,
             )
-            if not result.success or not result.output_path:
-                raise SlicerError(f"Slicing copy {placed} failed: {result.message}")
+        finally:
+            _unrecorded.reset(quiet)
+        if not result.success or not result.output_path:
+            raise SlicerError(f"Slicing the plate of {count} copies failed: {result.message}")
 
-            slicer_name = result.slicer
-            filament = result.filament
-            if result.soft_nozzle:
-                said_anyway.append((placed + 1, result.soft_nozzle))
+        # The file is read before it is handed over: a filament for every
+        # copy, and one print from start to end.
+        with open(result.output_path, errors="replace", encoding="utf-8") as fh:
+            sliced = fh.read()
+        wrong = _one_print_faults(sliced, tools=count)
+        if wrong:
+            raise SlicerError(
+                f"Kiln sliced the {count} copies as one plate with {result.slicer or 'the slicer'}, but the file "
+                f"{wrong[0]}, so it is not handed over. OrcaSlicer and Bambu Studio give each copy its own "
+                "filament: slice with one of them (`--slicer`), or leave out `--ams-mapping` to print the "
+                "copies in one colour."
+            )
 
-            # Read the gcode body
-            with open(result.output_path, errors="replace", encoding="utf-8") as fh:
-                gcode_bodies.append(fh.read())
-
-            placed += 1
-
-    # Merge gcode bodies with T commands between copies
-    merged = _merge_multicolor_gcode(gcode_bodies)
-
-    # Write merged gcode
-    out_dir = output_dir or kiln_output_dir(_DEFAULT_OUTPUT_NAME)
-    os.makedirs(out_dir, mode=0o700, exist_ok=True)
-    stem = Path(input_path).stem
-    merged_path = os.path.join(out_dir, f"{stem}_multicolor.gcode")
-    with open(merged_path, "w", encoding="utf-8") as fh:
-        fh.write(_KILN_GCODE_HEADER + merged)
+        out_dir = output_dir or kiln_output_dir(_DEFAULT_OUTPUT_NAME)
+        os.makedirs(out_dir, mode=0o700, exist_ok=True)
+        merged_path = os.path.join(out_dir, f"{stem}_multicolor.gcode")
+        shutil.move(result.output_path, merged_path)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
     merged_result = SliceResult(
         success=True,
         output_path=merged_path,
-        slicer=slicer_name,
+        slicer=result.slicer,
         message=f"Sliced {count} multi-color copies of {Path(input_path).name}",
-        filament=filament,
+        filament=result.filament,
         supports=supports,
     )
-    # The merged file is the one that prints: it gets its own record, and
-    # the owner's word to print anyway is kept on it.
-    from kiln.print_lineage import note_soft_nozzle, record_slice
+    # The file that prints gets its own record, and the owner's word to
+    # print anyway is kept on it.
+    from kiln.print_lineage import note_soft_nozzle
 
-    record_slice(input_path, merged_path, profile=profile)
-    block = _soft_nozzle_of_copies(said_anyway)
-    if block is not None:
-        merged_result.soft_nozzle = block
-        merged_result.message = f"{merged_result.message} {block['said']}".strip()
-        note_soft_nozzle(merged_path, block)
+    _record_slice(profile, os.path.abspath(input_path), merged_path)
+    if result.soft_nozzle:
+        merged_result.soft_nozzle = result.soft_nozzle
+        merged_result.message = f"{merged_result.message} {result.soft_nozzle.get('said') or ''}".strip()
+        note_soft_nozzle(merged_path, result.soft_nozzle)
     return merged_result
 
 
-def _soft_nozzle_of_copies(said_anyway: list[tuple[int, dict[str, Any]]]) -> dict[str, Any] | None:
-    """One ``soft_nozzle`` block for a file merged from copies sliced one
-    filament each: *said_anyway* is ``(copy number, that copy's block)`` for
-    each copy the owner said to print anyway.  Each copy's filament is
-    numbered as the copy, and every nozzle named is kept once.  ``None``
-    when no copy carries one."""
-    if not said_anyway:
-        return None
-    nozzles: list[dict[str, Any]] = []
-    for _copy, block in said_anyway:
-        for nozzle in block.get("nozzles") or ():
-            if nozzle not in nozzles:
-                nozzles.append(nozzle)
-    first = said_anyway[0][1]
-    return {
-        "confirmed_by": "owner",
-        "filaments": [
-            {"filament": copy, "material": (block.get("filaments") or [{}])[0].get("material")}
-            for copy, block in said_anyway
-        ],
-        "nozzles": nozzles,
-        "said": first.get("said") or "",
-    }
+#: A command that ends a print or starts one: the nozzle or bed heater
+#: switched off, the motors released, or the head sent home.
+_ENDS_OR_STARTS = re.compile(r"^(?:M10[49]\s+S0\b|M1[49]0\s+S0\b|M84\b|M18\b|G28\b)")
+_EXTRUDES = re.compile(r"^G[0-3]\s(?=[^;]*[XY]-?[\d.])[^;]*E(-?\d*\.?\d+)")
+_TOOL_WORD = re.compile(r"^T(\d+)\s*(?:;.*)?$")
 
 
-def _merge_multicolor_gcode(gcode_bodies: list[str]) -> str:
-    """Merge multiple single-filament gcode bodies into one with T commands.
+def _one_print_faults(gcode: str, *, tools: int = 0) -> list[str]:
+    """What stops *gcode* being one print from start to end, each as the
+    end of a sentence about the file; empty when nothing does.
 
-    Takes the first copy's gcode as the base (with headers/comments intact),
-    then for subsequent copies, extracts only the layer gcode (stripping
-    slicer headers and init commands) and inserts T commands before each.
-
-    The merged gcode uses the first copy's header, all layer bodies merged
-    sequentially, with tool changes at the transition between copies.
+    One print heats, homes, prints and stops, in that order and once: no
+    heater is switched off, no motor released and no homing run between
+    the first line it lays and the last.  With *tools*, every one of
+    ``T0`` .. ``T<tools - 1>`` is called for.  And it holds layers.
     """
-    if not gcode_bodies:
-        raise ValueError("No gcode bodies to merge")
-    if len(gcode_bodies) == 1:
-        return gcode_bodies[0]
-
-    def _extract_body(gcode: str) -> str:
-        """Extract gcode body starting from the first layer change marker."""
-        lines = gcode.split("\n")
-        body_start = 0
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith((";BEFORE_LAYER_CHANGE", ";LAYER_CHANGE")):
-                body_start = i
-                break
-        return "\n".join(lines[body_start:])
-
-    def _extract_header(gcode: str) -> str:
-        """Extract gcode header before the first layer change."""
-        lines = gcode.split("\n")
-        header_lines = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith((";BEFORE_LAYER_CHANGE", ";LAYER_CHANGE")):
-                break
-            header_lines.append(line)
-        return "\n".join(header_lines)
-
-    # Build merged gcode:
-    # 1. Header from copy 0
-    # 2. T0 + body from copy 0
-    # 3. T1 + body from copy 1
-    # ...
-    parts: list[str] = []
-
-    # Header from first copy
-    parts.append(_extract_header(gcode_bodies[0]))
-    parts.append("")
-
-    for i, gcode in enumerate(gcode_bodies):
-        body = _extract_body(gcode)
-        # Insert tool change command before each copy's layers
-        parts.append(f"; --- Copy {i + 1} (Tool {i}) ---")
-        parts.append(f"T{i}")
-        parts.append(body)
-        parts.append("")
-
-    return "\n".join(parts)
+    lines = gcode.splitlines()
+    laid = [i for i, line in enumerate(lines) if (m := _EXTRUDES.match(line)) and float(m.group(1)) > 0]
+    faults: list[str] = []
+    if not laid or not LAYER_CHANGE_LINE.search(gcode):
+        return ["holds no layers Kiln can read"]
+    for line in lines[laid[0]:laid[-1]]:
+        if _ENDS_OR_STARTS.match(line):
+            faults.append(
+                "stops or starts over part-way through "
+                f"(`{line.split(';')[0].strip()}` comes before the last of the printing)"
+            )
+            break
+    if tools:
+        called = {int(m.group(1)) for line in lines if (m := _TOOL_WORD.match(line))}
+        missing = sum(1 for tool in range(tools) if tool not in called)
+        if missing:
+            faults.append(
+                "prints every copy in one filament" if len(called) < 2
+                else f"calls for {tools - missing} filaments where the {tools} copies need one each"
+            )
+    return faults
 
 
 def merge_multipart_gcode(
