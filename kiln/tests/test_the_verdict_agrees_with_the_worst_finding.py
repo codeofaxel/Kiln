@@ -1,8 +1,9 @@
 """The top verdict of a reply agrees with the worst thing the same reply found.
 
 A reply that knows the part is expected to come off the bed, does not fit
-the bed it was held to, is not a closed solid, or has walls the slice may
-leave out never says "Ready to print." or "valid".  Each case is run through
+the bed it was held to, is not a closed solid, has walls the slice may
+leave out, or has walls thinner than the nozzle never says "Ready to
+print." or "valid".  Each case is run through
 the registered tools on a broken part, and on its good twin, which still
 reads ready and valid: a rule that refuses everything cannot hide here.
 """
@@ -279,3 +280,93 @@ def test_walls_half_the_nozzle_wide_are_not_called_ready(tmp_path):
 def test_walls_five_nozzles_wide_are_still_ready(tmp_path):
     reply = _call("analyze_printability", file_path=_open_box(tmp_path, 2.0))
     assert reply["verdict"] == "ready" and reply["message"].startswith("Ready to print."), reply["message"]
+
+
+# ---------------------------------------------------------------------------
+# Walls thinner than the nozzle, judged by Kiln's own slice figures
+# ---------------------------------------------------------------------------
+
+#: The stand-in server's narrowest wall Kiln's slice lays a line on, and its
+#: thinnest round pin, at a 0.4 mm nozzle.  Figures of this file's own, under
+#: the 0.2 mm walls below, so the slice keeps them as one thin line each.
+WALL_LINE = 0.17
+PIN_LINE = 0.7
+
+
+@pytest.fixture
+def kilns_own_figures(monkeypatch):
+    """Kiln's servers answer what Kiln's own slice keeps at the nozzle, as
+    they do for a signed-in install; every other ask is a miss."""
+    from kiln import _pro_material_limits_bridge as bridge
+    from kiln import material_limits as helper
+    from kiln import server
+
+    def serve(tool_name, _timeout=None, _asked_by_user=True, _feature=None, **kwargs):
+        if tool_name != bridge.WIRE_TOOL:
+            return {"status": "error", "code": "NO_ANSWER", "error": "no answer", "why": "no_answer"}
+        return {
+            "success": True,
+            "status": "ok",
+            "known": False,
+            "material_id": None,
+            "scenario": {"nozzle_mm": kwargs.get("nozzle_mm", 0.4)},
+            "limits": {
+                "sliced_wall_min_mm": {"value": WALL_LINE, "unit": "mm", "basis": "general"},
+                "sliced_pin_min_mm": {"value": PIN_LINE, "unit": "mm", "basis": "general"},
+            },
+            "note": "",
+        }
+
+    def forget() -> None:
+        helper._answers.clear()
+        helper._said.clear()
+        bridge._service_down_until, bridge._service_down_miss = 0.0, None
+
+    forget()
+    monkeypatch.setattr(server, "_pro_api_call", serve)
+    yield
+    forget()
+
+
+def test_walls_thinner_than_the_nozzle_are_not_called_ready_on_kilns_own_figures(tmp_path, kilns_own_figures):
+    reply = _call("analyze_printability", file_path=_open_box(tmp_path, 0.2))
+    report = reply["report"]
+    walls = report["thin_walls"]
+    # Control: Kiln's own figures judged the walls, and the slice keeps each as one thin line.
+    assert walls["slicer_check"] == "exact", walls
+    assert (walls["thin_line_kind"], walls["may_be_left_out_count"], walls["dropped_regions"]) == ("wall", 0, [])
+    assert reply["verdict"] == "check", reply["message"]
+    assert reply["message"].startswith(
+        "Check before printing: Walls as thin as 0.20 mm are thinner than the nozzle"
+    ), reply["message"]
+    said = reply["message"].removeprefix("Check before printing: ").split("  Checked for")[0]
+    assert any(said.startswith(advice) for advice in report["recommendations"]), (said, report["recommendations"])
+    assert report["printable"] is False
+    assert _says_ready(reply) == []
+
+
+def test_every_door_carries_the_check_for_the_thin_walls(tmp_path, kilns_own_figures):
+    box = _open_box(tmp_path, 0.2)
+    readiness = _call("check_print_readiness", file_path=box)
+    assert (readiness["printability_verdict"], readiness["can_print"]) == ("check", False), readiness
+    prepared = _call("validate_and_prepare", input_path=box)
+    assert (prepared["printability_verdict"], prepared["ready_to_print"]) == ("check", False), prepared
+    mesh = _call("validate_and_prepare_mesh", file_path=box, auto_repair=False)
+    assert (mesh["passed"], mesh["verdict"]) == (False, "check"), mesh
+    audit = _call("audit_original_design", file_path=box, requirements="an open box")
+    [gate] = [g for g in audit["gates"] if g["name"] == "printability"]
+    assert gate["passed"] is False and gate["message"].startswith("Check before printing: Walls as thin"), gate
+    for reply in (readiness, prepared, mesh):
+        assert _says_ready(reply) == [], reply
+
+
+@pytest.mark.parametrize("wall_mm", [0.6, 2.0])
+def test_walls_at_least_a_nozzle_wide_are_still_ready_on_kilns_own_figures(tmp_path, kilns_own_figures, wall_mm):
+    """The good twins: a wall past the nozzle prints as drawn, so the same
+    doors still call the part ready."""
+    box = _open_box(tmp_path, wall_mm)
+    reply = _call("analyze_printability", file_path=box)
+    assert reply["report"]["thin_walls"]["slicer_check"] == "exact"
+    assert reply["verdict"] == "ready" and reply["message"].startswith("Ready to print."), reply["message"]
+    readiness = _call("check_print_readiness", file_path=box)
+    assert (readiness["printability_verdict"], readiness["can_print"]) == ("ready", True), readiness
