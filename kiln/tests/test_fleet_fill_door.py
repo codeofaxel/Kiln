@@ -690,7 +690,10 @@ def test_models_sliced_side_by_side_each_get_their_own_time(tmp_path):
     """Two models sliced at once each get the time their own slice gives.
 
     Each slice writes to its own output folder, so concurrent slices never
-    read each other's files."""
+    read each other's files.  A model's time for one copy on one plate is
+    its own slice's time, to within what a second copy's travel adds in the
+    slicer that made it (a few seconds in a few hundred), and never the
+    other model's, which is a third longer."""
     from kiln.plugins.recovery_tools import _model_times, _sliced_seconds
 
     part = _cube(tmp_path / "clip.stl")
@@ -698,9 +701,10 @@ def test_models_sliced_side_by_side_each_get_their_own_time(tmp_path):
     for model in ("bambu_a1", "prusa_mk4"):
         alone = _sliced_seconds(part, model, None, "PLA")
         per_copy, per_plate = together[model]
-        assert alone and abs((per_copy + per_plate) - alone) <= 1.0, (model, together, alone)
+        assert alone and abs((per_copy + per_plate) - alone) <= 0.05 * alone, (model, together, alone)
         assert per_copy > 60, together
-    assert together["bambu_a1"] != together["prusa_mk4"]
+    own = {model: sum(together[model]) for model in together}
+    assert abs(own["bambu_a1"] - own["prusa_mk4"]) > 0.2 * min(own.values()), together
 
 
 # ---------------------------------------------------------------------------

@@ -295,6 +295,7 @@ def _prusaslicer() -> str | None:
 
 
 _MOVE = re.compile(r"^G1 X(-?[\d.]+) Y(-?[\d.]+)(?: Z[-\d.]+)? E([\d.]+)")
+_MARK = re.compile(r"^;\s*(Z|Z_HEIGHT|WIDTH|LINE_WIDTH)\s*:\s*([\d.]+)")
 
 
 def _layers(gcode: Path) -> dict[float, np.ndarray]:
@@ -302,11 +303,14 @@ def _layers(gcode: Path) -> dict[float, np.ndarray]:
     extrusion in it."""
     out: dict[float, list[tuple[float, ...]]] = {}
     layer, width, x, y = None, 0.0, 0.0, 0.0
-    for line in gcode.read_text().splitlines():
-        if line.startswith(";Z:"):
-            layer = float(line[3:])
-        elif line.startswith(";WIDTH:"):
-            width = float(line[7:])
+    for line in gcode.read_text(errors="replace").splitlines():
+        # A layer's height and a line's width, as each slicer writes them:
+        # ``;Z:`` and ``;WIDTH:``, or Bambu Studio's ``; Z_HEIGHT:`` and ``; LINE_WIDTH:``.
+        marked = _MARK.match(line)
+        if marked and marked.group(1) in ("Z", "Z_HEIGHT"):
+            layer = float(marked.group(2))
+        elif marked:
+            width = float(marked.group(2))
         elif line.startswith(("G1", "G0")):
             hit = _MOVE.match(line)
             nx = float(re.search(r"X(-?[\d.]+)", line).group(1)) if " X" in line else x
@@ -328,21 +332,30 @@ def _covered(point: np.ndarray, beads: np.ndarray) -> bool:
 def test_the_premise_a_slicer_prints_a_corner_and_leaves_out_a_hairline_fin(tmp_path):
     """Kiln's own slice of a 27 degree spike and of a 0.1 mm fin: the spike is
     printed to within a millimetre of its point, the fin not at all."""
-    from kiln.slicer import slice_file
+    from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+    from kiln.slicer import _CLI_PRUSA, find_slicer, slice_file, slicer_cli_family
     from kiln.slicer_profiles import resolve_slicer_profile
 
     profile = resolve_slicer_profile("bambu_a1")
+    # The part has to stay where it is put.  PrusaSlicer is told not to
+    # arrange a mesh; the other slicers take a 3MF where it stands.
+    prusa = slicer_cli_family(find_slicer()) == _CLI_PRUSA
 
     def sliced(name: str, mesh) -> Path:
         mesh.apply_translation((128.0, 128.0, 0.0))
-        stl = tmp_path / f"{name}.stl"
-        mesh.export(stl)
+        part = tmp_path / f"{name}.stl"
+        mesh.export(part)
+        if not prusa:
+            placed = compose_multicolor_3mf([ColorPart(str(part), extruder=1, name=name)],
+                                            output_path=str(tmp_path / f"{name}.3mf"))
+            assert placed["success"], placed
+            part = Path(placed["output_path"])
         result = slice_file(
-            str(stl),
+            str(part),
             profile=profile,
             output_dir=str(tmp_path),
             output_name=f"{name}.gcode",
-            extra_args=["--dont-arrange"],
+            extra_args=["--dont-arrange"] if prusa else None,
         )
         return Path(result.output_path)
 

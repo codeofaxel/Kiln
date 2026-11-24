@@ -205,8 +205,10 @@ class TestTheStamp:
 
 
 def _slice_copies_here(home) -> tuple[str, str]:
-    """Two coloured copies of one part, sliced and merged into one file the
-    way the multi-colour copies flow does, with the slicer stood in for."""
+    """Two coloured copies of one part, sliced as one plate the way the
+    multi-colour copies flow does, with the slicer stood in for.  The file
+    the slicer writes already carries a stamp from an earlier slice, so the
+    file handed over holds more than one."""
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -217,7 +219,12 @@ def _slice_copies_here(home) -> tuple[str, str]:
 
     def _run(cmd, **_kw):
         out = cmd[cmd.index("--output") + 1]
-        pathlib.Path(out).write_text(GCODE, encoding="utf-8")
+        # One plate, a filament called for each copy.
+        pathlib.Path(out).write_text(
+            GCODE.replace("G1 X10 Y10 E0.5", "T0\nG1 X10 Y10 E0.5").replace("G1 X30 Y10 E0.5", "T1\nG1 X30 Y10 E0.5")
+            + "; kiln_lineage = 0123456789abcdef\n",
+            encoding="utf-8",
+        )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with patch("kiln.slicer.find_slicer", return_value=SlicerInfo(path="/fake/prusa-slicer", name="prusa-slicer", version="PrusaSlicer-2.9.4")), \
@@ -254,7 +261,7 @@ class TestAFileOfSeveralSlices:
         model, merged = _slice_copies_here(home)
         records = print_lineage._load()["records"]
         whole = next(r for r in records if r["files"][0]["name"] == os.path.basename(merged))
-        assert len(print_lineage.read_stamps(merged)) > 1, "the merged file carries the copies' stamps"
+        assert len(print_lineage.read_stamps(merged)) > 1, "the file handed over carries more than one stamp"
         assert print_lineage.resolve(os.path.basename(merged), local_paths=[merged])["lineage_id"] == whole["id"]
 
         wrap = _wrap_here(home, merged)

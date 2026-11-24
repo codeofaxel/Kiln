@@ -45,6 +45,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln import run_program
+from kiln.gcode import LAYER_CHANGE_LINE, LAYER_Z_LINE
 from kiln.openscad_runner import present_signals
 from kiln.output_paths import kiln_output_dir
 from kiln.slicer_filament import LOADED_OBSERVED, SOURCE_PROFILE, SliceFilament, ensure_profile_filament
@@ -190,6 +191,8 @@ REFUSED_OFF_THE_BED = "off_the_bed"
 REFUSED_PATHS_COLLIDE = "paths_collide"
 #: A filament was put on a nozzle that cannot reach a part it prints.
 REFUSED_NOZZLE_REACH = "nozzle_cannot_reach"
+#: The layer asked for is as tall as the line the nozzle lays, or taller.
+REFUSED_LAYER_TOO_TALL = "layer_too_tall"
 
 
 #: How long, in seconds, a slicer may run before it is stopped, unless a
@@ -347,6 +350,10 @@ class SliceResult:
     #: sliced file commands in each (:func:`kiln.speed_by_height.sliced`);
     #: ``None`` for a slice made with none.
     speed_by_height: dict[str, Any] | None = None
+    #: Set when the slice asked for a brim round the part and the sliced
+    #: file draws none: the width asked for and the sentence that says so
+    #: (:func:`_brim_left_out`).  ``None`` for every other slice.
+    brim: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -381,6 +388,8 @@ class SliceResult:
             d["experimental"] = self.experimental
         if self.speed_by_height is not None:
             d["speed_by_height"] = self.speed_by_height
+        if self.brim is not None:
+            d["brim"] = self.brim
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -707,6 +716,9 @@ _ORCA_REFUSAL_WORDS = (
     (REFUSED_OFF_THE_BED, re.compile(r"found gcode (?:in )?unprintable|g-code outside of the printable area", re.IGNORECASE)),
     (REFUSED_PATHS_COLLIDE, re.compile(r"path conflicts? found", re.IGNORECASE)),
     (REFUSED_NOZZLE_REACH, re.compile(r"cannot be mapped to correct extruders", re.IGNORECASE)),
+    (REFUSED_LAYER_TOO_TALL, re.compile(
+        r"layer height (?:cannot exceed|can't be greater than) nozzle diameter|too small line width", re.IGNORECASE,
+    )),
 )
 #: Return codes read as a refusal, by kind.
 _ORCA_REFUSAL_STATUSES = {
@@ -763,7 +775,19 @@ def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal
             f"the middle or use the other nozzle.",
             kind=kind, code="NOZZLE_CANNOT_REACH", slicer=slicer_name,
         )
+    if kind == REFUSED_LAYER_TOO_TALL:
+        return _layer_too_tall(slicer_name)
     return None
+
+
+def _layer_too_tall(slicer_name: str) -> SlicerRefusal:
+    """The refusal of a layer as tall as the line the nozzle lays, in the
+    person's terms, whichever slicer gave it."""
+    return SlicerRefusal(
+        f"{slicer_name} refused to slice: the layer height asked for is too tall for the nozzle. A layer "
+        "has to be thinner than the line the nozzle lays. Choose a lower layer height and slice again.",
+        kind=REFUSED_LAYER_TOO_TALL, code="LAYER_TOO_TALL", slicer=slicer_name,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2652,6 +2676,18 @@ def _slice_file(
     # handed over without it when this slice decided another layer: the
     # object's setting would win over the profile the reply names.
     sliced_input, layer_scratch = for_the_slicer(input_abs, layer)
+    # OrcaSlicer and Bambu Studio do not read a STEP file from the command
+    # line: they are handed Kiln's mesh of it, the one the slice is drawn as.
+    if slicer_cli_family(slicer) == _CLI_BAMBU and ext in (".step", ".stp"):
+        if drawn == input_abs:
+            from kiln.maker_slicer import said_name as _said_name
+
+            raise SlicerError(
+                f"{_said_name(slicer)} can't open a STEP file by itself, and Kiln couldn't turn this one "
+                "into a mesh on this computer, so it wasn't sliced. Export the part as STL or 3MF and slice "
+                "that, or slice with PrusaSlicer, which reads STEP."
+            )
+        sliced_input = drawn
     # A slice that carries supports keeps them off the faces the verdict
     # said print on their own: the mesh goes over as a 3MF with those faces
     # painted as blockers, or a thread beside the shelf that needs supports
@@ -2709,6 +2745,22 @@ def _slice_file(
                 supports = replace(
                     supports, kept_clear=kept_clear_placed(unpainted, supports, bed_centre=centre),
                 )
+    # OrcaSlicer and Bambu Studio leave a brim out where their normal supports
+    # stand, Bambu Studio all of it.  A slice that asks for a brim round the
+    # part and whose supports Kiln decided asks those slicers for supports
+    # that stand off the model, which keep the brim; a style the caller
+    # stated is theirs.  The sliced file is read for the brim either way.
+    asked_brim = _asked_brim_mm(slicer_profile)
+    if (asked_brim and supports.enabled and supports.decided_by == DECIDED_ANALYSIS
+            and slicer_cli_family(slicer) == _CLI_BAMBU and STYLE_KEY not in supports.settings
+            and STYLE_KEY not in profile_origin(slicer_profile).stated):
+        stand_off = {STYLE_KEY: STAND_OFF_STYLE}
+        slicer_profile = profile_with_overrides(
+            slicer_profile, stand_off,
+            prefix=f"{Path(slicer_profile).stem}_" if slicer_profile else None, stated=False,
+        )
+        supports = replace(supports, settings={**supports.settings, **stand_off})
+
     def _decided(out_path: str, *, with_profile: str | None, prepare: Any = None) -> SliceResult:
         return _slice_decided(
             slicer, input_abs, sliced_input, out_path, ext=ext, input_path=input_path,
@@ -2790,6 +2842,7 @@ def _slice_file(
             finally:
                 _unrecorded.reset(quiet)
         result = _say_left_out(say_project_plate(made, taken), left_out)
+        _say_brim_left_out(result, asked_brim, slicer, slicer_profile)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
         if soft_run is not None:
@@ -2811,6 +2864,56 @@ def _slice_file(
         for scratch in (layer_scratch, kept_off_scratch):
             if scratch is not None:
                 shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _asked_brim_mm(profile: str | None) -> float:
+    """How wide a brim round the part *profile* asks for; 0 for none or for
+    a profile that cannot be read."""
+    if not profile:
+        return 0.0
+    try:
+        return outside_brim_mm(ini_to_settings(profile))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return 0.0
+
+
+def _say_brim_left_out(result: SliceResult, asked_mm: float, slicer: SlicerInfo, profile: str | None) -> None:
+    """Say on *result* that the sliced file draws no brim, when the slice
+    asked for one *asked_mm* wide round the part.
+
+    The file is read by its own feature labels.  A file with a brim, or one
+    whose labels cannot be read, is left as it is: nothing is claimed either
+    way.  Never raises.
+    """
+    if not asked_mm or not result.success or not result.output_path:
+        return
+    try:
+        from kiln.maker_slicer import said_name
+        from kiln.slicer_geometry import parse_slicer_features
+
+        parsed = parse_slicer_features(result.output_path)
+        if not parsed.labelled or "brim" in parsed.buckets:
+            return
+        name = said_name(slicer)
+        supports = result.supports
+        beside_supports = (
+            slicer_cli_family(slicer) == _CLI_BAMBU and supports is not None and supports.enabled
+            and ini_to_settings(profile).get(STYLE_KEY, "").strip().lower() != STAND_OFF_STYLE
+        )
+        if beside_supports:
+            fix = (
+                f"{name} leaves the brim out beside the supports it builds this way. Tree supports keep it "
+                "(`support_material_style=organic`, through reslice_with_overrides), and so does slicing "
+                "without supports."
+            )
+        else:
+            fix = "Look at the first layer in the slicer before printing: the part is held by its own footprint alone."
+        said = f"The sliced file has no brim, though a {asked_mm:g} mm brim was asked for. {fix}"
+    except Exception:  # noqa: BLE001 -- a file that cannot be read claims nothing
+        logger.debug("the sliced file's brim could not be read", exc_info=True)
+        return
+    result.brim = {"asked_mm": asked_mm, "drawn": False, "said": said}
+    result.message = f"{result.message} {said}".strip()
 
 
 def _say_sliced_with(result: SliceResult, several: Any) -> SliceResult:
@@ -3041,6 +3144,8 @@ def _slice_with_slic3r(
     # into a generic mystery.
     if not os.path.isfile(out_file):
         reason = (result.stderr or "").strip() or (result.stdout or "").strip()
+        if dict(_ORCA_REFUSAL_WORDS)[REFUSED_LAYER_TOO_TALL].search(reason):
+            raise _layer_too_tall(os.path.basename(slicer.path))
         raise SlicerError(
             f"Slicer completed but output file was not created. "
             f"Slicer said: {reason[:500] if reason else '(no output)'}"
@@ -3423,38 +3528,40 @@ def slice_multicolor_copies(
         profile, input_path, material=_supports_plastic(material, loaded_material), stated=True,
     )
 
-    # Create positioned STL copies and slice each
-    work_dir = _tempfile.mkdtemp(prefix="kiln_multicolor_")
-    gcode_bodies: list[str] = []
-    slicer_name: str | None = None
-    filament: SliceFilament | None = None
+    # Each copy is written where it stands, the copies are put on one plate
+    # with a filament each, and the plate is sliced once.  The slicer then
+    # writes one start, one end, every layer once and its own change of
+    # filament between the copies.
+    from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
 
-    said_anyway: list[tuple[int, dict[str, Any]]] = []
-    placed = 0
-    for row in range(actual_rows):
-        for col in range(actual_cols):
-            if placed >= count:
-                break
+    work_dir = _tempfile.mkdtemp(prefix="kiln_multicolor_")
+    stem = Path(input_path).stem
+    try:
+        copies: list[ColorPart] = []
+        for placed in range(count):
+            row, col = divmod(placed, actual_cols)
             offset_x = start_x + col * cell_w
             offset_y = start_y + row * cell_d
-
-            # Translate centered mesh to this grid position
-            positioned = []
-            for tri in centered:
-                tv = tuple((v[0] + offset_x, v[1] + offset_y, v[2]) for v in tri)
-                positioned.append(tv)
-
-            # Write positioned copy as STL
+            positioned = [
+                tuple((v[0] + offset_x, v[1] + offset_y, v[2]) for v in tri) for tri in centered
+            ]
             copy_stl = os.path.join(work_dir, f"copy_{placed}.stl")
             _write_binary_stl(positioned, copy_stl)
+            copies.append(ColorPart(copy_stl, extruder=placed + 1, name=f"copy {placed + 1}"))
 
-            # Slice it
-            copy_out_dir = os.path.join(work_dir, f"slice_{placed}")
-            os.makedirs(copy_out_dir, exist_ok=True)
-
+        plate = os.path.join(work_dir, f"{stem}_copies.3mf")
+        composed = compose_multicolor_3mf(copies, output_path=plate, printer_id=printer_id)
+        if not composed.get("success"):
+            raise SlicerError(
+                f"Kiln couldn't put the {count} copies on one plate: "
+                f"{composed.get('error') or 'the plate could not be written'}"
+            )
+        # The plate is scratch: the file handed over is the one recorded.
+        quiet = _unrecorded.set(True)
+        try:
             result = slice_file(
-                copy_stl,
-                output_dir=copy_out_dir,
+                plate,
+                output_dir=os.path.join(work_dir, "sliced"),
                 profile=profile,
                 slicer_path=slicer_path,
                 extra_args=list(extra_args) if extra_args else None,
@@ -3464,134 +3571,107 @@ def slice_multicolor_copies(
                 loaded_determined_by=loaded_determined_by,
                 soft_nozzle_confirmed=soft_nozzle_confirmed,
             )
-            if not result.success or not result.output_path:
-                raise SlicerError(f"Slicing copy {placed} failed: {result.message}")
+        finally:
+            _unrecorded.reset(quiet)
+        if not result.success or not result.output_path:
+            raise SlicerError(f"Slicing the plate of {count} copies failed: {result.message}")
 
-            slicer_name = result.slicer
-            filament = result.filament
-            if result.soft_nozzle:
-                said_anyway.append((placed + 1, result.soft_nozzle))
+        # The file is read before it is handed over: a filament for every
+        # copy, and one print from start to end.
+        with open(result.output_path, errors="replace", encoding="utf-8") as fh:
+            sliced = fh.read()
+        wrong = _one_print_faults(sliced, tools=count)
+        if wrong:
+            raise SlicerError(
+                f"Kiln sliced the {count} copies as one plate with {result.slicer or 'the slicer'}, but the file "
+                f"{wrong[0]}, so it is not handed over. OrcaSlicer and Bambu Studio give each copy its own "
+                "filament: slice with one of them (`--slicer`), or leave out `--ams-mapping` to print the "
+                "copies in one colour."
+            )
 
-            # Read the gcode body
-            with open(result.output_path, errors="replace", encoding="utf-8") as fh:
-                gcode_bodies.append(fh.read())
-
-            placed += 1
-
-    # Merge gcode bodies with T commands between copies
-    merged = _merge_multicolor_gcode(gcode_bodies)
-
-    # Write merged gcode
-    out_dir = output_dir or kiln_output_dir(_DEFAULT_OUTPUT_NAME)
-    os.makedirs(out_dir, mode=0o700, exist_ok=True)
-    stem = Path(input_path).stem
-    merged_path = os.path.join(out_dir, f"{stem}_multicolor.gcode")
-    with open(merged_path, "w", encoding="utf-8") as fh:
-        fh.write(_KILN_GCODE_HEADER + merged)
+        out_dir = output_dir or kiln_output_dir(_DEFAULT_OUTPUT_NAME)
+        os.makedirs(out_dir, mode=0o700, exist_ok=True)
+        merged_path = os.path.join(out_dir, f"{stem}_multicolor.gcode")
+        shutil.move(result.output_path, merged_path)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
     merged_result = SliceResult(
         success=True,
         output_path=merged_path,
-        slicer=slicer_name,
+        slicer=result.slicer,
         message=f"Sliced {count} multi-color copies of {Path(input_path).name}",
-        filament=filament,
+        filament=result.filament,
         supports=supports,
     )
-    # The merged file is the one that prints: it gets its own record, and
-    # the owner's word to print anyway is kept on it.
-    from kiln.print_lineage import note_soft_nozzle, record_slice
+    # The file that prints gets its own record, and the owner's word to
+    # print anyway is kept on it.
+    from kiln.print_lineage import note_soft_nozzle
 
-    record_slice(input_path, merged_path, profile=profile)
-    block = _soft_nozzle_of_copies(said_anyway)
-    if block is not None:
-        merged_result.soft_nozzle = block
-        merged_result.message = f"{merged_result.message} {block['said']}".strip()
-        note_soft_nozzle(merged_path, block)
+    _record_slice(profile, os.path.abspath(input_path), merged_path)
+    if result.soft_nozzle:
+        merged_result.soft_nozzle = result.soft_nozzle
+        merged_result.message = f"{merged_result.message} {result.soft_nozzle.get('said') or ''}".strip()
+        note_soft_nozzle(merged_path, result.soft_nozzle)
     return merged_result
 
 
-def _soft_nozzle_of_copies(said_anyway: list[tuple[int, dict[str, Any]]]) -> dict[str, Any] | None:
-    """One ``soft_nozzle`` block for a file merged from copies sliced one
-    filament each: *said_anyway* is ``(copy number, that copy's block)`` for
-    each copy the owner said to print anyway.  Each copy's filament is
-    numbered as the copy, and every nozzle named is kept once.  ``None``
-    when no copy carries one."""
-    if not said_anyway:
-        return None
-    nozzles: list[dict[str, Any]] = []
-    for _copy, block in said_anyway:
-        for nozzle in block.get("nozzles") or ():
-            if nozzle not in nozzles:
-                nozzles.append(nozzle)
-    first = said_anyway[0][1]
-    return {
-        "confirmed_by": "owner",
-        "filaments": [
-            {"filament": copy, "material": (block.get("filaments") or [{}])[0].get("material")}
-            for copy, block in said_anyway
-        ],
-        "nozzles": nozzles,
-        "said": first.get("said") or "",
-    }
+_MOVES_ONLY = re.compile(r"^(?:G0*[0-3]\b|G1[01]\b|G92\b|\s*;|\s*$)")
 
 
-def _merge_multicolor_gcode(gcode_bodies: list[str]) -> str:
-    """Merge multiple single-filament gcode bodies into one with T commands.
+def _without_its_ending(lines: list[str]) -> tuple[list[str], str]:
+    """*lines* of one sliced file as ``(the lines up to its ending, its
+    ending)``.  The ending starts at the first command after the last line
+    the file lays that is not a move: the fan, the heaters, the motors, and
+    the figures and settings a slicer writes after them."""
+    last_laid = max(
+        (i for i, line in enumerate(lines) if (m := _EXTRUDES.match(line)) and float(m.group(1)) > 0), default=None,
+    )
+    if last_laid is None:
+        return lines, ""
+    for i in range(last_laid + 1, len(lines)):
+        if not _MOVES_ONLY.match(lines[i]):
+            return lines[:i], "".join(lines[i:])
+    return lines, ""
 
-    Takes the first copy's gcode as the base (with headers/comments intact),
-    then for subsequent copies, extracts only the layer gcode (stripping
-    slicer headers and init commands) and inserts T commands before each.
 
-    The merged gcode uses the first copy's header, all layer bodies merged
-    sequentially, with tool changes at the transition between copies.
+#: A command that ends a print or starts one: the nozzle or bed heater
+#: switched off, the motors released, or the head sent home.
+_ENDS_OR_STARTS = re.compile(r"^(?:M10[49]\s+S0\b|M1[49]0\s+S0\b|M84\b|M18\b|G28\b)")
+_EXTRUDES = re.compile(r"^G[0-3]\s(?=[^;]*[XY]-?[\d.])[^;]*E(-?\d*\.?\d+)")
+_TOOL_WORD = re.compile(r"^T(\d+)\s*(?:;.*)?$")
+
+
+def _one_print_faults(gcode: str, *, tools: int = 0) -> list[str]:
+    """What stops *gcode* being one print from start to end, each as the
+    end of a sentence about the file; empty when nothing does.
+
+    One print heats, homes, prints and stops, in that order and once: no
+    heater is switched off, no motor released and no homing run between
+    the first line it lays and the last.  With *tools*, every one of
+    ``T0`` .. ``T<tools - 1>`` is called for.  And it holds layers.
     """
-    if not gcode_bodies:
-        raise ValueError("No gcode bodies to merge")
-    if len(gcode_bodies) == 1:
-        return gcode_bodies[0]
-
-    def _extract_body(gcode: str) -> str:
-        """Extract gcode body starting from the first layer change marker."""
-        lines = gcode.split("\n")
-        body_start = 0
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith((";BEFORE_LAYER_CHANGE", ";LAYER_CHANGE")):
-                body_start = i
-                break
-        return "\n".join(lines[body_start:])
-
-    def _extract_header(gcode: str) -> str:
-        """Extract gcode header before the first layer change."""
-        lines = gcode.split("\n")
-        header_lines = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith((";BEFORE_LAYER_CHANGE", ";LAYER_CHANGE")):
-                break
-            header_lines.append(line)
-        return "\n".join(header_lines)
-
-    # Build merged gcode:
-    # 1. Header from copy 0
-    # 2. T0 + body from copy 0
-    # 3. T1 + body from copy 1
-    # ...
-    parts: list[str] = []
-
-    # Header from first copy
-    parts.append(_extract_header(gcode_bodies[0]))
-    parts.append("")
-
-    for i, gcode in enumerate(gcode_bodies):
-        body = _extract_body(gcode)
-        # Insert tool change command before each copy's layers
-        parts.append(f"; --- Copy {i + 1} (Tool {i}) ---")
-        parts.append(f"T{i}")
-        parts.append(body)
-        parts.append("")
-
-    return "\n".join(parts)
+    lines = gcode.splitlines()
+    laid = [i for i, line in enumerate(lines) if (m := _EXTRUDES.match(line)) and float(m.group(1)) > 0]
+    faults: list[str] = []
+    if not laid or not LAYER_CHANGE_LINE.search(gcode):
+        return ["holds no layers Kiln can read"]
+    for line in lines[laid[0]:laid[-1]]:
+        if _ENDS_OR_STARTS.match(line):
+            faults.append(
+                "stops or starts over part-way through "
+                f"(`{line.split(';')[0].strip()}` comes before the last of the printing)"
+            )
+            break
+    if tools:
+        called = {int(m.group(1)) for line in lines if (m := _TOOL_WORD.match(line))}
+        missing = sum(1 for tool in range(tools) if tool not in called)
+        if missing:
+            faults.append(
+                "prints every copy in one filament" if len(called) < 2
+                else f"calls for {tools - missing} filaments where the {tools} copies need one each"
+            )
+    return faults
 
 
 def merge_multipart_gcode(
@@ -3639,6 +3719,10 @@ def merge_multipart_gcode(
         with open(gcode_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
+        # Each slicer's own layer marks, read through the one pattern every
+        # reader shares.  What follows a part's last printing is its ending
+        # (heaters off, motors released) and is kept apart from its layers.
+        lines, ending = _without_its_ending(lines)
         header_lines: list[str] = []
         layers: list[tuple[float, str]] = []
         current_block: list[str] = []
@@ -3646,17 +3730,18 @@ def merge_multipart_gcode(
         found_first = False
 
         for line in lines:
-            if ";LAYER_CHANGE" in line and not found_first:
+            at_a_layer = LAYER_CHANGE_LINE.match(line) is not None
+            if at_a_layer and not found_first:
                 found_first = True
             if not found_first:
                 header_lines.append(line)
                 continue
-            if ";LAYER_CHANGE" in line and current_block and current_z is not None:
+            if at_a_layer and current_block and current_z is not None:
                 layers.append((current_z, "".join(current_block)))
                 current_block = []
                 current_z = None
             current_block.append(line)
-            m = re.match(r"^;Z:([\d.]+)", line)
+            m = LAYER_Z_LINE.match(line)
             if m:
                 current_z = float(m.group(1))
 
@@ -3665,11 +3750,12 @@ def merge_multipart_gcode(
 
         if not layers:
             raise ValueError(
-                f"Part {p['name']!r} ({gcode_path}) has zero parsed layers. "
-                "Ensure the gcode contains ;LAYER_CHANGE markers."
+                f"Kiln couldn't find any layers in the G-code for {p['name']}, so the parts are not merged. "
+                "It reads the layer marks PrusaSlicer, OrcaSlicer and Bambu Studio write; a file from another "
+                "slicer, or one saved without its comments, can't be merged this way."
             )
 
-        parsed.append(("".join(header_lines), layers, p))
+        parsed.append(("".join(header_lines), layers, {**p, "_ending": ending}))
 
     # Find the Z overlap range — the max Z of the shortest part
     # layers is guaranteed non-empty per the zero-layer check above.
@@ -3691,6 +3777,7 @@ def merge_multipart_gcode(
     sorted_parts = sorted(enumerate(parsed), key=lambda x: x[1][2]["tool_index"])
     phases: list[dict[str, Any]] = []
     merged_blocks: list[str] = []
+    last_printed: dict[str, Any] | None = None
 
     merged_blocks.append(merged_header)
     merged_blocks.append(
@@ -3705,6 +3792,7 @@ def merge_multipart_gcode(
         above = [(z, blk) for z, blk in layers if z > overlap_ceiling]
 
         if overlap:
+            last_printed = part_info
             merged_blocks.append(f"; --- Tool change: T{tool} ({name}) ---\n")
             merged_blocks.append(f"T{tool}\n")
             merged_blocks.append("G92 E0\n")
@@ -3724,6 +3812,7 @@ def merge_multipart_gcode(
         above = [(z, blk) for z, blk in layers if z > overlap_ceiling]
 
         if above:
+            last_printed = part_info
             merged_blocks.append(f"; --- Tool change: T{tool} ({name}) ---\n")
             merged_blocks.append(f"T{tool}\n")
             merged_blocks.append("G92 E0\n")
@@ -3737,7 +3826,18 @@ def merge_multipart_gcode(
                 "z_range": f"{above[0][0]}-{above[-1][0]}mm",
             })
 
+    # One ending, the last part's own, after every layer of every part.
+    if last_printed is not None:
+        merged_blocks.append(last_printed["_ending"])
     merged_body = "".join(merged_blocks)
+
+    # Read before it is written: one print from start to end.
+    wrong = _one_print_faults(merged_body)
+    if wrong:
+        raise ValueError(
+            f"Kiln merged the parts, but the merged file {wrong[0]}, so it is not handed over. "
+            "Slice the parts together as one multi-colour plate instead."
+        )
 
     # Each part's own figures, read from the top and the end of its file,
     # where every slicer writes them: the merged print's time is their sum,

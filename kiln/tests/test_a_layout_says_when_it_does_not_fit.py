@@ -285,8 +285,12 @@ class TestTheCopyGridCountsItsGapsOnce:
         monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
         monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
         model = _part(tmp_path, "tile", size=(120.0, 120.0, 5.0))
-        result = slice_multicolor_copies(
-            model, 2, spacing_mm=10.0, bed_width_mm=256.0, bed_depth_mm=256.0,
-            slicer_path=_real_prusaslicer(), output_dir=str(tmp_path / "out"),
-        )
-        assert os.path.isfile(result.output_path)
+        # The two fit, so the plate reaches the slicer.  PrusaSlicer set up
+        # for one filament prints both in it, and that file is not handed over.
+        from kiln.slicer import SlicerError
+
+        with pytest.raises(SlicerError, match="prints every copy in one filament"):
+            slice_multicolor_copies(
+                model, 2, spacing_mm=10.0, bed_width_mm=256.0, bed_depth_mm=256.0,
+                slicer_path=_real_prusaslicer(), output_dir=str(tmp_path / "out"),
+            )
