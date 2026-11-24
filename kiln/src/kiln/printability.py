@@ -4753,14 +4753,22 @@ def _grid_points(faces: np.ndarray) -> np.ndarray | None:
     a grid no coarser than the lateral reach
     (:data:`_MAX_LATERAL_REACH_MM`), corners and edges included, so a large
     face is read across its whole area and not at its centre alone.
-    ``None`` past :data:`_GRID_POINT_CAP` points."""
+    ``None`` past :data:`_GRID_POINT_CAP` points, and for faces with a
+    corner that is not a finite number: the count is taken before any grid
+    is laid, so a face of any size costs nothing to refuse."""
     if len(faces) == 0:
         return np.zeros((0, 3))
-    edges = np.stack([faces[:, 1] - faces[:, 0], faces[:, 2] - faces[:, 1], faces[:, 0] - faces[:, 2]], axis=1)
-    longest = np.linalg.norm(edges[:, :, :2], axis=2).max(axis=1)
-    steps = np.maximum(np.ceil(longest / _MAX_LATERAL_REACH_MM), 1).astype(np.int64)
-    if int(((steps + 1) * (steps + 2) // 2).sum()) > _GRID_POINT_CAP:
+    if not np.isfinite(faces).all():
         return None
+    edges = np.stack([faces[:, 1] - faces[:, 0], faces[:, 2] - faces[:, 1], faces[:, 0] - faces[:, 2]], axis=1)
+    with np.errstate(over="ignore", invalid="ignore"):
+        longest = np.linalg.norm(edges[:, :, :2], axis=2).max(axis=1)
+        # Counted as floats, which grow past any cap without wrapping round.
+        wanted = np.maximum(np.ceil(longest / _MAX_LATERAL_REACH_MM), 1.0)
+        points = float(((wanted + 1.0) * (wanted + 2.0) / 2.0).sum())
+    if not points <= _GRID_POINT_CAP:
+        return None
+    steps = wanted.astype(np.int64)
     blocks: list[np.ndarray] = []
     for n in np.unique(steps).tolist():
         weights = np.array(
@@ -4828,13 +4836,21 @@ def _points_plate_supports_miss(
     other, no farther apart than a bridge.  A plate support is counted only
     where the plate is clear for the lateral reach all round it.  What is
     left is a point whose support has to stand on the model.
+
+    Every count is checked against its cap before the work it bounds, and
+    a boundary that is not finite numbers is past what this reads.
     """
+    if not (np.isfinite(pa).all() and np.isfinite(d_seg).all()):
+        return None
     points = _grid_points(faces)
     if points is None:
         return None
     if supported.any():
         sup_a, sup_d = pa[supported], d_seg[supported]
-        sup_len_sq = np.maximum((sup_d ** 2).sum(axis=1), 1e-18)
+        with np.errstate(over="ignore"):
+            sup_len_sq = np.maximum((sup_d ** 2).sum(axis=1), 1e-18)
+        if not np.isfinite(sup_len_sq).all():
+            return None
         points = points[_distances_to_segments(points[:, :2], sup_a, sup_d, sup_len_sq) > _MAX_LATERAL_REACH_MM]
     if not len(points):
         return 0
@@ -4860,9 +4876,13 @@ def _points_plate_supports_miss(
     if supported.any():
         # Points along the supported boundary, no farther apart than half
         # the lateral reach, its ends included.
-        pieces = np.maximum(np.ceil(np.sqrt(sup_len_sq) / (reach / 2.0)), 1).astype(np.int64)
-        if int((pieces + 1).sum()) * len(need) > _HOLD_PAIR_CAP:
+        with np.errstate(over="ignore", invalid="ignore"):
+            # Counted as floats, which grow past any cap without wrapping round.
+            wanted = np.maximum(np.ceil(np.sqrt(sup_len_sq) / (reach / 2.0)), 1.0)
+            pairs = float((wanted + 1.0).sum()) * len(need)
+        if not pairs <= _HOLD_PAIR_CAP:
             return None
+        pieces = wanted.astype(np.int64)
         along = np.concatenate([np.arange(n + 1) / n for n in pieces.tolist()])
         walls = np.repeat(sup_a, pieces + 1, axis=0) + along[:, None] * np.repeat(sup_d, pieces + 1, axis=0)
     if len(need) * (len(stands) + len(walls)) > _HOLD_PAIR_CAP:
@@ -9488,13 +9508,15 @@ def _plate_reaches_every_support(
     does not serve (:func:`_points_plate_supports_miss`): there may be
     none.  Every *held* face outside those patches is read at its centre
     and corners: none may have a face of the part straight below it, more
-    than a layer away.  ``False`` when the part needs no supports, or a
-    patch could not be read.
+    than a layer away.  ``False`` when the part needs no supports, a patch
+    could not be read, or a corner of the part is not a finite number.
     """
     needing = [region for region in regions if region.needs_supports]
     in_a_patch = {gi for region in needing for gi in region.triangle_indices}
     loose = [gi for gi in held if gi not in in_a_patch]
     if not needing and not loose:
+        return False
+    if not np.isfinite(tris).all():
         return False
     index = XYIndex(tris)
     for region in needing:

@@ -15,8 +15,11 @@ The supports.  A file whose parts print in place a clearance apart gets its
 supports from the plate alone wherever the plate serves every point that
 needs one, so none stands on one part to hold up another.  Where the plate
 does not serve them all the supports stand on the model, and the answer
-says to break out any that stands between two parts.  The slicing half reads
-the G-code of every slicer installed and skips without one.
+says to break out any that stands between two parts.  The read of the
+plate's reach counts its work before doing any: a face or a boundary of any
+size, or with a corner that is not a number, is refused at once.  The
+slicing half reads the G-code of every slicer installed and skips without
+one.
 """
 
 from __future__ import annotations
@@ -277,6 +280,89 @@ class TestWhereTheSupportsStand:
                    for line in assess_support_feasibility(stl_path=lid, material="pla").recommendations)
         assert not any("print in place apart" in line
                        for line in assess_support_feasibility(stl_path=cap, material="pla").recommendations)
+
+
+# ---------------------------------------------------------------------------
+# The supports: the read of the plate's reach is bounded
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def within_seconds():
+    """Fails the test if its body runs past ten seconds, where the platform
+    has an alarm to say so: a read that is refused does no work first."""
+    import signal
+
+    if not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def too_long(_signum, _frame):
+        raise AssertionError("the read ran past ten seconds")
+
+    before = signal.signal(signal.SIGALRM, too_long)
+    signal.setitimer(signal.ITIMER_REAL, 10.0)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, before)
+
+
+def _one_face(a, b, c) -> np.ndarray:
+    return np.array([[a, b, c]], dtype=np.float64)
+
+
+_SMALL = ((0.0, 0.0, 5.0), (6.0, 0.0, 5.0), (0.0, 6.0, 5.0))
+
+
+class TestTheReadIsBounded:
+    @pytest.mark.parametrize("far", [1e7, 1e12, 1e19, 1e150, 1e300])
+    def test_an_enormous_face_is_refused_before_any_grid_is_laid(self, within_seconds, far):
+        from kiln.printability import _grid_points
+
+        assert len(_grid_points(_one_face(*_SMALL))) == 21  # five steps along its longest edge
+        enormous = _one_face((0.0, 0.0, 5.0), (far, 0.0, 5.0), (0.0, far, 5.0))
+        assert _grid_points(enormous) is None
+        assert _grid_points(np.concatenate([_one_face(*_SMALL), enormous])) is None
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_a_corner_that_is_not_a_number_is_refused(self, within_seconds, bad):
+        from kiln.printability import _grid_points
+
+        for at in range(3):
+            corners = [list(c) for c in _SMALL]
+            corners[at][0] = bad
+            assert _grid_points(_one_face(*corners)) is None
+            assert _grid_points(np.concatenate([_one_face(*_SMALL), _one_face(*corners)])) is None
+
+    @pytest.mark.parametrize("run", [1e12, 1e19, 1e300, float("inf"), float("nan")])
+    def test_an_enormous_boundary_is_refused_before_it_is_walked(self, within_seconds, run):
+        """A patch over another face, with a plate-clear side, whose one
+        supported boundary segment runs *run* mm."""
+        from kiln.printability import _points_plate_supports_miss
+        from kiln.triangle_index import XYIndex
+
+        deck = np.array([
+            [(0.0, 0.0, 8.0), (40.0, 0.0, 8.0), (40.0, 20.0, 8.0)],
+            [(0.0, 0.0, 8.0), (40.0, 20.0, 8.0), (0.0, 20.0, 8.0)],
+        ])
+        under = np.array([[(0.0, 0.0, 2.0), (12.0, 0.0, 2.0), (12.0, 20.0, 2.0)],
+                          [(0.0, 0.0, 2.0), (12.0, 20.0, 2.0), (0.0, 20.0, 2.0)]])
+        tris = np.concatenate([deck, under])
+        own = np.array([True, True, False, False])
+        pa, d_seg, supported = np.array([[-50.0, -5.0]]), np.array([[0.0, run]]), np.array([True])
+        assert _points_plate_supports_miss(deck, tris, XYIndex(tris), own, pa, d_seg, supported, 0.2) is None
+
+    def test_a_part_with_a_corner_that_is_not_a_number_is_not_read(self, within_seconds):
+        from kiln.printability import _DownwardRegion, _plate_reaches_every_support
+
+        tris = np.array([_SMALL, ((0.0, 0.0, 0.0), (6.0, 0.0, 0.0), (float("nan"), 6.0, 0.0))], dtype=np.float64)
+        patch = _DownwardRegion(
+            triangle_indices=[0], flat_indices=[0], span_mm=20.0, needs_supports=True, bbox_span_mm=6.0,
+            boundary=(np.zeros((0, 2)), np.zeros((0, 2)), np.zeros(0, dtype=bool)),
+        )
+        assert _plate_reaches_every_support(tris, [patch], [], 0.2) is False
 
 
 # ---------------------------------------------------------------------------
