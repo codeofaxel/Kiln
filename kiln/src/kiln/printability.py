@@ -8354,6 +8354,18 @@ def _thin_line_sentence(thin_walls: ThinWallAnalysis) -> str:
     )
 
 
+def _thin_sheet_said(thin_walls: ThinWallAnalysis) -> str:
+    """What is said about the flat pieces thinner than one layer
+    (:attr:`ThinWallAnalysis.thin_sheet_count`): the one sentence the
+    report's advice and its verdict both say."""
+    layer = thin_walls.layer_height_mm
+    return (
+        f"A flat piece as thin as {thin_walls.thin_sheet_min_mm:.2f} mm is thinner than one "
+        f"{layer:g} mm layer, so it may be left out when sliced; make it at least {layer:g} mm "
+        f"thick."
+    )
+
+
 def supports_between_parts_advice(judged: SupportJudgement, *, beside_the_pieces: bool = False) -> str:
     """What advice to use supports adds for a file whose separate parts
     print in place a clearance apart (:attr:`SupportJudgement.parts_apart`);
@@ -8444,12 +8456,7 @@ def _build_recommendations(
         if thin_walls.thin_line_count:
             recs.append(_thin_line_sentence(thin_walls))
         if thin_walls.thin_sheet_count:
-            layer = thin_walls.layer_height_mm
-            recs.append(
-                f"A flat piece as thin as {thin_walls.thin_sheet_min_mm:.2f} mm is thinner than one "
-                f"{layer:g} mm layer, so it may be left out when sliced; make it at least {layer:g} mm "
-                f"thick."
-            )
+            recs.append(_thin_sheet_said(thin_walls))
         if getattr(thin_walls, "may_be_left_out_count", 0):
             recs.append(_may_be_left_out_said(thin_walls))
             if slicer_note:
@@ -11051,12 +11058,19 @@ def checks_due(report: PrintabilityReport) -> list[str]:
     and that nothing in the report settles: a surface that does not close
     (:attr:`PiecesAnalysis.open_surface`), a part the adhesion-force verdict
     expects to come off the bed (``likely_detach``, said as :func:`footing`
-    says it, with the brim that holds it), and walls or pins the slice may
-    leave out (:attr:`ThinWallAnalysis.may_be_left_out_count`).  The one
+    says it, with the brim that holds it), walls or pins the slice may leave
+    out (:attr:`ThinWallAnalysis.may_be_left_out_count`), flat pieces
+    thinner than one layer (:attr:`ThinWallAnalysis.thin_sheet_count`), and
+    walls thinner than the nozzle in use, which print only as one thin line
+    and which some slicers' standard settings leave out (``thin_line_kind``
+    of ``"wall"``).  The line for a wall is the nozzle the analysis ran for,
+    on every tier: a wall at least as wide as the nozzle asks for no check
+    here.  Each is said in the sentence the report's advice says.  The one
     reading :func:`verdict` takes, so no door says a part is ready beside a
     finding of the same report that says otherwise.  A hold that is only
     borderline (``marginal``) asks for no check: the verdict says it prints
-    and how to hold it.
+    and how to hold it.  Nor does a flat piece one layer thick, which prints
+    as that layer.
     """
     due: list[str] = []
     pieces = report.pieces
@@ -11065,16 +11079,33 @@ def checks_due(report: PrintabilityReport) -> list[str]:
     force = report.adhesion_force
     if force is not None and getattr(force, "risk_level", "") == "likely_detach":
         due.append(footing(report))
-    walls = report.thin_walls
-    if walls is not None and getattr(walls, "may_be_left_out_count", 0):
-        due.append(_may_be_left_out_said(walls))
+    due += [said for said, _thinnest in _thin_checks(report.thin_walls)]
     return [sentence for sentence in due if sentence]
+
+
+def _thin_checks(walls: ThinWallAnalysis | None) -> list[tuple[str, float]]:
+    """The thin readings of *walls* a check is due for, worst first, each
+    as ``(sentence, thinnest_mm)``: walls or pins the slice may leave out,
+    flat pieces thinner than one layer, and walls thinner than the nozzle
+    that print only as one thin line.  The one reading :func:`checks_due`
+    and :func:`check_reasons` both take."""
+    if walls is None:
+        return []
+    found: list[tuple[str, float]] = []
+    if getattr(walls, "may_be_left_out_count", 0):
+        found.append((_may_be_left_out_said(walls), walls.may_be_left_out_min_mm))
+    if getattr(walls, "thin_sheet_count", 0):
+        found.append((_thin_sheet_said(walls), walls.thin_sheet_min_mm))
+    if getattr(walls, "thin_line_count", 0) and getattr(walls, "thin_line_kind", "") == "wall":
+        found.append((_thin_line_sentence(walls), walls.thin_line_min_mm))
+    return found
 
 
 #: Why a part's verdict is ``check``, as a fixed set of ids: one for each
 #: reason :func:`checks_due` names (a surface that does not close, a part
-#: expected to come off the bed, walls or pins the slice may leave out), and
-#: ``other`` for a check the report names no single cause for.
+#: expected to come off the bed, and walls, pins or flat pieces too thin for
+#: the slice to keep as drawn), and ``other`` for a check the report names
+#: no single cause for.
 CHECK_REASONS: tuple[str, ...] = ("open_surface", "comes_off_bed", "walls_left_out", "other")
 
 
@@ -11083,8 +11114,10 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
     worst first in the order of :func:`checks_due`: each ``{"id": ...}`` from
     :data:`CHECK_REASONS`, ``comes_off_bed`` with how the part is held down
     (``"hold"``: ``"raft"`` or ``"brim"``, and ``"brim_mm"`` when the brim
-    has a width) and ``walls_left_out`` with ``"thinnest_mm"`` and
-    ``"general_mm"`` when they are known.  ``[{"id": "other"}]`` for a check
+    has a width) and ``walls_left_out``, once for every thin reading
+    :func:`checks_due` names, with ``"thinnest_mm"``, the thinnest of them,
+    and ``"general_mm"`` when the general minimum wall judged them.
+    ``[{"id": "other"}]`` for a check
     with none of those causes, ``[]`` for any other verdict.  Never raises."""
     try:
         if verdict_of(report)[0] != "check":
@@ -11104,10 +11137,13 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
                 hold = {"hold": "brim"}
             reasons.append({"id": "comes_off_bed", **hold})
         walls = report.thin_walls
-        if walls is not None and getattr(walls, "may_be_left_out_count", 0):
+        thin = _thin_checks(walls)
+        if thin:
             sizes = {
-                "thinnest_mm": round(float(walls.may_be_left_out_min_mm), 2),
-                "general_mm": round(float(walls.general_wall_mm), 2),
+                "thinnest_mm": round(min(float(mm) for _said, mm in thin), 2),
+                "general_mm": (
+                    round(float(walls.general_wall_mm), 2) if getattr(walls, "may_be_left_out_count", 0) else 0.0
+                ),
             }
             reasons.append({"id": "walls_left_out", **{k: v for k, v in sizes.items() if v > 0}})
         return reasons or [{"id": "other"}]
