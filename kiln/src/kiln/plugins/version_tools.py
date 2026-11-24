@@ -1008,13 +1008,25 @@ class _VersionToolsPlugin:
                 return {"ok": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
 
 
+def _version_number(text: str) -> int:
+    """The version number in ``"3"`` or ``"v3"``.
+
+    :raises ValueError: If *text* is neither.
+    """
+    cleaned = text.strip()
+    if cleaned[:1] in ("v", "V"):
+        cleaned = cleaned[1:]
+    return int(cleaned)
+
+
 def _parse_version_ref(
     ref: str, *, default_design_id: str | None = None
 ) -> tuple[str, int]:
     """Parse a version reference into ``(design_id, version_number)``.
 
     Accepts ``"design_id:N"`` or a plain integer string when
-    *default_design_id* is provided.
+    *default_design_id* is provided.  ``N`` may be written ``vN``, the
+    way replies label a version.
 
     :raises ValueError: If the reference cannot be parsed.
     """
@@ -1022,13 +1034,13 @@ def _parse_version_ref(
         parts = ref.split(":", 1)
         design_id = parts[0].strip()
         try:
-            version = int(parts[1].strip())
+            version = _version_number(parts[1])
         except ValueError as exc:
             raise ValueError(f"Invalid version number in ref '{ref}'") from exc
         return design_id, version
     if default_design_id is not None:
         try:
-            return default_design_id, int(ref.strip())
+            return default_design_id, _version_number(ref)
         except ValueError as exc:
             raise ValueError(
                 f"Cannot parse version number from '{ref}'. "

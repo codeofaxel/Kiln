@@ -602,3 +602,28 @@ class TestDesignLibraryIsPerMachine:
         )
         assert result.get("ok") is False
         assert "simple name" in result.get("error", "")
+
+
+class TestVersionRefAcceptsTheLabelRepliesUse:
+    """A reply labels a version ``v1`` (a rollback's note, a diff's header),
+    so a reference written that way names the same version as ``1``."""
+
+    def test_plain_number_with_a_design(self):
+        from kiln.plugins.version_tools import _parse_version_ref
+
+        assert _parse_version_ref("v3", default_design_id="bracket") == ("bracket", 3)
+        assert _parse_version_ref("3", default_design_id="bracket") == ("bracket", 3)
+
+    def test_design_and_number(self):
+        from kiln.plugins.version_tools import _parse_version_ref
+
+        assert _parse_version_ref("bracket:v2") == ("bracket", 2)
+        assert _parse_version_ref("bracket:V2") == ("bracket", 2)
+
+    def test_a_word_is_still_refused(self):
+        import pytest
+
+        from kiln.plugins.version_tools import _parse_version_ref
+
+        with pytest.raises(ValueError):
+            _parse_version_ref("latest", default_design_id="bracket")
