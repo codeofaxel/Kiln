@@ -349,6 +349,124 @@ class TestWhatTheSlicerLaysDown:
 
 
 # ---------------------------------------------------------------------------
+# An overhang straight above a thread
+# ---------------------------------------------------------------------------
+
+#: An M12 screw standing on its end with a flat arm across its top: the arm
+#: overhangs from the thread's own crest outward, so its supports start
+#: right above the thread and reach the plate past the whole of it.
+_SCREW_UNDER_AN_ARM = (
+    "union() { threaded_rod(d=12, l=40, pitch=1.75, anchor=BOTTOM);"
+    " up(40) cyl(d=11.6, l=6, anchor=BOTTOM); up(46) cuboid([60, 10, 6], anchor=BOTTOM); }"
+)
+_ARM_THREAD = ((0, 0), (0, 40), 6.0)
+_ARM_UNDERSIDE = 46.0
+
+_ANY_SLICER = {**({"PrusaSlicer": _PRUSA} if _PRUSA else {}), **_ORCA_FAMILY}
+
+
+def _support_samples(gcode: str) -> np.ndarray:
+    """Every support extrusion in a file from any driven slicer, sampled
+    every 0.1 mm: rows of (x, y, z)."""
+    pts, x, y, z, last_e, relative, support = [], 0.0, 0.0, 0.0, 0.0, True, False
+    number = re.compile(r"([XYZE])(-?\d*\.?\d+)")
+    with open(gcode, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if line.startswith(";"):
+                label = re.match(r";\s*(?:TYPE|FEATURE)\s*:\s*(.*)", line)
+                if label:
+                    support = bool(re.match(r"support\b", label.group(1), re.I))
+                continue
+            if line.startswith("M82"):
+                relative = False
+            elif line.startswith("M83"):
+                relative = True
+            elif line.startswith("G92"):
+                last_e = float(dict(number.findall(line.split(";")[0])).get("E", last_e))
+            if not re.match(r"G[0-3][ \t]", line):
+                continue
+            words = dict(number.findall(line.split(";")[0]))
+            nx, ny, nz = float(words.get("X", x)), float(words.get("Y", y)), float(words.get("Z", z))
+            pushed = 0.0
+            if "E" in words:
+                pushed = float(words["E"]) if relative else float(words["E"]) - last_e
+                last_e = last_e if relative else float(words["E"])
+            if support and pushed > 0 and (nx, ny) != (x, y):
+                n = max(2, int(math.hypot(nx - x, ny - y) / 0.1) + 1)
+                t = np.linspace(0.0, 1.0, n)
+                pts.append(np.stack([x + (nx - x) * t, y + (ny - y) * t, np.full(n, nz)], axis=1))
+            x, y, z = nx, ny, nz
+    return np.concatenate(pts) if pts else np.zeros((0, 3))
+
+
+@needs_openscad
+@pytest.mark.skipif(not _ANY_SLICER, reason="no slicer installed: public CI has none")
+@pytest.mark.parametrize("slicer", list(_ANY_SLICER) or ["none installed"])
+def test_supports_for_an_arm_above_a_thread_stay_out_of_its_grooves(tmp_path, monkeypatch, _slice, slicer):
+    """The arm is held along its length and the thread under it is left
+    alone: no support line in a groove, next to none within a millimetre of
+    the crest, and the answer says so because the file shows it."""
+    axis, height, outer = _ARM_THREAD
+    result, shift = _slice(_build(_SCREW_UNDER_AN_ARM, tmp_path, monkeypatch), _ANY_SLICER[slicer])
+    points = _support_samples(result.output_path)
+    assert len(points), f"{slicer}: the arm got no supports: {result.supports.note}"
+    r = np.hypot(points[:, 0] - (axis[0] + shift[0]), points[:, 1] - (axis[1] + shift[1]))
+    beside = (points[:, 2] >= height[0] + shift[2]) & (points[:, 2] <= height[1] + shift[2])
+    grooves = int(((r < outer - 0.1) & beside).sum())
+    assert grooves == 0, f"{slicer}: {grooves} support samples in the thread's grooves"
+    near = int(((r <= outer + 1.0) & beside).sum())
+    assert near < 1000, f"{slicer}: {near} support samples within a millimetre of the thread"
+    just_under = points[points[:, 2] > _ARM_UNDERSIDE + shift[2] - 1.5]
+    for side in (-1, 1):
+        reach = side * (just_under[:, 0] - (axis[0] + shift[0]))
+        assert (reach > 20).sum() > 50 and ((reach > 8) & (reach < 20)).sum() > 50, (
+            f"{slicer}: the arm is not held along its length")
+    assert result.supports.kept_off_painted > 0 and result.supports.on_kept_off == 0, result.supports.note
+    assert result.supports.note.endswith("none on the parts that print on their own")
+
+
+def _lines_under(tri, z: float) -> str:
+    """A sliced file with one support line across the middle of *tri*, at *z*."""
+    (ax, ay, _), (bx, by, _), (cx, cy, _) = tri
+    mx, my = (ax + bx + cx) / 3, (ay + by + cy) / 3
+    return (f"M83\nG1 Z{z:.3f}\n;TYPE:Support material\nG1 X{mx - 0.2:.3f} Y{my:.3f}\n"
+            f"G1 X{mx + 0.2:.3f} Y{my:.3f} E0.02\n;TYPE:Perimeter\nG1 X{mx:.3f} Y{my + 30:.3f} E1\n")
+
+
+def test_the_answer_says_supports_touch_the_kept_off_faces_when_the_file_shows_them(tmp_path):
+    """What the answer says of the faces kept clear is read from the sliced
+    file: support under one of them is said, support far below or beside it
+    is not, and before any file is read nothing is claimed."""
+    from kiln.slicer_supports import SliceSupports, kept_clear_placed, witnessed
+
+    stl = _flared_post(1.5, tmp_path / "lip.stl")
+    from kiln.printability import _load_mesh_for_analysis
+
+    tris = np.asarray(_load_mesh_for_analysis(str(stl))[0], dtype=float)
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    leaning = np.flatnonzero((normals[:, 2] < 0) & (tris[:, :, 2].min(axis=1) > 5.0))
+    faces = tuple(int(i) for i in leaning)
+    assert faces, "the lip's underside was not found"
+    asked = SliceSupports(enabled=True, decided_by="analysis", reason="test", kept_off=faces, kept_off_painted=len(faces))
+    placed = kept_clear_placed(str(stl), asked, bed_centre=(128.0, 128.0))
+    assert len(placed) == len(faces)
+    asked = SliceSupports(enabled=True, decided_by="analysis", reason="test", kept_off=faces,
+                          kept_off_painted=len(faces), kept_clear=placed)
+    assert "none on the parts" not in asked.note and "was asked to keep them off" in asked.note
+    under = min(z for _x, _y, z in placed[0])
+    for name, z, said in (
+        ("against", under - 0.3, "the slicer still put some against parts that print on their own"),
+        ("far_below", under - 6.0, "none on the parts that print on their own"),
+    ):
+        gcode = tmp_path / f"{name}.gcode"
+        gcode.write_text(_lines_under(placed[0], z), encoding="utf-8")
+        seen = witnessed(asked, str(gcode))
+        assert seen.note.endswith(said), f"{name}: {seen.note}"
+        assert (seen.on_kept_off > 0) == (name == "against")
+    assert "on_kept_off" not in asked.to_dict() and "kept_clear" not in asked.to_dict()
+
+
+# ---------------------------------------------------------------------------
 # The answer matches the file, whichever slicer wrote it
 # ---------------------------------------------------------------------------
 

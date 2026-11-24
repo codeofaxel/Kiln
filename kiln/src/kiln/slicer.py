@@ -59,10 +59,14 @@ from kiln.slicer_orca import (
     write_orca_presets,
 )
 from kiln.slicer_supports import (
+    DECIDED_ANALYSIS,
     PAINTED_ONLY_KEY,
+    STAND_OFF_STYLE,
+    STYLE_KEY,
     SliceSupports,
     asked_under_input,
     ensure_profile_supports,
+    kept_clear_placed,
     kept_off_input,
     witnessed,
 )
@@ -2658,6 +2662,12 @@ def _slice_file(
     # supported, and the slicer told to support only what is painted.  Only
     # when every one of them was painted; otherwise the slice keeps supports
     # on for the whole part, with the faces above kept clear.
+    # A blocker stops a support starting on a face, not one that starts under
+    # an overhang above it and fills what it passes on its way to the plate.
+    # So a slice Kiln decided, with faces painted clear, asks for supports
+    # that stand off the model, unless the caller stated the style.  The
+    # painted faces go with the decision, placed as the slicer has them, so
+    # the sliced file is read for support under them.
     from kiln.slicer_profiles import profile_origin, profile_with_overrides
 
     kept_off_scratch: str | None = None
@@ -2669,6 +2679,7 @@ def _slice_file(
         if keep_xy or bed is not None:
             kept_off_scratch = tempfile.mkdtemp(prefix="kiln_kept_off_")
             centre = None if bed is None else ((bed[0] + bed[2]) / 2.0, (bed[1] + bed[3]) / 2.0)
+            unpainted = sliced_input
             under = None
             if supports.under and PAINTED_ONLY_KEY not in profile_origin(slicer_profile).stated:
                 under = asked_under_input(sliced_input, supports, kept_off_scratch, bed_centre=centre)
@@ -2685,6 +2696,18 @@ def _slice_file(
                 if painted is not None:
                     sliced_input, faces = painted
                     supports = replace(supports, kept_off_painted=faces)
+                    own_style = STYLE_KEY in profile_origin(slicer_profile).stated
+                    if supports.decided_by == DECIDED_ANALYSIS and not own_style:
+                        stand_off = {STYLE_KEY: STAND_OFF_STYLE}
+                        slicer_profile = profile_with_overrides(
+                            slicer_profile, stand_off,
+                            prefix=f"{Path(slicer_profile).stem}_" if slicer_profile else None, stated=False,
+                        )
+                        supports = replace(supports, settings={**supports.settings, **stand_off})
+            if supports.kept_off_painted:
+                supports = replace(
+                    supports, kept_clear=kept_clear_placed(unpainted, supports, bed_centre=centre),
+                )
     def _decided(out_path: str, *, with_profile: str | None, prepare: Any = None) -> SliceResult:
         return _slice_decided(
             slicer, input_abs, sliced_input, out_path, ext=ext, input_path=input_path,

@@ -33,8 +33,14 @@ The rule, in order:
   thread's flanks beside the shelf that needs supports) are painted as
   support blockers in the file the slicer is handed (:func:`kept_off_input`),
   because a slicer turned on for one overhang supports every slope it
-  finds and packs a thread's grooves; and the file the slicer wrote is read
-  back, so a slice that asked for supports and got none says so;
+  finds and packs a thread's grooves.  A blocker stops a support starting
+  on a face; it does not stop one that starts under an overhang above and
+  stands on the plate from filling what it passes on the way down, so a
+  slice with faces kept clear asks for supports that stand off the model
+  (:data:`STAND_OFF_STYLE`).  The file the slicer wrote is read back: a
+  slice that asked for supports and got none says so, and the answer says
+  the kept-off faces carry none only when the file shows none under them
+  (:func:`supports_against`);
 * when the one reason is a piece that starts on nothing (a foot a layer
   over the plate, a tooth hanging from the top of a hole), the supports
   are asked for under that piece and nowhere else: its faces are painted
@@ -71,6 +77,12 @@ SUPPORT_KEY = "support_material"
 
 #: The suffix a witnessed decision's reason carries when the file has none.
 _PLACED_NONE = "; the slicer placed none"
+
+#: The key that chooses how supports are built, and the value whose supports
+#: stand off the model on their way down to the plate (PrusaSlicer's organic,
+#: the Orca family's tree: :mod:`kiln.slicer_orca` carries it across).
+STYLE_KEY = "support_material_style"
+STAND_OFF_STYLE = "organic"
 
 #: Who decided the answer.
 DECIDED_STATED = "stated"        # the caller's own key, left alone
@@ -109,6 +121,24 @@ class SliceSupports:
     #: threshold, as the printability reply states its verdict and not the
     #: angle; the profile carries it.  Never served.
     own_angle: bool = field(default=False, repr=False)
+    #: The kept-off faces where the slicer has them, as triangles in the
+    #: bed's frame (:func:`kept_clear_placed`).  Bookkeeping for
+    #: :func:`witnessed`; never served.
+    kept_clear: tuple = field(default=(), repr=False, compare=False)
+    #: How much support the sliced file carries under the kept-off faces
+    #: (:func:`supports_against`); ``None`` until a sliced file has been
+    #: read.  Never served: the sentence says it.
+    on_kept_off: int | None = field(default=None, repr=False)
+
+    @property
+    def _kept_clear_clause(self) -> str:
+        """What the answer says of the faces kept clear: only what the
+        sliced file shows."""
+        if self.on_kept_off is None:
+            return "the slicer was asked to keep them off the parts that print on their own"
+        if self.on_kept_off:
+            return "the slicer still put some against parts that print on their own"
+        return "none on the parts that print on their own"
 
     @property
     def note(self) -> str:
@@ -127,23 +157,25 @@ class SliceSupports:
             if placed_none:
                 return f"supports asked for, {asked_for}, but the slicer placed none"
             if self.enabled and self.kept_off_painted:
-                return f"supports on, {self.reason}; none on the parts that print on their own"
+                return f"supports on, {self.reason}; {self._kept_clear_clause}"
             return f"{'supports on' if self.enabled else 'no supports'}, {self.reason}"
         if self.decided_by == DECIDED_NOT_CHECKED:
             return f"no supports; whether the part needs them was {self.reason}"
         if placed_none:
             return f"the part needs supports but the slicer placed none: {asked_for}"
-        # Asked for under one piece alone, the faces that would have been
-        # kept clear carry no supports either: the sentence is the same one.
-        if self.enabled and (self.kept_off_painted or (self.under_painted and self.kept_off)):
-            return f"supports on: {self.reason}; none on the parts that print on their own"
+        if self.enabled and self.kept_off_painted:
+            return f"supports on: {self.reason}; {self._kept_clear_clause}"
+        # Asked for under one piece alone, the answer says what was asked:
+        # the support under that piece stands against the faces beside it.
+        if self.enabled and self.under_painted and self.kept_off:
+            return f"supports on: {self.reason}; asked for only under what starts in mid-air"
         if self.enabled:
             return f"supports on: {self.reason}"
         return f"no supports: {self.reason}"
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        for bookkeeping in ("kept_off", "under", "under_painted", "own_angle"):
+        for bookkeeping in ("kept_off", "under", "under_painted", "own_angle", "kept_clear", "on_kept_off"):
             d.pop(bookkeeping)
         if self.own_angle:
             d["settings"] = {k: v for k, v in d["settings"].items() if k != "support_material_threshold"}
@@ -209,12 +241,113 @@ def witnessed(decision: SliceSupports, gcode_path: str | None) -> SliceSupports:
     to support -- rather than reported as supported because the key was
     set.  Without this check both shapes come back "supports on" with
     zero support lines.
+
+    A slice with faces kept clear is read for support under those faces
+    too, and the count goes on the answer: the sentence says they carry
+    none only when the file shows none.
     """
     if not decision.enabled or not gcode_path:
         return decision
-    if gcode_support_lines(gcode_path) > 0:
-        return decision
-    return replace(decision, enabled=False, reason=decision.reason + _PLACED_NONE)
+    if gcode_support_lines(gcode_path) == 0:
+        return replace(decision, enabled=False, reason=decision.reason + _PLACED_NONE)
+    if decision.kept_clear:
+        return replace(decision, on_kept_off=supports_against(gcode_path, decision.kept_clear))
+    return decision
+
+
+#: How far under a kept-off face a support line counts as against it: the
+#: gap a slicer leaves under a face it supports, and a layer or two of the
+#: support's own top.
+_AGAINST_MM = 1.0
+#: The spacing a support line is sampled at, and the cell the faces are
+#: indexed by, in millimetres.
+_SAMPLE_MM = 0.25
+_CELL_MM = 1.0
+
+_MOVE = re.compile(r"G0*[0-3](?=[ \t])")
+_WORD = re.compile(r"([XYZE])(-?\d*\.?\d+)")
+
+
+def _faces_by_cell(triangles: tuple) -> dict[tuple[int, int], list[tuple[float, ...]]]:
+    """*triangles* as plane equations over their footprints, by the bed
+    cells each footprint touches.  A face standing on edge has no
+    footprint to be under and is left out."""
+    cells: dict[tuple[int, int], list[tuple[float, ...]]] = {}
+    for (ax, ay, az), (bx, by, bz), (cx, cy, cz) in triangles:
+        det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+        if abs(det) < 1e-9:
+            continue
+        face = (ax, ay, az, bx, by, bz, cx, cy, cz, det)
+        for i in range(int(min(ax, bx, cx) // _CELL_MM), int(max(ax, bx, cx) // _CELL_MM) + 1):
+            for j in range(int(min(ay, by, cy) // _CELL_MM), int(max(ay, by, cy) // _CELL_MM) + 1):
+                cells.setdefault((i, j), []).append(face)
+    return cells
+
+
+def _under_a_face(faces: list[tuple[float, ...]], x: float, y: float, z: float) -> bool:
+    """Whether the point sits under one of *faces*, within reach of it."""
+    for ax, ay, az, bx, by, bz, cx, cy, cz, det in faces:
+        u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / det
+        v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / det
+        if u < 0.0 or v < 0.0 or u + v > 1.0:
+            continue
+        if -0.05 <= u * az + v * bz + (1.0 - u - v) * cz - z <= _AGAINST_MM:
+            return True
+    return False
+
+
+def supports_against(gcode_path: str, triangles: tuple) -> int | None:
+    """How much support the sliced file lays under *triangles* (faces in
+    the bed's frame), counted in samples a quarter millimetre apart along
+    every support line; ``None`` when the file cannot be read.
+
+    A sample counts when it sits inside a face's footprint and no more than
+    a millimetre below it.  Support that stands beside a face, or far
+    below it under something else, does not.  The three driven slicers'
+    files are read alike: their feature labels, relative or absolute
+    extrusion, and arcs by their end points.
+    """
+    cells = _faces_by_cell(triangles)
+    if not cells:
+        return 0
+    found = 0
+    x = y = z = last_e = 0.0
+    relative = True
+    support = False
+    try:
+        with open(gcode_path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith(";"):
+                    label = feature_label(line)
+                    if label is not None:
+                        support = bool(_SUPPORT_LABEL.match(label))
+                    continue
+                if line.startswith("M82"):
+                    relative = False
+                elif line.startswith("M83"):
+                    relative = True
+                elif line.startswith("G92"):
+                    words = dict(_WORD.findall(line.split(";")[0]))
+                    last_e = float(words.get("E", last_e))
+                if not _MOVE.match(line):
+                    continue
+                words = dict(_WORD.findall(line.split(";")[0]))
+                nx, ny, nz = float(words.get("X", x)), float(words.get("Y", y)), float(words.get("Z", z))
+                pushed = 0.0
+                if "E" in words:
+                    pushed = float(words["E"]) if relative else float(words["E"]) - last_e
+                    last_e = last_e if relative else float(words["E"])
+                if support and pushed > 0.0 and (nx, ny) != (x, y):
+                    steps = max(1, int(((nx - x) ** 2 + (ny - y) ** 2) ** 0.5 / _SAMPLE_MM))
+                    for step in range(steps + 1):
+                        px, py = x + (nx - x) * step / steps, y + (ny - y) * step / steps
+                        faces = cells.get((int(px // _CELL_MM), int(py // _CELL_MM)))
+                        if faces and _under_a_face(faces, px, py, nz):
+                            found += 1
+                x, y, z = nx, ny, nz
+    except (OSError, ValueError):
+        return None
+    return found
 
 
 #: The inputs a slice can be handed with faces kept off supports: meshes
@@ -290,6 +423,41 @@ def asked_under_input(
     return _painted_input(input_path, decision.under, _ENFORCER_STATE, out_dir, bed_centre=bed_centre, every=True)
 
 
+def kept_clear_placed(
+    input_path: str, decision: SliceSupports, *, bed_centre: tuple[float, float] | None,
+) -> tuple:
+    """The faces *decision* keeps supports off, as triangles where the
+    slicer has them: a mesh placed as :func:`kept_off_input` places it, a
+    3MF where it stands.  Empty when there are none or the input is not one
+    this paints."""
+    suffix = Path(input_path).suffix.lower()
+    if not decision.kept_off or suffix not in _KEPT_OFF_INPUTS:
+        return ()
+    from kiln.printability import _parse_mesh, _prepare_parsed
+
+    try:
+        facets, vertices = _parse_mesh(input_path)
+        judged = _prepare_parsed(list(facets), vertices)[0]
+    except (OSError, ValueError):
+        return ()
+    tx = ty = tz = 0.0
+    if suffix != ".3mf":
+        tx, ty, tz = _placement({tuple(v) for tri in facets for v in tri}, bed_centre)
+    return tuple(
+        tuple((x + tx, y + ty, z + tz) for x, y, z in judged[i])
+        for i in decision.kept_off if 0 <= i < len(judged)
+    )
+
+
+def _placement(corners: Any, bed_centre: tuple[float, float] | None) -> tuple[float, float, float]:
+    """The move that stands a mesh with these *corners* on the plate,
+    centred on *bed_centre* (or where it is, with none)."""
+    xs, ys, zs = zip(*corners, strict=True)
+    tx = 0.0 if bed_centre is None else bed_centre[0] - (min(xs) + max(xs)) / 2.0
+    ty = 0.0 if bed_centre is None else bed_centre[1] - (min(ys) + max(ys)) / 2.0
+    return tx, ty, -min(zs)
+
+
 def _painted_input(
     input_path: str,
     faces: tuple[int, ...],
@@ -338,10 +506,7 @@ def _painted_input(
             rows.append(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>')
     if not painted or (every and len(found) < len(kept)):
         return None
-    xs, ys, zs = zip(*corner_ids, strict=True)
-    tx = 0.0 if bed_centre is None else bed_centre[0] - (min(xs) + max(xs)) / 2.0
-    ty = 0.0 if bed_centre is None else bed_centre[1] - (min(ys) + max(ys)) / 2.0
-    tz = -min(zs)
+    tx, ty, tz = _placement(corner_ids, bed_centre)
     model = "".join([
         '<?xml version="1.0" encoding="UTF-8"?>\n',
         '<model unit="millimeter" xml:lang="en-US" ',

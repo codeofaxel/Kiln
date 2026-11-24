@@ -270,7 +270,7 @@ def test_the_slice_supports_only_what_is_painted_and_the_tooth_is_held(tmp_path:
     supports = result.supports
     assert supports.enabled and supports.under_painted == 2 and supports.kept_off_painted == 0
     assert supports.settings[PAINTED_ONLY_KEY] == "0"
-    assert supports.note == "supports on: starts in mid-air at 21mm; none on the parts that print on their own"
+    assert supports.note == "supports on: starts in mid-air at 21mm; asked for only under what starts in mid-air"
     assert gcode_support_lines(result.output_path) > 0
     written = _settings_in(result.output_path)
     if slicer == "PrusaSlicer":
@@ -295,4 +295,4 @@ def test_a_file_that_cannot_be_painted_whole_keeps_supports_for_the_whole_part(t
     if slicer == "PrusaSlicer":
         assert written["support_material_auto"] == "1"
     else:
-        assert written["support_type"] == "normal(auto)"
+        assert written["support_type"] == "tree(auto)"
