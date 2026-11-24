@@ -1466,7 +1466,42 @@ def test_a_print_that_is_nothing_special_carries_no_rows(signed_in, model, obser
     _held()
     _ask(model)
     body = _posted()
-    assert not {"owner_words", "experimental", "colours", "print_anyway"} & set(body)
+    assert not {"owner_words", "experimental", "colours", "print_anyway", "check"} & set(body)
+
+
+def _standing_block(tmp_path: pathlib.Path, name: str, size: tuple[float, float, float]) -> pathlib.Path:
+    """A solid block standing on the bed, *size* in millimetres."""
+    trimesh = pytest.importorskip("trimesh")
+    mesh = trimesh.creation.box(extents=size)
+    mesh.apply_translation((0.0, 0.0, size[2] / 2.0))
+    path = tmp_path / name
+    mesh.export(str(path))
+    return path
+
+
+@responses.activate
+def test_the_card_carries_the_parts_check_and_a_ready_part_carries_none(signed_in, tmp_path, observed):
+    """A part the printability verdict asks a check of prints on a yes, so a
+    yes given on the account's card is given with the reason in front of the
+    person: the ask carries the verdict's sentence, word for word, the one the
+    approval dialog shows.  A ready part's ask carries none."""
+    from kiln.print_consent import what_the_print_is
+
+    pillar = _standing_block(tmp_path, "pillar.stl", (4.0, 4.0, 200.0))
+    squat = _standing_block(tmp_path, "squat.stl", (40.0, 40.0, 10.0))
+    said = what_the_print_is(pillar.name, str(pillar)).get("check")
+    assert said and said.startswith("Check before printing"), said
+    assert "check" not in what_the_print_is(squat.name, str(squat))
+    _may_i()
+    _held()
+    _ask(pillar)
+    _may_i()
+    _held(pending_id="pa_2")
+    _ask(squat)
+    asked, ready = _posted(0), _posted(1)
+    assert asked["check"] == said
+    assert "check" not in ready
+    assert not {"print_anyway", "experimental", "colours", "owner_words"} & set(asked)
 
 
 def test_the_card_sends_facts_that_say_a_row_and_never_a_rows_text():
@@ -1489,6 +1524,25 @@ def test_the_card_sends_facts_that_say_a_row_and_never_a_rows_text():
         "soft_nozzle_confirmed": {"filaments": [], "nozzles": []},
         "mixed_nozzle_experiment": {"sizes": []},
     }}
+
+
+def test_the_cards_check_is_one_line_of_whole_sentences_with_no_place_in_it():
+    said = "Check before printing: It is tall for what it stands on."
+    assert bridge_client.AskCard(facts={"check": said}).fields() == {"check": said}
+    assert bridge_client.AskCard(facts={"check": "Check before printing:\n  thin  walls."}).fields() == {
+        "check": "Check before printing: thin walls."
+    }
+    # What locates the computer or the person never leaves with it.
+    sent = bridge_client.AskCard(facts={
+        "check": "Check before printing: /Users/jane/parts/x.stl at 192.168.1.20 is tall.",
+    }).fields()["check"]
+    assert "jane" not in sent and "192.168.1.20" not in sent and sent.startswith("Check before printing:")
+    # Too long for the card: the whole sentences that fit, never half of one.
+    first = "Check before printing: " + "a" * 300 + "."
+    assert bridge_client.AskCard(facts={"check": f"{first} {'b' * 200}."}).fields() == {"check": first}
+    assert bridge_client.AskCard(facts={"check": "c" * 500}).fields() == {}
+    for bad in (None, "", "   ", 12, {"said": "x"}):
+        assert bridge_client.AskCard(facts={"check": bad}).fields() == {}, bad
 
 
 def _said_anyway(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:

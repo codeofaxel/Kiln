@@ -1542,6 +1542,8 @@ _CARD_PRINT_TIME_MAX_S = 30 * 24 * 3600
 _CARD_FILAMENT_MAX_G = 10_000.0
 _CARD_PRINTER_STATES = frozenset({"ready", "busy", "offline"})
 _CARD_ASKED_FROM = frozenset({"mac", "windows", "linux"})
+#: The longest sentence about the part the card holds.
+_CARD_CHECK_MAX = 400
 
 
 def _card_text(value: Any) -> str:
@@ -1552,6 +1554,18 @@ def _card_text(value: Any) -> str:
     import unicodedata
 
     return " ".join("".join(" " if unicodedata.category(c) == "Cc" else c for c in value).split())
+
+
+def _whole_sentences(text: str, limit: int) -> str:
+    """*text* when it fits in *limit* characters, else as many of its first
+    sentences as fit, else ``""``: a sentence is never cut partway."""
+    if len(text) <= limit:
+        return text
+    kept = ""
+    for end, ch in enumerate(text[:limit], start=1):
+        if ch in ".!?" and (end == len(text) or text[end].isspace()):
+            kept = text[:end]
+    return kept
 
 
 def _fits(text: str, limit: int) -> str:
@@ -1594,7 +1608,8 @@ class AskCard:
     #: The checked facts of what the print itself is
     #: (:func:`kiln.print_consent.what_the_print_states`): the account's
     #: server says each row from them in the words every door uses, and
-    #: never takes a row's text from the ask.
+    #: never takes a row's text from the ask.  ``check`` is sent as the
+    #: sentence itself: the printability verdict about this part.
     facts: Mapping[str, Any] | None = None
 
     def fields(self) -> dict[str, Any]:
@@ -1642,7 +1657,28 @@ class AskCard:
         colours = facts.get("colours")
         if isinstance(colours, Mapping) and colours_row(colours):
             out["colours"] = dict(colours)
+        check = self._check_sentence(facts.get("check"))
+        if check:
+            out["check"] = check
         return out
+
+    @staticmethod
+    def _check_sentence(value: Any) -> str:
+        """The printability verdict's sentence about the part, as it leaves
+        this computer: one line, each address, secret or home folder in it
+        replaced (:func:`kiln.outbound_guard.redact_text`), whole sentences
+        within :data:`_CARD_CHECK_MAX`.  ``""`` for none, or for one that
+        cannot be read."""
+        if not isinstance(value, str):
+            return ""
+        try:
+            from kiln.outbound_guard import redact_text
+
+            said = _card_text(redact_text(_card_text(value)))
+        except Exception:  # noqa: BLE001 -- a sentence that cannot be read is not sent
+            logger.debug("the part's check left off the card", exc_info=True)
+            return ""
+        return _whole_sentences(said, _CARD_CHECK_MAX)
 
 
 def asked_from(platform: str | None = None) -> str:
