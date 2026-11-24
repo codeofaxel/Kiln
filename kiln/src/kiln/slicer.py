@@ -191,6 +191,8 @@ REFUSED_OFF_THE_BED = "off_the_bed"
 REFUSED_PATHS_COLLIDE = "paths_collide"
 #: A filament was put on a nozzle that cannot reach a part it prints.
 REFUSED_NOZZLE_REACH = "nozzle_cannot_reach"
+#: The layer asked for is as tall as the line the nozzle lays, or taller.
+REFUSED_LAYER_TOO_TALL = "layer_too_tall"
 
 
 #: How long, in seconds, a slicer may run before it is stopped, unless a
@@ -708,6 +710,9 @@ _ORCA_REFUSAL_WORDS = (
     (REFUSED_OFF_THE_BED, re.compile(r"found gcode (?:in )?unprintable|g-code outside of the printable area", re.IGNORECASE)),
     (REFUSED_PATHS_COLLIDE, re.compile(r"path conflicts? found", re.IGNORECASE)),
     (REFUSED_NOZZLE_REACH, re.compile(r"cannot be mapped to correct extruders", re.IGNORECASE)),
+    (REFUSED_LAYER_TOO_TALL, re.compile(
+        r"layer height (?:cannot exceed|can't be greater than) nozzle diameter|too small line width", re.IGNORECASE,
+    )),
 )
 #: Return codes read as a refusal, by kind.
 _ORCA_REFUSAL_STATUSES = {
@@ -764,7 +769,19 @@ def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal
             f"the middle or use the other nozzle.",
             kind=kind, code="NOZZLE_CANNOT_REACH", slicer=slicer_name,
         )
+    if kind == REFUSED_LAYER_TOO_TALL:
+        return _layer_too_tall(slicer_name)
     return None
+
+
+def _layer_too_tall(slicer_name: str) -> SlicerRefusal:
+    """The refusal of a layer as tall as the line the nozzle lays, in the
+    person's terms, whichever slicer gave it."""
+    return SlicerRefusal(
+        f"{slicer_name} refused to slice: the layer height asked for is too tall for the nozzle. A layer "
+        "has to be thinner than the line the nozzle lays. Choose a lower layer height and slice again.",
+        kind=REFUSED_LAYER_TOO_TALL, code="LAYER_TOO_TALL", slicer=slicer_name,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3054,6 +3071,8 @@ def _slice_with_slic3r(
     # into a generic mystery.
     if not os.path.isfile(out_file):
         reason = (result.stderr or "").strip() or (result.stdout or "").strip()
+        if dict(_ORCA_REFUSAL_WORDS)[REFUSED_LAYER_TOO_TALL].search(reason):
+            raise _layer_too_tall(os.path.basename(slicer.path))
         raise SlicerError(
             f"Slicer completed but output file was not created. "
             f"Slicer said: {reason[:500] if reason else '(no output)'}"
