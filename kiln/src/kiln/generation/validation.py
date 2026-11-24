@@ -4427,8 +4427,9 @@ def can_print_now(
       slicer adds, which is a normal print.
     - ``check_before_printing``: sound, but the verdict asks for a check
       (one the report names, or under the printable line with no single
-      cause to name).  The print pipeline holds such a part until the check
-      is made, so ``can_print`` is false.
+      cause to name).  ``can_print`` is false: Kiln does not call it
+      printable.  A print of it still starts when the person approves it;
+      the approval says the check, word for word.
     - ``wont_print``: sound, but the verdict says it won't print as it is
       (it rests on a point, a wall is thinner than the nozzle lays, ...).
     - ``needs_fixes``: the mesh has a fault to fix first; ``issues`` says
@@ -4636,8 +4637,8 @@ def can_print_now(
             "fix": "Change the part, or how it sits on the plate, as the verdict says",
         })
     elif not passes(verdict_key, report.score, bar=_MIN_PASS_SCORE):
-        # The print pipeline holds this part until the check is made, so it
-        # is not called printable here either; the word says a check is due.
+        # Not called printable: the word says a check is due.  A print of it
+        # still starts on the person's yes, the check said in the approval.
         verdict = "check_before_printing"
         can_print = False
     elif issues:

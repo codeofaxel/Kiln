@@ -333,7 +333,9 @@ def too_big_slab(tmp_path) -> str:
 def test_can_print_says_what_the_print_door_does(part, request):
     """``can_print`` is true exactly when the pre-print gate every print door
     runs (:func:`gate_for_print`) would send the file on, asked about the same
-    file, printer and material.  ``check_print_readiness`` runs fewer steps
+    file, printer and material, for every part but one the verdict asks a
+    check of, which the gate sends on to the person's approval
+    (:func:`test_a_part_the_verdict_asks_to_check_still_prints`).  ``check_print_readiness`` runs fewer steps
     than that gate (no repair, no support or structural assessment), so this
     pins five shapes: a clean part, one that prints with
     supports, one that won't print as it is, a file with no part, and a part
@@ -344,16 +346,17 @@ def test_can_print_says_what_the_print_door_does(part, request):
     path = request.getfixturevalue(part)
     readiness = can_print_now(path, printer_id="bambu_x1c", material="pla")
     gate = gate_for_print(path, printer_id="bambu_x1c", material="pla")
-    assert readiness["can_print"] is (gate.reason is None), (readiness, gate.reason)
+    if readiness.get("printability_verdict") == "check":
+        assert (readiness["can_print"], gate.reason) == (False, None), (readiness, gate.reason)
+    else:
+        assert readiness["can_print"] is (gate.reason is None), (readiness, gate.reason)
 
 
-def test_a_part_the_verdict_asks_to_check_is_held_until_it_is_checked(block, monkeypatch):
+def test_a_part_the_verdict_asks_to_check_still_prints(block, monkeypatch):
     """A part the verdict asks a check of (``check``) is not called
-    printable by any door: the pre-print gate holds it, with the verdict's
-    sentence as the reason and a way past for the person who has checked,
-    and ``can_print`` is false for it, so the readiness check refuses what
-    the print door refuses.  It reads ``check_before_printing``, the
-    verdict's own words."""
+    printable (``can_print`` is false, and it reads ``check_before_printing``,
+    the verdict's own words), and the pre-print gate still sends it on: the
+    print's approval says the check and the person decides."""
     import kiln.printability as printability
     from kiln.generation.validation import can_print_now
     from kiln.plugins.validation_pipeline_tools import gate_for_print
@@ -372,9 +375,9 @@ def test_a_part_the_verdict_asks_to_check_is_held_until_it_is_checked(block, mon
     assert readiness["verdict"] == "check_before_printing", readiness
     assert readiness["can_print"] is False
     gate = gate_for_print(block, printer_id="bambu_x1c", material="pla")
-    assert gate.reason and "Check before printing" in gate.reason, gate.reason
-    assert gate.bypassable is True
+    assert gate.reason is None, gate.reason
     assert gate.report["printability_verdict"] == "check"
+    assert gate.report["ready_to_print"] is False
 
 
 # --- regressions pinned by review (each fails at e0b5a815) -----------------

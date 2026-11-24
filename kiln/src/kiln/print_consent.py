@@ -953,6 +953,7 @@ PRINT_ROW_LABELS: dict[str, str] = {
     "print_anyway": "Print anyway",
     "experimental": "Experimental",
     "colours": "Colours",
+    "check": "The part",
 }
 
 
@@ -965,12 +966,17 @@ def print_rows_of(states: Any) -> dict[str, str]:
     """The rows an approval shows, said from *states*
     (:func:`what_the_print_states`) in the one wording of each, in the order
     of :data:`PRINT_ROW_LABELS`: ``print_anyway`` and ``experimental`` for
-    the owner's words (:func:`kiln.experimental_print.word_rows`) and
-    ``colours`` (:func:`kiln.maker_slicer_notes.colours_row`).  Facts that
-    do not check say nothing.  Never raises."""
+    the owner's words (:func:`kiln.experimental_print.word_rows`),
+    ``colours`` (:func:`kiln.maker_slicer_notes.colours_row`) and ``check``
+    for the printability verdict's sentence, word for word, when it asks
+    for a check of the part.  Facts that do not check say nothing.  Never
+    raises."""
     said: dict[str, str] = {}
     if not isinstance(states, dict):
         return said
+    check = states.get("check")
+    if isinstance(check, str) and check.strip():
+        said["check"] = check.strip()
     try:
         from kiln import experimental_print
 
@@ -988,15 +994,29 @@ def print_rows_of(states: Any) -> dict[str, str]:
     return {name: said[name] for name in PRINT_ROW_LABELS if name in said}
 
 
-def what_the_print_states(file_name: str, local_path: str | None) -> dict[str, Any]:
+def what_the_print_states(
+    file_name: str, local_path: str | None, *, printer_id: str = "", material: str = "",
+) -> dict[str, Any]:
     """The checked facts every door says a print's approval rows from:
-    ``owner_words`` (``{word: facts}``, :func:`kiln.experimental_print.file_owner_words`)
+    ``check`` (the printability verdict's sentence,
+    :func:`kiln.plugins.validation_pipeline_tools.check_due_before_printing`)
+    for a part the verdict asks a check of, judged for *printer_id* and
+    *material* as the print door judges it, ``owner_words``
+    (``{word: facts}``, :func:`kiln.experimental_print.file_owner_words`)
     for a slice the owner said to print anyway and a print sliced for
     nozzles of different sizes, and ``colours``
     (:func:`kiln.maker_slicer_notes.colours_facts`) for a plate Kiln sliced
     in fewer colours than it holds.  Only what applies; *local_path* is the
     copy of the file on this computer, when there is one.  Never raises."""
     states: dict[str, Any] = {}
+    try:
+        from kiln.plugins.validation_pipeline_tools import check_due_before_printing
+
+        check = check_due_before_printing(local_path or "", printer_id=printer_id, material=material)
+        if check:
+            states["check"] = check
+    except Exception:  # noqa: BLE001 -- the approval opens without the row
+        logger.debug("the part's check skipped for %s", file_name, exc_info=True)
     try:
         from kiln import experimental_print
 
@@ -1020,8 +1040,10 @@ def what_the_print_is(file_name: str, local_path: str | None) -> dict[str, str]:
     """The rows a person's approval carries about the print itself, the same
     at every door that asks, in the order of :data:`PRINT_ROW_LABELS`:
     ``print_anyway`` for a slice the owner said to print anyway,
-    ``experimental`` for a print Kiln has not proven on a printer, and
-    ``colours`` for a plate Kiln sliced in fewer colours than it holds; each
+    ``experimental`` for a print Kiln has not proven on a printer,
+    ``colours`` for a plate Kiln sliced in fewer colours than it holds, and
+    ``check`` for a part the printability verdict asks a check of, in the
+    verdict's own words; each
     said from its checked facts (:func:`print_rows_of` of
     :func:`what_the_print_states`).  Only the rows that apply.  Never
     raises."""

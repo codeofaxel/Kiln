@@ -129,14 +129,64 @@ def test_every_door_still_passes_the_squat_part(tmp_path):
     assert mesh["passed"] is True and "PASSED validation. Ready to print." in mesh["message"], mesh
 
 
-def test_the_print_gate_holds_a_part_with_a_check_due(tmp_path):
-    from kiln.plugins.validation_pipeline_tools import gate_for_print
+def _approval(monkeypatch, part: str) -> str:
+    """The question a person is asked before ``slice_and_print`` prints *part*."""
+    import asyncio
+
+    from kiln import server
+    from kiln.print_consent import CHOICE_THIS_PRINT, DialogAnswer, reset_consent
+
+    monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
+    monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: True)
+    asked: list[str] = []
+
+    async def _answer(ctx, message, **_kw):
+        asked.append(message)
+        return DialogAnswer("accept", "", choice=CHOICE_THIS_PRINT)
+
+    monkeypatch.setattr(server, "ask_user_to_confirm", _answer)
+
+    async def _ask() -> None:
+        token = await server._obtain_print_consent("slice_and_print", {"input_path": part}, object())
+        if token is not None:
+            reset_consent(token)
 
     with rx.without_kiln_pro():
-        held = gate_for_print(_block(tmp_path, "pillar.stl", (4.0, 4.0, 200.0)))
-        clear = gate_for_print(_block(tmp_path, "squat.stl", (40.0, 40.0, 10.0)))
-    assert held.reason and "Check before printing" in held.reason and held.bypassable, held
-    assert clear.reason is None, clear
+        asyncio.run(_ask())
+    [message] = asked
+    return message
+
+
+def test_the_print_approval_says_the_check_and_the_part_still_prints(tmp_path, monkeypatch):
+    """A part the verdict asks a check of is not ready, and it is not held:
+    the approval the person answers before the print says the verdict's
+    sentence, word for word, and on their yes the print door sends it on."""
+    from kiln.pipelines import _validate_mesh_step
+    from kiln.plugins.validation_pipeline_tools import gate_for_print
+    from kiln.print_consent import what_the_print_is
+
+    pillar = _block(tmp_path, "pillar.stl", (4.0, 4.0, 200.0))
+    with rx.without_kiln_pro():
+        gate = gate_for_print(pillar)
+        step, _ = _validate_mesh_step(pillar, printer_id="", label="pipeline")
+        rows = what_the_print_is("pillar.stl", pillar)
+    said = gate.report["printability_verdict_text"]
+    assert said.startswith("Check before printing: It is tall for what it stands on"), said
+    assert gate.report["ready_to_print"] is False, gate.report
+    assert gate.reason is None, gate.reason
+    assert step.success and step.message == said.rstrip("."), step
+    assert rows == {"check": said}, rows
+    assert f"  The part: {said}" in _approval(monkeypatch, pillar).splitlines()
+
+
+def test_the_print_approval_of_a_ready_part_says_no_check(tmp_path, monkeypatch):
+    squat = _block(tmp_path, "squat.stl", (40.0, 40.0, 10.0))
+    with rx.without_kiln_pro():
+        from kiln.print_consent import what_the_print_is
+
+        assert what_the_print_is("squat.stl", squat) == {}
+    message = _approval(monkeypatch, squat)
+    assert "The part:" not in message and "Check before printing" not in message, message
 
 
 # ---------------------------------------------------------------------------

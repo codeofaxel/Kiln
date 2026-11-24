@@ -1254,7 +1254,9 @@ class _DesignReasoningToolsPlugin:
             Kiln's verdict lets the part print, the same verdict the print
             pipeline refuses on.  ``verdict`` is ``ready_to_print``,
             ``printable_with_supports``, ``check_before_printing`` (the
-            verdict asks for a check; ``can_print`` is false until it is made),
+            verdict asks for a check; ``can_print`` is false, and a print of
+            it still starts on the person's yes, the check said in the
+            approval),
             ``wont_print`` (sound, but it won't print as it is) or
             ``needs_fixes`` (a mesh fault, named in ``issues``).
             ``validate_and_prepare`` runs the full pre-print pipeline.

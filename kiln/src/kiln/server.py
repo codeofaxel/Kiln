@@ -2883,6 +2883,19 @@ def _consent_filament_line(
         return None
 
 
+def _approval_judged_for(arguments: dict[str, Any], printer_name: str | None) -> dict[str, str]:
+    """The printer model and plastic a print's approval judges its part for:
+    the ones the print door judges it for (the named model, else the model
+    of the machine aimed at, as ``slice_and_print`` resolves it).  Never
+    raises: an unknown is left out."""
+    try:
+        printer_id = _resolve_printer_profile_id(arguments.get("printer_id") or None, printer_name) or ""
+    except Exception:  # noqa: BLE001 -- judged without a printer model
+        printer_id = ""
+    material = arguments.get("material")
+    return {"printer_id": printer_id, "material": material if isinstance(material, str) else ""}
+
+
 async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: Any):
     """Ask the person before this print starts.  Returns a reset token or None.
 
@@ -2977,10 +2990,13 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     # and one the owner said to print anyway, are asked about every time too
     # (kiln.experimental_print).
     from kiln import experimental_print
-    from kiln.print_consent import print_rows_of, what_the_print_states
+    from kiln.print_consent import print_rows_of, row_label, what_the_print_states
 
     states = await asyncio.to_thread(
-        what_the_print_states, os.path.basename(file_value) or file_value, _local_copy_of(file_value),
+        functools.partial(
+            what_the_print_states, os.path.basename(file_value) or file_value, _local_copy_of(file_value),
+            **_approval_judged_for(arguments, printer_name),
+        ),
     )
     about = print_rows_of(states)
     own_yes = experimental_print.asks_every_time(about)
@@ -3029,6 +3045,9 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         file_name=os.path.basename(file_value) or file_value,
         printer_name=person_printer,
         extra={
+            # A part the printability verdict asks a check of: the verdict's
+            # sentence, word for word.  It still prints on this yes.
+            row_label("check"): about.get("check"),
             "material": arguments.get("material"),
             "printer model": arguments.get("printer_id"),
             "filament slots": _consent_filament_line(tool_name, file_value, printer_name, arguments),

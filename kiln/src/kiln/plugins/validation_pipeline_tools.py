@@ -21,6 +21,7 @@ working.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from dataclasses import asdict, dataclass
@@ -522,14 +523,72 @@ class PrintGate:
         }
 
 
+def check_due(report: dict[str, Any] | None) -> str | None:
+    """The printability verdict's sentence when *report* (the pre-print
+    check's) asks for a check of the part and nothing else in it stops the
+    part, else ``None``.
+
+    Such a part is not ready (``ready_to_print`` is false) and still prints:
+    the print's approval says this sentence, word for word
+    (:func:`kiln.print_consent.what_the_print_states`), and the person
+    decides.
+    """
+    if not report or report.get("printability_verdict") != "check":
+        return None
+    for c in report.get("checks") or []:
+        if not c.get("passed") and c.get("severity") == "error" and c.get("name") != "printability":
+            return None
+    return str(report.get("printability_verdict_text") or "") or "Check before printing."
+
+
+def _sliced_project(path: str) -> bool:
+    """Whether the 3MF at *path* is a sliced project, which holds no part to
+    judge.  A 3MF that will not open is not one: the door says why."""
+    import zipfile
+
+    from kiln.gcode_metadata import sliced_gcode_member
+    from kiln.untrusted_zip import UntrustedZipFile
+
+    with contextlib.suppress(zipfile.BadZipFile), UntrustedZipFile(path) as zf:
+        return sliced_gcode_member(zf) is not None
+    return False
+
+
+def check_due_before_printing(input_path: str, *, printer_id: str = "", material: str = "") -> str | None:
+    """What a print's approval says about the part in *input_path*: the
+    printability verdict's sentence when it asks for a check (:func:`check_due`),
+    else ``None``.
+
+    The print door's own gate (:func:`gate_for_print`), for the same printer
+    and material, so the approval says what the print door finds.  A file
+    with no part in it (G-code, a sliced project), a file that is not there,
+    a file the gate refuses and a check that could not run say nothing here.
+    Never raises.
+    """
+    try:
+        ext = os.path.splitext(input_path or "")[1].lower()
+        if ext not in _SUPPORTED_FORMATS or not os.path.isfile(input_path):
+            return None
+        if ext == ".3mf" and _sliced_project(input_path):
+            return None
+        gate = gate_for_print(input_path, printer_id=printer_id, material=material)
+    except Exception:  # noqa: BLE001 -- the approval opens without the line
+        _logger.debug("The approval says no check for %s: the check did not run", input_path, exc_info=True)
+        return None
+    return check_due(gate.report) if gate.reason is None else None
+
+
 def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "") -> PrintGate:
     """Run the pre-print check the way every print door must.
 
     A file that is not a mesh (G-code, a sliced project) has nothing to check
-    and passes as it is.  A mesh prints only when the check ran and found it
-    ready: one that failed, or that could not be checked at all, is refused
-    with the reason.  One shared check for every door: a door carrying its
-    own copy tends to print anyway when the check crashes.
+    and passes as it is.  A mesh prints when the check ran and found it
+    ready, or found only a check the printability verdict asks for
+    (:func:`check_due`): that part prints, its sentence said in the print's
+    approval and carried in ``report``.  One that failed otherwise, or that
+    could not be checked at all, is refused with the reason.  One shared
+    check for every door: a door carrying its own copy tends to print anyway
+    when the check crashes.
     """
     if os.path.splitext(input_path)[1].lower() not in _SUPPORTED_FORMATS:
         return PrintGate(path=input_path)
@@ -542,7 +601,7 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
             reason=f"Kiln couldn't check this file before printing: {_plain_words.said(exc)}.",
             code="VALIDATION_ERROR",
         )
-    if not report.get("ready_to_print"):
+    if not report.get("ready_to_print") and check_due(report) is None:
         # The check's own summary says it: "Not ready. 1 issue: ..." -- the
         # same sentence validate_and_prepare shows.
         no_part = any(
