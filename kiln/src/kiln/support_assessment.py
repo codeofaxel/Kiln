@@ -216,12 +216,15 @@ def _shared_verdict(
     material: str,
     nozzle_diameter_mm: float,
     layer_height_mm: float,
-) -> tuple[bool, str | None, str | None]:
-    """``(needs_supports, reason, not_judged)`` read off the printability
-    engine -- the same verdict every other door gives
+) -> tuple[bool, str | None, str | None, str]:
+    """``(needs_supports, reason, not_judged, between_parts)`` read off the
+    printability engine -- the same verdict every other door gives
     (:func:`kiln.printability.support_verdict`), with its reason -- and,
     for faces that are not a solid (flat, degenerate, nothing to print),
     ``False`` with the engine's own sentence to put in the warnings.
+    *between_parts* is what to watch for in a file whose separate parts
+    print in place apart (:func:`kiln.printability.supports_between_parts_advice`),
+    ``""`` for every other file.
 
     The verdict always comes from the engine, so it agrees with the rest of
     the report.  Triangles handed in without a file are written to one for
@@ -230,7 +233,7 @@ def _shared_verdict(
     import os
     import tempfile
 
-    from kiln.printability import judge_supports, support_verdict
+    from kiln.printability import judge_supports, support_verdict, supports_between_parts_advice
 
     path = stl_path
     scratch: str | None = None
@@ -249,17 +252,20 @@ def _shared_verdict(
             layer_height=layer_height_mm,
         )
     except ValueError as exc:
-        return False, None, f"Whether supports are needed was not judged: {_plain_words.said(exc)}"
+        return False, None, f"Whether supports are needed was not judged: {_plain_words.said(exc)}", ""
     except MemoryError:
         # The analysis runner's cap: more memory than this machine gives a
         # single analysis.  Not judged, said -- never a quiet "no".
-        return False, None, "Whether supports are needed was not judged: the part is too large for this machine's analysis"
+        return (
+            False, None,
+            "Whether supports are needed was not judged: the part is too large for this machine's analysis", "",
+        )
     finally:
         if scratch is not None:
             with contextlib.suppress(OSError):
                 os.unlink(scratch)
     reason = support_verdict(judged)
-    return reason is not None, reason, None
+    return reason is not None, reason, None, supports_between_parts_advice(judged)
 
 
 def _bridge_part(reason: str | None) -> str | None:
@@ -1044,8 +1050,9 @@ def assess_support_feasibility(
     # Build recommendations
     recommendations: list[str] = []
     bridge_reason: str | None = None
+    between_parts = ""
     if needs_supports is None:
-        needs_supports, verdict_reason, not_judged = _shared_verdict(
+        needs_supports, verdict_reason, not_judged, between_parts = _shared_verdict(
             tris, stl_path, material=material,
             nozzle_diameter_mm=nozzle_diameter_mm, layer_height_mm=layer_height_mm,
         )
@@ -1057,6 +1064,8 @@ def assess_support_feasibility(
         recommendations.append(
             f"Supports recommended: {overhang_pct:.0f}% overhang area detected"
         )
+        if between_parts:
+            recommendations.append(between_parts)
         if support_type == "cross_material":
             pairing = profile.get("cross_material_pairing", "")
             recommendations.append(

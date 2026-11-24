@@ -55,6 +55,13 @@ _DEFAULT_JOINT_CLEARANCES: dict[str, tuple[float, float]] = {
     "loose": (0.5, 5.0),
 }
 
+def moving_gap_floor_mm() -> float:
+    """The smallest gap, in mm, two parts that move against each other are
+    given with no printer named: the low end of the clearance-fit band.
+    Parts modelled closer than this may print as one piece."""
+    return _DEFAULT_JOINT_CLEARANCES["clearance_fit"][0]
+
+
 #: Every joint type an assembly's record may name: the one list.  The
 #: validator's rules, the clearance recommendation and the assembly guide
 #: all read this.
@@ -1515,7 +1522,7 @@ def _judge_measured_gap(
             if separately else f" to still move on this printer in {material}"
         )
     else:
-        floor_mm = _DEFAULT_JOINT_CLEARANCES["clearance_fit"][0]
+        floor_mm = moving_gap_floor_mm()
         needed = f"the {floor_mm:.2f} mm minimum for parts that move"
     if gap < floor_mm:
         outcome = (

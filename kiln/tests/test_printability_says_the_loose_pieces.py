@@ -64,8 +64,8 @@ def _with_a_piece_in_the_air(path: Path) -> Path:
 
 
 def _lid_a_clearance_above(path: Path) -> Path:
-    """A block with a smaller one sitting 0.2 mm above it, as a print-in-place lid."""
-    trimesh.util.concatenate([_box((0, 0, 0), (30, 30, 10)), _box((5, 5, 10.2), (15, 15, 14))]).export(path)
+    """A block with a smaller one sitting 0.4 mm above it, as a print-in-place lid."""
+    trimesh.util.concatenate([_box((0, 0, 0), (30, 30, 10)), _box((5, 5, 10.4), (15, 15, 14))]).export(path)
     return path
 
 
@@ -184,9 +184,9 @@ class TestTheVerdictSaysThePieces:
         sentence = verdict(analyze_printability(str(path)))[1]
         assert f"It prints as 3 {SEPARATE}, not one" in sentence
         assert "2 of them stand 0.4 mm apart without touching, so they print in place together" in sentence
-        assert sentence.endswith(
+        assert (
             "The other one comes off the plate on its own; if it belongs with them, join it so they overlap."
-        )
+        ) in sentence
 
     def test_a_mesh_past_the_pair_limits_is_not_called_loose(self, tmp_path, monkeypatch):
         import kiln.fusion_check as fusion_check
@@ -281,7 +281,7 @@ class TestTheVerdictSaysThePieces:
         assert "If they were meant to be one solid" in sentence
 
     def test_a_piece_in_the_air_the_note_moves(self, tmp_path):
-        meshes = [_box((0, 0, 0), (30, 30, 10)), _box((5, 5, 10.2), (15, 15, 14))]
+        meshes = [_box((0, 0, 0), (30, 30, 10)), _box((5, 5, 10.4), (15, 15, 14))]
         path = _with_a_mechanism_note(tmp_path / "lid.stl", meshes, ["box", "lid"], ["lid"])
         sentence = verdict(analyze_printability(str(path)))[1]
         assert (

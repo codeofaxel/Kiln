@@ -644,9 +644,14 @@ class PiecesAnalysis:
     captive_bodies: int = 0
     floating: str = ""
     note: str = ""
+    #: Whether two or more of the separate parts stand a clearance apart on
+    #: the plate.  Bookkeeping for the support advice; never served.
+    stand_apart: bool = field(default=False, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("stand_apart")
+        return d
 
 
 @dataclass
@@ -1193,7 +1198,8 @@ def _judge_supports_here(
     if layer_height is None:
         layer_height = _fitted_layer_height(nozzle.diameter_mm)
     mesh_path = _mesh_path_for_analysis(file_path, plate_number)
-    triangles, _vertices, bbox, z_min = _load_mesh_for_analysis(mesh_path)
+    parsed, parsed_vertices = _parse_mesh(mesh_path)
+    triangles, _vertices, bbox, z_min = _prepare_parsed(parsed, parsed_vertices)
     threshold = _resolve_overhang_threshold(
         max_overhang_angle, material,
         material_overhangs(material, nozzle_mm=nozzle.diameter_mm, layer_height_mm=layer_height),
@@ -1202,6 +1208,7 @@ def _judge_supports_here(
         triangles, z_min, bbox,
         resolved_threshold=threshold, layer_height=layer_height,
         clear_with_none_held=clear_with_none_held,
+        parts_apart=lambda: _parts_stand_apart(parsed),
     )
     judged.nozzle = nozzle.to_dict()
     return judged
@@ -4483,6 +4490,11 @@ class _DownwardRegion:
     #: how far its farthest free corner sits from the boundary that holds
     #: it.  Zero for every other patch.
     sticks_out_mm: float = 0.0
+    #: For a patch that needs supports: its boundary as
+    #: :func:`_points_plate_supports_miss` reads it, ``(pa, d_seg,
+    #: supported)``: each boundary segment's start and run in XY, and
+    #: whether material continues below it.
+    boundary: tuple[np.ndarray, np.ndarray, np.ndarray] | None = field(default=None, repr=False, compare=False)
 
 
 # Membership limit for downward-region aggregation: faces overhanging
@@ -4728,6 +4740,179 @@ def _distances_to_segments(
     return out
 
 
+#: The most points :func:`_grid_points` lays across one patch.
+_GRID_POINT_CAP: int = 200_000
+#: The most point-to-hold pairs :func:`_points_plate_supports_miss` reads,
+#: and the most it reads at once.
+_HOLD_PAIR_CAP: int = 20_000_000
+_HOLD_PAIR_BLOCK: int = 1 << 20
+
+
+def _grid_points(faces: np.ndarray) -> np.ndarray | None:
+    """Points across *faces* ``(F, 3, 3)`` as ``(P, 3)``: each face read on
+    a grid no coarser than the lateral reach
+    (:data:`_MAX_LATERAL_REACH_MM`), corners and edges included, so a large
+    face is read across its whole area and not at its centre alone.
+    ``None`` past :data:`_GRID_POINT_CAP` points, and for faces with a
+    corner that is not a finite number: the count is taken before any grid
+    is laid, so a face of any size costs nothing to refuse."""
+    if len(faces) == 0:
+        return np.zeros((0, 3))
+    if not np.isfinite(faces).all():
+        return None
+    edges = np.stack([faces[:, 1] - faces[:, 0], faces[:, 2] - faces[:, 1], faces[:, 0] - faces[:, 2]], axis=1)
+    with np.errstate(over="ignore", invalid="ignore"):
+        longest = np.linalg.norm(edges[:, :, :2], axis=2).max(axis=1)
+        # Counted as floats, which grow past any cap without wrapping round.
+        wanted = np.maximum(np.ceil(longest / _MAX_LATERAL_REACH_MM), 1.0)
+        points = float(((wanted + 1.0) * (wanted + 2.0) / 2.0).sum())
+    if not points <= _GRID_POINT_CAP:
+        return None
+    steps = wanted.astype(np.int64)
+    blocks: list[np.ndarray] = []
+    for n in np.unique(steps).tolist():
+        weights = np.array(
+            [(i / n, j / n, (n - i - j) / n) for i in range(n + 1) for j in range(n + 1 - i)], dtype=np.float64,
+        )
+        blocks.append(np.einsum("pk,fkc->fpc", weights, faces[steps == n]).reshape(-1, 3))
+    return np.concatenate(blocks)
+
+
+def _over_the_model(
+    tris: np.ndarray, index: XYIndex, own: np.ndarray, points: np.ndarray, layer_height: float,
+) -> np.ndarray:
+    """For each of *points* ``(P, 3)``, whether a face of the part other
+    than the *own* faces (a mask over *tris*) lies straight below it, more
+    than *layer_height* away: a support under the point stands on the
+    model, not the plate.  Each face is read by the same arithmetic as
+    :func:`_gap_to_faces_below`."""
+    over = np.zeros(len(points), dtype=bool)
+    for start in range(0, len(points), _OVER_MODEL_SAMPLE_BLOCK):
+        block = points[start:start + _OVER_MODEL_SAMPLE_BLOCK]
+        sample_of, face_of = index.at_points(block[:, :2])
+        keep = ~own[face_of]
+        sample_of, face_of = sample_of[keep], face_of[keep]
+        nearest = np.full(len(block), -np.inf)
+        for first in range(0, len(face_of), _OVER_MODEL_PAIR_BLOCK):
+            at = sample_of[first:first + _OVER_MODEL_PAIR_BLOCK]
+            sub = tris[face_of[first:first + _OVER_MODEL_PAIR_BLOCK]]
+            px, py, pz = block[at, 0], block[at, 1], block[at, 2]
+            ax, ay = sub[:, 0, 0], sub[:, 0, 1]
+            bx, by = sub[:, 1, 0], sub[:, 1, 1]
+            cx, cy = sub[:, 2, 0], sub[:, 2, 1]
+            det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+            with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+                u = ((px - ax) * (cy - ay) - (cx - ax) * (py - ay)) / det
+                v = ((bx - ax) * (py - ay) - (px - ax) * (by - ay)) / det
+                z_at = sub[:, 0, 2] + u * (sub[:, 1, 2] - sub[:, 0, 2]) + v * (sub[:, 2, 2] - sub[:, 0, 2])
+                inside = (np.abs(det) > 1e-12) & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1.0 + 1e-9)
+            below = inside & (z_at <= pz + 1e-6)
+            np.maximum.at(nearest, at[below], z_at[below])
+        found = np.isfinite(nearest)
+        over[start:start + len(block)] = found & (block[:, 2] - np.where(found, nearest, 0.0) > layer_height)
+    return over
+
+
+def _points_plate_supports_miss(
+    faces: np.ndarray,
+    tris: np.ndarray,
+    index: XYIndex,
+    own: np.ndarray,
+    pa: np.ndarray,
+    d_seg: np.ndarray,
+    supported: np.ndarray,
+    layer_height: float,
+) -> int | None:
+    """How many points across a patch that needs supports (*faces*, the
+    *own* faces of *tris*) need a support that one standing on the plate
+    does not serve; ``None`` when the patch is past what this reads.
+
+    A point is served when it is held without a support by the patch's own
+    rules (within the lateral reach of a supported boundary segment
+    ``pa + s * d_seg``, or on a supported chord no longer than a bridge),
+    when nothing of the part lies under it (a support there stands on the
+    plate), or when a plate support holds it from beside: one stands within
+    the lateral reach, or one stands on one side and another hold on the
+    other, no farther apart than a bridge.  A plate support is counted only
+    where the plate is clear for the lateral reach all round it.  What is
+    left is a point whose support has to stand on the model.
+
+    Every count is checked against its cap before the work it bounds, and
+    a boundary that is not finite numbers is past what this reads.
+    """
+    if not (np.isfinite(pa).all() and np.isfinite(d_seg).all()):
+        return None
+    points = _grid_points(faces)
+    if points is None:
+        return None
+    if supported.any():
+        sup_a, sup_d = pa[supported], d_seg[supported]
+        with np.errstate(over="ignore"):
+            sup_len_sq = np.maximum((sup_d ** 2).sum(axis=1), 1e-18)
+        if not np.isfinite(sup_len_sq).all():
+            return None
+        points = points[_distances_to_segments(points[:, :2], sup_a, sup_d, sup_len_sq) > _MAX_LATERAL_REACH_MM]
+    if not len(points):
+        return 0
+    over = _over_the_model(tris, index, own, points, layer_height)
+    need = points[over]
+    if not len(need):
+        return 0
+    if len(pa):
+        need = need[_supported_chords(need[:, :2], pa, d_seg, supported) > _MAX_SELF_SUPPORTING_BRIDGE_MM]
+        if not len(need):
+            return 0
+    clear = points[~over]
+    if not len(clear):
+        return len(need)
+    reach = _MAX_LATERAL_REACH_MM
+    ring = np.array([(reach, 0.0, 0.0), (-reach, 0.0, 0.0), (0.0, reach, 0.0), (0.0, -reach, 0.0)])
+    around = (clear[:, None, :] + ring[None, :, :]).reshape(-1, 3)
+    roomy = ~_over_the_model(tris, index, own, around, layer_height).reshape(-1, len(ring)).any(axis=1)
+    stands = clear[roomy][:, :2]
+    if not len(stands):
+        return len(need)
+    walls = np.zeros((0, 2))
+    if supported.any():
+        # Points along the supported boundary, no farther apart than half
+        # the lateral reach, its ends included.
+        with np.errstate(over="ignore", invalid="ignore"):
+            # Counted as floats, which grow past any cap without wrapping round.
+            wanted = np.maximum(np.ceil(np.sqrt(sup_len_sq) / (reach / 2.0)), 1.0)
+            pairs = float((wanted + 1.0).sum()) * len(need)
+        if not pairs <= _HOLD_PAIR_CAP:
+            return None
+        pieces = wanted.astype(np.int64)
+        along = np.concatenate([np.arange(n + 1) / n for n in pieces.tolist()])
+        walls = np.repeat(sup_a, pieces + 1, axis=0) + along[:, None] * np.repeat(sup_d, pieces + 1, axis=0)
+    if len(need) * (len(stands) + len(walls)) > _HOLD_PAIR_CAP:
+        return None
+    # The nearest plate support, and the nearest hold of either kind, in
+    # each of eight directions round every point.
+    sectors = 8
+    limit = _MAX_SELF_SUPPORTING_BRIDGE_MM
+
+    def nearest_by_sector(holds: np.ndarray) -> np.ndarray:
+        out = np.full((len(need), sectors), np.inf)
+        if not len(holds):
+            return out
+        step = max(1, _HOLD_PAIR_BLOCK // len(holds))
+        for start in range(0, len(need), step):
+            delta = holds[None, :, :] - need[start:start + step, None, :2]
+            dist = np.hypot(delta[:, :, 0], delta[:, :, 1])
+            turn = np.arctan2(delta[:, :, 1], delta[:, :, 0]) / (2.0 * np.pi / sectors)
+            sector = np.floor(turn).astype(np.int64) % sectors
+            for k in range(sectors):
+                out[start:start + step, k] = np.where(sector == k, dist, np.inf).min(axis=1)
+        return out
+
+    from_plate = nearest_by_sector(stands)
+    from_any = np.minimum(from_plate, nearest_by_sector(walls))
+    beside = from_plate.min(axis=1) <= reach
+    between = (from_plate + np.roll(from_any, sectors // 2, axis=1)).min(axis=1) <= limit
+    return int((~(beside | between)).sum())
+
+
 def _analyze_downward_regions(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -4890,6 +5075,7 @@ def _analyze_downward_regions(
                 needs_supports=True,
                 bbox_span_mm=round(bbox_span, 2),
                 free_air_span_mm=round(bbox_span, 2),
+                boundary=(np.zeros((0, 2)), np.zeros((0, 2)), np.zeros(0, dtype=bool)),
             ))
             continue
 
@@ -5003,6 +5189,7 @@ def _analyze_downward_regions(
                 else round(region_free_air, 2)
             ),
             sticks_out_mm=round(sticks_out, 2),
+            boundary=(pa, d_seg, supported_arr) if region_needs_supports else None,
         ))
 
     return regions
@@ -8053,6 +8240,32 @@ def _thin_line_sentence(thin_walls: ThinWallAnalysis) -> str:
     )
 
 
+def supports_between_parts_advice(judged: SupportJudgement, *, beside_the_pieces: bool = False) -> str:
+    """What advice to use supports adds for a file whose separate parts
+    print in place a clearance apart (:attr:`SupportJudgement.parts_apart`);
+    ``""`` for every other file.
+
+    A support that stands on one part to hold up another ties the two
+    together until it is broken out.  Where the plate serves every point
+    that needs a support the advice is supports from the plate alone;
+    otherwise it is to break out any that stands between two parts.
+    *beside_the_pieces* is the wording that follows the sentence saying the
+    parts print in place apart.
+    """
+    if not judged.parts_apart:
+        return ""
+    if judged.plate_reaches_supports:
+        told = "use supports from the build plate only: one that stands on a part to hold up another locks the two together."
+        return f"U{told[1:]}" if beside_the_pieces else f"Its parts print in place apart from each other, so {told}"
+    told = (
+        "have to stand on the model: break out any that stands on one part to hold up another, or the two "
+        "stay locked together."
+    )
+    if beside_the_pieces:
+        return f"Some of its supports {told}"
+    return f"Its parts print in place apart from each other, and some of these supports {told}"
+
+
 def _build_recommendations(
     overhangs: OverhangAnalysis,
     thin_walls: ThinWallAnalysis,
@@ -8065,6 +8278,7 @@ def _build_recommendations(
     adhesion: AdhesionRecommendation | None = None,
     thin_walls_below_nozzle: bool | None = None,
     slicer_note: str = "",
+    between_parts_advice: str = "",
 ) -> list[str]:
     """Generate actionable recommendations based on analysis results.
 
@@ -8076,8 +8290,13 @@ def _build_recommendations(
     *slicer_note* is why what the slice leaves out was judged by the
     general figures (:meth:`kiln.material_limits.SlicedFloors.note`), said
     once, after the warning it explains.
+
+    *between_parts_advice* is what to watch for in a file whose separate
+    parts print in place apart (:func:`supports_between_parts_advice`): the
+    first advice to use supports carries it.
     """
     recs: list[str] = []
+    between_parts = f"  {between_parts_advice}" if between_parts_advice else ""
 
     if overhangs.needs_supports:
         # The faces that need supports, as the verdict says them (a thread
@@ -8090,7 +8309,10 @@ def _build_recommendations(
             f"{pct:.0f}% of triangles are overhangs" if pct >= 0.5
             else f"{count} overhang face(s) need them"
         )
-        recs.append(f"Enable supports: {need}.  Consider re-orienting the model to reduce supports.")
+        recs.append(
+            f"Enable supports: {need}.  Consider re-orienting the model to reduce supports.{between_parts}"
+        )
+        between_parts = ""
 
     below_nozzle = (
         thin_walls_below_nozzle
@@ -8146,13 +8368,15 @@ def _build_recommendations(
     bridge_mm, sticks_out_mm = _unsupported_flats(bridging)
     if bridge_mm:
         recs.append(
-            f"Long bridges detected ({bridge_mm:.1f} mm).  Enable supports or reduce bridge spans."
+            f"Long bridges detected ({bridge_mm:.1f} mm).  Enable supports or reduce bridge spans.{between_parts}"
         )
+        between_parts = ""
     if sticks_out_mm:
         recs.append(
             f"Part of this model sticks out {sticks_out_mm:.1f} mm with nothing under it.  "
-            "Turn on supports, or add a 45-degree slope or a brace under it."
+            f"Turn on supports, or add a 45-degree slope or a brace under it.{between_parts}"
         )
+        between_parts = ""
 
     if bed_adhesion.adhesion_risk == "high":
         recs.append(
@@ -8678,6 +8902,16 @@ class SupportJudgement:
     #: one reason the part needs supports is a piece that starts on nothing:
     #: :func:`_faces_under_a_start`.  Empty for every other part.
     support_under_faces: list[int] = field(default_factory=list)
+    #: Whether the file's separate parts stand a clearance apart, printing
+    #: in place together (:func:`_parts_stand_apart`), in a file that needs
+    #: supports.  A support that stands on one such part to hold up another
+    #: ties the two together.
+    parts_apart: bool = False
+    #: For parts that stand apart: whether supports standing on the plate
+    #: alone serve every point that needs one
+    #: (:func:`_plate_reaches_every_support`).  ``False`` for every other
+    #: part.
+    plate_reaches_supports: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -9072,6 +9306,7 @@ def _judge_supports(
     layer_height: float,
     tris: np.ndarray | None = None,
     clear_with_none_held: bool = False,
+    parts_apart: bool | Callable[[], bool] = False,
 ) -> SupportJudgement:
     """The support half of :func:`analyze_printability`, on a loaded mesh:
     the overhangs, the bridges, the support volume, and the exemptions
@@ -9079,7 +9314,9 @@ def _judge_supports(
     supports".  One body for the report and for :func:`judge_supports`,
     so the two cannot drift.  *tris* is the same triangles as a
     ``(T, 3, 3)`` array when the caller holds one, handed to each reading
-    below that would otherwise build its own."""
+    below that would otherwise build its own.  *parts_apart* is the
+    caller's reading of the file's pieces (:func:`_parts_stand_apart`), or
+    a call that makes it: asked only of a part that needs supports."""
     over_faces, over_angles = _overhang_faces(
         triangles, resolved_threshold, z_min=z_min, layer_height=layer_height, tris=tris,
     )
@@ -9232,6 +9469,10 @@ def _judge_supports(
         support_area_mm2=round(held_up, 2),
         support_area_percentage=round(100.0 * held_up / underside, 1) if underside > 0 else 0.0,
     )
+    # The pieces are read only for a part that needs supports, and the
+    # plate's reach only for parts that stand apart.
+    needs = bool(held_faces and overhangs.needs_supports) or bool(bridging.needs_supports_for_bridges)
+    apart = needs and bool(parts_apart() if callable(parts_apart) else parts_apart)
     return SupportJudgement(
         overhangs=overhangs,
         bridging=bridging,
@@ -9249,7 +9490,81 @@ def _judge_supports(
             with_none_held=clear_with_none_held,
         ),
         support_under_faces=under_faces,
+        plate_reaches_supports=apart and _plate_reaches_every_support(
+            tris if tris is not None else np.asarray(triangles, dtype=np.float64),
+            downward_regions, held_faces if overhangs.needs_supports else [], layer_height,
+        ),
+        parts_apart=apart,
     )
+
+
+def _plate_reaches_every_support(
+    tris: np.ndarray, regions: list[_DownwardRegion], held: list[int], layer_height: float,
+) -> bool:
+    """Whether supports standing on the plate alone serve every point of
+    the part that needs one.
+
+    Each patch that needs supports is read for the points a plate support
+    does not serve (:func:`_points_plate_supports_miss`): there may be
+    none.  Every *held* face outside those patches is read at its centre
+    and corners: none may have a face of the part straight below it, more
+    than a layer away.  ``False`` when the part needs no supports, a patch
+    could not be read, or a corner of the part is not a finite number.
+    """
+    needing = [region for region in regions if region.needs_supports]
+    in_a_patch = {gi for region in needing for gi in region.triangle_indices}
+    loose = [gi for gi in held if gi not in in_a_patch]
+    if not needing and not loose:
+        return False
+    if not np.isfinite(tris).all():
+        return False
+    index = XYIndex(tris)
+    for region in needing:
+        if region.boundary is None:
+            return False
+        own = np.zeros(len(tris), dtype=bool)
+        own[np.asarray(region.triangle_indices, dtype=np.int64)] = True
+        try:
+            misses = _points_plate_supports_miss(tris[own], tris, index, own, *region.boundary, layer_height)
+        except (ValueError, IndexError, MemoryError):
+            return False
+        if misses is None or misses:
+            return False
+    for gi in loose:
+        own = np.zeros(len(tris), dtype=bool)
+        own[gi] = True
+        points = np.vstack([tris[gi], tris[gi].mean(axis=0, keepdims=True)])
+        if _over_the_model(tris, index, own, points, layer_height).any():
+            return False
+    return True
+
+
+def _parts_stand_apart(parsed: list[tuple[tuple[float, ...], ...]], reading: Any = None) -> bool:
+    """Whether the file's separate parts stand a clearance apart on the
+    plate, printing in place together: the pieces of *parsed* (the file's
+    triangles as written; *reading* is :func:`kiln.mesh_bodies.read_triangles`
+    of them when the caller holds it) make two or more solids, and
+    :func:`kiln.fusion_check.judge_reading` measures a clearance between at
+    least two of them.  ``False`` when the pieces cannot be read: a file
+    whose parts are not known to stand apart is sliced as any other.
+    """
+    try:
+        if reading is None:
+            from kiln.mesh_bodies import read_triangles
+
+            repeated = _repeated_faces(parsed)
+            if repeated[0]:
+                parsed = [t for i, t in enumerate(parsed) if i not in repeated[0]]
+            reading = read_triangles(parsed)
+        if reading.piece_count < 2 or len(set(reading.solid_of or range(reading.piece_count))) < 2:
+            return False
+        from kiln.fusion_check import judge_reading
+
+        fusion = judge_reading(parsed, reading, clearances=True)
+    except Exception:  # noqa: BLE001 -- unread pieces change nothing about the slice
+        logger.debug("pieces not read for the support decision", exc_info=True)
+        return False
+    return bool((fusion.get("clearances") or {}).get("pairs"))
 
 
 def _mm_said(value: float) -> str:
@@ -9422,7 +9737,8 @@ def _judge_pieces(
     and said in its words, so the make doors that refuse a floating piece
     and this report name the same pieces.  Separate parts on the plate that
     stand a clearance apart print in place together, and are said so, never
-    told to be joined.  Where the file's motion note (*motion*, from
+    told to be joined; a gap that may print as one piece is said as that
+    (:func:`_may_print_stuck`).  Where the file's motion note (*motion*, from
     :func:`_motion_on_record`) has two parts a clearance apart moving against
     each other, the gap between them is said as the gap moving parts need,
     with no suggestion that they were meant to be one solid.  ``None`` when
@@ -9463,6 +9779,7 @@ def _judge_pieces(
     if floating is not None:
         block.floating = str(floating["message"])
         return block
+    block.stand_apart = bool((fusion.get("clearances") or {}).get("pairs"))
     unheld = set(fusion.get("unheld_bodies") or [])
     in_air = {solid_of[body - 1] for body in unheld}
     standing = [s for s in largest_first if s not in in_air]
@@ -9474,6 +9791,7 @@ def _judge_pieces(
     resting: set[int] = set()
     close: set[int] = set()
     close_moving: set[int] = set()
+    gap_of: dict[int, float] = {}
     for finding in findings:
         bodies = list(finding.get("bodies") or [])
         named = unheld & set(bodies)
@@ -9485,14 +9803,21 @@ def _judge_pieces(
                 close_moving |= named
             else:
                 close |= named
+            gap = finding.get("gap_mm")
+            if gap is not None:
+                for body in named:
+                    gap_of[body] = min(gap_of.get(body, float(gap)), float(gap))
     close -= resting
     close_moving -= resting | close
     if resting:
         said.append(_in_the_air_said(len(resting), resting=True))
-    if close:
-        said.append(_in_the_air_said(len(close), resting=False))
-    if close_moving:
-        said.append(_in_the_air_said(len(close_moving), resting=False, moving=True))
+    for bodies_close, moving_close in ((close, False), (close_moving, True)):
+        tight = sorted(gap_of[body] for body in bodies_close if _may_print_stuck(gap_of.get(body)))
+        clear = len(bodies_close) - len(tight)
+        if clear:
+            said.append(_in_the_air_said(clear, resting=False, moving=moving_close))
+        if tight:
+            said.append(_in_the_air_said(len(tight), resting=False, moving=moving_close, tight_gaps=tight))
     captive = next((f for f in findings if f.get("relation") == "captive"), None)
     if captive is not None:
         said.append(str(captive["message"]))
@@ -9513,7 +9838,10 @@ def _standing_said(
     together, and that the rest each come off the plate on their own.  A
     pair *moves_apart* says moves against each other is said as moving
     parts, and only the others are asked whether they were meant to be one
-    solid."""
+    solid.  A gap that may print as one piece (:func:`_may_print_stuck`) is
+    said as that, and parts the reading found *touching* are said to print
+    stuck together: neither is told it prints in place the way moving parts
+    have to, and neither is called loose."""
     from kiln.fusion_check import embedment_floor_mm
 
     largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
@@ -9547,7 +9875,12 @@ def _standing_said(
             still |= {a, b}
             still_gaps.append(float(pair["gap_mm"]))
     still -= moving
-    spaced = moving | still
+    touching: set[int] = set()
+    touching_gaps: list[float] = []
+    for pair in reading.get("touching") or []:
+        touching |= {solid_of[body - 1] for body in pair["bodies"]}
+        touching_gaps.append(float(pair["gap_mm"]))
+    spaced = moving | still | touching
     unread = {solid_of[body - 1] for body in reading.get("unmeasured") or []} - spaced
     near = [s for s in standing if s in spaced]
     unknown = [s for s in standing if s in unread]
@@ -9568,24 +9901,25 @@ def _standing_said(
         still_near = [s for s in standing if s in still]
         if moving_near:
             who = "They" if len(moving_near) == len(standing) else f"{len(moving_near)} of them"
-            sentences.append(
-                f"{who} stand {_gaps_said(moving_gaps)} apart without touching, so they print in place "
-                "together with nothing joining them, the way parts that move have to."
-            )
+            sentences.append(_moving_gaps_said(who, moving_gaps))
             if still_gaps:
                 # Said by the gap, not by the part: a part that moves against
                 # one neighbour can stand still beside another.
-                sentences.append(
-                    f"Other parts stand {_gaps_said(still_gaps)} apart with nothing joining them: fine for a "
-                    "designed clearance. If they were meant to be one solid, sink them at least "
-                    f"{floor:g} mm into each other."
-                )
-        else:
+                sentences.append(_still_gaps_said("Other parts", still_gaps, floor, beside_moving=True))
+        elif still_near:
             who = "They" if len(still_near) == len(standing) else f"{len(still_near)} of them"
+            sentences.append(_still_gaps_said(who, still_gaps, floor))
+        if touching:
+            touching_near = [s for s in standing if s in touching]
+            if len(touching_near) == len(standing) and not sentences:
+                who = "They sit"
+            else:
+                who = f"{len(touching_near)} of them sit"
             sentences.append(
-                f"{who} stand {_gaps_said(still_gaps)} apart without touching, so they print in place together "
-                "with nothing joining them: fine for a designed clearance. If they were meant to be one solid, "
-                f"sink them at least {floor:g} mm into each other."
+                f"{who} closer together than a printer keeps apart ({_gaps_said([min(touching_gaps)])} at the "
+                "nearest), so expect them to print stuck together. If they are meant to move or come apart, "
+                f"give them a real gap; if they were meant to be one solid, sink them at least {floor:g} mm "
+                "into each other."
             )
         said = f"{parts}. {' '.join(sentences)}{not_measured}"
     else:
@@ -9601,6 +9935,70 @@ def _standing_said(
     return said
 
 
+def _may_print_stuck(gap_mm: float | None) -> bool:
+    """Whether two separate parts *gap_mm* apart may print as one piece:
+    the gap is under the smallest one moving parts are given
+    (:func:`kiln.assembly.moving_gap_floor_mm`).  An unmeasured gap is not
+    called close."""
+    if gap_mm is None:
+        return False
+    from kiln.assembly import moving_gap_floor_mm
+
+    return float(gap_mm) < moving_gap_floor_mm()
+
+
+def _moving_gaps_said(who: str, gaps: list[float]) -> str:
+    """What is said of parts that move against each other and stand *gaps*
+    apart.  Gaps that may print as one piece (:func:`_may_print_stuck`) are
+    said as that, by the gap measured, and never as the gap moving parts
+    need."""
+    tight = [gap for gap in gaps if _may_print_stuck(gap)]
+    if not tight:
+        return (
+            f"{who} stand {_gaps_said(gaps)} apart without touching, so they print in place "
+            "together with nothing joining them, the way parts that move have to."
+        )
+    if len(tight) == len(gaps):
+        return (
+            f"{who} stand {_gaps_said(gaps)} apart without touching, with nothing joining them. Parts that "
+            "move need a gap that prints as a gap, and at that size they may print stuck together or too "
+            "stiff to move: widen the gap."
+        )
+    return (
+        f"{who} stand {_gaps_said(gaps)} apart without touching, with nothing joining them, as parts that "
+        f"move have to. Where the gap is {_gaps_said(tight)} they may print stuck together or too stiff to "
+        "move: widen it there."
+    )
+
+
+def _still_gaps_said(who: str, gaps: list[float], floor: float, *, beside_moving: bool = False) -> str:
+    """What is said of separate parts that stand *gaps* apart and are not
+    known to move: a designed clearance or parts meant to be one solid,
+    with the gaps that may print as one piece (:func:`_may_print_stuck`)
+    said as that.  *beside_moving* is the wording that follows the moving
+    parts' sentence."""
+    tight = [gap for gap in gaps if _may_print_stuck(gap)]
+    one_solid = f"If they were meant to be one solid, sink them at least {floor:g} mm into each other."
+    if beside_moving:
+        opening = f"{who} stand {_gaps_said(gaps)} apart with nothing joining them"
+    else:
+        opening = (
+            f"{who} stand {_gaps_said(gaps)} apart without touching, so they print in place together "
+            "with nothing joining them"
+        )
+    if not tight:
+        return f"{opening}: fine for a designed clearance. {one_solid}"
+    if beside_moving:
+        stuck = f"{who} stand {_gaps_said(gaps)} apart with nothing joining them"
+    else:
+        stuck = f"{who} stand {_gaps_said(gaps)} apart without touching, with nothing joining them"
+    where = "at that gap" if len(tight) == len(gaps) else f"where the gap is {_gaps_said(tight)}"
+    return (
+        f"{stuck}, and {where} they may print stuck together. If they are meant to come apart, widen the "
+        f"gap. {one_solid}"
+    )
+
+
 def _gaps_said(gaps: list[float]) -> str:
     def said(value: float) -> str:
         return f"{value:.2f}".rstrip("0").rstrip(".")
@@ -9609,11 +10007,15 @@ def _gaps_said(gaps: list[float]) -> str:
     return f"{low} mm" if low == high else f"{low} to {high} mm"
 
 
-def _in_the_air_said(count: int, *, resting: bool, moving: bool = False) -> str:
+def _in_the_air_said(
+    count: int, *, resting: bool, moving: bool = False, tight_gaps: list[float] | None = None,
+) -> str:
     """What is said of *count* pieces off the plate that rest on the part
     without being joined to it (*resting*), or sit a clearance away from it,
     as parts that move against it (*moving*) or as pieces that may have been
-    meant to be one solid with it."""
+    meant to be one solid with it.  *tight_gaps* are those pieces' measured
+    gaps when each may print as one piece with the part
+    (:func:`_may_print_stuck`): they are said as that, by the gap."""
     from kiln.fusion_check import NEAR_GAP_MM, embedment_floor_mm
 
     one = count == 1
@@ -9629,6 +10031,18 @@ def _in_the_air_said(count: int, *, resting: bool, moving: bool = False) -> str:
             f"most. {sink}"
         )
     sit = "sits" if one else "sit"
+    if tight_gaps:
+        stuck = (
+            f"{pieces} {sit} {_gaps_said(tight_gaps)} from the part, joined to nothing, and at that gap "
+            f"{they} may print stuck to it."
+        )
+        if moving:
+            return f"{stuck} Parts that move need a gap that prints as a gap: widen it."
+        return (
+            f"{stuck} If {they} {'is' if one else 'are'} meant to come off or move, widen the gap. "
+            f"If {they} {'was' if one else 'were'} meant to be one solid with the part, "
+            f"sink {them} at least {embedment_floor_mm():g} mm into it."
+        )
     if moving:
         return (
             f"{pieces} {sit} less than {NEAR_GAP_MM:g} mm from the part, joined to nothing, "
@@ -9911,8 +10325,12 @@ def _analyze_printability_here(
     judged = _judge_supports(
         triangles, z_min, bbox,
         resolved_threshold=_resolved_threshold, layer_height=layer_height, tris=shared_tris,
+        parts_apart=bool(parts is not None and parts.stand_apart),
     )
     overhangs, bridging, supports = judged.overhangs, judged.bridging, judged.supports
+    # Said beside the pieces, so every door that says them says it.
+    if parts is not None and parts.note and judged.parts_apart:
+        parts.note = f"{parts.note} {supports_between_parts_advice(judged, beside_the_pieces=True)}"
     _overhang_scoring_pct = judged.overhang_scoring_pct
     _self_supporting_overhang_count = judged.self_supporting_overhang_count
     _bridge_substituted_overhang_pct = judged.bridge_substituted_overhang_pct
@@ -9967,6 +10385,7 @@ def _analyze_printability_here(
         adhesion=adhesion,
         thin_walls_below_nozzle=sub_nozzle_wall_pct > 0,
         slicer_note=sliced.note(),
+        between_parts_advice=supports_between_parts_advice(judged),
     )
 
     # Surface the bridge-substitution downgrade.  When the
