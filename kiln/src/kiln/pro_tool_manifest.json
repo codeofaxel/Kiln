@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-23T22:59:02.972293+00:00",
+  "generated": "2026-11-24T21:05:40.915847+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -13424,7 +13424,7 @@
           "mating": {
             "title": "Mating",
             "type": "string",
-            "description": "What is moving against what. ``\"pin_in_bore\"`` \u2014 a pin, shaft or axle turning in a hole; answers a diametral clearance. ``\"gear_flank\"`` \u2014 meshing gear teeth; answers tangential backlash, plus the tooth-thinning and centre-distance forms of the same number. ``\"slot\"`` \u2014 a tongue, rail or key sliding in a groove. ``\"planar_face\"`` \u2014 two flat faces sliding past each other."
+            "description": "What is moving against what. ``\"pin_in_bore\"`` \u2014 a pin, shaft or axle turning in a hole; answers a diametral clearance (bore diameter minus pin diameter: the gap on both sides of the pin together). ``\"gear_flank\"`` \u2014 meshing gear teeth; answers tangential backlash (the play of a tooth between both flanks, along the pitch circle), plus the tooth-thinning and centre-distance forms of the same number. ``\"slot\"`` \u2014 a tongue, rail or key sliding in a groove; answers slot width minus tongue width (the gap on both sides of the tongue together). ``\"planar_face\"`` \u2014 two flat faces sliding past each other; answers the gap between them."
           },
           "material": {
             "default": "PLA",
@@ -13462,7 +13462,7 @@
             ],
             "default": null,
             "title": "Nominal Mm",
-            "description": "The feature size, so the answer can be stated in the user's own numbers (\"a 6.42 mm bore for a 6 mm pin\").  Does not change the recommendation."
+            "description": "The feature size, so the answer can be stated in the user's own numbers (for a pin, the bore diameter to draw round a pin of this diameter).  Does not change the recommendation."
           },
           "pressure_angle_deg": {
             "default": 20.0,
@@ -16213,7 +16213,7 @@
             "default": "",
             "title": "Screw Name",
             "type": "string",
-            "description": "Catalog name (``\"M3\"``, ``\"1/4-20\"``). Use this for known fasteners."
+            "description": "Catalog name (``\"M3\"``, ``\"1/4-20\"``). Use this for known fasteners.  A screw size Kiln has no record of, sent with ``thing_diameter_mm`` (the thread's outside diameter, measured), is sized from that measurement, and the answer's ``note`` says so."
           },
           "thing_diameter_mm": {
             "default": 0.0,
