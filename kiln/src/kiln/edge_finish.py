@@ -337,9 +337,21 @@ def _why_none(plan: EdgePlan) -> str:
     return f"the {_count(len(plan.left_sharp), 'edge')} selected stayed sharp -- " + "; ".join(reasons) + "."
 
 
+def _finished_as(plan: EdgePlan, kind: str) -> str:
+    """The word for what the plan does to its edge chains: the finish asked
+    for when every chain takes it, and each finish with its count when the
+    plan mixes them.  The one wording the plan note and the done note share,
+    so neither names a finish the edge list beside it does not show."""
+    finishes = [t["kind"] for t in plan.treatments]
+    if set(finishes) <= {kind}:
+        return _DONE[kind]
+    counted = [f"{finishes.count(each)} {_DONE[each]}" for each in (FILLET, CHAMFER) if each in finishes]
+    return f"finished ({', '.join(counted)})"
+
+
 def _plan_note(plan: EdgePlan, kind: str) -> str:
     return (
-        f"Plan only, nothing built: {_count(len(plan.treatments), 'edge chain')} would be {_DONE[kind]}, "
+        f"Plan only, nothing built: {_count(len(plan.treatments), 'edge chain')} would be {_finished_as(plan, kind)}, "
         f"{len(plan.left_sharp)} would stay sharp, {_count(len(plan.cautions), 'caution')}. "
         "all_edges lists every sharp edge with its id."
     )
@@ -347,8 +359,7 @@ def _plan_note(plan: EdgePlan, kind: str) -> str:
 
 def _done_note(plan: EdgePlan, kind: str, reply: dict[str, Any], beside: str) -> str:
     done = len(plan.treatments)
-    finishes = {t["kind"] for t in plan.treatments}
-    what = _DONE[kind] if finishes == {kind} else "finished"
+    what = _finished_as(plan, kind)
     said = f"{_count(done, 'edge chain')} {what} on the CAD file {os.path.basename(reply['cad_source'])}."
     if plan.left_sharp:
         said += f" {_count(len(plan.left_sharp), 'selected edge')} stayed sharp; edges.left_sharp says why."
