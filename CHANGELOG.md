@@ -11,7 +11,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Kiln warns you when a part sits near heat, a flame, a wall outlet or a battery.** Make a lamp shade or a candle holder and it says what to watch for, without you asking. Each version keeps its notes.
 
-- **Things with moving parts now play on the stage, with no setup from you.**
+- **Things with moving parts now play on the stage, including files you import.**
 
 - **Give a design a description in your own words.** One per design, private or public, shown on its page and found by search; your AI assistant can write it on your say, and your earlier wordings are kept.
 
@@ -27,12 +27,52 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **See how much room the parts of a print-in-place design have.** Kiln reports the gap between each pair of parts, and flags parts that overlap and would print fused together.
 
-- **Assembly manuals can name the exact screws and tools a kit uses (Business).** See https://kiln3d.com/pricing.
+- **Assembly manuals can name the exact screws and tools a kit uses (Business+).** See https://kiln3d.com/pricing.
 
 - **Your Bambu camera, without the homework.** The X1, X2, P2 and H series need one free add-on before Kiln can show their camera. Kiln now tells you the moment you add one of those printers, and adds it for you when you say yes. No restart. If it can't, it walks you through adding it yourself, step by step, on a Mac, Windows or Linux computer.
 - **Publish just the version you want.** Making a design public is one choice — just this version, from a version onward, or the full journey — and versions you save afterwards stay private until you publish them.
 
 - **Say yes with the code on your screen.** Approve an order or making a design public with the 4-digit code on the computer Kiln runs on. Off until you switch it on for that computer in settings.
+
+- **Two-nozzle printers print with both nozzles.** Bambu Lab H2D and X2D, and the Prusa XL's tool heads.
+
+- **Kiln picks the speeds for each height of your part.** Delicate stretches print gently, sturdy ones faster, and Kiln tells you how the print time moved. Kiln Pro; several printers at once is Kiln Business.
+
+- **Choose your own speeds for any height of a print.** Slow one stretch to a top speed you pick, or speed up just the inside. Free on every plan.
+
+- **Kiln warns before an abrasive filament goes through a soft nozzle.**
+
+- **Kiln prints from the right spool.** When your plastic isn't loaded, Kiln says what's missing and offers real choices.
+
+- **Teach Kiln what your printer can really print.** A short test print and a few numbers read off it, free with a Kiln account. Kiln Pro then checks your designs against it.
+
+- **Keep a print out of your history,** or keep your whole history on your own computer, from your account page.
+
+- **Carve words in the font you pick.**
+
+- **QR codes on a part are now Kiln Pro.** They used to need Kiln Business.
+
+- **Splitting a too-big part says how each seam should hold,** with a list of what to buy. Kiln Pro cuts the joints for you.
+
+- **Each saved version remembers how long it takes to print.**
+
+- **Dimensioned drawings on every plan.** Ask for a drawing of any part and get a sheet with its outside sizes, free. Kiln Pro draws exact sizes from your own design, holes at the size they print; Kiln Business adds a DXF for fab shops, and the customer-drawing check now says which of your machines can hold it.
+
+- **Kiln checks your model before a print service prices it.** A model that isn't a printable solid gets no quote, so it can't turn into an order a print shop cancels a week later. Kiln says what's wrong and can repair it for free for your order.
+
+- **Your order tells you when it's cancelled.** If a print service cancels or can't make your order, Kiln emails you what happened to your money and how to try again.
+
+- **Keep the model you ordered.** After an order, Kiln offers to save the exact model to your Kiln account.
+
+- **See what a repair fixed before you order.** When Kiln repairs a model a print shop would refuse, it shows the same check before and after, with any hole or loose piece pictured close up.
+
+- **Send a bug report from the terminal.** `kiln doctor --bug-report` copies your checkup, with addresses and keys taken out, and opens Kiln's support page so you can send it.
+
+- **Use your own colours on any pattern, and save colour sets.** Free covers your own colours within the monthly allowance; Pro adds your own image as a pattern and patterns layered over a surface texture.
+
+- **Your print history says how each print ended.** When Kiln can't tell, it asks you once.
+
+- **Kiln asks about your printer when it keeps having trouble.**
 
 ### Changed
 
@@ -53,6 +93,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **"Won't print" now means the slicer would really leave it out.** Walls that are thin but still print now get a "fragile" warning instead of a stop.
 
 - **Hairline cracks the slicer seals read as solid.** Kiln says so in one line, so a gap you meant to keep can be widened.
+
+- **Error messages are in plain words.** What happened, what still works, and what to do next.
+
+- **The print approval says what you're printing.**
+
+- **Speeding up a running print won't outrun your nozzle.**
+
+- **Only a bad print counts against your design.** A power cut or a problem with your printer no longer does.
+
+- **Clearer answers for moving gears.** Kiln now tells you when gear teeth sit too close to print cleanly, and how to fix it.
+
+- **Colour patterns look better and print cheaper.** Tiger stripe, camo and the rest flow smoothly over rounded shapes, go only where they show, and Kiln tells you the filament changes before you print.
+
+- **Dark parts read clearly in previews.** Black and navy parts no longer blend into the background.
+
+- **Print time estimates now say warm-up time is extra.**
+
+- **"What printers do I have?" just answers.** With one printer you get its live status; with several you get the list.
 
 ### Fixed
 
@@ -88,8 +146,40 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Designs that use BOSL2 or MCAD (add-on part libraries for OpenSCAD) now come out complete.** Parts from those libraries used to go missing without warning. Now they're included, and if a design asks for something Kiln can't find, it stops and says what.
 
-- **Camera snapshots work on the Bambu P2S, H2 and X2 printers.** Kiln now reads each Bambu printer's camera the way the printer says it streams, and when a camera answers with something that isn't a picture, Kiln says so plainly instead of passing it on.
+- **Camera snapshots work on the Bambu P2S, H2 and X2 printers.**
 - **The publish preview loads again.** "View as a visitor" in the publish sheet showed an error instead of your page.
+
+- **A Bambu printer saved by the name on its box works fully.**
+
+- **A Bambu printer you just added works as it should the same day.** Homing, parking and wiping a Bambu printer no longer give issue.
+
+- **Slicing and print approval work again on macOS 27.** Programs Kiln started could crash before they ran, so slicing failed and the approval notification never appeared. A slicer crash on a non-Bambu printer also no longer blames Bambu presets. Thanks to the person who sent in a detailed report.
+
+- **Prints sliced in any slicer Kiln uses now run at your printer's real speed.**
+
+- **Gears Kiln makes now mesh, printed threads have real teeth, and nuts have threads.**
+
+- **glTF models arrive at the right size.**
+
+- **A setting OpenSCAD ignores now stops the build,** instead of giving you a part at the wrong size.
+
+- **Kiln won't send a move meant for one printer model to another.**
+
+- **Drying advice knows more filament names.**
+
+- **A magnet or insert you declare is no longer sized like a screw hole.**
+
+- **Saving several versions at once just works.** Two computers using one branch name now keep both copies, and when two saves race, neither one silently overwrites the other.
+
+- **Pushes and history changes to your Kiln account land complete or not at all, never half-saved.**
+
+- **Cost estimates take larger plates.** Plates up to 64 MB can now be sent for a cost estimate.
+
+- **Repaired models are shown upright in previews.** Some were drawn lying on their side.
+
+### Security
+
+- **Signing in a new computer, app or team invite asks you first.** Nothing is approved until you press Approve.
 
 ## [1.5.1] - 2026-11-03
 
