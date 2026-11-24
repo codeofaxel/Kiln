@@ -458,6 +458,12 @@ class ThermalStressAnalysis:
     layer_count_analyzed: int
     material_stress_factor: float  # multiplier from material thermal properties
     recommendations: list[str]
+    #: What raised ``risk_level`` above ``low``: ``"geometry"`` when the part
+    #: has a change in cross-section that reaches the risk on its own,
+    #: ``"material"`` when its section holds steady and the plastic alone
+    #: raised it, ``""`` at ``low``.  Advice that speaks of a transition or a
+    #: geometry change is for ``"geometry"`` only.
+    raised_by: str = ""
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
@@ -990,15 +996,17 @@ _THERMAL_STRESS_PUBLIC_DEFAULTS: dict[str, Any] = {
     "max_zones_tracked": 20,
     "max_zones_emitted": 10,
     "recommendation_rules": [
-        {"metric": "risk_level",            "operator": "in", "threshold": ["high", "critical"],
+        {"metric": "geometry_risk_level",   "operator": "in", "threshold": ["high", "critical"],
          "template": "Cross-section changes abruptly between layers (peak ratio {max_ratio:.1f}x at z={peak_zone_z:.1f}mm). Add a 2-4mm chamfer or fillet at the transition to spread thermal contraction stress."},
-        {"metric": "risk_level",            "operator": "==", "threshold": "critical",
+        {"metric": "geometry_risk_level",   "operator": "==", "threshold": "critical",
          "template": "Critical thermal stress risk. Slow print speed to 30-40mm/s through the transition zone, and increase fan ramp-up to avoid sudden cooling at the geometry change."},
+        {"metric": "material_risk_level",   "operator": "in", "threshold": ["moderate", "high", "critical"],
+         "template": "The part's cross-section holds steady; the thermal stress risk here comes from the material ({material}), not from a change in shape."},
         {"metric": "many_zones",            "operator": "==", "threshold": True,
          "template": "Multiple stress concentration zones detected ({stress_zones_count} layers above threshold). Consider splitting the part at the worst transition and printing as two pieces."},
         {"metric": "amplification_active",  "operator": "==", "threshold": True,
          "template": "Material ({material}) amplifies thermal stress. Print in an enclosed chamber, increase bed temperature 5-10°C above the default, and avoid sudden layer cooling."},
-        {"metric": "risk_level",            "operator": "==", "threshold": "moderate",
+        {"metric": "geometry_risk_level",   "operator": "==", "threshold": "moderate",
          "template": "Moderate cross-section variation (max ratio {max_ratio:.1f}x). Adding transition layers (3-5mm chamfer at the geometry change) typically eliminates the stress concentration."},
     ],
 }
@@ -6902,6 +6910,16 @@ def _analyze_thermal_stress(
 
     score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
 
+    # Which reason raised the risk: a change in section the part really has
+    # (one that reaches the lowest risk line with no help from the plastic),
+    # or the plastic alone on a section that holds steady.
+    if risk_level == "low":
+        raised_by = ""
+    elif max_ratio >= risk_thresholds.get("moderate", 1.8):
+        raised_by = "geometry"
+    else:
+        raised_by = "material"
+
     # Peak-zone z-coordinate for the recommendation template: the
     # author of the part wants to know WHERE to add the chamfer.
     peak_zone_z = stress_zones[0]["z_mm"] if stress_zones else 0.0
@@ -6913,6 +6931,13 @@ def _analyze_thermal_stress(
     # so no template, the overlay's included, can print it.
     rec_metrics: dict[str, Any] = {
         "risk_level": risk_level,
+        # What raised the risk, and the risk under each reason: the level
+        # when that reason raised it, "low" otherwise.  A rule that speaks
+        # of a transition reads ``geometry_risk_level``; one that speaks of
+        # the plastic alone reads ``material_risk_level``.
+        "raised_by": raised_by,
+        "geometry_risk_level": risk_level if raised_by == "geometry" else "low",
+        "material_risk_level": risk_level if raised_by == "material" else "low",
         "max_ratio": max_ratio,
         "material": material,
         # Amplification-active threshold tightened to >= 1.2 (was > 1.0)
@@ -6941,6 +6966,7 @@ def _analyze_thermal_stress(
         layer_count_analyzed=num_layers,
         material_stress_factor=stress_factor,
         recommendations=recommendations,
+        raised_by=raised_by,
     )
 
 
