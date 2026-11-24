@@ -345,6 +345,23 @@ def test_walls_thinner_than_the_nozzle_are_not_called_ready_on_kilns_own_figures
     assert _says_ready(reply) == []
 
 
+def test_the_thin_walls_check_travels_as_walls_left_out_with_their_figure(tmp_path, kilns_own_figures):
+    """The check reaches a door that carries facts and never a sentence (the
+    approval card) as ``walls_left_out`` with the walls' own thickness, never
+    as ``other``.  Kiln's own figures judged them, so no general minimum
+    wall is named."""
+    from kiln.print_consent import what_the_print_states
+    from kiln.printability import analyze_printability, check_reasons
+
+    box = _open_box(tmp_path, 0.2)
+    with rx.without_kiln_pro():
+        reasons = check_reasons(analyze_printability(box))
+        states = what_the_print_states("box_0.2.stl", box)
+    assert reasons == [{"id": "walls_left_out", "thinnest_mm": 0.2}], reasons
+    assert states["part_check"] == {"verdict": "check", "reasons": reasons}, states
+    assert states["check"].startswith("Check before printing: Walls as thin as 0.20 mm"), states
+
+
 def test_every_door_carries_the_check_for_the_thin_walls(tmp_path, kilns_own_figures):
     box = _open_box(tmp_path, 0.2)
     readiness = _call("check_print_readiness", file_path=box)
