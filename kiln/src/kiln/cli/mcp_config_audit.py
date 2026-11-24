@@ -119,11 +119,48 @@ def audit_all_mcp_clients() -> list[ClientAuditResult]:
     Desktop first (most common), then Claude Code, then Codex — so
     the ``kiln health`` output reads consistently across runs.
     """
-    return [
+    results = [
         _audit_claude_json("Claude Desktop", _claude_desktop_config_path()),
         _audit_claude_json("Claude Code", _claude_code_config_path()),
         _audit_codex_toml("Codex", _codex_config_path()),
     ]
+    # Every other app ``kiln install-mcp`` can write, from the same registry,
+    # when that app has settings on this computer.
+    from kiln.cli.app_wiring import APPS
+
+    for app in APPS:
+        if app.id in ("claude_desktop", "claude_code", "codex"):
+            continue
+        if not app.settings_path().exists():
+            continue
+        if app.fmt == "json" and app.key == ("mcpServers",):
+            results.append(_audit_claude_json(app.display, app.settings_path()))
+        elif app.fmt == "toml":
+            results.append(_audit_codex_toml(app.display, app.settings_path()))
+        elif app.fmt in ("json", "yaml"):
+            results.append(_audit_registry_app(app))
+    return results
+
+
+def _audit_registry_app(app: Any) -> ClientAuditResult:
+    """Audit an app whose servers sit under another key or in YAML, reading
+    it with the installer's own reader so both agree on what is there."""
+    from kiln.cli.app_wiring import SettingsUnreadable, _read_text
+
+    path = app.settings_path()
+    try:
+        servers = app.format().entries(path, _read_text(path))
+    except SettingsUnreadable as exc:
+        return ClientAuditResult(client=app.display, path=path, config_exists=True, parse_error=str(exc))
+    entries = []
+    for name, raw in servers.items():
+        if isinstance(raw, dict):
+            command = raw.get("command", raw.get("cmd"))
+            if isinstance(command, list) and command:
+                command = command[0]
+            raw = {**raw, "command": command}
+        entries.append(_check_server_entry(name, raw))
+    return ClientAuditResult(client=app.display, path=path, config_exists=True, entries=entries)
 
 
 # ---------------------------------------------------------------------------

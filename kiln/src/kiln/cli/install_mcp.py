@@ -1,29 +1,18 @@
-"""``kiln install-mcp`` / ``kiln uninstall-mcp`` — auto-wire Kiln into
-supported MCP client configs.
+"""``kiln install-mcp`` / ``kiln uninstall-mcp`` — connect Kiln to the AI
+apps on this computer, and take it back out.
 
-Short version:
+The apps, their settings files and the plan / write / undo engine live in
+:mod:`kiln.cli.app_wiring`; this module is the command line on top of it,
+plus the launch-command helpers other commands import.
 
-- Detects Claude Desktop, Claude Code, and Codex by checking for their
-  per-client config paths.  Anything else (Cursor, generic MCP clients)
-  is served by ``kiln install-mcp --print``, which emits the raw JSON
-  snippet to copy into whatever config your tool takes.
-- Merges into existing configs — never overwrites unrelated entries.
-- Refuses to touch a config file it can't parse, rather than silently
-  clobbering hand-edited JSON or TOML.
-- Requires a signed-in session (``kiln signin`` or ``kiln pair <code>``)
-  before writing anything — otherwise the installed config would put
-  users on FREE tier and every pro-tool call would fail cold, training
-  them to blame Kiln instead of the missing auth step.
-- Every mutated file is printed on its own line so the user can audit
-  what was touched at a glance.
-- When Kiln is launched as a module (``python -m kiln``) instead of
-  through the entry-point script, the installed config preserves that
-  launch shape via a ``prefix_args`` list (``["-m", "kiln"]``) prepended
-  to ``["serve"]``, so the MCP client invokes the same interpreter +
-  module the installer is running under.
-
-Companion command ``kiln uninstall-mcp`` removes the Kiln entry only —
-never touches sibling MCP servers.
+- Detects every app in :data:`kiln.cli.app_wiring.APPS`.  Anything else is
+  served by ``--print``, which emits a JSON snippet to paste.
+- Merges into existing settings and never writes a file it can't read.
+- Backs up each file before its first change and keeps a receipt, so
+  ``kiln uninstall-mcp`` takes back exactly what was done.
+- ``--dry-run`` shows the plan per app and changes nothing.
+- When Kiln is launched as a module (``python -m kiln``), the entry keeps
+  that launch shape via ``prefix_args`` (``["-m", "kiln"]``).
 """
 from __future__ import annotations
 
@@ -100,11 +89,14 @@ def _codex_config_path() -> Path:
     return Path.home() / ".codex/config.toml"
 
 
-_DEFAULT_CLIENTS: list[MCPClient] = [
-    MCPClient("claude_desktop", "Claude Desktop", _claude_desktop_config_path()),
-    MCPClient("claude_code",    "Claude Code",    _claude_code_config_path()),
-    MCPClient("codex",          "Codex",          _codex_config_path(), "toml"),
-]
+def _clients_from_registry() -> list[MCPClient]:
+    """Every app in the shared registry, as an :class:`MCPClient`."""
+    from kiln.cli.app_wiring import APPS
+
+    return [MCPClient(a.id, a.display, a.settings_path(), a.fmt) for a in APPS]
+
+
+_DEFAULT_CLIENTS: list[MCPClient] = _clients_from_registry()
 
 
 def _discover_clients() -> list[MCPClient]:
@@ -234,9 +226,9 @@ def _path_kiln_warning(command: str) -> str | None:
     if path_resolved == command_resolved:
         return None
     return (
-        f"Using {command_resolved} for MCP because it is the command running "
-        f"this installer. Your PATH resolves `kiln` to {path_resolved}; "
-        "that may expose a different tool surface."
+        f"Your AI apps will start Kiln from {command_resolved}. Typing `kiln` "
+        f"in a terminal runs a different copy, {path_resolved}, which may be "
+        "a different version."
     )
 
 
@@ -497,25 +489,194 @@ def _is_signed_in() -> bool:
 # ═════════════════════════════════════════════════════════════════════
 
 
+def _split_ids(values: tuple[str, ...]) -> list[str]:
+    """Accept ``--only a --only b`` and ``--only a,b``; dashes or underscores."""
+    from kiln.cli.app_wiring import normalize_id
+
+    out: list[str] = []
+    for value in values:
+        out.extend(normalize_id(v) for v in value.split(",") if v.strip())
+    return out
+
+
 def _select_clients(only: tuple[str, ...], skip: tuple[str, ...]) -> list[MCPClient]:
     """Resolve ``--only`` / ``--skip`` against the discovered client set.
 
-    Unknown ids are a hard error — if you typed ``--only claude-desktop``
-    (dash, not underscore) we want you to know that now, not discover a
-    silent no-op at runtime."""
+    Unknown ids are a hard error — a typo should say so now, not turn
+    into a silent no-op."""
     clients = _discover_clients()
     valid_ids = {c.id for c in clients}
-    for chosen in list(only) + list(skip):
+    only_ids, skip_ids = _split_ids(only), _split_ids(skip)
+    for chosen in only_ids + skip_ids:
         if chosen not in valid_ids:
             raise click.ClickException(
-                f"Unknown client id: {chosen!r}.  "
-                f"Valid ids: {sorted(valid_ids)}"
+                f"Unknown app: {chosen!r}.  "
+                f"Valid ids: {', '.join(sorted(valid_ids))}"
             )
-    if only:
-        return [c for c in clients if c.id in only]
-    if skip:
-        return [c for c in clients if c.id not in skip]
+    if only_ids:
+        return [c for c in clients if c.id in only_ids]
+    if skip_ids:
+        return [c for c in clients if c.id not in skip_ids]
     return clients
+
+
+def _as_apps(clients: list[MCPClient]) -> list[Any]:
+    """Map clients onto registry apps.
+
+    A client that matches a registry app (same id, same settings path)
+    keeps that app's detection and restart wording.  Any other client
+    (a test harness, a custom path) counts as present when its settings
+    folder exists."""
+    from kiln.cli.app_wiring import APPS, App
+
+    by_id = {a.id: a for a in APPS}
+    apps = []
+    for c in clients:
+        known = by_id.get(c.id)
+        if known is not None and known.settings_path() == c.config_path:
+            apps.append(known)
+            continue
+        apps.append(
+            App(
+                c.id, c.display, (lambda p=c.config_path: p), c.config_kind,
+                markers=(lambda p=c.config_path: (p.parent,)),
+                restart=known.restart if known else f"restart {c.display}",
+            )
+        )
+    return apps
+
+
+def _short(path: Path) -> str:
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
+
+_MARKS = {
+    "add": "+", "update": "~", "leave": "·", "remove duplicate": "-",
+    "not found": "·", "can't read": "!",
+}
+
+
+def _echo_plan(plans: list[Any]) -> None:
+    from kiln.cli.app_wiring import REMOVE_DUPLICATE
+
+    for plan in plans:
+        mark = _MARKS.get(plan.action, "·")
+        where = _short(plan.path)
+        if plan.action == "not found":
+            click.echo(f"  {mark} {'not found':<10} {plan.app.display}")
+            continue
+        if plan.action == "can't read":
+            click.echo(f"  {mark} {'skip':<10} {plan.app.display:<15} {plan.reason}")
+            continue
+        if plan.action == "online":
+            click.echo(
+                f"  · {'online':<10} {plan.app.display:<15} uses Kiln online, so it stays that way "
+                "(one Kiln per app)"
+            )
+            for step in plan.steps:
+                click.echo(f"  - {'remove':<10} {'':<15} duplicate {step.name!r} ({step.note})")
+            continue
+        if plan.action == "leave":
+            click.echo(f"  {mark} {'leave':<10} {plan.app.display:<15} {where} (already set up)")
+            continue
+        kiln_step = next(s for s in plan.steps if s.name == "kiln")
+        verb = kiln_step.action if kiln_step.action != "leave" else "tidy"
+        note = f" ({kiln_step.note})" if kiln_step.note else ""
+        if plan.from_online:
+            verb, note = "switch", " (from Kiln online to Kiln on this computer)"
+        click.echo(f"  {mark} {verb:<10} {plan.app.display:<15} {where}{note}")
+        for step in plan.steps:
+            if plan.from_online and step.note == "Kiln's hosted connector":
+                continue  # the switch line above already says it
+            if step.action == REMOVE_DUPLICATE:
+                click.echo(
+                    f"  - {'remove':<10} {'':<15} duplicate {step.name!r} ({step.note})"
+                )
+
+
+#: What moving an app from Kiln online to this computer adds, shown by
+#: ``kiln install-mcp --offer-local`` (the installer asks with it).
+SWITCH_OFFER = """\
+  Kiln on this computer talks to your printer directly and slices here,
+  with every Kiln tool on hand."""
+
+SWITCH_SIGNED_IN = """\
+  Your account and saved designs come with you. Uninstalling Kiln puts
+  Kiln online back."""
+
+SWITCH_SIGNED_OUT = """\
+  You're not signed in on this computer, so your plan and saved designs
+  won't follow until you run: kiln signin
+  Uninstalling Kiln puts Kiln online back."""
+
+
+def _cli_id(app_id: str) -> str:
+    return app_id.replace("_", "-")
+
+
+def _name_list(names: list[str]) -> str:
+    if len(names) < 3:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _offer_local(entry: dict[str, Any], apps: list[Any], receipt_file: Path | None) -> None:
+    """Ask, app by app, whether an app on Kiln online should use Kiln on
+    this computer instead.
+
+    Says nothing when no app is on Kiln online, or when the person already
+    said to keep it there.  Never switches without a person's own yes.  Yes
+    is the suggested answer only when they are signed in here, because that
+    is when their plan and saved designs follow.
+    """
+    from kiln import __version__
+    from kiln.cli import app_wiring
+    from kiln.cli.auth_commands import _person_at_terminal
+
+    signed_in = _is_signed_in()
+    kept = app_wiring.kept_online()
+    online = [
+        p for p in app_wiring.plan_apps(entry, apps=apps)
+        if p.action == app_wiring.ONLINE
+        and (p.app.id not in kept or (signed_in and not kept[p.app.id].get("signed_in")))
+    ]
+    if not online:
+        return
+    if not _person_at_terminal():
+        for p in online:
+            click.echo(
+                f"  {p.app.display} uses Kiln online. To move it to Kiln on this computer: "
+                f"kiln install-mcp --local {_cli_id(p.app.id)}"
+            )
+        return
+
+    click.echo("")
+    click.echo(f"  {_name_list([p.app.display for p in online])} use{'s' if len(online) == 1 else ''} Kiln online.")
+    click.echo(SWITCH_OFFER)
+    click.echo(SWITCH_SIGNED_IN if signed_in else SWITCH_SIGNED_OUT)
+    for p in online:
+        name = p.app.display
+        question = f"  Switch {name} to Kiln on this computer?" if signed_in else f"  Switch {name} anyway?"
+        if not click.confirm(question, default=signed_in):
+            app_wiring.set_kept_online(p.app.id, True, signed_in=signed_in)
+            click.echo(
+                f"  {name} stays on Kiln online. Switch any time with: "
+                f"kiln install-mcp --local {_cli_id(p.app.id)}"
+            )
+            continue
+        plan = app_wiring.plan_apps(entry, apps=[p.app], to_local=[p.app.id])[0]
+        problem = plan.reason if plan.action == app_wiring.CANT_READ else ""
+        if not problem:
+            problem = app_wiring.apply_plan([plan], kiln_version=__version__, receipt_file=receipt_file)[0].message
+        if problem:
+            click.echo(f"  ! {name}: {problem}", err=True)
+            click.echo(f"    {name} stays on Kiln online. Nothing was changed.", err=True)
+            continue
+        app_wiring.set_kept_online(p.app.id, False)
+        click.echo(f"  ✓ {name} now uses Kiln on this computer. To load it: {p.app.restart}")
 
 
 def _generic_snippet(entry: dict[str, Any]) -> str:
@@ -529,18 +690,63 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
     )
 
 
+#: Where Qwen's Mac app lives besides ~/Applications.  Kiln never writes
+#: Qwen's settings: Qwen saves a copy of its own environment into each server
+#: it adds, so the person adds Kiln there themselves with these steps.
+QWEN_APP_PATHS: tuple[Path, ...] = (Path("/Applications/Qwen.app"),)
+_QWEN_BUNDLE_ID = "com.qwen.chat"
+_QWEN_STEPS = (
+    "  Found Qwen. Add Kiln yourself: Settings > MCP > + Add MCP > Quick Add.\n"
+    "  Name: Kiln. Type: STDIO. Command: uvx. Parameters: kiln3d, then serve on the next line.\n"
+    "  Choose Save and enable, then quit and reopen Qwen. Pick Qwen3.8-Max in the model menu;\n"
+    "  in our test the default model stopped after Kiln's first step."
+)
+
+
+def _qwen_app_here() -> bool:
+    """True when Qwen's own Mac app is installed (not another app by that name)."""
+    if sys.platform != "darwin":
+        return False
+    import plistlib
+
+    for app in (*QWEN_APP_PATHS, Path.home() / "Applications" / "Qwen.app"):
+        try:
+            with open(app / "Contents" / "Info.plist", "rb") as f:
+                if plistlib.load(f).get("CFBundleIdentifier") == _QWEN_BUNDLE_ID:
+                    return True
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            continue
+    return False
+
+
 @click.command("install-mcp")
 @click.option(
     "--only", multiple=True, metavar="ID",
-    help="Only install into these clients (claude_desktop, claude_code, codex).  Repeat for multiple.",
+    help="Only these apps (claude_code, claude_desktop, codex, cursor, gemini, grok, copilot, "
+    "devin, amp, opencode, kimi, hermes, openclaw).  "
+         "Repeat or comma-separate.",
 )
 @click.option(
     "--skip", multiple=True, metavar="ID",
-    help="Skip these clients.  Repeat for multiple.",
+    help="Skip these apps.  Repeat or comma-separate.",
+)
+@click.option(
+    "--local", "local", multiple=True, metavar="ID",
+    help="Move these apps from Kiln online to Kiln on this computer.  "
+         "Repeat or comma-separate.  Uninstalling puts Kiln online back.",
+)
+@click.option(
+    "--offer-local", is_flag=True, hidden=True,
+    help="Only ask, app by app, whether an app on Kiln online should use Kiln on this "
+         "computer instead (the installer's last question).  Connects nothing else.",
+)
+@click.option(
+    "--dry-run", is_flag=True,
+    help="Show what would change in each app, and change nothing.",
 )
 @click.option(
     "--print", "print_snippet", is_flag=True,
-    help="Print a generic MCP snippet instead of installing.  Use for editors / agents we don't auto-detect.",
+    help="Print a generic MCP snippet instead of installing.  Use for apps Kiln doesn't detect.",
 )
 @click.option(
     "--command",
@@ -552,6 +758,11 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
     ),
 )
 @click.option(
+    "--receipt", "receipt_file", default=None, hidden=True,
+    type=click.Path(path_type=Path),
+    help="Where to keep the receipt (default ~/.kiln/install/receipt.json).",
+)
+@click.option(
     "--force", is_flag=True, hidden=True,
     help="(deprecated) Install is account-free by default; --force now only "
          "suppresses the one-line sign-in suggestion.  Kept so existing "
@@ -560,21 +771,31 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
 def install_mcp(
     only: tuple[str, ...],
     skip: tuple[str, ...],
+    local: tuple[str, ...],
+    offer_local: bool,
+    dry_run: bool,
     print_snippet: bool,
     command_override: str | None,
+    receipt_file: Path | None,
     force: bool,
 ) -> None:
-    """Auto-wire Kiln into supported MCP client configs.
+    """Connect Kiln to the AI apps on this computer.
 
-    Run this to make your AI agent see Kiln's tools — no account needed for
-    local use.  Safely merges into existing configs — never clobbers sibling
-    MCP servers.  (Sign in anytime with ``kiln signin`` to sync across
-    devices and unlock Pro.)
+    Finds every AI app Kiln knows (Claude Code, Claude Desktop, Codex,
+    Cursor, Gemini CLI, Grok Build, GitHub Copilot, Devin Desktop, Amp,
+    opencode, Kimi Code, Hermes Agent, OpenClaw), shows the
+    plan for each, and carries it out.  Web apps get the address to add.
+    Merges into existing settings, never rewrites a file it can't read,
+    backs up what it edits, and writes a receipt so ``kiln uninstall-mcp``
+    takes back exactly what was done.  No account needed for local use.
 
-    If your agent isn't Claude Desktop, Claude Code, or Codex, run with
-    ``--print`` to get a copy-paste-able snippet for any MCP client
-    (Cursor, custom MCP setups, etc.).
+    An app that already uses Kiln online keeps it (one Kiln per app);
+    ``--local ID`` moves it to Kiln on this computer.
+
+    For an app Kiln doesn't detect, ``--print`` gives a snippet to paste.
     """
+    from kiln.cli import app_wiring
+
     if command_override is not None:
         entry = _server_entry(command_override)
     else:
@@ -590,9 +811,7 @@ def install_mcp(
         )
         return
 
-    # No account required for local use — never block.  Just invite the user
-    # to sign in (sync + Pro), unless they've silenced it with --force.
-    if not force and not _is_signed_in():
+    if not dry_run and not force and not offer_local and not _is_signed_in():
         click.echo(
             "  You're set up for local use — no account needed.\n"
             "  Run `kiln signin` anytime to sync across devices and unlock Pro.",
@@ -600,18 +819,24 @@ def install_mcp(
         )
 
     clients = _select_clients(only, skip)
+    to_local = _split_ids(local)
+    unknown = [i for i in to_local if i not in {c.id for c in _discover_clients()}]
+    if unknown:
+        raise click.ClickException(f"Unknown app: {unknown[0]!r}.  See `kiln install-mcp --help` for the ids.")
 
-    # Ensure the command is launchable — otherwise Claude Desktop shows
-    # a cryptic spawn error on first launch.  Better to catch it now.
+    # A config that points at a missing binary shows up later as a cryptic
+    # spawn error inside the app.  Catch it now.
     command_path = Path(command).expanduser()
     command_is_path = command_path.parent != Path(".")
-    if command_is_path and not command_path.exists():
+    if dry_run:
+        pass  # a dry run may name where Kiln WILL be installed
+    elif command_is_path and not command_path.exists():
         raise click.ClickException(
             f"Couldn't find the Kiln executable at {command}.\n\n"
             "  Pass a working path with:\n"
             "    kiln install-mcp --command /path/to/kiln"
         )
-    if not command_is_path and not shutil.which(command):
+    elif not command_is_path and not shutil.which(command):
         raise click.ClickException(
             f"Couldn't find `{command}` on your PATH.\n\n"
             "  The MCP config must point at a launchable Kiln command.\n\n"
@@ -619,90 +844,183 @@ def install_mcp(
             "  Then re-run `kiln install-mcp`."
         )
 
-    results: list[tuple[MCPClient, str, Path]] = []
-    skipped: list[tuple[MCPClient, str]] = []
-    for c in clients:
-        # Skip clients whose parent dir doesn't exist AND whose app
-        # isn't installed — creating the dir wouldn't help them.  The
-        # heuristic: if the GRANDPARENT (e.g. ``~/Library/Application
-        # Support``) is missing too, this is almost certainly a fresh
-        # machine where the agent isn't installed at all.
-        # For Claude Code, config lives at ``~/.claude.json`` so the
-        # parent is $HOME (always exists) — never skipped.
-        if c.id in {"claude_desktop", "codex"} and not c.config_path.parent.exists():
-            skipped.append((c, "not installed"))
-            continue
-        status, path = _install_into(c, entry)
-        results.append((c, status, path))
+    if offer_local:
+        if not dry_run:
+            _offer_local(entry, _as_apps(clients), receipt_file)
+        return
 
-    # Output: one line per client, ✓ or · depending on status.  Then a
-    # single restart hint.  Quiet when everything was unchanged.
+    plans = app_wiring.plan_apps(entry, apps=_as_apps(clients), to_local=to_local)
+    if not plans:
+        click.echo("  No apps matched.  Nothing to install.")
+        return
+
     click.echo("")
-    for c, status, path in results:
-        mark = "✓" if status in ("installed", "updated") else "·"
-        label = {
-            "installed": "installed",
-            "updated":   "updated  ",
-            "unchanged": "unchanged",
-        }[status]
-        click.echo(f"  {mark} {label}  {c.display:<16} → {path}")
-    for c, reason in skipped:
-        click.echo(f"  · skipped    {c.display:<16} ({reason})")
+    click.echo("  Kiln's plan for your AI apps:" if dry_run else "  Connecting Kiln to your AI apps:")
+    _echo_plan(plans)
+
+    if any(p.action == app_wiring.CANT_READ for p in plans):
+        click.echo(
+            "    Kiln never rewrites settings it can't read.  Fix that file and run "
+            "this again, or add Kiln by hand: kiln install-mcp --print"
+        )
+
+    if any(p.app.id in ("claude_desktop", "claude_code") and p.action not in ("not found", "can't read", "online")
+           for p in plans):
+        click.echo("")
+        click.echo(
+            "  Added Kiln to your Claude account at claude.ai too? Claude Desktop and Claude Code\n"
+            "  load that one as well, so turn it off at claude.ai/customize/connectors to keep one Kiln."
+        )
+
+    held_here = [a.display for a in app_wiring.HELD_APPS if a.is_present()] if not only else []
+    if held_here:
+        names = " and ".join(filter(None, [", ".join(held_here[:-1]), held_here[-1]]))
+        them = "it" if len(held_here) == 1 else "them"
+        click.echo("")
+        click.echo(f"  Found {names} too. Kiln doesn't connect to {them} yet.")
+
+    if not only and _qwen_app_here():
+        click.echo("")
+        click.echo(_QWEN_STEPS)
+
+    if not only:
+        click.echo("")
+        click.echo("  Web apps keep Kiln in your account, so no installer can reach them.")
+        click.echo("  Add Kiln in each one's connector settings by its address:")
+        for name, url in app_wiring.WEB_APPS:
+            click.echo(f"    {name:<31} {url}")
+
+    if dry_run:
+        click.echo("")
+        click.echo("  Dry run: nothing was changed.")
+        return
+
+    from kiln import __version__
+
+    outcomes = app_wiring.apply_plan(
+        plans, kiln_version=__version__, receipt_file=receipt_file,
+    )
+    failed = [o for o in outcomes if o.message]
+    changed = [o for o in outcomes if o.done]
+    for o in changed:
+        if o.plan.from_online:
+            app_wiring.set_kept_online(o.plan.app.id, False)
+    for o in failed:
+        click.echo(f"  ! {o.plan.app.display}: {o.message}", err=True)
+    if failed:
+        click.echo(
+            "    Nothing was written to those files.  Fix them, run this again, "
+            "or add Kiln by hand with `kiln install-mcp --print`.",
+            err=True,
+        )
 
     warning = _path_kiln_warning(command)
     if warning:
         click.echo("")
         click.echo(f"  Note: {warning}")
 
-    did_write = any(s in ("installed", "updated") for _, s, _ in results)
-    if did_write:
+    if changed:
         click.echo("")
         args_suffix = " ".join(entry.get("args") or [])
         click.echo(f"  MCP command: {entry['command']} {args_suffix}".rstrip())
-        click.echo(
-            "  Restart Claude Desktop, open a fresh Codex session, or reload "
-            "your MCP client to pick up the new server."
-        )
-    elif not results and not skipped:
-        # No clients matched --only/--skip filters.
-        click.echo("  No clients matched.  Nothing to install.")
+        click.echo(f"  Receipt: {_short(receipt_file or app_wiring.receipt_path())}")
+        click.echo("  To load Kiln:")
+        for o in changed:
+            click.echo(f"    {o.plan.app.display}: {o.plan.app.restart}")
+    elif not failed:
+        click.echo("")
+        click.echo("  Everything was already set up.  Nothing changed.")
 
 
 @click.command("uninstall-mcp")
 @click.option(
     "--only", multiple=True, metavar="ID",
-    help="Only uninstall from these clients.",
+    help="Only these apps.  Repeat or comma-separate.",
 )
 @click.option(
     "--skip", multiple=True, metavar="ID",
-    help="Skip these clients.",
+    help="Skip these apps.",
 )
-def uninstall_mcp(only: tuple[str, ...], skip: tuple[str, ...]) -> None:
-    """Remove the Kiln entry from your MCP client configs.
+@click.option(
+    "--dry-run", is_flag=True,
+    help="Show what would be taken back, and change nothing.",
+)
+@click.option(
+    "--receipt-only", is_flag=True,
+    help="Take back only what the receipt lists; leave every other file alone.",
+)
+@click.option(
+    "--receipt", "receipt_file", default=None, hidden=True,
+    type=click.Path(path_type=Path),
+)
+def uninstall_mcp(
+    only: tuple[str, ...],
+    skip: tuple[str, ...],
+    dry_run: bool,
+    receipt_only: bool,
+    receipt_file: Path | None,
+) -> None:
+    """Take Kiln back out of your AI apps.
 
-    Only touches the ``kiln`` entry — leaves every other MCP server
-    alone.
+    With a receipt from ``kiln install-mcp``, takes back exactly what it
+    says: each file goes back to how it was, and anything changed since
+    Kiln wrote it is left alone and named.  Apps the receipt doesn't cover
+    lose only their ``kiln`` entry (unless ``--receipt-only``); every other
+    server is left alone.
     """
+    from kiln.cli import app_wiring
+
     clients = _select_clients(only, skip)
-
-    results: list[tuple[MCPClient, str, Path]] = []
-    for c in clients:
-        try:
-            status, path = _uninstall_from(c)
-        except _ConfigParseError as exc:
-            # Can't parse: treat as absent so we don't clobber.
-            click.echo(f"  ! {exc.message}", err=True)
-            continue
-        results.append((c, status, path))
-
-    click.echo("")
-    for c, status, path in results:
-        mark = "✓" if status == "removed" else "·"
-        label = "removed  " if status == "removed" else "absent   "
-        click.echo(f"  {mark} {label}  {c.display:<16} → {path}")
-    if any(s == "removed" for _, s, _ in results):
+    receipt_at = receipt_file or app_wiring.receipt_path()
+    receipt = app_wiring.load_receipt(receipt_at)
+    covered = set(receipt["files"])
+    if covered:
+        ids = [c.id for c in clients]
+        undone = app_wiring.undo_receipt(receipt_file=receipt_at, only=ids, dry_run=dry_run)
         click.echo("")
-        click.echo("  Restart Claude Desktop / Claude Code to stop loading Kiln.")
+        names = {c.id: c.display for c in clients}
+        for r in undone:
+            display = names.get(r.app, r.app)
+            if r.message:
+                click.echo(f"  ! {display:<15} {r.message}", err=True)
+                continue
+            verb = ("would be " if dry_run else "") + r.how
+            if r.back_online:
+                verb += " (back on Kiln online)"
+            click.echo(f"  ✓ {display:<15} {_short(Path(r.path))}: {verb}")
+            for name in r.left_alone:
+                click.echo(
+                    f"    left {name!r} alone: it changed after Kiln wrote it", err=True,
+                )
+    if receipt_only:
+        clients = []
+    clients = [c for c in clients if str(c.config_path) not in covered]
+
+    results: list[tuple[str, str, Path]] = []
+    for app in _as_apps(clients):
+        if app.fmt == "skill":
+            continue
+        fmt, path = app.format(), app.settings_path()
+        try:
+            text = app_wiring._read_text(path)
+            present = text is not None and fmt.get(path, text, app_wiring.KILN_NAME) is not None
+            if present and not dry_run:
+                app_wiring._atomic_write(path, fmt.put(path, text, app_wiring.KILN_NAME, None))
+        except app_wiring.SettingsUnreadable as exc:
+            # Can't read it: leave it alone rather than clobber it.
+            click.echo(f"  ! {exc}", err=True)
+            continue
+        if present:
+            results.append((app.display, "would remove" if dry_run else "removed", path))
+
+    if results:
+        click.echo("")
+    for display, status, path in results:
+        click.echo(f"  ✓ {display:<15} {_short(path)}: {status} the kiln entry")
+    if dry_run:
+        click.echo("\n  Dry run: nothing was changed.")
+    else:
+        click.echo("\n  Restart your AI apps to stop loading Kiln.")
 
 
 # ═════════════════════════════════════════════════════════════════════
