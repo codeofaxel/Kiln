@@ -45,7 +45,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln import run_program
-from kiln.gcode import LAYER_CHANGE_LINE
+from kiln.gcode import LAYER_CHANGE_LINE, LAYER_Z_LINE
 from kiln.openscad_runner import present_signals
 from kiln.output_paths import kiln_output_dir
 from kiln.slicer_filament import LOADED_OBSERVED, SOURCE_PROFILE, SliceFilament, ensure_profile_filament
@@ -3512,6 +3512,25 @@ def slice_multicolor_copies(
     return merged_result
 
 
+_MOVES_ONLY = re.compile(r"^(?:G0*[0-3]\b|G1[01]\b|G92\b|\s*;|\s*$)")
+
+
+def _without_its_ending(lines: list[str]) -> tuple[list[str], str]:
+    """*lines* of one sliced file as ``(the lines up to its ending, its
+    ending)``.  The ending starts at the first command after the last line
+    the file lays that is not a move: the fan, the heaters, the motors, and
+    the figures and settings a slicer writes after them."""
+    last_laid = max(
+        (i for i, line in enumerate(lines) if (m := _EXTRUDES.match(line)) and float(m.group(1)) > 0), default=None,
+    )
+    if last_laid is None:
+        return lines, ""
+    for i in range(last_laid + 1, len(lines)):
+        if not _MOVES_ONLY.match(lines[i]):
+            return lines[:i], "".join(lines[i:])
+    return lines, ""
+
+
 #: A command that ends a print or starts one: the nozzle or bed heater
 #: switched off, the motors released, or the head sent home.
 _ENDS_OR_STARTS = re.compile(r"^(?:M10[49]\s+S0\b|M1[49]0\s+S0\b|M84\b|M18\b|G28\b)")
@@ -3596,6 +3615,10 @@ def merge_multipart_gcode(
         with open(gcode_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
+        # Each slicer's own layer marks, read through the one pattern every
+        # reader shares.  What follows a part's last printing is its ending
+        # (heaters off, motors released) and is kept apart from its layers.
+        lines, ending = _without_its_ending(lines)
         header_lines: list[str] = []
         layers: list[tuple[float, str]] = []
         current_block: list[str] = []
@@ -3603,17 +3626,18 @@ def merge_multipart_gcode(
         found_first = False
 
         for line in lines:
-            if ";LAYER_CHANGE" in line and not found_first:
+            at_a_layer = LAYER_CHANGE_LINE.match(line) is not None
+            if at_a_layer and not found_first:
                 found_first = True
             if not found_first:
                 header_lines.append(line)
                 continue
-            if ";LAYER_CHANGE" in line and current_block and current_z is not None:
+            if at_a_layer and current_block and current_z is not None:
                 layers.append((current_z, "".join(current_block)))
                 current_block = []
                 current_z = None
             current_block.append(line)
-            m = re.match(r"^;Z:([\d.]+)", line)
+            m = LAYER_Z_LINE.match(line)
             if m:
                 current_z = float(m.group(1))
 
@@ -3622,11 +3646,12 @@ def merge_multipart_gcode(
 
         if not layers:
             raise ValueError(
-                f"Part {p['name']!r} ({gcode_path}) has zero parsed layers. "
-                "Ensure the gcode contains ;LAYER_CHANGE markers."
+                f"Kiln couldn't find any layers in the G-code for {p['name']}, so the parts are not merged. "
+                "It reads the layer marks PrusaSlicer, OrcaSlicer and Bambu Studio write; a file from another "
+                "slicer, or one saved without its comments, can't be merged this way."
             )
 
-        parsed.append(("".join(header_lines), layers, p))
+        parsed.append(("".join(header_lines), layers, {**p, "_ending": ending}))
 
     # Find the Z overlap range — the max Z of the shortest part
     # layers is guaranteed non-empty per the zero-layer check above.
@@ -3648,6 +3673,7 @@ def merge_multipart_gcode(
     sorted_parts = sorted(enumerate(parsed), key=lambda x: x[1][2]["tool_index"])
     phases: list[dict[str, Any]] = []
     merged_blocks: list[str] = []
+    last_printed: dict[str, Any] | None = None
 
     merged_blocks.append(merged_header)
     merged_blocks.append(
@@ -3662,6 +3688,7 @@ def merge_multipart_gcode(
         above = [(z, blk) for z, blk in layers if z > overlap_ceiling]
 
         if overlap:
+            last_printed = part_info
             merged_blocks.append(f"; --- Tool change: T{tool} ({name}) ---\n")
             merged_blocks.append(f"T{tool}\n")
             merged_blocks.append("G92 E0\n")
@@ -3681,6 +3708,7 @@ def merge_multipart_gcode(
         above = [(z, blk) for z, blk in layers if z > overlap_ceiling]
 
         if above:
+            last_printed = part_info
             merged_blocks.append(f"; --- Tool change: T{tool} ({name}) ---\n")
             merged_blocks.append(f"T{tool}\n")
             merged_blocks.append("G92 E0\n")
@@ -3694,7 +3722,18 @@ def merge_multipart_gcode(
                 "z_range": f"{above[0][0]}-{above[-1][0]}mm",
             })
 
+    # One ending, the last part's own, after every layer of every part.
+    if last_printed is not None:
+        merged_blocks.append(last_printed["_ending"])
     merged_body = "".join(merged_blocks)
+
+    # Read before it is written: one print from start to end.
+    wrong = _one_print_faults(merged_body)
+    if wrong:
+        raise ValueError(
+            f"Kiln merged the parts, but the merged file {wrong[0]}, so it is not handed over. "
+            "Slice the parts together as one multi-colour plate instead."
+        )
 
     # Each part's own figures, read from the top and the end of its file,
     # where every slicer writes them: the merged print's time is their sum,
