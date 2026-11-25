@@ -10785,8 +10785,8 @@ def _analyze_printability_here(
             0,
             f"{_self_supporting_overhang_count} overhang face(s) sit on "
             f"features that print on their own (short bridges, narrow "
-            f"lips, a screw thread's flanks) — the slicer prints these "
-            f"without supports; they are excluded from the score."
+            f"lips, a screw thread's flanks): the slicer prints these "
+            f"without supports."
         )
     if _bridge_substituted_overhang_pct is not None:
         # A ceiling that is a sliver of the part (a hex socket's roof) is
