@@ -237,8 +237,8 @@ class TestTheServedPick:
         _plan(monkeypatch, "pro")
         pitched = dict(_FLOOR_PICK, warnings=[
             "Load not checked for this material.",
-            f"{di._PICK_LOAD_CAUTION} Kiln Pro sizes the part for the weight and how long it's held; see "
-            "https://kiln3d.com/pricing.",
+            f"{di._PICK_LOAD_CAUTION} Kiln Pro sizes the part for the weight, how long it's held and the "
+            "way it's printed, and checks its fits against your own printer → https://kiln3d.com/pricing",
         ])
         refusal = {"success": False, "status": "error", "code": "TIER_REQUIRED", "required_tier": "pro",
                    "error": "Kiln Pro's material pick needs Kiln Pro. Upgrade at https://kiln3d.com/pricing."}
@@ -482,7 +482,12 @@ class TestTheCautionsOnEveryPath:
         out = _door()("shelf bracket that holds 10 lbs")
         text = " ".join(out["warnings"])
         assert text.count("Kiln Pro") == 1 and text.count("kiln3d.com/pricing") == 1
-        assert "Kiln Pro sizes the part for the weight and how long it's held" in text
+        assert (
+            "Kiln Pro sizes the part for the weight, how long it's held and the way it's printed" in text
+        )
+        # What Kiln Pro gives for this part, never how it works it out.
+        for method in ("beam mechanics", "FoS", "ISO 286", "derating", "real-engineering math"):
+            assert method not in text, method
 
     def test_a_part_with_nothing_to_warn_about_carries_no_caution(self):
         out = _door()("cable clip")

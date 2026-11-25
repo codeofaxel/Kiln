@@ -2412,9 +2412,11 @@ def _screw_hole_recommendation(detail: dict[str, Any]) -> str:
             bits.append(f"{torque} N·m install-torque ceiling")
         bits.append("45° lead-in chamfer")
         return f"{size} self-threading hole (calibrated): " + ", ".join(bits) + "."
-    start = f"~{h} mm" if h is not None else "near the screw pitch diameter"
+    if h is not None:
+        start = f"start ~{h} mm, verify on a test print"
+    else:
+        start = "find its size on a test print"
     return (
-        f"{size} self-threading hole: start {start}, verify on a test print, "
-        f"45° lead-in chamfer (generic starting point — the calibrated "
-        f"table covers Bambu X1/P1/A1 + PLA/PETG)."
+        f"{size} self-threading hole: {start}, 45° lead-in chamfer "
+        f"(a general starting point, not tuned to this printer)."
     )

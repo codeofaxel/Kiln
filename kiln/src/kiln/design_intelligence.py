@@ -1606,11 +1606,10 @@ def _format_upgrade_nudge(verdict: Any, caution: str = _PICK_LOAD_CAUTION) -> st
     """
     from kiln.tiers_and_terms import plan_offer
 
-    plan = plan_offer("pro", "The engineering math for this part").nudge(
-        "Kiln Pro sizes the part for the weight and how long it's held, with "
-        "real-engineering math (beam mechanics with FoS control, ISO 286 fits, "
-        "fatigue + creep derating, calibrated tolerances); see "
-        "https://kiln3d.com/pricing."
+    plan = plan_offer("pro", "The full load check for this part").nudge(
+        "Kiln Pro sizes the part for the weight, how long it's held and the "
+        "way it's printed, and checks its fits against your own printer → "
+        "https://kiln3d.com/pricing"
     )
     return f"{caution} {plan}" if plan else caution
 
