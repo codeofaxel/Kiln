@@ -168,6 +168,38 @@ class TestOneFusedJointAmongGoodOnes:
         assert STUCK not in sentence
 
 
+class TestAGapAtTheFloorIsAtTheFloor:
+    """A gap is judged the way it is said.  Two parts drawn the floor apart
+    read a hair under it off their facets (a 0.3 mm gap drawn round with 32
+    facets a turn measures 0.299 mm) and are said "0.3 mm apart": that is
+    the floor itself, so the same sentence never also says they may print
+    stuck together.  A gap said as less than the floor is under it."""
+
+    @staticmethod
+    def _two_bars(tmp_path: Path, name: str, gap: float) -> Path:
+        near = trimesh.creation.box(extents=(20.0, 10.0, 10.0))
+        near.apply_translation((10.0, 0.0, 5.0))
+        far = trimesh.creation.box(extents=(20.0, 10.0, 10.0))
+        far.apply_translation((30.0 + gap, 0.0, 5.0))
+        trimesh.util.concatenate([near, far]).export(tmp_path / name)
+        return tmp_path / name
+
+    def test_a_gap_said_as_the_floor_is_not_called_stuck(self, tmp_path):
+        from kiln.printability import verdict
+
+        report = _report(self._two_bars(tmp_path, "at_floor.stl", 0.2994))
+        sentence = verdict(report)[1]
+        assert "0.3 mm apart" in sentence, sentence
+        assert STUCK not in sentence, sentence
+        assert not report.pieces.may_fuse, report.pieces.may_fuse
+
+    def test_a_gap_said_under_the_floor_still_is(self, tmp_path):
+        from kiln.printability import verdict
+
+        sentence = verdict(_report(self._two_bars(tmp_path, "under.stl", 0.29)))[1]
+        assert STUCK in sentence and "0.29 mm" in sentence, sentence
+
+
 class TestTouchingOrSunkPiecesAreOneSolid:
     """Pieces that touch or sink into one another are one solid as drawn:
     nothing is said of them, and a hollow part's inner wall is never a pair."""

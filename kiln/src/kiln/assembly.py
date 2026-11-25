@@ -62,6 +62,18 @@ def moving_gap_floor_mm() -> float:
     return _DEFAULT_JOINT_CLEARANCES["clearance_fit"][0]
 
 
+#: Decimals of a millimetre a gap is said to, and so judged at, against
+#: :func:`moving_gap_floor_mm`.
+GAP_JUDGED_DECIMALS = 2
+
+
+def under_moving_gap_floor(gap_mm: float) -> bool:
+    """Whether a measured gap is under :func:`moving_gap_floor_mm`, judged
+    the way the gap is said: to the hundredth of a millimetre.  A gap said
+    as the floor is at it, never under it."""
+    return round(float(gap_mm), GAP_JUDGED_DECIMALS) < round(moving_gap_floor_mm(), GAP_JUDGED_DECIMALS)
+
+
 #: Every joint type an assembly's record may name: the one list.  The
 #: validator's rules, the clearance recommendation and the assembly guide
 #: all read this.

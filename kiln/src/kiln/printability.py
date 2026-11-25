@@ -10303,14 +10303,14 @@ def _standing_said(
 
 def _may_print_stuck(gap_mm: float | None) -> bool:
     """Whether two separate parts *gap_mm* apart may print as one piece:
-    the gap is under the smallest one moving parts are given
-    (:func:`kiln.assembly.moving_gap_floor_mm`).  An unmeasured gap is not
-    called close."""
+    the gap is under the smallest one moving parts are given, judged as it
+    is said (:func:`kiln.assembly.under_moving_gap_floor`).  An unmeasured
+    gap is not called close."""
     if gap_mm is None:
         return False
-    from kiln.assembly import moving_gap_floor_mm
+    from kiln.assembly import under_moving_gap_floor
 
-    return float(gap_mm) < moving_gap_floor_mm()
+    return under_moving_gap_floor(gap_mm)
 
 
 def _elsewhere_said(who: str, gaps: list[float]) -> str:
