@@ -88,17 +88,20 @@ def without_rating(reply: dict[str, Any]) -> dict[str, Any]:
 def _served(analysis: Any) -> dict[str, Any]:
     """*analysis* as a reply carries it: what every ``to_dict`` below returns.
 
-    The score's arithmetic (:data:`_SCORE_ARITHMETIC`) is never served.  A
-    check on public Kiln's own floor serves everything else; its measurements
-    are this file's.  A check Kiln Pro tuned (``analysis.tuned``) keeps its
-    verdict, its reasons and what to do about them, and leaves out the
-    numbers the tuning worked them out from (the class's ``_WORKED_OUT``),
-    which stay in the process that worked them out.  ``tuned`` itself is
-    never served.
+    The score's arithmetic (:data:`_SCORE_ARITHMETIC`) is never served, and
+    nor, at any tier, are the numbers a check reaches its verdict from (the
+    class's ``_WEIGHED``, when it has one): the reply says the verdict, the
+    reasons and what to do, and those numbers stay in the process.  A check
+    on public Kiln's own floor serves everything else;
+    its measurements are this file's.  A check Kiln Pro tuned
+    (``analysis.tuned``) keeps its verdict, its reasons and what to do about
+    them, and leaves out the numbers the tuning worked them out from (the
+    class's ``_WORKED_OUT``), which stay in the process that worked them out.
+    ``tuned`` itself is never served.
     """
     out = asdict(analysis)
     out.pop("tuned", None)
-    for key in _SCORE_ARITHMETIC:
+    for key in (*_SCORE_ARITHMETIC, *getattr(analysis, "_WEIGHED", ())):
         out.pop(key, None)
     if analysis.tuned:
         for key in analysis._WORKED_OUT:
@@ -520,6 +523,12 @@ class AdhesionForceEstimate:
 
     _WORKED_OUT: ClassVar[tuple[str, ...]] = (
         "score_deduction", "adhesion_force_n", "peel_force_n", "force_ratio", "tipping_ratio",
+    )
+    #: Never served, at any tier (:func:`_served`): the reply says whether
+    #: the part holds (``risk_level``, ``will_detach``), how sure that is and
+    #: what to do, and these stay on the estimate for the code that reads it.
+    _WEIGHED: ClassVar[tuple[str, ...]] = (
+        "adhesion_force_n", "peel_force_n", "force_ratio", "tipping_ratio",
     )
 
     def to_dict(self) -> dict[str, Any]:

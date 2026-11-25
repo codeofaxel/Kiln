@@ -8,12 +8,12 @@ door that turned the report into a reply carried them, and a reader could
 take a constant back out of one reply -- the adhesion force over the bed
 contact in the same report is the material's bed strength.
 
-A reply now keeps the verdict, the score and grade, every check's risk and
-reasons, and what to do; a check Kiln Pro tuned leaves out the numbers it
-was worked out from, which stay in the process (``kiln.printability._served``).
-A report on public Kiln's own floor serves every measurement it did, as
-before; the points each check took off and the thermal factor are never
-served, at any tier.
+A reply keeps the verdict, every check's risk and reasons, and what to do; a
+check Kiln Pro tuned leaves out the numbers it was worked out from, which stay
+in the process (``kiln.printability._served``).  A report on public Kiln's own
+floor serves every measurement it did, but for what no reply carries at any
+tier: the points each check took off, the thermal factor, and the numbers
+behind the adhesion estimate's verdict.
 
 The tuning here is stood in for with numbers no real material has, so a
 number that reaches a reply can only have come from the tuning.
@@ -65,6 +65,17 @@ WORKED_OUT = (
     ("thermal_stress", "score_deduction"),
     ("thermal_stress", "material_stress_factor"),
     ("adhesion_force", "score_deduction"),
+    ("adhesion_force", "adhesion_force_n"),
+    ("adhesion_force", "peel_force_n"),
+    ("adhesion_force", "force_ratio"),
+    ("adhesion_force", "tipping_ratio"),
+)
+
+#: The numbers behind the adhesion estimate's verdict, which no reply
+#: carries at any tier, the floor's included.
+#: Written out rather than read from the code, so a cut that is undone fails
+#: its own case.
+WEIGHED = (
     ("adhesion_force", "adhesion_force_n"),
     ("adhesion_force", "peel_force_n"),
     ("adhesion_force", "force_ratio"),
@@ -346,7 +357,8 @@ def _keys_at_any_depth(node: Any) -> set[str]:
 def test_the_floor_is_served_whole_but_for_the_scores_arithmetic(floor):
     """A report public Kiln worked out alone serves every measurement it
     ever did, since the measuring is public Kiln's own; what it never serves,
-    on any tier, is how the score was added up."""
+    on any tier, is how the score was added up, nor the numbers behind the
+    adhesion estimate's verdict."""
     report = floor["report"]
     assert not getattr(report, "tuned", False)
     expected = {
@@ -358,10 +370,12 @@ def test_the_floor_is_served_whole_but_for_the_scores_arithmetic(floor):
     expected["placement"] = {
         key: value for key, value in expected["placement"].items() if key not in P.RATING_KEYS
     }
+    for block, key in WEIGHED:
+        expected[block].pop(key)
     assert report.to_dict() == expected
     served = floor["reply"]["report"]
     for block, key in WORKED_OUT:
-        if key in SCORE_ARITHMETIC:
+        if key in SCORE_ARITHMETIC or (block, key) in WEIGHED:
             assert key not in _block(served, block), f"{block or 'report'}.{key} reached the floor's reply"
         else:
             assert key in _block(served, block), f"{block or 'report'}.{key} left the floor's reply"
@@ -378,3 +392,48 @@ def _without_arithmetic(node: Any) -> Any:
     if isinstance(node, list):
         return [_without_arithmetic(v) for v in node]
     return node
+
+
+# ---------------------------------------------------------------------------
+# The numbers behind the adhesion verdict stay in the process, at every tier
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("block", "key"), WEIGHED, ids=[f"{b}.{k}" for b, k in WEIGHED])
+def test_the_floors_reply_leaves_out_what_the_hold_is_weighed_by(floor, block, key):
+    served = _block(floor["reply"]["report"], block)
+    assert key not in served, f"{block}.{key} reached the floor's reply: {served.get(key)!r}"
+    # ...and the estimate still holds it for the code that reads it.
+    assert getattr(getattr(floor["report"], block), key) is not None
+
+
+def _standing(path: str, extents: tuple[float, float, float]) -> str:
+    part = trimesh.creation.box(extents=extents)
+    part.apply_translation((0, 0, extents[2] / 2))
+    part.export(path)
+    return path
+
+
+@pytest.mark.parametrize(
+    "extents",
+    [(4.0, 4.0, 200.0), (150.0, 2.0, 20.0)],
+    ids=["tall pillar on a small footing", "thin wall standing on edge"],
+)
+def test_a_part_that_comes_off_the_bed_is_told_so_without_the_quantities(tmp_path, extents):
+    """The verdict and the brim are the free answer; the numbers behind the
+    verdict are not in it."""
+    with pytest.MonkeyPatch.context() as mp:
+        _block_kiln_pro(mp)
+        path = _standing(str(tmp_path / "part.stl"), extents)
+        report = P.analyze_printability(path, material="pla")
+        reply = _tools()["analyze_printability"](path, material="pla")
+    force = reply["report"]["adhesion_force"]
+    assert force["risk_level"] == "likely_detach", force
+    assert force["will_detach"] is True
+    message = reply["message"].lower()
+    assert "come off the bed" in message and "brim" in message, reply["message"]
+    assert not set(force) & {key for _block_name, key in WEIGHED}, force
+    held = [getattr(report.adhesion_force, key) for _block_name, key in WEIGHED]
+    for number in _numbers(reply):
+        for value in held:
+            assert value is None or not _same(number, value), f"the reply says {number}, a number behind the verdict"
