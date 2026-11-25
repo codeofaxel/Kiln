@@ -184,7 +184,7 @@ _HIGHLIGHTS_RE = re.compile(
 # Defensive caps on remote-sourced copy: the description is fetched data, so a
 # surprising block must degrade to "fewer/shorter highlights", never to a
 # flooded tool result.
-_MAX_HIGHLIGHTS = 3
+_MAX_HIGHLIGHTS = 5
 _MAX_HIGHLIGHT_CHARS = 200
 
 

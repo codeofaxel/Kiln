@@ -386,10 +386,11 @@ class TestParseHighlights:
             "<!-- kiln-highlights: 1.2.3\n"
             "* one\n* two\n* three\n* four\n"
             f"* {'x' * 500}\n"
+            "* six\n"
             "kiln-highlights:end -->"
         )
         items = vc._parse_highlights(desc, "1.2.3")
-        assert items == ["one", "two", "three"]
+        assert items == ["one", "two", "three", "four", "x" * 200]
 
     def test_non_bullet_lines_are_ignored(self):
         desc = (
@@ -462,7 +463,7 @@ class TestReadmeHighlightsBlock:
     def test_block_exists_for_current_version_and_parses(self):
         readme, version = self._readme_and_version()
         items = vc._parse_highlights(readme, version)
-        assert 2 <= len(items) <= 3, (
+        assert 2 <= len(items) <= vc._MAX_HIGHLIGHTS, (
             f"README carries no parseable kiln-highlights block for {version}; "
             "refresh it at release (wording signed off with the changelog)."
         )
@@ -473,3 +474,4 @@ class TestReadmeHighlightsBlock:
             assert "—" not in item and "–" not in item, item  # no em/en dashes
             assert "desktop" not in item.lower(), item
             assert len(item) <= 160, item
+            assert ";" not in item, item  # clauses are joined with semicolons

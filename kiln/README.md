@@ -3,9 +3,11 @@
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
 <!-- kiln-highlights: 1.6.0
-* install Kiln with one line, and it connects itself to your AI apps
+* Kiln warns you, without being asked, when a part will sit near heat, a flame, a wall outlet or a battery
 * two-nozzle printers print with both nozzles
-* error messages are in plain words: what happened, what still works, and what to do next
+* parts that move play on the stage, including files you import, so you see them work before you print, and Kiln Pro shows the gap between each pair
+* supports go only where a part needs them, so screw threads and parts that stand on their own print clean
+* choose your own speeds for any height of a print, like slowing one delicate stretch or speeding up just the inside, or let Kiln Pro pick them for you
 kiln-highlights:end -->
 <!-- The block above is machine-read, not rendered: installed Kilns parse it
      out of the PyPI JSON description so their update nudge can say what the
