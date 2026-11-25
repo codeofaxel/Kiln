@@ -10777,9 +10777,9 @@ def _analyze_printability_here(
     # ``needs_supports`` verdict was downgraded above, give the user
     # an explicit "the slicer will bridge this" line so they
     # understand WHY no supports are needed despite the horizontal
-    # overhang in the geometry.  Silent downgrade is worse UX than
-    # "needs supports + slicer will bridge" was — at least the old
-    # version told the user something.
+    # overhang in the geometry.  Said only of a part that needs no
+    # supports: beside a verdict that asks for them, "no action is
+    # needed" is a second answer to the same question.
     if _self_supporting_overhang_count > 0:
         recommendations.insert(
             0,
@@ -10788,7 +10788,8 @@ def _analyze_printability_here(
             f"lips, a screw thread's flanks): the slicer prints these "
             f"without supports."
         )
-    if _bridge_substituted_overhang_pct is not None:
+    needs_supports = overhangs.needs_supports or bridging.needs_supports_for_bridges
+    if _bridge_substituted_overhang_pct is not None and not needs_supports:
         # A ceiling that is a sliver of the part (a hex socket's roof) is
         # named without a share that would round to nothing.
         share = (
@@ -10798,7 +10799,7 @@ def _analyze_printability_here(
         recommendations.insert(
             0,
             f"Slicer will likely bridge the {share}horizontal overhang "
-            f"without supports — no action needed.  Force-enable supports "
+            f"without supports, so no action is needed.  Force-enable supports "
             f"in your slicer if the underside is a show surface and you "
             f"want a smoother finish."
         )
