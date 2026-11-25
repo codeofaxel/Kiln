@@ -70,7 +70,7 @@ Everyone else — two steps. Then ask your AI to make something.
 curl -fsSL https://www.kiln3d.com/install.sh | sh
 ```
 
-On Windows, in PowerShell:
+On Windows, in PowerShell (new on Windows: if it stops, `pip install kiln3d` below always works, and please tell us at [github.com/codeofaxel/Kiln/issues](https://github.com/codeofaxel/Kiln/issues)):
 
 ```powershell
 irm https://www.kiln3d.com/install.ps1 | iex
