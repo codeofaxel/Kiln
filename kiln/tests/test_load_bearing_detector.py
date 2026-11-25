@@ -14,6 +14,8 @@ kiln-pro and is tested separately there.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from kiln.load_bearing_detector import (
@@ -171,25 +173,30 @@ class TestUpgradeRecommendation:
         assert v.upgrade_recommendation["code"] == "LOAD_BEARING_DETECTED"
         assert v.upgrade_recommendation["engineering_grade"] == "heuristic"
         assert "kiln3d.com/pricing" in v.upgrade_recommendation["pro_upgrade"]["upgrade_url"]
-        # User sees what the heuristic doesn't account for
-        assert "fatigue" in v.upgrade_recommendation["warning"].lower()
-        assert "creep" in v.upgrade_recommendation["warning"].lower()
+        # User sees what the quick check doesn't allow for, in plain words
+        assert "load left on it" in v.upgrade_recommendation["warning"]
 
     def test_no_trip_no_upgrade_recommendation(self):
         v = detect_load_bearing("a phone stand")
         assert v.is_load_bearing is False
         assert v.upgrade_recommendation == {}
 
-    def test_upgrade_recommendation_lists_features(self):
-        v = detect_load_bearing("structural drone arm")
-        items = v.upgrade_recommendation["pro_upgrade"]["what_youd_get"]
-        assert isinstance(items, list)
-        assert len(items) >= 5
-        # Concrete, not vague
-        text = " ".join(items).lower()
-        assert "iso 286" in text or "iso286" in text
-        assert "fos" in text or "factor of safety" in text
-        assert "fatigue" in text
+    @pytest.mark.usefixtures("free_caller")
+    def test_the_offer_says_what_it_gives_for_this_part_never_how(self):
+        """The offer names what the full check gives for this part, a load it
+        can be trusted with and its fits checked on the person's own printer,
+        and names the plan once, with one link.  No number, formula or list
+        of steps: those are how the answer is reached, not what it is."""
+        rec = detect_load_bearing("structural drone arm").upgrade_recommendation
+        items = rec["pro_upgrade"]["what_youd_get"]
+        assert isinstance(items, list) and items
+        for item in items:
+            assert not re.search(r"[\d(=+/]", item), item
+        warning = rec["warning"]
+        assert warning.count("kiln3d.com") == 1
+        assert not re.search(r"\d", warning.replace("kiln3d.com", "")), warning
+        said = " ".join([warning, *items]).lower()
+        assert "load" in said and "your own printer" in said
 
 
 class TestConfidenceLevels:

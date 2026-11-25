@@ -413,21 +413,41 @@ def detect_load_bearing(
 _PRO_UPGRADE_URL = "https://kiln3d.com/pricing"
 
 
+#: The caution every caller reads when a part looks load-bearing, whatever
+#: their plan: the check is quick, a printed part is not a tested one, and a
+#: load left on it for months bends it.
+_CAUTION = (
+    "This part looks load-bearing.  This is a quick heuristic, not a "
+    "test of your actual printed part — and not enough for anything "
+    "that could hurt someone if it fails (overhead or climbing loads, "
+    "child or vehicle parts).  A load left on it for months slowly bends "
+    "printed plastic, PLA most of all: a PLA shelf is not safe long-term.  "
+    "Print it, load-test it, and for high-stakes parts get an engineer's "
+    "sign-off."
+)
+
+#: What the full load check gives for this part, as the offer names it.
+_WHAT_THE_FULL_CHECK_GIVES: tuple[str, ...] = (
+    "The load this part can be trusted with, for how long it's held and the way it's printed",
+    "Its fits checked against your own printer, across every part of an assembly",
+)
+
+
 def _build_upgrade_recommendation(trip_reasons: list[str]) -> dict[str, Any]:
     """Build the upgrade-nudge dict free-tier tools attach to their response.
 
-    Wording is factual and specific: names what the heuristic does
-    NOT account for so the user can judge if it matters for their
-    case.  Not fear-mongering, not vague.  The caution is said to every
-    caller; the plan line only to one who would buy the plan, and the plan
-    check's own words to one who pays for it already.
+    The caution is said to every caller; the plan line only to one who would
+    buy the plan, and the plan check's own words to one who pays for it
+    already.  The offer says what the full check gives for this part, once,
+    with one link.
     """
     from kiln.tiers_and_terms import plan_offer
 
     offer = plan_offer("pro", "The full load check for this part")
     plan = offer.nudge(
-        "Kiln Pro shows the real safety factor, fatigue + creep checks, and your "
-        "printer's calibrated tolerances → https://kiln3d.com/pricing"
+        "Kiln Pro sizes it for the weight, how long it's held and the way it's "
+        "printed, and checks its fits against your own printer → "
+        "https://kiln3d.com/pricing"
     )
     pro_upgrade: dict[str, Any] = {"available": True, "tool": "design_for_load"}
     if offer.buying:
@@ -436,27 +456,11 @@ def _build_upgrade_recommendation(trip_reasons: list[str]) -> dict[str, Any]:
         "code": "LOAD_BEARING_DETECTED",
         "tier": "free",
         "engineering_grade": "heuristic",
-        "warning": (
-            "This part looks load-bearing.  This is a quick heuristic, not a "
-            "test of your actual printed part — and not enough for anything "
-            "that could hurt someone if it fails (overhead or climbing loads, "
-            "child or vehicle parts).  Print it, load-test it, and for "
-            "high-stakes parts get an engineer's sign-off."
-            + (f"  {plan}" if plan else "")
-        ),
+        "warning": _CAUTION + (f"  {plan}" if plan else ""),
         "trip_reasons": trip_reasons,
         "pro_upgrade": {
             **pro_upgrade,
-            "what_youd_get": [
-                "Real beam mechanics (sigma = Mc/I) with cross-section shape awareness",
-                "Application-class factor of safety (1.5 prototype to 4-10 life-safety)",
-                "Fatigue derating for cyclic snap-fits, hinges, and gears",
-                "Creep derating for sustained loads (PLA shelves are NOT safe long-term)",
-                "ISO 286 H7/h6-style fits with FDM-achievability gating",
-                "Per-printer dimensional calibration (your printer's offsets, not generic)",
-                "Tolerance stack analysis (worst-case + RSS + Monte Carlo) for assemblies",
-                "Plain-English answer plus optional engineer-mode formula trace",
-            ],
+            "what_youd_get": list(_WHAT_THE_FULL_CHECK_GIVES),
         },
     }
 
@@ -551,12 +555,7 @@ def attach_load_bearing_nudge(
 #: The same caution a Free caller reads, without the offer: said to a
 #: caller whose plan already includes the engineering tools.
 _PAID_NOTE = (
-    "This part looks load-bearing.  This is a quick heuristic, not a test of "
-    "your actual printed part — and not enough for anything that could hurt "
-    "someone if it fails (overhead or climbing loads, child or vehicle "
-    "parts).  Print it, load-test it, and for high-stakes parts get an "
-    "engineer's sign-off.  design_for_load works out the safety factor, "
-    "fatigue and creep for it."
+    _CAUTION + "  design_for_load works out the safety factor, fatigue and creep for it."
 )
 
 
