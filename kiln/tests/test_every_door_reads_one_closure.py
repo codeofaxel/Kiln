@@ -235,6 +235,27 @@ def test_a_torn_surface_names_kilns_hole_repair_and_it_closes_it(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_pieces_whose_faces_lie_on_each_other_print_as_one_solid(tmp_path):
+    """A chain link left as touching bodies: a band's end lies flat on the
+    frame, triangulated its own way, over 24 mm2 that is two of the band's
+    264 triangles.  It prints as one solid, and every door says so."""
+    from tests.test_pieces_that_print_as_one_solid import _band_on_a_block
+
+    path = _write(tmp_path / "band_on_block.stl", np.concatenate([m.triangles for m in _band_on_a_block()]))
+
+    validated = _call("validate_and_prepare_mesh", file_path=path)
+    diagnosed = _call("diagnose_mesh", file_path=path)["report"]
+
+    one = "Its 2 pieces print as one solid"
+    assert validated["result"]["is_manifold"] is True
+    assert any(one in note for note in validated["result"]["notes"]), validated["result"]["notes"]
+    assert one in validated["message"]
+    assert "meet only along an edge" not in validated["message"]
+    assert "separate parts" not in validated["message"]
+    assert any(one in note for note in diagnosed["notes"]), diagnosed["notes"]
+    assert diagnosed["pieces"]["solid_count"] == 1
+
+
 def test_pieces_that_meet_only_along_an_edge_print_as_separate_parts(tmp_path):
     path = _write(tmp_path / "two_cubes.stl", _cells([(0, 0, 0), (1, 1, 0)]))
 

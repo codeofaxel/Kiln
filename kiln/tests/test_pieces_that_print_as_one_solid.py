@@ -53,6 +53,26 @@ def _ball(z):
     return ball
 
 
+def _band_on_a_block():
+    """A chain link's band, a D 12 mm tall and 2 mm thick with a rounded
+    back, whose flat end lies on a block's side: 24 mm2 of face on face,
+    two of the band's 264 triangles, triangulated unlike the block."""
+    turn = np.linspace(np.pi / 2, 3 * np.pi / 2, 65)
+    profile = [(0.0, 0.0), (0.0, 12.0), *[(-10.0 + 6.0 * np.cos(t), 6.0 + 6.0 * np.sin(t)) for t in turn]]
+    ring = np.asarray(profile)
+    n = len(ring)
+    v = np.vstack([np.c_[ring, np.full(n, 13.0)], np.c_[ring, np.full(n, 15.0)]])
+    faces = [(0, k + 1, k) for k in range(1, n - 1)] + [(n, n + k, n + k + 1) for k in range(1, n - 1)]
+    for k in range(n):
+        j = (k + 1) % n
+        faces += [(k, j, j + n), (k, j + n, k + n)]
+    band = trimesh.Trimesh(v, np.asarray(faces), process=False)
+    if band.volume < 0:
+        band.invert()
+    block = _box((0, 0, -15), (8.4, 12, 15)).subdivide().subdivide()
+    return [band, block]
+
+
 #: Each scene, and how many solids a slicer prints it as.
 SCENES = {
     "share_a_side_face": ([_box((0, 0, 0), (20, 20, 10)), _box((20, 0, 0), (40, 20, 10))], 1),
@@ -60,6 +80,7 @@ SCENES = {
     "coat_triangulated_its_own_way": (
         [_box((0, 0, 0), (20, 20, 10)), _box((0, 0, 10), (20, 20, 12)).subdivide().subdivide()], 1,
     ),
+    "an_end_face_lying_on_a_side": (_band_on_a_block(), 1),
     "overlap": ([_box((0, 0, 0), (20, 20, 10)), _box((15, 0, 0), (35, 20, 10))], 1),
     "embedded": ([_box((0, 0, 0), (40, 40, 10)), _box((10, 10, 2), (20, 20, 8))], 1),
     "hollow_part": (_hollow(), 1),

@@ -855,6 +855,22 @@ def _solids(
         if tests >= _MAX_CONTACT_PAIRS or work >= _MAX_CONTACT_WORK:
             untested += 1
             continue
+        # Faces of one lying flat on faces of the other, over more than a
+        # square one probe deep: one solid, however each is triangulated.
+        # The probes below sample a piece, so a face that is a small share of
+        # it can fall between them.
+        enough = (_PROBE_DEPTH_FRACTION * diagonal[small]) ** 2
+        shared, cost = _faces_lie_on(
+            tri, cross, faces_of(small), faces_of(host),
+            np.maximum(lows[a], lows[b]), np.minimum(highs[a], highs[b]), slack, enough,
+            budget=_MAX_CONTACT_WORK - work,
+        )
+        work += cost
+        if shared is not None and shared >= enough:
+            tests += 1
+            joined[(a, b)] = "surface"
+            root[find(a)] = find(b)
+            continue
         # Reading a host's material is work too, charged before it is done:
         # once, while it is held; every time, when it is not.
         if host not in held:
@@ -959,6 +975,101 @@ def _in_contact(
         count += (crossed * up[None, :]).sum(axis=1)
     inside = int((count > 0.5).sum())
     return inside >= _CONTACT_MIN_PROBES and inside >= _CONTACT_MIN_SHARE * len(probes), cost
+
+
+#: Two faces lie on each other when they face opposite ways to within this
+#: (the cosine of the angle between them, past a half turn) and sit on one
+#: plane to within the reading's weld radius.
+_FACING_COS = 1.0 - 1e-6
+
+#: Faces of the smaller piece compared at once with the other's, so a
+#: comparison holds a few hundred thousand numbers at most.
+_FACE_CHUNK = 256
+
+
+def _faces_lie_on(
+    tri: np.ndarray,
+    cross: np.ndarray,
+    own: np.ndarray,
+    host: np.ndarray,
+    box_lo: np.ndarray,
+    box_hi: np.ndarray,
+    tol: float,
+    enough: float,
+    *,
+    budget: int,
+) -> tuple[float | None, int]:
+    """The area over which faces among the triangles *own* lie flat on faces
+    among the triangles *host*: on one plane to within *tol*, facing each
+    other, and overlapping.  Only faces within the box two pieces share
+    (*box_lo*, *box_hi*) can, so only those are compared, and the sum stops
+    once it reaches *enough*.  Two pieces that meet only along an edge or at
+    a point share no area.
+
+    Returns ``(area, cost)``; ``area`` is ``None`` when comparing would cost
+    more than *budget*: the pair is left untested rather than read wrong.
+    """
+    def near(faces: np.ndarray) -> np.ndarray:
+        t = tri[faces]
+        within = np.all(t.max(axis=1) >= box_lo - tol, axis=1) & np.all(t.min(axis=1) <= box_hi + tol, axis=1)
+        return faces[within & (np.linalg.norm(cross[faces], axis=1) > 0.0)]
+
+    looked = len(own) + len(host)
+    mine, theirs = near(own), near(host)
+    if not len(mine) or not len(theirs):
+        return 0.0, looked
+    cost = looked + len(mine) * len(theirs)
+    if cost > budget:
+        return None, looked
+    n_mine = cross[mine] / np.linalg.norm(cross[mine], axis=1)[:, None]
+    n_theirs = cross[theirs] / np.linalg.norm(cross[theirs], axis=1)[:, None]
+    plane_mine = np.einsum("ij,ij->i", n_mine, tri[mine, 0])
+    centre_theirs = tri[theirs].mean(axis=1)
+    shared = 0.0
+    for s in range(0, len(mine), _FACE_CHUNK):
+        normals = n_mine[s : s + _FACE_CHUNK]
+        facing = normals @ n_theirs.T <= -_FACING_COS
+        on_plane = np.abs(normals @ centre_theirs.T - plane_mine[s : s + _FACE_CHUNK, None]) <= tol
+        for i, j in np.argwhere(facing & on_plane).tolist():
+            shared += _overlap_area(tri[mine[s + i]], tri[theirs[j]], normals[i])
+            if shared >= enough:
+                return shared, cost
+    return shared, cost
+
+
+def _overlap_area(first: np.ndarray, second: np.ndarray, normal: np.ndarray) -> float:
+    """The area two triangles on one plane (unit *normal*) cover in common."""
+    axis = int(np.argmax(np.abs(normal)))
+    keep = [k for k in range(3) if k != axis]
+    shape = _counter_clockwise(first[:, keep])
+    edge = _counter_clockwise(second[:, keep])
+    for k in range(3):
+        shape = _left_of(shape, edge[k], edge[(k + 1) % 3])
+        if len(shape) < 3:
+            return 0.0
+    p = np.asarray(shape)
+    flat = 0.5 * abs(float(np.dot(p[:, 0], np.roll(p[:, 1], -1)) - np.dot(p[:, 1], np.roll(p[:, 0], -1))))
+    return flat / abs(float(normal[axis]))
+
+
+def _counter_clockwise(corners: np.ndarray) -> list[np.ndarray]:
+    a, b, c = corners
+    turn = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    return [a, b, c] if turn >= 0.0 else [a, c, b]
+
+
+def _left_of(shape: list[np.ndarray], a: np.ndarray, b: np.ndarray) -> list[np.ndarray]:
+    """The part of the convex polygon *shape* on the left of the line a to b."""
+    kept: list[np.ndarray] = []
+    for k in range(len(shape)):
+        p, q = shape[k], shape[(k + 1) % len(shape)]
+        side_p = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+        side_q = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
+        if side_p >= 0.0:
+            kept.append(p)
+        if (side_p >= 0.0) != (side_q >= 0.0):
+            kept.append(p + (side_p / (side_p - side_q)) * (q - p))
+    return kept
 
 
 def read_triangles(triangles: Any, *, tolerance: float | None = None, max_points: int = 3) -> BodyReading:
