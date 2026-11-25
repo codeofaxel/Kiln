@@ -53,7 +53,7 @@ referencing==0.37.0
 requests==2.34.2
 responses==0.26.3
 rich==15.0.0
-rpds-py==0.30.0
+rpds-py==2026.9.1
 scipy==1.16.3
 sse-starlette==3.5.0
 starlette==1.7.0
