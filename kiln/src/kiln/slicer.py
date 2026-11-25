@@ -2847,8 +2847,36 @@ def _slice_file(
                 made = _sliced()
             finally:
                 _unrecorded.reset(quiet)
+        # A brim that reaches from one piece of a part printed in place to
+        # another joins them at the bed.  The first layer is read for it: a
+        # profile Kiln wrote is given the widest brim that keeps out of the
+        # gap between them, or none where none fits, and the slice is made
+        # once more and read again; a person's own profile is left as it is.
+        # The answer says which, either way.
+        brim_join: BrimJoin | None = None
+        brim_kept: float | None = None
+        brim_again: BrimJoin | None = None
+        if asked_brim and made.success and made.output_path:
+            brim_join = brim_joins_pieces(
+                made.output_path, drawn, asked_brim, apart=True if supports.parts_apart else None,
+            )
+            if brim_join is not None and brim_join.joined and profile_origin(slicer_profile).kiln:
+                brim_kept = brim_join.keep_mm
+                slicer_profile = profile_with_overrides(
+                    slicer_profile, {"brim_width": f"{brim_kept:g}"},
+                    prefix=f"{Path(slicer_profile).stem}_" if slicer_profile else None, stated=False,
+                )
+                quiet = _unrecorded.set(True)
+                try:
+                    made = _sliced()
+                finally:
+                    _unrecorded.reset(quiet)
+                if brim_kept and made.success and made.output_path:
+                    brim_again = brim_joins_pieces(made.output_path, drawn, brim_kept, apart=True)
         result = _say_left_out(say_project_plate(made, taken), left_out)
-        _say_brim_left_out(result, asked_brim, slicer, slicer_profile)
+        _say_brim_joined(result, asked_brim, brim_join, brim_kept, brim_again)
+        if brim_kept != 0.0:
+            _say_brim_left_out(result, brim_kept or asked_brim, slicer, slicer_profile)
         if unused_note:
             result.message = f"{result.message} {unused_note}".strip()
         if soft_run is not None:
@@ -2881,6 +2909,272 @@ def _asked_brim_mm(profile: str | None) -> float:
         return outside_brim_mm(ini_to_settings(profile))
     except (OSError, UnicodeDecodeError, ValueError):
         return 0.0
+
+
+#: Brim samples are read this far apart along each brim line, in mm.
+_BRIM_SAMPLE_MM = 0.25
+#: A brim narrowed to stay out of the gap between two pieces is rounded down
+#: to this step, in mm.
+_BRIM_STEP_MM = 0.1
+#: The most (brim sample, outline segment) pairs measured at once, and laid
+#: out in all; a part that needs more is not read for its brim.
+_BRIM_PAIRS_PER_PASS = 400_000
+_BRIM_CELL_PAIRS_MAX = 4_000_000
+
+
+@dataclass(frozen=True)
+class BrimJoin:
+    """What the first layer of a sliced file shows of its brim between two
+    pieces of a part printed in place apart."""
+
+    #: Whether the brim reaches from one piece to another.
+    joined: bool
+    #: How far apart, at the bed, the narrowest two pieces it joins stand,
+    #: in mm; ``None`` when it joins none.
+    gap_mm: float | None = None
+    #: The widest brim that keeps out of that gap, in mm: 0 when no brim
+    #: fits there without joining the two.
+    keep_mm: float = 0.0
+
+
+def brim_joins_pieces(
+    gcode_path: str, input_path: str, reach_mm: float, *, apart: bool | None = None,
+) -> BrimJoin | None:
+    """Whether the brim in *gcode_path*'s first layer joins two pieces of the
+    part in *input_path* that print in place apart.
+
+    The pieces are the part's separate solids, read at the height of the
+    first layer and placed where the file's own footprint of the part puts
+    them; the brim is the file's own brim lines (:mod:`kiln.slicer_geometry`
+    tells a brim from a skirt).  A brim line that lies between two pieces,
+    with one on each side of it and each within *reach_mm* (the brim's
+    width), is in the brims of both at once: the slicer fills a brim with
+    lines laid side by side, so there the brim runs from one piece to the
+    other.  A brim round the outside that only meets two pieces at their
+    outer edges, and one that never reaches a piece standing in another's
+    hole, join nothing.  *apart* is the caller's reading of whether the
+    pieces print in place apart (``None`` reads it here).
+
+    ``BrimJoin(joined=False)`` when the brim joins no two pieces, the part
+    is one piece, or its pieces do not print in place apart; ``None`` when
+    the file or the part cannot be read for it.
+    """
+    import numpy as np
+
+    from kiln.slicer_geometry import DEFAULT_LINE_WIDTH_MM, parse_slicer_features
+    from kiln.slicer_supports import shift_to_footprint
+
+    try:
+        parsed = parse_slicer_features(gcode_path)
+    except (OSError, ValueError):
+        return None
+    brim = parsed.buckets.get("brim")
+    if brim is None or not brim.segments:
+        return BrimJoin(joined=False)
+    segs = np.asarray(brim.segments, dtype=np.float64).reshape(-1, 6)
+    first = segs[:, 2] <= segs[:, 2].min() + 0.01
+    segs = segs[first]
+    pieces = _first_layer_pieces(input_path, float(segs[:, 2].min()) / 2.0, apart=apart)
+    if pieces is None:
+        return None
+    outline, solid, box = pieces
+    if outline is None:
+        return BrimJoin(joined=False)
+    shift = shift_to_footprint(parsed, box)
+    if shift is None:
+        return None
+    outline = outline + np.asarray(shift, dtype=np.float64)
+    width = max(brim.widths, key=brim.widths.get) if brim.widths else DEFAULT_LINE_WIDTH_MM
+    points = _along(segs, _BRIM_SAMPLE_MM)
+    between = _between_two_pieces(points, outline, solid, reach_mm)
+    if between is None:
+        return None
+    if not between.size:
+        return BrimJoin(joined=False)
+    # The gap where the brim lies between them, read across it.
+    gap = float(between.min())
+    # Two brims a line apart do not touch: each reaches half of what is left.
+    steps = int(max(0.0, (gap - width) / 2.0) / _BRIM_STEP_MM + 1e-9)
+    keep = round(steps * _BRIM_STEP_MM, 1)
+    return BrimJoin(joined=True, gap_mm=gap, keep_mm=keep if keep >= width else 0.0)
+
+
+def _along(segs: Any, step: float) -> Any:
+    """Points every *step* mm along each segment of *segs* (rows of x0, y0,
+    z0, x1, y1, z1), both ends included: rows of x, y."""
+    import numpy as np
+
+    a, b = segs[:, 0:2], segs[:, 3:5]
+    n = np.maximum(1, np.ceil(np.linalg.norm(b - a, axis=1) / step).astype(np.int64))
+    which = np.repeat(np.arange(len(segs)), n + 1)
+    t = (np.arange(which.size) - np.repeat(np.cumsum(n + 1) - (n + 1), n + 1)) / n[which]
+    return a[which] + (b - a)[which] * t[:, None]
+
+
+def _first_layer_pieces(input_path: str, height: float, *, apart: bool | None) -> tuple[Any, Any, Any] | None:
+    """The outline of each separate solid of *input_path* at *height* mm over
+    the plate, as segments ``(S, 2, 2)`` in the part's own XY, the solid each
+    belongs to, and the part's XY box: what the brim is read against.  The
+    outline is ``None`` when the part is one solid or its solids do not
+    print in place apart; ``None`` in all when the part cannot be read."""
+    import numpy as np
+
+    from kiln.mesh_bodies import read_triangles
+    from kiln.printability import _parse_mesh, _parts_stand_apart, _prepare_parsed
+
+    try:
+        facets, vertices = _parse_mesh(input_path)
+        triangles = _prepare_parsed(list(facets), vertices)[0]
+        tris = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+        reading = read_triangles(tris)
+    except (OSError, ValueError, MemoryError):
+        logger.debug("pieces not read for the brim", exc_info=True)
+        return None
+    if len(tris) == 0 or not np.isfinite(tris).all():
+        return None
+    lo, hi = tris[:, :, :2].reshape(-1, 2).min(axis=0), tris[:, :, :2].reshape(-1, 2).max(axis=0)
+    box = (float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1]))
+    piece = np.asarray(reading.face_piece, dtype=np.int64)
+    solid_of = np.asarray(reading.solid_of or range(reading.piece_count), dtype=np.int64)
+    if piece.shape[0] != len(tris) or solid_of.size == 0:
+        return None
+    solid = np.where(piece >= 0, solid_of[np.clip(piece, 0, None)], -1)
+    if np.unique(solid[solid >= 0]).size < 2:
+        return None, None, box
+    if apart is None:
+        apart = _parts_stand_apart(list(triangles), reading)
+    if not apart:
+        return None, None, box
+    level = float(tris[:, :, 2].min()) + height + 1e-6
+    d = tris[:, :, 2] - level
+    crossing = (d.min(axis=1) < 0.0) & (d.max(axis=1) > 0.0) & (solid >= 0)
+    t, dd = tris[crossing], d[crossing]
+    ends = []
+    for i, j in ((0, 1), (1, 2), (2, 0)):
+        cut = (dd[:, i] < 0.0) != (dd[:, j] < 0.0)
+        f = np.where(cut, dd[:, i] / np.where(cut, dd[:, i] - dd[:, j], 1.0), 0.0)
+        ends.append((t[:, i, :2] + (t[:, j, :2] - t[:, i, :2]) * f[:, None], cut))
+    points = np.stack([p for p, _cut in ends], axis=1)
+    cuts = np.stack([c for _p, c in ends], axis=1)
+    two = cuts.sum(axis=1) == 2
+    order = np.argsort(~cuts[two], axis=1, kind="stable")[:, :2]
+    outline = np.take_along_axis(points[two], order[:, :, None], axis=1)
+    return outline, solid[crossing][two], box
+
+
+def _between_two_pieces(points: Any, outline: Any, solid: Any, reach: float) -> Any | None:
+    """The distance across, from one piece to the other, at each of
+    *points* that lies between two pieces: its two nearest pieces' outlines
+    are each within *reach* of it, on opposite sides of it.  ``None`` when
+    that is more than this reads.  The outline's segments are laid out by
+    the cells their reach covers, so each point is measured against the few
+    that can reach it."""
+    import numpy as np
+
+    if len(points) == 0 or len(outline) == 0:
+        return np.zeros(0)
+    cell = max(reach, 0.5)
+    lo = np.floor((outline.min(axis=1) - reach) / cell).astype(np.int64)
+    span = np.floor((outline.max(axis=1) + reach) / cell).astype(np.int64) - lo + 1
+    count = span.prod(axis=1)
+    total = int(count.sum())
+    if total > _BRIM_CELL_PAIRS_MAX:
+        return None
+    which = np.repeat(np.arange(len(outline)), count)
+    step = np.arange(total) - np.repeat(np.cumsum(count) - count, count)
+    cells = lo[which] + np.stack([step // span[which, 1], step % span[which, 1]], axis=1)
+    p_cell = np.floor(points / cell).astype(np.int64)
+    origin = np.minimum(cells.min(axis=0), p_cell.min(axis=0))
+    width = int(max(cells[:, 1].max(), p_cell[:, 1].max()) - origin[1] + 1)
+    keys = (cells[:, 0] - origin[0]) * width + (cells[:, 1] - origin[1])
+    p_keys = (p_cell[:, 0] - origin[0]) * width + (p_cell[:, 1] - origin[1])
+    order = np.argsort(keys, kind="stable")
+    keys, by_key = keys[order], which[order]
+    start = np.searchsorted(keys, p_keys, side="left")
+    many = np.searchsorted(keys, p_keys, side="right") - start
+    todo = np.flatnonzero(many > 0)
+    across: list[Any] = []
+    at = 0
+    while at < todo.size:
+        stop = at + 1
+        budget = int(many[todo[at]])
+        while stop < todo.size and budget + int(many[todo[stop]]) <= _BRIM_PAIRS_PER_PASS:
+            budget += int(many[todo[stop]])
+            stop += 1
+        chunk = todo[at:stop]
+        at = stop
+        point_of = np.repeat(chunk, many[chunk])
+        offset = np.arange(point_of.size) - np.repeat(np.cumsum(many[chunk]) - many[chunk], many[chunk])
+        seg = by_key[start[point_of] + offset]
+        a, b = outline[seg, 0], outline[seg, 1]
+        ab = b - a
+        t = np.clip(((points[point_of] - a) * ab).sum(axis=1) / np.maximum((ab * ab).sum(axis=1), 1e-12), 0.0, 1.0)
+        toward = a + ab * t[:, None] - points[point_of]
+        dist = np.linalg.norm(toward, axis=1)
+        near = dist <= reach
+        point_of, owner, dist, toward = point_of[near], solid[seg[near]], dist[near], toward[near]
+        if point_of.size == 0:
+            continue
+        # Each point's nearest stretch of each piece, then its two nearest pieces.
+        by = np.lexsort((dist, owner, point_of))
+        point_of, owner, dist, toward = point_of[by], owner[by], dist[by], toward[by]
+        head = np.r_[True, (np.diff(point_of) != 0) | (np.diff(owner) != 0)]
+        point_of, dist, toward = point_of[head], dist[head], toward[head]
+        by = np.lexsort((dist, point_of))
+        point_of, dist, toward = point_of[by], dist[by], toward[by]
+        lead = np.r_[True, np.diff(point_of) != 0]
+        runner = np.r_[False, (np.diff(point_of) == 0) & lead[:-1]]
+        second = np.flatnonzero(runner)
+        first = second - 1
+        opposite = (toward[first] * toward[second]).sum(axis=1) < 0.0
+        across.append(dist[first][opposite] + dist[second][opposite])
+    return np.concatenate(across) if across else np.zeros(0)
+
+
+def _say_brim_joined(
+    result: SliceResult, asked_mm: float, join: BrimJoin | None, kept_mm: float | None, again: BrimJoin | None,
+) -> None:
+    """Say on *result* what the first layer showed of a brim *asked_mm* wide
+    between two pieces of a part printed in place apart (*join*), and what
+    the slice did about it: drew it *kept_mm* wide, read once more as
+    *again*, or left it off at 0; ``None`` for a person's own profile, left
+    as it is.  Nothing is said when the brim joins no two pieces."""
+    if not asked_mm or not result.success:
+        return
+    if join is None:
+        said = ("Whether the brim runs into the gap between two pieces of the part could not be read from the "
+                "sliced file, so look at the first layer in the slicer before printing.")
+        result.brim = {"asked_mm": asked_mm, "joins_pieces": None, "said": said}
+        result.message = f"{result.message} {said}".strip()
+        return
+    if not join.joined:
+        return
+    gap = "" if join.gap_mm is None else f", which stand {join.gap_mm:.1f} mm apart at the bed,"
+    into = f"into the gap between two of the part's pieces{gap} and can stick them together there"
+    if kept_mm is None:
+        fix = (f"Set `brim_width` to {join.keep_mm:g} mm or less before printing." if join.keep_mm
+               else "Set `brim_width` to 0 before printing: no brim fits in that gap.")
+        said = f"The {asked_mm:g} mm brim in your profile runs {into}. {fix}"
+        drawn, joins = asked_mm, True
+    elif not kept_mm:
+        said = (f"The {asked_mm:g} mm brim asked for would run {into}. No brim fits in that gap, so this slice "
+                "has none: the part is held by its own footprint alone.")
+        drawn, joins = 0.0, False
+    elif again is not None and not again.joined:
+        said = (f"The {asked_mm:g} mm brim asked for would run {into}, so it is drawn {kept_mm:g} mm wide, which "
+                "keeps it out of that gap.")
+        drawn, joins = kept_mm, False
+    elif again is not None:
+        said = (f"The {asked_mm:g} mm brim asked for would run {into}. It is drawn {kept_mm:g} mm wide, and the "
+                "sliced file still shows brim in that gap, so look at the first layer in the slicer before printing.")
+        drawn, joins = kept_mm, True
+    else:
+        said = (f"The {asked_mm:g} mm brim asked for would run {into}, so it is drawn {kept_mm:g} mm wide. "
+                "Whether that keeps it out of the gap could not be read from the sliced file, so look at the "
+                "first layer in the slicer before printing.")
+        drawn, joins = kept_mm, None
+    result.brim = {"asked_mm": asked_mm, "drawn_mm": drawn, "joins_pieces": joins, "said": said}
+    result.message = f"{result.message} {said}".strip()
 
 
 def _say_brim_left_out(result: SliceResult, asked_mm: float, slicer: SlicerInfo, profile: str | None) -> None:
