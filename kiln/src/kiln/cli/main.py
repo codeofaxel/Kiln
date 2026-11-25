@@ -845,6 +845,7 @@ def cli_gate(
     *,
     printer_name: str | None,
     json_mode: bool,
+    material: str | None = None,
 ) -> dict[str, Any] | None:
     """The CLI's door to the one preview gate — the same verdict the MCP
     doors get, worded for a terminal, exiting on a no.
@@ -882,7 +883,7 @@ def cli_gate(
 
         if confirm_print_at_terminal(
             tool=tool, file_path=file_path, printer_name=printer_name, json_mode=json_mode,
-            preview_token=preview_token,
+            preview_token=preview_token, material=material,
         ):
             return None
     message = message.replace(
@@ -5343,7 +5344,7 @@ def slice(
         # runs; the clearance covers the slice made from it by lineage.
         window = cli_gate(
             "kiln slice --print-after", input_file, preview_token,
-            printer_name=ctx.obj.get("printer"), json_mode=json_mode,
+            printer_name=ctx.obj.get("printer"), json_mode=json_mode, material=material,
         )
     else:
         window = None
@@ -11391,7 +11392,7 @@ def generate_and_print_cmd(
             _cli_start_refusal(adapter, json_mode, file_name=remote, local_path=slice_result.output_path)
             window = cli_gate(
                 "kiln generate-and-print --auto-print", result.local_path, None,
-                printer_name=ctx.obj.get("printer"), json_mode=json_mode,
+                printer_name=ctx.obj.get("printer"), json_mode=json_mode, material=material,
             )
             # The yes was about the model; the printer is handed the slice
             # made from it.  Re-aim the clearance at that file, keeping who

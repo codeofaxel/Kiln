@@ -1040,7 +1040,9 @@ def what_the_print_states(
     return states
 
 
-def what_the_print_is(file_name: str, local_path: str | None) -> dict[str, str]:
+def what_the_print_is(
+    file_name: str, local_path: str | None, *, printer_id: str = "", material: str = "",
+) -> dict[str, str]:
     """The rows a person's approval carries about the print itself, the same
     at every door that asks, in the order of :data:`PRINT_ROW_LABELS`:
     ``print_anyway`` for a slice the owner said to print anyway,
@@ -1049,9 +1051,12 @@ def what_the_print_is(file_name: str, local_path: str | None) -> dict[str, str]:
     ``check`` for a part the printability verdict asks a check of, in the
     verdict's own words; each
     said from its checked facts (:func:`print_rows_of` of
-    :func:`what_the_print_states`).  Only the rows that apply.  Never
+    :func:`what_the_print_states`), the part judged for *printer_id* and
+    *material* when the door knows them.  Only the rows that apply.  Never
     raises."""
-    return print_rows_of(what_the_print_states(file_name, local_path))
+    return print_rows_of(
+        what_the_print_states(file_name, local_path, printer_id=printer_id, material=material)
+    )
 
 
 def describe_print_request(

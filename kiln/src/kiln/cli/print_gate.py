@@ -91,6 +91,7 @@ def confirm_print_at_terminal(
     printer_name: str | None = None,
     json_mode: bool = False,
     preview_token: str | None = None,
+    material: str | None = None,
 ) -> bool:
     """Ask the person at this terminal.  ``True`` on a yes (clearance granted),
     ``False`` when nobody is here to ask.  Exits the command on a no.
@@ -113,8 +114,10 @@ def confirm_print_at_terminal(
     where = f" on {printer_name}" if printer_name else ""
     # What the print itself is, as the approval dialog says it.
     from kiln.print_consent import row_label, what_the_print_is
+    from kiln.server import _approval_judged_for
 
-    for row, said in what_the_print_is(name, file_path).items():
+    judged = _approval_judged_for({"material": material or ""}, printer_name)
+    for row, said in what_the_print_is(name, file_path, **judged).items():
         click.echo(f"{row_label(row)}: {said}")
     images: list[str] = []
     viewer_url: str | None = None

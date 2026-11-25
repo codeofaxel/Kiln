@@ -497,3 +497,24 @@ def test_a_standing_window_asks_the_person_at_the_terminal_to_print_anyway(cli_e
     assert result.exit_code != 0
     assert PRINT_ANYWAY_NEEDS_A_YES_CODE in result.output
     assert printer.started == ["cf.gcode"]
+
+
+def test_the_terminal_approval_judges_the_part_for_the_plastic_named(cli_env, audits, monkeypatch, tmp_path):
+    """The part check a person reads at the terminal is judged for the
+    plastic the command names, as the app's approval judges it."""
+    runner, printer = cli_env
+    mesh, _ = _mesh_with_png_on_record(tmp_path, monkeypatch)
+    monkeypatch.setattr(print_gate, "_person_is_present", lambda: True)
+    asked: list[dict] = []
+
+    def _check(path, *, printer_id="", material=""):
+        asked.append({"printer_id": printer_id, "material": material})
+        return None
+
+    monkeypatch.setattr("kiln.plugins.validation_pipeline_tools.check_before_printing", _check)
+    monkeypatch.setattr(print_gate.click, "confirm", lambda *a, **k: False)
+    with pytest.raises(SystemExit):
+        print_gate.confirm_print_at_terminal(
+            tool="kiln slice --print-after", file_path=str(mesh), material="PETG",
+        )
+    assert asked and asked[-1]["material"] == "PETG"
