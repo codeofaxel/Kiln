@@ -277,6 +277,8 @@ class SkillManifest:
                 "cloud_push_branch(design_id, branch_id) — push when the person has an account; cloud_clone_design(design_id) brings it to another computer",
                 "list_design_versions(design_id) then rollback_design_version(design_id, to_version_id) — offer to go back to a version that worked; the old one becomes current again as a new version",
                 "Saving versions, comparing and rolling back are free on the person's computer with no account; branching, merging, undo and push need a Kiln account. A free account keeps a few designs, each with its full history and branches; Kiln Pro keeps every design, and adds releases. The count is on the pricing page and the push's own reply says when the account is full — said once, when it applies: https://kiln3d.com/pricing",
+                "set_design_public(design_id, public=true): a design is private until the person chooses to make it public, and a public one gets its own page on kiln3d.com that anyone can open; it first shows what strangers will see, then the person gets an alert on their phone or computer and says yes themselves, on the design's page or with the code Kiln shows on their computer's screen; you cannot say yes for them; making it private again, or showing fewer versions, happens at once",
+                "search_public_designs(query): find a design someone else made public, to print or remix; the same search as kiln3d.com/search, free on every plan with a Kiln sign-in",
             ],
             # No printer is not a dead end; the fact lives in
             # kiln.tiers_and_terms so every surface says it one way.
