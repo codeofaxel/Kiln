@@ -139,9 +139,10 @@ class TestTheGapIsSaidAsItIs:
             ("blocks", [_box((0, 0, 0), (20, 20, 10)), _box((20.03, 0, 0), (40, 20, 10))]),
         ):
             said = _said(_write(tmp_path / f"{name}.stl", meshes))
-            assert "It prints as 2 separate parts on the plate, not one" in said, said
-            assert "They sit closer together than a printer keeps apart (0.03 mm at the nearest), so expect them " \
-                   "to print stuck together." in said, said
+            # Counted as they print: one part, the count every reply says.
+            assert "It prints as one solid, though it is drawn as 2 pieces: two of them sit 0.03 mm apart, " \
+                   "closer than a printer keeps apart, so they print stuck together." in said, said
+            assert "separate parts" not in said, said
             assert "comes off the plate on its own" not in said, said
             assert "print in place together" not in said, said
 

@@ -653,10 +653,13 @@ class PlacementAnalysis:
 class PiecesAnalysis:
     """How the part's pieces print: as one solid, or as separate parts.
 
-    ``piece_count`` and ``solid_count`` are :mod:`kiln.mesh_bodies`' reading
-    (pieces that share a surface or sink into one another print as one
-    solid).  Each solid past the first is a separate part, and ``parts_mm``
-    gives every part's size (width, depth, height), largest first.  The
+    ``piece_count`` is :mod:`kiln.mesh_bodies`' reading of the pieces, and
+    ``solid_count`` how many separate parts they print as
+    (:func:`kiln.fusion_check.printed_parts`): pieces that share a surface
+    or sink into one another print as one, and so do parts standing closer
+    than a printer keeps apart.  Each part past the first is a separate
+    part, and ``parts_mm`` gives every part's size (width, depth, height),
+    largest first.  The
     pieces that start above the bed with nothing under them and nothing
     holding them are ``floating_bodies``, and pieces held inside the part
     without touching it are ``captive_bodies``, as :mod:`kiln.fusion_check`
@@ -689,11 +692,16 @@ class PiecesAnalysis:
     #: The gap between the closest pair ``may_fuse`` names, for the check's
     #: facts (:func:`check_reasons`).  Bookkeeping; never served.
     may_fuse_mm: float = field(default=0.0, repr=False)
+    #: The separate part each piece of the reading prints as, one entry per
+    #: piece (:func:`kiln.fusion_check.printed_parts`).  Bookkeeping for the
+    #: brim decision; never served.
+    part_of_piece: list[int] = field(default_factory=list, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("stand_apart")
         d.pop("may_fuse_mm")
+        d.pop("part_of_piece")
         return d
 
 
@@ -9711,7 +9719,10 @@ def _parts_stand_apart(parsed: list[tuple[tuple[float, ...], ...]], reading: Any
     of them when the caller holds it) make two or more solids, and
     :func:`kiln.fusion_check.judge_reading` measures a clearance between at
     least two of them.  ``False`` when the pieces cannot be read: a file
-    whose parts are not known to stand apart is sliced as any other.
+    whose parts are not known to stand apart is sliced as any other.  Parts
+    are counted as they print (:func:`kiln.fusion_check.printed_parts`), as
+    the printability report counts them: a clearance inside one printed
+    part is not two parts standing apart.
     """
     try:
         if reading is None:
@@ -9723,13 +9734,15 @@ def _parts_stand_apart(parsed: list[tuple[tuple[float, ...], ...]], reading: Any
             reading = read_triangles(parsed)
         if reading.piece_count < 2 or len(set(reading.solid_of or range(reading.piece_count))) < 2:
             return False
-        from kiln.fusion_check import judge_reading
+        from kiln.fusion_check import judge_reading, printed_parts
 
         fusion = judge_reading(parsed, reading, clearances=True)
+        clearances = fusion.get("clearances") or {}
+        part = printed_parts(reading, clearances)
+        return any(part[a - 1] != part[b - 1] for a, b in (p["bodies"] for p in clearances.get("pairs") or []))
     except Exception:  # noqa: BLE001 -- unread pieces change nothing about the slice
         logger.debug("pieces not read for the support decision", exc_info=True)
         return False
-    return bool((fusion.get("clearances") or {}).get("pairs"))
 
 
 def _mm_said(value: float) -> str:
@@ -9920,7 +9933,10 @@ def _judge_pieces(
     with no suggestion that they were meant to be one solid.  Pieces the
     reading prints as one solid that do not touch, a hair apart, are said to
     print stuck together, and no clearance beside them is called fine
-    (:func:`kiln.fusion_check.joined_apart`).  Every pair that may print
+    (:func:`kiln.fusion_check.joined_apart`).  Parts are counted as they
+    print (:func:`kiln.fusion_check.printed_parts`): parts standing closer
+    than a printer keeps apart are one part, said as pieces drawn apart that
+    print stuck together, never as two parts.  Every pair that may print
     stuck together is counted in ``may_fuse``, with where the closest pair
     is.  ``None`` when the mesh has no pieces to read.
     """
@@ -9944,7 +9960,9 @@ def _judge_pieces(
     )
     corner = np.min(np.vstack(list(lows.values())), axis=0)
 
-    from kiln.fusion_check import joined_apart, judge_reading
+    from kiln.fusion_check import joined_apart, judge_reading, printed_parts
+
+    block.part_of_piece = printed_parts(reading)
 
     try:
         apart = joined_apart(triangles, reading)
@@ -9982,20 +10000,55 @@ def _judge_pieces(
         block.floating = str(floating["message"])
         return block
     clearances = fusion.get("clearances") or {}
-    block.stand_apart = bool(clearances.get("pairs"))
     unheld = set(fusion.get("unheld_bodies") or [])
     in_air = {solid_of[body - 1] for body in unheld}
-    standing = [s for s in largest_first if s not in in_air]
+    # The parts it prints as, the one count every reply says: solids that
+    # stand closer than a printer keeps apart print as one part, said as
+    # pieces drawn apart that print stuck together.
+    block.part_of_piece = printed_parts(reading, clearances)
+    part_of = {solid: block.part_of_piece[piece] for piece, solid in enumerate(solid_of)}
+    members: dict[int, list[int]] = {}
+    for solid in largest_first:
+        members.setdefault(part_of[solid], []).append(solid)
+    part_size = {
+        part: [
+            round(float(v), 2)
+            for v in np.max([highs[s] for s in solids], axis=0) - np.min([lows[s] for s in solids], axis=0)
+        ]
+        for part, solids in members.items()
+    }
+    parts_first = sorted(part_size, key=lambda p: (-float(np.prod(part_size[p])), part_size[p]))
+    block.solid_count = len(part_size)
+    block.parts_mm = [part_size[p] for p in parts_first[:_PARTS_LISTED]]
+    touching = list(clearances.get("touching") or [])
+    joined_gaps = fused_gaps + [float(p["gap_mm"]) for p in touching]
+    part_of_body = [part_of[solid] for solid in solid_of]
+    between = [
+        p for p in clearances.get("pairs") or []
+        if part_of_body[p["bodies"][0] - 1] != part_of_body[p["bodies"][1] - 1]
+    ]
+    block.stand_apart = bool(between)
+    standing = [p for p in parts_first if not any(s in in_air for s in members[p])]
     said: list[str] = []
     if len(standing) >= 2:
-        said.append(_standing_said(standing, size_of, clearances, solid_of, moves_apart, fused_gaps=fused_gaps))
-        stuck += [(float(p["gap_mm"]), list(p["bodies"])) for p in clearances.get("touching") or []]
-        stuck += [
-            (float(p["gap_mm"]), list(p["bodies"]))
-            for p in clearances.get("pairs") or [] if _may_print_stuck(p.get("gap_mm"))
-        ]
+
+        def parts_move_apart(a: int, b: int) -> bool:
+            return any(moves_apart(x, y) for x in members[a] for y in members[b])
+
+        said.append(_standing_said(
+            standing, part_size, {**clearances, "pairs": between, "touching": []}, part_of_body,
+            parts_move_apart, fused_gaps=joined_gaps,
+        ))
+    elif touching:
+        drawn = sum(1 for solid in solid_of if solid not in in_air)
+        said.append(_fused_said(joined_gaps, drawn_as=drawn))
     elif fused:
         said.append(_fused_said(fused_gaps))
+    stuck += [(float(p["gap_mm"]), list(p["bodies"])) for p in touching]
+    stuck += [
+        (float(p["gap_mm"]), list(p["bodies"]))
+        for p in clearances.get("pairs") or [] if _may_print_stuck(p.get("gap_mm"))
+    ]
     # The pieces in the air that do print, by how the fusion check found
     # them: resting on the part, a clearance away from it, held inside it.
     resting: set[int] = set()
