@@ -977,6 +977,9 @@ class ScadBuild:
     corrected_source: str | None = None
     #: One plain line per corrected setting.
     settings_read: list[str] = field(default_factory=list)
+    #: The sentence said when the file is OpenSCAD's fast engine's although
+    #: that engine left it open; None otherwise.
+    fast_engine_kept: str | None = None
 
 
 def compile_scad_code(
@@ -1018,7 +1021,9 @@ def compile_scad_source(
     :param as_written: Skip Kiln's curve rule and compile the source
         exactly as given -- for a design's kept source, whose rebuild must
         make the part it made (see :func:`kiln.curve_resolution.apply_rule`).
-    :returns: The STL's absolute path, and any correction.
+    :returns: The STL's absolute path, any correction, and the sentence
+        said when the file is OpenSCAD's fast engine's although that
+        engine left it open.
     :raises ValueError: If compilation fails.
     """
     import os
@@ -1045,7 +1050,8 @@ def compile_scad_source(
         shutil.move(result.local_path, output_path)
         path = output_path
     return ScadBuild(path, getattr(job, "corrected_source", None),
-                     list(getattr(job, "settings_read", None) or []))
+                     list(getattr(job, "settings_read", None) or []),
+                     getattr(job, "fast_engine_kept", None))
 
 
 def tweak_and_compile(
@@ -1066,7 +1072,9 @@ def tweak_and_compile(
     :param new_value: New value.
     :param material: Optional material for limit validation.
     :param output_path: Optional output STL path.
-    :returns: Dict with updated_code, stl_path, warnings.
+    :returns: Dict with updated_code, stl_path, warnings, and
+        ``fast_engine_kept`` when the file is OpenSCAD's fast engine's
+        although that engine left it open.
     """
     # 1. Update the parameter
     updated_code = update_openscad_parameter(scad_code, parameter_name, new_value)
@@ -1078,6 +1086,8 @@ def tweak_and_compile(
     build = compile_scad_source(updated_code, output_path=output_path)
     stl_path = build.stl_path
     read = {"settings_read": build.settings_read} if build.settings_read else {}
+    if build.fast_engine_kept:
+        read["fast_engine_kept"] = build.fast_engine_kept
 
     return {
         **read,

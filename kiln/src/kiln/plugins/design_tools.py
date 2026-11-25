@@ -1755,6 +1755,12 @@ class _DesignToolsPlugin:
                     response["settings_read"] = build.settings_read
                     response["corrected_scad_code"] = build.corrected_source
                     code = build.corrected_source
+                if build.fast_engine_kept:
+                    # The file is the fast engine's although it left the part
+                    # open: said with the part, with what to do.
+                    response["fast_engine_kept"] = build.fast_engine_kept
+                    response.setdefault("warnings", []).append(build.fast_engine_kept)
+                    response["message"] = f"{response['message']}. {build.fast_engine_kept}"
                 from kiln.curve_resolution import AGENT_ADVICE, own_resolution
 
                 _own = own_resolution(code)
@@ -1894,6 +1900,8 @@ class _DesignToolsPlugin:
                         f"Updated {parameter_name}={new_value}, compiled to STL{suffix}."
                     ),
                 }
+                if result.get("fast_engine_kept"):
+                    response["message"] = f"{response['message']} {result['fast_engine_kept']}"
                 # Same door as compile_scad: a tweak can slide a part to
                 # exact tangency or lift a feature clear of its host.  Judged
                 # BEFORE the goal join, so a refused tweak is not recorded as

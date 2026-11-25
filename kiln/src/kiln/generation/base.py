@@ -87,10 +87,14 @@ class GenerationJob:
     settings_read: list[str] = field(default_factory=list)
     #: The code the part was built from, when Kiln corrected it; else None.
     corrected_source: str | None = None
-    #: Sentences the source asked to have said with the part, one per
-    #: ``echo("KILN NOTE: ...")`` (a template that builds what was asked
-    #: but has something to say about it).
+    #: Sentences said with the part: one per ``echo("KILN NOTE: ...")`` the
+    #: source wrote (a template that builds what was asked but has something
+    #: to say about it), and :attr:`fast_engine_kept` when it is set.
     notes: list[str] = field(default_factory=list)
+    #: The sentence said when the file is OpenSCAD's fast engine's although
+    #: that engine left it open (:func:`kiln.openscad_runner.fast_engine_kept_sentence`);
+    #: None otherwise.
+    fast_engine_kept: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -100,6 +104,8 @@ class GenerationJob:
             data.pop("corrected_source")
         if not self.notes:
             data.pop("notes")
+        if not self.fast_engine_kept:
+            data.pop("fast_engine_kept")
         return data
 
 

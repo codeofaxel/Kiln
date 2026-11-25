@@ -525,6 +525,10 @@ class OpenSCADProvider(GenerationProvider):
                 job.settings_read = list(resolution.lines)
                 job.corrected_source = resolution.apply(given) or resolution.source
             job.notes = scad_notes(result.stderr)
+            kept = getattr(result, "fast_engine_kept", None)
+            if kept:
+                job.fast_engine_kept = kept
+                job.notes.append(kept)
             record = JobRecord.from_job(job)
             records.keep_result(record, out_path)
             records.put(record)

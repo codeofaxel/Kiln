@@ -38,6 +38,10 @@ same command runs once more with ``--backend=cgal``, within
 :data:`EXACT_ENGINE_TIMEOUT_S`, and its file is kept only if it is closed;
 otherwise the first file stays.  An
 OpenSCAD too old to know the option refuses it, and the first file stays.
+When the first file stays although it is open, the returned object says so:
+``fast_engine_kept`` holds the sentence a person reads, what the file is, why
+the exact engine's file did not replace it, and what to do
+(:func:`fast_engine_kept_sentence`).
 Before that check, at any size, a binary STL from such a compile is written
 again without its triangles collapsed to a line or a point
 (:func:`kiln.generation.validation.drop_collapsed_triangles`), the rest byte
@@ -76,6 +80,7 @@ __all__ = [
     "OPENSCAD_CRASH_RETURNCODES",
     "LaunchRefused",
     "bundled_library_path",
+    "fast_engine_kept_sentence",
     "host_policy",
     "ignored_settings",
     "left_out_parts",
@@ -671,7 +676,9 @@ def run_openscad(
         code 1, the reason first on stderr, ``left_out_parts`` and
         ``ignored_settings`` set, and *output_path* deleted.  A launch the
         host policy refused (:func:`set_host_policy`) never starts, and
-        comes back the same way with ``refused`` set.
+        comes back the same way with ``refused`` set.  A compile whose file
+        is the fast engine's although that engine left it open comes back
+        with ``fast_engine_kept`` set to the sentence a person reads.
     """
     policy = _host_policy
     if policy is None:
@@ -887,16 +894,82 @@ def _closed_by_the_exact_engine(
                        "geometry the fast engine made); keeping the fast engine's file.",
                        os.path.basename(path))
         os.replace(kept, path)
-        return fast
+        return _kept_fast(fast, path, "changed", budget)
     if closed:
         os.remove(kept)
         logger.info("OpenSCAD's fast engine left %s open; the exact engine closed it.",
                     os.path.basename(path))
         return exact
     os.replace(kept, path)
-    logger.warning("OpenSCAD's fast engine left %s open and the exact engine did not close "
-                   "it within %.0fs; keeping the fast engine's file.", os.path.basename(path), budget)
+    if exact is None:
+        logger.warning("OpenSCAD's fast engine left %s open and the exact engine did not close "
+                       "it within %.0fs; keeping the fast engine's file.", os.path.basename(path), budget)
+        return _kept_fast(fast, path, "timed_out", budget)
+    why = "failed" if exact.returncode != 0 else "still_open"
+    logger.warning("OpenSCAD's fast engine left %s open and the exact engine %s; keeping the "
+                   "fast engine's file.", os.path.basename(path),
+                   "could not build it" if why == "failed" else "left it open too")
+    return _kept_fast(fast, path, why, budget)
+
+
+#: Why a compile's file is the fast engine's although that engine left it
+#: open, as the clause a person reads after what the fast engine left.
+_EXACT_ENGINE_KEPT_OUT = {
+    "timed_out": "OpenSCAD's exact engine did not finish within {seconds} seconds",
+    "failed": "OpenSCAD's exact engine could not build this model",
+    "still_open": "OpenSCAD's exact engine did not close it either",
+    "changed": ("OpenSCAD's exact engine closed it but lost or added part of the model, "
+                "so its file was not used"),
+}
+
+
+def _kept_fast(
+    fast: subprocess.CompletedProcess, path: str, why: str, budget: float,
+) -> subprocess.CompletedProcess:
+    """*fast* with ``fast_engine_kept`` set to what a person reads about the
+    file at *path* (:func:`fast_engine_kept_sentence`)."""
+    fast.fast_engine_kept = fast_engine_kept_sentence(path, why, budget)  # type: ignore[attr-defined]
     return fast
+
+
+def _only_touching_pieces(path: str) -> bool | None:
+    """True when the only flaw of the STL at *path* is separate closed pieces
+    that touch; False when its surface has an open or pinched edge; None
+    when it cannot be read.  Read by :mod:`kiln.mesh_bodies`, the reading
+    every door that counts pieces asks."""
+    try:
+        from kiln.generation.validation import read_stl_triangles
+        from kiln.mesh_bodies import read_triangles
+
+        reading = read_triangles(read_stl_triangles(Path(path)))
+    except Exception:  # noqa: BLE001 -- an unread file is said in general words
+        logger.debug("piece reading could not read %s", path, exc_info=True)
+        return None
+    return bool(reading.sealed and reading.touching_edges)
+
+
+def fast_engine_kept_sentence(path: str, why: str, budget: float) -> str:
+    """The sentence a person reads when the file at *path* is OpenSCAD's fast
+    engine's although that engine left it open: what the file is, why the
+    exact engine's file did not take its place (*why*, a key of
+    :data:`_EXACT_ENGINE_KEPT_OUT`; *budget* the seconds it was given), and
+    what to do.  ``run_openscad`` sets it on its result as ``fast_engine_kept``.
+    """
+    touching = _only_touching_pieces(path)
+    if touching:
+        lead = "Made with OpenSCAD's fast engine, which keeps pieces of a model that only touch as separate pieces"
+    else:
+        lead = "Made with OpenSCAD's fast engine, which left this model's surface not fully closed"
+    said = [f"{lead}: {_EXACT_ENGINE_KEPT_OUT[why].format(seconds=f'{budget:.0f}')}."]
+    if touching:
+        said.append("A slicer prints pieces that touch as one solid, but a count of pieces can read them apart.")
+    if why == "timed_out":
+        said.append("For the exact engine's file, make it again when the computer is less busy, "
+                    "or set a lower `$fn` so curves have fewer sides.")
+    if touching:
+        said.append("Overlapping pieces that should be one by a little, and running each cut a little "
+                    "past the face it cuts, lets the fast engine join them itself.")
+    return " ".join(said)
 
 
 def _run_with_retry(

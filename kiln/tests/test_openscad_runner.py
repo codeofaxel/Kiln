@@ -994,3 +994,181 @@ class TestASharedBedPlaneCompilesClosed:
         assert len(mesh.faces) > 100_000
         assert mesh.is_watertight
         assert len(mesh.split(only_watertight=False)) == 1
+
+
+# ---------------------------------------------------------------------------
+# A fast file that stays although it is open is said, with what to do
+# ---------------------------------------------------------------------------
+
+def _touching_boxes() -> bytes:
+    """Two closed boxes that share a whole face, written as two pieces: the
+    shape OpenSCAD's fast engine writes for blocks that meet face to face."""
+    import numpy as np
+
+    return _binary_stl(np.vstack([_box().triangles, _box(at=(20.0, 0.0, 0.0)).triangles]))
+
+
+class _ExactEngineFails:
+    """The fast engine writes *fast*; the exact engine exits 1 and writes nothing."""
+
+    def __init__(self, path: Path, fast: bytes | str) -> None:
+        self.path, self.fast, self.argvs = path, fast, []
+
+    def __call__(self, argv, **kwargs):
+        self.argvs.append(list(argv))
+        if len(self.argvs) == 1:
+            if isinstance(self.fast, bytes):
+                self.path.write_bytes(self.fast)
+            else:
+                self.path.write_text(self.fast)
+            return subprocess.CompletedProcess(list(argv), 0, "", "")
+        return subprocess.CompletedProcess(list(argv), 1, "", "ERROR: CGAL error in CGAL_Nef_polyhedron3()\n")
+
+
+class TestAFastFileThatStaysIsSaid:
+    """The fast engine's file staying although it is open is the same source
+    coming out another way on a busier machine (a 17-link chain: 83 pieces
+    with the fast engine's file, 17 with the exact one's).  The run says so on
+    its result, ``fast_engine_kept``: what the file is, why the exact engine's
+    file did not replace it, and what to do."""
+
+    @staticmethod
+    def _run(monkeypatch, tmp_path, outputs, **kwargs):
+        out = tmp_path / "out.stl"
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", _EngineFake(out, outputs))
+        return run_openscad(_fast(out), output_path=str(out), **kwargs), out
+
+    def test_pieces_kept_apart_past_the_exact_engines_time_are_said(self, monkeypatch, tmp_path):
+        pytest.importorskip("trimesh")
+        fast = _touching_boxes()
+        result, out = self._run(monkeypatch, tmp_path, [fast, subprocess.TimeoutExpired("openscad", 60)],
+                                timeout=600)
+        said = result.fast_engine_kept
+        assert said.startswith("Made with OpenSCAD's fast engine, which keeps pieces of a model that only "
+                               "touch as separate pieces: OpenSCAD's exact engine did not finish within 60 seconds.")
+        assert "A slicer prints pieces that touch as one solid, but a count of pieces can read them apart." in said
+        assert "make it again when the computer is less busy, or set a lower `$fn`" in said
+        assert "lets the fast engine join them itself" in said
+        assert "—" not in said
+        assert out.read_bytes() == fast, "the fast file is still the one kept"
+
+    def test_an_open_surface_kept_past_the_exact_engines_time_is_said(self, monkeypatch, tmp_path):
+        result, _out = self._run(monkeypatch, tmp_path, [_OPEN_STL, subprocess.TimeoutExpired("openscad", 20)],
+                                 timeout=20)
+        said = result.fast_engine_kept
+        assert said.startswith("Made with OpenSCAD's fast engine, which left this model's surface not fully "
+                               "closed: OpenSCAD's exact engine did not finish within 20 seconds.")
+        assert "`$fn`" in said
+        assert "slicer" not in said and "overlap" not in said.lower()
+
+    def test_an_exact_engine_that_cannot_build_it_is_said(self, monkeypatch, tmp_path):
+        pytest.importorskip("trimesh")
+        out = tmp_path / "out.stl"
+        fake = _ExactEngineFails(out, _touching_boxes())
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
+        result = run_openscad(_fast(out), output_path=str(out))
+        assert result.returncode == 0 and len(fake.argvs) == 2
+        said = result.fast_engine_kept
+        assert ": OpenSCAD's exact engine could not build this model." in said
+        assert "less busy" not in said and "`$fn`" not in said, "trying again does not help a failed build"
+        assert "lets the fast engine join them itself" in said
+
+    def test_an_exact_engine_that_leaves_it_open_too_is_said(self, monkeypatch, tmp_path):
+        result, _out = self._run(monkeypatch, tmp_path, [_OPEN_STL.replace("solid t", "solid fast", 1), _OPEN_STL])
+        assert ": OpenSCAD's exact engine did not close it either." in result.fast_engine_kept
+
+    def test_an_exact_engine_that_changes_the_part_is_said(self, monkeypatch, tmp_path):
+        plain, _carved, opened = TestTheExactEngineMustKeepThePart._parts()
+        stl = TestTheExactEngineMustKeepThePart._stl
+        result, out = self._run(monkeypatch, tmp_path, [stl(opened), stl(plain)])
+        assert out.read_text() == stl(opened)
+        assert "closed it but lost or added part of the model, so its file was not used" in result.fast_engine_kept
+
+    def test_nothing_is_said_when_the_file_is_closed(self, monkeypatch, tmp_path):
+        closed, _out = self._run(monkeypatch, tmp_path, [_CLOSED_STL])
+        assert getattr(closed, "fast_engine_kept", None) is None
+        rebuilt, _out = self._run(monkeypatch, tmp_path, [_OPEN_STL, _CLOSED_STL])
+        assert getattr(rebuilt, "fast_engine_kept", None) is None
+
+
+class _Engines:
+    """OpenSCAD stood in at the launch seam: ``--version`` answers, the fast
+    compile writes *fast*, the exact engine runs out of time."""
+
+    def __init__(self, fast: bytes) -> None:
+        self.fast = fast
+
+    def __call__(self, argv, **kwargs):
+        argv = list(argv)
+        if "--version" in argv:
+            return subprocess.CompletedProcess(argv, 0, "", "OpenSCAD version 2026.04.26\n")
+        if "--backend=cgal" in argv:
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout") or 60)
+        Path(argv[argv.index("-o") + 1]).write_bytes(self.fast)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+@pytest.fixture
+def _openscad_found():
+    from kiln.generation.openscad import OpenSCADProvider
+
+    try:
+        OpenSCADProvider()._require_binary()
+    except Exception:  # noqa: BLE001 -- no binary, no make door to walk
+        pytest.skip("OpenSCAD required: the make door looks the binary up before it compiles")
+
+
+class TestTheMakeDoorsSayIt:
+    """The sentence reaches what a person reads at the make doors: the job,
+    the compile helper, and the registered ``compile_scad`` tool."""
+
+    def test_the_job_and_the_build_carry_it(self, monkeypatch, tmp_path, _openscad_found):
+        pytest.importorskip("trimesh")
+        from kiln.generation.openscad import OpenSCADProvider
+        from kiln.parametric import compile_scad_source
+
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", _Engines(_touching_boxes()))
+        job = OpenSCADProvider().generate("cube(1);", output_dir=str(tmp_path / "job"))
+        assert job.status.value == "succeeded"
+        assert job.fast_engine_kept.startswith("Made with OpenSCAD's fast engine")
+        assert job.notes[-1] == job.fast_engine_kept and job.to_dict()["fast_engine_kept"] == job.fast_engine_kept
+        build = compile_scad_source("cube(1);", output_path=str(tmp_path / "part.stl"))
+        assert build.fast_engine_kept == job.fast_engine_kept
+
+    def test_the_compile_scad_tool_says_it(self, monkeypatch, tmp_path, _openscad_found):
+        pytest.importorskip("trimesh")
+        import asyncio
+
+        import kiln.server as srv
+
+        for name in [n for n in sys.modules if n == "kiln_pro" or n.startswith("kiln_pro.")]:
+            monkeypatch.setitem(sys.modules, name, None)
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", _Engines(_touching_boxes()))
+        out = asyncio.run(srv.mcp._tool_manager.call_tool(
+            "compile_scad", {"scad_code": "cube(1);"}, context=None, convert_result=False,
+        ))
+        out = next(x for x in out if isinstance(x, dict)) if isinstance(out, list) else out
+        assert out.get("success") is True, out
+        said = out["fast_engine_kept"]
+        assert said.startswith("Made with OpenSCAD's fast engine, which keeps pieces of a model that only touch")
+        assert said in out["message"] and said in out["warnings"]
+
+    def test_a_tweak_says_it(self, monkeypatch, tmp_path, _openscad_found):
+        pytest.importorskip("trimesh")
+        from kiln.parametric import tweak_and_compile
+
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", _Engines(_touching_boxes()))
+        result = tweak_and_compile("w = 10;\ncube(w);\n", "w", 12, output_path=str(tmp_path / "part.stl"))
+        assert result["fast_engine_kept"].startswith("Made with OpenSCAD's fast engine")
+
+    def test_a_closed_make_says_nothing(self, monkeypatch, tmp_path, _openscad_found):
+        pytest.importorskip("trimesh")
+        from kiln.parametric import compile_scad_source, tweak_and_compile
+
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run",
+                            _Engines(_binary_stl(_box().triangles)))
+        build = compile_scad_source("cube(1);", output_path=str(tmp_path / "part.stl"))
+        assert build.fast_engine_kept is None
+        tweaked = tweak_and_compile("w = 10;\ncube(w);\n", "w", 12, output_path=str(tmp_path / "t.stl"))
+        assert "fast_engine_kept" not in tweaked
