@@ -657,7 +657,12 @@ class PiecesAnalysis:
     is ``""`` when there is nothing to say.  ``open_surface`` is what is said
     about a surface that does not close (open edges in the same reading): a
     reason to check the part before printing (:func:`checks_due`), ``""``
-    for a mesh whose every piece is closed.
+    for a mesh whose every piece is closed.  ``may_fuse`` is what is said
+    about pieces drawn apart that may print stuck together (a gap under the
+    one moving parts are given, :func:`_may_print_stuck`, or pieces read as
+    one solid that do not touch): how many pairs, and how close and where
+    the closest pair is.  It is a reason to check the part before printing
+    (:func:`checks_due`), and ``""`` when no pair may.
     """
 
     piece_count: int
@@ -668,13 +673,18 @@ class PiecesAnalysis:
     floating: str = ""
     note: str = ""
     open_surface: str = ""
+    may_fuse: str = ""
     #: Whether two or more of the separate parts stand a clearance apart on
     #: the plate.  Bookkeeping for the support advice; never served.
     stand_apart: bool = field(default=False, repr=False)
+    #: The gap between the closest pair ``may_fuse`` names, for the check's
+    #: facts (:func:`check_reasons`).  Bookkeeping; never served.
+    may_fuse_mm: float = field(default=0.0, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("stand_apart")
+        d.pop("may_fuse_mm")
         return d
 
 
@@ -3748,6 +3758,25 @@ def _thin_wall_features(
     standoffs and bosses for later rounds to find.
     """
     features: list[dict[str, float]] = []
+    for idx in _feature_groups(points, thickness, link_mm=link_mm):
+        best = idx[np.argmin(thickness[idx])]
+        features.append({
+            "x": round(float(points[best, 0]), 2),
+            "y": round(float(points[best, 1]), 2),
+            "z": round(float(points[best, 2]), 2),
+            "thickness_mm": round(float(thickness[best]), 3),
+            "samples": int(idx.size),
+        })
+    features.sort(key=lambda f: (f["thickness_mm"], f["x"], f["y"], f["z"]))
+    return features[:_THIN_FEATURE_CAP]
+
+
+def _feature_groups(points: np.ndarray, thickness: np.ndarray, *, link_mm: float) -> list[np.ndarray]:
+    """The thin measurement points of one feature each, as index arrays
+    into *points*: banded by thickness (a band spans
+    :data:`_THIN_FEATURE_BAND_MM` from its thinnest point), then joined
+    within a band when closer than *link_mm* (:func:`_thin_wall_features`)."""
+    found: list[np.ndarray] = []
     order = np.argsort(thickness, kind="stable")
     i = 0
     while i < order.size:
@@ -3768,19 +3797,26 @@ def _thin_wall_features(
         groups: dict[int, list[int]] = {}
         for k in range(band.size):
             groups.setdefault(_union_root(parent, k), []).append(int(band[k]))
-        for members in groups.values():
-            idx = np.asarray(members)
-            best = idx[np.argmin(thickness[idx])]
-            features.append({
-                "x": round(float(points[best, 0]), 2),
-                "y": round(float(points[best, 1]), 2),
-                "z": round(float(points[best, 2]), 2),
-                "thickness_mm": round(float(thickness[best]), 3),
-                "samples": len(members),
-            })
+        found += [np.asarray(members) for members in groups.values()]
         i = j
-    features.sort(key=lambda f: (f["thickness_mm"], f["x"], f["y"], f["z"]))
-    return features[:_THIN_FEATURE_CAP]
+    return found
+
+
+def _walls_win(points: np.ndarray, thickness: np.ndarray, detail: np.ndarray, *, link_mm: float) -> np.ndarray:
+    """*detail* (which thin readings :func:`_surface_detail_mask` reads as
+    detail) with one reading per feature (:func:`_feature_groups`): where a
+    feature's readings are at least as often a wall as detail, every reading
+    of it is a wall.  Where a thin wall meets thicker solid beside it, a
+    reading there looks like a fin standing on that solid, and the wall it
+    belongs to is still a wall."""
+    out = detail.copy()
+    if not detail.any() or detail.all():
+        return out
+    for idx in _feature_groups(points, thickness, link_mm=link_mm):
+        details = int(detail[idx].sum())
+        if details and idx.size - details >= details:
+            out[idx] = False
+    return out
 
 
 def _analyze_thin_walls(
@@ -4030,10 +4066,19 @@ def _measure_thin_walls(
             o, dd, c, targets, window=pin_line, budget=fate_budget, cache=component_cache,
         )
 
+    diagonal = float(np.linalg.norm(
+        tris.reshape(-1, 3).max(axis=0) - tris.reshape(-1, 3).min(axis=0)
+    ))
+    link_mm = min(
+        _THIN_FEATURE_LINK_MAX_MM,
+        max(_THIN_FEATURE_LINK_MIN_MM, _THIN_FEATURE_LINK_FRACTION * diagonal),
+    )
     if where.size:
         is_detail = _surface_detail_mask(
             origins[where], directions[where], exit_dist[where], origin_comps[where], runs, nozzle_diameter,
         )
+        # One feature, one reading: a wall is never also called detail.
+        is_detail = _walls_win(origins[where], exit_dist[where], is_detail, link_mm=link_mm)
         detail_mask[where[is_detail]] = True
         thin_mask &= ~detail_mask
         counted = counted & ~detail_mask
@@ -4106,14 +4151,6 @@ def _measure_thin_walls(
     thin_line = sub_nozzle & (fate == _FATE_PRINTS)
     thin_sheet = sub_nozzle & (fate == _FATE_SHEET)
     line_count, sheet_count = int(thin_line.sum()), int(thin_sheet.sum())
-
-    diagonal = float(np.linalg.norm(
-        tris.reshape(-1, 3).max(axis=0) - tris.reshape(-1, 3).min(axis=0)
-    ))
-    link_mm = min(
-        _THIN_FEATURE_LINK_MAX_MM,
-        max(_THIN_FEATURE_LINK_MIN_MM, _THIN_FEATURE_LINK_FRACTION * diagonal),
-    )
 
     # ``min_wall_thickness_mm`` carries the absolute smallest measured
     # wall thickness on the mesh, regardless of the nozzle threshold —
@@ -9872,8 +9909,12 @@ def _judge_pieces(
     (:func:`_may_print_stuck`).  Where the file's motion note (*motion*, from
     :func:`_motion_on_record`) has two parts a clearance apart moving against
     each other, the gap between them is said as the gap moving parts need,
-    with no suggestion that they were meant to be one solid.  ``None`` when
-    the mesh has no pieces to read.
+    with no suggestion that they were meant to be one solid.  Pieces the
+    reading prints as one solid that do not touch, a hair apart, are said to
+    print stuck together, and no clearance beside them is called fine
+    (:func:`kiln.fusion_check.joined_apart`).  Every pair that may print
+    stuck together is counted in ``may_fuse``, with where the closest pair
+    is.  ``None`` when the mesh has no pieces to read.
     """
     if reading is None or reading.piece_count == 0:
         return None
@@ -9893,16 +9934,34 @@ def _judge_pieces(
         parts_mm=[size_of[s] for s in largest_first[:_PARTS_LISTED]],
         open_surface=_open_surface_said(int(getattr(reading, "open_edges", 0) or 0)),
     )
-    if block.solid_count < 2:
-        return block
+    corner = np.min(np.vstack(list(lows.values())), axis=0)
 
-    from kiln.fusion_check import judge_reading
+    from kiln.fusion_check import joined_apart, judge_reading
+
+    try:
+        apart = joined_apart(triangles, reading)
+    except Exception:  # noqa: BLE001 -- pieces whose gap is unread stay one solid, as read
+        logger.debug("gaps between joined pieces unread", exc_info=True)
+        apart = {}
+    fused = [p for p in apart.get("pairs") or [] if _may_print_stuck(p.get("gap_mm"))]
+    fused_gaps = [float(p["gap_mm"]) for p in fused]
+    # Every pair that may print stuck together, as (gap, bodies from 1).
+    stuck: list[tuple[float, list[int]]] = [(float(p["gap_mm"]), list(p["bodies"])) for p in fused]
+    if block.solid_count < 2:
+        if fused:
+            block.note = _fused_said(fused_gaps, drawn_as=block.piece_count)
+            _say_may_fuse(block, stuck, triangles, reading, corner)
+        return block
 
     try:
         fusion = judge_reading(triangles, reading, clearances=True)
     except Exception:  # noqa: BLE001 -- the parts are still counted; the air goes unjudged
         logger.debug("pieces in the air unjudged", exc_info=True)
-        block.note = f"It prints as {block.solid_count} separate parts, not one."
+        block.note = " ".join(filter(None, (
+            f"It prints as {block.solid_count} separate parts, not one.",
+            _fused_said(fused_gaps) if fused else "",
+        )))
+        _say_may_fuse(block, stuck, triangles, reading, corner)
         return block
     findings = fusion.get("findings") or []
     block.floating_bodies = int(fusion.get("floating_bodies") or 0)
@@ -9911,13 +9970,21 @@ def _judge_pieces(
     if floating is not None:
         block.floating = str(floating["message"])
         return block
-    block.stand_apart = bool((fusion.get("clearances") or {}).get("pairs"))
+    clearances = fusion.get("clearances") or {}
+    block.stand_apart = bool(clearances.get("pairs"))
     unheld = set(fusion.get("unheld_bodies") or [])
     in_air = {solid_of[body - 1] for body in unheld}
     standing = [s for s in largest_first if s not in in_air]
     said: list[str] = []
     if len(standing) >= 2:
-        said.append(_standing_said(standing, size_of, fusion.get("clearances"), solid_of, moves_apart))
+        said.append(_standing_said(standing, size_of, clearances, solid_of, moves_apart, fused_gaps=fused_gaps))
+        stuck += [(float(p["gap_mm"]), list(p["bodies"])) for p in clearances.get("touching") or []]
+        stuck += [
+            (float(p["gap_mm"]), list(p["bodies"]))
+            for p in clearances.get("pairs") or [] if _may_print_stuck(p.get("gap_mm"))
+        ]
+    elif fused:
+        said.append(_fused_said(fused_gaps))
     # The pieces in the air that do print, by how the fusion check found
     # them: resting on the part, a clearance away from it, held inside it.
     resting: set[int] = set()
@@ -9939,6 +10006,8 @@ def _judge_pieces(
             if gap is not None:
                 for body in named:
                     gap_of[body] = min(gap_of.get(body, float(gap)), float(gap))
+                if named and _may_print_stuck(gap):
+                    stuck.append((float(gap), bodies))
     close -= resting
     close_moving -= resting | close
     if resting:
@@ -9954,7 +10023,76 @@ def _judge_pieces(
     if captive is not None:
         said.append(str(captive["message"]))
     block.note = " ".join(said)
+    _say_may_fuse(block, stuck, triangles, reading, corner)
     return block
+
+
+def _fused_said(gaps: list[float], *, drawn_as: int = 0) -> str:
+    """What is said of pieces drawn apart that print as one because their
+    gaps (*gaps*) are closer than a printer keeps apart.  *drawn_as* is the
+    number of pieces drawn when they all print as one solid."""
+    from kiln.fusion_check import embedment_floor_mm
+
+    fix = (
+        "If they are meant to move or come apart, give them a real gap; if they were meant to be one "
+        f"solid, sink them at least {embedment_floor_mm():g} mm into each other."
+    )
+    close = "closer than a printer keeps apart, so"
+    if drawn_as:
+        who = "two of them" if len(gaps) == 1 else f"{len(gaps)} pairs of them"
+        return (
+            f"It prints as one solid, though it is drawn as {drawn_as} pieces: {who} sit "
+            f"{_gaps_said(gaps)} apart, {close} they print stuck together. {fix}"
+        )
+    if len(gaps) == 1:
+        return (
+            f"Two of its pieces drawn apart sit {_gaps_said(gaps)} apart, {close} they print stuck "
+            f"together as one part. {fix}"
+        )
+    return (
+        f"{len(gaps)} pairs of its pieces drawn apart sit {_gaps_said(gaps)} apart, {close} each pair "
+        f"prints stuck together as one part. {fix}"
+    )
+
+
+def _place_said(point: list[float] | None, corner: np.ndarray) -> str:
+    """Where *point* is on the part, from the part's own lowest corner
+    *corner* (its left side, its front and the bottom, as the file is laid
+    out), or ``""`` when it is not known."""
+    if point is None:
+        return ""
+    x, y, z = (max(0.0, float(v) - float(c)) for v, c in zip(point, corner, strict=True))
+    said = [f"{_mm_said(x)} mm from its left side", f"{_mm_said(y)} mm from its front"]
+    if z >= 1.0:
+        said.append(f"{_mm_said(z)} mm up")
+    return "about " + (f"{said[0]}, {said[1]} and {said[2]}" if len(said) == 3 else " and ".join(said))
+
+
+def _say_may_fuse(
+    block: PiecesAnalysis,
+    stuck: list[tuple[float, list[int]]],
+    triangles: Any,
+    reading: Any,
+    corner: np.ndarray,
+) -> None:
+    """Set *block*'s ``may_fuse`` from *stuck*, every pair of pieces (by
+    body, from 1) that may print stuck together with its gap: how many pairs,
+    and how close and where the closest is
+    (:func:`kiln.fusion_check.where_pieces_meet`)."""
+    if not stuck:
+        return
+    from kiln.fusion_check import where_pieces_meet
+
+    gap, bodies = min(stuck, key=lambda pair: (pair[0], pair[1]))
+    place = _place_said(where_pieces_meet(triangles, reading, bodies[0], bodies[1]), corner)
+    how = f"sit {_gaps_said([gap])} apart" if gap > 0 else "touch"
+    if len(stuck) == 1:
+        said = f"Two of its pieces may print stuck together: they {how}"
+    else:
+        sits = f"sits {_gaps_said([gap])} apart" if gap > 0 else "touches"
+        said = f"{len(stuck)} pairs of its pieces may print stuck together; the closest pair {sits}"
+    block.may_fuse = f"{said}, {place}." if place else f"{said}."
+    block.may_fuse_mm = round(gap, 2)
 
 
 def _standing_said(
@@ -9963,6 +10101,8 @@ def _standing_said(
     clearances: dict[str, Any] | None,
     solid_of: list[int],
     moves_apart: Callable[[int, int], bool] = lambda _a, _b: False,
+    *,
+    fused_gaps: list[float] | None = None,
 ) -> str:
     """What is said of the separate parts standing on the plate (*standing*,
     largest first): their sizes, then that the ones a clearance apart
@@ -9973,7 +10113,10 @@ def _standing_said(
     solid.  A gap that may print as one piece (:func:`_may_print_stuck`) is
     said as that, and parts the reading found *touching* are said to print
     stuck together: neither is told it prints in place the way moving parts
-    have to, and neither is called loose."""
+    have to, and neither is called loose.  *fused_gaps* are the gaps of
+    pieces drawn apart that print as one of these parts
+    (:func:`_fused_said`).  What prints stuck together is said first, and
+    beside it no other gap is called fine: the others are said as gaps."""
     from kiln.fusion_check import embedment_floor_mm
 
     largest, rest = size_of[standing[0]], [size_of[s] for s in standing[1:]]
@@ -10024,38 +10167,50 @@ def _standing_said(
         )
     else:
         not_measured = ""
+    fused = _fused_said(fused_gaps) if fused_gaps else ""
     if not near and not unknown:
+        if fused:
+            return (
+                f"{parts}. {fused} Each part comes off the plate on its own; if they belong together, "
+                "join them so they overlap."
+            )
         return f"{parts}, and each comes off the plate on its own. If they belong together, join them so they overlap."
     if near:
         floor = embedment_floor_mm()
-        sentences = []
-        moving_near = [s for s in standing if s in moving]
-        still_near = [s for s in standing if s in still]
-        if moving_near:
-            who = "They" if len(moving_near) == len(standing) else f"{len(moving_near)} of them"
-            sentences.append(_moving_gaps_said(who, moving_gaps))
-            if still_gaps:
-                # Said by the gap, not by the part: a part that moves against
-                # one neighbour can stand still beside another.
-                sentences.append(_still_gaps_said("Other parts", still_gaps, floor, beside_moving=True))
-        elif still_near:
-            who = "They" if len(still_near) == len(standing) else f"{len(still_near)} of them"
-            sentences.append(_still_gaps_said(who, still_gaps, floor))
+        sentences = [fused] if fused else []
         if touching:
             touching_near = [s for s in standing if s in touching]
             if len(touching_near) == len(standing) and not sentences:
                 who = "They sit"
             else:
                 who = f"{len(touching_near)} of them sit"
-            sentences.append(
+            close = (
                 f"{who} closer together than a printer keeps apart ({_gaps_said([min(touching_gaps)])} at the "
-                "nearest), so expect them to print stuck together. If they are meant to move or come apart, "
-                f"give them a real gap; if they were meant to be one solid, sink them at least {floor:g} mm "
-                "into each other."
+                "nearest), so expect them to print stuck together"
             )
+            # The fix is said once, by the sentence before, when there is one.
+            sentences.append(f"{close} too." if fused else (
+                f"{close}. If they are meant to move or come apart, give them a real gap; if they were meant "
+                f"to be one solid, sink them at least {floor:g} mm into each other."
+            ))
+        beside_stuck = bool(sentences)
+        moving_near = [s for s in standing if s in moving]
+        still_near = [s for s in standing if s in still]
+        if moving_near:
+            who = "They" if len(moving_near) == len(standing) else f"{len(moving_near)} of them"
+            sentences.append(_moving_gaps_said(who, moving_gaps, beside_stuck=beside_stuck))
+            if still_gaps:
+                # Said by the gap, not by the part: a part that moves against
+                # one neighbour can stand still beside another.
+                sentences.append(_still_gaps_said(
+                    "Other parts", still_gaps, floor, beside_moving=True, beside_stuck=beside_stuck,
+                ))
+        elif still_near:
+            who = "They" if len(still_near) == len(standing) else f"{len(still_near)} of them"
+            sentences.append(_still_gaps_said(who, still_gaps, floor, beside_stuck=beside_stuck))
         said = f"{parts}. {' '.join(sentences)}{not_measured}"
     else:
-        said = f"{parts}.{not_measured} Any that are meant to be one solid have to overlap."
+        said = f"{parts}.{' ' + fused if fused else ''}{not_measured} Any that are meant to be one solid have to overlap."
     loose = len(standing) - len(near) - len(unknown)
     if loose == 1:
         return f"{said} The other one comes off the plate on its own; if it belongs with them, join it so they overlap."
@@ -10079,12 +10234,21 @@ def _may_print_stuck(gap_mm: float | None) -> bool:
     return float(gap_mm) < moving_gap_floor_mm()
 
 
-def _moving_gaps_said(who: str, gaps: list[float]) -> str:
+def _elsewhere_said(who: str, gaps: list[float]) -> str:
+    """The gaps that print as gaps, said beside parts that print stuck
+    together: as gaps, and never called fine."""
+    return f"Elsewhere {who[:1].lower()}{who[1:]} stand {_gaps_said(gaps)} apart without touching, with nothing joining them."
+
+
+def _moving_gaps_said(who: str, gaps: list[float], *, beside_stuck: bool = False) -> str:
     """What is said of parts that move against each other and stand *gaps*
     apart.  Gaps that may print as one piece (:func:`_may_print_stuck`) are
     said as that, by the gap measured, and never as the gap moving parts
-    need."""
+    need.  *beside_stuck* is the wording that follows a sentence saying
+    other parts print stuck together (:func:`_elsewhere_said`)."""
     tight = [gap for gap in gaps if _may_print_stuck(gap)]
+    if not tight and beside_stuck:
+        return _elsewhere_said(who, gaps)
     if not tight:
         return (
             f"{who} stand {_gaps_said(gaps)} apart without touching, so they print in place "
@@ -10103,13 +10267,20 @@ def _moving_gaps_said(who: str, gaps: list[float]) -> str:
     )
 
 
-def _still_gaps_said(who: str, gaps: list[float], floor: float, *, beside_moving: bool = False) -> str:
+def _still_gaps_said(
+    who: str, gaps: list[float], floor: float, *, beside_moving: bool = False, beside_stuck: bool = False,
+) -> str:
     """What is said of separate parts that stand *gaps* apart and are not
     known to move: a designed clearance or parts meant to be one solid,
     with the gaps that may print as one piece (:func:`_may_print_stuck`)
     said as that.  *beside_moving* is the wording that follows the moving
-    parts' sentence."""
+    parts' sentence, and *beside_stuck* the wording that follows a sentence
+    saying other parts print stuck together (:func:`_elsewhere_said`)."""
     tight = [gap for gap in gaps if _may_print_stuck(gap)]
+    if not tight and beside_stuck:
+        if beside_moving:
+            return f"{who} stand {_gaps_said(gaps)} apart with nothing joining them."
+        return _elsewhere_said(who, gaps)
     one_solid = f"If they were meant to be one solid, sink them at least {floor:g} mm into each other."
     if beside_moving:
         opening = f"{who} stand {_gaps_said(gaps)} apart with nothing joining them"
@@ -11063,9 +11234,11 @@ def checks_due(report: PrintabilityReport) -> list[str]:
     thinner than one layer (:attr:`ThinWallAnalysis.thin_sheet_count`), and
     walls thinner than the nozzle in use, which print only as one thin line
     and which some slicers' standard settings leave out (``thin_line_kind``
-    of ``"wall"``).  The line for a wall is the nozzle the analysis ran for,
-    on every tier: a wall at least as wide as the nozzle asks for no check
-    here.  Each is said in the sentence the report's advice says.  The one
+    of ``"wall"``), and pieces drawn apart that may print stuck together
+    (:attr:`PiecesAnalysis.may_fuse`).  The line for a wall is the nozzle the
+    analysis ran for, on every tier: a wall at least as wide as the nozzle
+    asks for no check here.  Each is said in the sentence the report's
+    advice says.  The one
     reading :func:`verdict` takes, so no door says a part is ready beside a
     finding of the same report that says otherwise.  A hold that is only
     borderline (``marginal``) asks for no check: the verdict says it prints
@@ -11080,6 +11253,8 @@ def checks_due(report: PrintabilityReport) -> list[str]:
     if force is not None and getattr(force, "risk_level", "") == "likely_detach":
         due.append(footing(report))
     due += [said for said, _thinnest in _thin_checks(report.thin_walls)]
+    if pieces is not None:
+        due.append(getattr(pieces, "may_fuse", ""))
     return [sentence for sentence in due if sentence]
 
 
@@ -11103,10 +11278,12 @@ def _thin_checks(walls: ThinWallAnalysis | None) -> list[tuple[str, float]]:
 
 #: Why a part's verdict is ``check``, as a fixed set of ids: one for each
 #: reason :func:`checks_due` names (a surface that does not close, a part
-#: expected to come off the bed, and walls, pins or flat pieces too thin for
-#: the slice to keep as drawn), and ``other`` for a check the report names
-#: no single cause for.
-CHECK_REASONS: tuple[str, ...] = ("open_surface", "comes_off_bed", "walls_left_out", "other")
+#: expected to come off the bed, walls, pins or flat pieces too thin for the
+#: slice to keep as drawn, and pieces drawn apart that may print stuck
+#: together), and ``other`` for a check the report names no single cause for.
+CHECK_REASONS: tuple[str, ...] = (
+    "open_surface", "comes_off_bed", "walls_left_out", "parts_may_fuse", "other",
+)
 
 
 def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
@@ -11114,10 +11291,11 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
     worst first in the order of :func:`checks_due`: each ``{"id": ...}`` from
     :data:`CHECK_REASONS`, ``comes_off_bed`` with how the part is held down
     (``"hold"``: ``"raft"`` or ``"brim"``, and ``"brim_mm"`` when the brim
-    has a width) and ``walls_left_out``, once for every thin reading
+    has a width), ``walls_left_out``, once for every thin reading
     :func:`checks_due` names, with ``"thinnest_mm"``, the thinnest of them,
-    and ``"general_mm"`` when the general minimum wall judged them.
-    ``[{"id": "other"}]`` for a check
+    and ``"general_mm"`` when the general minimum wall judged them, and
+    ``parts_may_fuse`` with ``"nearest_mm"``, the gap of the closest pair,
+    when the pieces do not touch.  ``[{"id": "other"}]`` for a check
     with none of those causes, ``[]`` for any other verdict.  Never raises."""
     try:
         if verdict_of(report)[0] != "check":
@@ -11146,6 +11324,9 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
                 ),
             }
             reasons.append({"id": "walls_left_out", **{k: v for k, v in sizes.items() if v > 0}})
+        if pieces is not None and getattr(pieces, "may_fuse", ""):
+            nearest = float(getattr(pieces, "may_fuse_mm", 0.0) or 0.0)
+            reasons.append({"id": "parts_may_fuse", **({"nearest_mm": nearest} if nearest > 0 else {})})
         return reasons or [{"id": "other"}]
     except Exception:  # noqa: BLE001 -- the reasons are said by the verdict's sentence too
         logger.debug("check reasons unavailable", exc_info=True)

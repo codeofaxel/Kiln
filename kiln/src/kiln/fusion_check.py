@@ -150,8 +150,9 @@ def _nearest_centroid_ids(points: Any, centroids: Any, k: int) -> Any:
         return idx
 
 
-def _points_to_surface_min_mm(points: Any, mesh: Any, k: int = 24) -> float:
-    """Exact min distance from sample points to a mesh's surface.
+def _nearest_on_surface(points: Any, mesh: Any, k: int = 24) -> tuple[float, Any]:
+    """The smallest distance from sample points to a mesh's surface, and
+    the point halfway between that sample and the surface point nearest it.
 
     ``k`` candidate triangles per point (nearest centroids), then exact
     point-to-triangle distance on the shortlist — the same shape of
@@ -168,7 +169,14 @@ def _points_to_surface_min_mm(points: Any, mesh: Any, k: int = 24) -> float:
     flat_pts = np.repeat(points, idx.shape[1], axis=0)
     closest = _tri_closest(flat_tris, flat_pts)
     d = np.sqrt(((closest - flat_pts) ** 2).sum(axis=1))
-    return float(d.reshape(len(points), -1).min())
+    best = int(d.argmin())
+    return float(d[best]), (flat_pts[best] + closest[best]) / 2.0
+
+
+def _points_to_surface_min_mm(points: Any, mesh: Any, k: int = 24) -> float:
+    """Exact min distance from sample points to a mesh's surface
+    (:func:`_nearest_on_surface`)."""
+    return _nearest_on_surface(points, mesh, k)[0]
 
 
 def _pair_gap_mm(body_a: Any, body_b: Any) -> float:
@@ -254,7 +262,24 @@ def judge_reading(triangles: Any, reading: Any, *, clearances: bool = False) -> 
     parts standing on the plate that sit a clearance apart
     (:func:`_standing_clearances`).
     """
+    bodies = _piece_bodies(triangles, reading)
+    solid_of = list(reading.solid_of)
+    report = _judge(bodies, solid_of, expect_single_body=None, max_pairs=_MAX_PAIRS)
+    if clearances and report["solid_count"] >= 2:
+        report["clearances"] = _standing_clearances(bodies, solid_of, set(report["unheld_bodies"]))
+    return report
+
+
+def _piece_bodies(triangles: Any, reading: Any, wanted: Any = None, *, welded: bool = False) -> list[Any]:
+    """The pieces of :func:`kiln.mesh_bodies.read_triangles`' *reading* of
+    the triangle soup *triangles*, each as its own trimesh body, in the
+    reading's order; with *wanted* (piece indices from 0), only those, and
+    ``None`` in place of the rest.  *welded* joins each piece's corners as
+    the reading did (:func:`kiln.mesh_bodies.weld`, at its tolerance), so a
+    piece the reading found sealed is a closed body."""
     import trimesh
+
+    from kiln.mesh_bodies import weld
 
     tri = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
     face_piece = np.asarray(reading.face_piece)
@@ -267,18 +292,89 @@ def judge_reading(triangles: Any, reading: Any, *, clearances: bool = False) -> 
     # as many pieces as faces.
     order = np.argsort(face_piece, kind="stable")
     starts = np.searchsorted(face_piece[order], np.arange(reading.piece_count + 1))
-    bodies = []
+    keep = None if wanted is None else set(wanted)
+    bodies: list[Any] = []
     for i in range(reading.piece_count):
+        if keep is not None and i not in keep:
+            bodies.append(None)
+            continue
         own = tri[order[starts[i]:starts[i + 1]]]
-        bodies.append(trimesh.Trimesh(
-            vertices=own.reshape(-1, 3), faces=np.arange(len(own) * 3).reshape(-1, 3),
-            process=True,
-        ))
-    solid_of = list(reading.solid_of)
-    report = _judge(bodies, solid_of, expect_single_body=None, max_pairs=_MAX_PAIRS)
-    if clearances and report["solid_count"] >= 2:
-        report["clearances"] = _standing_clearances(bodies, solid_of, set(report["unheld_bodies"]))
-    return report
+        corners = np.arange(len(own) * 3).reshape(-1, 3)
+        if welded:
+            vertices, faces, _tol = weld(own.reshape(-1, 3), corners, tolerance=reading.weld_tolerance)
+            whole = (faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])
+            bodies.append(trimesh.Trimesh(vertices=vertices, faces=faces[whole], process=False))
+            continue
+        bodies.append(trimesh.Trimesh(vertices=own.reshape(-1, 3), faces=corners, process=True))
+    return bodies
+
+
+def joined_apart(triangles: Any, reading: Any) -> dict[str, Any]:
+    """The pairs of pieces that *reading* (:func:`kiln.mesh_bodies.read_triangles`
+    of *triangles*) prints as one solid because they lie in contact, while
+    their surfaces stand apart: two pieces drawn a hair apart, closer than
+    the reading's contact probe reaches, so a slicer prints them as one.
+
+    A pair that touches or sinks in is one solid as drawn and is not listed,
+    nor is a hollow part's inner wall.  Each gap is the exact distance
+    between the two closed pieces, and a gap no wider than the reading's own
+    weld is a touch.  Returns ``{"pairs": [{"bodies": [a, b], "gap_mm": g},
+    ...], "unmeasured": n}`` with bodies numbered from 1, as
+    :func:`judge_reading` numbers them; ``unmeasured`` counts the pairs past
+    the pair budget or that could not be measured, and the pair table's
+    limits hold (past them nothing is measured and the reading is
+    ``skipped``).
+    """
+    contact = [(int(a), int(b)) for a, b, how in getattr(reading, "joined", ()) if how == "contact"]
+    found: dict[str, Any] = {"pairs": [], "unmeasured": 0}
+    if not contact:
+        return found
+    triangles = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    if reading.piece_count > _PAIR_TABLE_MAX_BODIES or len(triangles) > _PAIR_TABLE_MAX_TRIANGLES:
+        return {**found, "unmeasured": len(contact), "skipped": True}
+    measured = contact[:_PAIR_TABLE_MAX_PAIRS]
+    found["unmeasured"] = len(contact) - len(measured)
+    bodies = _piece_bodies(triangles, reading, {i for pair in measured for i in pair}, welded=True)
+    solids: dict[int, Any] = {}
+    touch = float(getattr(reading, "weld_tolerance", 0.0) or 0.0)
+    for a, b in measured:
+        try:
+            # A hollow part's inner wall builds as the solid of its cavity
+            # (:func:`_as_manifold`), which lies inside the part: a touch.
+            for i in (a, b):
+                if i not in solids:
+                    solids[i] = _as_manifold(bodies[i])
+            if solids[a] is None or solids[b] is None:
+                found["unmeasured"] += 1
+                continue
+            gap = float(solids[a].min_gap(solids[b], NEAR_GAP_MM + 0.1))
+        except Exception as exc:  # noqa: BLE001 -- unmeasured, never invented
+            _logger.debug("gap between joined pieces %s and %s not measured: %s", a + 1, b + 1, exc)
+            found["unmeasured"] += 1
+            continue
+        if gap > touch:
+            found["pairs"].append({"bodies": [a + 1, b + 1], "gap_mm": round(gap, 3)})
+    return found
+
+
+def where_pieces_meet(triangles: Any, reading: Any, a: int, b: int) -> list[float] | None:
+    """Where pieces *a* and *b* (numbered from 1, as :func:`judge_reading`
+    numbers them) of *reading* come closest: the point halfway across the
+    smallest gap between their surfaces, sampled from both sides, in the
+    file's own coordinates.  ``None`` when it cannot be found.  Never raises."""
+    try:
+        first, second = a - 1, b - 1
+        bodies = _piece_bodies(triangles, reading, {first, second})
+        one, other = bodies[first], bodies[second]
+        there = min(
+            _nearest_on_surface(_sample_points(one), other),
+            _nearest_on_surface(_sample_points(other), one),
+            key=lambda found: found[0],
+        )
+        return [round(float(v), 3) for v in there[1]]
+    except Exception:  # noqa: BLE001 -- a place not found is not said
+        _logger.debug("where pieces %s and %s meet not found", a, b, exc_info=True)
+        return None
 
 
 def _standing_clearances(bodies: list[Any], solid_of: list[int], unheld: set[int]) -> dict[str, Any]:

@@ -1676,8 +1676,19 @@ _CHECK_FIGURES: dict[str, dict[str, Callable[[Any], bool]]] = {
         "thinnest_mm": lambda v: _card_figure(v, _CARD_WALL_MAX_MM),
         "general_mm": lambda v: _card_figure(v, _CARD_WALL_MAX_MM),
     },
+    "parts_may_fuse": {
+        "nearest_mm": lambda v: _card_figure(v, _moving_gap_floor_mm()),
+    },
     "other": {},
 }
+
+
+def _moving_gap_floor_mm() -> float:
+    """The gap under which a pair may print stuck together, the bound a
+    ``parts_may_fuse`` figure stays under (:func:`kiln.assembly.moving_gap_floor_mm`)."""
+    from kiln.assembly import moving_gap_floor_mm
+
+    return moving_gap_floor_mm()
 
 
 def _part_check_fact(value: Any) -> dict[str, Any] | None:
