@@ -437,7 +437,7 @@ def test_the_answer_says_supports_touch_the_kept_off_faces_when_the_file_shows_t
     """What the answer says of the faces kept clear is read from the sliced
     file: support under one of them is said, support far below or beside it
     is not, and before any file is read nothing is claimed."""
-    from kiln.slicer_supports import SliceSupports, _kept_clear_placed, witnessed
+    from kiln.slicer_supports import SliceSupports, placed_for_reading, witnessed
 
     stl = _flared_post(1.5, tmp_path / "lip.stl")
     from kiln.printability import _load_mesh_for_analysis
@@ -448,7 +448,7 @@ def test_the_answer_says_supports_touch_the_kept_off_faces_when_the_file_shows_t
     faces = tuple(int(i) for i in leaning)
     assert faces, "the lip's underside was not found"
     asked = SliceSupports(enabled=True, decided_by="analysis", reason="test", kept_off=faces, kept_off_painted=len(faces))
-    placed = _kept_clear_placed(str(stl), asked, bed_centre=(128.0, 128.0))
+    placed = placed_for_reading(str(stl), asked, bed_centre=(128.0, 128.0)).kept_clear
     assert len(placed) == len(faces)
     asked = SliceSupports(enabled=True, decided_by="analysis", reason="test", kept_off=faces,
                           kept_off_painted=len(faces), kept_clear=placed)

@@ -40,7 +40,7 @@ The rule, in order:
   (:data:`STAND_OFF_STYLE`).  The file the slicer wrote is read back: a
   slice that asked for supports and got none says so, and the answer says
   the kept-off faces carry none only when the file shows none under them
-  (:func:`_supports_against`);
+  (:func:`_count_against`);
 * a file whose separate parts print in place a clearance apart gets those
   supports from the plate alone wherever the plate reaches every point that
   needs one (:attr:`kiln.printability.SupportJudgement.plate_reaches_supports`):
@@ -143,11 +143,11 @@ class SliceSupports:
     #: angle; the profile carries it.  Never served.
     own_angle: bool = field(default=False, repr=False)
     #: The kept-off faces where the slicer has them, as triangles in the
-    #: bed's frame (:func:`_kept_clear_placed`).  Bookkeeping for
+    #: bed's frame (:func:`placed_for_reading`).  Bookkeeping for
     #: :func:`witnessed`; never served.
     kept_clear: tuple = field(default=(), repr=False, compare=False)
     #: How much support the sliced file carries under the kept-off faces
-    #: (:func:`_supports_against`); ``None`` until a sliced file has been
+    #: (:func:`_count_against`); ``None`` until a sliced file has been
     #: read.  Never served: the sentence says it.
     on_kept_off: int | None = field(default=None, repr=False)
     #: Whether the slice was made with no gap over its supports, because
@@ -179,7 +179,7 @@ class SliceSupports:
     #: they were placed.  Bookkeeping for :func:`witnessed`.
     placed_box: tuple[float, float, float, float] | None = field(default=None, repr=False, compare=False)
     #: How much support the sliced file carries under the faces in the
-    #: joints (:func:`_supports_against`); ``None`` before a file is read or
+    #: joints (:func:`_count_against`); ``None`` before a file is read or
     #: when it cannot be read for it.  Never served: the sentence says it.
     on_joints: int | None = field(default=None, repr=False)
     #: Whether a sliced file was read for support in the joints.
@@ -452,23 +452,9 @@ def _under_a_face(faces: list[tuple[float, ...]], x: float, y: float, z: float) 
     return False
 
 
-def _supports_against(gcode_path: str, triangles: tuple) -> int | None:
-    """How much support the sliced file lays under *triangles* (faces in
-    the bed's frame), counted in samples a quarter millimetre apart along
-    every support line; ``None`` when the file cannot be read.
-
-    A sample counts when it sits inside a face's footprint and no more than
-    a millimetre below it.  Support that stands beside a face, or far
-    below it under something else, does not.  The three driven slicers'
-    files are read alike: their feature labels, relative or absolute
-    extrusion, and arcs by their end points.
-    """
-    return _count_against(gcode_path, [triangles])[0]
-
-
 def _count_against(gcode_path: str, sets: list[tuple]) -> list[int | None]:
-    """:func:`_supports_against` for each of *sets*, in one pass over the
-    file; every count ``None`` when the file cannot be read."""
+    """How much support the sliced file lays under each of *sets* (faces in
+    the bed's frame), in one pass over the file; every count ``None`` when the file cannot be read."""
     all_cells = [_faces_by_cell(triangles) for triangles in sets]
     if not any(all_cells):
         return [0 for _ in sets]
@@ -589,32 +575,6 @@ def asked_under_input(
     if not (decision.enabled and decision.under):
         return None
     return _painted_input(input_path, decision.under, _ENFORCER_STATE, out_dir, bed_centre=bed_centre, every=True)
-
-
-def _kept_clear_placed(
-    input_path: str, decision: SliceSupports, *, bed_centre: tuple[float, float] | None,
-) -> tuple:
-    """The faces *decision* keeps supports off, as triangles where the
-    slicer has them: a mesh placed as :func:`kept_off_input` places it, a
-    3MF where it stands.  Empty when there are none or the input is not one
-    this paints."""
-    suffix = Path(input_path).suffix.lower()
-    if not decision.kept_off or suffix not in _KEPT_OFF_INPUTS:
-        return ()
-    from kiln.printability import _parse_mesh, _prepare_parsed
-
-    try:
-        facets, vertices = _parse_mesh(input_path)
-        judged = _prepare_parsed(list(facets), vertices)[0]
-    except (OSError, ValueError):
-        return ()
-    tx = ty = tz = 0.0
-    if suffix != ".3mf":
-        tx, ty, tz = _placement({tuple(v) for tri in facets for v in tri}, bed_centre)
-    return tuple(
-        tuple((x + tx, y + ty, z + tz) for x, y, z in judged[i])
-        for i in decision.kept_off if 0 <= i < len(judged)
-    )
 
 
 def placed_for_reading(
