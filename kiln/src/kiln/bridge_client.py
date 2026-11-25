@@ -1670,7 +1670,7 @@ def _card_figure(value: Any, high: float, *, whole: bool = False) -> bool:
 _CHECK_FIGURES: dict[str, dict[str, Callable[[Any], bool]]] = {
     "open_surface": {},
     "comes_off_bed": {
-        "hold": lambda v: v in ("brim", "raft"),
+        "hold": lambda v: v in ("brim", "raft", "glue"),
         "brim_mm": lambda v: _card_figure(v, _CARD_BRIM_MAX_MM, whole=True),
     },
     "walls_left_out": {

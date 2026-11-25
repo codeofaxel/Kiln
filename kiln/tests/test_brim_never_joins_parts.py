@@ -82,12 +82,14 @@ def test_parts_a_clearance_apart_get_no_brim_and_are_told_what_holds_them(tmp_pa
     said = " ".join(text for _where, text in rx._sentences(reply))
     assert "mm brim" not in said, said
     assert adhesion["rationale"] in report["recommendations"], report["recommendations"]
-    # The approval card's facts never name a brim for it.
+    # The approval card's facts name the hold it is told, glue stick, and
+    # never a brim.
     from kiln.printability import analyze_printability, check_reasons
 
     with rx.without_kiln_pro():
         facts = check_reasons(analyze_printability(_walls_a_clearance_apart(tmp_path)))
-    assert {"id": "other"} in facts and not any(r.get("hold") == "brim" for r in facts), facts
+    assert {"id": "comes_off_bed", "hold": "glue"} in facts, facts
+    assert not any(r.get("hold") == "brim" or "brim_mm" in r or r["id"] == "other" for r in facts), facts
 
 
 def test_parts_further_apart_on_the_bed_get_the_widest_brim_that_leaves_the_gap(tmp_path):
@@ -102,6 +104,13 @@ def test_parts_further_apart_on_the_bed_get_the_widest_brim_that_leaves_the_gap(
         "so print it with a 3 mm brim and glue stick on a clean plate: a wider brim would join its "
         "separate pieces where they stand 8 mm apart on the bed."
     ) in reply["message"], reply["message"]
+    # The approval card's facts carry both halves of that hold: the narrow
+    # brim and the glue stick beside it.
+    from kiln.printability import analyze_printability, check_reasons
+
+    with rx.without_kiln_pro():
+        facts = check_reasons(analyze_printability(_walls_apart_on_the_bed(tmp_path)))
+    assert {"id": "comes_off_bed", "hold": "glue", "brim_mm": 3} in facts, facts
 
 
 def test_a_tall_pillar_alone_keeps_its_brim(tmp_path):

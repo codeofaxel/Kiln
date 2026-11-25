@@ -1561,6 +1561,21 @@ def test_the_cards_check_is_ids_and_figures_and_never_a_sentence():
     assert set(bridge_client._CHECK_FIGURES) == set(CHECK_REASONS)
 
 
+@pytest.mark.parametrize("held", [
+    {"hold": "glue"},
+    {"hold": "glue", "brim_mm": 3},
+])
+def test_the_card_is_sent_a_part_held_down_with_glue_stick(held):
+    """A part whose separate pieces a brim would join is held down with
+    glue stick (with a narrow brim beside it when one leaves them apart):
+    the card is sent that hold as the check states it, and a hold Kiln does
+    not name is still sent nothing."""
+    fact = {"verdict": "check", "reasons": [{"id": "comes_off_bed", **held}]}
+    assert bridge_client.AskCard(facts={"part_check": fact}).fields() == {"part_check": fact}
+    unknown = {"verdict": "check", "reasons": [{"id": "comes_off_bed", "hold": "tape"}]}
+    assert bridge_client.AskCard(facts={"part_check": unknown}).fields() == {}
+
+
 def _said_anyway(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
     """A sliced file whose record keeps the owner's word to print it anyway."""
     from tests.test_print_anyway_needs_its_own_yes import said_anyway

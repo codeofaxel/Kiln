@@ -11421,15 +11421,14 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
     """Why *report*'s verdict is ``check``, as facts rather than sentences,
     worst first in the order of :func:`checks_due`: each ``{"id": ...}`` from
     :data:`CHECK_REASONS`, ``comes_off_bed`` with how the part is held down
-    (``"hold"``: ``"raft"`` or ``"brim"``, and ``"brim_mm"`` when the brim
-    has a width), ``walls_left_out``, once for every thin reading
-    :func:`checks_due` names, with ``"thinnest_mm"``, the thinnest of them,
-    and ``"general_mm"`` when the general minimum wall judged them, and
+    (``"hold"``: ``"raft"``, ``"brim"``, or ``"glue"`` for glue stick where
+    a brim as wide as the part asks for would join its separate pieces on
+    the bed, and ``"brim_mm"`` when a brim with a width goes with it),
+    ``walls_left_out``, once for every thin reading :func:`checks_due`
+    names, with ``"thinnest_mm"``, the thinnest of them, and
+    ``"general_mm"`` when the general minimum wall judged them, and
     ``parts_may_fuse`` with ``"nearest_mm"``, the gap of the closest pair,
-    when the pieces do not touch.  A part expected to come off the bed
-    that no brim can hold without joining its separate pieces
-    (:attr:`AdhesionRecommendation.brim_left_off`) is ``other``: a brim is
-    the one hold these facts name, and it is the wrong one there.
+    when the pieces do not touch, and ``"pairs"``, how many pairs.
     ``[{"id": "other"}]`` for a check with none of those causes, ``[]`` for
     any other verdict.  Never raises."""
     try:
@@ -11445,9 +11444,10 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
             if rec is not None and rec.use_raft:
                 reasons.append({"id": "comes_off_bed", "hold": "raft"})
             elif rec is not None and rec.brim_width_mm > 0:
-                reasons.append({"id": "comes_off_bed", "hold": "brim", "brim_mm": int(rec.brim_width_mm)})
+                hold = "brim" if rec.parts_gap_mm is None else "glue"
+                reasons.append({"id": "comes_off_bed", "hold": hold, "brim_mm": int(rec.brim_width_mm)})
             elif rec is not None and rec.brim_left_off:
-                reasons.append({"id": "other"})
+                reasons.append({"id": "comes_off_bed", "hold": "glue"})
             else:
                 reasons.append({"id": "comes_off_bed", "hold": "brim"})
         walls = report.thin_walls
