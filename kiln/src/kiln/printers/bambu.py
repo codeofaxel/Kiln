@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import contextlib
 import ftplib
 import hashlib
@@ -37,6 +35,7 @@ from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
 from kiln.bambu_trays import unit_name as _bambu_unit_name
 from kiln.cli_command import kiln_command
+from kiln.plain_words import listed as _listed
 from kiln.printer_backends import need_where
 from kiln.printer_intelligence import chamber_sensor_for_model
 from kiln.printers.bambu_hms_text import (

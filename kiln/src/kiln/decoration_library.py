@@ -14,8 +14,6 @@ back into the decoration's own folder (:mod:`kiln._pro_decoration_bridge`).
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import json
 import logging
 import os
@@ -26,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln.plain_words import listed as _listed
 from kiln.text_fonts import resolve_text_font
 
 _logger = logging.getLogger(__name__)

@@ -155,7 +155,7 @@ def floor_schedule(
     *past_the_melt_limit* each is kept as asked and judged only to say what
     it costs.  Raises :class:`ScheduleRefused` for a schedule that is not
     well formed."""
-    from kiln.live_speed_floor import judging_layers, judge
+    from kiln.live_speed_floor import judge, judging_layers
     from kiln.live_speed_floor import past_the_melt_limit as past
 
     presets = takes_presets(adapter)

@@ -8,8 +8,6 @@ PGM P5 (binary Portable Gray Map) is the format OpenSCAD's surface() reads.
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import contextlib
 import logging
 import math
@@ -22,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import run_program
+from kiln.plain_words import listed as _listed
 
 _logger = logging.getLogger(__name__)
 

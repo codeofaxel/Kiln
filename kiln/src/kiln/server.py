@@ -47,8 +47,6 @@ Environment variables
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import asyncio
 import atexit
 
@@ -88,6 +86,7 @@ from kiln.mcp_compat import (
     set_instructions,
     stamp_restart,
 )
+from kiln.plain_words import listed as _listed
 from kiln.print_consent import (
     NOT_ASKED_CODE_COOLDOWN,
     NOT_ASKED_CODE_SHOWN,

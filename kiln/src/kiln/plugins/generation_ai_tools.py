@@ -10,8 +10,6 @@ no manual imports needed.
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import logging
 import os
 import time
@@ -19,6 +17,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln import print_keeping
+from kiln.plain_words import listed as _listed
 from kiln.print_start_verdict import resolve_print_start
 from kiln.quoted_text import fence
 from kiln.tool_annotations import creates, destructive, read_only

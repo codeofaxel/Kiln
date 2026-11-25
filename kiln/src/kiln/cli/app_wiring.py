@@ -27,8 +27,6 @@ Contract:
 
 from __future__ import annotations
 
-from kiln import plain_words as _plain_words
-
 import hashlib
 import json
 import os
@@ -42,6 +40,8 @@ from pathlib import Path
 from typing import Any
 
 import tomllib
+
+from kiln import plain_words as _plain_words
 
 KILN_NAME = "kiln"
 RECEIPT_VERSION = 1

@@ -10,8 +10,6 @@ other door sees it in.
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import contextlib
 import itertools
 import json as _json
@@ -28,6 +26,7 @@ from kiln import _vec
 from kiln import plain_words as _plain_words
 from kiln.generation.base import MeshAnalysis, MeshValidationResult
 from kiln.mesh_errors import UnreadableMeshError
+from kiln.plain_words import listed as _listed
 from kiln.untrusted_zip import UntrustedZipFile
 
 if TYPE_CHECKING:

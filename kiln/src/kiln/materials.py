@@ -7,8 +7,6 @@ preflight check system.
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import logging
 import os
 import threading
@@ -18,6 +16,7 @@ from typing import Any
 
 from kiln.catalog_keys import _MATERIAL_ABBREVIATIONS
 from kiln.events import EventType
+from kiln.plain_words import listed as _listed
 
 logger = logging.getLogger(__name__)
 

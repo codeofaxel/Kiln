@@ -51,8 +51,6 @@ kept only in this process would answer "not found" to the call that needs it.
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import copy
 import hashlib
 import logging
@@ -61,6 +59,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from kiln.generation.base import GenerationError, GenerationJob, GenerationStatus
+from kiln.plain_words import listed as _listed
 
 logger = logging.getLogger(__name__)
 

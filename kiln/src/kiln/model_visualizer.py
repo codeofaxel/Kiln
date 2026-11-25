@@ -18,8 +18,6 @@ Usage::
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import contextlib
 import logging
 import os
@@ -35,6 +33,7 @@ from kiln import _fonts
 from kiln import plain_words as _plain_words
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
 from kiln.openscad_runner import run_openscad
+from kiln.plain_words import listed as _listed
 from kiln.preview_render import downscale_png, effective_supersample
 from kiln.untrusted_zip import UntrustedZipFile
 

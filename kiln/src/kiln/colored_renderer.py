@@ -8,8 +8,6 @@ back-face culling, and multiple camera angle presets.
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import math
 import os
 import tempfile
@@ -24,6 +22,7 @@ from kiln._vec import normalize as _normalize
 from kiln._vec import sub as _sub
 from kiln.model_visualizer import _ANGLE_ROTATIONS
 from kiln.model_visualizer import _CAMERA_ANGLES as _VIEWS
+from kiln.plain_words import listed as _listed
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

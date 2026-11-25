@@ -13,8 +13,6 @@ no manual imports needed.
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import logging
 import math
 import os
@@ -29,6 +27,7 @@ from typing import Any
 from kiln import plain_words as _plain_words
 from kiln.colour_availability import attach_colour_availability
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
+from kiln.plain_words import listed as _listed
 from kiln.tool_annotations import creates
 
 _logger = logging.getLogger(__name__)

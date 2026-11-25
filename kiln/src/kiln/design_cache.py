@@ -25,8 +25,6 @@ Each cached entry may also store FDM-relevant metadata:
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import hashlib
 import json
 import logging
@@ -39,6 +37,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from kiln.plain_words import listed as _listed
 
 logger = logging.getLogger(__name__)
 

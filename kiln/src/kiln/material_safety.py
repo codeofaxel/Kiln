@@ -26,13 +26,13 @@ Compatibility levels
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import json
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from kiln.plain_words import listed as _listed
 
 # ---------------------------------------------------------------------------
 # Food contact and the nozzle it came through

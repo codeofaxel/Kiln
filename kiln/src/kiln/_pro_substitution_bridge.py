@@ -25,12 +25,11 @@ Nothing here raises.
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import logging
 from dataclasses import dataclass
 from typing import Any
 
+from kiln.plain_words import listed as _listed
 from kiln.served_answer import (
     Miss,
     ask_briefly,

@@ -23,8 +23,6 @@ Example::
 
 from __future__ import annotations
 
-from kiln.plain_words import listed as _listed
-
 import contextlib
 import hashlib
 import hmac
@@ -48,6 +46,7 @@ from kiln.failure_vocabulary import (
     PRINTER_LOG,
     judged_ending_sql,
 )
+from kiln.plain_words import listed as _listed
 
 logger = logging.getLogger(__name__)
 

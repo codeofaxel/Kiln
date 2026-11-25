@@ -9,7 +9,8 @@ site that is not connected is not searched and is never a refusal on its own.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
