@@ -14,7 +14,8 @@ Two things a file does not say have to be settled first.
   a fixed length, since the same model written in meters and in millimeters
   must weld the same way, or the count depends on the unit it was exported
   in.  Two corners one triangle holds stay apart unless they are copies
-  too, a few roundings apart.
+  too, a few roundings apart, and no join folds two triangles that share a
+  side onto each other.
 * **Which triangles belong together where more than two meet on one edge.**
   Two pieces laid on each other (a coat modelled on a body's surface) share
   their corners along the contact, so after the weld four triangles meet on
@@ -274,7 +275,10 @@ def weld(
     copies of one point an exporter wrote a rounding apart, except where a
     triangle holds both and they are further apart than a few roundings
     (:data:`_COPY_RADII`), even through a chain of others: that side is the
-    triangle's own.  So geometry finer than the radius reads as the file
+    triangle's own.  Nor does a join ever lay two triangles that share a
+    side onto each other, the corner across that side from each joined while
+    the side stays: that would fold a sliver the file wrote into a crease it
+    does not have.  So geometry finer than the radius reads as the file
     wrote it.  A *tolerance* of ``0`` joins exact duplicates only.
 
     :returns: ``(vertices, faces, tolerance)`` with *faces* re-indexed.
@@ -314,7 +318,9 @@ def _join_near(points: np.ndarray, faces: np.ndarray, tol: float) -> np.ndarray:
     """For each point, the smallest index of the points joined to it: two
     join when they lie within *tol* of each other and are not the ends of a
     side of *faces* longer than :data:`_COPY_RADII` radii, and joins chain.
-    A chain that would close such a side is left unjoined, all of it.
+    A chain that would close such a side is left unjoined, all of it, and so
+    is one that would fold two triangles sharing a side onto each other
+    (:func:`_folds`).
 
     Each of eight grids of cell ``2 * tol``, offset by ``tol`` on each axis
     in turn, buckets the points; two points within *tol* on every axis share
@@ -342,16 +348,58 @@ def _join_near(points: np.ndarray, faces: np.ndarray, tol: float) -> np.ndarray:
                 a, b = label[a[~own]], label[b[~own]]
                 if len(a):
                     label = _components(n, a, b)[label]
-    if sides is None or not len(sides):
-        return label
-    lo, hi = sides // n, sides % n
-    closed = label[lo[label[lo] == label[hi]]]
-    if len(closed):
-        shut = np.zeros(n, dtype=bool)
-        shut[closed] = True
-        undo = shut[label]
+    if sides is None:
+        return label  # no two points lay within the radius
+    shut = np.zeros(n, dtype=bool)
+    if len(sides):
+        lo, hi = sides // n, sides % n
+        shut[label[lo[label[lo] == label[hi]]]] = True
+    shut[_folds(label, faces)] = True
+    undo = shut[label]
+    if undo.any():
         label[undo] = np.flatnonzero(undo)
     return label
+
+
+def _folds(label: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """The groups of *label* that would lay two triangles of *faces* sharing
+    a side onto each other: the corner across that side from each is in the
+    group while the side's two ends stay apart, so the pair would become one
+    triangle's worth of surface folded back on itself.  Two triangles that
+    already hold the same corner across their side lie back to back as the
+    file wrote them, and are left as they are.
+
+    A side more than :data:`_NEAR_SPAN` + 1 triangles meet on is compared
+    over its first :data:`_NEAR_SPAN` + 1 only.
+    """
+    n = len(label)
+    grouped = np.bincount(label, minlength=n)[label] > 1
+    if not grouped.any():
+        return np.zeros(0, dtype=np.int64)
+    f = np.asarray(faces, dtype=np.int64).reshape(-1, 3)
+    # Side k of a triangle runs from its corner k to corner k + 1; the
+    # corner across it is k + 2.
+    start = f.reshape(-1)
+    end = f[:, [1, 2, 0]].reshape(-1)
+    across = f[:, [2, 0, 1]].reshape(-1)
+    keep = grouped[across] & (start != end)
+    low = np.minimum(start, end)[keep]
+    high = np.maximum(start, end)[keep]
+    across = across[keep]
+    key = low * n + high
+    order = np.argsort(key, kind="stable")
+    key, low, high, across = key[order], low[order], high[order], across[order]
+    found: list[np.ndarray] = []
+    for step in range(1, _NEAR_SPAN + 1):
+        same = key[step:] == key[:-step]
+        if not same.any():
+            break
+        a, c = across[:-step][same], across[step:][same]
+        p, q = label[low[step:][same]], label[high[step:][same]]
+        group = label[a]
+        fold = (a != c) & (group == label[c]) & (p != q) & (group != p) & (group != q)
+        found.append(group[fold])
+    return np.unique(np.concatenate(found)) if found else np.zeros(0, dtype=np.int64)
 
 
 def _near_pairs(

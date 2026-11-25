@@ -108,10 +108,15 @@ def measure_mesh(path: str) -> MeshMeasure:
     report = analyze_printability(path, include_hole_detection=True)
     holes = sorted(float(h.get("diameter_mm") or 0.0) for h in report.holes or [] if h.get("diameter_mm"))
     wall = report.thin_walls.min_wall_thickness_mm if report.thin_walls is not None else None
+    # Closed as every door reads it (kiln.mesh_closure), never a rule of its own.
+    from kiln.mesh_bodies import read_mesh
+    from kiln.mesh_closure import surface_closure
+
+    closed = surface_closure(read_mesh(mesh)).manifold
     return MeshMeasure(
         extents_mm=tuple(float(e) for e in mesh.extents),
-        watertight=bool(mesh.is_watertight),
-        volume_mm3=float(abs(mesh.volume)) if mesh.is_watertight else 0.0,
+        watertight=closed,
+        volume_mm3=float(abs(mesh.volume)) if closed else 0.0,
         min_wall_mm=float(wall) if wall is not None else None,
         hole_diameters_mm=tuple(holes),
     )

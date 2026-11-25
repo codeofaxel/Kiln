@@ -41,6 +41,17 @@ def _make_mesh_validation_result(
         "y_min": 0.0, "y_max": 50.0,
         "z_min": 0.0, "z_max": 30.0,
     }
+    # The closure block validate_mesh carries (kiln.mesh_closure).
+    mock.notes = []
+    mock.closure = (
+        {"closed": True, "manifold": True, "status": "closed (watertight)",
+         "state": "The surface is closed (watertight).", "fix": "", "found": ""}
+        if is_manifold else
+        {"closed": False, "manifold": False, "status": "not closed",
+         "state": "The surface is not closed: 4 open edges (holes in the surface).",
+         "fix": "Kiln's `repair_mesh` with `close_holes=True` sews small holes shut.",
+         "found": "4 open edges (holes in the surface)"}
+    )
     mock.to_dict.return_value = {
         "valid": mock.valid,
         "is_manifold": mock.is_manifold,
@@ -286,7 +297,8 @@ class TestValidationPipelineRepair:
 
         assert result.passed is False
         assert result.is_manifold is False
-        assert any("manifold" in w.lower() for w in result.warnings)
+        # The surface the run hands on is said, in the closure reading's words.
+        assert any(result.closure["state"] in w for w in result.warnings)
 
     @patch(_PRINTABILITY)
     @patch(_VALIDATE)

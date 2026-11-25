@@ -52,7 +52,11 @@ class _MeshDiagnosticToolsPlugin:
             size, location), and polygon count assessment for FDM printing.
 
             Returns a structured report with severity level, defect list, and
-            actionable fix recommendations (specific MeshLab/Blender steps).
+            actionable fix recommendations: Kiln's own repair where it handles
+            the defect, specific MeshLab/Blender steps where it does not.
+            ``report.closure`` says whether the surface is closed and every
+            edge of each piece shared by exactly two of its triangles, in the
+            same words ``validate_and_prepare_mesh`` uses.
 
             Requires the optional ``trimesh`` package (``pip install trimesh``).
             Supports STL, 3MF, OBJ, PLY, OFF, GLB, and GLTF formats.  A 3MF

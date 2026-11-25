@@ -158,6 +158,10 @@ class MeshDiagnosticReport:
     # and which touch.  The same reading every door that counts pieces uses.
     pieces: dict[str, Any] = field(default_factory=dict)
 
+    # Whether the surface is closed, in the words every door says
+    # (kiln.mesh_closure): ``closed`` and ``manifold``, and the sentences.
+    closure: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         return d
@@ -664,9 +668,8 @@ def _compute_severity(
 def _build_defects(
     *,
     units: str = "",
-    bodies: Any = None,
+    closure: Any = None,
     degenerate_count: int,
-    self_intersection_count: int,
     normals: NormalsReport,
     hole_count: int,
     holes: list[HoleInfo],
@@ -677,20 +680,19 @@ def _build_defects(
     detached_attachment: bool = False,
     floating: int = 0,
 ) -> list[str]:
-    """Build a list of human-readable defect descriptions."""
+    """Build a list of human-readable defect descriptions.  Whether the
+    surface is closed is said in the one closure reading's words
+    (:func:`kiln.mesh_closure.surface_closure`), pinched edges and where
+    they are included."""
     defects: list[str] = []
 
     if units:
         defects.append(units)
 
     if not is_watertight:
-        if bodies is not None and bodies.open_edges == 0:
-            defects.append(
-                f"{bodies.unsealed_count} of {bodies.piece_count} piece(s) are not "
-                "sealed solids: a piece meets itself along a line."
-            )
-        else:
-            defects.append("Mesh is not watertight (has open boundaries).")
+        defects.append(
+            closure.state if closure is not None else "The surface is not closed."
+        )
 
     if hole_count > 0:
         largest = holes[0] if holes else None
@@ -706,18 +708,6 @@ def _build_defects(
     if degenerate_count > 0:
         defects.append(
             f"{degenerate_count} degenerate (zero-area) face(s) — can cause slicer errors."
-        )
-
-    if self_intersection_count > 0:
-        where = ""
-        if bodies is not None and bodies.pinch_at:
-            where = " (for example at " + ", ".join(
-                "(" + ", ".join(f"{c:g}" for c in p) + ")" for p in bodies.pinch_at
-            ) + ")"
-        defects.append(
-            f"{self_intersection_count} pinched edge(s): a piece meets itself "
-            f"along a line, with 3 or more triangles on one edge{where} — "
-            f"may cause unpredictable slicer behavior."
         )
 
     if detached_attachment:
@@ -743,16 +733,18 @@ def _build_defects(
 def _build_recommendations(
     *,
     defects: list[str],
+    closure: Any = None,
     degenerate_count: int,
-    self_intersection_count: int,
     normals: NormalsReport,
-    hole_count: int,
     has_fragments: bool,
     is_watertight: bool,
     polygon_assessment: PolygonCountAssessment,
     detached_attachment: bool = False,
 ) -> list[str]:
-    """Build actionable recommendations for fixing detected defects."""
+    """Build actionable recommendations for fixing detected defects.  What
+    to do about a surface that is not closed, or meets itself along a line,
+    is the one closure reading's (:func:`kiln.mesh_closure.surface_closure`),
+    which names Kiln's own repair where it handles the case."""
     recs: list[str] = []
 
     if not defects:
@@ -766,30 +758,13 @@ def _build_recommendations(
             "Mesh > Normals > Recalculate Outside."
         )
 
-    if hole_count > 0:
-        if hole_count <= 5:
-            recs.append(
-                "Fill holes: In MeshLab, use Filters > Remeshing > Close Holes. "
-                "PrusaSlicer can also auto-repair small holes during slicing."
-            )
-        else:
-            recs.append(
-                f"{hole_count} holes detected — consider using Netfabb (free web repair) "
-                f"or Meshmixer's Analysis > Inspector for bulk hole filling."
-            )
+    if not is_watertight and closure is not None and closure.fix:
+        recs.append(closure.fix)
 
     if degenerate_count > 0:
         recs.append(
             "Remove degenerate faces: In MeshLab, use Filters > Cleaning and Repairing > "
             "Remove Zero Area Faces, then Remove Duplicate Faces."
-        )
-
-    if self_intersection_count > 0:
-        recs.append(
-            "Fix pinched edges: they are not holes, so hole filling cannot touch "
-            "them. In MeshLab, use Filters > Cleaning and Repairing > Repair "
-            "non Manifold Edges; for stubborn cases, try Meshmixer's Make Solid "
-            "operation, or rebuild the surface where it was made."
         )
 
     if detached_attachment:
@@ -812,12 +787,6 @@ def _build_recommendations(
             f"Reduce polygon count: In MeshLab, use Filters > Remeshing > "
             f"Simplification: Quadric Edge Collapse Decimation. "
             f"Target ~{polygon_assessment.recommended_for_fdm:,} faces."
-        )
-
-    if not is_watertight and hole_count == 0:
-        recs.append(
-            "Mesh is not watertight but no holes were detected — this may indicate "
-            "non-manifold edges. Try PrusaSlicer's built-in repair (it handles most cases)."
         )
 
     return recs
@@ -849,14 +818,17 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
 
     # Pieces first: whether the mesh is closed is a question about each
     # piece, and two pieces sitting on each other are each still closed.
+    # The verdict and its words are the one closure reading every door reads.
     from kiln.mesh_bodies import read_mesh
+    from kiln.mesh_closure import surface_closure
 
     bodies = read_mesh(mesh, tolerance=0.0)  # already welded on load
+    closure = surface_closure(bodies)
 
     # Basic geometry
     face_count = len(mesh.faces)
     vertex_count = len(mesh.vertices)
-    is_watertight = bodies.sealed
+    is_watertight = closure.manifold
     volume = round(float(mesh.volume), 2) if is_watertight else None
     surface_area = round(float(mesh.area), 2)
 
@@ -915,9 +887,8 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
 
     defects = _build_defects(
         units=units_note,
-        bodies=bodies,
+        closure=closure,
         degenerate_count=degenerate_count,
-        self_intersection_count=self_intersections,
         normals=normals,
         hole_count=hole_count,
         holes=holes,
@@ -931,10 +902,9 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
 
     recommendations = _build_recommendations(
         defects=defects,
+        closure=closure,
         degenerate_count=degenerate_count,
-        self_intersection_count=self_intersections,
         normals=normals,
-        hole_count=hole_count,
         has_fragments=has_fragments,
         is_watertight=is_watertight,
         polygon_assessment=polygon_assessment,
@@ -965,8 +935,9 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         recommendations=recommendations,
         detached_attachment=detached_attachment,
         notes=[
-            *(line for line in bodies.describe() if "sit on each other" in line),
+            *([closure.contact] if closure.contact else []),
             *([bodies.solids_sentence()] if bodies.solids_sentence() else []),
         ],
         pieces=bodies.to_dict(),
+        closure=closure.to_dict(),
     )

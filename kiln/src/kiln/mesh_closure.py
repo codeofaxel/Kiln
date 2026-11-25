@@ -1,8 +1,17 @@
-"""Whether an STL's surface is closed, and how many of its closed pieces are
-inside out, read from the triangle arrays rather than through a trimesh mesh.
+"""Whether a mesh's surface is closed, said once for every door.
 
-The answers are trimesh's, by its own definitions, so a check that switches
-here keeps its verdicts:
+:func:`surface_closure` is the one answer every door that tells a person
+whether a surface is closed reads (validation, the pre-print pipeline,
+diagnosis, repair): from Kiln's piece reading (:mod:`kiln.mesh_bodies`),
+whether the surface has holes, whether every edge of each piece is shared by
+exactly two of its triangles, and the plain sentences that say so, what it
+means for printing and what to do.  A door never words closure itself.
+
+The rest of this module answers two narrower questions for the compile gates,
+read from the triangle arrays rather than through a trimesh mesh: whether an
+STL is watertight and how many of its closed pieces are inside out.  Those
+answers are trimesh's, by its own definitions, so a check that switches here
+keeps its verdicts:
 
 - vertices merge when their coordinates agree once scaled by 1e8 and rounded
   (``trimesh.grouping.merge_vertices`` at ``tol.merge``), so a triangle two of
@@ -32,9 +41,184 @@ mesh.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+
+
+@dataclass(frozen=True)
+class SurfaceClosure:
+    """Whether a mesh's surface is closed, and what a person is told about it.
+
+    ``closed``: no edge has a triangle on one side only, so there is no hole.
+    ``manifold``: closed, and every edge of each piece is shared by exactly
+    two of its triangles: no piece meets itself along a line.  Separate
+    pieces that meet each other are each still manifold; ``contact`` says
+    how they print.
+
+    ``state`` is the sentence on the surface, ``status`` its verdict as a
+    clause, ``fix`` what to do about it (``""`` when nothing), ``found`` the
+    defects alone, as ``state`` names them, and ``contact`` the sentence on
+    separate pieces that share edges (``""`` when none do).
+    """
+
+    closed: bool
+    manifold: bool
+    open_edges: int
+    pinched_edges: int
+    touching_edges: int
+    status: str
+    state: str
+    fix: str
+    found: str
+    contact: str
+
+    def sentence(self) -> str:
+        """The state and what to do, as one paragraph."""
+        return closure_sentence(self.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        """What a reply carries: the verdicts and the sentences."""
+        return {
+            "closed": self.closed,
+            "manifold": self.manifold,
+            "status": self.status,
+            "state": self.state,
+            "fix": self.fix,
+            "found": self.found,
+        }
+
+
+def closure_sentence(block: dict[str, Any]) -> str:
+    """The state and what to do from a reply's closure block
+    (:meth:`SurfaceClosure.to_dict`), as one paragraph."""
+    return " ".join(part for part in (block.get("state"), block.get("fix")) if part)
+
+
+#: What a person is told to do about holes.
+_HOLES_FIX = (
+    "Kiln's `repair_mesh` with `close_holes=True` sews small holes shut; an "
+    "opening it cannot close has to be closed where the shape was made."
+)
+_HOLES_LEFT = (
+    "Kiln's hole repair could not close them, so they have to be closed where "
+    "the shape was made."
+)
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count:,} {word}{'' if count == 1 else 's'}"
+
+
+def _point(p: Any) -> str:
+    return "(" + ", ".join(f"{float(f'{float(c):.4g}'):g}" for c in p) + ")"
+
+
+def pinch_fix() -> str:
+    """What a person is told to do about a surface that meets itself along a
+    line: what it prints as, and where it is fixed."""
+    from kiln.fusion_check import embedment_floor_mm
+
+    return (
+        "A slicer joins the two sides of such a line by a sliver at most, and "
+        "`repair_mesh` cannot change it, as it is not a hole: where the shape "
+        f"was made, sink the two sides at least {embedment_floor_mm():g} mm into "
+        "each other if they belong together, or move them apart."
+    )
+
+
+def pinched_found(reading: Any) -> str:
+    """The pinched edges of *reading*, and where some of them are, in words."""
+    where = ""
+    if reading.pinch_at:
+        where = " (for example at " + ", ".join(_point(p) for p in reading.pinch_at) + ")"
+    return (
+        f"{_plural(int(reading.pinch_edges), 'pinched edge')}, where the part meets "
+        f"itself along a line with more than two triangles on one edge{where}"
+    )
+
+
+def _contact(reading: Any) -> str:
+    """The sentence on separate pieces that share edges: those that print as
+    one solid sit on each other; those that do not meet only along an edge,
+    and print as separate parts."""
+    if not reading.touching_edges:
+        return ""
+    solid = reading.solid_of or tuple(range(reading.piece_count))
+    lines: list[str] = []
+    for as_one in (True, False):
+        pairs = [(a, b, n) for a, b, n in reading.touching if (solid[a] == solid[b]) == as_one]
+        if not pairs:
+            continue
+        pieces = {i for a, b, _ in pairs for i in (a, b)}
+        edges = sum(n for _a, _b, n in pairs)
+        if as_one:
+            lines.append(
+                f"{_plural(edges, 'edge')} where {len(pieces)} separate pieces sit on "
+                "each other (separate pieces in contact, which is not a defect of "
+                "either piece).  Each piece is closed, so the file needs no repair."
+            )
+            continue
+        parts = len({solid[i] for i in pieces})
+        unchecked = (
+            f" {_plural(reading.untested_pairs, 'pair')} of pieces were not checked "
+            "for more contact and are counted apart."
+            if reading.untested_pairs else ""
+        )
+        lines.append(
+            f"{_plural(edges, 'edge')} where {len(pieces)} separate pieces meet only "
+            "along an edge, with no surface between them.  Each piece is closed, so "
+            f"the file needs no repair, but they print as {parts:,} separate parts, "
+            f"joined where they meet by a sliver at most.{unchecked}"
+        )
+    return "  ".join(lines)
+
+
+def surface_closure(reading: Any, *, repair_tried: bool = False) -> SurfaceClosure:
+    """The closure of the mesh *reading* (:func:`kiln.mesh_bodies.read_bodies`)
+    describes, in the words every door says.
+
+    :param repair_tried: Kiln's hole repair already ran on this surface, so
+        what is left open is said to be beyond it.
+    """
+    open_edges, pinched = int(reading.open_edges), int(reading.pinch_edges)
+    closed = bool(reading.pieces) and open_edges == 0
+    manifold = closed and pinched == 0
+    found: list[str] = []
+    if open_edges:
+        found.append(f"{_plural(open_edges, 'open edge')} (holes in the surface)")
+    if pinched:
+        found.append(pinched_found(reading))
+    what = " and ".join(found)
+    if manifold:
+        status = "closed (watertight)"
+        state = "The surface is closed (watertight)."
+    elif not reading.pieces:
+        status = "empty"
+        state = "The file has no surface to close."
+    else:
+        status = "closed with no holes, but it is not a clean solid" if closed else "not closed"
+        state = f"The surface is {status}: {what}."
+    fixes = []
+    if open_edges:
+        fixes.append(_HOLES_LEFT if repair_tried else _HOLES_FIX)
+    if pinched:
+        fixes.append(pinch_fix())
+    return SurfaceClosure(
+        closed=closed,
+        manifold=manifold,
+        open_edges=open_edges,
+        pinched_edges=pinched,
+        touching_edges=int(reading.touching_edges),
+        status=status,
+        state=state,
+        fix=" ".join(fixes),
+        found=what,
+        contact=_contact(reading),
+    )
+
 
 #: trimesh's vertex merge: coordinates scaled by 10**8, rounded (tol.merge).
 _MERGE_SCALE = 10**8

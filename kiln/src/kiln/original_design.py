@@ -620,10 +620,11 @@ def audit_original_design(
             name="manifold_geometry",
             passed=mesh_validation.is_manifold,
             severity="critical" if not mesh_validation.is_manifold else "info",
-            message=(
-                "Mesh appears manifold."
+            # The surface in the closure reading's words (kiln.mesh_closure).
+            message=mesh_validation.closure.get("state") or (
+                "The surface is closed (watertight)."
                 if mesh_validation.is_manifold
-                else "Mesh is non-manifold or open."
+                else "The surface is not closed."
             ),
             details={"is_manifold": mesh_validation.is_manifold},
         ),
@@ -894,7 +895,7 @@ def audit_original_design(
         reasons.append("; ".join(mesh_validation.errors) or "The mesh did not pass validation.")
     if not mesh_validation.is_manifold:
         score -= 20
-        reasons.append("Mesh is non-manifold or open.")
+        reasons.append(mesh_validation.closure.get("state") or "The surface is not closed.")
     if design_validation.critical_count or design_validation.warning_count:
         score -= design_validation.critical_count * 12
         score -= design_validation.warning_count * 4

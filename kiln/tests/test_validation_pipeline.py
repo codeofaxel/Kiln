@@ -78,6 +78,17 @@ def _make_mock_validation(*, is_manifold: bool = True, valid: bool = True) -> Ma
     result.valid = valid
     result.errors = [] if valid else ["Non-manifold geometry"]
     result.warnings = []
+    result.notes = []
+    # The closure block validate_mesh carries (kiln.mesh_closure).
+    result.closure = (
+        {"closed": True, "manifold": True, "status": "closed (watertight)",
+         "state": "The surface is closed (watertight).", "fix": "", "found": ""}
+        if is_manifold else
+        {"closed": False, "manifold": False, "status": "not closed",
+         "state": "The surface is not closed: 4 open edges (holes in the surface).",
+         "fix": "Kiln's `repair_mesh` with `close_holes=True` sews small holes shut.",
+         "found": "4 open edges (holes in the surface)"}
+    )
     return result
 
 

@@ -1817,6 +1817,16 @@ def compose_painted_3mf(
         "compose_painted_3mf: wrote %s (1 object, %d triangles, %d colors)",
         output_path, len(faces), len(palette),
     )
+    # Whether the object is closed, as every door reads it (kiln.mesh_closure):
+    # said only when measured, and what is wrong said when it is not.
+    import numpy as np
+
+    from kiln.mesh_bodies import read_bodies
+    from kiln.mesh_closure import surface_closure
+
+    closure = surface_closure(read_bodies(np.asarray(vertices, dtype=np.float64), np.asarray(faces)))
+    surface = "one watertight object" if closure.manifold else "one object"
+    unclosed = "" if closure.manifold else f"{closure.sentence()}  "
     result: dict[str, Any] = {
         "success": True,
         "output_path": output_path,
@@ -1824,9 +1834,11 @@ def compose_painted_3mf(
         "colors": palette,
         "total_vertices": len(vertices),
         "total_triangles": len(faces),
+        "closure": closure.to_dict(),
         "message": (
-            f"Created painted multicolor 3MF: one watertight object, "
+            f"Created painted multicolor 3MF: {surface}, "
             f"{len(faces):,} triangles across {len(palette)} colors.  "
+            f"{unclosed}"
             "Slicers that support color import (BambuStudio, OrcaSlicer) "
             "will offer to map each color to a filament on open."
             if palette
