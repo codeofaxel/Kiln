@@ -102,6 +102,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **The print approval says what you're printing.**
 
+- **The print approval says what to check about your part.**
+
 - **Speeding up a running print won't outrun your nozzle.**
 
 - **Only a bad print counts against your design.** A power cut or a problem with your printer no longer does.
@@ -141,6 +143,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **The same part gets the same printability verdict at any detail level, on every plan.**
 
 - **Thin free-standing pins and thin skins over hollow insides are now caught.** The slicer leaves both out; Kiln used to let them through silently.
+
+- **Walls thinner than your nozzle ask for a check before printing.**
 
 - **Wall settings you give Kiln now reach OrcaSlicer and Bambu Studio.** They were silently ignored there before.
 
