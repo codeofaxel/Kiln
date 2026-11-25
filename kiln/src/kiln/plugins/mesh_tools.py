@@ -70,14 +70,19 @@ def _edge_census_sentence(
     if census["is_watertight"]:
         verdict = f"watertight, 0 non-manifold edges out of {total}"
     else:
+        # The verdict in the closure reading's words (kiln.mesh_closure), so
+        # a surface that meets itself along a line is never called open here
+        # while every other door calls it closed with no holes.
+        status = (census.get("closure") or {}).get("status") or "not watertight"
         touching = int(census.get("touching_edges") or 0)
         verdict = (
-            f"not watertight — {non_manifold} non-manifold edges out of "
+            f"{status}: {non_manifold} non-manifold "
+            f"edge{'' if non_manifold == 1 else 's'} out of "
             f"{total} ({census['boundary_edges']} boundary, "
             f"{census['t_junction_edges']} T-junction"
             + (
-                f", {touching} of them where separate pieces sit on each other "
-                "and are not joined, which is not a defect of either piece"
+                f", {touching} of them where separate pieces meet, which is "
+                "not a defect of either piece"
                 if touching else ""
             )
             + ")"

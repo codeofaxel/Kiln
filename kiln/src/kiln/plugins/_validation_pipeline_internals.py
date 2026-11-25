@@ -966,8 +966,9 @@ def _step_watertight_check(
                 details=" ".join(["Every piece is closed (watertight).", *validation.notes]),
             ))
         else:
-            closure = [w for w in validation.warnings if w.startswith("Mesh is not manifold")]
-            issues = "; ".join(validation.errors or closure) or "The surface is not closed"
+            from kiln.mesh_closure import closure_sentence
+
+            issues = "; ".join(validation.errors) or closure_sentence(validation.closure) or "The surface is not closed."
             report.checks.append(_CheckResult(
                 name="watertight",
                 passed=False,
@@ -1040,9 +1041,11 @@ def _step_repair(
                     details="Repair attempted but mesh remains non-manifold",
                     severity="warning",
                 ))
+                from kiln.mesh_closure import closure_sentence
+
                 report.recommendations.append(
-                    "Mesh is non-manifold after repair. "
-                    "Try repair_mesh with close_holes=True, or fix in Blender/MeshLab."
+                    closure_sentence(post_repair.closure)
+                    or "The surface is still not closed after repair."
                 )
         except ImportError:
             report.checks.append(_CheckResult(

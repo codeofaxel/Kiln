@@ -139,10 +139,15 @@ class MeshValidationResult:
     notes: list[str] = field(default_factory=list)
     triangle_count: int = 0
     vertex_count: int = 0
-    # Every piece is closed (watertight).  Separate pieces in contact still
-    # count: each is closed, and a note says they touch.
+    # Every piece is closed (watertight) and meets itself nowhere: each of
+    # its edges is shared by exactly two of its triangles.  Separate pieces
+    # in contact still count: each is closed, and a note says how they print.
     is_manifold: bool = False
     bounding_box: dict[str, float] | None = None
+    # What a person is told about the surface (kiln.mesh_closure): the
+    # sentences beside ``closed`` and ``manifold``.  Empty when the mesh was
+    # not read.
+    closure: dict[str, Any] = field(default_factory=dict)
 
     @property
     def closed_solid(self) -> bool:
@@ -187,6 +192,9 @@ class MeshAnalysis:
     #: ``None`` when it can.  Every print verdict asks this before judging anything else
     #: (:func:`kiln.generation.validation.unprintable_geometry_reason`).
     unprintable_geometry: str | None = None
+    #: Whether the surface is closed, in the words every door says
+    #: (:mod:`kiln.mesh_closure`); empty when the mesh was not read.
+    closure: dict[str, Any] = field(default_factory=dict)
 
     def has_geometry(self) -> bool:
         """True when the analysis is about an actual mesh.

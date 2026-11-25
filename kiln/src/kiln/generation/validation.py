@@ -125,26 +125,25 @@ def validation_said(result: MeshValidationResult) -> str:
     """What a door says about *result*, in one sentence.
 
     "Mesh is valid." is said only of a mesh that reads and whose every piece
-    is closed.  A mesh that reads but is not closed is told so, in the
-    reading's own words for what is open, and what closes it; a mesh with
-    errors is told its errors.  The one wording for every door that sums a
-    validation up, so none calls a mesh valid beside its own finding that
-    the surface is open.
+    is closed and meets itself nowhere.  A mesh that reads but is not is
+    told what the closure reading found and what to do
+    (:func:`kiln.mesh_closure.surface_closure`); a mesh with errors is told
+    its errors.  The one wording for every door that sums a validation up,
+    so none calls a mesh valid beside its own finding that the surface is
+    open or pinched.
     """
     if not result.valid:
         return f"Mesh has issues: {'; '.join(result.errors)}"
     if result.is_manifold:
         return "Mesh is valid."
-    closure = next((w for w in result.warnings if w.startswith("Mesh is not manifold")), "")
-    found = closure.split(":", 1)[1].split(".  ", 1)[0].strip() if ":" in closure else ""
-    what = f": {found}" if found else ""
-    return (
-        f"The file reads as a mesh, but it is not a closed solid{what}. "
-        "Close it with `repair_mesh` before printing."
+    found = result.closure.get("found") or "the surface does not close"
+    fix = result.closure.get("fix") or ""
+    return " ".join(
+        part for part in (f"The file reads as a mesh, but it is not a closed solid: {found}.", fix) if part
     )
 
 
-def validate_mesh(file_path: str) -> MeshValidationResult:
+def validate_mesh(file_path: str, *, repair_tried: bool = False) -> MeshValidationResult:
     """Validate an STL, OBJ, GLB, or 3MF file for 3D printing readiness.
 
     Checks performed:
@@ -154,10 +153,14 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
     3. Geometry is parseable (binary/ASCII STL, OBJ, GLB, or 3MF).
     4. Triangle count is within printable range.
     5. Bounding box dimensions are reasonable.
-    6. Basic manifold (watertight) check via edge analysis.
+    6. Whether the surface is closed and every edge of each piece is shared
+       by exactly two of its triangles, by the one closure reading
+       (:func:`kiln.mesh_closure.surface_closure`).
 
     Args:
         file_path: Path to the mesh file.
+        repair_tried: Kiln's hole repair already ran on this file, so what
+            is left open is said to be beyond it.
 
     Returns:
         :class:`MeshValidationResult` with errors, warnings, and metrics.
@@ -243,9 +246,12 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
                 f"{_MIN_DIMENSION_MM} mm.  Model may be too small to print."
             )
 
-    # --- manifold check ---
+    # --- closure ---
     notes: list[str] = []
-    is_manifold = _check_manifold(triangles, warnings, notes)
+    closure: dict[str, Any] = {}
+    is_manifold = _check_manifold(
+        triangles, warnings, notes, closure=closure, repair_tried=repair_tried,
+    )
 
     valid = len(errors) == 0
 
@@ -258,6 +264,7 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
         vertex_count=vert_count,
         is_manifold=is_manifold,
         bounding_box=bbox,
+        closure=closure,
     )
 
 
@@ -1010,13 +1017,12 @@ def _edge_reading(
     return reading.open_edges, reading.pinch_edges, reading.touching_edges, reading
 
 
-def _touching_sentence(touching: int, reading: Any) -> str:
-    """The plain sentence for *touching* edges between separate pieces."""
-    pieces = len({i for a, b, _ in reading.touching for i in (a, b)}) if reading else 2
-    return (
-        f"{touching:,} edges where {pieces} separate pieces sit on each other "
-        "(separate pieces in contact, which is not a defect of either piece)"
-    )
+def _touching_sentence(reading: Any) -> str:
+    """The plain sentences for edges separate pieces share: whether they
+    print as one solid or as separate parts (:mod:`kiln.mesh_closure`)."""
+    from kiln.mesh_closure import surface_closure
+
+    return surface_closure(reading).contact
 
 
 def _signed_volume(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
@@ -1186,54 +1192,43 @@ def _check_manifold(
     triangles: list[tuple[tuple[float, ...], ...]],
     warnings: list[str],
     notes: list[str] | None = None,
+    *,
+    reading: Any = None,
+    closure: dict[str, Any] | None = None,
+    repair_tried: bool = False,
 ) -> bool:
-    """Check whether every piece of the mesh is closed (watertight).
+    """Whether every piece of the mesh is closed and meets itself nowhere,
+    by the one closure reading every door reads
+    (:func:`kiln.mesh_closure.surface_closure`), so this check never calls a
+    surface closed that the diagnosis calls pinched.
 
-    Counts edges through :func:`_edge_census` in O(n) time; where that
-    finds more or fewer than two triangles on an edge, the piece reading
-    (:func:`_edge_reading`) says which kind each is and names the defects
-    it found, because a hole and a pinch call for different fixes.  Pieces
-    that only sit on each other are each closed: that is a sealed file,
-    said in *notes* rather than as a defect, the reading
-    :func:`repair_stl` gives the same file (``is_watertight``).
+    A surface that is not is told so in *warnings*, in the reading's words
+    for what it found and what to do.  Pieces that only sit on each other
+    are each closed: that is said in *notes* rather than as a defect, with
+    how they print.  *reading* is the piece reading of *triangles* when the
+    caller already has it; *closure* receives the reply's closure block.
 
     Returns:
-        True when every piece is closed, False otherwise (with a warning).
+        True when every piece is closed with each of its edges shared by
+        exactly two of its triangles, False otherwise.
     """
-    if not triangles:
+    if not len(triangles):
         return False
+    from kiln.mesh_closure import surface_closure
 
-    census = _edge_census(triangles)
-    if census["boundary"] == 0 and census["pinch"] == 0:
-        return True
-
-    open_edges, pinched, touching, reading = _edge_reading(triangles)
-    if not (open_edges or pinched):
-        if touching and notes is not None:
-            notes.append(
-                f"{_touching_sentence(touching, reading)}.  Each piece is "
-                "closed, so the file needs no repair."
-            )
-            if reading.solids_sentence():
-                notes.append(reading.solids_sentence())
-        return True
-    parts: list[str] = []
-    if open_edges:
-        parts.append(
-            f"{open_edges:,} open edges (holes in the surface)"
-        )
-    if pinched:
-        parts.append(
-            f"{pinched:,} pinched edges (3+ triangles meet along one "
-            f"line)"
-        )
-    if touching:
-        parts.append(_touching_sentence(touching, reading))
-    warnings.append(
-        f"Mesh is not manifold (watertight): {' and '.join(parts)}.  Most "
-        f"slicers can handle this, but print quality may be affected."
-    )
-    return False
+    if reading is None:
+        _open, _pinched, _touching, reading = _edge_reading(triangles)
+    said = surface_closure(reading, repair_tried=repair_tried)
+    if closure is not None:
+        closure.update(said.to_dict())
+    if notes is not None:
+        if said.contact:
+            notes.append(said.contact)
+        if reading.solids_sentence():
+            notes.append(reading.solids_sentence())
+    if not said.manifold:
+        warnings.append(said.sentence())
+    return said.manifold
 
 
 # ---------------------------------------------------------------------------
@@ -1613,8 +1608,9 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     components = reading.piece_count
     solids = reading.solid_count
 
-    # Manifold check
-    is_manifold = _check_manifold(triangles, [])
+    # Closure, from the same reading
+    closure: dict[str, Any] = {}
+    is_manifold = _check_manifold(triangles, [], reading=reading, closure=closure)
 
     volume, overhang_pct, max_overhang = exact
     degenerate_count = analysis.degenerate_triangles
@@ -1626,7 +1622,7 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
 
     if not is_manifold:
         score -= 15
-        issues.append("Non-manifold geometry (not watertight)")
+        issues.append(closure.get("state") or "The surface is not closed.")
     if solids > 1:
         score -= min(20, (solids - 1) * 10)
         issues.append(f"{solids} separate solids: they print as separate parts")
@@ -1657,6 +1653,7 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     score = max(0, score)
 
     analysis.is_manifold = is_manifold
+    analysis.closure = closure
     analysis.connected_components = components
     analysis.solid_count = solids
     analysis.mesh_check_score = score
@@ -2067,18 +2064,12 @@ def _residual_defect_report(
                 f"again with close_holes=True to sew small holes."
             )
     if pinched:
-        unrepaired.append(
-            f"{pinched:,} pinched edges remain (3+ triangles meet "
-            f"along one line).  No repair pass here handles this class — it "
-            f"is not a hole, so hole closing cannot touch it.  The geometry "
-            f"has to be rebuilt where it was made (e.g. regenerate the "
-            f"model, or re-run the boolean/decoration step that produced "
-            f"it)."
-        )
+        from kiln.mesh_closure import pinch_fix, pinched_found
+
+        unrepaired.append(f"Still {pinched_found(reading)}.  {pinch_fix()}")
     if touching:
         unrepaired.append(
-            f"{_touching_sentence(touching, reading)}.  Repair leaves them as "
-            f"they are, and neither piece needs rebuilding."
+            f"{_touching_sentence(reading)}  Repair leaves them as they are."
         )
     report["remaining_touching_edges"] = touching
     if unrepaired:
@@ -3561,13 +3552,15 @@ def predict_print_failures(
         })
         risk_score += 15 if min_dim < nozzle_mm else 5
 
-    # 6. Non-manifold / disconnected components
+    # 6. Non-manifold / disconnected components, said in the closure
+    # reading's words (kiln.mesh_closure)
     if not analysis.is_manifold:
         failures.append({
             "type": "non_manifold",
             "severity": "medium",
-            "detail": "Mesh is not watertight — slicers may produce artifacts",
-            "suggestion": "Run `repair_mesh` with `close_holes=True` to close the holes.",
+            "detail": analysis.closure.get("state") or "The surface is not closed.",
+            "suggestion": analysis.closure.get("fix")
+            or "Run `repair_mesh` with `close_holes=True` to close the holes.",
         })
         risk_score += 10
 
@@ -4543,12 +4536,14 @@ def can_print_now(
         # Re-analyze after fixes
         analysis = analyze_mesh(working_path)
 
-    # Step 3: Check all criteria
+    # Step 3: Check all criteria.  The surface is said in the closure
+    # reading's words (kiln.mesh_closure).
     if not analysis.is_manifold:
         issues.append({
             "type": "non_manifold",
-            "detail": "Mesh is not watertight — slicers may produce artifacts",
-            "fix": "Run with auto_fix=True or use repair_mesh(close_holes=True)",
+            "detail": analysis.closure.get("state") or "The surface is not closed.",
+            "fix": analysis.closure.get("fix")
+            or "Run with auto_fix=True or use repair_mesh(close_holes=True)",
         })
 
     # Pieces in the air that join nothing, as the fusion check measures
@@ -4950,8 +4945,11 @@ def count_non_manifold_edges(file_path: str) -> dict[str, Any]:
     crowded = pinched + touching
     manifold = total_edges - open_edges - crowded
     non_manifold = open_edges + pinched
+    from kiln.mesh_closure import surface_closure
 
     return {
+        # Whether the surface is closed, in the words every door says.
+        "closure": surface_closure(reading).to_dict(),
         "total_edges": total_edges,
         "manifold_edges": manifold,
         "boundary_edges": open_edges,

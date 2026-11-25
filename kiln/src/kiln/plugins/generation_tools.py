@@ -407,6 +407,11 @@ class _GenerationToolsPlugin:
             as it is or with supports, passes; one that won't print fails;
             one with no single cause named is judged against Kiln's own
             floor.  Tell the person the verdict.
+
+            ``result.closure`` says whether the surface of the file handed on
+            is closed and every edge of each piece shared by exactly two of
+            its triangles, in the same words ``diagnose_mesh`` uses; a part
+            that meets itself along a line is never called manifold.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):

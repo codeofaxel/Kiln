@@ -53,6 +53,26 @@ def _ball(z):
     return ball
 
 
+def _band_on_a_block():
+    """A chain link's band, a D 12 mm tall and 2 mm thick with a rounded
+    back, whose flat end lies on a block's side: 24 mm2 of face on face,
+    two of the band's 264 triangles, triangulated unlike the block."""
+    turn = np.linspace(np.pi / 2, 3 * np.pi / 2, 65)
+    profile = [(0.0, 0.0), (0.0, 12.0), *[(-10.0 + 6.0 * np.cos(t), 6.0 + 6.0 * np.sin(t)) for t in turn]]
+    ring = np.asarray(profile)
+    n = len(ring)
+    v = np.vstack([np.c_[ring, np.full(n, 13.0)], np.c_[ring, np.full(n, 15.0)]])
+    faces = [(0, k + 1, k) for k in range(1, n - 1)] + [(n, n + k, n + k + 1) for k in range(1, n - 1)]
+    for k in range(n):
+        j = (k + 1) % n
+        faces += [(k, j, j + n), (k, j + n, k + n)]
+    band = trimesh.Trimesh(v, np.asarray(faces), process=False)
+    if band.volume < 0:
+        band.invert()
+    block = _box((0, 0, -15), (8.4, 12, 15)).subdivide().subdivide()
+    return [band, block]
+
+
 #: Each scene, and how many solids a slicer prints it as.
 SCENES = {
     "share_a_side_face": ([_box((0, 0, 0), (20, 20, 10)), _box((20, 0, 0), (40, 20, 10))], 1),
@@ -60,6 +80,7 @@ SCENES = {
     "coat_triangulated_its_own_way": (
         [_box((0, 0, 0), (20, 20, 10)), _box((0, 0, 10), (20, 20, 12)).subdivide().subdivide()], 1,
     ),
+    "an_end_face_lying_on_a_side": (_band_on_a_block(), 1),
     "overlap": ([_box((0, 0, 0), (20, 20, 10)), _box((15, 0, 0), (35, 20, 10))], 1),
     "embedded": ([_box((0, 0, 0), (40, 40, 10)), _box((10, 10, 2), (20, 20, 8))], 1),
     "hollow_part": (_hollow(), 1),
@@ -166,6 +187,80 @@ def test_the_search_stops_at_its_budget_and_says_what_it_left(monkeypatch):
     monkeypatch.setattr(mb, "_MAX_CONTACT_WORK", 10**12)
     monkeypatch.setattr(mb, "_MAX_SWEEP_LOOKS", 0)
     assert mb.read_triangles(scene).untested_pairs > 0
+
+
+def _fans_meeting_on_a_line(n):
+    """Two prisms whose faces on one plane are fans of *n* slivers each,
+    facing each other and meeting only along a diagonal: the box of every
+    sliver meets the box of every sliver across, and no two share any area,
+    so each pair has to be measured to learn that."""
+    below = [(0.0, 0.0)] + [(1.0, k / n) for k in range(n + 1)]
+    above = [(0.0, 0.0)] + [(1.0 - k / n, 1.0) for k in range(n + 1)]
+    fan = [(0, k + 1, k + 2) for k in range(n)]
+    lower = trimesh.creation.extrude_triangulation(below, fan, 1.0)
+    upper = trimesh.creation.extrude_triangulation(above, fan, 1.0)
+    upper.apply_translation((0.0, 0.0, 1.0))
+    return np.asarray(trimesh.util.concatenate([lower, upper]).triangles)
+
+
+def _count_measured(monkeypatch):
+    import kiln.mesh_bodies as mb
+
+    measured = []
+    real = mb._flat_overlap
+
+    def counted(first, second):
+        measured.append(1)
+        return real(first, second)
+
+    monkeypatch.setattr(mb, "_flat_overlap", counted)
+    return measured
+
+
+def test_faces_too_many_to_measure_are_left_unchecked_quickly_and_said(monkeypatch):
+    """A server reads files people upload, and each pair of faces lying on
+    one plane is measured on its own, so a file of a few thousand slivers
+    that share no area could keep it busy for hours.  Past a cap the pair is
+    not judged, at once, and the reading says so; the same shape small
+    enough to measure is measured and stands apart."""
+    import time
+
+    import kiln.mesh_bodies as mb
+
+    started = time.perf_counter()
+    hostile = mb.read_triangles(_fans_meeting_on_a_line(400))
+    took = time.perf_counter() - started
+    assert (hostile.piece_count, hostile.solid_count, hostile.untested_pairs) == (2, 2, 1)
+    assert hostile.solids_sentence() == "1 pair of pieces was not checked and is counted apart."
+    assert took < 5.0, took
+
+    measured = _count_measured(monkeypatch)
+    mb.read_triangles(_fans_meeting_on_a_line(400))
+    assert len(measured) <= mb._MAX_FACE_OVERLAPS
+
+    measured.clear()
+    small = mb.read_triangles(_fans_meeting_on_a_line(16))
+    assert (small.solid_count, small.untested_pairs) == (2, 0)
+    assert len(measured) >= 16 * 16
+
+
+def test_the_face_cap_holds_across_blocks_and_for_the_whole_reading(monkeypatch):
+    """Faces are compared a block at a time; blocks that fit are measured
+    until the reading's allowance would be passed, and never past it."""
+    import kiln.mesh_bodies as mb
+
+    measured = _count_measured(monkeypatch)
+    monkeypatch.setattr(mb, "_FACE_BLOCK", 16)
+    monkeypatch.setattr(mb, "_MAX_FACE_OVERLAPS", 1000)
+    reading = mb.read_triangles(_fans_meeting_on_a_line(40))
+    assert reading.untested_pairs == 1
+    assert 0 < len(measured) <= 1000
+
+    monkeypatch.setattr(mb, "_MAX_FACE_OVERLAPS", 10_000)
+    measured.clear()
+    reading = mb.read_triangles(_fans_meeting_on_a_line(40))
+    assert (reading.solid_count, reading.untested_pairs) == (2, 0)
+    assert len(measured) >= 40 * 40
 
 
 def _filament_mm(slicer: str, stl: Path) -> float:

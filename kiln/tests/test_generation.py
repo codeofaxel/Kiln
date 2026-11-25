@@ -784,7 +784,9 @@ class TestMeshValidation:
         result = validate_mesh(str(f))
         assert result.valid is True
         assert result.is_manifold is False
-        assert any("manifold" in w.lower() for w in result.warnings)
+        # Said in the closure reading's words (kiln.mesh_closure).
+        assert result.closure["closed"] is False
+        assert any(w.startswith("The surface is not closed: ") for w in result.warnings)
 
     def test_a_single_flat_triangle_is_no_part(self, tmp_path):
         f = tmp_path / "tri.stl"

@@ -14,7 +14,8 @@ Two things a file does not say have to be settled first.
   a fixed length, since the same model written in meters and in millimeters
   must weld the same way, or the count depends on the unit it was exported
   in.  Two corners one triangle holds stay apart unless they are copies
-  too, a few roundings apart.
+  too, a few roundings apart, and no join folds two triangles that share a
+  side onto each other.
 * **Which triangles belong together where more than two meet on one edge.**
   Two pieces laid on each other (a coat modelled on a body's surface) share
   their corners along the contact, so after the weld four triangles meet on
@@ -93,6 +94,13 @@ _MAX_CONTACT_WORK = 200_000_000
 #: Triangles held at once in the per-host material the tests reuse; a host
 #: past it is read for its test and let go.
 _MAX_HELD_MATERIAL = 4_000_000
+#: Pairs of faces one reading measures for the area they share.  Each pair
+#: is measured on its own, so a file with many faces that lie on one plane
+#: and face each other but share no area (two fans of slivers meeting along
+#: a line) could keep a reading busy for hours.  A pair of pieces whose
+#: faces would take more than what is left is not judged, and is counted
+#: as untested.
+_MAX_FACE_OVERLAPS = 100_000
 
 @dataclass(frozen=True)
 class Piece:
@@ -140,7 +148,8 @@ class BodyReading:
     #: index of the pieces joined to it.  Empty for a reading of no pieces.
     solid_of: tuple[int, ...] = ()
     #: Pairs of pieces whose boxes meet that went untested for contact (past
-    #: :data:`_MAX_CONTACT_PAIRS`); each reads as apart.
+    #: one of the reading's limits, such as :data:`_MAX_CONTACT_PAIRS` or
+    #: :data:`_MAX_FACE_OVERLAPS`); each reads as apart.
     untested_pairs: int = 0
 
     @property
@@ -202,10 +211,14 @@ class BodyReading:
         """How many solids the pieces print as, in one plain sentence, or
         ``""`` for a single piece or pieces that all stand apart."""
         n, k = self.piece_count, self.solid_count
-        unchecked = (
-            f"  {self.untested_pairs:,} pairs of pieces were not checked and are "
-            "counted apart." if self.untested_pairs else ""
-        )
+        unchecked = ""
+        if self.untested_pairs == 1:
+            unchecked = "  1 pair of pieces was not checked and is counted apart."
+        elif self.untested_pairs:
+            unchecked = (
+                f"  {self.untested_pairs:,} pairs of pieces were not checked and are "
+                "counted apart."
+            )
         if n < 2 or not (self.joined or unchecked):
             return ""
         if not self.joined:
@@ -274,7 +287,10 @@ def weld(
     copies of one point an exporter wrote a rounding apart, except where a
     triangle holds both and they are further apart than a few roundings
     (:data:`_COPY_RADII`), even through a chain of others: that side is the
-    triangle's own.  So geometry finer than the radius reads as the file
+    triangle's own.  Nor does a join ever lay two triangles that share a
+    side onto each other, the corner across that side from each joined while
+    the side stays: that would fold a sliver the file wrote into a crease it
+    does not have.  So geometry finer than the radius reads as the file
     wrote it.  A *tolerance* of ``0`` joins exact duplicates only.
 
     :returns: ``(vertices, faces, tolerance)`` with *faces* re-indexed.
@@ -314,7 +330,9 @@ def _join_near(points: np.ndarray, faces: np.ndarray, tol: float) -> np.ndarray:
     """For each point, the smallest index of the points joined to it: two
     join when they lie within *tol* of each other and are not the ends of a
     side of *faces* longer than :data:`_COPY_RADII` radii, and joins chain.
-    A chain that would close such a side is left unjoined, all of it.
+    A chain that would close such a side is left unjoined, all of it, and so
+    is one that would fold two triangles sharing a side onto each other
+    (:func:`_folds`).
 
     Each of eight grids of cell ``2 * tol``, offset by ``tol`` on each axis
     in turn, buckets the points; two points within *tol* on every axis share
@@ -342,16 +360,58 @@ def _join_near(points: np.ndarray, faces: np.ndarray, tol: float) -> np.ndarray:
                 a, b = label[a[~own]], label[b[~own]]
                 if len(a):
                     label = _components(n, a, b)[label]
-    if sides is None or not len(sides):
-        return label
-    lo, hi = sides // n, sides % n
-    closed = label[lo[label[lo] == label[hi]]]
-    if len(closed):
-        shut = np.zeros(n, dtype=bool)
-        shut[closed] = True
-        undo = shut[label]
+    if sides is None:
+        return label  # no two points lay within the radius
+    shut = np.zeros(n, dtype=bool)
+    if len(sides):
+        lo, hi = sides // n, sides % n
+        shut[label[lo[label[lo] == label[hi]]]] = True
+    shut[_folds(label, faces)] = True
+    undo = shut[label]
+    if undo.any():
         label[undo] = np.flatnonzero(undo)
     return label
+
+
+def _folds(label: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """The groups of *label* that would lay two triangles of *faces* sharing
+    a side onto each other: the corner across that side from each is in the
+    group while the side's two ends stay apart, so the pair would become one
+    triangle's worth of surface folded back on itself.  Two triangles that
+    already hold the same corner across their side lie back to back as the
+    file wrote them, and are left as they are.
+
+    A side more than :data:`_NEAR_SPAN` + 1 triangles meet on is compared
+    over its first :data:`_NEAR_SPAN` + 1 only.
+    """
+    n = len(label)
+    grouped = np.bincount(label, minlength=n)[label] > 1
+    if not grouped.any():
+        return np.zeros(0, dtype=np.int64)
+    f = np.asarray(faces, dtype=np.int64).reshape(-1, 3)
+    # Side k of a triangle runs from its corner k to corner k + 1; the
+    # corner across it is k + 2.
+    start = f.reshape(-1)
+    end = f[:, [1, 2, 0]].reshape(-1)
+    across = f[:, [2, 0, 1]].reshape(-1)
+    keep = grouped[across] & (start != end)
+    low = np.minimum(start, end)[keep]
+    high = np.maximum(start, end)[keep]
+    across = across[keep]
+    key = low * n + high
+    order = np.argsort(key, kind="stable")
+    key, low, high, across = key[order], low[order], high[order], across[order]
+    found: list[np.ndarray] = []
+    for step in range(1, _NEAR_SPAN + 1):
+        same = key[step:] == key[:-step]
+        if not same.any():
+            break
+        a, c = across[:-step][same], across[step:][same]
+        p, q = label[low[step:][same]], label[high[step:][same]]
+        group = label[a]
+        fold = (a != c) & (group == label[c]) & (p != q) & (group != p) & (group != q)
+        found.append(group[fold])
+    return np.unique(np.concatenate(found)) if found else np.zeros(0, dtype=np.int64)
 
 
 def _near_pairs(
@@ -795,6 +855,7 @@ def _solids(
 
     tests = 0
     work = 0
+    overlaps = 0
     untested = unswept
     for a, b in pairs:
         if find(a) == find(b):
@@ -806,6 +867,23 @@ def _solids(
             continue
         if tests >= _MAX_CONTACT_PAIRS or work >= _MAX_CONTACT_WORK:
             untested += 1
+            continue
+        # Faces of one lying flat on faces of the other, over more than a
+        # square one probe deep: one solid, however each is triangulated.
+        # The probes below sample a piece, so a face that is a small share of
+        # it can fall between them.
+        enough = (_PROBE_DEPTH_FRACTION * diagonal[small]) ** 2
+        shared, cost, measured = _faces_lie_on(
+            tri, cross, faces_of(small), faces_of(host),
+            np.maximum(lows[a], lows[b]), np.minimum(highs[a], highs[b]), slack, enough,
+            budget=_MAX_CONTACT_WORK - work, allowance=_MAX_FACE_OVERLAPS - overlaps,
+        )
+        work += cost
+        overlaps += measured
+        if shared is not None and shared >= enough:
+            tests += 1
+            joined[(a, b)] = "surface"
+            root[find(a)] = find(b)
             continue
         # Reading a host's material is work too, charged before it is done:
         # once, while it is held; every time, when it is not.
@@ -836,6 +914,10 @@ def _solids(
         if met:
             joined[(a, b)] = "contact"
             root[find(a)] = find(b)
+        elif shared is None:
+            # No probe met the other piece, but faces that may lie on each
+            # other went unmeasured, so the pair is not judged apart.
+            untested += 1
 
     label = _components(n, np.array([a for a, _ in joined], dtype=np.int64),
                         np.array([b for _, b in joined], dtype=np.int64))
@@ -911,6 +993,151 @@ def _in_contact(
         count += (crossed * up[None, :]).sum(axis=1)
     inside = int((count > 0.5).sum())
     return inside >= _CONTACT_MIN_PROBES and inside >= _CONTACT_MIN_SHARE * len(probes), cost
+
+
+#: Two faces lie on each other when they face opposite ways to within this
+#: (the cosine of the angle between them, past a half turn) and sit on one
+#: plane to within the reading's weld radius.
+_FACING_COS = 1.0 - 1e-6
+
+#: Faces of each piece compared at once, so one comparison holds about a
+#: million pairs of faces.
+_FACE_BLOCK = 1024
+
+#: The two axes a face keeps when it is laid flat along the axis its normal
+#: is closest to.
+_IN_PLANE = np.array([[1, 2], [0, 2], [0, 1]])
+
+
+def _faces_lie_on(
+    tri: np.ndarray,
+    cross: np.ndarray,
+    own: np.ndarray,
+    host: np.ndarray,
+    box_lo: np.ndarray,
+    box_hi: np.ndarray,
+    tol: float,
+    enough: float,
+    *,
+    budget: int,
+    allowance: int,
+) -> tuple[float | None, int, int]:
+    """The area over which faces among the triangles *own* lie flat on faces
+    among the triangles *host*: on one plane to within *tol*, facing each
+    other, and overlapping.  Only faces within the box two pieces share
+    (*box_lo*, *box_hi*) can, so only those are compared; only a pair of
+    faces whose own boxes meet is measured, and the sum stops once it
+    reaches *enough*.  Two pieces that meet only along an edge or at a point
+    share no area.
+
+    Returns ``(area, cost, measured)``: ``measured`` pairs of faces were
+    measured, never more than *allowance*.  ``area`` is ``None`` when
+    comparing would cost more than *budget*, or measuring would take more
+    pairs than *allowance*: the pair is left untested rather than read wrong.
+    """
+    def near(faces: np.ndarray) -> np.ndarray:
+        t = tri[faces]
+        within = np.all(t.max(axis=1) >= box_lo - tol, axis=1) & np.all(t.min(axis=1) <= box_hi + tol, axis=1)
+        return faces[within & (np.linalg.norm(cross[faces], axis=1) > 0.0)]
+
+    looked = len(own) + len(host)
+    mine, theirs = near(own), near(host)
+    if not len(mine) or not len(theirs):
+        return 0.0, looked, 0
+    cost = looked + len(mine) * len(theirs)
+    if cost > budget:
+        return None, looked, 0
+    unit_mine = cross[mine] / np.linalg.norm(cross[mine], axis=1)[:, None]
+    unit_theirs = cross[theirs] / np.linalg.norm(cross[theirs], axis=1)[:, None]
+    plane_mine = np.einsum("ij,ij->i", unit_mine, tri[mine, 0])
+    centre_theirs = tri[theirs].mean(axis=1)
+    lo_mine, hi_mine = tri[mine].min(axis=1) - tol, tri[mine].max(axis=1) + tol
+    lo_theirs, hi_theirs = tri[theirs].min(axis=1), tri[theirs].max(axis=1)
+    shared, measured = 0.0, 0
+    for r in range(0, len(mine), _FACE_BLOCK):
+        rows = slice(r, r + _FACE_BLOCK)
+        for c in range(0, len(theirs), _FACE_BLOCK):
+            cols = slice(c, c + _FACE_BLOCK)
+            lie = unit_mine[rows] @ unit_theirs[cols].T <= -_FACING_COS
+            lie &= np.abs(unit_mine[rows] @ centre_theirs[cols].T - plane_mine[rows, None]) <= tol
+            for k in range(3):
+                lie &= lo_mine[rows, None, k] <= hi_theirs[None, cols, k]
+                lie &= hi_mine[rows, None, k] >= lo_theirs[None, cols, k]
+            count = int(np.count_nonzero(lie))
+            if not count:
+                continue
+            if measured + count > allowance:
+                return None, cost, measured
+            i, j = np.nonzero(lie)
+            got, done = _area_in_common(
+                tri[mine[r + i]], tri[theirs[c + j]], unit_mine[r + i], enough - shared,
+            )
+            shared += got
+            measured += done
+            if shared >= enough:
+                return shared, cost, measured
+    return shared, cost, measured
+
+
+def _area_in_common(
+    first: np.ndarray, second: np.ndarray, normals: np.ndarray, wanted: float,
+) -> tuple[float, int]:
+    """The area pairs of triangles on one plane, ``first[k]`` and
+    ``second[k]`` with unit ``normals[k]``, cover in common, summed in order
+    until it reaches *wanted*, and how many pairs that took."""
+    axis = np.argmax(np.abs(normals), axis=1)
+    keep = _IN_PLANE[axis][:, None, :]
+    flat_first = np.take_along_axis(first, keep, axis=2).tolist()
+    flat_second = np.take_along_axis(second, keep, axis=2).tolist()
+    scale = np.abs(normals[np.arange(len(axis)), axis]).tolist()
+    total = 0.0
+    for k, (a, b, s) in enumerate(zip(flat_first, flat_second, scale, strict=True), start=1):
+        total += _flat_overlap(a, b) / s
+        if total >= wanted:
+            return total, k
+    return total, len(scale)
+
+
+def _flat_overlap(first: list[list[float]], second: list[list[float]]) -> float:
+    """The area two triangles in a plane, three ``[x, y]`` corners each,
+    cover in common."""
+    shape = _counter_clockwise(first)
+    edge = _counter_clockwise(second)
+    for k in range(3):
+        shape = _left_of(shape, edge[k - 1], edge[k])
+        if len(shape) < 3:
+            return 0.0
+    twice = 0.0
+    x0, y0 = shape[-1]
+    for x1, y1 in shape:
+        twice += x0 * y1 - x1 * y0
+        x0, y0 = x1, y1
+    return 0.5 * abs(twice)
+
+
+def _counter_clockwise(corners: list[list[float]]) -> list[list[float]]:
+    (ax, ay), (bx, by), (cx, cy) = corners
+    turn = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+    return corners if turn >= 0.0 else [corners[0], corners[2], corners[1]]
+
+
+def _left_of(shape: list[list[float]], a: list[float], b: list[float]) -> list[list[float]]:
+    """The part of the convex polygon *shape* on the left of the line a to b."""
+    ax, ay = a
+    dx, dy = b[0] - ax, b[1] - ay
+    kept: list[list[float]] = []
+    px, py = shape[-1]
+    side_p = dx * (py - ay) - dy * (px - ax)
+    for q in shape:
+        qx, qy = q
+        side_q = dx * (qy - ay) - dy * (qx - ax)
+        if (side_p >= 0.0) != (side_q >= 0.0):
+            t = side_p / (side_p - side_q)
+            kept.append([px + t * (qx - px), py + t * (qy - py)])
+        if side_q >= 0.0:
+            kept.append(q)
+        px, py, side_p = qx, qy, side_q
+    return kept
 
 
 def read_triangles(triangles: Any, *, tolerance: float | None = None, max_points: int = 3) -> BodyReading:

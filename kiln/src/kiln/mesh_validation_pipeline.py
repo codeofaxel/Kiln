@@ -68,6 +68,14 @@ class ValidationPipelineResult:
     # each closed, for one.
     notes: list[str] = field(default_factory=list)
 
+    # The closure of the file this run hands on (kiln.mesh_closure): whether
+    # it is closed and manifold, and the sentences that say so.
+    closure: dict[str, Any] = field(default_factory=dict)
+
+    # What a repair in this run fixed, in the closure reading's words; ``""``
+    # when nothing was repaired.
+    repaired_found: str = ""
+
     # The printability verdict (kiln.printability.verdict): ``ready``,
     # ``prints_with_supports``, ``wont_print`` or ``check``, and its
     # sentence; ``""`` when the analysis could not run.  This is what
@@ -119,6 +127,13 @@ def _mesh_fits_volume(
     )
 
 
+def _closure_said(closure: dict[str, Any]) -> str:
+    """The closure block's state and what to do, as one paragraph."""
+    from kiln.mesh_closure import closure_sentence
+
+    return closure_sentence(closure)
+
+
 def _build_summary(result: ValidationPipelineResult) -> str:
     """Generate a human-readable summary paragraph."""
     parts: list[str] = []
@@ -133,13 +148,23 @@ def _build_summary(result: ValidationPipelineResult) -> str:
     if result.verdict_text:
         parts.append(result.verdict_text)
 
-    # Closed surface / repair
-    if result.was_repaired and result.is_manifold:
-        parts.append("The surface had holes, and repair closed them.")
-    elif not result.is_manifold:
-        parts.append("The surface is not closed, and repair could not close it.")
-    else:
+    # The surface, in the closure reading's words (kiln.mesh_closure), said
+    # once: a verdict that already names the state is followed by the fix.
+    closure = _closure_said(result.closure)
+    state = result.closure.get("state") or ""
+    if result.was_repaired and result.is_manifold and result.repaired_found:
+        parts.append(
+            f"Repair fixed {result.repaired_found}: the surface is now closed (watertight)."
+        )
+    elif state and state in result.verdict_text:
+        if result.closure.get("fix"):
+            parts.append(result.closure["fix"])
+    elif closure:
+        parts.append(closure)
+    elif result.is_manifold:
         parts.append("The surface is closed (watertight).")
+    else:
+        parts.append("The surface is not closed.")
     parts.extend(result.notes)
 
     # Build volume
@@ -157,8 +182,9 @@ def _build_summary(result: ValidationPipelineResult) -> str:
 
     if result.errors:
         parts.append(f"Errors: {'; '.join(result.errors)}.")
-    # The stop the verdict names is said once, there.
-    warnings = [w for w in result.warnings if w not in result.verdict_text]
+    # The stop the verdict names is said once, there, and the surface once,
+    # above.
+    warnings = [w for w in result.warnings if w not in result.verdict_text and w not in closure]
     if warnings:
         parts.append(f"Warnings: {'; '.join(warnings)}.")
 
@@ -243,12 +269,15 @@ def run_validation_pipeline(
         validation = validate_mesh(file_path)
 
         is_manifold = validation.is_manifold
+        closure = validation.closure
+        repaired_found = ""
         triangle_count = validation.triangle_count
         bounding_box = validation.bounding_box
         dimensions = _dimensions_from_bbox(bounding_box)
 
         errors.extend(validation.errors)
-        warnings.extend(validation.warnings)
+        # The surface is said once, from the file this run hands on.
+        warnings.extend(w for w in validation.warnings if w != _closure_said(closure))
 
         if not validation.valid and not validation.is_manifold and not auto_repair:
             _logger.warning("Mesh is invalid and auto_repair is disabled.")
@@ -282,6 +311,7 @@ def run_validation_pipeline(
             # Re-validate after basic repair
             post_basic = validate_mesh(tmp_repaired)
             is_manifold = post_basic.is_manifold
+            closure = post_basic.closure
             triangle_count = post_basic.triangle_count
             bounding_box = post_basic.bounding_box
             dimensions = _dimensions_from_bbox(bounding_box)
@@ -306,18 +336,19 @@ def run_validation_pipeline(
                     _logger.error("Advanced repair failed: %s", exc, exc_info=True)
 
                 # Re-validate after advanced repair
-                post_adv = validate_mesh(tmp_repaired)
+                post_adv = validate_mesh(tmp_repaired, repair_tried=True)
                 is_manifold = post_adv.is_manifold
+                closure = post_adv.closure
                 triangle_count = post_adv.triangle_count
                 bounding_box = post_adv.bounding_box
                 dimensions = _dimensions_from_bbox(bounding_box)
 
             if is_manifold:
                 was_repaired = True
+                repaired_found = validation.closure.get("found", "")
                 working_path = tmp_repaired
                 _logger.info("Repair succeeded — mesh is now manifold.")
             else:
-                warnings.append("Mesh remains non-manifold after repair attempts.")
                 # Still use the repaired copy — degenerate cleanup may help downstream.
                 was_repaired = repair_stats is not None
                 working_path = tmp_repaired
@@ -377,10 +408,16 @@ def run_validation_pipeline(
             printability_details = report.to_dict()
             recommendations.extend(report.recommendations)
             from kiln.printability import stops as _stops
-            from kiln.printability import verdict_of as _verdict_of
+            from kiln.printability import verdict_block as _verdict_block
 
             hard_stops = _stops(report)
-            verdict_key, verdict_text = _verdict_of(report)
+            # A surface this run hands on still open or pinched is a fault
+            # the report does not hold: the verdict never calls it ready.
+            block = _verdict_block(
+                report, found=() if is_manifold else (closure.get("state", ""),),
+            )
+            verdict_key = block["printability_verdict"]
+            verdict_text = block["printability_verdict_text"]
             _logger.info(
                 "Printability score: %d/100 (grade %s)", report.score, report.grade,
             )
@@ -467,6 +504,9 @@ def run_validation_pipeline(
 
         if not is_manifold:
             passed = False
+            # The surface the run hands on, in the closure reading's words.
+            if _closure_said(closure):
+                warnings.append(_closure_said(closure))
 
         # The verdict decides (kiln.printability.passes): a part that prints
         # with supports passes whatever it scores.
@@ -517,6 +557,8 @@ def run_validation_pipeline(
             warnings=warnings,
             recommendations=recommendations,
             notes=list(validation.notes),
+            closure=dict(closure),
+            repaired_found=repaired_found,
             verdict=verdict_key,
             verdict_text=verdict_text,
             summary="",
