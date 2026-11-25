@@ -176,7 +176,12 @@ def test_an_auto_centred_slice_says_the_design_yes_does_not_carry(tmp_path, monk
 
     from kiln.plugins import slicer_tools
 
-    monkeypatch.setattr("kiln.printers.bed_fit.validate_mesh_for_printer", _off_bed)
+    # The design measures off the bed and the centred copy on it, as the
+    # real measurement reads the two files.
+    monkeypatch.setattr(
+        "kiln.printers.bed_fit.validate_mesh_for_printer",
+        lambda path, *a, **k: _on_bed() if path.endswith("_bedcentered.stl") else _off_bed(),
+    )
     monkeypatch.setattr(
         "kiln.printers.bed_fit.apply_translation_to_stl",
         lambda src, t, dst: Path(dst).write_bytes(b"solid p\nendsolid p\n"),
@@ -187,6 +192,7 @@ def test_an_auto_centred_slice_says_the_design_yes_does_not_carry(tmp_path, monk
     effective, err, info = slicer_tools._apply_bed_fit_gate(str(stl), "bambu_a1", True)
     assert err is None
     assert info["auto_centered"] is True and effective != str(stl)
+    assert info["ok"] is True and info["error_code"] is None and info["error_message"] is None
     assert info["approval_carries"] is False
     assert "13 mm" in info["approval_note"]
     assert "design" in info["approval_note"]

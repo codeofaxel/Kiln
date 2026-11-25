@@ -409,6 +409,11 @@ def _apply_bed_fit_gate(
                     "the stage on this result shows the plate as it will print "
                     "— approve from here"
                 )
+                # The verdict is of the copy that is sliced, measured as a
+                # turned copy is, never of where the design stood.
+                fit.update(validate_mesh_for_printer(centered_path, effective_printer_id))
+                if not fit["ok"] and fit["error_code"] in ("OFF_BED_GEOMETRY", "EXCEEDS_BED"):
+                    return input_path, fit, fit
                 return centered_path, None, fit
             except Exception as exc:  # noqa: BLE001
                 _logger.warning("Auto-center failed: %s", exc)
