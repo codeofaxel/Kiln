@@ -3,16 +3,16 @@
 # newer interpreter can silently resolve packages that drop 3.10/3.11
 # support, as happened on the kiln/ side on 2026-07-12):
 # python3.10 -m venv /tmp/octoprint-cli-lock && /tmp/octoprint-cli-lock/bin/python -m pip install -e ".[dev]" && /tmp/octoprint-cli-lock/bin/python -m pip freeze | grep -v "^-e" | sort > requirements-lock.txt
-PyYAML==6.0.3
+PyYAML==6.0.4
 Pygments==2.21.0
-certifi==2026.10.23
+certifi==2026.11.20
 charset-normalizer==3.5.2
-click==8.5.0
+click==8.5.1
 coverage==7.16.2
-exceptiongroup==1.3.1
+exceptiongroup==1.3.2
 idna==3.20
 iniconfig==2.3.1
-markdown-it-py==4.2.0
+markdown-it-py==4.3.0
 mdurl==0.1.2
 packaging==26.3
 pluggy==1.7.0
