@@ -406,6 +406,17 @@ class AdhesionRecommendation:
     contact_percentage: float
     rationale: str
     slicer_overrides: dict[str, str] = field(default_factory=dict)
+    #: The narrowest gap on the bed, in mm, between separate parts that
+    #: print in place together, when it kept the brim narrower than the part
+    #: asks for, or left it off: a brim that wide would join them there.
+    #: ``None`` when no brim was held back.
+    parts_gap_mm: float | None = None
+
+    @property
+    def brim_left_off(self) -> bool:
+        """Whether the part asks for a brim that no width can give it
+        without joining its separate parts on the bed."""
+        return self.parts_gap_mm is not None and self.brim_width_mm == 0 and not self.use_raft
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -653,10 +664,13 @@ class PlacementAnalysis:
 class PiecesAnalysis:
     """How the part's pieces print: as one solid, or as separate parts.
 
-    ``piece_count`` and ``solid_count`` are :mod:`kiln.mesh_bodies`' reading
-    (pieces that share a surface or sink into one another print as one
-    solid).  Each solid past the first is a separate part, and ``parts_mm``
-    gives every part's size (width, depth, height), largest first.  The
+    ``piece_count`` is :mod:`kiln.mesh_bodies`' reading of the pieces, and
+    ``solid_count`` how many separate parts they print as
+    (:func:`kiln.fusion_check.printed_parts`): pieces that share a surface
+    or sink into one another print as one, and so do parts standing closer
+    than a printer keeps apart.  Each part past the first is a separate
+    part, and ``parts_mm`` gives every part's size (width, depth, height),
+    largest first.  The
     pieces that start above the bed with nothing under them and nothing
     holding them are ``floating_bodies``, and pieces held inside the part
     without touching it are ``captive_bodies``, as :mod:`kiln.fusion_check`
@@ -692,12 +706,17 @@ class PiecesAnalysis:
     #: How many pairs ``may_fuse`` counts, for the check's facts
     #: (:func:`check_reasons`).  Bookkeeping; never served.
     may_fuse_pairs: int = field(default=0, repr=False)
+    #: The separate part each piece of the reading prints as, one entry per
+    #: piece (:func:`kiln.fusion_check.printed_parts`).  Bookkeeping for the
+    #: brim decision; never served.
+    part_of_piece: list[int] = field(default_factory=list, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("stand_apart")
         d.pop("may_fuse_mm")
         d.pop("may_fuse_pairs")
+        d.pop("part_of_piece")
         return d
 
 
@@ -8367,9 +8386,13 @@ def adhesion_advice(adhesion: AdhesionRecommendation | None) -> list[str]:
     recommendations read it, and so does any door that serves one block of
     the report on its own — the warping and adhesion-force blocks state
     their risk and name no brim, so such a door carries the decision with
-    this or the brim is in the reply nowhere.
+    this or the brim is in the reply nowhere.  A brim left off because it
+    would join the part's separate pieces is said too, with what holds the
+    part down instead.
     """
-    if adhesion is not None and (adhesion.brim_width_mm > 0 or adhesion.use_raft):
+    if adhesion is not None and (
+        adhesion.brim_width_mm > 0 or adhesion.use_raft or adhesion.parts_gap_mm is not None
+    ):
         return [adhesion.rationale]
     return []
 
@@ -8397,9 +8420,10 @@ def _thin_line_sentence(thin_walls: ThinWallAnalysis) -> str:
             f"Kiln's slicer settings, so they will be fragile."
         )
     return (
-        f"Walls as thin as {thinnest:.2f} mm are thinner than the nozzle: {_JUDGED_FOR} "
-        f"print each as a single thin line, so they will be fragile.  Bambu Studio's "
-        f"standard settings leave such walls out unless Arachne walls are turned on."
+        f"Walls as thin as {thinnest:.2f} mm are thinner than the nozzle: Kiln's slicer settings "
+        f"print each as a single thin line, so they will be fragile. Bambu Studio's standard "
+        f'settings leave walls this thin out of the print; to keep them there, set its "Wall '
+        f'generator" to "Arachne".'
     )
 
 
@@ -9715,7 +9739,10 @@ def _parts_stand_apart(parsed: list[tuple[tuple[float, ...], ...]], reading: Any
     of them when the caller holds it) make two or more solids, and
     :func:`kiln.fusion_check.judge_reading` measures a clearance between at
     least two of them.  ``False`` when the pieces cannot be read: a file
-    whose parts are not known to stand apart is sliced as any other.
+    whose parts are not known to stand apart is sliced as any other.  Parts
+    are counted as they print (:func:`kiln.fusion_check.printed_parts`), as
+    the printability report counts them: a clearance inside one printed
+    part is not two parts standing apart.
     """
     try:
         if reading is None:
@@ -9727,13 +9754,15 @@ def _parts_stand_apart(parsed: list[tuple[tuple[float, ...], ...]], reading: Any
             reading = read_triangles(parsed)
         if reading.piece_count < 2 or len(set(reading.solid_of or range(reading.piece_count))) < 2:
             return False
-        from kiln.fusion_check import judge_reading
+        from kiln.fusion_check import judge_reading, printed_parts
 
         fusion = judge_reading(parsed, reading, clearances=True)
+        clearances = fusion.get("clearances") or {}
+        part = printed_parts(reading, clearances)
+        return any(part[a - 1] != part[b - 1] for a, b in (p["bodies"] for p in clearances.get("pairs") or []))
     except Exception:  # noqa: BLE001 -- unread pieces change nothing about the slice
         logger.debug("pieces not read for the support decision", exc_info=True)
         return False
-    return bool((fusion.get("clearances") or {}).get("pairs"))
 
 
 def _mm_said(value: float) -> str:
@@ -9924,7 +9953,10 @@ def _judge_pieces(
     with no suggestion that they were meant to be one solid.  Pieces the
     reading prints as one solid that do not touch, a hair apart, are said to
     print stuck together, and no clearance beside them is called fine
-    (:func:`kiln.fusion_check.joined_apart`).  Every pair that may print
+    (:func:`kiln.fusion_check.joined_apart`).  Parts are counted as they
+    print (:func:`kiln.fusion_check.printed_parts`): parts standing closer
+    than a printer keeps apart are one part, said as pieces drawn apart that
+    print stuck together, never as two parts.  Every pair that may print
     stuck together is counted in ``may_fuse``, with where the closest pair
     is.  ``None`` when the mesh has no pieces to read.
     """
@@ -9948,7 +9980,9 @@ def _judge_pieces(
     )
     corner = np.min(np.vstack(list(lows.values())), axis=0)
 
-    from kiln.fusion_check import joined_apart, judge_reading
+    from kiln.fusion_check import joined_apart, judge_reading, printed_parts
+
+    block.part_of_piece = printed_parts(reading)
 
     try:
         apart = joined_apart(triangles, reading)
@@ -9986,20 +10020,55 @@ def _judge_pieces(
         block.floating = str(floating["message"])
         return block
     clearances = fusion.get("clearances") or {}
-    block.stand_apart = bool(clearances.get("pairs"))
     unheld = set(fusion.get("unheld_bodies") or [])
     in_air = {solid_of[body - 1] for body in unheld}
-    standing = [s for s in largest_first if s not in in_air]
+    # The parts it prints as, the one count every reply says: solids that
+    # stand closer than a printer keeps apart print as one part, said as
+    # pieces drawn apart that print stuck together.
+    block.part_of_piece = printed_parts(reading, clearances)
+    part_of = {solid: block.part_of_piece[piece] for piece, solid in enumerate(solid_of)}
+    members: dict[int, list[int]] = {}
+    for solid in largest_first:
+        members.setdefault(part_of[solid], []).append(solid)
+    part_size = {
+        part: [
+            round(float(v), 2)
+            for v in np.max([highs[s] for s in solids], axis=0) - np.min([lows[s] for s in solids], axis=0)
+        ]
+        for part, solids in members.items()
+    }
+    parts_first = sorted(part_size, key=lambda p: (-float(np.prod(part_size[p])), part_size[p]))
+    block.solid_count = len(part_size)
+    block.parts_mm = [part_size[p] for p in parts_first[:_PARTS_LISTED]]
+    touching = list(clearances.get("touching") or [])
+    joined_gaps = fused_gaps + [float(p["gap_mm"]) for p in touching]
+    part_of_body = [part_of[solid] for solid in solid_of]
+    between = [
+        p for p in clearances.get("pairs") or []
+        if part_of_body[p["bodies"][0] - 1] != part_of_body[p["bodies"][1] - 1]
+    ]
+    block.stand_apart = bool(between)
+    standing = [p for p in parts_first if not any(s in in_air for s in members[p])]
     said: list[str] = []
     if len(standing) >= 2:
-        said.append(_standing_said(standing, size_of, clearances, solid_of, moves_apart, fused_gaps=fused_gaps))
-        stuck += [(float(p["gap_mm"]), list(p["bodies"])) for p in clearances.get("touching") or []]
-        stuck += [
-            (float(p["gap_mm"]), list(p["bodies"]))
-            for p in clearances.get("pairs") or [] if _may_print_stuck(p.get("gap_mm"))
-        ]
+
+        def parts_move_apart(a: int, b: int) -> bool:
+            return any(moves_apart(x, y) for x in members[a] for y in members[b])
+
+        said.append(_standing_said(
+            standing, part_size, {**clearances, "pairs": between, "touching": []}, part_of_body,
+            parts_move_apart, fused_gaps=joined_gaps,
+        ))
+    elif touching:
+        drawn = sum(1 for solid in solid_of if solid not in in_air)
+        said.append(_fused_said(joined_gaps, drawn_as=drawn))
     elif fused:
         said.append(_fused_said(fused_gaps))
+    stuck += [(float(p["gap_mm"]), list(p["bodies"])) for p in touching]
+    stuck += [
+        (float(p["gap_mm"]), list(p["bodies"]))
+        for p in clearances.get("pairs") or [] if _may_print_stuck(p.get("gap_mm"))
+    ]
     # The pieces in the air that do print, by how the fusion check found
     # them: resting on the part, a clearance away from it, held inside it.
     resting: set[int] = set()
@@ -10255,14 +10324,14 @@ def _standing_said(
 
 def _may_print_stuck(gap_mm: float | None) -> bool:
     """Whether two separate parts *gap_mm* apart may print as one piece:
-    the gap is under the smallest one moving parts are given
-    (:func:`kiln.assembly.moving_gap_floor_mm`).  An unmeasured gap is not
-    called close."""
+    the gap is under the smallest one moving parts are given, judged as it
+    is said (:func:`kiln.assembly.under_moving_gap_floor`).  An unmeasured
+    gap is not called close."""
     if gap_mm is None:
         return False
-    from kiln.assembly import moving_gap_floor_mm
+    from kiln.assembly import under_moving_gap_floor
 
-    return float(gap_mm) < moving_gap_floor_mm()
+    return under_moving_gap_floor(gap_mm)
 
 
 def _elsewhere_said(who: str, gaps: list[float]) -> str:
@@ -10707,6 +10776,17 @@ def _analyze_printability_here(
     # prescribes a brim on its own any more, so a report cannot say "no
     # brim needed" and "add a brim" at once.
     has_enclosure, on_bedslinger = _printer_adhesion_context(printer_id)
+    # Separate parts that print in place together stand apart on the bed
+    # too: the brim decision keeps that gap clear.
+    parts_gap = None
+    if pieces is not None and parts is not None and parts.stand_apart:
+        try:
+            parts_gap = _bed_gap_between_parts(
+                once, pieces, parts, z_min, layer_height=layer_height,
+                reach=2 * max(_BRIM_WIDTHS_MM) + nozzle_diameter,
+            )
+        except (ValueError, IndexError, MemoryError):
+            logger.debug("gap between parts on the bed unread", exc_info=True)
     adhesion = recommend_adhesion(
         bed_adhesion,
         material=material,
@@ -10715,6 +10795,8 @@ def _analyze_printability_here(
         model_height_mm=bbox["z_max"] - bbox["z_min"],
         warping=warping,
         adhesion_force=adhesion_force,
+        parts_gap_mm=parts_gap,
+        nozzle_mm=nozzle_diameter,
     )
     recommendations = _build_recommendations(
         overhangs, thin_walls, bridging, bed_adhesion, supports,
@@ -10729,18 +10811,19 @@ def _analyze_printability_here(
     # ``needs_supports`` verdict was downgraded above, give the user
     # an explicit "the slicer will bridge this" line so they
     # understand WHY no supports are needed despite the horizontal
-    # overhang in the geometry.  Silent downgrade is worse UX than
-    # "needs supports + slicer will bridge" was — at least the old
-    # version told the user something.
+    # overhang in the geometry.  Said only of a part that needs no
+    # supports: beside a verdict that asks for them, "no action is
+    # needed" is a second answer to the same question.
     if _self_supporting_overhang_count > 0:
         recommendations.insert(
             0,
             f"{_self_supporting_overhang_count} overhang face(s) sit on "
             f"features that print on their own (short bridges, narrow "
-            f"lips, a screw thread's flanks) — the slicer prints these "
-            f"without supports; they are excluded from the score."
+            f"lips, a screw thread's flanks): the slicer prints these "
+            f"without supports."
         )
-    if _bridge_substituted_overhang_pct is not None:
+    needs_supports = overhangs.needs_supports or bridging.needs_supports_for_bridges
+    if _bridge_substituted_overhang_pct is not None and not needs_supports:
         # A ceiling that is a sliver of the part (a hex socket's roof) is
         # named without a share that would round to nothing.
         share = (
@@ -10750,7 +10833,7 @@ def _analyze_printability_here(
         recommendations.insert(
             0,
             f"Slicer will likely bridge the {share}horizontal overhang "
-            f"without supports — no action needed.  Force-enable supports "
+            f"without supports, so no action is needed.  Force-enable supports "
             f"in your slicer if the underside is a show surface and you "
             f"want a smoother finish."
         )
@@ -11244,14 +11327,28 @@ def _on_a_small_spot(bed: BedAdhesionAnalysis) -> bool:
 
 
 def _hold_down(report: PrintabilityReport) -> str:
-    """How *report*'s part is held down, from its own brim or raft decision."""
+    """How *report*'s part is held down, from its own brim or raft decision.
+    A brim narrowed or left off so it does not join the part's separate
+    pieces on the bed is said with why, and with what holds it down
+    instead."""
     rec = report.adhesion
     if rec is not None and rec.use_raft:
         return "print it on a raft"
+    gap = getattr(rec, "parts_gap_mm", None) if rec is not None else None
     if rec is not None and rec.brim_width_mm > 0:
         width = rec.brim_width_mm
         article = "an" if str(width).startswith("8") or width in (11, 18) else "a"
+        if gap is not None:
+            return (
+                f"print it with {article} {width} mm brim and glue stick on a clean plate: a wider brim "
+                f"would join its separate pieces where they stand {_gaps_said([gap])} apart on the bed"
+            )
         return f"print it with {article} {width} mm brim"
+    if gap is not None:
+        return (
+            "hold it down with glue stick on a clean plate: a brim would join its separate pieces "
+            f"where they stand {_gaps_said([gap])} apart on the bed"
+        )
     return "print it with a brim"
 
 
@@ -11329,8 +11426,12 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
     :func:`checks_due` names, with ``"thinnest_mm"``, the thinnest of them,
     and ``"general_mm"`` when the general minimum wall judged them, and
     ``parts_may_fuse`` with ``"nearest_mm"``, the gap of the closest pair,
-    when the pieces do not touch.  ``[{"id": "other"}]`` for a check
-    with none of those causes, ``[]`` for any other verdict.  Never raises."""
+    when the pieces do not touch.  A part expected to come off the bed
+    that no brim can hold without joining its separate pieces
+    (:attr:`AdhesionRecommendation.brim_left_off`) is ``other``: a brim is
+    the one hold these facts name, and it is the wrong one there.
+    ``[{"id": "other"}]`` for a check with none of those causes, ``[]`` for
+    any other verdict.  Never raises."""
     try:
         if verdict_of(report)[0] != "check":
             return []
@@ -11342,12 +11443,13 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
         if force is not None and getattr(force, "risk_level", "") == "likely_detach":
             rec = report.adhesion
             if rec is not None and rec.use_raft:
-                hold: dict[str, Any] = {"hold": "raft"}
+                reasons.append({"id": "comes_off_bed", "hold": "raft"})
             elif rec is not None and rec.brim_width_mm > 0:
-                hold = {"hold": "brim", "brim_mm": int(rec.brim_width_mm)}
+                reasons.append({"id": "comes_off_bed", "hold": "brim", "brim_mm": int(rec.brim_width_mm)})
+            elif rec is not None and rec.brim_left_off:
+                reasons.append({"id": "other"})
             else:
-                hold = {"hold": "brim"}
-            reasons.append({"id": "comes_off_bed", **hold})
+                reasons.append({"id": "comes_off_bed", "hold": "brim"})
         walls = report.thin_walls
         thin = _thin_checks(walls)
         if thin:
@@ -11542,6 +11644,8 @@ def recommend_adhesion(
     model_height_mm: float = 0.0,
     warping: WarpingAnalysis | None = None,
     adhesion_force: AdhesionForceEstimate | None = None,
+    parts_gap_mm: float | None = None,
+    nozzle_mm: float = 0.4,
 ) -> AdhesionRecommendation:
     """Recommend brim/raft settings based on model geometry + material + printer.
 
@@ -11554,6 +11658,14 @@ def recommend_adhesion(
     so a report can never say "no brim needed" and "add a brim" at once.
     The ``adhesion_risk`` it returns is :func:`adhesion_risk_of`: it never
     reads lower than the adhesion-force verdict that raised the brim.
+
+    A brim never joins separate parts that print in place together: with
+    *parts_gap_mm*, the narrowest gap on the bed between them
+    (:func:`_bed_gap_between_parts`), the brim is the widest of
+    :data:`_BRIM_WIDTHS_MM`, no wider than the one decided, whose two sides
+    leave a line of *nozzle_mm* clear between them, or none at all.  Either
+    way the part is still told how to hold it down (``parts_gap_mm`` on the
+    result), and the risk it states is unchanged.
 
     :param bed_adhesion: Output from ``_analyze_bed_adhesion()``.
     :param material: Filament type (PLA, ABS, PETG, etc.).
@@ -11666,6 +11778,34 @@ def recommend_adhesion(
                 f"calls for one."
             )
 
+    # A brim joins separate parts where they stand closer on the bed than
+    # its two sides and a line between them: it is narrowed, or left off,
+    # and the part is told what holds it down instead (a raft, when one was
+    # decided, still does).
+    held_back: float | None = None
+    if brim > 0 and parts_gap_mm is not None:
+        fits = [w for w in _BRIM_WIDTHS_MM if w <= brim and 2 * w + nozzle_mm <= parts_gap_mm]
+        width = max(fits, default=0)
+        if width < brim:
+            held_back = round(float(parts_gap_mm), 2)
+            apart = f"its separate pieces where they stand {_gaps_said([held_back])} apart on the bed"
+            if raft:
+                rationale = (
+                    f"{rationale} A {width} mm brim with it, no wider: a wider one would join {apart}."
+                    if width else f"{rationale} No brim with it: one would join {apart}."
+                )
+            elif width:
+                rationale = (
+                    f"{width}mm brim, no wider: a wider one would join {apart}.  "
+                    "Glue stick on a clean plate adds hold without joining them."
+                )
+            else:
+                rationale = (
+                    f"No brim: one would join {apart}, so hold it down with glue stick "
+                    "on a clean plate instead."
+                )
+            brim = width
+
     # Build slicer overrides
     overrides: dict[str, str] = {}
     if brim > 0:
@@ -11681,7 +11821,94 @@ def recommend_adhesion(
         contact_percentage=bed_adhesion.contact_percentage,
         rationale=rationale,
         slicer_overrides=overrides,
+        parts_gap_mm=held_back,
     )
+
+
+#: The brim widths the adhesion decision gives, in mm, widest first.
+_BRIM_WIDTHS_MM: tuple[int, ...] = (8, 5, 3)
+
+#: The most point-against-edge readings the gap between separate parts on
+#: the bed is measured with.  Past it a pair's gap is read from the boxes of
+#: their footprints, which can only read it narrower, never wider.
+_BED_GAP_WORK = 20_000_000
+
+
+def _bed_gap_between_parts(
+    triangles: Any,
+    reading: Any,
+    pieces: PiecesAnalysis | None,
+    z_min: float,
+    *,
+    layer_height: float,
+    reach: float,
+) -> float | None:
+    """The narrowest gap on the bed, in mm, between two of the separate
+    parts a file prints in place together, or ``None``.
+
+    *triangles* are the faces *reading* (:func:`kiln.mesh_bodies.read_triangles`)
+    numbers, and *pieces* their :class:`PiecesAnalysis`.  Read only when the
+    parts stand a clearance apart (``stand_apart``): the faces within one
+    layer of the bed, as :func:`_bed_contact` takes them, are grouped by the
+    part each prints as (``part_of_piece``), and the gap is the least
+    distance between two groups' outlines.  Groups whose boxes stand more
+    than *reach* apart are not measured.  ``None`` when fewer than two parts
+    touch the bed or none come within *reach* of another.
+    """
+    if pieces is None or not pieces.stand_apart or not pieces.part_of_piece:
+        return None
+    face_piece = np.asarray(getattr(reading, "face_piece", ()), dtype=np.int64)
+    tris = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    if len(face_piece) != len(tris):
+        return None
+    part_of = np.asarray(pieces.part_of_piece, dtype=np.int64)
+    rows = np.flatnonzero((tris[:, :, 2].max(axis=1) <= z_min + layer_height) & (face_piece >= 0))
+    if not len(rows):
+        return None
+    part = part_of[face_piece[rows]]
+    xy = tris[rows][:, :, :2]
+    outlines: dict[int, np.ndarray] = {}
+    boxes: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    for p in np.unique(part):
+        own = xy[part == p]
+        flat = own.reshape(-1, 2)
+        boxes[int(p)] = (flat.min(axis=0), flat.max(axis=0))
+        edges, _ids = _patch_outline(own, _corner_ids(flat).reshape(-1, 3))
+        outlines[int(p)] = edges
+    narrowest: float | None = None
+    work = 0
+    for a, b in itertools.combinations(sorted(outlines), 2):
+        (lo_a, hi_a), (lo_b, hi_b) = boxes[a], boxes[b]
+        apart = np.maximum(np.maximum(lo_a - hi_b, lo_b - hi_a), 0.0)
+        box_gap = float(np.hypot(*apart))
+        if box_gap > reach or (narrowest is not None and box_gap >= narrowest):
+            continue
+        ea, eb = outlines[a], outlines[b]
+        cost = 2 * len(ea) * len(eb)
+        if not len(ea) or not len(eb) or work + cost > _BED_GAP_WORK:
+            gap = box_gap
+        else:
+            work += cost
+            gap = min(_points_to_edges_mm(ea.reshape(-1, 2), eb), _points_to_edges_mm(eb.reshape(-1, 2), ea))
+        narrowest = gap if narrowest is None else min(narrowest, gap)
+    return narrowest
+
+
+def _points_to_edges_mm(points: np.ndarray, edges: np.ndarray) -> float:
+    """The least distance (mm) from any of *points* ``(n, 2)`` to any of
+    *edges* ``(m, 2, 2)``, at most :data:`_HELD_STRETCH_BLOCK` readings held
+    at once."""
+    start = edges[:, 0]
+    run = edges[:, 1] - start
+    length2 = np.maximum((run * run).sum(axis=1), 1e-18)
+    nearest = math.inf
+    step = max(1, _HELD_STRETCH_BLOCK // max(len(edges), 1))
+    for lo in range(0, len(points), step):
+        offset = points[lo : lo + step, None, :] - start[None, :, :]
+        t = np.clip((offset * run[None, :, :]).sum(axis=2) / length2[None, :], 0.0, 1.0)
+        miss = offset - t[:, :, None] * run[None, :, :]
+        nearest = min(nearest, float(np.sqrt((miss * miss).sum(axis=2).min())))
+    return nearest
 
 
 # ---------------------------------------------------------------------------

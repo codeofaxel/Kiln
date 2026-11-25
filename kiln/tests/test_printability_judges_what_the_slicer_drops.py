@@ -185,6 +185,20 @@ class TestWhatTheSlicerPrintsIsNotAStop:
         assert "single thin line" in said and "fragile" in said
         assert "Bambu Studio" in said and "Arachne" in said
 
+    def test_the_thin_wall_sentence_says_what_happens_in_plain_words(self, tmp_path):
+        """What happens to the wall, and the one setting another slicer
+        needs for it, as Bambu Studio names it: one space between
+        sentences, and no setting name standing in for what it does."""
+        report = _report(tmp_path, "wall", _on_a_plate(_wall(0.3)))
+        thinnest = report.thin_walls.thin_line_min_mm
+        sentence = (
+            f"Walls as thin as {thinnest:.2f} mm are thinner than the nozzle: Kiln's slicer settings print each "
+            "as a single thin line, so they will be fragile. Bambu Studio's standard settings leave walls this "
+            'thin out of the print; to keep them there, set its "Wall generator" to "Arachne".'
+        )
+        assert sentence in report.recommendations, report.recommendations
+        assert "  " not in sentence and "Arachne walls" not in " ".join(report.recommendations)
+
     def test_a_wall_just_past_the_line_prints(self):
         walls = _walls(_on_a_plate(_wall(round(LINE + 0.03, 2))))
         assert walls.dropped_regions == []

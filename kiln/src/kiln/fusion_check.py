@@ -270,6 +270,43 @@ def judge_reading(triangles: Any, reading: Any, *, clearances: bool = False) -> 
     return report
 
 
+def printed_parts(reading: Any, clearances: dict[str, Any] | None = None) -> list[int]:
+    """The separate part each piece of *reading* (:func:`kiln.mesh_bodies.read_triangles`)
+    prints as, one entry per piece, parts numbered from 0 in the order of
+    their first piece.
+
+    The pieces of one solid (:attr:`kiln.mesh_bodies.BodyReading.solid_of`)
+    print as one part, and so do solids standing at or under
+    :data:`TOUCH_GAP_MM` of one another: the ``touching`` pairs of
+    :func:`judge_reading`'s ``clearances``, where a printer keeps no gap open.
+    The one count of a file's separate parts: every reply that says how many
+    parts a file prints as reads it from here.  Without *clearances*, the
+    solids alone.
+    """
+    count = int(reading.piece_count)
+    solid_of = [int(s) for s in reading.solid_of] if reading.solid_of else list(range(count))
+    root = list(range(count))
+
+    def find(i: int) -> int:
+        while root[i] != i:
+            root[i] = root[root[i]]
+            i = root[i]
+        return i
+
+    def join(a: int, b: int) -> None:
+        root[find(a)] = find(b)
+
+    first_of: dict[int, int] = {}
+    for piece, solid in enumerate(solid_of):
+        join(piece, first_of.setdefault(solid, piece))
+    for pair in (clearances or {}).get("touching") or []:
+        a, b = (int(body) - 1 for body in pair["bodies"])
+        if 0 <= a < count and 0 <= b < count:
+            join(a, b)
+    numbers: dict[int, int] = {}
+    return [numbers.setdefault(find(i), len(numbers)) for i in range(count)]
+
+
 def _piece_bodies(triangles: Any, reading: Any, wanted: Any = None, *, welded: bool = False) -> list[Any]:
     """The pieces of :func:`kiln.mesh_bodies.read_triangles`' *reading* of
     the triangle soup *triangles*, each as its own trimesh body, in the
