@@ -98,8 +98,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Hairline cracks the slicer seals read as solid.** Kiln says so in one line, so a gap you meant to keep can be widened.
 
-- **Error messages are in plain words.** What happened, what still works, and what to do next.
-
 - **The print approval says what you're printing.**
 
 - **The print approval says what to check about your part.**
