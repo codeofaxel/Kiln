@@ -33,7 +33,11 @@ are not the caller's to fix), and :func:`run_openscad` refuses the run,
 naming each setting and its line.
 
 And it is where a mesh the fast engine left open is rebuilt with the exact
-one.  When a compile not already on CGAL writes an STL that is not closed, the
+one.  When a compile not already on CGAL writes an STL that is not closed, and
+its only flaw is separate closed pieces that touch, the pieces that touch are
+joined into one closed solid in place (:func:`_joined_touching_pieces`), and
+that file is kept when it is closed and the same part, so the same source
+makes the same file however busy the machine is.  Otherwise the
 same command runs once more with ``--backend=cgal``, within
 :data:`EXACT_ENGINE_TIMEOUT_S`, and its file is kept only if it is closed;
 otherwise the first file stays.  An
@@ -877,6 +881,10 @@ def _closed_by_the_exact_engine(
             return fast
     if not _is_open_mesh(path):
         return fast
+    if _joined_touching_pieces(path):
+        logger.info("OpenSCAD's fast engine left %s as separate pieces that touch; they are "
+                    "joined into one closed solid.", os.path.basename(path))
+        return fast
 
     kept = f"{path}.fast"
     os.replace(path, kept)
@@ -946,6 +954,51 @@ def _only_touching_pieces(path: str) -> bool | None:
         logger.debug("piece reading could not read %s", path, exc_info=True)
         return None
     return bool(reading.sealed and reading.touching_edges)
+
+
+def _joined_touching_pieces(path: str) -> bool:
+    """Join the separate closed pieces that touch in the STL at *path* into
+    one closed solid, in place, when that is the file's only flaw.
+
+    True when the file was rewritten: every piece is a closed solid, the
+    joined file is closed, and it is the same part (:func:`_same_part`).
+    False, with the file as it was, otherwise.
+    """
+    joined_path = f"{path}.joined.stl"
+    try:
+        import manifold3d as mf
+        import numpy as np
+        import trimesh
+
+        from kiln.generation.validation import read_stl_triangles
+        from kiln.mesh_bodies import read_triangles
+
+        triangles = np.asarray(read_stl_triangles(Path(path)), dtype=np.float64).reshape(-1, 3, 3)
+        reading = read_triangles(triangles)
+        if reading.piece_count < 2 or not (reading.sealed and reading.touching_edges):
+            return False
+        piece = np.asarray(reading.face_piece)
+        solids = []
+        for k in range(reading.piece_count):
+            corners, index = np.unique(triangles[piece == k].reshape(-1, 3), axis=0, return_inverse=True)
+            solid = mf.Manifold(mf.Mesh(vert_properties=corners.astype(np.float32),
+                                        tri_verts=index.reshape(-1, 3).astype(np.uint32)))
+            if solid.status() != mf.Error.NoError:
+                return False
+            solids.append(solid)
+        joined = mf.Manifold.batch_boolean(solids, mf.OpType.Add).to_mesh()
+        trimesh.Trimesh(vertices=np.asarray(joined.vert_properties)[:, :3],
+                        faces=np.asarray(joined.tri_verts), process=False).export(joined_path, file_type="stl")
+        if _is_open_mesh(joined_path) or not _same_part(path, joined_path):
+            return False
+        os.replace(joined_path, path)
+        return True
+    except Exception:  # noqa: BLE001 -- the exact engine is asked instead, as before
+        logger.debug("the touching pieces of %s could not be joined", path, exc_info=True)
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(joined_path)
 
 
 def fast_engine_kept_sentence(path: str, why: str, budget: float) -> str:

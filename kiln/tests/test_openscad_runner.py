@@ -1008,6 +1008,12 @@ def _touching_boxes() -> bytes:
     return _binary_stl(np.vstack([_box().triangles, _box(at=(20.0, 0.0, 0.0)).triangles]))
 
 
+@pytest.fixture
+def _cannot_join(monkeypatch):
+    """Pieces that touch which cannot be joined here, so the exact engine is asked."""
+    monkeypatch.setattr("kiln.openscad_runner._joined_touching_pieces", lambda path: False, raising=False)
+
+
 class _ExactEngineFails:
     """The fast engine writes *fast*; the exact engine exits 1 and writes nothing."""
 
@@ -1038,7 +1044,7 @@ class TestAFastFileThatStaysIsSaid:
         monkeypatch.setattr("kiln.openscad_runner.run_program.run", _EngineFake(out, outputs))
         return run_openscad(_fast(out), output_path=str(out), **kwargs), out
 
-    def test_pieces_kept_apart_past_the_exact_engines_time_are_said(self, monkeypatch, tmp_path):
+    def test_pieces_kept_apart_past_the_exact_engines_time_are_said(self, monkeypatch, tmp_path, _cannot_join):
         pytest.importorskip("trimesh")
         fast = _touching_boxes()
         result, out = self._run(monkeypatch, tmp_path, [fast, subprocess.TimeoutExpired("openscad", 60)],
@@ -1061,7 +1067,7 @@ class TestAFastFileThatStaysIsSaid:
         assert "`$fn`" in said
         assert "slicer" not in said and "overlap" not in said.lower()
 
-    def test_an_exact_engine_that_cannot_build_it_is_said(self, monkeypatch, tmp_path):
+    def test_an_exact_engine_that_cannot_build_it_is_said(self, monkeypatch, tmp_path, _cannot_join):
         pytest.importorskip("trimesh")
         out = tmp_path / "out.stl"
         fake = _ExactEngineFails(out, _touching_boxes())
@@ -1122,7 +1128,7 @@ class TestTheMakeDoorsSayIt:
     """The sentence reaches what a person reads at the make doors: the job,
     the compile helper, and the registered ``compile_scad`` tool."""
 
-    def test_the_job_and_the_build_carry_it(self, monkeypatch, tmp_path, _openscad_found):
+    def test_the_job_and_the_build_carry_it(self, monkeypatch, tmp_path, _openscad_found, _cannot_join):
         pytest.importorskip("trimesh")
         from kiln.generation.openscad import OpenSCADProvider
         from kiln.parametric import compile_scad_source
@@ -1135,7 +1141,7 @@ class TestTheMakeDoorsSayIt:
         build = compile_scad_source("cube(1);", output_path=str(tmp_path / "part.stl"))
         assert build.fast_engine_kept == job.fast_engine_kept
 
-    def test_the_compile_scad_tool_says_it(self, monkeypatch, tmp_path, _openscad_found):
+    def test_the_compile_scad_tool_says_it(self, monkeypatch, tmp_path, _openscad_found, _cannot_join):
         pytest.importorskip("trimesh")
         import asyncio
 
@@ -1154,7 +1160,7 @@ class TestTheMakeDoorsSayIt:
         assert said.startswith("Made with OpenSCAD's fast engine, which keeps pieces of a model that only touch")
         assert said in out["message"] and said in out["warnings"]
 
-    def test_a_tweak_says_it(self, monkeypatch, tmp_path, _openscad_found):
+    def test_a_tweak_says_it(self, monkeypatch, tmp_path, _openscad_found, _cannot_join):
         pytest.importorskip("trimesh")
         from kiln.parametric import tweak_and_compile
 
@@ -1172,3 +1178,74 @@ class TestTheMakeDoorsSayIt:
         assert build.fast_engine_kept is None
         tweaked = tweak_and_compile("w = 10;\ncube(w);\n", "w", 12, output_path=str(tmp_path / "t.stl"))
         assert "fast_engine_kept" not in tweaked
+
+
+#: A rounded end and a block that meet face to face, each drawn in a rotated
+#: frame: OpenSCAD 2026.04.26's fast engine writes them as two closed pieces
+#: that share an edge, and its exact engine as one closed solid (1.3 s for a
+#: whole drag-chain link, 53 s for a chain of 17 on an idle machine).
+_BLOCKS_THAT_TOUCH = """$fn = 64;
+module plate(y0, y1) { translate([0,y1,0]) rotate([90,0,0]) linear_extrude(y1 - y0) children(); }
+module band(x0, x1) { union() { translate([x0, 6]) circle(6); translate([x0, 0]) square([x1 - x0, 12]); } }
+plate(13.0, 15.0) band(22.0, 28.8);
+plate(10.7, 15.0) translate([28.8, 0]) square([8.4, 12]);
+"""
+
+
+class TestPiecesThatTouchAreJoined:
+    """A fast file whose only flaw is closed pieces that touch is joined into
+    one closed solid in place, with no second engine: the same source makes
+    the same file however busy the machine is.  A 17-link chain made 83
+    pieces when the exact engine ran out of time and 17 when it did not."""
+
+    def test_pieces_that_touch_are_joined_with_no_second_engine(self, monkeypatch, tmp_path):
+        trimesh = pytest.importorskip("trimesh")
+        pytest.importorskip("manifold3d")
+        from kiln import mesh_closure
+
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [_touching_boxes()])
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", fake)
+
+        result = run_openscad(_fast(out), output_path=str(out))
+
+        assert result.returncode == 0
+        assert len(fake.argvs) == 1, "pieces that only touch need no exact engine"
+        assert mesh_closure.is_watertight(str(out)) is True
+        mesh = trimesh.load(out, force="mesh")
+        assert len(mesh.split(only_watertight=False)) == 1
+        assert float(mesh.volume) == pytest.approx(8000.0, abs=1e-3)
+        assert getattr(result, "fast_engine_kept", None) is None
+
+    def test_a_real_make_of_blocks_that_touch_is_one_closed_solid_however_busy(self, monkeypatch, tmp_path):
+        """The exact engine is given no time at all, the busiest machine there
+        is, and the part still comes out one closed solid."""
+        trimesh = pytest.importorskip("trimesh")
+        pytest.importorskip("manifold3d")
+        from kiln.emboss_generator import _find_openscad
+
+        try:
+            exe = _find_openscad()
+        except (FileNotFoundError, RuntimeError):
+            pytest.skip("OpenSCAD required for a real compile")
+        monkeypatch.setattr("kiln.openscad_runner.EXACT_ENGINE_TIMEOUT_S", 0.001)
+        launches: list[list[str]] = []
+        real = subprocess.run
+
+        def spy(argv, *args, **kwargs):
+            launches.append(list(argv))
+            return real(argv, *args, **kwargs)
+
+        monkeypatch.setattr("kiln.openscad_runner.run_program.run", spy)
+        scad = tmp_path / "blocks.scad"
+        scad.write_text(_BLOCKS_THAT_TOUCH)
+        out = tmp_path / "blocks.stl"
+        result = run_openscad([exe, "--export-format", "binstl", "-o", str(out), "--backend=manifold", str(scad)],
+                              timeout=120, output_path=str(out))
+
+        assert result.returncode == 0, result.stderr
+        mesh = trimesh.load(out, force="mesh")
+        assert mesh.is_watertight
+        assert len(mesh.split(only_watertight=False)) == 1
+        assert getattr(result, "fast_engine_kept", None) is None
+        assert not [argv for argv in launches if "--backend=cgal" in argv]
