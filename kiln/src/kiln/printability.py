@@ -689,11 +689,15 @@ class PiecesAnalysis:
     #: The gap between the closest pair ``may_fuse`` names, for the check's
     #: facts (:func:`check_reasons`).  Bookkeeping; never served.
     may_fuse_mm: float = field(default=0.0, repr=False)
+    #: How many pairs ``may_fuse`` counts, for the check's facts
+    #: (:func:`check_reasons`).  Bookkeeping; never served.
+    may_fuse_pairs: int = field(default=0, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("stand_apart")
         d.pop("may_fuse_mm")
+        d.pop("may_fuse_pairs")
         return d
 
 
@@ -10119,6 +10123,7 @@ def _say_may_fuse(
         said = f"{len(stuck)} pairs of its pieces may print stuck together; the closest pair {sits}"
     block.may_fuse = f"{said}, {place}." if place else f"{said}."
     block.may_fuse_mm = round(gap, 2)
+    block.may_fuse_pairs = len(stuck)
 
 
 def _standing_said(
@@ -11355,7 +11360,11 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
             reasons.append({"id": "walls_left_out", **{k: v for k, v in sizes.items() if v > 0}})
         if pieces is not None and getattr(pieces, "may_fuse", ""):
             nearest = float(getattr(pieces, "may_fuse_mm", 0.0) or 0.0)
-            reasons.append({"id": "parts_may_fuse", **({"nearest_mm": nearest} if nearest > 0 else {})})
+            pairs = int(getattr(pieces, "may_fuse_pairs", 0) or 0)
+            reasons.append({
+                "id": "parts_may_fuse", **({"nearest_mm": nearest} if nearest > 0 else {}),
+                **({"pairs": pairs} if pairs > 0 else {}),
+            })
         return reasons or [{"id": "other"}]
     except Exception:  # noqa: BLE001 -- the reasons are said by the verdict's sentence too
         logger.debug("check reasons unavailable", exc_info=True)

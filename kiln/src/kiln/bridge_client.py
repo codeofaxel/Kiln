@@ -1546,6 +1546,7 @@ _CARD_ASKED_FROM = frozenset({"mac", "windows", "linux"})
 _CARD_CHECK_REASONS_MAX = 4
 _CARD_BRIM_MAX_MM = 50
 _CARD_WALL_MAX_MM = 20.0
+_CARD_FUSED_PAIRS_MAX = 10_000
 
 
 def _card_text(value: Any) -> str:
@@ -1678,6 +1679,7 @@ _CHECK_FIGURES: dict[str, dict[str, Callable[[Any], bool]]] = {
     },
     "parts_may_fuse": {
         "nearest_mm": lambda v: _card_figure(v, _moving_gap_floor_mm()),
+        "pairs": lambda v: _card_figure(v, _CARD_FUSED_PAIRS_MAX, whole=True),
     },
     "other": {},
 }

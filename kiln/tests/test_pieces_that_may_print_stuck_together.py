@@ -75,7 +75,7 @@ class TestOneFusedJointAmongGoodOnes:
         assert FINE not in sentence and MOVING not in sentence, sentence
         assert "Elsewhere they stand 0.3 mm apart without touching, with nothing joining them." in sentence
         assert checks_due(report) == [report.pieces.may_fuse]
-        assert check_reasons(report) == [{"id": "parts_may_fuse", "nearest_mm": 0.05}]
+        assert check_reasons(report) == [{"id": "parts_may_fuse", "nearest_mm": 0.05, "pairs": 1}]
         assert report.printable is False
 
     def test_parts_said_as_moving_are_not_called_fine_beside_it(self, tmp_path):
@@ -235,7 +235,10 @@ class TestThePrintDoorAndTheApproval:
         assert said is not None and STUCK in said.split(". ")[0], said
         assert rows["check"] == states["check"] == said
         reasons = states["part_check"]["reasons"]
-        assert {"id": "parts_may_fuse", "nearest_mm": nearest_mm} in reasons, reasons
+        fused = [r for r in reasons if r["id"] == "parts_may_fuse"]
+        assert fused and fused[0]["nearest_mm"] == nearest_mm, reasons
+        # The card counts the pairs the check names, never a fixed "two".
+        assert isinstance(fused[0]["pairs"], int) and fused[0]["pairs"] >= 1, reasons
 
     @pytest.mark.parametrize(
         ("name", "build"),
