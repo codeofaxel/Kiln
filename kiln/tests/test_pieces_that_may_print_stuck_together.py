@@ -127,6 +127,47 @@ class TestOneFusedJointAmongGoodOnes:
         assert STUCK not in clear and FINE in clear, clear
 
 
+    def test_the_way_to_make_them_one_solid_is_said_once(self, tmp_path):
+        """A fused joint beside a tight one: each is said, and how to make
+        parts one solid is said once."""
+        from kiln.printability import verdict
+
+        path = _tongs(tmp_path, gaps={parts.TONGS_MIDDLE_JOINT: 0.05, parts.TONGS_FIRST_CROSSING: 0.2})
+        sentence = verdict(_report(path))[1]
+        assert "Two of its pieces drawn apart sit 0.05 mm apart" in sentence, sentence
+        assert "where the gap is 0.2 mm they may print stuck together" in sentence, sentence
+        assert sentence.count("sink them at least 0.4 mm into each other") == 1, sentence
+
+    @pytest.mark.parametrize(("posts", "unchecked"), [(26, 2), (20, 0)])
+    def test_pairs_past_what_is_measured_are_said_not_checked(self, tmp_path, posts, unchecked):
+        """Posts sunk into a plate print as one solid with it.  Past the
+        pairs one reading measures, the rest are said as not checked, so the
+        answer never reads as if every joint had been measured."""
+        from kiln.printability import verdict
+
+        plate = trimesh.creation.box(extents=(140.0, 60.0, 4.0))
+        plate.apply_translation((70.0, 30.0, 2.0))
+        sunk = []
+        for i in range(posts):
+            post = trimesh.creation.box(extents=(4.0, 4.0, 10.0))
+            post.apply_translation((6.0 + 10.0 * (i % 13), 15.0 + 30.0 * (i // 13), 8.0))  # 1 mm into the plate
+            sunk.append(post)
+        path = tmp_path / f"posts_{posts}.stl"
+        trimesh.util.concatenate([plate, *sunk]).export(path)
+        report = _report(path)
+        # Control: every post is one solid with the plate.
+        assert (report.pieces.piece_count, report.pieces.solid_count) == (posts + 1, 1)
+        sentence = verdict(report)[1]
+        if unchecked:
+            assert (
+                f"Not checked: {unchecked} pairs of its pieces that print as one solid, past what this check "
+                "measures."
+            ) in sentence, sentence
+        else:
+            assert "Not checked" not in sentence, sentence
+        assert STUCK not in sentence
+
+
 class TestTouchingOrSunkPiecesAreOneSolid:
     """Pieces that touch or sink into one another are one solid as drawn:
     nothing is said of them, and a hollow part's inner wall is never a pair."""

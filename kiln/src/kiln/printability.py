@@ -9940,17 +9940,19 @@ def _judge_pieces(
 
     try:
         apart = joined_apart(triangles, reading)
-    except Exception:  # noqa: BLE001 -- pieces whose gap is unread stay one solid, as read
+    except Exception:  # noqa: BLE001 -- pieces whose gap is unread are said as unread
         logger.debug("gaps between joined pieces unread", exc_info=True)
-        apart = {}
+        apart = {"unmeasured": sum(1 for _a, _b, how in getattr(reading, "joined", ()) if how == "contact")}
     fused = [p for p in apart.get("pairs") or [] if _may_print_stuck(p.get("gap_mm"))]
     fused_gaps = [float(p["gap_mm"]) for p in fused]
+    unchecked = _unchecked_joins_said(int(apart.get("unmeasured") or 0))
     # Every pair that may print stuck together, as (gap, bodies from 1).
     stuck: list[tuple[float, list[int]]] = [(float(p["gap_mm"]), list(p["bodies"])) for p in fused]
     if block.solid_count < 2:
-        if fused:
-            block.note = _fused_said(fused_gaps, drawn_as=block.piece_count)
-            _say_may_fuse(block, stuck, triangles, reading, corner)
+        block.note = " ".join(filter(None, (
+            _fused_said(fused_gaps, drawn_as=block.piece_count) if fused else "", unchecked,
+        )))
+        _say_may_fuse(block, stuck, triangles, reading, corner)
         return block
 
     try:
@@ -9960,6 +9962,7 @@ def _judge_pieces(
         block.note = " ".join(filter(None, (
             f"It prints as {block.solid_count} separate parts, not one.",
             _fused_said(fused_gaps) if fused else "",
+            unchecked,
         )))
         _say_may_fuse(block, stuck, triangles, reading, corner)
         return block
@@ -10022,9 +10025,24 @@ def _judge_pieces(
     captive = next((f for f in findings if f.get("relation") == "captive"), None)
     if captive is not None:
         said.append(str(captive["message"]))
-    block.note = " ".join(said)
+    said.append(unchecked)
+    block.note = " ".join(filter(None, said))
     _say_may_fuse(block, stuck, triangles, reading, corner)
     return block
+
+
+def _unchecked_joins_said(count: int) -> str:
+    """What is said when *count* pairs of pieces the reading prints as one
+    solid were not measured (:func:`kiln.fusion_check.joined_apart`), or
+    ``""``: that not every pair was checked, so none of them is passed in
+    silence."""
+    if count <= 0:
+        return ""
+    pairs = "1 pair of its pieces that prints" if count == 1 else f"{count} pairs of its pieces that print"
+    return (
+        f"Not checked: {pairs} as one solid, past what this check measures. Any of them drawn a hair apart "
+        "instead of touching prints stuck together, so look at those joints before printing."
+    )
 
 
 def _fused_said(gaps: list[float], *, drawn_as: int = 0) -> str:
@@ -10275,7 +10293,8 @@ def _still_gaps_said(
     with the gaps that may print as one piece (:func:`_may_print_stuck`)
     said as that.  *beside_moving* is the wording that follows the moving
     parts' sentence, and *beside_stuck* the wording that follows a sentence
-    saying other parts print stuck together (:func:`_elsewhere_said`)."""
+    saying other parts print stuck together (:func:`_elsewhere_said`), which
+    has said how to make parts one solid."""
     tight = [gap for gap in gaps if _may_print_stuck(gap)]
     if not tight and beside_stuck:
         if beside_moving:
@@ -10296,9 +10315,11 @@ def _still_gaps_said(
     else:
         stuck = f"{who} stand {_gaps_said(gaps)} apart without touching, with nothing joining them"
     where = "at that gap" if len(tight) == len(gaps) else f"where the gap is {_gaps_said(tight)}"
+    # Beside parts that print stuck together, the sentence before has said
+    # how to make them one solid.
     return (
         f"{stuck}, and {where} they may print stuck together. If they are meant to come apart, widen the "
-        f"gap. {one_solid}"
+        f"gap.{'' if beside_stuck else ' ' + one_solid}"
     )
 
 

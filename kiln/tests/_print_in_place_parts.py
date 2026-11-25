@@ -136,6 +136,8 @@ def tongs(
 
 #: The joint the tight tongs close up: the middle of the third pair of bars.
 TONGS_MIDDLE_JOINT = (2 * _X + _X / 2, 0.0)
+#: Where the first pair of bars crosses the second.
+TONGS_FIRST_CROSSING = (_X, _Y)
 
 
 def claw(path: Path, *, gap: float = 0.3, rod_gap: float = 0.3, fn: int = 72) -> Path:
