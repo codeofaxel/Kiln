@@ -47,7 +47,10 @@ The rule, in order:
   a support that stands on one part to hold up another ties the two
   together.  Where the plate does not reach them all the supports stand on
   the model as above, and the answer says to break out any that stands
-  between two parts;
+  between two parts.  Either way the faces in the joints between the parts
+  (:func:`faces_in_joints`) are kept clear as the faces above are, and the
+  answer says the joints carry no support only when the sliced file shows
+  none there, and says so when the file cannot be read for it;
 * when the one reason is a piece that starts on nothing (a foot a layer
   over the plate, a tooth hanging from the top of a hole), the supports
   are asked for under that piece and nowhere else: its faces are painted
@@ -162,6 +165,25 @@ class SliceSupports:
     #: in place together (:attr:`kiln.printability.SupportJudgement.parts_apart`).
     #: Never served: the sentence says it.
     parts_apart: bool = field(default=False, repr=False)
+    #: The faces in the joints between parts that print in place apart, by
+    #: the same index as :attr:`kept_off` (:func:`faces_in_joints`): kept
+    #: clear of supports as those are.  Empty when the parts have none;
+    #: ``None`` when the joints were not read.  Bookkeeping; never served.
+    in_joints: tuple[int, ...] | None = field(default=None, repr=False)
+    #: Those faces as triangles, in the frame :attr:`placed_box` is in
+    #: (:func:`placed_for_reading`).  Bookkeeping for :func:`witnessed`.
+    joints_clear: tuple = field(default=(), repr=False, compare=False)
+    #: The part's box on the plate, ``(x0, y0, x1, y1)``, in the frame the
+    #: faces read back are in; the sliced file's own footprint of the part
+    #: says where the slicer put that frame.  ``None`` reads the faces where
+    #: they were placed.  Bookkeeping for :func:`witnessed`.
+    placed_box: tuple[float, float, float, float] | None = field(default=None, repr=False, compare=False)
+    #: How much support the sliced file carries under the faces in the
+    #: joints (:func:`supports_against`); ``None`` before a file is read or
+    #: when it cannot be read for it.  Never served: the sentence says it.
+    on_joints: int | None = field(default=None, repr=False)
+    #: Whether a sliced file was read for support in the joints.
+    joints_read: bool = field(default=False, repr=False)
 
     @property
     def _plate_only(self) -> bool:
@@ -171,14 +193,39 @@ class SliceSupports:
     def _parts_clause(self) -> str:
         """What the answer adds for parts that print in place apart: that
         the supports were asked for from the plate alone, or what to do
-        about one that stands between two parts."""
+        about one that stands between two parts, and what the sliced file
+        shows in the joints between them."""
         if not self.parts_apart:
             return ""
         if self._plate_only:
-            return "; asked for from the plate only, as its parts print in place apart from each other"
+            return f"; asked for from the plate only, as its parts print in place apart from each other{self._joints_clause}"
         return (
             "; its parts print in place apart from each other, so break out any support that stands on one "
-            "part to hold up another"
+            f"part to hold up another{self._joints_clause}"
+        )
+
+    @property
+    def _joints_clause(self) -> str:
+        """What the sliced file shows inside the joints between the parts:
+        nothing claimed before a file is read, and none said only when the
+        file was read and shows none."""
+        if self.in_joints is None:
+            return (
+                "; where its parts meet was not checked for supports, so look at the joints in the slicer "
+                "before printing"
+            )
+        if not self.in_joints or not self.joints_read:
+            return ""
+        if self.on_joints == 0:
+            return ", and none stands inside the joints between them"
+        if self.on_joints:
+            return (
+                "; the slicer still put some inside the joints between them, where it can join the parts, "
+                "so look at the joints in the slicer and clear them before printing"
+            )
+        return (
+            "; whether any stands inside the joints between them could not be read from the sliced file, "
+            "so look at the joints in the slicer before printing"
         )
 
     @property
@@ -217,7 +264,7 @@ class SliceSupports:
         if self.enabled and self.joined:
             return (f"supports on: {self.reason}; that is too close to the plate for a gap, "
                     f"so the support under it is joined to it{self._parts_clause}")
-        if self.enabled and self.kept_off_painted:
+        if self.enabled and self.kept_off_painted and self.kept_off:
             return f"supports on: {self.reason}; {self._kept_clear_clause}{self._parts_clause}"
         # Asked for under one piece alone, the answer says what was asked:
         # the support under that piece stands against the faces beside it.
@@ -231,6 +278,7 @@ class SliceSupports:
         d = asdict(self)
         for bookkeeping in (
             "kept_off", "under", "under_painted", "own_angle", "kept_clear", "on_kept_off", "joined", "parts_apart",
+            "in_joints", "joints_clear", "placed_box", "on_joints", "joints_read",
         ):
             d.pop(bookkeeping)
         if self.own_angle:
@@ -301,16 +349,66 @@ def witnessed(decision: SliceSupports, gcode_path: str | None) -> SliceSupports:
     zero support lines.
 
     A slice with faces kept clear is read for support under those faces
-    too, and the count goes on the answer: the sentence says they carry
-    none only when the file shows none.
+    too, and so is one whose parts meet in joints, under the faces in the
+    joints; the counts go on the answer, and the sentence says they carry
+    none only when the file shows none.  Faces placed in a frame with a
+    box (:attr:`SliceSupports.placed_box`) are read where the file's own
+    footprint of the part puts them; a file whose footprint is not that
+    box's size is not read for them.
     """
     if not decision.enabled or not gcode_path:
         return decision
     if gcode_support_lines(gcode_path) == 0:
         return replace(decision, enabled=False, reason=decision.reason + _PLACED_NONE)
+    joints = bool(decision.in_joints)
+    if not (decision.kept_clear or joints):
+        return decision
+    shift: tuple[float, float] | None = (0.0, 0.0)
+    if decision.placed_box is not None:
+        shift = _shift_to_file(gcode_path, decision.placed_box)
+    sets = [decision.kept_clear, decision.joints_clear if joints else ()]
+    counts = [None, None] if shift is None else _count_against(gcode_path, [_moved(s, shift) for s in sets])
+    seen = decision
     if decision.kept_clear:
-        return replace(decision, on_kept_off=supports_against(gcode_path, decision.kept_clear))
-    return decision
+        seen = replace(seen, on_kept_off=counts[0])
+    if joints:
+        seen = replace(seen, on_joints=counts[1] if decision.joints_clear else None, joints_read=True)
+    return seen
+
+
+#: How far the sliced file's footprint of the part may differ from the box
+#: the part was placed in, on each side, and still be the same part where
+#: it stands: half a line width of shrink is the toolpath's centreline, and
+#: a slicer's own first-layer squeeze is smaller than this.
+_FOOTPRINT_SLACK_MM = 1.5
+
+
+def _shift_to_file(gcode_path: str, box: tuple[float, float, float, float]) -> tuple[float, float] | None:
+    """The move from *box* (a part's footprint as Kiln placed it) to where
+    the sliced file prints the part, read from the file's own model lines;
+    ``None`` when the file names no part, or its footprint is not *box*'s
+    size (the slicer turned or scaled it)."""
+    try:
+        from kiln.slicer_geometry import parse_slicer_features
+
+        parsed = parse_slicer_features(gcode_path)
+    except (OSError, ValueError):
+        return None
+    if not parsed.labelled or parsed.model_footprint is None:
+        return None
+    fx0, fy0, fx1, fy1 = parsed.model_footprint
+    bx0, by0, bx1, by1 = box
+    if abs((fx1 - fx0) - (bx1 - bx0)) > _FOOTPRINT_SLACK_MM or abs((fy1 - fy0) - (by1 - by0)) > _FOOTPRINT_SLACK_MM:
+        return None
+    return (fx0 + fx1 - bx0 - bx1) / 2.0, (fy0 + fy1 - by0 - by1) / 2.0
+
+
+def _moved(triangles: tuple, shift: tuple[float, float]) -> tuple:
+    """*triangles* moved by *shift* in X and Y."""
+    if not triangles or shift == (0.0, 0.0):
+        return triangles
+    dx, dy = shift
+    return tuple(tuple((x + dx, y + dy, z) for x, y, z in tri) for tri in triangles)
 
 
 #: How far under a kept-off face a support line counts as against it: the
@@ -365,10 +463,16 @@ def supports_against(gcode_path: str, triangles: tuple) -> int | None:
     files are read alike: their feature labels, relative or absolute
     extrusion, and arcs by their end points.
     """
-    cells = _faces_by_cell(triangles)
-    if not cells:
-        return 0
-    found = 0
+    return _count_against(gcode_path, [triangles])[0]
+
+
+def _count_against(gcode_path: str, sets: list[tuple]) -> list[int | None]:
+    """:func:`supports_against` for each of *sets*, in one pass over the
+    file; every count ``None`` when the file cannot be read."""
+    all_cells = [_faces_by_cell(triangles) for triangles in sets]
+    if not any(all_cells):
+        return [0 for _ in sets]
+    found = [0 for _ in sets]
     x = y = z = last_e = 0.0
     relative = True
     support = False
@@ -399,12 +503,14 @@ def supports_against(gcode_path: str, triangles: tuple) -> int | None:
                     steps = max(1, int(((nx - x) ** 2 + (ny - y) ** 2) ** 0.5 / _SAMPLE_MM))
                     for step in range(steps + 1):
                         px, py = x + (nx - x) * step / steps, y + (ny - y) * step / steps
-                        faces = cells.get((int(px // _CELL_MM), int(py // _CELL_MM)))
-                        if faces and _under_a_face(faces, px, py, nz):
-                            found += 1
+                        key = (int(px // _CELL_MM), int(py // _CELL_MM))
+                        for n, cells in enumerate(all_cells):
+                            faces = cells.get(key)
+                            if faces and _under_a_face(faces, px, py, nz):
+                                found[n] += 1
                 x, y, z = nx, ny, nz
     except (OSError, ValueError):
-        return None
+        return [None for _ in sets]
     return found
 
 
@@ -453,10 +559,14 @@ def kept_off_input(
     part is placed where the mesh would have gone: centred on
     *bed_centre*, or where the file has it when that is ``None`` (the
     caller asked the slicer not to arrange), and on the plate either way.
+
+    The faces in the joints between parts that print in place apart
+    (:attr:`SliceSupports.in_joints`) are painted with them.
     """
-    if not (decision.enabled and decision.kept_off):
+    faces = tuple(sorted(set(decision.kept_off) | set(decision.in_joints or ())))
+    if not (decision.enabled and faces):
         return None
-    return _painted_input(input_path, decision.kept_off, _BLOCKER_STATE, out_dir, bed_centre=bed_centre, every=False)
+    return _painted_input(input_path, faces, _BLOCKER_STATE, out_dir, bed_centre=bed_centre, every=False)
 
 
 def asked_under_input(
@@ -504,6 +614,51 @@ def kept_clear_placed(
     return tuple(
         tuple((x + tx, y + ty, z + tz) for x, y, z in judged[i])
         for i in decision.kept_off if 0 <= i < len(judged)
+    )
+
+
+def placed_for_reading(
+    input_path: str, decision: SliceSupports, *, bed_centre: tuple[float, float] | None,
+) -> SliceSupports:
+    """*decision* with the faces the sliced file is read against placed as
+    :func:`kept_off_input` places the part, for a slicer handed the painted
+    copy: the kept-off faces, the faces in the joints, and the part's box in
+    the same frame (:attr:`SliceSupports.placed_box`), so a slicer that
+    moved the part on the plate is still read where it printed it.
+    *decision* as it was when nothing was painted, since a slicer handed the
+    part loose may also turn it, or when the input is not one this reads.
+    """
+    suffix = Path(input_path).suffix.lower()
+    if not (decision.kept_off_painted or decision.under_painted):
+        return decision
+    if suffix not in _KEPT_OFF_INPUTS:
+        return decision
+    from kiln.printability import _parse_mesh, _prepare_parsed
+
+    try:
+        facets, vertices = _parse_mesh(input_path)
+        judged = _prepare_parsed(list(facets), vertices)[0]
+    except (OSError, ValueError):
+        return decision
+    if not judged:
+        return decision
+    tx = ty = tz = 0.0
+    if suffix != ".3mf":
+        tx, ty, tz = _placement({tuple(v) for tri in facets for v in tri}, bed_centre)
+
+    def placed(faces: tuple[int, ...]) -> tuple:
+        return tuple(
+            tuple((x + tx, y + ty, z + tz) for x, y, z in judged[i]) for i in faces if 0 <= i < len(judged)
+        )
+
+    corners = [v for tri in judged for v in tri]
+    xs = [x for x, _y, _z in corners]
+    ys = [y for _x, y, _z in corners]
+    return replace(
+        decision,
+        kept_clear=placed(decision.kept_off) if decision.kept_off_painted else decision.kept_clear,
+        joints_clear=placed(decision.in_joints or ()),
+        placed_box=(min(xs) + tx, min(ys) + ty, max(xs) + tx, max(ys) + ty),
     )
 
 
@@ -724,6 +879,135 @@ _ROOT_RELS = (
 )
 
 
+#: How near another part every point of a downward face lies for the face to
+#: be in a joint: a clearance as wide as two parts are read to stand apart
+#: at, measured across the wider opening a joint is given where it meets the
+#: plate.
+_JOINT_REACH_MM = 1.5
+#: How far over the plate a face may sit and still rest on it: a face there
+#: has nothing under it for a support to stand in.
+_ON_PLATE_MM = 0.01
+#: The most (triangle, cell) pairs the joint reading lays out; a part that
+#: needs more is not read for its joints, and the answer says so.
+_JOINT_CELL_PAIRS_MAX = 4_000_000
+#: The most (point, triangle) distances the joint reading measures at once.
+_JOINT_PAIRS_PER_PASS = 400_000
+
+
+def faces_in_joints(input_path: str, judged: Any) -> tuple[int, ...] | None:
+    """The faces in the joints between the parts of *input_path* that print
+    in place apart, by index into the triangles the verdict *judged* was
+    read from (the index :attr:`SliceSupports.kept_off` uses).
+
+    A face is in a joint when it faces down, does not rest on the plate,
+    and lies within :data:`_JOINT_REACH_MM` of another part at each corner,
+    the middle of each edge and its centre: the relief at the foot of a pin
+    and its bore, the waist of a captive pin, the roof of a slot over the
+    part that slides in it.  A face the verdict says needs supports under it
+    is never one of them: it keeps its supports.  A support under any of the
+    rest stands in the gap between two parts that move, and can join them.
+
+    Empty when the parts meet in no such face; ``None`` when the file or its
+    parts cannot be read, or reading them would take more than this reads.
+    """
+    import numpy as np
+
+    from kiln.mesh_bodies import read_triangles
+    from kiln.printability import _parse_mesh, _prepare_parsed
+
+    try:
+        facets, vertices = _parse_mesh(input_path)
+        triangles, _vertices, _bbox, z_min = _prepare_parsed(list(facets), vertices)
+        tris = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+        reading = read_triangles(tris)
+    except (OSError, ValueError, MemoryError):
+        logger.debug("joints not read for %s", input_path, exc_info=True)
+        return None
+    if len(tris) == 0 or not np.isfinite(tris).all():
+        return None
+    piece = np.asarray(reading.face_piece, dtype=np.int64)
+    solid_of = np.asarray(reading.solid_of or range(reading.piece_count), dtype=np.int64)
+    if piece.shape[0] != len(tris) or solid_of.size == 0:
+        return None
+    solid = np.where(piece >= 0, solid_of[np.clip(piece, 0, None)], -1)
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    candidate = (normals[:, 2] < 0) & ~(tris[:, :, 2] <= float(z_min) + _ON_PLATE_MM).all(axis=1) & (solid >= 0)
+    held = [
+        i for region in getattr(judged, "downward_regions", ()) or () if region.needs_supports
+        for i in region.triangle_indices if 0 <= i < len(tris)
+    ]
+    candidate[np.asarray(held, dtype=np.int64)] = False
+    faces = np.flatnonzero(candidate)
+    if faces.size == 0:
+        return ()
+    t = tris[faces]
+    points = np.concatenate([t, (t + t[:, [1, 2, 0]]) / 2.0, t.mean(axis=1, keepdims=True)], axis=1)
+    near = _near_another_part(points.reshape(-1, 3), np.repeat(solid[faces], points.shape[1]), tris, solid)
+    if near is None:
+        return None
+    return tuple(int(i) for i in faces[near.reshape(len(faces), -1).all(axis=1)])
+
+
+def _near_another_part(points: Any, owner: Any, tris: Any, solid: Any) -> Any:
+    """For each of *points* (rows of x, y, z), whether a triangle of *tris*
+    belonging to a part other than the point's *owner* lies within
+    :data:`_JOINT_REACH_MM` of it; ``None`` when that is more than this
+    reads.  The triangles are laid out by the cells their reach covers, so
+    each point is measured against the few that can reach it."""
+    import numpy as np
+    from trimesh.triangles import closest_point
+
+    reach = _JOINT_REACH_MM
+    cell = 2.0 * reach
+    lo = np.minimum(points.min(axis=0), tris.reshape(-1, 3).min(axis=0)) - reach
+    t_lo = np.floor((tris.min(axis=1) - reach - lo) / cell).astype(np.int64)
+    t_hi = np.floor((tris.max(axis=1) + reach - lo) / cell).astype(np.int64)
+    p_cell = np.floor((points - lo) / cell).astype(np.int64)
+    within = (t_hi >= p_cell.min(axis=0)).all(axis=1) & (t_lo <= p_cell.max(axis=0)).all(axis=1) & (solid >= 0)
+    kept = np.flatnonzero(within)
+    near = np.zeros(len(points), dtype=bool)
+    if kept.size == 0:
+        return near
+    span = t_hi[kept] - t_lo[kept] + 1
+    count = span.prod(axis=1)
+    total = int(count.sum())
+    if total > _JOINT_CELL_PAIRS_MAX:
+        return None
+    which = np.repeat(np.arange(kept.size), count)
+    step = np.arange(total) - np.repeat(np.cumsum(count) - count, count)
+    sy, sz = span[which, 1], span[which, 2]
+    cx = t_lo[kept[which], 0] + step // (sy * sz)
+    cy = t_lo[kept[which], 1] + (step // sz) % sy
+    cz = t_lo[kept[which], 2] + step % sz
+    dims = np.maximum(np.maximum(t_hi.max(axis=0), p_cell.max(axis=0)) + 1, 1)
+    keys = (cx * dims[1] + cy) * dims[2] + cz
+    order = np.argsort(keys, kind="stable")
+    keys, by_key = keys[order], kept[which[order]]
+    p_keys = (p_cell[:, 0] * dims[1] + p_cell[:, 1]) * dims[2] + p_cell[:, 2]
+    first = np.searchsorted(keys, p_keys, side="left")
+    many = np.searchsorted(keys, p_keys, side="right") - first
+    todo = np.flatnonzero(many > 0)
+    at = 0
+    while at < todo.size:
+        stop = at + 1
+        budget = int(many[todo[at]])
+        while stop < todo.size and budget + int(many[todo[stop]]) <= _JOINT_PAIRS_PER_PASS:
+            budget += int(many[todo[stop]])
+            stop += 1
+        chunk = todo[at:stop]
+        at = stop
+        point_of = np.repeat(chunk, many[chunk])
+        offset = np.arange(point_of.size) - np.repeat(np.cumsum(many[chunk]) - many[chunk], many[chunk])
+        tri_of = by_key[first[point_of] + offset]
+        other = solid[tri_of] != owner[point_of]
+        point_of, tri_of = point_of[other], tri_of[other]
+        if point_of.size == 0:
+            continue
+        gap = np.linalg.norm(closest_point(tris[tri_of], points[point_of]) - points[point_of], axis=1)
+        near[point_of[gap <= reach]] = True
+    return near
+
+
 def decide_supports(
     input_path: str,
     *,
@@ -779,13 +1063,15 @@ def _decide_supports(
     if reason:
         # Parts that print in place apart get their supports from the plate
         # alone wherever the plate reaches everything that needs one, so
-        # none stands on one part to hold up another.
+        # none stands on one part to hold up another, and none inside the
+        # joints between them.
         parts_apart = bool(getattr(judged, "parts_apart", False))
         from_plate = parts_apart and bool(getattr(judged, "plate_reaches_supports", False))
         return SliceSupports(
             enabled=True, decided_by=DECIDED_ANALYSIS, reason=reason,
             settings=support_settings(judged.overhang_threshold_deg, build_plate_only=from_plate),
             parts_apart=parts_apart,
+            in_joints=faces_in_joints(input_path, judged) if parts_apart else (),
             kept_off=tuple(judged.support_kept_off_faces),
             under=tuple(getattr(judged, "support_under_faces", ())),
             own_angle=bool(
