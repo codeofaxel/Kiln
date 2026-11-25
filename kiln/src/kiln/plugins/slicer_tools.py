@@ -2158,6 +2158,16 @@ def _brim_and_skirts(profile_path: str | None) -> tuple[float, float | None]:
     return outside_brim_mm(asked), _leading_number(asked.get("skirts"))
 
 
+def _drawn_brim_mm(result: Any, asked: float) -> float:
+    """How wide a brim the slice in *result* drew: the width it gave the
+    brim to keep it out of the gap between two pieces printed in place
+    (:func:`kiln.slicer.brim_joins_pieces`, on ``result.brim``), else the
+    *asked* width."""
+    said = getattr(result, "brim", None) or {}
+    drawn = said.get("drawn_mm") if isinstance(said, dict) else None
+    return float(drawn) if isinstance(drawn, (int, float)) and not isinstance(drawn, bool) else asked
+
+
 def _keep_the_print_on_the_bed(
     result: Any,
     *,
@@ -2176,7 +2186,10 @@ def _keep_the_print_on_the_bed(
     slicer for, never from the file's labels: PrusaSlicer writes skirt and
     brim as one feature.  A brim it asked for that is wider than the room
     beside the part is refused, naming its width and that room -- a brim
-    holds the part down, and Kiln never narrows or drops one on its own.
+    holds the part down, and Kiln narrows or drops one only where it would
+    run into the gap between two pieces printed in place, which the slice
+    says (:func:`kiln.slicer.brim_joins_pieces`); the width judged here is
+    the one the slice drew.
     Otherwise the skirt is the culprit and the one thing Kiln drops: the
     part is sliced ONCE more with ``skirts=0`` (*reslice* takes the profile
     path), and the note says so.  A file still past the edge after that,
@@ -2200,10 +2213,12 @@ def _keep_the_print_on_the_bed(
     volume = bed.volume if bed is not None else None
     edge = print_past_the_bed(getattr(result, "output_path", None), volume)
     if edge and edge["on_bed"]:
-        return result, _brim_without_room(result, volume, _brim_and_skirts(profile_path)[0]), None
+        drawn = _drawn_brim_mm(result, _brim_and_skirts(profile_path)[0])
+        return result, _brim_without_room(result, volume, drawn), None
     if not edge or edge["part_fits"] is not True:
         return result, None, None
     brim, skirts = _brim_and_skirts(profile_path)
+    brim = _drawn_brim_mm(result, brim)
     if brim > edge["room_mm"] + _FIT_EPSILON_MM:
         return result, _brim_past_the_bed(brim, edge, volume), None
     if skirts is not None and skirts <= 0:
@@ -2226,6 +2241,7 @@ def _judge_the_slice_without_its_skirt(
     rather than write it), and then the sentence names no distance."""
     from kiln.printers.bed_fit import print_past_the_bed
 
+    brim = _drawn_brim_mm(again, brim)
     if volume:
         after = print_past_the_bed(getattr(again, "output_path", None), volume)
         if after is None:

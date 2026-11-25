@@ -207,6 +207,82 @@ def test_the_answer_says_what_the_file_shows_in_the_joints(tmp_path, name, said)
         assert "none stands inside the joints" not in seen.note
 
 
+#: The eye's radius and the height of its top, and how far over that top a
+#: support line counts as resting on it.
+_EYE_RADIUS = 7.0
+_EYE_TOP = 5.0
+_RESTING_MM = 1.0
+
+
+def _over_an_eye_under_the_bar(decision: SliceSupports, *, rise: float) -> tuple[float, float, float]:
+    """A point inside the rim of the first eye and under the bar, *rise* mm
+    over the eye's top, as placed: where a support that leans over the
+    eye on its way to the plate passes."""
+    x0, y0, x1, y1 = decision.placed_box
+    centre_x, centre_y = (x0 + x1) / 2, (y0 + y1) / 2
+    # The first eye's axis is _HALF_SPAN to the left of the part's centre;
+    # 6.5 mm out from it, toward the bar and off its middle line.
+    return centre_x - _HALF_SPAN + 4.6, centre_y - 4.6, _EYE_TOP + rise
+
+
+@pytest.mark.parametrize(("rise", "plate_only", "said"), [
+    (0.25, True, "the slicer still put some on the parts themselves instead of the plate"),
+    (0.25, False, "the slicer still put some standing on one part under another"),
+    (_RESTING_MM + 0.4, True, "and none stands inside the joints between them"),
+])
+def test_a_support_resting_on_one_part_under_another_is_said(tmp_path, rise, plate_only, said):
+    decision = _decided(tmp_path)
+    plate = {"support_material_buildplate_only": "1" if plate_only else "0"}
+    decision = _with(decision, settings={**decision.settings, **plate})
+    gcode = tmp_path / "rests.gcode"
+    gcode.write_text(_file(decision.placed_box, [_over_an_eye_under_the_bar(decision, rise=rise)]), encoding="utf-8")
+    seen = witnessed(decision, str(gcode))
+    assert said in seen.note, seen.note
+    if rise < _RESTING_MM:
+        assert "none stands inside the joints" not in seen.note
+    assert "on_parts" not in seen.to_dict() and "parts_clear" not in seen.to_dict()
+
+
+def test_a_support_on_the_plate_beside_a_part_is_not_on_it(tmp_path):
+    decision = _decided(tmp_path)
+    x, y, _z = _over_an_eye_under_the_bar(decision, rise=0.25)
+    gcode = tmp_path / "beside.gcode"
+    # The same height, just outside the eye's rim: it stands on the plate.
+    gcode.write_text(_file(decision.placed_box, [(x + 1.6, y - 1.6, _EYE_TOP + 0.25)]), encoding="utf-8")
+    seen = witnessed(decision, str(gcode))
+    assert "and none stands inside the joints between them" in seen.note, seen.note
+
+
+#: The slicer key for the gap a support's foot keeps over a face of the part.
+_FOOT_GAP_KEY = "support_material_bottom_contact_distance"
+
+
+def test_supports_from_the_plate_keep_their_foot_clear_of_the_part(tmp_path):
+    from kiln.slicer_supports import support_settings
+
+    assert float(support_settings(45.0, build_plate_only=True).get(_FOOT_GAP_KEY, 0)) == _RESTING_MM
+    assert _FOOT_GAP_KEY not in support_settings(45.0)
+    stl, _axes = _two_pins(tmp_path / "pins.stl")
+    decision = decide_supports(str(stl), material="PLA", nozzle_diameter=0.4, layer_height=0.2)
+    assert decision.settings["support_material_buildplate_only"] == "1", decision.settings
+    assert float(decision.settings.get(_FOOT_GAP_KEY, 0)) == _RESTING_MM, decision.settings
+
+
+def test_a_stated_plate_only_off_drops_the_foot_clearance(tmp_path):
+    """Supports allowed on the part keep the slicer's own gap under them:
+    a millimetre would leave each one hanging over the face it stands on."""
+    from kiln.slicer_orca import ini_to_settings
+    from kiln.slicer_profiles import profile_with_overrides
+    from kiln.slicer_supports import ensure_profile_supports
+
+    stl, _axes = _two_pins(tmp_path / "pins.stl")
+    stated = profile_with_overrides(None, {"support_material_buildplate_only": "0"}, stated=True)
+    written, decision = ensure_profile_supports(stated, str(stl), material="PLA")
+    assert decision.settings["support_material_buildplate_only"] == "0", decision.settings
+    assert _FOOT_GAP_KEY not in decision.settings
+    assert _FOOT_GAP_KEY not in ini_to_settings(written)
+
+
 def test_a_part_the_slicer_moved_is_read_where_it_printed(tmp_path):
     decision = _decided(tmp_path)
     x0, y0, x1, y1 = decision.placed_box
@@ -364,6 +440,31 @@ def test_no_support_stands_inside_a_joint(tmp_path, monkeypatch, slice_model, sl
     # The bar is still held across the plate between the eyes.
     under_the_bar = (np.abs(points[:, 0]) < _HALF_SPAN - 9.0) & (np.abs(points[:, 1]) < 4.0)
     assert int(under_the_bar.sum()) > 500, f"{slicer}: almost no support under the bar"
+    assert "none stands inside the joints between them" in supports["note"], supports["note"]
+
+
+@needs_a_slicer
+@pytest.mark.parametrize("printer", [None, "bambu_p1s"])
+@pytest.mark.parametrize("slicer", list(_SLICERS) or ["none installed"])
+def test_no_support_rests_on_one_part_under_another(tmp_path, slice_model, slicer, printer):
+    """The bar hangs over the top of each eye: a support that leans over an
+    eye on its way down to the plate, to hold the bar up, passes clear of the
+    eye's top, and the answer's "none stands inside the joints" is earned by
+    the file."""
+    stl, axes = _two_pins(tmp_path / "pins.stl")
+    result = slice_model(stl, slicer, printer)
+    supports = result["supports"]
+    assert supports["enabled"], supports["note"]
+    raw = result.get("raw_gcode_path") or result["output_path"]
+    points = _in_the_part_frame(stl, *_extrusion(raw))
+    over_an_eye = np.zeros(len(points), dtype=bool)
+    for x, y in axes:
+        over_an_eye |= np.hypot(points[:, 0] - x, points[:, 1] - y) < _EYE_RADIUS
+    resting = over_an_eye & (points[:, 2] > _EYE_TOP) & (points[:, 2] <= _EYE_TOP + _RESTING_MM)
+    assert int(resting.sum()) == 0, (
+        f"{slicer}: {int(resting.sum())} support samples rest on an eye's top under the bar, "
+        f"lowest at z {points[resting, 2].min():.2f}; {supports['note']}"
+    )
     assert "none stands inside the joints between them" in supports["note"], supports["note"]
 
 

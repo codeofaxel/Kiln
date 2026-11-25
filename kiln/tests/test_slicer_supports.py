@@ -469,6 +469,7 @@ class TestTheCliMode:
         assert _support_statement("off") == {SUPPORT_KEY: "0"}
         assert _support_statement("minimal", "PLA") == {
             **MINIMAL_SUPPORTS, "support_material_buildplate_only": "1",
+            "support_material_bottom_contact_distance": "1",
         }
         assert _support_statement("aggressive", "PLA") == MINIMAL_SUPPORTS
         assert _support_statement("auto") is None
