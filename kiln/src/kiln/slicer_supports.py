@@ -40,7 +40,7 @@ The rule, in order:
   (:data:`STAND_OFF_STYLE`).  The file the slicer wrote is read back: a
   slice that asked for supports and got none says so, and the answer says
   the kept-off faces carry none only when the file shows none under them
-  (:func:`supports_against`);
+  (:func:`_supports_against`);
 * a file whose separate parts print in place a clearance apart gets those
   supports from the plate alone wherever the plate reaches every point that
   needs one (:attr:`kiln.printability.SupportJudgement.plate_reaches_supports`):
@@ -143,11 +143,11 @@ class SliceSupports:
     #: angle; the profile carries it.  Never served.
     own_angle: bool = field(default=False, repr=False)
     #: The kept-off faces where the slicer has them, as triangles in the
-    #: bed's frame (:func:`kept_clear_placed`).  Bookkeeping for
+    #: bed's frame (:func:`_kept_clear_placed`).  Bookkeeping for
     #: :func:`witnessed`; never served.
     kept_clear: tuple = field(default=(), repr=False, compare=False)
     #: How much support the sliced file carries under the kept-off faces
-    #: (:func:`supports_against`); ``None`` until a sliced file has been
+    #: (:func:`_supports_against`); ``None`` until a sliced file has been
     #: read.  Never served: the sentence says it.
     on_kept_off: int | None = field(default=None, repr=False)
     #: Whether the slice was made with no gap over its supports, because
@@ -179,7 +179,7 @@ class SliceSupports:
     #: they were placed.  Bookkeeping for :func:`witnessed`.
     placed_box: tuple[float, float, float, float] | None = field(default=None, repr=False, compare=False)
     #: How much support the sliced file carries under the faces in the
-    #: joints (:func:`supports_against`); ``None`` before a file is read or
+    #: joints (:func:`_supports_against`); ``None`` before a file is read or
     #: when it cannot be read for it.  Never served: the sentence says it.
     on_joints: int | None = field(default=None, repr=False)
     #: Whether a sliced file was read for support in the joints.
@@ -452,7 +452,7 @@ def _under_a_face(faces: list[tuple[float, ...]], x: float, y: float, z: float) 
     return False
 
 
-def supports_against(gcode_path: str, triangles: tuple) -> int | None:
+def _supports_against(gcode_path: str, triangles: tuple) -> int | None:
     """How much support the sliced file lays under *triangles* (faces in
     the bed's frame), counted in samples a quarter millimetre apart along
     every support line; ``None`` when the file cannot be read.
@@ -467,7 +467,7 @@ def supports_against(gcode_path: str, triangles: tuple) -> int | None:
 
 
 def _count_against(gcode_path: str, sets: list[tuple]) -> list[int | None]:
-    """:func:`supports_against` for each of *sets*, in one pass over the
+    """:func:`_supports_against` for each of *sets*, in one pass over the
     file; every count ``None`` when the file cannot be read."""
     all_cells = [_faces_by_cell(triangles) for triangles in sets]
     if not any(all_cells):
@@ -591,7 +591,7 @@ def asked_under_input(
     return _painted_input(input_path, decision.under, _ENFORCER_STATE, out_dir, bed_centre=bed_centre, every=True)
 
 
-def kept_clear_placed(
+def _kept_clear_placed(
     input_path: str, decision: SliceSupports, *, bed_centre: tuple[float, float] | None,
 ) -> tuple:
     """The faces *decision* keeps supports off, as triangles where the

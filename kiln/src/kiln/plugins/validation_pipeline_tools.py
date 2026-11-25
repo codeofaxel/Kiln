@@ -554,14 +554,6 @@ def _sliced_project(path: str) -> bool:
     return False
 
 
-def check_due_before_printing(input_path: str, *, printer_id: str = "", material: str = "") -> str | None:
-    """What a print's approval says about the part in *input_path*: the
-    printability verdict's sentence when it asks for a check (:func:`check_due`),
-    else ``None`` (:func:`check_before_printing`).  Never raises."""
-    found = check_before_printing(input_path, printer_id=printer_id, material=material)
-    return found[0] if found else None
-
-
 def check_before_printing(
     input_path: str, *, printer_id: str = "", material: str = "",
 ) -> tuple[str, list[dict[str, Any]]] | None:
