@@ -406,6 +406,17 @@ class AdhesionRecommendation:
     contact_percentage: float
     rationale: str
     slicer_overrides: dict[str, str] = field(default_factory=dict)
+    #: The narrowest gap on the bed, in mm, between separate parts that
+    #: print in place together, when it kept the brim narrower than the part
+    #: asks for, or left it off: a brim that wide would join them there.
+    #: ``None`` when no brim was held back.
+    parts_gap_mm: float | None = None
+
+    @property
+    def brim_left_off(self) -> bool:
+        """Whether the part asks for a brim that no width can give it
+        without joining its separate parts on the bed."""
+        return self.parts_gap_mm is not None and self.brim_width_mm == 0 and not self.use_raft
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -8371,9 +8382,13 @@ def adhesion_advice(adhesion: AdhesionRecommendation | None) -> list[str]:
     recommendations read it, and so does any door that serves one block of
     the report on its own — the warping and adhesion-force blocks state
     their risk and name no brim, so such a door carries the decision with
-    this or the brim is in the reply nowhere.
+    this or the brim is in the reply nowhere.  A brim left off because it
+    would join the part's separate pieces is said too, with what holds the
+    part down instead.
     """
-    if adhesion is not None and (adhesion.brim_width_mm > 0 or adhesion.use_raft):
+    if adhesion is not None and (
+        adhesion.brim_width_mm > 0 or adhesion.use_raft or adhesion.parts_gap_mm is not None
+    ):
         return [adhesion.rationale]
     return []
 
@@ -10755,6 +10770,17 @@ def _analyze_printability_here(
     # prescribes a brim on its own any more, so a report cannot say "no
     # brim needed" and "add a brim" at once.
     has_enclosure, on_bedslinger = _printer_adhesion_context(printer_id)
+    # Separate parts that print in place together stand apart on the bed
+    # too: the brim decision keeps that gap clear.
+    parts_gap = None
+    if pieces is not None and parts is not None and parts.stand_apart:
+        try:
+            parts_gap = _bed_gap_between_parts(
+                once, pieces, parts, z_min, layer_height=layer_height,
+                reach=2 * max(_BRIM_WIDTHS_MM) + nozzle_diameter,
+            )
+        except (ValueError, IndexError, MemoryError):
+            logger.debug("gap between parts on the bed unread", exc_info=True)
     adhesion = recommend_adhesion(
         bed_adhesion,
         material=material,
@@ -10763,6 +10789,8 @@ def _analyze_printability_here(
         model_height_mm=bbox["z_max"] - bbox["z_min"],
         warping=warping,
         adhesion_force=adhesion_force,
+        parts_gap_mm=parts_gap,
+        nozzle_mm=nozzle_diameter,
     )
     recommendations = _build_recommendations(
         overhangs, thin_walls, bridging, bed_adhesion, supports,
@@ -11293,14 +11321,28 @@ def _on_a_small_spot(bed: BedAdhesionAnalysis) -> bool:
 
 
 def _hold_down(report: PrintabilityReport) -> str:
-    """How *report*'s part is held down, from its own brim or raft decision."""
+    """How *report*'s part is held down, from its own brim or raft decision.
+    A brim narrowed or left off so it does not join the part's separate
+    pieces on the bed is said with why, and with what holds it down
+    instead."""
     rec = report.adhesion
     if rec is not None and rec.use_raft:
         return "print it on a raft"
+    gap = getattr(rec, "parts_gap_mm", None) if rec is not None else None
     if rec is not None and rec.brim_width_mm > 0:
         width = rec.brim_width_mm
         article = "an" if str(width).startswith("8") or width in (11, 18) else "a"
+        if gap is not None:
+            return (
+                f"print it with {article} {width} mm brim and glue stick on a clean plate: a wider brim "
+                f"would join its separate pieces where they stand {_gaps_said([gap])} apart on the bed"
+            )
         return f"print it with {article} {width} mm brim"
+    if gap is not None:
+        return (
+            "hold it down with glue stick on a clean plate: a brim would join its separate pieces "
+            f"where they stand {_gaps_said([gap])} apart on the bed"
+        )
     return "print it with a brim"
 
 
@@ -11378,8 +11420,12 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
     :func:`checks_due` names, with ``"thinnest_mm"``, the thinnest of them,
     and ``"general_mm"`` when the general minimum wall judged them, and
     ``parts_may_fuse`` with ``"nearest_mm"``, the gap of the closest pair,
-    when the pieces do not touch.  ``[{"id": "other"}]`` for a check
-    with none of those causes, ``[]`` for any other verdict.  Never raises."""
+    when the pieces do not touch.  A part expected to come off the bed
+    that no brim can hold without joining its separate pieces
+    (:attr:`AdhesionRecommendation.brim_left_off`) is ``other``: a brim is
+    the one hold these facts name, and it is the wrong one there.
+    ``[{"id": "other"}]`` for a check with none of those causes, ``[]`` for
+    any other verdict.  Never raises."""
     try:
         if verdict_of(report)[0] != "check":
             return []
@@ -11391,12 +11437,13 @@ def check_reasons(report: PrintabilityReport) -> list[dict[str, Any]]:
         if force is not None and getattr(force, "risk_level", "") == "likely_detach":
             rec = report.adhesion
             if rec is not None and rec.use_raft:
-                hold: dict[str, Any] = {"hold": "raft"}
+                reasons.append({"id": "comes_off_bed", "hold": "raft"})
             elif rec is not None and rec.brim_width_mm > 0:
-                hold = {"hold": "brim", "brim_mm": int(rec.brim_width_mm)}
+                reasons.append({"id": "comes_off_bed", "hold": "brim", "brim_mm": int(rec.brim_width_mm)})
+            elif rec is not None and rec.brim_left_off:
+                reasons.append({"id": "other"})
             else:
-                hold = {"hold": "brim"}
-            reasons.append({"id": "comes_off_bed", **hold})
+                reasons.append({"id": "comes_off_bed", "hold": "brim"})
         walls = report.thin_walls
         thin = _thin_checks(walls)
         if thin:
@@ -11587,6 +11634,8 @@ def recommend_adhesion(
     model_height_mm: float = 0.0,
     warping: WarpingAnalysis | None = None,
     adhesion_force: AdhesionForceEstimate | None = None,
+    parts_gap_mm: float | None = None,
+    nozzle_mm: float = 0.4,
 ) -> AdhesionRecommendation:
     """Recommend brim/raft settings based on model geometry + material + printer.
 
@@ -11599,6 +11648,14 @@ def recommend_adhesion(
     so a report can never say "no brim needed" and "add a brim" at once.
     The ``adhesion_risk`` it returns is :func:`adhesion_risk_of`: it never
     reads lower than the adhesion-force verdict that raised the brim.
+
+    A brim never joins separate parts that print in place together: with
+    *parts_gap_mm*, the narrowest gap on the bed between them
+    (:func:`_bed_gap_between_parts`), the brim is the widest of
+    :data:`_BRIM_WIDTHS_MM`, no wider than the one decided, whose two sides
+    leave a line of *nozzle_mm* clear between them, or none at all.  Either
+    way the part is still told how to hold it down (``parts_gap_mm`` on the
+    result), and the risk it states is unchanged.
 
     :param bed_adhesion: Output from ``_analyze_bed_adhesion()``.
     :param material: Filament type (PLA, ABS, PETG, etc.).
@@ -11711,6 +11768,34 @@ def recommend_adhesion(
                 f"calls for one."
             )
 
+    # A brim joins separate parts where they stand closer on the bed than
+    # its two sides and a line between them: it is narrowed, or left off,
+    # and the part is told what holds it down instead (a raft, when one was
+    # decided, still does).
+    held_back: float | None = None
+    if brim > 0 and parts_gap_mm is not None:
+        fits = [w for w in _BRIM_WIDTHS_MM if w <= brim and 2 * w + nozzle_mm <= parts_gap_mm]
+        width = max(fits, default=0)
+        if width < brim:
+            held_back = round(float(parts_gap_mm), 2)
+            apart = f"its separate pieces where they stand {_gaps_said([held_back])} apart on the bed"
+            if raft:
+                rationale = (
+                    f"{rationale} A {width} mm brim with it, no wider: a wider one would join {apart}."
+                    if width else f"{rationale} No brim with it: one would join {apart}."
+                )
+            elif width:
+                rationale = (
+                    f"{width}mm brim, no wider: a wider one would join {apart}.  "
+                    "Glue stick on a clean plate adds hold without joining them."
+                )
+            else:
+                rationale = (
+                    f"No brim: one would join {apart}, so hold it down with glue stick "
+                    "on a clean plate instead."
+                )
+            brim = width
+
     # Build slicer overrides
     overrides: dict[str, str] = {}
     if brim > 0:
@@ -11726,7 +11811,94 @@ def recommend_adhesion(
         contact_percentage=bed_adhesion.contact_percentage,
         rationale=rationale,
         slicer_overrides=overrides,
+        parts_gap_mm=held_back,
     )
+
+
+#: The brim widths the adhesion decision gives, in mm, widest first.
+_BRIM_WIDTHS_MM: tuple[int, ...] = (8, 5, 3)
+
+#: The most point-against-edge readings the gap between separate parts on
+#: the bed is measured with.  Past it a pair's gap is read from the boxes of
+#: their footprints, which can only read it narrower, never wider.
+_BED_GAP_WORK = 20_000_000
+
+
+def _bed_gap_between_parts(
+    triangles: Any,
+    reading: Any,
+    pieces: PiecesAnalysis | None,
+    z_min: float,
+    *,
+    layer_height: float,
+    reach: float,
+) -> float | None:
+    """The narrowest gap on the bed, in mm, between two of the separate
+    parts a file prints in place together, or ``None``.
+
+    *triangles* are the faces *reading* (:func:`kiln.mesh_bodies.read_triangles`)
+    numbers, and *pieces* their :class:`PiecesAnalysis`.  Read only when the
+    parts stand a clearance apart (``stand_apart``): the faces within one
+    layer of the bed, as :func:`_bed_contact` takes them, are grouped by the
+    part each prints as (``part_of_piece``), and the gap is the least
+    distance between two groups' outlines.  Groups whose boxes stand more
+    than *reach* apart are not measured.  ``None`` when fewer than two parts
+    touch the bed or none come within *reach* of another.
+    """
+    if pieces is None or not pieces.stand_apart or not pieces.part_of_piece:
+        return None
+    face_piece = np.asarray(getattr(reading, "face_piece", ()), dtype=np.int64)
+    tris = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    if len(face_piece) != len(tris):
+        return None
+    part_of = np.asarray(pieces.part_of_piece, dtype=np.int64)
+    rows = np.flatnonzero((tris[:, :, 2].max(axis=1) <= z_min + layer_height) & (face_piece >= 0))
+    if not len(rows):
+        return None
+    part = part_of[face_piece[rows]]
+    xy = tris[rows][:, :, :2]
+    outlines: dict[int, np.ndarray] = {}
+    boxes: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    for p in np.unique(part):
+        own = xy[part == p]
+        flat = own.reshape(-1, 2)
+        boxes[int(p)] = (flat.min(axis=0), flat.max(axis=0))
+        edges, _ids = _patch_outline(own, _corner_ids(flat).reshape(-1, 3))
+        outlines[int(p)] = edges
+    narrowest: float | None = None
+    work = 0
+    for a, b in itertools.combinations(sorted(outlines), 2):
+        (lo_a, hi_a), (lo_b, hi_b) = boxes[a], boxes[b]
+        apart = np.maximum(np.maximum(lo_a - hi_b, lo_b - hi_a), 0.0)
+        box_gap = float(np.hypot(*apart))
+        if box_gap > reach or (narrowest is not None and box_gap >= narrowest):
+            continue
+        ea, eb = outlines[a], outlines[b]
+        cost = 2 * len(ea) * len(eb)
+        if not len(ea) or not len(eb) or work + cost > _BED_GAP_WORK:
+            gap = box_gap
+        else:
+            work += cost
+            gap = min(_points_to_edges_mm(ea.reshape(-1, 2), eb), _points_to_edges_mm(eb.reshape(-1, 2), ea))
+        narrowest = gap if narrowest is None else min(narrowest, gap)
+    return narrowest
+
+
+def _points_to_edges_mm(points: np.ndarray, edges: np.ndarray) -> float:
+    """The least distance (mm) from any of *points* ``(n, 2)`` to any of
+    *edges* ``(m, 2, 2)``, at most :data:`_HELD_STRETCH_BLOCK` readings held
+    at once."""
+    start = edges[:, 0]
+    run = edges[:, 1] - start
+    length2 = np.maximum((run * run).sum(axis=1), 1e-18)
+    nearest = math.inf
+    step = max(1, _HELD_STRETCH_BLOCK // max(len(edges), 1))
+    for lo in range(0, len(points), step):
+        offset = points[lo : lo + step, None, :] - start[None, :, :]
+        t = np.clip((offset * run[None, :, :]).sum(axis=2) / length2[None, :], 0.0, 1.0)
+        miss = offset - t[:, :, None] * run[None, :, :]
+        nearest = min(nearest, float(np.sqrt((miss * miss).sum(axis=2).min())))
+    return nearest
 
 
 # ---------------------------------------------------------------------------
