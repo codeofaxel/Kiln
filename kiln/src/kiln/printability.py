@@ -7904,12 +7904,11 @@ def _estimate_adhesion_force(
     # specific guard.
     if geometry_extreme:
         recommendations = list(recommendations) + [
-            f"Tall, narrow geometry (aspect ratio {aspect_ratio:.0f}) "
-            "concentrates peel stress at the base regardless of "
-            "material: verify your bed surface is clean and level. "
-            "The force-balance verdict "
-            "alone can understate this risk; Kiln Pro adds per-"
-            "material physics on top.",
+            f"A part this tall and narrow (aspect ratio {aspect_ratio:.0f}) "
+            "pulls hardest at its base whatever the plastic, so check "
+            "that your bed is clean and level: it can come off even "
+            "when the rest of this check reads fine. Kiln Pro checks "
+            "it against your plastic.",
         ]
 
     # Model-confidence band.  The static force-balance model is
