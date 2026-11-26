@@ -4620,9 +4620,10 @@ _BRIDGE_CHORD_DIRECTIONS: int = 12
 # worst point is interior, which stride sampling still hits.
 _BRIDGE_SPAN_SAMPLE_CAP: int = 200
 
-# Ceilings this close to the bed (three 0.2 mm layers) are exempt
-# from the needs-supports verdict: the bed itself catches any sag, a
-# support could not fit in the gap, and the empirically proven QR
+# Ceilings this close to the bed, or to the part's own material below
+# them (three 0.2 mm layers), are exempt from the needs-supports
+# verdict: what lies below catches any sag, a support could not fit in
+# the gap, and the empirically proven QR
 # workflow prints an 84 mm pocket ceiling at 0.5 mm.  Deliberately
 # NOT extended further: at millimeter-plus gaps a fused sag starts
 # ruining functional clearances rather than cosmetics.
@@ -4636,6 +4637,30 @@ _BED_PROXIMATE_CEILING_MM: float = 0.61
 # a dome) are free edges: bridging toward them has nothing to anchor
 # on.
 _BRIDGE_SUPPORTED_EDGE_DROP_MM: float = 1e-3
+
+
+def _drops_below_edge(
+    tri: tuple[tuple[float, ...], ...], a: tuple[float, ...], b: tuple[float, ...], edge_z: float,
+) -> bool:
+    """Whether the face *tri* on the edge *a*-*b* reaches below that edge:
+    a corner of it lower than the edge stands at that corner's place along
+    the edge (by more than :data:`_BRIDGE_SUPPORTED_EDGE_DROP_MM`).  Read
+    against the edge where the corner is, a face going down from a sloped
+    edge holds it whichever way its surface was cut into faces; an edge
+    level in XY (one corner above the other) is read at its lower end,
+    *edge_z*."""
+    ax, ay, az = a[0], a[1], a[2]
+    dx, dy, dz = b[0] - ax, b[1] - ay, b[2] - az
+    run = dx * dx + dy * dy
+    for v in tri:
+        if run > 0.0:
+            t = min(1.0, max(0.0, ((v[0] - ax) * dx + (v[1] - ay) * dy) / run))
+            at = az + t * dz
+        else:
+            at = edge_z
+        if v[2] < at - _BRIDGE_SUPPORTED_EDGE_DROP_MM:
+            return True
+    return False
 
 # Two-sided bridge spans up to this print reliably without supports:
 # the general bridge figure (kiln.generic_limits).
@@ -5103,17 +5128,18 @@ def _analyze_downward_regions(
     # deck point asked (each probe is one point against the whole mesh).
     _inside: _InsideMeshTest | None = None
 
-    def _solid_directly_below(cx: float, cy: float, cz: float) -> bool:
-        """True when the point one-and-a-half layers under the deck is
-        inside the solid — the deck face rests on material below (a
-        boolean seam, a feature starting flush on a floor) and prints
-        as an ordinary layer bond even though the mesh topology reads
-        it as an unanchored underside."""
+    def _solid_directly_below(cx: float, cy: float, cz: float, depth: float | None = None) -> bool:
+        """True when the point one-and-a-half layers (or *depth* mm) under
+        the deck is inside the solid — the deck face rests on material
+        below (a boolean seam, a feature starting flush on a floor) and
+        prints as an ordinary layer bond even though the mesh topology
+        reads it as an unanchored underside; with *depth*, material lies
+        no farther than that below the deck."""
         nonlocal _tris_arr, _inside
         if _tris_arr is None:
             _tris_arr = np.asarray(triangles, dtype=np.float64)
         probe = np.array(
-            [[cx, cy, cz - 1.5 * layer_height]], dtype=np.float64,
+            [[cx, cy, cz - (1.5 * layer_height if depth is None else depth)]], dtype=np.float64,
         )
         try:
             if _inside is None:
@@ -5155,9 +5181,7 @@ def _analyze_downward_regions(
             for ni in [] if supported else mesh_edges.get(e, []):
                 if ni in member_set:
                     continue
-                ntri = triangles[ni]
-                n_min_z = min(v[2] for v in ntri)
-                if n_min_z < edge_z - _BRIDGE_SUPPORTED_EDGE_DROP_MM:
+                if _drops_below_edge(triangles[ni], a, b, edge_z):
                     supported = True
                     break
             seg_a.append((a[0], a[1]))
@@ -5233,13 +5257,19 @@ def _analyze_downward_regions(
             elif _solid_directly_below(cx, cy, _cz):
                 point_span = 0.0
                 point_free_air = 0.0
-            elif _cz - z_min <= _BED_PROXIMATE_CEILING_MM:
+            elif _cz - z_min <= _BED_PROXIMATE_CEILING_MM or _solid_directly_below(
+                cx, cy, _cz, _BED_PROXIMATE_CEILING_MM,
+            ):
                 # First-layers recess (a bottom QR pocket, a debossed
                 # logo underside): the ceiling bridges with the bed a
                 # hair beneath it, so any sag lands harmlessly on the
                 # plate instead of drooping into air — the coaster
                 # recipe prints an 84 mm pocket ceiling this way and
                 # scans.  Supports could not even fit in the gap.  The
+                # same holds over the part's own material that close
+                # below: a hinge pin inside its knuckle's bore, a
+                # print-in-place part over its neighbour (whether that
+                # gap stays open is the clearance check's to say).  The
                 # span still reports; only the verdict is lifted.
                 point_span = (
                     best_chord if not math.isinf(best_chord) else 0.0
@@ -5637,6 +5667,12 @@ def _bed_contact(
     if not contact:
         return _BedContact(np.empty((0, 3, 3), dtype=np.float64), 0.0, False)
     tris = np.asarray(contact, dtype=np.float64)
+    # A face standing on edge within that layer (the foot of a wall, the end
+    # of a rounded knuckle) covers no bed, and read as an outline it adds
+    # edges that bound nothing: it is not contact.
+    tris = tris[_covers_bed(tris[:, :, :2])]
+    if not len(tris):
+        return _BedContact(tris, 0.0, False)
     ids = _corner_ids(tris[:, :, :2].reshape(-1, 2)).reshape(-1, 3)
     _, first = np.unique(np.sort(ids, axis=1), axis=0, return_index=True)
     tris = tris[np.sort(first)]
@@ -5654,6 +5690,21 @@ def _bed_contact(
     if drawn - measured.area > measured.slack + 0.02 * drawn:
         return _BedContact(tris, measured.area, True, measured)
     return _BedContact(tris, drawn, False)
+
+
+#: A triangle whose plan area is no more than this share of the square of
+#: its longest side has its corners on one line on the bed, to rounding.
+_ON_ONE_LINE = 1e-10
+
+
+def _covers_bed(xy: np.ndarray) -> np.ndarray:
+    """Which of the ``(T, 3, 2)`` triangles *xy* cover any of the bed: every
+    one but those whose corners lie on one line in plan (a face standing on
+    edge).  A thin sliver of a fan covers bed and is kept."""
+    e1, e2 = xy[:, 1] - xy[:, 0], xy[:, 2] - xy[:, 0]
+    twice_area = np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0])
+    longest = (np.linalg.norm(xy - np.roll(xy, -1, axis=1), axis=2) ** 2).max(axis=1)
+    return twice_area > _ON_ONE_LINE * longest
 
 
 def _contact_patches(tris: np.ndarray) -> list[np.ndarray]:
