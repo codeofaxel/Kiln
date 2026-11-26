@@ -5,6 +5,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Fewer false alarms on hinged and print-in-place parts.**
+
 ## [1.6.0] - 2026-11-24
 
 ### Added
