@@ -1,4 +1,3 @@
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -8,26 +7,18 @@ dist/
 build/
 .eggs/
 *.so
-
-# Virtual environments
 .venv/
 venv/
-
-# Environment / secrets
 .env
 .env.*
 *.pem
 *.key
 .kiln/
-
-# Testing / linting
 .tox/
 .pytest_cache/
 .mypy_cache/
 htmlcov/
 .coverage
-
-# Development tooling
 tools/
 .DS_Store
 node_modules/
@@ -35,128 +26,32 @@ node_modules/
 CLAUDE.md
 AGENTS.md
 .claude/
-# The Mac notification helper is compiled, so it is never committed: the
-# release workflow builds it from kiln/native/notifier/main.swift and attests
-# it, and kiln/scripts/build_notifier.py builds it here for local work.
 kiln/src/kiln/data/notifier/Kiln.app/
-# Local git worktrees (parallel feature-branch checkouts) — never committed
 .worktrees/
 .mcp.json
-# The Claude Code plugin's MCP wiring is the plugin — it must ship.
 !plugins/kiln/.mcp.json
 .pre-commit-config.yaml
-
-# Deployment / infrastructure (operator-private)
-fly.toml
-deploy.sh
-Dockerfile.api
-# scripts/ is operator-private by default — ignore contents, but allow
-# the directory itself to exist so surgical exceptions below can
-# re-include named files.  `scripts/*` (not `scripts/`) is the right
-# form: ignoring the directory rules-out re-including children.
 scripts/*
-# …with a surgical exception for the wheel-inventory release gate, which runs in
-# publish.yml before SBOM/sign/upload to assert the wheel ships the
-# catalogs, OpenSCAD libraries, and printer g-code files that runtime
-# code depends on — prevents `package-data` glob regressions.
 !scripts/audit_wheel_inventory.py
-# …and for the supported-printers generator + drift gate, which keeps the
-# README's printer-breadth block in sync with the printer catalog and is
-# run by tests/CI so the published surface can never go stale.
 !scripts/generate_supported_printers.py
-# …and for the moat-comment leak gate, which is run by a CI-collected
-# test so public comments can never narrate the kiln-pro overlay's
-# internal strategy.
 !scripts/audit_moat_comment_leak.py
-# …and its frozen inventory of kiln_pro.<module> paths the public tests may
-# reference — a NEW path fails the gate until it is added here on purpose.
 !scripts/public_tests_kiln_pro_paths.txt
 !scripts/public_source_pins.txt
-# …and for the plain-words check and its frozen list, which a CI-collected
-# test runs so a sentence a person is shown never gains technical words.
 !scripts/audit_plain_words.py
 !scripts/plain_words_baseline.txt
-# …and for the import-target gate, which a CI-collected test runs so a public
-# import of code only the private package provides cannot crash every plain
-# install unnoticed (kiln-pro runs the same file over both trees).
 !scripts/audit_import_targets.py
-# …and for the untrusted-zip gate, which a CI-collected test runs so a raw
-# read of a ZIP from outside the process (a 3MF / sliced-print / marketplace
-# file) can never regrow and let a bomb exhaust the shared hosted process.
 !scripts/audit_untrusted_zip.py
-# …and for the public SME-table leak gate, which is run by a CI-collected
-# test so public source can never ship a curated cross-vendor capability /
-# SME table (curated depth belongs in the private tier or a pro overlay).
 !scripts/audit_public_sme_leak.py
 !scripts/audit_public_material_tables.py
 !scripts/public_material_tables.yaml
-# …and its ledger of bundled data files that may carry a table keyed by
-# several printer makers, each with its classification and reason.
 !scripts/public_data_allowed.yaml
-# …and for the public-language gate, which checks tracked text and new
-# commit messages for private editorial context before it reaches GitHub.
 !scripts/check_public_language.py
-# …and for the served-surface leak gate plus the dump it is built on: every
-# tool / prompt / resource description, CLI help text, manifest entry, and
-# data note a client or `kiln --help` reader receives, judged for wording
-# that names how the paid depth is built instead of what a tier unlocks.
 !scripts/audit_served_surface_leak.py
 !scripts/dump_tool_descriptions.py
-# …and for the tool-door param-parity gate, which is run by a CI-collected
-# test so a tuned engine axis (material, printer_id) can never be silently
-# unreachable through the @mcp.tool() door an agent actually calls.
 !scripts/audit_tool_param_parity.py
-# …and for the adapter-conformance gate + its ledger, which are run by a
-# CI-collected test so a contract field one printer backend fills and the
-# other seven leave empty can never again be invisible to the type system
-# and to every per-adapter test.  The ledger is the public record of what
-# each backend really provides and why anything is absent.
 !scripts/audit_adapter_conformance.py
 !scripts/adapter_conformance.yaml
-# …and for the clean-install capability gate, which ci.yml runs as its own
-# job.  Every other check installs from requirements-lock.txt, so a package
-# Kiln imports but never declares is present in all of them and missing only
-# for real users; this one installs the way a user does and asserts the
-# capabilities actually RUN.  v1.4.1 shipped the studio-look renderer inert
-# for that reason.  It must be tracked or the CI job it backs cannot run.
 !scripts/audit_clean_install.py
-
-# Internal working docs (backed up via iCloud)
-.dev
-
-# Internal task tracking
-task.md
-
-# Lessons learned / session notes (private by convention across all repos)
-lessons_learned.md
-LESSONS_LEARNED.md
-*lessons_learned*.md
-tasks.md
-
-# Session summaries, work notes, scratch markdown — never commit these.
-# These are ephemeral working-memory artifacts, not repo artifacts.
-# See CLAUDE.md "Files Never to Commit" section.
-*SUMMARY.md
-*_SUMMARY.md
-*_NOTES.md
-WORK_LOG.md
-SESSION_*.md
-OVERNIGHT_*.md
-NOTES.md
-
-# Circle recovery files
-.circle-recovery.txt
-recovery.dat
-
-# Print working files (photos, heightmaps, STLs, gcode — personal/private)
 prints/
-
-# Marketing drafts
-docs/marketing/
 .vercel
 .env*.local
-
-# Brand-casing policy — private internal doc, not part of public Kiln
-# surface.  Lives at docs/BRAND.md; see Adam directly for the current
-# version.  See CLAUDE.md "Files Never to Commit" for the principle.
-docs/BRAND.md
