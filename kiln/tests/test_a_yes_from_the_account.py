@@ -54,7 +54,7 @@ from kiln.print_consent import (
     reset_consent,
     why_not_asked,
 )
-from kiln.printers.base import PrinterError, PrinterState, PrinterStatus
+from kiln.printers.base import PrinterAdapter, PrinterError, PrinterState, PrinterStatus
 
 API = "https://api.account.test"
 PENDING = f"{API}/api/print-authority/pending"
@@ -93,6 +93,9 @@ def _clean(monkeypatch, tmp_path):
     import kiln.preview_gate as pg
 
     monkeypatch.setattr(pg, "_gate", PreviewGate())
+    # What this process knows of printer-side files' local copies is
+    # process-wide: each test starts knowing none.
+    monkeypatch.setattr(server, "_UPLOADED_FROM", {})
     monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
     monkeypatch.setattr(server, "host_can_ask_the_user", lambda mcp, ctx: False)
     monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: name or "bench")
@@ -1635,3 +1638,204 @@ def test_a_window_on_the_account_does_not_start_a_print_the_owner_said_to_print_
     r = _ask(model)
     assert r.consent is None and _calls(RECORD) == []
     assert "soft_nozzle_confirmed" in json.loads(_calls(PENDING)[0].request.body)["owner_words"]
+
+
+# ---------------------------------------------------------------------------
+# A start that names the file only by its name on the printer
+# ---------------------------------------------------------------------------
+
+
+def _start(file_name, preview_token=None, printer_name="bench"):
+    """One start_print of a printer-side name, carrying its preview token."""
+
+    async def run():
+        args = {"file_name": str(file_name), "printer_name": printer_name}
+        if preview_token:
+            args["preview_token"] = preview_token
+        token = await server._obtain_print_consent("start_print", args, types.SimpleNamespace())
+        try:
+            return types.SimpleNamespace(
+                why=why_not_asked(),
+                consent=consent_for(file_name=str(file_name), printer_name=printer_name),
+                text=server._no_yes_message("start_print", str(file_name), printer_name),
+            )
+        finally:
+            reset_consent(token)
+
+    return asyncio.run(run())
+
+
+def _preview(path: pathlib.Path) -> str:
+    """A preview token issued for the local file, the way the agent gets one."""
+    from kiln.preview_gate import get_preview_gate
+
+    return get_preview_gate().issue(str(path), door="png").token
+
+
+class TestAPrinterSideStart:
+    """The file is already on the printer and this Kiln never sent it (it was
+    restarted since, or another program sent it): the card on the account
+    still shows, and binds the yes to, the bytes the person was shown."""
+
+    @responses.activate
+    def test_the_previewed_file_is_put_to_the_account(self, signed_in, model):
+        _may_i()
+        _held("pa_7")
+        r = _start("benchy.3mf", _preview(model))
+        posts = _calls(PENDING)
+        assert len(posts) == 1
+        assert json.loads(posts[0].request.body)["file_sha256"] == _sha(model)
+        assert r.why.endswith(NOT_ASKED_PENDING_TAG + "pa_7")
+        assert "kiln3d.com/monitor" in r.text
+
+    @responses.activate
+    def test_the_answer_is_read_back_for_the_same_bytes(self, signed_in, model):
+        """The approval is matched back by the same bytes and printer it was
+        asked about, so the retry after a tap on the card can start."""
+        _may_i(True, {"kind": "approval", "id": "ap_1", "grantor": "account:acct-1", "via": "web_button"})
+        responses.add(responses.POST, RECORD, json={"success": True, "event": {"id": "ev_1"}, "repeat": False})
+        r = _start("benchy.3mf", _preview(model))
+        read = _calls(MAY_I)
+        assert read and f"file_hash={_sha(model)}" in read[0].request.url
+        assert r.consent is not None and r.consent.source == SOURCE_HOSTED_APPROVAL
+        assert json.loads(_calls(RECORD)[0].request.body)["file_sha256"] == _sha(model)
+
+    @responses.activate
+    def test_a_preview_of_one_file_never_stands_for_another(self, signed_in, model):
+        _may_i()
+        _held()
+        r = _start("other.3mf", _preview(model))
+        assert _calls(PENDING) == [] and _calls(MAY_I) == []
+        assert NOT_ASKED_PENDING_TAG not in r.why
+
+    @responses.activate
+    def test_a_file_changed_since_its_preview_is_not_put_to_the_account(self, signed_in, model):
+        token = _preview(model)
+        model.write_bytes(model.read_bytes() + b" changed after the preview")
+        _may_i()
+        _held()
+        _start("benchy.3mf", token)
+        assert _calls(PENDING) == [] and _calls(MAY_I) == []
+
+    @responses.activate
+    def test_with_no_preview_token_nothing_is_guessed(self, signed_in, model):
+        _preview(model)  # a live token this call does not carry
+        _may_i()
+        _held()
+        _start("benchy.3mf")
+        assert _calls(PENDING) == [] and _calls(MAY_I) == []
+
+    @responses.activate
+    def test_signed_in_with_no_card_the_reply_says_so(self, signed_in, model):
+        _may_i()
+        _held()
+        r = _start("benchy.3mf")  # no local copy, no token: nothing to put on the account
+        assert _calls(PENDING) == []
+        assert "could not be put on their Kiln account" in r.text
+        assert "kiln3d.com/monitor" not in r.text
+        assert "kiln print benchy.3mf" in r.text  # the way that still works is named
+
+    def test_signed_out_the_reply_names_signin_not_a_missing_card(self, model):
+        r = _start("benchy.3mf")
+        assert "could not be put on their Kiln account" not in r.text
+        assert "kiln signin" in r.text
+
+    def test_on_the_hosted_server_no_local_copy_is_learned(self, model, monkeypatch):
+        """One process serves every caller there, and a printer-side name is
+        anyone's to choose: nothing is read back and nothing is learned."""
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        token = _preview(model)
+
+        async def run():
+            await server._learn_the_local_copy("benchy.3mf", {"preview_token": token})
+            return server._local_copy_of("benchy.3mf")
+
+        assert asyncio.run(run()) is None
+
+
+
+class TestAFileOnlyOnThePrinter:
+    """Kiln was restarted since it sent the file, so this process holds no
+    copy and no preview of it: the printer hands its own bytes back, and the
+    card on the account is bound to exactly those bytes."""
+
+    PLATE = b"PK the plate as the printer holds it"
+
+    @pytest.fixture
+    def printer(self, monkeypatch, tmp_path):
+        from kiln.output_paths import REQUEST_OUTPUT_ROOT
+        from tests._fake_bambu_ftps import FakeBambuFTPS, bambu_on
+
+        ftps = FakeBambuFTPS()
+        ftps.hold("cube.gcode.3mf", self.PLATE, 1_764_100_000)
+        adapter = bambu_on(ftps, monkeypatch, tmp_path)
+        monkeypatch.setattr(server, "_resolve_adapter", lambda printer_name=None: adapter)
+        token = REQUEST_OUTPUT_ROOT.set(str(tmp_path / "out"))
+        yield ftps
+        REQUEST_OUTPUT_ROOT.reset(token)
+
+    @responses.activate
+    def test_the_card_is_bound_to_the_printers_bytes(self, signed_in, printer):
+        _may_i()
+        _held("pa_9")
+        r = _start("cube.gcode.3mf")
+        posts = _calls(PENDING)
+        assert len(posts) == 1
+        assert json.loads(posts[0].request.body)["file_sha256"] == hashlib.sha256(self.PLATE).hexdigest()
+        assert r.why.endswith(NOT_ASKED_PENDING_TAG + "pa_9")
+        assert "kiln3d.com/monitor" in r.text
+        assert "could not be put on their Kiln account" not in r.text
+
+    @responses.activate
+    def test_a_yes_on_the_card_answers_only_those_bytes(self, signed_in, printer):
+        sha = hashlib.sha256(self.PLATE).hexdigest()
+        _may_i(True, {"kind": "approval", "id": "ap_2", "grantor": "account:acct-1", "via": "web_button"})
+        responses.add(responses.POST, RECORD, json={"success": True, "event": {"id": "ev_2"}, "repeat": False})
+        r = _start("cube.gcode.3mf")
+        assert f"file_hash={sha}" in _calls(MAY_I)[0].request.url
+        assert r.consent is not None and r.consent.source == SOURCE_HOSTED_APPROVAL
+        assert json.loads(_calls(RECORD)[0].request.body)["file_sha256"] == sha
+
+    @responses.activate
+    def test_the_file_is_read_once_across_starts(self, signed_in, printer):
+        _may_i()
+        _held("pa_9")
+        _start("cube.gcode.3mf")
+        _start("cube.gcode.3mf")
+        assert len(printer.reads()) == 1
+        assert len(_calls(MAY_I)) == 2
+
+    @responses.activate
+    def test_a_printer_that_cannot_hand_it_back_files_no_card_and_says_so(self, signed_in, monkeypatch):
+        class NoReadBack:
+            read_print_file = PrinterAdapter.read_print_file
+
+        monkeypatch.setattr(server, "_resolve_adapter", lambda printer_name=None: NoReadBack())
+        _may_i()
+        _held()
+        r = _start("cube.gcode.3mf")
+        assert _calls(PENDING) == [] and _calls(MAY_I) == []
+        assert "could not be put on their Kiln account" in r.text
+        assert "kiln print cube.gcode.3mf" in r.text
+
+class TestAWindowsNotification:
+    """Windows takes a notification and can hold it back without telling
+    Kiln, so a code sent there is said as sent, never as seen."""
+
+    @responses.activate
+    def test_on_windows_the_code_is_said_as_sent_and_the_other_ways_are_named(self, signed_in, model, monkeypatch):
+        monkeypatch.setattr(screen_code, "sys", types.SimpleNamespace(platform="win32"))
+        _may_i()
+        _held()
+        r = _ask(model)
+        assert "just sent in a notification" in r.text and "just shown" not in r.text
+        assert "Do not disturb" in r.text
+        assert "kiln3d.com/monitor" in r.text and "kiln print benchy.3mf" in r.text
+
+    @responses.activate
+    def test_elsewhere_the_wording_is_unchanged(self, signed_in, model, monkeypatch):
+        monkeypatch.setattr(screen_code, "sys", types.SimpleNamespace(platform="darwin"))
+        _may_i()
+        _held()
+        r = _ask(model)
+        assert "code was just shown in a notification" in r.text

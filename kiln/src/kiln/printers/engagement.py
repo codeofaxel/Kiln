@@ -75,6 +75,7 @@ GATED_ACTIONS = frozenset(
         # Reads what the machine holds and how it is set.
         "list_files",
         "read_print_file",
+        "print_file_identity",
         "get_filament_status",
         "get_ams_status",
         "get_cfs_status",
@@ -927,6 +928,7 @@ _READ_ACTIONS = frozenset(
     {
         "list_files",
         "read_print_file",
+        "print_file_identity",
         "get_filament_status",
         "get_ams_status",
         "get_cfs_status",

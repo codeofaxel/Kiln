@@ -79,6 +79,10 @@ class PreviewToken:
     #: audit line, never to decide.
     door: str = ""
     evidence: dict = field(default_factory=dict)
+    #: The local file the preview was of, when the token was issued for a
+    #: path.  Read only to find what a later start of the same file name
+    #: was previewed as (:meth:`PreviewGate.previewed_source`).
+    source_path: str = ""
 
     def expired(self, now: float | None = None) -> bool:
         if now is None:
@@ -117,9 +121,11 @@ class PreviewGate:
         before calling this; they ride the token so the print gate can say
         which door signed the print off.
         """
+        source_path = ""
         if _looks_like_path(file_path_or_hash):
             file_hash = hash_file(file_path_or_hash)
             filename_key = os.path.basename(file_path_or_hash)
+            source_path = os.path.abspath(file_path_or_hash)
         else:
             # Caller passed a bare filename or a pre-computed hash.
             # If it looks like a slicer output filename (common shape
@@ -142,6 +148,7 @@ class PreviewGate:
             ttl_seconds=ttl_seconds,
             door=door,
             evidence=dict(evidence or {}),
+            source_path=source_path,
         )
         with self._lock:
             self._tokens[token_str] = t
@@ -231,6 +238,29 @@ class PreviewGate:
             with self._lock:
                 self._tokens.pop(token_str, None)
         return True, None, t
+
+    def previewed_source(self, token_str: str, file_name: str) -> str | None:
+        """The local file a live token was issued for, when a start names
+        that file only by its name on the printer: the path, or ``None``.
+
+        Only for a token issued for a path whose base name is *file_name*'s
+        and whose bytes still hash to what was previewed, so the file this
+        returns is exactly the file the person was shown.  Never consumes
+        the token and never raises."""
+        if not token_str or not file_name:
+            return None
+        with self._lock:
+            t = self._tokens.get(token_str)
+        if t is None or t.expired() or not t.source_path or not t.file_hash:
+            return None
+        if os.path.basename(str(file_name)) != t.filename_key:
+            return None
+        try:
+            if hash_file(t.source_path) != t.file_hash:
+                return None
+        except OSError:
+            return None
+        return t.source_path
 
 
 # ---------------------------------------------------------------------------

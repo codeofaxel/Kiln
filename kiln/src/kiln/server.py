@@ -2957,6 +2957,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
         print_signoff.verified_resume, file_value, arguments, printer_name=arguments.get("printer_name"),
     ):
         return None  # already running, already approved
+    await _learn_the_local_copy(file_value, arguments)
     note_window_outcome(None)  # nothing from an earlier call rides this result
     note_alerted_devices(None)
     printer_name = arguments.get("printer_name")
@@ -4306,6 +4307,14 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         if why and signed_out
         else ""
     )
+    # Signed in, and still nothing is waiting on the account: say so, so
+    # nobody looks for it on their phone or in a browser.
+    no_card = (
+        " This print could not be put on their Kiln account this time, so it is not waiting for "
+        "them on their phone or in a browser."
+        if why and not pending and not signed_out
+        else ""
+    )
     # The account page's switch reaches this machine only once it is signed in.
     web = (
         ""
@@ -4344,8 +4353,15 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
                 " Notifications from Kiln are turned off on this Mac, so the code went out another "
                 "way and may not show: they can turn them on in System Settings, Notifications, Kiln."
             )
+        sent = (
+            "code was just sent in a notification to the screen of the computer Kiln runs on. Windows "
+            "can hold a notification back without saying so (Do not disturb, or notifications turned "
+            "off for Kiln), so they may not see it."
+            if screen_code.may_go_unseen()
+            else "code was just shown in a notification on the screen of the computer Kiln runs on."
+        )
         code = (
-            "code was just shown in a notification on the screen of the computer Kiln runs on." + hook + switch
+            sent + hook + switch
             + f" They type the code here to print {name} on {aimed} — the code alone approves this print; "
             f"the code followed by 2h or today also keeps printing on {aimed} without asking — and you pass "
             "their exact words to give_print_code, then start again. Nothing you can call reveals the "
@@ -4359,7 +4375,7 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         )
         if monitor and agent_host.person_is_in_a_chat_app():
             return f"{ready} First, they can {monitor} Or, at the computer: a {code}{terminal}{always}"
-        account = f" Or they can {monitor}" if monitor else (f" {signin}" if signin else "")
+        account = f" Or they can {monitor}" if monitor else (f" {signin}" if signin else no_card)
         return f"{ready} A {code}{account}{terminal}{always}"
     if why.startswith(NOT_ASKED_CODE_COOLDOWN):
         secs = why.split(":", 1)[1] if ":" in why else "60"
@@ -4388,7 +4404,7 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
                 f"these yeses.{always}"
             )
         return (
-            f"{lead}{(' ' + signin) if signin else ''} Their yes has to be given at a terminal: "
+            f"{lead}{(' ' + signin) if signin else no_card} Their yes has to be given at a terminal: "
             f"{terminal}either yes.{always}"
         )
     doors = (
@@ -5306,6 +5322,12 @@ def _remember_upload(remote_name: str | None, local_path: str | None) -> None:
         _UPLOADED_FROM.pop(next(iter(_UPLOADED_FROM)), None)
 
 
+#: The local copy of the file the start being served names, when Kiln held
+#: none and learned one for this start (:func:`_learn_the_local_copy`):
+#: ``(printer-side name, local path)``.  Lives as long as the call.
+_START_COPY: ContextVar[tuple[str, str] | None] = ContextVar("kiln_start_local_copy", default=None)
+
+
 def _local_copy_of(file_name: str | None) -> str | None:
     """A readable local copy of a printer-side file name, or ``None``."""
     if not file_name:
@@ -5313,7 +5335,59 @@ def _local_copy_of(file_name: str | None) -> str | None:
     if os.path.isfile(file_name):
         return file_name
     local = _UPLOADED_FROM.get(os.path.basename(file_name))
-    return local if local and os.path.isfile(local) else None
+    if local and os.path.isfile(local):
+        return local
+    held = _START_COPY.get()
+    if held is not None and held[0] == file_name and os.path.isfile(held[1]):
+        return held[1]
+    return None
+
+
+def _previewed_copy(file_name: str, preview_token: Any) -> str | None:
+    """The local file this call's preview token was issued for, when it has
+    *file_name*'s name and its bytes are unchanged since the preview."""
+    if not preview_token:
+        return None
+    with contextlib.suppress(Exception):
+        from kiln.preview_gate import get_preview_gate
+
+        return get_preview_gate().previewed_source(str(preview_token), file_name)
+    return None
+
+
+def _printer_copy(file_name: str, printer_name: str | None) -> str | None:
+    """The printer's own bytes of *file_name*, read back into a private
+    folder (:func:`kiln.printer_copy.copy_from_printer`), or ``None`` when
+    the printer cannot hand it back."""
+    with contextlib.suppress(Exception):
+        from kiln.printer_copy import copy_from_printer
+
+        return copy_from_printer(_resolve_adapter(printer_name), file_name).path
+    return None
+
+
+async def _learn_the_local_copy(file_name: str | None, arguments: dict[str, Any]) -> None:
+    """A start that names a file only by its name on the printer, with no
+    local copy here (Kiln was restarted since it sent the file, or another
+    program sent it), gets one for this call, so the print can be put to the
+    person's account bound to bytes Kiln has read: the file this call's
+    preview token was issued for when its bytes are unchanged, else the
+    printer's own copy, read back from it.  Off the hosted server only.
+    Never raises."""
+    if not file_name or _hosted_now():
+        return
+    if "/" in file_name or "\\" in file_name or _local_copy_of(file_name) is not None:
+        return  # a path is its own copy, or none; a copy on record stands
+    try:
+        local = _previewed_copy(file_name, arguments.get("preview_token")) or await asyncio.to_thread(
+            _printer_copy, file_name, arguments.get("printer_name"),
+        )
+    except Exception:  # noqa: BLE001 -- no copy is the answer it always was
+        logger.debug("consent: no local copy learned for %s", file_name, exc_info=True)
+        return
+    if local:
+        _START_COPY.set((file_name, local))
+
 
 # Rate limits: {tool_name: (min_interval_ms, max_per_minute)}.
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.

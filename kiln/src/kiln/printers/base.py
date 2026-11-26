@@ -4484,6 +4484,12 @@ class PrinterAdapter(ABC):
         """The bytes of *file_name* as the printer holds them, or ``None``."""
         return None
 
+    def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
+        """``(size in bytes, Unix time stamp)`` the printer reports for
+        *file_name* without sending it, either part ``None`` when not
+        reported; ``None`` when the printer cannot say."""
+        return None
+
     # -- async wrappers (hot-path methods) --------------------------------
 
     async def async_get_state(self) -> PrinterState:

@@ -5396,6 +5396,38 @@ class BambuAdapter(PrinterAdapter):
             except Exception as exc:
                 logger.debug("Failed to quit FTP session after read-back: %s", exc)
 
+    def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
+        """``(size, time stamp)`` of *file_name* on the printer, over FTPS
+        ``SIZE`` and ``MDTM``; either part ``None`` when the printer does
+        not answer that one."""
+        ftp = self._ftp_connect()
+        try:
+            path = self._storage_file_path(ftp, file_name)
+            size: int | None = None
+            stamp: int | None = None
+            with contextlib.suppress(Exception):
+                ftp.voidcmd("TYPE I")
+            with contextlib.suppress(Exception):
+                found = ftp.size(path)
+                size = int(found) if found is not None else None
+            with contextlib.suppress(Exception):
+                reply = ftp.sendcmd(f"MDTM {path}")
+                code, _, when = str(reply).partition(" ")
+                if code == "213":
+                    import datetime
+
+                    stamp = int(
+                        datetime.datetime.strptime(when.strip()[:14], "%Y%m%d%H%M%S")
+                        .replace(tzinfo=datetime.timezone.utc)
+                        .timestamp()
+                    )
+            return size, stamp
+        finally:
+            try:
+                ftp.quit()
+            except Exception as exc:
+                logger.debug("Failed to quit FTP session after reading a file's size: %s", exc)
+
     def delete_file(self, file_path: str) -> bool:
         """Delete a file from the printer's storage via FTPS."""
         try:

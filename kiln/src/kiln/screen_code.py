@@ -386,6 +386,14 @@ def _windows_toast_script(issued: Issued) -> str:
     return ";".join(steps) + "\n"
 
 
+def may_go_unseen() -> bool:
+    """Whether a banner this machine accepted can still go unseen without
+    Kiln being told: Windows takes a notification and may hold it back (Do
+    not disturb, or notifications turned off for Kiln), so a code sent there
+    is said as sent, never as seen."""
+    return sys.platform.startswith("win")
+
+
 def _show_command(issued: Issued) -> tuple[list[str], str | None] | None:
     """``(argv, stdin)`` that puts the banner up on this platform, or ``None``.
 
