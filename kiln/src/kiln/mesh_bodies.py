@@ -43,6 +43,8 @@ from typing import Any
 
 import numpy as np
 
+from kiln.fusion_check import TOUCH_GAP_MM
+
 #: Corners closer than this fraction of the part's diagonal are copies of one
 #: corner, unless a triangle holds them both (:data:`_COPY_RADII`).  A millionth of the part's size
 #: is far below anything a printer can make and well above float32 rounding
@@ -64,9 +66,10 @@ _NEAR_SPAN = 8
 _COPY_RADII = 0.25
 
 #: How far outside a piece's own surface, as a fraction of its diagonal, the
-#: points sit that ask whether another piece is right there: far below any
-#: gap a printer resolves and far above the weld, so a designed clearance
-#: (a print-in-place hinge) never reads as contact.
+#: points sit that ask whether another piece is right there: far above the
+#: weld, and never deeper than the gap a printer keeps apart
+#: (:data:`kiln.fusion_check.TOUCH_GAP_MM`), so a designed clearance (a
+#: print-in-place hinge) never reads as contact however large the part.
 _PROBE_DEPTH_FRACTION = 1e-3
 
 #: Probe points per pair, spread evenly over the smaller piece's triangles.
@@ -961,7 +964,7 @@ def _in_contact(
     picked, area = picked[area > 0.0], area[area > 0.0]
     if len(picked) == 0 or own_volume == 0.0:
         return False, 0
-    depth = _PROBE_DEPTH_FRACTION * own_diagonal
+    depth = min(_PROBE_DEPTH_FRACTION * own_diagonal, TOUCH_GAP_MM)
     outward = np.sign(own_volume) * cross[picked] / area[:, None]
     probes = tri[picked].mean(axis=1) + depth * outward
     # Off every edge and corner of the host in plan, by a hair.
