@@ -4280,6 +4280,11 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         "first step, not a failure: do not tell the person the print failed or was refused. Tell them "
         f"{name} is ready for {aimed}, and how they say go."
     )
+    if _PREVIEW_IS_NOT_THE_PRINTERS.get():
+        ready += (
+            f" The {name} on {aimed} is not the file that was previewed: what they are asked to approve "
+            "is the file on the printer, which is what would print."
+        )
     monitor = ""
     if pending:
         alert = (
@@ -5322,10 +5327,15 @@ def _remember_upload(remote_name: str | None, local_path: str | None) -> None:
         _UPLOADED_FROM.pop(next(iter(_UPLOADED_FROM)), None)
 
 
-#: The local copy of the file the start being served names, when Kiln held
-#: none and learned one for this start (:func:`_learn_the_local_copy`):
-#: ``(printer-side name, local path)``.  Lives as long as the call.
-_START_COPY: ContextVar[tuple[str, str] | None] = ContextVar("kiln_start_local_copy", default=None)
+#: What the start being served binds its approval to, decided once per call
+#: by :func:`_learn_the_local_copy`: ``(printer-side name, local path or
+#: None)``.  While set it answers for that name before the upload memory, so
+#: a copy Kiln cannot vouch for is no copy.  Lives as long as the call.
+_START_COPY: ContextVar[tuple[str, str | None] | None] = ContextVar("kiln_start_local_copy", default=None)
+
+#: Set for the call when the file on the printer is not the file the
+#: start's preview token was made for (:func:`_learn_the_local_copy`).
+_PREVIEW_IS_NOT_THE_PRINTERS: ContextVar[bool] = ContextVar("kiln_preview_is_not_the_printers", default=False)
 
 
 def _local_copy_of(file_name: str | None) -> str | None:
@@ -5334,13 +5344,11 @@ def _local_copy_of(file_name: str | None) -> str | None:
         return None
     if os.path.isfile(file_name):
         return file_name
-    local = _UPLOADED_FROM.get(os.path.basename(file_name))
-    if local and os.path.isfile(local):
-        return local
     held = _START_COPY.get()
-    if held is not None and held[0] == file_name and os.path.isfile(held[1]):
-        return held[1]
-    return None
+    if held is not None and held[0] == file_name:
+        return held[1] if held[1] and os.path.isfile(held[1]) else None
+    local = _UPLOADED_FROM.get(os.path.basename(file_name))
+    return local if local and os.path.isfile(local) else None
 
 
 def _previewed_copy(file_name: str, preview_token: Any) -> str | None:
@@ -5355,38 +5363,66 @@ def _previewed_copy(file_name: str, preview_token: Any) -> str | None:
     return None
 
 
-def _printer_copy(file_name: str, printer_name: str | None) -> str | None:
-    """The printer's own bytes of *file_name*, read back into a private
-    folder (:func:`kiln.printer_copy.copy_from_printer`), or ``None`` when
-    the printer cannot hand it back."""
+def _printer_reports_another_size(adapter: Any, file_name: str, local: str) -> bool:
+    """Whether the printer reports a size for *file_name* other than
+    *local*'s: then something replaced it since Kiln sent it.  A printer
+    that cannot say is taken at Kiln's word, as before."""
     with contextlib.suppress(Exception):
+        found = adapter.print_file_identity(file_name) if adapter is not None else None
+        size = found[0] if found else None
+        if isinstance(size, int):
+            return size != os.path.getsize(local)
+    return False
+
+
+def _the_bytes_to_ask_about(file_name: str, printer_name: str | None, preview_token: Any) -> tuple[str | None, bool]:
+    """``(local path, preview differs)``: the bytes the account's approval of
+    this start is bound to, and whether the start's preview token was made
+    for other bytes.
+
+    The bytes are the ones the printer holds.  A file this process sent is
+    those bytes unless the printer now reports another size for the name;
+    otherwise the printer's own copy is read back
+    (:func:`kiln.printer_copy.copy_from_printer`).  A preview never stands
+    in for them: when nothing can be read from the printer there is no copy,
+    and when the previewed file differs from what the printer holds, the
+    printer's bytes are what is asked about."""
+    adapter = None
+    with contextlib.suppress(Exception):
+        adapter = _resolve_adapter(printer_name)
+    bound: str | None = None
+    sent = _UPLOADED_FROM.get(os.path.basename(file_name))
+    if sent and os.path.isfile(sent) and not _printer_reports_another_size(adapter, file_name, sent):
+        bound = sent
+    elif adapter is not None:
         from kiln.printer_copy import copy_from_printer
 
-        return copy_from_printer(_resolve_adapter(printer_name), file_name).path
-    return None
+        bound = copy_from_printer(adapter, file_name).path
+    previewed = _previewed_copy(file_name, preview_token)
+    if not bound or not previewed:
+        return bound, False
+    from kiln.bridge_client import _sha256_of
+
+    return bound, _sha256_of(previewed) != _sha256_of(bound)
 
 
 async def _learn_the_local_copy(file_name: str | None, arguments: dict[str, Any]) -> None:
-    """A start that names a file only by its name on the printer, with no
-    local copy here (Kiln was restarted since it sent the file, or another
-    program sent it), gets one for this call, so the print can be put to the
-    person's account bound to bytes Kiln has read: the file this call's
-    preview token was issued for when its bytes are unchanged, else the
-    printer's own copy, read back from it.  Off the hosted server only.
-    Never raises."""
-    if not file_name or _hosted_now():
+    """Decide, once for this call, which bytes a start that names a file
+    only by its name on the printer is put to the person's account about
+    (:func:`_the_bytes_to_ask_about`).  Off the hosted server only; a path
+    is its own copy.  Never raises."""
+    if not file_name or _hosted_now() or "/" in file_name or "\\" in file_name or os.path.isfile(file_name):
         return
-    if "/" in file_name or "\\" in file_name or _local_copy_of(file_name) is not None:
-        return  # a path is its own copy, or none; a copy on record stands
+    bound: str | None = None
+    differs = False
     try:
-        local = _previewed_copy(file_name, arguments.get("preview_token")) or await asyncio.to_thread(
-            _printer_copy, file_name, arguments.get("printer_name"),
+        bound, differs = await asyncio.to_thread(
+            _the_bytes_to_ask_about, file_name, arguments.get("printer_name"), arguments.get("preview_token"),
         )
-    except Exception:  # noqa: BLE001 -- no copy is the answer it always was
-        logger.debug("consent: no local copy learned for %s", file_name, exc_info=True)
-        return
-    if local:
-        _START_COPY.set((file_name, local))
+    except Exception:  # noqa: BLE001 -- bytes nobody could read are no copy
+        logger.debug("consent: no copy decided for %s", file_name, exc_info=True)
+    _START_COPY.set((file_name, bound))
+    _PREVIEW_IS_NOT_THE_PRINTERS.set(differs)
 
 
 # Rate limits: {tool_name: (min_interval_ms, max_per_minute)}.

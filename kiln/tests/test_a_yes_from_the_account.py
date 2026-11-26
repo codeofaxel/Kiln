@@ -1672,33 +1672,32 @@ def _preview(path: pathlib.Path) -> str:
     return get_preview_gate().issue(str(path), door="png").token
 
 
+class _NoReadBack:
+    """A printer that cannot hand a file back."""
+
+    read_print_file = PrinterAdapter.read_print_file
+
+
 class TestAPrinterSideStart:
-    """The file is already on the printer and this Kiln never sent it (it was
-    restarted since, or another program sent it): the card on the account
-    still shows, and binds the yes to, the bytes the person was shown."""
+    """The file is already on the printer and this Kiln holds no copy of it
+    (it was restarted since, or another program sent it), and this printer
+    cannot hand a file back: a preview of a local file of that name never
+    puts the print on the account, because nothing proves the printer holds
+    those bytes."""
+
+    @pytest.fixture(autouse=True)
+    def _cannot_read_back(self, monkeypatch):
+        monkeypatch.setattr(server, "_resolve_adapter", lambda printer_name=None: _NoReadBack())
 
     @responses.activate
-    def test_the_previewed_file_is_put_to_the_account(self, signed_in, model):
+    def test_a_preview_alone_puts_nothing_on_the_account(self, signed_in, model):
         _may_i()
-        _held("pa_7")
+        _held()
         r = _start("benchy.3mf", _preview(model))
-        posts = _calls(PENDING)
-        assert len(posts) == 1
-        assert json.loads(posts[0].request.body)["file_sha256"] == _sha(model)
-        assert r.why.endswith(NOT_ASKED_PENDING_TAG + "pa_7")
-        assert "kiln3d.com/monitor" in r.text
-
-    @responses.activate
-    def test_the_answer_is_read_back_for_the_same_bytes(self, signed_in, model):
-        """The approval is matched back by the same bytes and printer it was
-        asked about, so the retry after a tap on the card can start."""
-        _may_i(True, {"kind": "approval", "id": "ap_1", "grantor": "account:acct-1", "via": "web_button"})
-        responses.add(responses.POST, RECORD, json={"success": True, "event": {"id": "ev_1"}, "repeat": False})
-        r = _start("benchy.3mf", _preview(model))
-        read = _calls(MAY_I)
-        assert read and f"file_hash={_sha(model)}" in read[0].request.url
-        assert r.consent is not None and r.consent.source == SOURCE_HOSTED_APPROVAL
-        assert json.loads(_calls(RECORD)[0].request.body)["file_sha256"] == _sha(model)
+        assert _calls(PENDING) == [] and _calls(MAY_I) == []
+        assert NOT_ASKED_PENDING_TAG not in r.why
+        assert "could not be put on their Kiln account" in r.text
+        assert "kiln print benchy.3mf" in r.text
 
     @responses.activate
     def test_a_preview_of_one_file_never_stands_for_another(self, signed_in, model):
@@ -1740,26 +1739,14 @@ class TestAPrinterSideStart:
         assert "could not be put on their Kiln account" not in r.text
         assert "kiln signin" in r.text
 
-    def test_on_the_hosted_server_no_local_copy_is_learned(self, model, monkeypatch):
-        """One process serves every caller there, and a printer-side name is
-        anyone's to choose: nothing is read back and nothing is learned."""
-        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        token = _preview(model)
-
-        async def run():
-            await server._learn_the_local_copy("benchy.3mf", {"preview_token": token})
-            return server._local_copy_of("benchy.3mf")
-
-        assert asyncio.run(run()) is None
-
-
 
 class TestAFileOnlyOnThePrinter:
-    """Kiln was restarted since it sent the file, so this process holds no
-    copy and no preview of it: the printer hands its own bytes back, and the
-    card on the account is bound to exactly those bytes."""
+    """Kiln holds no copy of the file it is starting: the printer hands its
+    own bytes back, and the card on the account is bound to exactly those
+    bytes, whatever was previewed."""
 
     PLATE = b"PK the plate as the printer holds it"
+    NAME = "cube.gcode.3mf"
 
     @pytest.fixture
     def printer(self, monkeypatch, tmp_path):
@@ -1767,21 +1754,30 @@ class TestAFileOnlyOnThePrinter:
         from tests._fake_bambu_ftps import FakeBambuFTPS, bambu_on
 
         ftps = FakeBambuFTPS()
-        ftps.hold("cube.gcode.3mf", self.PLATE, 1_764_100_000)
+        ftps.hold(self.NAME, self.PLATE, 1_764_100_000)
         adapter = bambu_on(ftps, monkeypatch, tmp_path)
         monkeypatch.setattr(server, "_resolve_adapter", lambda printer_name=None: adapter)
         token = REQUEST_OUTPUT_ROOT.set(str(tmp_path / "out"))
         yield ftps
         REQUEST_OUTPUT_ROOT.reset(token)
 
+    def _local(self, tmp_path, data: bytes) -> pathlib.Path:
+        path = tmp_path / "local" / self.NAME
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def _filed_sha(self) -> str:
+        posts = _calls(PENDING)
+        assert len(posts) == 1
+        return json.loads(posts[0].request.body)["file_sha256"]
+
     @responses.activate
     def test_the_card_is_bound_to_the_printers_bytes(self, signed_in, printer):
         _may_i()
         _held("pa_9")
-        r = _start("cube.gcode.3mf")
-        posts = _calls(PENDING)
-        assert len(posts) == 1
-        assert json.loads(posts[0].request.body)["file_sha256"] == hashlib.sha256(self.PLATE).hexdigest()
+        r = _start(self.NAME)
+        assert self._filed_sha() == hashlib.sha256(self.PLATE).hexdigest()
         assert r.why.endswith(NOT_ASKED_PENDING_TAG + "pa_9")
         assert "kiln3d.com/monitor" in r.text
         assert "could not be put on their Kiln account" not in r.text
@@ -1791,7 +1787,7 @@ class TestAFileOnlyOnThePrinter:
         sha = hashlib.sha256(self.PLATE).hexdigest()
         _may_i(True, {"kind": "approval", "id": "ap_2", "grantor": "account:acct-1", "via": "web_button"})
         responses.add(responses.POST, RECORD, json={"success": True, "event": {"id": "ev_2"}, "repeat": False})
-        r = _start("cube.gcode.3mf")
+        r = _start(self.NAME)
         assert f"file_hash={sha}" in _calls(MAY_I)[0].request.url
         assert r.consent is not None and r.consent.source == SOURCE_HOSTED_APPROVAL
         assert json.loads(_calls(RECORD)[0].request.body)["file_sha256"] == sha
@@ -1800,23 +1796,87 @@ class TestAFileOnlyOnThePrinter:
     def test_the_file_is_read_once_across_starts(self, signed_in, printer):
         _may_i()
         _held("pa_9")
-        _start("cube.gcode.3mf")
-        _start("cube.gcode.3mf")
+        _start(self.NAME)
+        _start(self.NAME)
         assert len(printer.reads()) == 1
         assert len(_calls(MAY_I)) == 2
 
     @responses.activate
-    def test_a_printer_that_cannot_hand_it_back_files_no_card_and_says_so(self, signed_in, monkeypatch):
-        class NoReadBack:
-            read_print_file = PrinterAdapter.read_print_file
-
-        monkeypatch.setattr(server, "_resolve_adapter", lambda printer_name=None: NoReadBack())
+    def test_a_preview_of_other_bytes_never_vouches_for_the_printers(self, signed_in, printer, tmp_path):
+        """The maker's app put a different file of the same name on the
+        printer after the preview: the person is asked about the bytes that
+        would print, and told they are not the ones previewed."""
+        previewed = self._local(tmp_path, b"PK the plate that was previewed")
         _may_i()
         _held()
-        r = _start("cube.gcode.3mf")
+        r = _start(self.NAME, _preview(previewed))
+        assert self._filed_sha() == hashlib.sha256(self.PLATE).hexdigest() != _sha(previewed)
+        assert "is not the file that was previewed" in r.text
+
+    @responses.activate
+    def test_a_preview_of_the_same_bytes_changes_nothing(self, signed_in, printer, tmp_path):
+        previewed = self._local(tmp_path, self.PLATE)
+        _may_i()
+        _held()
+        r = _start(self.NAME, _preview(previewed))
+        assert self._filed_sha() == _sha(previewed)
+        assert "is not the file that was previewed" not in r.text
+
+    @responses.activate
+    def test_a_preview_is_judged_by_the_bytes_it_was_made_of(self, signed_in, printer, tmp_path):
+        """The local file changed after a preview of the printer's very bytes:
+        what was previewed is what the printer holds, so nothing is said."""
+        previewed = self._local(tmp_path, self.PLATE)
+        token = _preview(previewed)
+        previewed.write_bytes(b"PK edited on this computer after the preview")
+        _may_i()
+        _held()
+        r = _start(self.NAME, token)
+        assert self._filed_sha() == hashlib.sha256(self.PLATE).hexdigest()
+        assert "is not the file that was previewed" not in r.text
+
+    @responses.activate
+    def test_a_file_this_kiln_sent_stands_while_the_printer_reports_its_size(self, signed_in, printer, tmp_path):
+        server._remember_upload(self.NAME, str(self._local(tmp_path, self.PLATE)))
+        _may_i()
+        _held()
+        _start(self.NAME)
+        assert self._filed_sha() == hashlib.sha256(self.PLATE).hexdigest()
+        assert printer.reads() == []  # its size was asked; nothing was read back
+
+    @responses.activate
+    def test_a_file_replaced_since_this_kiln_sent_it_is_read_back(self, signed_in, printer, tmp_path):
+        sent = self._local(tmp_path, b"PK an older plate, sent by this Kiln, of another size")
+        server._remember_upload(self.NAME, str(sent))
+        _may_i()
+        _held()
+        _start(self.NAME)
+        assert self._filed_sha() == hashlib.sha256(self.PLATE).hexdigest() != _sha(sent)
+        assert len(printer.reads()) == 1
+
+    @responses.activate
+    def test_a_printer_that_cannot_hand_it_back_files_no_card_and_says_so(self, signed_in, monkeypatch):
+        monkeypatch.setattr(server, "_resolve_adapter", lambda printer_name=None: _NoReadBack())
+        _may_i()
+        _held()
+        r = _start(self.NAME)
         assert _calls(PENDING) == [] and _calls(MAY_I) == []
         assert "could not be put on their Kiln account" in r.text
         assert "kiln print cube.gcode.3mf" in r.text
+
+    def test_on_the_hosted_server_nothing_is_read_or_learned(self, printer, tmp_path, monkeypatch):
+        """One process serves every caller there, and a printer-side name is
+        anyone's to choose."""
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        token = _preview(self._local(tmp_path, self.PLATE))
+
+        async def run():
+            await server._learn_the_local_copy(self.NAME, {"preview_token": token})
+            return server._local_copy_of(self.NAME)
+
+        assert asyncio.run(run()) is None
+        assert printer.reads() == [] and not any(c.startswith("SIZE") for c in printer.commands)
+
 
 class TestAWindowsNotification:
     """Windows takes a notification and can hold it back without telling
