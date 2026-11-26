@@ -20,6 +20,17 @@ from kiln.tool_annotations import creates, read_only
 _logger = logging.getLogger(__name__)
 
 
+def _compile_failed(exc: BaseException) -> dict[str, Any]:
+    """The reply for an OpenSCAD compile that failed with *exc*: the
+    sentence for the person, and a code for the agent: the failure's own
+    code when it names one, ``OPENSCAD_COMPILE_ERROR`` when OpenSCAD could
+    not build the model, ``INTERNAL_ERROR`` for anything else."""
+    code = getattr(exc, "code", None)
+    if not isinstance(code, str) or not code:
+        code = "OPENSCAD_COMPILE_ERROR" if isinstance(exc, ValueError) else "INTERNAL_ERROR"
+    return {"success": False, "error": _plain_words.sentence(exc), "code": code, **_plain_words.detail_field(exc)}
+
+
 def _public_template_summary(template: dict[str, Any]) -> dict[str, Any]:
     """Project a design PATTERN to its discovery fields.
 
@@ -1737,11 +1748,11 @@ class _DesignToolsPlugin:
                 code = scad_code
                 if not code and scad_path:
                     if not os.path.isfile(scad_path):
-                        return {"success": False, "error": f"File not found: {scad_path}"}
+                        return {"success": False, "code": "FILE_NOT_FOUND", "error": f"File not found: {scad_path}"}
                     with open(scad_path, encoding="utf-8") as f:
                         code = f.read()
                 if not code:
-                    return {"success": False, "error": "Give `scad_code` or `scad_path`."}
+                    return {"success": False, "code": "INVALID_INPUT", "error": "Give `scad_code` or `scad_path`."}
 
                 build = compile_scad_source(code, timeout=timeout)
                 stl_path = build.stl_path
@@ -1845,10 +1856,10 @@ class _DesignToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
+                return _compile_failed(exc)
             except Exception as exc:
                 _logger.error("Compile SCAD failed: %s", exc, exc_info=True)
-                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
+                return _compile_failed(exc)
 
         @mcp.tool(annotations=creates("Tweak and compile OpenSCAD"))
         def tweak_and_compile_scad(
@@ -1930,12 +1941,12 @@ class _DesignToolsPlugin:
                 except ImportError:
                     return response
             except ValueError as exc:
-                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
+                return _compile_failed(exc)
             except Exception as exc:
                 _logger.error(
                     "Tweak and compile failed: %s", exc, exc_info=True
                 )
-                return {"success": False, "error": _plain_words.sentence(exc), **_plain_words.detail_field(exc)}
+                return _compile_failed(exc)
 
         @mcp.tool(annotations=read_only("Analyze OpenSCAD code"))
         def analyze_scad_code(scad_code: str) -> dict:
