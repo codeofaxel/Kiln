@@ -84,6 +84,7 @@ from kiln.printers.base import (
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
+from kiln.printers.read_back import READ_BACK_CAP_BYTES as _READ_BACK_CAP
 from kiln.quoted_text import fence
 from kiln.snapshot_analysis import picture_format
 from kiln.untrusted_zip import UntrustedZipFile
@@ -5340,7 +5341,7 @@ class BambuAdapter(PrinterAdapter):
 
     _STORAGE_DIRS: tuple[str, ...] = ("/model", "/sdcard", f"/{_BAMBU_FTP_URL_DIR}")
 
-    _READ_BACK_CAP_BYTES: int = 256 * 1024 * 1024
+    _READ_BACK_CAP_BYTES: int = _READ_BACK_CAP
 
     def _storage_file_path(self, ftp: ftplib.FTP_TLS, file_name: str) -> str:
         """*file_name* as a full path on the printer's storage."""
