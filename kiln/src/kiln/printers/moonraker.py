@@ -16,6 +16,7 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln import plain_words as _plain_words
+from kiln.printers import read_back as _read_back
 from kiln.printers.base import (
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
@@ -88,6 +89,13 @@ _FILAMENT_SENSOR_TYPES: tuple[str, ...] = (
     "filament_motion_sensor",
 )
 
+#: The extensions Klipper's ``SDCARD_PRINT_FILE`` opens, compared the way
+#: Klipper compares them: the text after the name's last dot, capitals and all.
+_KLIPPER_PRINT_EXTS: frozenset[str] = frozenset({"gcode", "g", "gco"})
+
+#: Bytes taken from a download at a time when a file is read back.
+_READ_BACK_CHUNK_BYTES: int = 1024 * 1024
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -103,6 +111,25 @@ def _printer_words(response: Any) -> str:
         return ""
     message = message.strip()[:300] if isinstance(message, str) else ""
     return message if not message or message.endswith((".", "!", "?")) else message + "."
+
+
+def _klipper_prints(path: str) -> bool:
+    """Whether Klipper counts *path* as a print file it can start."""
+    name = path.rsplit("/", 1)[-1]
+    return name[name.rfind(".") + 1 :] in _KLIPPER_PRINT_EXTS
+
+
+def _download_refused(status_code: int) -> str:
+    """Why Moonraker refused a download, as a clause of a sentence."""
+    if status_code == 401:
+        return "Moonraker didn't accept the API key"
+    if status_code == 403:
+        return "Moonraker doesn't allow Kiln to download that file"
+    if status_code == 404:
+        return "the printer has no file by that name"
+    if status_code >= 500:
+        return "Moonraker ran into a problem of its own"
+    return "Moonraker refused the download"
 
 
 def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
@@ -1441,6 +1468,90 @@ class MoonrakerAdapter(PrinterAdapter):
         encoded = quote(file_path, safe="")
         self._request("DELETE", f"/server/files/gcodes/{encoded}")
         return True
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- reading a print file back
+    # ------------------------------------------------------------------
+
+    def _printed_entry(self, file_name: str) -> dict[str, Any]:
+        """The ``gcodes`` listing entry a start of *file_name* prints.
+
+        Resolved as the start resolves it: Moonraker drops one leading slash
+        and Klipper's ``SDCARD_PRINT_FILE`` one more, then Klipper opens the
+        print file at exactly that path, else the one whose path matches it
+        apart from capital letters.  Raises :class:`PrinterError` when the
+        listing does not come through, or no single file matches.
+        """
+        wanted = str(file_name or "")
+        for _ in range(2):
+            if wanted.startswith("/"):
+                wanted = wanted[1:]
+        try:
+            payload = self._get_json("/server/files/list", params={"root": "gcodes"})
+        except PrinterError as exc:
+            raise _read_back.read_failed(file_name, exc) from exc
+        raw = _safe_get(payload, "result", default=[])
+        printable = [
+            entry
+            for entry in (raw if isinstance(raw, list) else [])
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str) and _klipper_prints(entry["path"])
+        ]
+        for entry in printable:
+            if entry["path"] == wanted:
+                return entry
+        folded = [entry for entry in printable if entry["path"].lower() == wanted.lower()]
+        if len(folded) == 1:
+            return folded[0]
+        if folded:
+            raise _read_back.read_failed(
+                file_name,
+                "more than one file on the printer has that name in different capital letters, "
+                "so Kiln can't tell which one would print",
+            )
+        raise _read_back.read_failed(file_name, "the printer has no print file by that name")
+
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The bytes a start of *file_name* prints, downloaded from
+        Moonraker's ``gcodes`` root with this session's API key.  Moonraker
+        serves every file in that root, so this never answers ``None``."""
+        path = self._printed_entry(file_name)["path"]
+        cap = _read_back.READ_BACK_CAP_BYTES
+        url = self._url(f"/server/files/gcodes/{quote(path, safe='/')}")
+        try:
+            response = self._session.get(url, stream=True, timeout=self._timeout)
+        except RequestException as exc:
+            raise _read_back.read_failed(file_name, exc) from exc
+        try:
+            if not response.ok:
+                raise _read_back.read_failed(file_name, _download_refused(response.status_code))
+            declared = str(response.headers.get("Content-Length") or "")
+            if declared.isdigit() and int(declared) > cap:
+                raise _read_back.too_big(file_name, cap)
+            return _read_back.collect_capped(
+                response.iter_content(chunk_size=_READ_BACK_CHUNK_BYTES), file_name, cap,
+            )
+        except RequestException as exc:
+            raise _read_back.read_failed(file_name, exc) from exc
+        finally:
+            response.close()
+
+    def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
+        """``(size, time stamp)`` of the file a start of *file_name* prints,
+        from Moonraker's ``gcodes`` listing, which reads them off the disk at
+        each call (the per-file metadata is the record of the last scan, and
+        has none for a file not scanned yet).  ``None`` when the listing does
+        not come through or no single file matches."""
+        try:
+            entry = self._printed_entry(file_name)
+        except Exception:  # noqa: BLE001 -- an identity the printer did not give is none
+            return None
+        size = entry.get("size")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            size = None
+        stamp = _read_back.unix_time(entry.get("modified"))
+        if size is None and stamp is None:
+            return None
+        return size, stamp
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam snapshot

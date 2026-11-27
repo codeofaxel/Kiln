@@ -1082,6 +1082,16 @@ class CrealityAdapter(PrinterAdapter):
     def delete_file(self, file_path: str) -> bool:
         return self._backend.delete_file(file_path)
 
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The printer's own copy of *file_name*, read through the Moonraker
+        backend that starts its prints.  This adapter exists only once
+        Moonraker answered, so there is always a download to read from."""
+        return self._backend.read_print_file(file_name)
+
+    def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
+        """``(size, time stamp)`` of *file_name*, from the Moonraker backend."""
+        return self._backend.print_file_identity(file_name)
+
     def get_multi_material_status(self) -> Any:
         """The CFS as a :class:`~kiln.multi_material.MultiMaterialStatus`."""
         from kiln.multi_material import from_creality_cfs

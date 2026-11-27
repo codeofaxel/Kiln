@@ -718,33 +718,42 @@ class TestUploadFile:
 # ---------------------------------------------------------------------------
 
 class TestStartPrint:
+    """A start by name: the printer holds the file, so the print gate reads
+    it back before the start is sent (the fake serves it as Moonraker does)."""
+
+    @staticmethod
+    def _printer_holding(name: str) -> tuple[MoonrakerAdapter, Any]:
+        from tests.test_moonraker_hands_its_file_back import HOMED, FakeMoonraker
+
+        adapter = _adapter()
+        adapter.set_safety_profile("voron_2")
+        fake = FakeMoonraker(api_key=None)
+        fake.hold(name, HOMED)
+        adapter._session.mount("http://", fake)
+        return adapter, fake
 
     def test_start_print(self) -> None:
-        adapter = _adapter()
-        resp = _mock_response(json_data={"result": {}})
+        adapter, fake = self._printer_holding("test.gcode")
 
         with mock.patch("kiln.heater_check_readings.note_print_started"), \
-                mock.patch("kiln.print_evidence.note_start_firmware"), \
-                mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
+                mock.patch("kiln.print_evidence.note_start_firmware"):
             result = adapter.start_print("test.gcode")
 
         assert isinstance(result, PrintResult)
         assert result.success is True
         assert "test.gcode" in result.message
 
-        # Verify the filename was passed as a query param.  (A start also
+        # The filename went as the start's query param.  (A start also
         # reads the heater checks and asks the firmware version, each on a
         # thread of its own, stubbed here.)
-        call_kwargs = mock_req.call_args
-        assert call_kwargs.kwargs.get("params") == {"filename": "test.gcode"}
+        assert fake.started == ["test.gcode"]
 
     def test_start_print_failure(self) -> None:
-        adapter = _adapter()
-        resp = _mock_response(status_code=400, text="No file", ok=False)
+        adapter, fake = self._printer_holding("refused.gcode")
+        fake.start_refusal = (400, b"No file")
 
-        with mock.patch.object(adapter._session, "request", return_value=resp):
-            with pytest.raises(PrinterError, match="didn't complete the request") as caught:
-                adapter.start_print("missing.gcode")
+        with pytest.raises(PrinterError, match="didn't complete the request") as caught:
+            adapter.start_print("refused.gcode")
         assert "HTTP 400" in caught.value.detail
 
 
