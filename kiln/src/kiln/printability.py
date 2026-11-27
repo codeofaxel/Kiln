@@ -11407,7 +11407,8 @@ def held_without_brim(brim_mm: int = 0) -> str:
         )
     return (
         "Don't add a brim: it would join the separate pieces. Rub a thin layer of ordinary glue "
-        f"stick on the clean plate instead. If the part still lifts, turn on a raft in your slicer: {_RAFT_SAID}."
+        "stick on the clean plate instead; it helps the first layer grip so the part doesn't come loose. "
+        f"If the part still lifts, turn on a raft in your slicer: {_RAFT_SAID}."
     )
 
 

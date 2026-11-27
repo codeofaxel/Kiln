@@ -77,8 +77,9 @@ def test_parts_a_clearance_apart_get_no_brim_and_are_told_what_holds_them(tmp_pa
     assert reply["verdict"] == "check", reply["message"]
     assert (
         "likely to come off the bed before it finishes. Don't add a brim: it would join the separate "
-        "pieces. Rub a thin layer of ordinary glue stick on the clean plate instead. If the part still "
-        "lifts, turn on a raft in your slicer: a thin base printed underneath that peels off afterwards."
+        "pieces. Rub a thin layer of ordinary glue stick on the clean plate instead; it helps the first "
+        "layer grip so the part doesn't come loose. If the part still lifts, turn on a raft in your "
+        "slicer: a thin base printed underneath that peels off afterwards."
     ) in reply["message"], reply["message"]
     said = " ".join(text for _where, text in rx._sentences(reply))
     assert "mm brim" not in said, said
