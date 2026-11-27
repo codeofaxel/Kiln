@@ -93,18 +93,16 @@ def test_parts_a_clearance_apart_get_no_brim_and_are_told_what_holds_them(tmp_pa
     assert not any(r.get("hold") == "brim" or "brim_mm" in r or r["id"] == "other" for r in facts), facts
 
 
-def test_parts_of_a_plastic_that_warps_are_told_a_raft_in_the_check(tmp_path):
-    """The same walls in ABS: the check says the hold the brim decision
-    gives, a raft, and says what a raft is."""
-    reply = _call("analyze_printability", file_path=_walls_a_clearance_apart(tmp_path), material="ABS")
-    adhesion = reply["report"]["adhesion"]
-    assert adhesion["brim_width_mm"] == 0 and not adhesion["use_raft"], adhesion
-    assert adhesion["material"] == "ABS", adhesion
-    assert (
-        "Don't add a brim: it would join the separate pieces. Turn on a raft in your slicer instead: a thin "
-        "base printed underneath that peels off afterwards. Peel it gently, since thin moving parts can snap."
-    ) in reply["message"], reply["message"]
-    assert "glue stick" not in reply["message"], reply["message"]
+def test_the_hold_said_is_the_same_for_every_plastic(tmp_path):
+    """The same walls in ABS are told the same hold as in PLA: glue stick,
+    then a raft if it still lifts."""
+    path = _walls_a_clearance_apart(tmp_path)
+    pla = _call("analyze_printability", file_path=path, material="PLA")
+    abs_ = _call("analyze_printability", file_path=path, material="ABS")
+    assert abs_["report"]["adhesion"]["brim_width_mm"] == 0 and not abs_["report"]["adhesion"]["use_raft"]
+    for reply in (pla, abs_):
+        assert GLUE in reply["message"] and "turn on a raft in your slicer:" in reply["message"], reply["message"]
+    assert abs_["report"]["adhesion"]["rationale"] == pla["report"]["adhesion"]["rationale"]
 
 
 def test_parts_further_apart_on_the_bed_get_the_widest_brim_that_leaves_the_gap(tmp_path):
@@ -180,14 +178,11 @@ class TestTheDecisionItself:
 
     @pytest.mark.parametrize("material", ["ABS", "ASA", "NYLON", "PC"])
     @pytest.mark.parametrize(("gap", "width"), [(0.5, 0), (8.0, 3)])
-    def test_a_plastic_that_warps_is_told_a_raft_not_glue_stick(self, material, gap, width):
-        """Glue stick does not hold a plastic that warps hard, so where the
-        brim is held back it is told to turn on a raft, and what a raft is."""
+    def test_the_hold_said_does_not_change_with_the_plastic(self, material, gap, width):
+        """Where the brim is held back, every plastic is told the same hold."""
         rec = self._decide(20.0, gap, material=material)
         assert not rec.use_raft and rec.brim_width_mm == width and rec.parts_gap_mm == gap, rec
-        assert "glue stick" not in rec.rationale, rec.rationale
-        assert "urn on a raft in your slicer instead: a thin base printed underneath" in rec.rationale, rec.rationale
-
+        assert rec.rationale == self._decide(20.0, gap, material="PLA").rationale, rec.rationale
 
     def test_a_raft_still_holds_it_down(self):
         rec = self._decide(1.0, 1.3, material="ABS")
