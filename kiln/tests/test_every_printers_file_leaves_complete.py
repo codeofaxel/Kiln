@@ -552,13 +552,36 @@ class TestStartByNameDoor:
     def _no_signoff(self, monkeypatch):
         monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
 
-    def test_a_printer_copy_without_its_preview_is_refused(self, tmp_path):
+    def test_a_printer_copy_without_its_preview_starts_and_offers_a_finished_copy(self, tmp_path, preview):
+        # The preview picture and the filament amount only fill the printer's
+        # screen, so a file already on the printer starts without them; the
+        # result says what is missing and where a finished copy is.
         raw = Path(raw_gcode(tmp_path)).read_bytes()
         adapter = _Fake("moonraker", printer_copy=raw)
+        adapter.set_safety_profile("kilntest_open")
+        with mock.patch.object(gcode_complete, "_render_preview", return_value=preview):
+            result = adapter.start_print("part.gcode")
+        assert result.success is True, result.message
+        assert adapter.started == ["part.gcode"]
+        assert "preview picture" in result.message and "upload_file" in result.message
+        copy = result.message.split("every move unchanged: ", 1)[1].split(". To fix", 1)[0]
+        assert gcode_complete.gcode_problems(copy, "moonraker") == []
+
+        def moves(data: bytes) -> list[str]:
+            return [ln for ln in data.decode().splitlines() if ln.strip() and not ln.lstrip().startswith(";")]
+
+        assert moves(Path(copy).read_bytes()) == moves(raw)
+
+    def test_a_printer_whose_screen_refuses_the_file_is_still_refused(self, tmp_path):
+        # The large Prusa screen will not take a file without its preview, so
+        # starting one would only stop at the printer: it is refused here.
+        raw = Path(raw_gcode(tmp_path)).read_bytes()
+        adapter = _Fake("prusalink", printer_copy=raw)
+        adapter.set_safety_profile("kilntest_open")
+        adapter.declared_printer_model = lambda: "prusa_mk4"  # type: ignore[method-assign]
         result = adapter.start_print("part.gcode")
         assert result.success is False, result.message
-        assert gcode_complete.SURFACES["moonraker"].surface in result.message
-        assert adapter.started == []
+        assert "313x173" in result.message and adapter.started == []
 
     # A start needs a printer whose bed Kiln knows (a printer with none waits
     # for it), so the two that should start are set up as a

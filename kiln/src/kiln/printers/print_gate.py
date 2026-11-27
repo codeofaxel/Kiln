@@ -6,6 +6,7 @@ import contextlib
 import logging
 import os
 import re
+from contextvars import ContextVar
 from typing import Any
 
 from kiln import plain_words as _plain_words
@@ -1699,10 +1700,73 @@ def _same_bed_or_original(
     }
 
 
+#: What a start of a printer's own file lacked for the printer's screen, said
+#: on the start's result (:func:`unfinished_note`).  Lives as long as the call.
+_UNFINISHED: ContextVar[str] = ContextVar("kiln_print_gate_unfinished", default="")
+
+#: The one gcode_problems finding the printer itself acts on: a screen that
+#: refuses a file without its preview.  The rest only fill the screen.
+_PRINTER_REFUSES = "no screen preview"
+
+
+def unfinished_note() -> str:
+    """The sentence for a start whose file lacked only what the printer's
+    screen shows (a preview picture, the filament it uses), or ``""``."""
+    return _UNFINISHED.get()
+
+
+def _note_unfinished(adapter: Any, fetched: str, file_name: str, problems: list[str]) -> None:
+    """Say what the printer's own file lacks for its screen, and make a copy
+    with it added (comment lines only) for the person to send back."""
+    from kiln.printers.gcode_complete import (
+        complete_gcode_for_printer,
+        declared_model_for_adapter,
+        family_for_adapter,
+        gcode_problems,
+        printer_model_for_adapter,
+    )
+
+    name = os.path.basename(str(file_name)) or "the file"
+    missing = []
+    if any(p.startswith("no preview") for p in problems):
+        missing.append("preview picture")
+    if any(p.startswith(("no weight", "no length")) for p in problems):
+        missing.append("filament amount")
+    if not missing:
+        return
+    lacks = " or ".join(missing)
+    said = f"{name} on the printer has no {lacks} for the printer's own screen; the print itself is not affected."
+    copy = ""
+    with contextlib.suppress(Exception):
+        import hashlib
+
+        from kiln.output_paths import kiln_output_dir
+
+        with open(fetched, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+        folder = os.path.join(kiln_output_dir("kiln-finished-files"), digest)
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        target = os.path.join(folder, name)
+        family = family_for_adapter(adapter)
+        complete_gcode_for_printer(
+            fetched, family, printer_model=printer_model_for_adapter(adapter), output_path=target,
+        )
+        if not gcode_problems(target, family, name=name, printer_model=declared_model_for_adapter(adapter)):
+            copy = target
+    if copy:
+        said += (
+            f" Kiln made a copy with the {' and '.join(missing)} added and every move unchanged: {copy}. "
+            f"To fix it on the printer, send that copy with `upload_file` once this print has finished; "
+            f"it replaces {name} there."
+        )
+    _UNFINISHED.set(said)
+
+
 def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any], *, keep: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Universal print-time backstop, called from ``PrinterAdapter.start_print``."""
+    _UNFINISHED.set("")
     try:
         plate_number = printed_plate_number(kwargs)
     except ValueError as exc:
@@ -1773,6 +1837,12 @@ def run_adapter_gate(
                 fetched, family_for_adapter(adapter), name=str(file_name or ""),
                 printer_model=declared_model_for_adapter(adapter),
             )
+            # The printer's own file starts when it lacks only what the screen
+            # shows; a screen that refuses such a file still refuses it here.
+            if problems and not any(p.startswith(_PRINTER_REFUSES) for p in problems):
+                with contextlib.suppress(Exception):
+                    _note_unfinished(adapter, fetched, file_name, problems)
+                problems = []
             if problems:
                 verdict = {
                     "blocked": True,

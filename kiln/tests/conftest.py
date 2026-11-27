@@ -1146,7 +1146,7 @@ def _isolate_upload_memory():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_printer_copies(tmp_path, monkeypatch):
+def _isolate_printer_copies(tmp_path_factory, monkeypatch):
     """Each test reads printer files back into its own folder, with no record
     of bytes Kiln sent before it.
 
@@ -1158,8 +1158,7 @@ def _isolate_printer_copies(tmp_path, monkeypatch):
     """
     from kiln import printer_copy, resume_provenance
 
-    folder = tmp_path / "printer-copies"
-    folder.mkdir(exist_ok=True)
+    folder = tmp_path_factory.mktemp("printer-copies")
     monkeypatch.setattr(printer_copy, "_folder", lambda: str(folder))
     with resume_provenance._lock:
         resume_provenance._sent.clear()

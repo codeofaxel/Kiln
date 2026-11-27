@@ -2463,6 +2463,13 @@ class PrinterAdapter(ABC):
             _discard_copies(kept)
         if getattr(result, "success", False):
             try:
+                from kiln.printers.print_gate import unfinished_note
+
+                if note := unfinished_note():
+                    result.message = f"{result.message} {note}".strip()
+            except Exception:  # noqa: BLE001 -- a note that cannot be read is no note
+                pass
+            try:
                 from kiln.machine_repairs import start_warning
 
                 warning = start_warning(self)

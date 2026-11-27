@@ -330,11 +330,13 @@ def _gcode(tmp_path: pathlib.Path, name: str = "part.gcode") -> str:
     return str(path)
 
 
-def _previewed(path: str) -> str:
-    """The SAW half, on record the way an agent puts it there."""
+def _previewed(path: str, printer_name: str | None = "garage") -> str:
+    """The SAW half, on record the way an agent puts it there, for the file
+    Kiln sent to the printer under that name."""
     preview_evidence.record("stage", path, via="panel_fetch")
     out = server.issue_preview_token(path, door="stage")
     assert out["success"], out
+    _sent(path, printer_name)
     return out["token"]
 
 
@@ -368,9 +370,7 @@ def _start(tmp_path: pathlib.Path, *, printer_name: str | None = "garage", previ
     if printer_name is not None:
         arguments["printer_name"] = printer_name
     if previewed:
-        path = _gcode(tmp_path)
-        arguments["preview_token"] = _previewed(path)
-        _sent(path, printer_name)
+        arguments["preview_token"] = _previewed(_gcode(tmp_path), printer_name)
     return _call("start_print", **arguments)
 
 
