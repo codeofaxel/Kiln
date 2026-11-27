@@ -524,11 +524,33 @@ class TestUploadFile:
 # Print control tests
 # ---------------------------------------------------------------------------
 
+def _holds_on_the_printer(adapter, encoded_name: str, tmp_path) -> None:
+    """Answer the read-back the print gate makes before a start by name, as
+    an OctoPrint holding a file Kiln left complete for an Ender 3: the
+    file's record, then its bytes."""
+    from kiln.printers.gcode_complete import complete_gcode_for_printer
+
+    path = tmp_path / "held.gcode"
+    path.write_bytes(b"G28\nG1 Z0.3 F3000\nG1 X10 Y10 E1 F1200\nM104 S0\n")
+    with open(complete_gcode_for_printer(path, "octoprint"), "rb") as fh:
+        data = fh.read()
+    adapter.printer_model = "ender3"
+    responses.add(
+        responses.GET,
+        f"{OCTOPRINT_HOST}/api/files/local/{encoded_name}",
+        json={"name": encoded_name, "path": encoded_name, "origin": "local", "type": "machinecode",
+              "size": len(data), "date": 1764100000,
+              "refs": {"download": f"{OCTOPRINT_HOST}/downloads/files/local/{encoded_name}"}},
+    )
+    responses.add(responses.GET, f"{OCTOPRINT_HOST}/downloads/files/local/{encoded_name}", body=data)
+
+
 class TestStartPrint:
     """Tests for OctoPrintAdapter.start_print()."""
 
     @responses.activate
-    def test_success(self, adapter):
+    def test_success(self, adapter, tmp_path):
+        _holds_on_the_printer(adapter, "benchy.gcode", tmp_path)
         responses.add(
             responses.POST,
             f"{OCTOPRINT_HOST}/api/files/local/benchy.gcode",
@@ -540,8 +562,9 @@ class TestStartPrint:
         assert "benchy.gcode" in result.message
 
     @responses.activate
-    def test_file_name_with_special_chars(self, adapter):
+    def test_file_name_with_special_chars(self, adapter, tmp_path):
         encoded_name = "my%20file.gcode"
+        _holds_on_the_printer(adapter, encoded_name, tmp_path)
         responses.add(
             responses.POST,
             f"{OCTOPRINT_HOST}/api/files/local/{encoded_name}",
@@ -551,7 +574,9 @@ class TestStartPrint:
         assert result.success is True
 
     @responses.activate
-    def test_http_error(self, adapter):
+    def test_http_error(self, adapter, tmp_path):
+        """The file was there when Kiln checked it and gone when it was selected."""
+        _holds_on_the_printer(adapter, "missing.gcode", tmp_path)
         responses.add(
             responses.POST,
             f"{OCTOPRINT_HOST}/api/files/local/missing.gcode",
@@ -560,6 +585,14 @@ class TestStartPrint:
         )
         with pytest.raises(PrinterError, match="doesn't have what Kiln asked for"):
             adapter.start_print("missing.gcode")
+
+    @responses.activate
+    def test_a_file_the_printer_does_not_hold_is_refused_before_anything_is_sent(self, adapter):
+        responses.add(responses.GET, f"{OCTOPRINT_HOST}/api/files/local/missing.gcode", status=404)
+        result = adapter.start_print("missing.gcode")
+        assert result.success is False and result.refused_before_send
+        assert "missing.gcode" in result.message
+        assert not any(call.request.method == "POST" for call in responses.calls)
 
 
 class TestCancelPrint:

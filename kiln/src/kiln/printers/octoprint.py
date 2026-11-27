@@ -17,6 +17,7 @@ from requests.exceptions import RequestException, Timeout
 
 from kiln import plain_words as _plain_words
 from kiln.printer_backends import REQUEST_OFFERS, backend_for
+from kiln.printers import read_back
 from kiln.printers.base import (
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
@@ -113,6 +114,36 @@ def _flatten_files(entries: list[dict[str, Any]], prefix: str = "") -> list[dict
         else:
             flat.append(entry)
     return flat
+
+
+#: The storage every by-name call here addresses: OctoPrint's own uploads
+#: folder.  Kiln never selects a file on the printer's SD card through this
+#: adapter, and OctoPrint serves no downloads from one.
+_UPLOADS = "local"
+
+#: Bytes asked for per read while a file downloads.
+_DOWNLOAD_CHUNK_BYTES = 64 * 1024
+
+
+def _uploads_name(file_name: str) -> str:
+    """*file_name* as the one URL segment every by-name call sends.
+
+    A leading slash is dropped: OctoPrint's storage reads ``/a.gcode`` as
+    ``a.gcode``, and its download route would look for it outside the
+    uploads folder.  Folder separators are escaped with the rest; OctoPrint
+    decodes them back into the path.
+    """
+    return quote(str(file_name).lstrip("/"), safe="")
+
+
+def _file_api_path(file_name: str) -> str:
+    """The API resource of *file_name* in the uploads folder."""
+    return f"/api/files/{_UPLOADS}/{_uploads_name(file_name)}"
+
+
+def _file_download_path(file_name: str) -> str:
+    """Where OctoPrint serves the bytes of *file_name* in the uploads folder."""
+    return f"/downloads/files/{_UPLOADS}/{_uploads_name(file_name)}"
 
 
 # ---------------------------------------------------------------------------
@@ -789,7 +820,7 @@ class OctoPrintAdapter(PrinterAdapter):
     def list_files(self) -> list[PrinterFile]:
         """Return a list of files stored on OctoPrint's local storage."""
         payload = self._get_json(
-            "/api/files/local",
+            f"/api/files/{_UPLOADS}",
             params={"recursive": "true"},
         )
 
@@ -829,7 +860,7 @@ class OctoPrintAdapter(PrinterAdapter):
                     "file": (filename, fh, "application/octet-stream"),
                 }
                 response = self._post(
-                    "/api/files/local",
+                    f"/api/files/{_UPLOADS}",
                     files=files_payload,
                 )
         except PermissionError as exc:
@@ -859,7 +890,7 @@ class OctoPrintAdapter(PrinterAdapter):
     def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
         """Begin printing a file that already exists on OctoPrint."""
         self._post(
-            f"/api/files/local/{quote(file_name, safe='')}",
+            _file_api_path(file_name),
             json={"command": "select", "print": True},
         )
         return PrintResult(
@@ -1087,8 +1118,90 @@ class OctoPrintAdapter(PrinterAdapter):
 
     def delete_file(self, file_path: str) -> bool:
         """Delete a G-code file from OctoPrint's local storage."""
-        self._request("DELETE", f"/api/files/local/{quote(file_path, safe='')}")
+        self._request("DELETE", _file_api_path(file_path))
         return True
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- reading a file back
+    # ------------------------------------------------------------------
+
+    def _uploads_get(self, path: str, file_name: str, *, stream: bool = False) -> requests.Response:
+        """GET *path* about *file_name* through this adapter's session (its
+        API key header, TLS setting and proxies) within its time limit.
+        Anything but a successful answer raises :func:`read_back.read_failed`."""
+        try:
+            response = self._session.get(self._url(path), stream=stream, timeout=self._timeout)
+        except Timeout as exc:
+            raise read_back.read_failed(file_name, f"OctoPrint did not answer within {self._timeout:g}s") from exc
+        except RequestException as exc:
+            raise read_back.read_failed(file_name, "Kiln could not reach OctoPrint") from exc
+        if response.ok:
+            return response
+        status = response.status_code
+        response.close()
+        if status in (401, 403):
+            why = "OctoPrint refused the API key, or the key's user may not download files"
+        elif status == 404:
+            why = "OctoPrint has no file by that name"
+        else:
+            why = "OctoPrint did not send it"
+        raise read_back.read_failed(file_name, PrinterError(why, detail=f"HTTP {status} on GET {path}"))
+
+    def _file_entry(self, file_name: str) -> dict[str, Any]:
+        """OctoPrint's record of *file_name* in its uploads folder."""
+        response = self._uploads_get(_file_api_path(file_name), file_name)
+        try:
+            entry = response.json()
+        except ValueError as exc:
+            raise read_back.read_failed(file_name, "OctoPrint's answer about it could not be read") from exc
+        if not isinstance(entry, dict):
+            raise read_back.read_failed(file_name, "OctoPrint's answer about it could not be read")
+        return entry
+
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The bytes of *file_name* in OctoPrint's uploads folder, the file
+        ``start_print`` selects under that name.
+
+        ``None`` when OctoPrint's record of the file carries no download
+        link, which OctoPrint leaves out for a storage it cannot read files
+        from.  The download address is built from this adapter's own host,
+        never taken from the reply, so the API key only goes where every
+        other call sends it.
+        """
+        entry = self._file_entry(file_name)
+        if entry.get("type") == "folder":
+            raise read_back.read_failed(file_name, "OctoPrint holds a folder under that name, not a print file")
+        if not _safe_get(entry, "refs", "download"):
+            return None
+        cap = read_back.READ_BACK_CAP_BYTES
+        response = self._uploads_get(_file_download_path(file_name), file_name, stream=True)
+        try:
+            declared = str(response.headers.get("Content-Length") or "")
+            if declared.isdigit() and int(declared) > cap:
+                raise read_back.too_big(file_name, cap)
+            return read_back.collect_capped(
+                response.iter_content(chunk_size=_DOWNLOAD_CHUNK_BYTES), file_name, cap,
+            )
+        except RequestException as exc:
+            raise read_back.read_failed(file_name, "the download from OctoPrint broke off") from exc
+        finally:
+            response.close()
+
+    def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
+        """``(size in bytes, Unix time stamp)`` from OctoPrint's record of
+        *file_name* in its uploads folder, without sending the file; ``None``
+        when the record gives neither or OctoPrint does not answer."""
+        try:
+            entry = self._file_entry(file_name)
+        except PrinterError:
+            return None
+        if entry.get("type") == "folder":
+            return None
+        size = entry.get("size")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            size = None
+        stamp = read_back.unix_time(entry.get("date"))
+        return None if size is None and stamp is None else (size, stamp)
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam snapshot
