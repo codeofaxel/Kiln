@@ -1696,7 +1696,7 @@ class TestAPrinterSideStart:
         r = _start("benchy.3mf", _preview(model))
         assert _calls(PENDING) == [] and _calls(MAY_I) == []
         assert NOT_ASKED_PENDING_TAG not in r.why
-        assert "could not be put on their Kiln account" in r.text
+        assert "couldn't send this approval to your phone or the Kiln website this time, so approve it here instead" in r.text
         assert "kiln print benchy.3mf" in r.text
 
     @responses.activate
@@ -1730,13 +1730,13 @@ class TestAPrinterSideStart:
         _held()
         r = _start("benchy.3mf")  # no local copy, no token: nothing to put on the account
         assert _calls(PENDING) == []
-        assert "could not be put on their Kiln account" in r.text
+        assert "couldn't send this approval to your phone or the Kiln website this time, so approve it here instead" in r.text
         assert "kiln3d.com/monitor" not in r.text
         assert "kiln print benchy.3mf" in r.text  # the way that still works is named
 
     def test_signed_out_the_reply_names_signin_not_a_missing_card(self, model):
         r = _start("benchy.3mf")
-        assert "could not be put on their Kiln account" not in r.text
+        assert "couldn't send this approval to your phone or the Kiln website this time, so approve it here instead" not in r.text
         assert "kiln signin" in r.text
 
 
@@ -1780,7 +1780,7 @@ class TestAFileOnlyOnThePrinter:
         assert self._filed_sha() == hashlib.sha256(self.PLATE).hexdigest()
         assert r.why.endswith(NOT_ASKED_PENDING_TAG + "pa_9")
         assert "kiln3d.com/monitor" in r.text
-        assert "could not be put on their Kiln account" not in r.text
+        assert "couldn't send this approval to your phone or the Kiln website this time, so approve it here instead" not in r.text
 
     @responses.activate
     def test_a_yes_on_the_card_answers_only_those_bytes(self, signed_in, printer):
@@ -1861,7 +1861,7 @@ class TestAFileOnlyOnThePrinter:
         _held()
         r = _start(self.NAME)
         assert _calls(PENDING) == [] and _calls(MAY_I) == []
-        assert "could not be put on their Kiln account" in r.text
+        assert "couldn't send this approval to your phone or the Kiln website this time, so approve it here instead" in r.text
         assert "kiln print cube.gcode.3mf" in r.text
 
     def test_on_the_hosted_server_nothing_is_read_or_learned(self, printer, tmp_path, monkeypatch):

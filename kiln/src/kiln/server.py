@@ -4321,8 +4321,8 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     # Signed in, and still nothing is waiting on the account: say so, so
     # nobody looks for it on their phone or in a browser.
     no_card = (
-        " This print could not be put on their Kiln account this time, so it is not waiting for "
-        "them on their phone or in a browser."
+        ' Tell them, in these words: "Kiln couldn\'t send this approval to your phone or the Kiln '
+        'website this time, so approve it here instead."'
         if why and not pending and not signed_out
         else ""
     )
