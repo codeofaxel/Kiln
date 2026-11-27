@@ -402,6 +402,25 @@ class TestAStartByNameReadsTheFile:
         assert fake.downloads() == ["/server/files/gcodes/jobs/good.gcode"]
         assert fake.started == ["jobs/good.gcode"]
 
+    @pytest.mark.parametrize("name", ['jobs/a".gcode', "jobs/a\\b.gcode", "jobs/a\nG28.gcode", "jobs/a\x07.gcode"])
+    def test_a_name_the_start_command_cannot_hold_is_not_sent(self, name: str) -> None:
+        # Klipper's start is a quoted G-code command; a quote, backslash or
+        # control character in the name would be read as part of it.
+        adapter, fake = _printer()
+        result = adapter._start_print_impl(name)
+        assert result.success is False and result.refused_before_send is True
+        assert "Rename the file" in result.message
+        assert fake.started == []
+
+    def test_the_file_started_is_the_one_read_back(self) -> None:
+        # Klipper would open a file differing only in capital letters; the
+        # start names that file exactly, so it prints what was read.
+        adapter, fake = _printer()
+        adapter.set_safety_profile("voron_2")
+        fake.hold("jobs/Good.gcode", HOMED)
+        assert adapter.start_print("jobs/good.gcode").success is True
+        assert fake.started == ["jobs/Good.gcode"]
+
 
 # ---------------------------------------------------------------------------
 # Creality reads through the Moonraker backend that starts its prints
