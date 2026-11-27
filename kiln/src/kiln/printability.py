@@ -411,6 +411,10 @@ class AdhesionRecommendation:
     #: asks for, or left it off: a brim that wide would join them there.
     #: ``None`` when no brim was held back.
     parts_gap_mm: float | None = None
+    #: The plastic the decision was made for, upper case: what holds the
+    #: part down when the brim is held back depends on it
+    #: (:func:`held_without_brim`).
+    material: str = ""
 
     @property
     def brim_left_off(self) -> bool:
@@ -11365,16 +11369,18 @@ def footing(report: PrintabilityReport) -> str:
         dims = report.dimensions_mm or {}
         width_mm, depth_mm = dims.get("width_mm"), dims.get("depth_mm")
         under = f" under a part {width_mm:.0f} x {depth_mm:.0f} mm across" if width_mm and depth_mm else ""
-        return f"It stands on only {_mm2_said(bed.contact_area_mm2)} mm2 of the bed{under}, so {_hold_down(report)}."
+        return _then_held_down(report, f"It stands on only {_mm2_said(bed.contact_area_mm2)} mm2 of the bed{under}")
     force = report.adhesion_force
     level = getattr(force, "risk_level", "") if force is not None else ""
     if level == "likely_detach":
-        return f"It is tall for what it stands on and is likely to come off the bed before it finishes, so {_hold_down(report)}."
+        return _then_held_down(report, "It is tall for what it stands on and is likely to come off the bed before it finishes")
     if level == "marginal":
         weak = getattr(force, "secure_withheld_for", "")
         if weak:
-            return f"{weak} holds a standard build surface weakly, so it could come off the bed before it finishes; {_hold_down(report)}."
-        return f"It is tall for what it stands on and could come off the bed before it finishes, so {_hold_down(report)}."
+            return _then_held_down(
+                report, f"{weak} holds a standard build surface weakly, so it could come off the bed before it finishes", ";",
+            )
+        return _then_held_down(report, "It is tall for what it stands on and could come off the bed before it finishes")
     return ""
 
 
@@ -11388,30 +11394,51 @@ def _on_a_small_spot(bed: BedAdhesionAnalysis) -> bool:
     return span is not None and _adhesion_risk_for_contact(span) == "high"
 
 
-def _hold_down(report: PrintabilityReport) -> str:
-    """How *report*'s part is held down, from its own brim or raft decision.
-    A brim narrowed or left off so it does not join the part's separate
-    pieces on the bed is said with why, and with what holds it down
-    instead."""
+#: What a raft is, said to someone who may never have turned one on.
+_RAFT_SAID = "a thin base printed underneath that peels off afterwards"
+
+
+def held_without_brim(material: str = "", brim_mm: int = 0) -> str:
+    """How to hold a part down when a brim as wide as it asks for would join
+    its separate pieces on the bed, said to the person in everyday words:
+    ordinary glue stick on the plate, then a raft if it still lifts; a raft
+    first for a plastic that warps too hard for glue stick to hold
+    (:data:`_HIGH_WARP_MATERIALS`).  With *brim_mm*, a brim that narrow
+    leaves the pieces apart and is kept.  An unknown plastic is told glue
+    stick first."""
+    warps = str(material or "").upper() in _HIGH_WARP_MATERIALS
+    if brim_mm:
+        then = (
+            f"If the part still lifts, turn on a raft in your slicer instead: {_RAFT_SAID}." if warps
+            else "Rub a thin layer of ordinary glue stick on the clean plate for extra hold."
+        )
+        return f"Use a {brim_mm} mm brim, no wider: a wider one would join the separate pieces. {then}"
+    if warps:
+        return (
+            "Don't add a brim: it would join the separate pieces. Turn on a raft in your slicer "
+            f"instead: {_RAFT_SAID}. Peel it gently, since thin moving parts can snap."
+        )
+    return (
+        "Don't add a brim: it would join the separate pieces. Rub a thin layer of ordinary glue "
+        f"stick on the clean plate instead. If the part still lifts, turn on a raft in your slicer: {_RAFT_SAID}."
+    )
+
+
+def _then_held_down(report: PrintabilityReport, why: str, joiner: str = ", so") -> str:
+    """*why* the part may come off the bed, then how it is held down, from
+    its own brim or raft decision: a clause after *joiner*, or, where the
+    brim is held back so it does not join the part's separate pieces on the
+    bed, the sentences :func:`held_without_brim` says."""
     rec = report.adhesion
     if rec is not None and rec.use_raft:
-        return "print it on a raft"
-    gap = getattr(rec, "parts_gap_mm", None) if rec is not None else None
+        return f"{why}{joiner} print it on a raft."
+    if rec is not None and rec.parts_gap_mm is not None:
+        return f"{why}. {held_without_brim(rec.material, rec.brim_width_mm)}"
     if rec is not None and rec.brim_width_mm > 0:
         width = rec.brim_width_mm
         article = "an" if str(width).startswith("8") or width in (11, 18) else "a"
-        if gap is not None:
-            return (
-                f"print it with {article} {width} mm brim and glue stick on a clean plate: a wider brim "
-                f"would join its separate pieces where they stand {_gaps_said([gap])} apart on the bed"
-            )
-        return f"print it with {article} {width} mm brim"
-    if gap is not None:
-        return (
-            "hold it down with glue stick on a clean plate: a brim would join its separate pieces "
-            f"where they stand {_gaps_said([gap])} apart on the bed"
-        )
-    return "print it with a brim"
+        return f"{why}{joiner} print it with {article} {width} mm brim."
+    return f"{why}{joiner} print it with a brim."
 
 
 def checks_due(report: PrintabilityReport) -> list[str]:
@@ -11860,16 +11887,8 @@ def recommend_adhesion(
                     f"{rationale} A {width} mm brim with it, no wider: a wider one would join {apart}."
                     if width else f"{rationale} No brim with it: one would join {apart}."
                 )
-            elif width:
-                rationale = (
-                    f"{width}mm brim, no wider: a wider one would join {apart}.  "
-                    "Glue stick on a clean plate adds hold without joining them."
-                )
             else:
-                rationale = (
-                    f"No brim: one would join {apart}, so hold it down with glue stick "
-                    "on a clean plate instead."
-                )
+                rationale = held_without_brim(mat_upper, width)
             brim = width
 
     # Build slicer overrides
@@ -11888,6 +11907,7 @@ def recommend_adhesion(
         rationale=rationale,
         slicer_overrides=overrides,
         parts_gap_mm=held_back,
+        material=mat_upper,
     )
 
 
