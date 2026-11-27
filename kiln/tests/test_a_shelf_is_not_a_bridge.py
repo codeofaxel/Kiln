@@ -145,7 +145,7 @@ def test_a_bridge_keeps_its_words(tmp_path: Path) -> None:
     report = analyze_printability(_stl(tmp_path / "bridge.stl", _bridge(30.0)), material="pla")
     assert support_verdict(report) == "bridges=30.0mm"
     assert report.bridging.sticks_out_mm == 0.0 and report.bridging.bridge_needing_supports_mm == 30.0
-    assert "Long bridges detected (30.0 mm).  Enable supports or reduce bridge spans." in report.recommendations
+    assert "Long bridge (30.0 mm): it may sag.  Your slicer may bridge it on its own; if it does not, turn supports on or shorten the span." in report.recommendations
     assert not any("sticks out" in line for line in report.recommendations)
 
 
@@ -155,7 +155,7 @@ def test_a_part_with_both_says_both_each_with_its_own_number(tmp_path: Path) -> 
     report = analyze_printability(_stl(tmp_path / "both.stl", faces), material="pla")
     verdict = support_verdict(report)
     assert verdict is not None and verdict.endswith("bridges=35.0mm, sticks out 30.0mm"), verdict
-    assert "Long bridges detected (35.0 mm).  Enable supports or reduce bridge spans." in report.recommendations
+    assert "Long bridge (35.0 mm): it may sag.  Your slicer may bridge it on its own; if it does not, turn supports on or shorten the span." in report.recommendations
     assert any("sticks out 30.0 mm" in line for line in report.recommendations)
 
 

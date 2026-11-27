@@ -302,8 +302,13 @@ class SliceSupports:
             return f"{'supports on' if self.enabled else 'no supports'}, {self.reason}"
         if self.decided_by == DECIDED_NOT_CHECKED:
             return f"no supports; whether the part needs them was {self.reason}"
-        if placed_none:
+        if placed_none and self._plate_only:
             return f"the part needs supports but the slicer placed none: {asked_for}"
+        if placed_none:
+            # Supports were on everywhere and the slicer found nothing it
+            # needed to hold up: its own read of each layer stands.
+            sag = ", though a bridge that long may sag a little" if "bridges=" in asked_for else ""
+            return f"supports were on and the slicer placed none: it prints these on its own{sag} ({asked_for})"
         if self.enabled and self.joined:
             return (f"supports on: {self.reason}; that is too close to the plate for a gap, "
                     f"so the support under it is joined to it{self._parts_clause}")

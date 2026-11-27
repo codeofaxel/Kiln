@@ -93,3 +93,25 @@ def test_a_sloped_edge_is_held_however_its_wall_is_cut(cut: str):
     assert len(deck) == 1
     assert not deck[0].needs_supports
     assert deck[0].span_mm == pytest.approx(6.0)
+
+
+def _bridge(tmp_path: Path) -> Path:
+    """A 2 mm slab spanning 20 mm between two posts, 10 mm over the bed."""
+    part = trimesh.boolean.union(
+        [_box([5, 10, 10], [2.5, 0, 5]), _box([5, 10, 10], [27.5, 0, 5]), _box([30, 10, 2], [15, 0, 11])],
+        engine="manifold",
+    )
+    path = tmp_path / "bridge.stl"
+    part.export(path)
+    return path
+
+
+def test_a_long_bridge_alone_is_said_as_a_maybe(tmp_path: Path):
+    from kiln.printability import verdict
+
+    report = analyze_printability(str(_bridge(tmp_path)), material="PLA")
+    key, sentence = verdict(report)
+    assert report.bridging.needs_supports_for_bridges
+    assert key == "prints_with_supports"
+    assert sentence.startswith("May need supports (bridges=")
+    assert any(r.startswith("Long bridge (") and "may bridge it on its own" in r for r in report.recommendations)

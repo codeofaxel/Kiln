@@ -334,8 +334,27 @@ class TestTheFileIsTheWitness:
         got = witnessed(asked, empty)
         assert not got.enabled and got.decided_by == DECIDED_ANALYSIS
         assert got.reason == "overhangs=11.1%; the slicer placed none"
-        assert got.note == "the part needs supports but the slicer placed none: overhangs=11.1%"
+        assert got.note == "supports were on and the slicer placed none: it prints these on its own (overhangs=11.1%)"
         assert got.settings == asked.settings
+
+    def test_a_bridge_the_slicer_bridged_is_not_said_to_need_supports(self, tmp_path: Path):
+        from kiln.slicer_supports import witnessed
+
+        asked = SliceSupports(True, DECIDED_ANALYSIS, "overhangs=1.3%, bridges=21.4mm", support_settings(45.0))
+        got = witnessed(asked, self._gcode(tmp_path, ";TYPE:Bridge", "G1 X1 E1"))
+        assert "needs supports" not in got.note
+        assert got.note == (
+            "supports were on and the slicer placed none: it prints these on its own, though a bridge that "
+            "long may sag a little (overhangs=1.3%, bridges=21.4mm)"
+        )
+
+    def test_supports_from_the_plate_that_the_slicer_could_not_place_are_still_said(self, tmp_path: Path):
+        from kiln.slicer_supports import PLATE_ONLY_KEY, witnessed
+
+        settings = {**support_settings(45.0), PLATE_ONLY_KEY: "1"}
+        asked = SliceSupports(True, DECIDED_ANALYSIS, "overhangs=11.1%", settings)
+        got = witnessed(asked, self._gcode(tmp_path, ";TYPE:Perimeter", "G1 X1 E1"))
+        assert got.note == "the part needs supports but the slicer placed none: overhangs=11.1%"
 
     def test_a_slice_whose_file_carries_them_keeps_its_answer(self, tmp_path: Path):
         from kiln.slicer_supports import witnessed

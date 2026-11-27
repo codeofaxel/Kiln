@@ -49,10 +49,10 @@ def test_a_bridge_too_long_to_span_is_never_also_called_bridged(tmp_path):
     # Control: the deck is two-sided and too long to bridge.
     assert report["bridging"]["needs_supports_for_bridges"] is True, report["bridging"]
     said = _said(reply)
-    assert any("Long bridges detected (21.0 mm).  Enable supports" in text for text in said), said
+    assert any("Long bridge (21.0 mm): it may sag." in text for text in said), said
     assert not any("will likely bridge" in text for text in said), said
     assert not any(NO_ACTION in text for text in said), said
-    assert "needs supports (bridges=21.0mm)" in reply["message"], reply["message"]
+    assert "may also need supports (bridges=21.0mm)" in reply["message"], reply["message"]
 
 
 def test_a_bridge_the_slicer_spans_is_said_so(tmp_path):
@@ -62,4 +62,4 @@ def test_a_bridge_the_slicer_spans_is_said_so(tmp_path):
     assert any(
         text.startswith("Slicer will likely bridge the") and NO_ACTION in text for text in recommendations
     ), recommendations
-    assert not any("Long bridges detected" in text for text in recommendations), recommendations
+    assert not any("Long bridge (" in text for text in recommendations), recommendations

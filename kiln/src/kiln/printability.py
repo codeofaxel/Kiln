@@ -1324,6 +1324,16 @@ def support_verdict(report: PrintabilityReport | SupportJudgement) -> str | None
     return ", ".join(reasons) if reasons else None
 
 
+def _only_a_bridge(report: PrintabilityReport | SupportJudgement) -> bool:
+    """Whether the only reason *report* gives for supports is a bridge held
+    at both ends (no overhang that needs them, nothing starting in mid-air,
+    nothing sticking out from one side)."""
+    if int(getattr(report.overhangs, "mid_air_starts", 0) or 0) or report.overhangs.needs_supports:
+        return False
+    bridge_mm, sticks_out_mm = _unsupported_flats(report.bridging)
+    return bool(bridge_mm) and not sticks_out_mm
+
+
 def _unsupported_flats(bridging: BridgingAnalysis) -> tuple[float, float]:
     """The flat undersides that need supports, as the two things a person
     can measure: ``(the bridge to support, how far an overhang sticks
@@ -8608,7 +8618,8 @@ def _build_recommendations(
     bridge_mm, sticks_out_mm = _unsupported_flats(bridging)
     if bridge_mm:
         recs.append(
-            f"Long bridges detected ({bridge_mm:.1f} mm).  Enable supports or reduce bridge spans.{between_parts}"
+            f"Long bridge ({bridge_mm:.1f} mm): it may sag.  Your slicer may bridge it on its own; if it "
+            f"does not, turn supports on or shorten the span.{between_parts}"
         )
         between_parts = ""
     if sticks_out_mm:
@@ -11570,19 +11581,23 @@ def verdict(report: PrintabilityReport) -> tuple[str, str]:
         (report.plan_check or {}).get("note", ""),
     )
     reason = support_verdict(report)
+    # A long bridge alone is one a slicer may bridge unsupported: said as a
+    # maybe, while supports stay asked for in the slice.
+    maybe = reason is not None and _only_a_bridge(report)
     due = checks_due(report)
     if due:
         said = (
             f"Check before printing: {due[0]}",
             *due[1:],
-            f"It also needs supports ({reason})." if reason else "",
+            (f"It may also need supports ({reason})." if maybe else f"It also needs supports ({reason}).") if reason else "",
             "" if held in due else held,
             *after,
         )
         return "check", " ".join(filter(None, said))
     notes = (held, *after)
     if reason:
-        return "prints_with_supports", " ".join(filter(None, (f"Prints with supports ({reason}).", *notes)))
+        first = f"May need supports ({reason})." if maybe else f"Prints with supports ({reason})."
+        return "prints_with_supports", " ".join(filter(None, (first, *notes)))
     if report.printable:
         return "ready", " ".join(filter(None, ("Ready to print.", *notes)))
     first = report.recommendations[0] if report.recommendations else "see the report"
