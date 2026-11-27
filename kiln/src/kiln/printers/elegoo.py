@@ -763,10 +763,8 @@ class ElegooAdapter(PrinterAdapter):
     # PrinterAdapter -- reading a print file back
     # ------------------------------------------------------------------
 
-    #: Where a Centauri Carbon hands a stored file back: an HTTP ``GET`` of
-    #: ``/downloadFile`` followed by the file's path on the printer, on the
-    #: printer's web port.  This is the address Elegoo's own client software
-    #: reads a Centauri Carbon's files from.
+    #: Where a Centauri Carbon hands a stored file back: ``GET /downloadFile``
+    #: and the file's path, on the web port, as Elegoo's own client reads it.
     _SDCP_DOWNLOAD_PORT: ClassVar[int] = 80
     _SDCP_DOWNLOAD_PATH: ClassVar[str] = "/downloadFile"
     #: The printer's onboard storage, where a bare file name is looked up.
@@ -786,17 +784,12 @@ class ElegooAdapter(PrinterAdapter):
         return f"{self._SDCP_ONBOARD}/{self._printed_name(file_name)}"
 
     def _hands_files_back(self) -> bool:
-        """Whether this printer hands a stored file back.
-
-        The Centauri Carbon does, over HTTP.  Elegoo's published SDCP
-        protocol documents only sending a file to the printer, so a printer
-        known to be another model cannot.  The model is the one this
-        printer's setup declared, else the model the printer reports; with
-        neither known, the Centauri Carbon's download is tried, and a
-        printer that does not serve it fails the read.
-        """
+        """Whether this printer hands a stored file back: a Centauri Carbon,
+        by the model its setup declared or the one it reports.  Elegoo's
+        published protocol documents only sending files, so any other model,
+        or one Kiln cannot name, is taken as one that does not."""
         model = self.declared_printer_model() or self._read_identity_fields()[0]
-        return not model or "centauri" in model.lower()
+        return bool(model) and "centauri" in model.lower()
 
     def read_print_file(self, file_name: str) -> bytes | None:
         """The printer's own copy of *file_name*: the file ``start_print``
@@ -817,7 +810,7 @@ class ElegooAdapter(PrinterAdapter):
                 url, stream=True, timeout=(float(self._timeout), self._SDCP_DOWNLOAD_READ_TIMEOUT)
             ) as resp:
                 if resp.status_code == 404:
-                    raise read_back.read_failed(file_name, "the printer has no file by that name")
+                    return self._not_served(file_name)
                 if not 200 <= resp.status_code < 300:
                     logger.debug("SDCP download of %s answered HTTP %s", name, resp.status_code)
                     raise read_back.read_failed(file_name, "the printer refused to send it")
@@ -838,8 +831,16 @@ class ElegooAdapter(PrinterAdapter):
         # A print file never begins as a web page; a web server can answer a
         # path it does not hold with one.
         if data.lstrip()[:14].lower().startswith((b"<!doctype html", b"<html")):
-            raise read_back.read_failed(file_name, "the printer sent back a web page, not the file")
+            return self._not_served(file_name)
         return data
+
+    def _not_served(self, file_name: str) -> None:
+        """A download that did not come back: ``None`` when the file list
+        holds the file (this printer serves no download of it), else the
+        file is missing and the read fails."""
+        if self.print_file_identity(file_name) is not None:
+            return None
+        raise read_back.read_failed(file_name, "the printer has no file by that name")
 
     def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
         """``(size, time stamp)`` the printer's file list reports for the file

@@ -300,6 +300,28 @@ class TestTheFileDoesNotComeBack:
 
         assert caught.value.code == "PRINT_FILE_READ_FAILED"
 
+    def test_a_listed_file_the_download_does_not_serve_is_not_handed_back(
+        self, files: tuple[_FakeFiles, int],
+    ) -> None:
+        # The file list holds the file, but the download answers it has none:
+        # the printer serves no download of it, which is no failed read.
+        store, port = files
+        adapter, ws = _printer(port)
+        ws.listing = [{"name": "/local/kept.gcode", "FileSize": 12, "CreateTime": 1_764_000_000, "type": 1}]
+
+        assert adapter.read_print_file("kept.gcode") is None
+        assert _gets(store) == ["/downloadFile/local/kept.gcode"]
+
+    def test_a_printer_whose_model_is_unknown_is_not_asked_for_a_download(
+        self, files: tuple[_FakeFiles, int],
+    ) -> None:
+        store, port = files
+        store.files["/local/cube.gcode"] = GCODE
+        adapter, _ = _printer(port, machine_name="")
+
+        assert adapter.read_print_file("cube.gcode") is None
+        assert _gets(store) == []
+
     def test_another_sdcp_model_cannot_hand_files_back(self, files: tuple[_FakeFiles, int]) -> None:
         store, port = files
         store.files["/local/model.ctb"] = b"\x12\xfd\x00\x01resin"
