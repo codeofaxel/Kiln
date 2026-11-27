@@ -124,24 +124,20 @@ def tell_off(envelope: dict[str, Any]) -> None:
 
 def has_separate_parts(mesh: str) -> bool:
     """Whether the model at *mesh* holds two or more pieces that do not
-    touch.  A file too large to send, or one that cannot be read, holds
-    none."""
+    touch, counted as every door counts pieces (:mod:`kiln.mesh_bodies`),
+    on any install Kiln runs on.  A file too large to send, or one that
+    cannot be read, holds none."""
     try:
         from kiln.served_makes import MAX_MODEL_BYTES
 
         if os.path.getsize(mesh) > MAX_MODEL_BYTES:
             return False
-        import trimesh
-
-        from kiln import mesh_frame
+        from kiln import mesh_bodies, mesh_frame
 
         model = mesh_frame.load_mesh(mesh, process=False, force="mesh")
-        faces = len(model.faces)
-        if faces < 2:
+        if len(model.faces) < 2:
             return False
-        model.merge_vertices()
-        labels = trimesh.graph.connected_component_labels(model.face_adjacency, node_count=len(model.faces))
-        return len(set(labels.tolist())) >= 2
+        return mesh_bodies.read_mesh(model).piece_count >= 2
     except Exception:  # noqa: BLE001 -- unreadable is "nothing to send"
         logger.debug("import motion: %s could not be read for its parts", mesh, exc_info=True)
         return False

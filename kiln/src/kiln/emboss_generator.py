@@ -2360,7 +2360,11 @@ def _write_mark_handoff(scad_path: Path, scad_code: str, model_path: str, mark: 
 
 
 def _sealed_hollows(mesh_path: str) -> int | None:
-    """Closed pieces of *mesh_path* that enclose negative volume: hollows."""
+    """Closed pieces of *mesh_path* that enclose negative volume: hollows.
+
+    A file the triangle arrays leave aside (not an STL, or an STL with a
+    piece that is not closed) is read as every door reads pieces
+    (:mod:`kiln.mesh_bodies`), so the answer is the same on any install."""
     mesh = None
     try:
         from kiln.mesh_closure import inside_out_pieces
@@ -2370,9 +2374,7 @@ def _sealed_hollows(mesh_path: str) -> int | None:
         if counted is not None:
             return counted
         mesh = load_mesh(mesh_path, force="mesh")
-        return sum(
-            1 for piece in mesh.split(only_watertight=True) if piece.volume < -1e-6
-        )
+        return _inside_out_sealed_pieces(mesh)
     except Exception:  # noqa: BLE001 — a check that cannot read stands aside
         _logger.debug("hollow check could not read %s", mesh_path, exc_info=True)
         return None
@@ -2382,6 +2384,24 @@ def _sealed_hollows(mesh_path: str) -> int | None:
 
             mesh = None  # the last reference, dropped so the collection can free it
             release_checked_mesh()
+
+
+def _inside_out_sealed_pieces(mesh: Any) -> int:
+    """How many sealed pieces of the loaded *mesh* enclose negative volume."""
+    import numpy as np
+
+    from kiln.mesh_bodies import read_mesh
+    from kiln.mesh_closure import _INSIDE_OUT_VOLUME
+
+    reading = read_mesh(mesh)
+    corners = np.asarray(mesh.vertices, dtype=np.float64)[np.asarray(mesh.faces, dtype=np.int64)]
+    signed = np.einsum("ij,ij->i", corners[:, 0], np.cross(corners[:, 1], corners[:, 2])) / 6.0
+    piece = np.asarray(reading.face_piece)
+    own = piece >= 0
+    volume = np.bincount(piece[own], weights=signed[own], minlength=reading.piece_count)
+    return sum(
+        1 for i, found in enumerate(reading.pieces) if found.sealed and volume[i] < _INSIDE_OUT_VOLUME
+    )
 
 
 def _new_sealed_hollows(scad_text: str, output_path: str) -> int:

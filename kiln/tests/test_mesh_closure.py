@@ -147,6 +147,42 @@ def test_the_sealed_cavity_check_runs_on_a_plain_install(tmp_path, monkeypatch):
     assert _sealed_hollows(path) == 1
 
 
+def _open_box(at=(40, 0, 0)):
+    box = _box((5, 5, 5), at)
+    box.update_faces(np.arange(len(box.faces)) > 1)
+    return box
+
+
+@pytest.mark.parametrize(
+    ("name", "write"),
+    [
+        ("an OBJ", lambda folder, mesh: _write_obj(folder, mesh)),
+        ("an STL with an open piece", lambda folder, mesh: _write(
+            folder, "open", trimesh.util.concatenate([mesh, _open_box()]))),
+    ],
+)
+def test_a_file_the_arrays_leave_aside_is_still_counted_on_a_plain_install(tmp_path, monkeypatch, name, write):
+    """A file the triangle arrays step aside from (not an STL, or a piece that
+    is not closed) is still read on a plain install: the check counts the
+    sealed hollow instead of standing aside, and an open piece is no hollow."""
+    from kiln.emboss_generator import _sealed_hollows
+
+    hollow = trimesh.util.concatenate([_box(), _box((8, 8, 8), inside_out=True)])
+    path = write(tmp_path, hollow)
+    (tmp_path / "closed").mkdir()
+    closed = write(tmp_path / "closed", _box())
+    _a_plain_install(monkeypatch)
+    assert mesh_closure.inside_out_pieces(path) is None, name
+    assert _sealed_hollows(path) == 1, name
+    assert _sealed_hollows(closed) == 0, name
+
+
+def _write_obj(folder, mesh):
+    path = folder / "shape.obj"
+    path.write_text(trimesh.exchange.obj.export_obj(mesh))
+    return str(path)
+
+
 @pytest.mark.parametrize("name", sorted(_shapes()))
 def test_the_pieces_are_the_ones_scipy_finds(tmp_path, name):
     """Where scipy is installed (the server, the dev extra), the numpy count

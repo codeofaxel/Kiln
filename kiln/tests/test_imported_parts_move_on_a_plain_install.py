@@ -10,7 +10,8 @@ once how.  A model in one piece is never sent for this.
 
 Walked with kiln-pro removed from the import system and Kiln's servers stood
 in at the one served door, the seam ``test_outside_model_opens_a_goal.py``
-uses.
+uses; the pieces are counted with scipy hidden too, since a plain install
+has none.
 """
 
 from __future__ import annotations
@@ -38,6 +39,22 @@ def plain_install(monkeypatch):
     for name in [n for n in sys.modules if n == "kiln_pro" or n.startswith("kiln_pro.")]:
         monkeypatch.setitem(sys.modules, name, None)
     monkeypatch.setitem(sys.modules, "kiln_pro", None)
+
+
+@pytest.fixture
+def without_scipy(monkeypatch):
+    """What ``pip install kiln3d`` has: neither scipy nor networkx, which are
+    developer packages only.  Both are hidden from anything that imports them
+    now, and trimesh's own references, taken when it was first imported, are
+    swapped for the stand-ins it keeps when they are missing."""
+    from trimesh import exceptions
+    from trimesh import graph as trimesh_graph
+
+    for name in [n for n in sys.modules if n == "scipy" or n.startswith("scipy.")] + ["scipy", "networkx"]:
+        monkeypatch.setitem(sys.modules, name, None)
+    missing = exceptions.ExceptionWrapper(ImportError("not installed on a plain install"))
+    for name in ("coo_matrix", "csgraph", "nx"):
+        monkeypatch.setattr(trimesh_graph, name, missing, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -145,6 +162,42 @@ def test_an_outside_file_with_separate_parts_plays_here_and_the_person_is_told_o
     assert s.uploads == [first, second]
     assert import_motion.REPLY_KEY not in env2
     assert mechanism_stage.block_for(second) == _NOTE
+
+
+@pytest.mark.parametrize(("pieces", "separate"), [(3, True), (2, True), (1, False)])
+def test_the_pieces_are_counted_without_scipy(without_scipy, tmp_path, pieces, separate):
+    """A plain install has no scipy; the count still answers, and a file in
+    one piece still holds none."""
+    path = _downloaded(tmp_path, f"model_{pieces}.stl", pieces=pieces)
+    assert import_motion.has_separate_parts(path) is separate
+
+
+def test_an_outside_file_with_separate_parts_plays_here_without_scipy(
+        plain_install, without_scipy, servers, plan, tmp_path):
+    """The whole door, on the install a customer has: the copy goes, what the
+    servers worked out plays here, and the person is told once."""
+    s = servers(_answer())
+    path = _downloaded(tmp_path, "gearbox.stl", pieces=3)
+    env = {"success": True, "local_path": path}
+    join_goal("", env, path)
+    assert s.uploads == [path]
+    _tool, sent = s.asks[0]
+    assert sent["motion"] == _WORK_IT_OUT and sent["source_artifact_token"] == _TOKEN
+    assert env["motion"]["plays"] is True
+    assert mechanism_stage.block_for(path) == _NOTE
+    assert env[import_motion.REPLY_KEY] == import_motion.SENT_LINE
+
+
+@pytest.mark.parametrize("tier", [LicenseTier.BUSINESS, LicenseTier.ENTERPRISE])
+def test_business_is_told_how_to_turn_it_on_without_scipy(
+        plain_install, without_scipy, servers, plan, tmp_path, tier):
+    plan(tier)
+    s = servers(_answer(plays=False))
+    path = _downloaded(tmp_path, "fixture.stl", pieces=2)
+    env = {"success": True, "local_path": path}
+    join_goal("", env, path)
+    assert s.uploads == []
+    assert env[import_motion.REPLY_KEY] == import_motion.OFF_LINE
 
 
 def test_the_line_says_what_was_sent_where_it_goes_and_how_to_stop_it():

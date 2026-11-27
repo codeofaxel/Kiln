@@ -178,6 +178,31 @@ print(json.dumps({"ok": ok, "detail": f"success={r.get('success')} method={r.get
 """,
     },
     {
+        "name": "separate-parts",
+        "why": (
+            "a model's separate pieces are counted (an imported file whose "
+            "parts move is worked out only when it is seen to hold two), on "
+            "an install with no scipy: a count that needs it reads every "
+            "file as one piece and nothing is said"
+        ),
+        "code": """
+import json, os, pathlib
+OUT = os.environ["PROBE_DIR"]
+import trimesh
+two = pathlib.Path(OUT) / "two.stl"
+one = pathlib.Path(OUT) / "one.stl"
+trimesh.util.concatenate([
+    trimesh.creation.box(extents=(10, 10, 10)),
+    trimesh.creation.box(extents=(10, 10, 10)).apply_translation((30, 0, 0)),
+]).export(two)
+trimesh.creation.box(extents=(10, 10, 10)).export(one)
+from kiln.import_motion import has_separate_parts
+found = (has_separate_parts(str(two)), has_separate_parts(str(one)))
+ok = found == (True, False)
+print(json.dumps({"ok": ok, "detail": f"two pieces={found[0]} one piece={found[1]}"}))
+""",
+    },
+    {
         "name": "stage-payload",
         "why": "the 3D stage panel every tier gets can read a mesh (trimesh)",
         "code": f"""
