@@ -28,16 +28,19 @@ above it is one of three things, and the geometry decides which:
 
 * a **void** — the inverted inner shell of a hollow part.  Part of the
   host, not a piece; never a finding.
-* a **captive** piece — a body held within the envelope of the rest of the
-  part (a ball in a cage, a print-in-place pin in its knuckles).  It prints
-  on supports inside the part and is said as a warning.
-* a **floating** piece — surrounded by air, joined to nothing.  Scrap: it
-  prints as a loose part on supports, or not at all, so the doors that
-  compile geometry refuse the make and name the gap to the nearest
-  surface.  (A honeycomb phone stand whose cells sit on a tilted plane
-  that never meets the base is dozens of floating pieces; a door that
-  reads them as merely "separated" stays quiet and shows the person
-  scrap.)
+* a **captive** piece — a body the rest of the part holds in: the part lies
+  above and below it (a ball inside a hollow part, a print-in-place pin in
+  its knuckles), or stands in its way in all six directions along the axes,
+  so it cannot come out (a ball in a cage of bars, a link of a chain, a ring
+  on a capped post).  It prints on supports inside the part and is said as
+  a warning.
+* a **floating** piece — surrounded by air, joined to nothing, held by
+  nothing.  Scrap: it prints as a loose part on supports, or not at all, so
+  the doors that compile geometry refuse the make, name the gap to the part
+  standing on the bed, and say where each piece is.  (A honeycomb phone
+  stand whose cells sit on a tilted plane that never meets the base is
+  dozens of floating pieces; a door that reads them as merely "separated"
+  stays quiet and shows the person scrap.)
 """
 
 from __future__ import annotations
@@ -72,6 +75,13 @@ _SUBSTANTIAL_VOLUME_FRACTION = 0.01
 _CAPTIVE_COVERED_FRACTION = 0.75
 # Sample points per piece for the cover test (vertices, evenly strided).
 _COVER_SAMPLES = 32
+# Sample points per piece for the test that the part holds it in on every
+# side (vertices and surface points, evenly strided).
+_TRAP_SAMPLES = 400
+# A floating finding names where this many pieces are in its sentence, and
+# carries the boxes of up to this many more in its ``boxes`` field.
+_BOXES_SAID = 4
+_BOXES_KEPT = 24
 # Slack on a box-containment test, mm.
 _BOUNDS_TOLERANCE_MM = 0.05
 # Each airborne piece is measured against the grounded part (touching /
@@ -641,6 +651,12 @@ def _judge(
         else:
             floating.append(i)
         cover_tests += 1
+    # The part, as far as it is known now: every piece that is not loose and
+    # not a hollow's inner wall.
+    holding = [j for j in range(len(bodies)) if j not in floating and j not in shells]
+    held_in = _held_by_the_part(bodies, solid_of, tris_by_body, floating, holding)
+    captive += held_in
+    floating = [i for i in floating if i not in held_in]
     result["void_shells"] = len(voids)
     if resting:
         result["findings"].append(_contact_group_finding(resting, "touching"))
@@ -658,6 +674,47 @@ def _judge(
         )
         result["findings"].append(_floating_finding(bodies, lifts, floating, gap_block))
     return result
+
+
+def _held_by_the_part(
+    bodies: list[Any],
+    solid_of: list[int],
+    tris_by_body: list[Any],
+    loose: list[int],
+    holding: list[int],
+) -> list[int]:
+    """Which of the *loose* pieces the part holds in on every side
+    (:func:`_held_on_every_side`).  The part is *holding* (what stands on
+    the bed and what it already holds) and grows by each piece it is found
+    to hold, so the next link of a chain is held too; pieces that only hold
+    one another up in the air hold nothing.  Past :data:`_MAX_COVER_TESTS`
+    tests a piece stays loose, the cautious answer."""
+    import numpy as np
+
+    holders = list(holding)
+    waiting = list(loose)
+    held: list[int] = []
+    tests = 0
+    found = True
+    while found and waiting:
+        found = False
+        part = np.vstack([tris_by_body[j] for j in holders]) if holders else None
+        for i in list(waiting):
+            if part is None or tests >= _MAX_COVER_TESTS:
+                return held
+            tests += 1
+            # A piece is never held in by its own solid.
+            if any(solid_of[j] == solid_of[i] for j in holders):
+                others = [tris_by_body[j] for j in holders if solid_of[j] != solid_of[i]]
+                around = np.vstack(others) if others else np.empty((0, 3, 3))
+            else:
+                around = part
+            if _held_on_every_side(bodies[i], around):
+                held.append(i)
+                holders.append(i)
+                waiting.remove(i)
+                found = True
+    return held
 
 
 def _contact_group_finding(members: list[int], relation: str) -> dict[str, Any]:
@@ -725,42 +782,95 @@ def _cover_samples(body: Any) -> Any:
     return np.vstack([pts, np.asarray(body.centroid, dtype=float)[None, :]])
 
 
-def _covered_above_and_below(body: Any, others: list[Any]) -> bool:
-    """True when the rest of the part (``others``: its triangle arrays) lies
-    both above and below most of the piece: a vertical line through a sample
-    point meets the part on both sides.  Pure numpy on the triangles' XY footprints -- no ray library --
-    so it runs on a bare install.  A ball in a closed cage or inside a
-    hollow part is covered; a cell over an open base, or a ball in a cage
-    of thin bars with the sky above it, is not.
+def _met_along(points: Any, tris: Any, axis: int) -> tuple[Any, Any]:
+    """For each point, whether a straight line through it along *axis* (0, 1
+    or 2 for x, y or z) meets the triangles *tris* past it on the plus side,
+    and on the minus side.  Pure numpy on the triangles' footprints across
+    that axis -- no ray library -- so it runs on a bare install.
     """
     import numpy as np
 
-    pts = _cover_samples(body)
+    plus = np.zeros(len(points), dtype=bool)
+    minus = np.zeros(len(points), dtype=bool)
+    if len(points) == 0 or len(tris) == 0:
+        return plus, minus
+    u, v = (k for k in range(3) if k != axis)
+    # Only a triangle whose footprint reaches the points' own can meet a line.
+    lo = points[:, (u, v)].min(axis=0) - _BOUNDS_TOLERANCE_MM
+    hi = points[:, (u, v)].max(axis=0) + _BOUNDS_TOLERANCE_MM
+    flat = tris[:, :, (u, v)]
+    reach = (flat.max(axis=1) >= lo).all(axis=1) & (flat.min(axis=1) <= hi).all(axis=1)
+    tris = tris[reach]
+    a, b, c = tris[:, 0, :], tris[:, 1, :], tris[:, 2, :]
+    # 2D barycentric test of each point against each triangle's footprint.
+    d = (b[:, v] - c[:, v]) * (a[:, u] - c[:, u]) + (c[:, u] - b[:, u]) * (a[:, v] - c[:, v])
+    ok = np.abs(d) > 1e-12
+    a, b, c, d = a[ok], b[ok], c[ok], d[ok]
+    if len(d) == 0:
+        return plus, minus
+    chunk = max(1, int(2_000_000 // len(d)))
+    for s in range(0, len(points), chunk):
+        p = points[s : s + chunk]
+        pu, pv = p[:, u][:, None], p[:, v][:, None]
+        l1 = ((b[:, v] - c[:, v])[None, :] * (pu - c[:, u][None, :])
+              + (c[:, u] - b[:, u])[None, :] * (pv - c[:, v][None, :])) / d[None, :]
+        l2 = ((c[:, v] - a[:, v])[None, :] * (pu - c[:, u][None, :])
+              + (a[:, u] - c[:, u])[None, :] * (pv - c[:, v][None, :])) / d[None, :]
+        l3 = 1.0 - l1 - l2
+        inside = (l1 >= -1e-9) & (l2 >= -1e-9) & (l3 >= -1e-9)
+        hit = l1 * a[:, axis][None, :] + l2 * b[:, axis][None, :] + l3 * c[:, axis][None, :]
+        at = p[:, axis][:, None]
+        plus[s : s + chunk] = (inside & (hit > at + _BOUNDS_TOLERANCE_MM)).any(axis=1)
+        minus[s : s + chunk] = (inside & (hit < at - _BOUNDS_TOLERANCE_MM)).any(axis=1)
+    return plus, minus
+
+
+def _covered_above_and_below(body: Any, others: list[Any]) -> bool:
+    """True when the rest of the part (``others``: its triangle arrays) lies
+    both above and below most of the piece: a vertical line through a sample
+    point meets the part on both sides.  A ball in a closed cage or inside a
+    hollow part is covered; a cell over an open base, or a ball in a cage
+    of thin bars with the sky above it, is not (:func:`_held_on_every_side`
+    reads that one).
+    """
+    import numpy as np
+
     tris = np.vstack(others)
     if len(tris) == 0:
         return False
-    above = np.zeros(len(pts), dtype=bool)
-    below = np.zeros(len(pts), dtype=bool)
-    a, b, c = tris[:, 0, :], tris[:, 1, :], tris[:, 2, :]
-    # 2D barycentric test of each point against each triangle's footprint.
-    d = (b[:, 1] - c[:, 1]) * (a[:, 0] - c[:, 0]) + (c[:, 0] - b[:, 0]) * (a[:, 1] - c[:, 1])
-    ok = np.abs(d) > 1e-12
-    a, b, c, d = a[ok], b[ok], c[ok], d[ok]
-    chunk = max(1, int(2_000_000 // max(len(a), 1)))
-    for s in range(0, len(pts), chunk):
-        p = pts[s : s + chunk]
-        px, py = p[:, 0][:, None], p[:, 1][:, None]
-        l1 = ((b[:, 1] - c[:, 1])[None, :] * (px - c[:, 0][None, :])
-              + (c[:, 0] - b[:, 0])[None, :] * (py - c[:, 1][None, :])) / d[None, :]
-        l2 = ((c[:, 1] - a[:, 1])[None, :] * (px - c[:, 0][None, :])
-              + (a[:, 0] - c[:, 0])[None, :] * (py - c[:, 1][None, :])) / d[None, :]
-        l3 = 1.0 - l1 - l2
-        inside = (l1 >= -1e-9) & (l2 >= -1e-9) & (l3 >= -1e-9)
-        z_hit = l1 * a[:, 2][None, :] + l2 * b[:, 2][None, :] + l3 * c[:, 2][None, :]
-        pz = p[:, 2][:, None]
-        above[s : s + chunk] = (inside & (z_hit > pz + _BOUNDS_TOLERANCE_MM)).any(axis=1)
-        below[s : s + chunk] = (inside & (z_hit < pz - _BOUNDS_TOLERANCE_MM)).any(axis=1)
+    above, below = _met_along(_cover_samples(body), tris, 2)
     return float((above & below).mean()) >= _CAPTIVE_COVERED_FRACTION
+
+
+def _trap_samples(body: Any) -> Any:
+    """Up to :data:`_TRAP_SAMPLES` points on the piece: its vertices and
+    points spread over its surface, so a thin bar or a narrow ring that
+    stands in the way of part of the piece is met."""
+    import numpy as np
+
+    pts = _sample_points(body)
+    if len(pts) > _TRAP_SAMPLES:
+        pts = pts[np.linspace(0, len(pts) - 1, _TRAP_SAMPLES).astype(int)]
+    return np.asarray(pts, dtype=float)
+
+
+def _held_on_every_side(body: Any, holders: Any) -> bool:
+    """True when the part (*holders*: its triangles) stands in the piece's
+    way in all six directions along the axes: moved straight up, down or
+    along either side, the piece would run into the part, so it cannot come
+    out.  A link of a chain, a ring on a capped post, a ball in a cage of
+    bars or in a cube with holes smaller than itself is held; a piece with
+    open air on any one side is not.
+    """
+    if len(holders) == 0:
+        return False
+    pts = _trap_samples(body)
+    # Up and down first: most loose pieces have open air above them.
+    for axis in (2, 0, 1):
+        plus, minus = _met_along(pts, holders, axis)
+        if not (plus.any() and minus.any()):
+            return False
+    return True
 
 
 def _within_bounds(body: Any, bodies: Any) -> bool:
@@ -780,23 +890,44 @@ def _span_text(low: float, high: float) -> str:
     return f"{low:.1f} mm" if high - low < 0.05 else f"{low:.1f} to {high:.1f} mm"
 
 
+def _box_of(body: Any, index: int) -> dict[str, Any]:
+    """Piece *index* (from 0) as the box it fills, in the file's own
+    coordinates: ``{"body": n, "min_mm": [x, y, z], "max_mm": [x, y, z]}``."""
+    lo, hi = body.bounds
+    return {
+        "body": index + 1,
+        "min_mm": [round(float(v), 2) for v in lo],
+        "max_mm": [round(float(v), 2) for v in hi],
+    }
+
+
+def _box_text(box: dict[str, Any]) -> str:
+    """``piece 2 spans x 10.0 to 20.0, y -5.0 to 5.0, z 12.0 to 14.0 mm``."""
+    spans = ", ".join(
+        f"{axis} {lo:.1f} to {hi:.1f}" for axis, lo, hi in zip("xyz", box["min_mm"], box["max_mm"], strict=True)
+    )
+    return f"piece {box['body']} spans {spans} mm"
+
+
 def _captive_finding(bodies: Any, captive: list[int]) -> dict[str, Any]:
     n = len(captive)
     biggest = max(captive, key=lambda i: abs(_signed_volume(bodies[i])))
     ext = bodies[biggest].bounds[1] - bodies[biggest].bounds[0]
     if n == 1:
         message = (
-            "1 piece is held inside the part without touching it (a captive "
-            "piece): it prints on supports inside the part, which have to be "
-            "cleared out afterwards. Fine if that is the design; if it was "
-            "meant to be joined, extend it until it overlaps."
+            "1 piece is held in by the part without touching it (a captive "
+            "piece, such as a ball in a cage or a link of a chain): it prints "
+            "on supports inside the part, which have to be cleared out "
+            "afterwards. Fine if it is meant to move or rattle; if it was "
+            "meant to be fixed to the part, extend it until it overlaps."
         )
     else:
         message = (
-            f"{n} pieces are held inside the part without touching it "
-            "(captive pieces): they print on supports inside the part, which "
-            "have to be cleared out afterwards. Fine if that is the design; "
-            "if they were meant to be joined, extend them until they overlap."
+            f"{n} pieces are held in by the part without touching it (captive "
+            "pieces, such as a ball in a cage or the links of a chain): they "
+            "print on supports inside the part, which have to be cleared out "
+            "afterwards. Fine if they are meant to move or rattle; if they "
+            "were meant to be fixed to the part, extend them until they overlap."
         )
     return {
         "bodies": [i + 1 for i in captive],
@@ -809,7 +940,10 @@ def _captive_finding(bodies: Any, captive: list[int]) -> dict[str, Any]:
 def _floating_finding(
     bodies: Any, lifts: list[float], floating: list[int], gaps: dict[str, float] | None,
 ) -> dict[str, Any]:
-    """The one finding for every piece surrounded by air."""
+    """The one finding for every piece surrounded by air: how high, how far
+    from the part standing on the bed, where each piece is in the file's
+    own coordinates (``boxes``, the first :data:`_BOXES_SAID` of them said),
+    and what to do for each thing the piece might have been meant to be."""
     low = min(lifts[i] for i in floating)
     high = max(lifts[i] for i in floating)
     biggest = max(floating, key=lambda i: abs(_signed_volume(bodies[i])))
@@ -817,32 +951,45 @@ def _floating_finding(
     n = len(floating)
     height = _span_text(low, high)
     floor = embedment_floor_mm()
+    boxes = [_box_of(bodies[i], i) for i in floating[:_BOXES_KEPT]]
     nearest = ""
     if gaps:
         nearest = (
-            f" and the nearest part of the model is {_span_text(gaps['min'], gaps['max'])} away"
+            f", and the part standing on the bed is {_span_text(gaps['min'], gaps['max'])} away"
         )
+    where = "; ".join(_box_text(box) for box in boxes[:_BOXES_SAID])
+    if n > _BOXES_SAID:
+        where += f"; and {n - _BOXES_SAID} more"
     if n == 1:
         message = (
             f"1 piece floats with nothing under it, {height} above the bed"
-            f"{nearest}: nothing joins it to the rest, so it would print as a "
-            "loose part on supports, or not at all. If it belongs to the "
-            f"part, extend it until it overlaps by at least {floor} mm; if it "
-            "is a separate part, set it on the bed."
+            f"{nearest}: nothing joins it to the rest and the part does not "
+            "hold it in, so it would print as a loose part on supports, or "
+            f"not at all. Where it is, in the file's own coordinates: {where}. "
+            "If it belongs to the part, extend it until it overlaps by at "
+            f"least {floor} mm; if it is a separate part, set it on the bed; "
+            "if it is meant to move, keep it apart and bring it within "
+            f"{NEAR_GAP_MM} mm of the part, or shape the part to hold it in "
+            "on every side."
         )
     else:
         message = (
             f"{n} pieces float with nothing under them, {height} above the "
-            f"bed{nearest}: nothing joins them to the rest, so they would "
-            "print as loose parts on supports, or not at all. If they belong "
-            f"to the part, extend them until they overlap it by at least "
-            f"{floor} mm; if they are separate parts, set them on the bed."
+            f"bed{nearest}: nothing joins them to the rest and the part does "
+            "not hold them in, so they would print as loose parts on "
+            "supports, or not at all. Where they are, in the file's own "
+            f"coordinates: {where}. If they belong to the part, extend them "
+            f"until they overlap it by at least {floor} mm; if they are "
+            "separate parts, set them on the bed; if they are meant to move, "
+            f"keep them apart and bring them within {NEAR_GAP_MM} mm of the "
+            "part, or shape the part to hold them in on every side."
         )
     finding: dict[str, Any] = {
         "bodies": [i + 1 for i in floating],
         "relation": "floating",
         "lift_mm": {"min": round(low, 2), "max": round(high, 2)},
         "largest_mm": [round(float(v), 2) for v in ext],
+        "boxes": boxes,
         "message": message,
     }
     if gaps:
@@ -879,8 +1026,9 @@ def refuse_for_floating(response: dict[str, Any], report: dict[str, Any]) -> dic
     the fix -- and no preview is drawn, no version recorded, nothing put in
     front of the person.  The file path stays on the response so the agent
     can look at what it wrote.  There is no flag to pass instead: a piece
-    meant to be held by the part is captive (inside its envelope) and is
-    not refused, so the geometry is the only way through, on purpose.
+    above the bed is made when it is joined to the part, sits within
+    :data:`NEAR_GAP_MM` of it, or is held in by it (captive), so the
+    geometry is the only way through, on purpose.
     """
     finding = next(
         (f for f in report.get("findings", []) if f.get("relation") == "floating"),
@@ -894,8 +1042,11 @@ def refuse_for_floating(response: dict[str, Any], report: dict[str, Any]) -> dic
     response["code"] = FLOATING_REFUSAL_CODE
     response["error"] = (
         f"Not made: {finding['message']} Fix the geometry and compile again. "
-        "A piece meant to be held by the part (a ball in a cage, a pin in its "
-        "knuckles) is not refused when it sits inside the part's envelope."
+        "A piece above the bed is made when it is joined to the part, when it "
+        f"sits within {NEAR_GAP_MM} mm of the part (a print-in-place "
+        "clearance), or when the part holds it in: the part lies above and "
+        "below it, or stands in its way up, down and to every side, as a cage "
+        "holds a ball or a chain holds its links."
     )
     response["message"] = response["error"]
     return response
