@@ -89,6 +89,48 @@ def adapter_with_ws() -> ElegooAdapter:
     return adapter
 
 
+#: A complete, homed G-code file, as the printer holds it.
+_HOMED_GCODE = (
+    b"M140 S60\nM104 S210\nM190 S60\nM109 S210\nG28\nG90\nG92 E0\n"
+    b"G1 Z0.3 F600\nG1 X50 Y50 F3000\nG1 X60 Y50 E1 F1200\nG1 Z10 F600\nM84\n"
+)
+
+
+class _Download:
+    """The printer's HTTP answer to a download of a file it holds."""
+
+    def __init__(self, body: bytes) -> None:
+        self.status_code = 200
+        self.headers = {"Content-Length": str(len(body))}
+        self._body = body
+
+    def __enter__(self) -> _Download:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        return None
+
+    def iter_content(self, chunk_size: int = 1) -> Any:
+        yield self._body
+
+
+@pytest.fixture
+def printer_holds_test_gcode(adapter_with_ws: ElegooAdapter) -> Any:
+    """A connected Centauri Carbon holding ``test.gcode`` in onboard
+    storage: its attributes are cached, and its download serves the file
+    the way the printer does, so a start by name reads it back."""
+    adapter_with_ws._last_status["MachineName"] = "Centauri Carbon"
+    asked: list[str] = []
+
+    def _get(url: str, **_kwargs: Any) -> _Download:
+        asked.append(url)
+        assert url == f"http://{HOST}:80/downloadFile/local/test.gcode"
+        return _Download(_HOMED_GCODE)
+
+    with mock.patch("kiln.printers.elegoo.requests.get", side_effect=_get):
+        yield asked
+
+
 # ---------------------------------------------------------------------------
 # Constructor tests
 # ---------------------------------------------------------------------------
@@ -406,11 +448,15 @@ class TestUploadFile:
 class TestPrintControl:
     """Tests for start/pause/resume/cancel/emergency_stop."""
 
-    def test_start_print(self, adapter_with_ws: ElegooAdapter) -> None:
+    def test_start_print(
+        self, adapter_with_ws: ElegooAdapter, printer_holds_test_gcode: list[str],
+    ) -> None:
         with mock.patch.object(adapter_with_ws, "_send_command_checked") as m:
             result = adapter_with_ws.start_print("test.gcode")
         assert result.success is True
         assert "test.gcode" in result.message
+        # The start was checked against the printer's own copy.
+        assert printer_holds_test_gcode
         # Verify the right command was sent.
         call_args = m.call_args
         assert call_args[0][0] == _CMD_START_PRINT
@@ -441,13 +487,17 @@ class TestPrintControl:
         assert result.success is True
         assert "emergency" in result.message.lower()
 
-    def test_start_print_strips_path(self, adapter_with_ws: ElegooAdapter) -> None:
+    def test_start_print_strips_path(
+        self, adapter_with_ws: ElegooAdapter, printer_holds_test_gcode: list[str],
+    ) -> None:
         with mock.patch.object(adapter_with_ws, "_send_command_checked") as m:
             adapter_with_ws.start_print("/local/subdir/test.gcode")
         data = m.call_args[0][1]
         assert data["Filename"] == "test.gcode"
 
-    def test_start_print_error(self, adapter_with_ws: ElegooAdapter) -> None:
+    def test_start_print_error(
+        self, adapter_with_ws: ElegooAdapter, printer_holds_test_gcode: list[str],
+    ) -> None:
         with mock.patch.object(
             adapter_with_ws,
             "_send_command_checked",

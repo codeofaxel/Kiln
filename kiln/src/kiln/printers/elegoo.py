@@ -14,11 +14,13 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, ClassVar
+from urllib.parse import quote
 
 import requests
 
 from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
+from kiln.printers import read_back
 from kiln.printers.base import (
     STALE_STATE_WARN_AGE,
     ActiveSlotReading,
@@ -751,11 +753,121 @@ class ElegooAdapter(PrinterAdapter):
                 PrinterFile(
                     name=fname,
                     path=item.get("path", item.get("Path", f"/local/{fname}")),
-                    size_bytes=_safe_int(item.get("size", item.get("Size"))),
-                    date=_safe_int(item.get("date", item.get("Date"))),
+                    size_bytes=_listed_size(item),
+                    date=_listed_stamp(item),
                 )
             )
         return entries
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- reading a print file back
+    # ------------------------------------------------------------------
+
+    #: Where a Centauri Carbon hands a stored file back: an HTTP ``GET`` of
+    #: ``/downloadFile`` followed by the file's path on the printer, on the
+    #: printer's web port.  This is the address Elegoo's own client software
+    #: reads a Centauri Carbon's files from.
+    _SDCP_DOWNLOAD_PORT: ClassVar[int] = 80
+    _SDCP_DOWNLOAD_PATH: ClassVar[str] = "/downloadFile"
+    #: The printer's onboard storage, where a bare file name is looked up.
+    _SDCP_ONBOARD: ClassVar[str] = "/local"
+    #: Seconds to wait between pieces of a download before giving up.
+    _SDCP_DOWNLOAD_READ_TIMEOUT: ClassVar[float] = 60.0
+    _SDCP_DOWNLOAD_CHUNK: ClassVar[int] = 64 * 1024
+
+    @staticmethod
+    def _printed_name(file_name: str) -> str:
+        """The name ``start_print`` sends for *file_name*: its bare name,
+        which the printer looks up in its onboard storage."""
+        return os.path.basename(file_name)
+
+    def _printed_path(self, file_name: str) -> str:
+        """*file_name* as the path on the printer that ``start_print`` prints."""
+        return f"{self._SDCP_ONBOARD}/{self._printed_name(file_name)}"
+
+    def _hands_files_back(self) -> bool:
+        """Whether this printer hands a stored file back.
+
+        The Centauri Carbon does, over HTTP.  Elegoo's published SDCP
+        protocol documents only sending a file to the printer, so a printer
+        known to be another model cannot.  The model is the one this
+        printer's setup declared, else the model the printer reports; with
+        neither known, the Centauri Carbon's download is tried, and a
+        printer that does not serve it fails the read.
+        """
+        model = self.declared_printer_model() or self._read_identity_fields()[0]
+        return not model or "centauri" in model.lower()
+
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The printer's own copy of *file_name*: the file ``start_print``
+        would print, read back over the printer's HTTP download.  ``None``
+        on an SDCP printer that does not hand files back."""
+        if not self._hands_files_back():
+            return None
+        name = self._printed_name(file_name)
+        if name in ("", ".", ".."):
+            raise read_back.read_failed(file_name, "that is not the name of a file on the printer")
+        url = (
+            f"http://{self._host}:{self._SDCP_DOWNLOAD_PORT}"
+            f"{self._SDCP_DOWNLOAD_PATH}{quote(self._printed_path(file_name))}"
+        )
+        cap = read_back.READ_BACK_CAP_BYTES
+        try:
+            with requests.get(
+                url, stream=True, timeout=(float(self._timeout), self._SDCP_DOWNLOAD_READ_TIMEOUT)
+            ) as resp:
+                if resp.status_code == 404:
+                    raise read_back.read_failed(file_name, "the printer has no file by that name")
+                if not 200 <= resp.status_code < 300:
+                    logger.debug("SDCP download of %s answered HTTP %s", name, resp.status_code)
+                    raise read_back.read_failed(file_name, "the printer refused to send it")
+                declared = _safe_int(resp.headers.get("Content-Length"))
+                if declared is not None and declared > cap:
+                    raise read_back.too_big(file_name, cap)
+                data = read_back.collect_capped(
+                    resp.iter_content(chunk_size=self._SDCP_DOWNLOAD_CHUNK), file_name, cap
+                )
+        except PrinterError:
+            raise
+        except requests.RequestException as exc:
+            raise read_back.read_failed(file_name, exc) from exc
+        if not data:
+            raise read_back.read_failed(file_name, "the printer sent back an empty file")
+        if declared is not None and len(data) != declared:
+            raise read_back.read_failed(file_name, "the copy came back incomplete")
+        # A print file never begins as a web page; a web server can answer a
+        # path it does not hold with one.
+        if data.lstrip()[:14].lower().startswith((b"<!doctype html", b"<html")):
+            raise read_back.read_failed(file_name, "the printer sent back a web page, not the file")
+        return data
+
+    def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
+        """``(size, time stamp)`` the printer's file list reports for the file
+        ``start_print`` would print; either part ``None`` when the list
+        leaves it out, ``None`` when it reports neither or does not answer."""
+        wanted = self._printed_path(file_name)
+        try:
+            resp = self._send_command_checked(
+                _CMD_LIST_FILES,
+                {"Url": self._SDCP_ONBOARD},
+                timeout=float(self._timeout),
+            )
+            resp_data = resp.get("Data", resp)
+            listed = resp_data.get("FileList", resp_data.get("Data", {}).get("FileList", []))
+            if not isinstance(listed, list):
+                return None
+            for item in listed:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name", item.get("Name", "")) or "")
+                path = name if name.startswith("/") else f"{self._SDCP_ONBOARD}/{name}"
+                if path != wanted or item.get("type") == 0:
+                    continue
+                size, stamp = _listed_size(item), _listed_stamp(item)
+                return None if size is None and stamp is None else (size, stamp)
+        except Exception as exc:  # noqa: BLE001 -- an identity not read is no identity
+            logger.debug("SDCP file list did not give %s's size and date: %s", wanted, exc)
+        return None
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- file management
@@ -954,7 +1066,7 @@ class ElegooAdapter(PrinterAdapter):
 
     def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
         """Begin printing a file on the Elegoo printer."""
-        basename = os.path.basename(file_name)
+        basename = self._printed_name(file_name)
         try:
             self._send_command_checked(
                 _CMD_START_PRINT,
@@ -1073,15 +1185,19 @@ class ElegooAdapter(PrinterAdapter):
             resp = self._send_command(_CMD_GET_ATTRIBUTES, timeout=5.0)
         except PrinterError:
             return "", ""
-        if not isinstance(resp, dict):
-            return "", ""
-        data = resp.get("Data", resp)
-        if not isinstance(data, dict):
-            return "", ""
-        return (
-            str(data.get("MachineName") or "").strip(),
-            str(data.get("Name") or "").strip(),
-        )
+        data = resp.get("Data", resp) if isinstance(resp, dict) else None
+        if isinstance(data, dict) and (data.get("MachineName") or data.get("Name")):
+            return (
+                str(data.get("MachineName") or "").strip(),
+                str(data.get("Name") or "").strip(),
+            )
+        # The printer reports its attributes as a separate message, which
+        # can land before its answer to the request.
+        with self._state_lock:
+            return (
+                str(self._last_status.get("MachineName") or "").strip(),
+                str(self._last_status.get("Name") or "").strip(),
+            )
 
     def _resolve_machine_name(self) -> str:
         """Return the printer's reported Name/MachineName, fetching fresh attributes if nothing is cached yet."""
@@ -1416,6 +1532,28 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _listed_size(item: dict[str, Any]) -> int | None:
+    """A file's size in bytes from one entry of the SDCP file list.
+
+    A Centauri Carbon lists it as ``FileSize``; other spellings are read as
+    a fallback.  The published protocol's ``usedSize`` / ``totalSize`` are
+    the storage's space, not the file's, and are never read as its size.
+    """
+    for key in ("FileSize", "size", "Size"):
+        if key in item:
+            return _safe_int(item.get(key))
+    return None
+
+
+def _listed_stamp(item: dict[str, Any]) -> int | None:
+    """A file's Unix time stamp from one entry of the SDCP file list
+    (``CreateTime`` on a Centauri Carbon; other spellings as a fallback)."""
+    for key in ("CreateTime", "date", "Date"):
+        if key in item:
+            return read_back.unix_time(item.get(key))
+    return None
 
 
 def _slot_index(value: Any) -> int | None:
