@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlsplit
 
 import pytest
 import requests
@@ -383,25 +384,97 @@ class TestUploadFile:
 # ---------------------------------------------------------------------------
 
 
+def _complete_printer_file() -> bytes:
+    """A print file as one sits on an MK4 after a slicer sent it: its moves,
+    the previews the file list and the printer's screen draw, and the weight
+    the file list reads."""
+    import io
+    import tempfile
+    from pathlib import Path
+
+    from PIL import Image
+
+    from kiln.printers import gcode_complete
+
+    picture = io.BytesIO()
+    Image.new("RGB", (400, 300), (200, 60, 60)).save(picture, format="PNG")
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "part.gcode"
+        path.write_text("; on the printer\nG28\nG1 X10 Y10 Z0.2 F3000\nG1 X20 E1\n", encoding="utf-8")
+        gcode_complete.complete_gcode_for_printer(
+            str(path), "prusalink", printer_model="prusa_mk4", preview_png=picture.getvalue()
+        )
+        return path.read_bytes()
+
+
+_PRINTER_GCODE = _complete_printer_file()
+
+
+def _routed(routes: dict[tuple[str, str], Any]):
+    """A ``session.request`` stand-in that answers by method and path, as the
+    printer does; a path it was not given is answered 404."""
+
+    def request(method: str, url: str, **_kwargs: Any) -> MagicMock:
+        answer = routes.get((method, urlsplit(url).path))
+        if answer is None:
+            answer = _mock_response(status_code=404, ok=False)
+            answer.text = "Not Found"
+        return answer
+
+    return request
+
+
+def _file_record(name: str, download: str) -> MagicMock:
+    """A file's record as ``GET /api/v1/files/<storage>/<path>`` answers it."""
+    return _mock_response(json_data={
+        "name": name, "type": "PRINT_FILE", "size": len(_PRINTER_GCODE),
+        "m_timestamp": 1_700_000_000, "refs": {"download": download},
+    })
+
+
+def _file_bytes(data: bytes = _PRINTER_GCODE) -> MagicMock:
+    """The file itself, as the printer's download address sends it."""
+    resp = _mock_response(status_code=200)
+    resp.iter_content.side_effect = lambda **_kw: iter([data])
+    return resp
+
+
+def _paths(mock_request: MagicMock, method: str) -> list[str]:
+    return [urlsplit(c.args[1]).path for c in mock_request.call_args_list if c.args[0] == method]
+
+
+def _model_set_up() -> PrusaLinkAdapter:
+    """An adapter for a printer saved with its model, so the safety gate can
+    check the file read back against that printer's bed."""
+    a = _adapter()
+    a._printer_model = "prusa_mk4"
+    return a
+
+
 class TestPrintControl:
     def test_start_print(self):
-        a = _adapter()
+        a = _model_set_up()
         usb_list = _mock_response(json_data={
             "children": [
                 {"display_name": "benchy.gcode", "name": "BENCHY.GCO", "type": "PRINT_FILE", "size": 123},
             ],
         })
-        local_404 = _mock_response(status_code=404, ok=False)
-        local_404.text = "Not Found"
-        start_resp = _mock_response(status_code=204)
-        with patch.object(a._session, "request", side_effect=[usb_list, local_404, start_resp]) as mock_request:
+        routes = {
+            ("GET", "/api/v1/files/usb"): usb_list,
+            ("GET", "/api/v1/files/usb/BENCHY.GCO"): _file_record("BENCHY.GCO", "/usb/BENCHY.GCO"),
+            ("GET", "/usb/BENCHY.GCO"): _file_bytes(),
+            ("POST", "/api/v1/files/usb/BENCHY.GCO"): _mock_response(status_code=204),
+        }
+        with patch.object(a._session, "request", side_effect=_routed(routes)) as mock_request:
             result = a.start_print("benchy.gcode")
 
         assert result.success is True
-        assert "/api/v1/files/usb/BENCHY.GCO" in mock_request.call_args_list[2].args[1]
+        assert _paths(mock_request, "POST") == ["/api/v1/files/usb/BENCHY.GCO"]
+        # The safety gate read the printer's own copy before the start.
+        assert "/usb/BENCHY.GCO" in _paths(mock_request, "GET")
 
     def test_start_print_resolves_display_name_to_short_name(self):
-        a = _adapter()
+        a = _model_set_up()
         usb_list = _mock_response(json_data={
             "children": [
                 {
@@ -412,19 +485,21 @@ class TestPrintControl:
                 },
             ],
         })
-        local_404 = _mock_response(status_code=404, ok=False)
-        local_404.text = "Not Found"
-        start_resp = _mock_response(status_code=204)
-        with patch.object(a._session, "request", side_effect=[usb_list, local_404, start_resp]) as mock_request:
+        routes = {
+            ("GET", "/api/v1/files/usb"): usb_list,
+            ("GET", "/api/v1/files/usb/WHISTL~1.GCO"): _file_record("WHISTL~1.GCO", "/usb/WHISTL~1.GCO"),
+            ("GET", "/usb/WHISTL~1.GCO"): _file_bytes(),
+            ("POST", "/api/v1/files/usb/WHISTL~1.GCO"): _mock_response(status_code=204),
+        }
+        with patch.object(a._session, "request", side_effect=_routed(routes)) as mock_request:
             result = a.start_print("Whistle_200um_MINI_PLA_32m.gcode")
 
         assert result.success is True
-        assert "/api/v1/files/usb/WHISTL~1.GCO" in mock_request.call_args_list[2].args[1]
+        assert _paths(mock_request, "POST") == ["/api/v1/files/usb/WHISTL~1.GCO"]
+        assert "/usb/WHISTL~1.GCO" in _paths(mock_request, "GET")
 
     def test_start_print_falls_back_to_local_when_usb_forbidden(self):
-        a = _adapter()
-        usb_404 = _mock_response(status_code=404, ok=False)
-        usb_404.text = "Not Found"
+        a = _model_set_up()
         local_list = _mock_response(json_data={
             "children": [
                 {"display_name": "benchy.gcode", "name": "BENCHY.GCO", "type": "PRINT_FILE", "size": 100},
@@ -432,18 +507,24 @@ class TestPrintControl:
         })
         usb_403 = _mock_response(status_code=403, ok=False)
         usb_403.text = "Forbidden"
-        local_start = _mock_response(status_code=204)
+        raw = "/api/files/local/PrusaLink gcodes/BENCHY.GCO/raw"
+        routes = {
+            ("GET", "/api/v1/files/local"): local_list,
+            ("GET", "/api/v1/files/local/BENCHY.GCO"): _file_record("BENCHY.GCO", raw),
+            ("GET", raw.replace(" ", "%20")): _file_bytes(),
+            ("POST", "/api/v1/files/usb/BENCHY.GCO"): usb_403,
+            ("POST", "/api/v1/files/local/BENCHY.GCO"): _mock_response(status_code=204),
+        }
 
-        with patch.object(
-            a._session,
-            "request",
-            side_effect=[usb_404, local_list, usb_403, local_start],
-        ) as mock_request:
+        with patch.object(a._session, "request", side_effect=_routed(routes)) as mock_request:
             result = a.start_print("benchy.gcode")
 
         assert result.success is True
-        assert "/api/v1/files/usb/BENCHY.GCO" in mock_request.call_args_list[2].args[1]
-        assert "/api/v1/files/local/BENCHY.GCO" in mock_request.call_args_list[3].args[1]
+        assert _paths(mock_request, "POST") == [
+            "/api/v1/files/usb/BENCHY.GCO",
+            "/api/v1/files/local/BENCHY.GCO",
+        ]
+        assert raw.replace(" ", "%20") in _paths(mock_request, "GET")
 
     def test_cancel_print(self):
         a = _adapter()

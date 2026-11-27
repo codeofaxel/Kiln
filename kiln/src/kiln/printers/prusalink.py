@@ -15,6 +15,7 @@ from requests.exceptions import RequestException, Timeout
 from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
 from kiln.printer_backends import PRUSALINK_PI_KEY_WHERE, need_where
+from kiln.printers import read_back
 from kiln.printers.base import (
     CameraHandshake,
     FilamentHandlingUnsupported,
@@ -42,6 +43,10 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 _FILE_ROOTS: tuple[str, ...] = ("usb", "local")
 _FILE_ROOT_FALLBACK_HTTP_CODES: tuple[int, ...] = (403, 404)
+
+#: How much of a print file is read from the socket at a time when it is
+#: handed back.
+_READ_BACK_CHUNK_BYTES: int = 64 * 1024
 
 _BAD_API_KEY_MARKER = "Bad X-Api-Key"
 
@@ -302,8 +307,13 @@ class PrusaLinkAdapter(PrinterAdapter):
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         data: Any | None = None,
+        stream: bool = False,
+        allow_redirects: bool = True,
     ) -> requests.Response:
-        """Execute an HTTP request with exponential-backoff retry logic."""
+        """Execute an HTTP request with exponential-backoff retry logic.
+
+        *stream* leaves the body unread for the caller to take in pieces;
+        *allow_redirects* False keeps the session's API key on this host."""
         url = self._url(path)
         last_exc: Exception | None = None
 
@@ -317,6 +327,8 @@ class PrusaLinkAdapter(PrinterAdapter):
                     headers=headers,
                     data=data,
                     timeout=self._timeout,
+                    stream=stream,
+                    allow_redirects=allow_redirects,
                 )
 
                 if response.ok:
@@ -378,6 +390,8 @@ class PrusaLinkAdapter(PrinterAdapter):
                     "Prusa Link didn't complete the request.",
                     detail=f"HTTP {response.status_code} on {method} {path} (try {attempt + 1} of {self._retries})",
                 )
+                if stream:
+                    response.close()
 
             except Timeout as exc:
                 last_exc = PrinterError(
@@ -796,13 +810,18 @@ class PrusaLinkAdapter(PrinterAdapter):
     # PrinterAdapter -- print control
     # ------------------------------------------------------------------
 
-    def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
-        """Begin printing a file on the printer."""
+    def _print_target(self, file_name: str) -> tuple[list[str], str, str]:
+        """Where a print of *file_name* is looked for: the storage roots in
+        the order they are tried, the file's API path quoted for a URL, and
+        that path as resolved.  ``start_print`` and the read-back share it,
+        so a file read back is the file a start by that name prints."""
         preferred_root, _ = self._split_storage_root(file_name)
         resolved_path = self._resolve_print_path(file_name)
-        encoded = quote(resolved_path, safe="/")
+        return self._iter_file_roots(preferred=preferred_root), quote(resolved_path, safe="/"), resolved_path
 
-        roots = self._iter_file_roots(preferred=preferred_root)
+    def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
+        """Begin printing a file on the printer."""
+        roots, encoded, resolved_path = self._print_target(file_name)
         last_fallback_error: PrinterError | None = None
         for root in roots:
             try:
@@ -920,6 +939,110 @@ class PrusaLinkAdapter(PrinterAdapter):
         raise PrinterError(
             f"Kiln couldn't delete '{file_path}' from Prusa storage roots ({root_list}).{detail}",
         )
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- reading a print file back
+    # ------------------------------------------------------------------
+
+    def _print_file_info(self, file_name: str) -> dict[str, Any]:
+        """The printer's own record of *file_name* (``GET
+        /api/v1/files/{storage}/{path}``), from the first storage root a
+        start by that name would print it from."""
+        roots, encoded, _ = self._print_target(file_name)
+        for root in roots:
+            try:
+                info = self._get_json(f"/api/v1/files/{root}/{encoded}")
+            except PrinterError as exc:
+                if self._is_storage_fallback_error(exc):
+                    continue
+                raise
+            if not isinstance(info, dict):
+                raise PrinterError(
+                    "The printer sent back a reply Kiln couldn't read.",
+                    detail=f"file record for {root}/{encoded} is not an object",
+                )
+            return info
+        raise PrinterError(
+            f"the printer has no file by that name in its {' or '.join(roots)} storage",
+        )
+
+    @staticmethod
+    def _is_folder(info: dict[str, Any]) -> bool:
+        return str(info.get("type") or "").strip().upper() == "FOLDER"
+
+    @staticmethod
+    def _reported_size(info: dict[str, Any]) -> int | None:
+        size = info.get("size")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            return None
+        return size
+
+    @staticmethod
+    def _download_path(info: dict[str, Any]) -> str | None:
+        """The download address the printer's record names for the file
+        (``refs.download``), quoted for a URL on this printer, or ``None``
+        when it names none.  Only an address on this printer is followed,
+        so the API key never goes to another host."""
+        refs = info.get("refs")
+        href = refs.get("download") if isinstance(refs, dict) else None
+        if not isinstance(href, str):
+            return None
+        href = href.strip()
+        if not href.startswith("/") or href.startswith("//"):
+            return None
+        return quote(href, safe="/")
+
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The printer's own copy of *file_name*: the file a start by that
+        name prints, fetched from the download address the printer's record
+        of it names.  ``None`` when the printer names no download for it."""
+        cap = read_back.READ_BACK_CAP_BYTES
+        try:
+            info = self._print_file_info(file_name)
+        except PrinterError as exc:
+            raise read_back.read_failed(file_name, exc) from exc
+        if self._is_folder(info):
+            raise read_back.read_failed(file_name, "that name is a folder on the printer, not a print file")
+        href = self._download_path(info)
+        if href is None:
+            logger.debug("Prusa Link names no download for %s", file_name)
+            return None
+        size = self._reported_size(info)
+        if size is not None and size > cap:
+            raise read_back.too_big(file_name, cap)
+        try:
+            response = self._request("GET", href, stream=True, allow_redirects=False)
+        except PrinterError as exc:
+            raise read_back.read_failed(file_name, exc) from exc
+        try:
+            if response.status_code != 200:
+                raise read_back.read_failed(
+                    file_name, "the printer sent the download somewhere else instead of the file"
+                )
+            return read_back.collect_capped(
+                response.iter_content(chunk_size=_READ_BACK_CHUNK_BYTES), file_name, cap
+            )
+        except RequestException as exc:
+            raise read_back.read_failed(file_name, exc) from exc
+        finally:
+            response.close()
+
+    def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
+        """``(size, time stamp)`` from the printer's record of *file_name*
+        (``size`` and ``m_timestamp``), without sending the file; ``None``
+        when the record is unreadable or carries neither."""
+        try:
+            info = self._print_file_info(file_name)
+        except Exception:  # noqa: BLE001 -- an unknown identity is no identity
+            logger.debug("Prusa Link record of %s not read", file_name, exc_info=True)
+            return None
+        if self._is_folder(info):
+            return None
+        size = self._reported_size(info)
+        stamp = read_back.unix_time(info.get("m_timestamp"))
+        if size is None and stamp is None:
+            return None
+        return size, stamp
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam snapshot
