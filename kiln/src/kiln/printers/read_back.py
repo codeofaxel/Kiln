@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from kiln.printers.base import PrinterError
+from kiln.quoted_text import fence
 
 #: The largest file any backend reads back.  A print file past it is too
 #: large to check, and the refusal says so.
@@ -30,7 +31,7 @@ def too_big(file_name: str, cap: int | None = None) -> PrinterError:
     """The failure for a file past the read-back ceiling."""
     cap = READ_BACK_CAP_BYTES if cap is None else cap
     return PrinterError(
-        f"{file_name} is larger than the {cap // (1024 * 1024)} MB Kiln reads back from a printer, "
+        f"{fence(file_name)} is larger than the {cap // (1024 * 1024)} MB Kiln reads back from a printer, "
         "so Kiln could not check it. Start it from the file on this computer, or from the "
         "printer's own screen.",
         code="PRINT_FILE_TOO_LARGE",
@@ -43,7 +44,7 @@ def read_failed(file_name: str, exc: BaseException | str) -> PrinterError:
 
     why = (plain_words.said(exc) if isinstance(exc, BaseException) else str(exc)).strip().rstrip(".")
     return PrinterError(
-        f"Kiln couldn't read {file_name} back from the printer: {why}. "
+        f"Kiln couldn't read {fence(file_name)} back from the printer: {why}. "
         "Use `printer_files` to check the file is there.",
         cause=exc if isinstance(exc, Exception) else None,
         code="PRINT_FILE_READ_FAILED",

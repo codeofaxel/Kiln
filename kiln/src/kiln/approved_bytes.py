@@ -170,7 +170,9 @@ def refusal(
     ]
     if not facts:
         return None
-    name = os.path.basename(str(file_name or "")) or "this file"
+    from kiln.quoted_text import fence
+
+    name = fence(os.path.basename(str(file_name or ""))) if file_name else "this file"
     printed_sha, how = what_prints(adapter, file_name, kwargs, printed=printed)
     if printed_sha is None:
         return {

@@ -1769,7 +1769,9 @@ def _note_unfinished(adapter: Any, fetched: str, file_name: str) -> None:
     missing, _refused = screen_gaps(adapter, fetched, file_name)
     if not missing or _AS_IT_IS.get():
         return
-    name = os.path.basename(str(file_name)) or "the file"
+    from kiln.quoted_text import fence
+
+    name = fence(os.path.basename(str(file_name))) if file_name else "the file"
     said = (
         f"{name} on the printer has no {' or '.join(missing)} for the printer's own screen; "
         "the print itself is not affected."

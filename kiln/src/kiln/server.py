@@ -5446,10 +5446,10 @@ def _finish_and_send(adapter: Any, local: str, file_name: str) -> str:
 
     finished = finished_copy(adapter, local, file_name)
     if not finished:
-        raise RuntimeError(f"Kiln could not add what the printer's screen needs to {file_name}, so it changed nothing")
+        raise RuntimeError(f"Kiln could not add what the printer's screen needs to {fence(file_name)}, so it changed nothing")
     sent = adapter.upload_file(finished)
     if not getattr(sent, "success", False):
-        raise RuntimeError(f"Kiln could not put the fixed {file_name} on the printer: {getattr(sent, 'message', '')}")
+        raise RuntimeError(f"Kiln could not put the fixed {fence(file_name)} on the printer: {getattr(sent, 'message', '')}")
     return finished
 
 
@@ -5484,6 +5484,7 @@ async def _offer_to_finish_the_file(tool_name: str, file_value: str | None, argu
     if not missing:
         return
     lacks = " or ".join(missing)
+    name = fence(file_value)
     if choice is None:
         printer = _printer_label_for_a_person(arguments.get("printer_name") or _resolve_effective_printer_name(None))
         either = (
@@ -5494,10 +5495,10 @@ async def _offer_to_finish_the_file(tool_name: str, file_value: str | None, argu
             "as it is."
         )
         raise RuntimeError(
-            f"{file_value} is ready to print on {printer}, and nothing has started. It has no {lacks} for the "
+            f"{name} is ready to print on {printer}, and nothing has started. It has no {lacks} for the "
             f"printer's own screen; the print itself is not affected. Ask the person whether Kiln should add "
             f"{'it' if len(missing) == 1 else 'them'} first: only comment lines change, every move stays the "
-            f"same, and the fixed file replaces {file_value} on the printer. {either}"
+            f"same, and the fixed file replaces {name} on the printer. {either}"
         )
     from kiln import print_signoff
 
