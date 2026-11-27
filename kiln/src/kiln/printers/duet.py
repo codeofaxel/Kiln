@@ -14,6 +14,7 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln import plain_words as _plain_words
+from kiln.printers import read_back
 from kiln.printers.base import (
     DEFAULT_LOAD_LENGTH_MM,
     DEFAULT_PURGE_LENGTH_MM,
@@ -43,6 +44,9 @@ _MAX_HOTEND_TEMP: float = 500.0
 _MAX_BED_TEMP: float = 200.0
 
 _GCODE_DIR: str = "0:/gcodes"
+
+# How much of a print file one read from the board's answer takes
+_READ_CHUNK_BYTES: int = 64 * 1024
 
 # How long cancel_print waits for a pause to take effect before giving up
 _PAUSE_SETTLE_TIMEOUT_S: float = 15.0
@@ -109,6 +113,20 @@ def _qualify(file_name: str) -> str:
     if name.startswith("/") or ":" in name.split("/", 1)[0]:
         return name
     return f"{_GCODE_DIR}/{name}"
+
+
+def _printed_path(file_name: str) -> str:
+    """The absolute path ``M32`` opens for *file_name*.
+
+    The firmware takes a name that is not absolute (no leading ``/`` and no
+    single-digit volume such as ``0:``) inside the G-code folder, while
+    ``rr_download`` would take it from the volume root, so a read names the
+    absolute path to land on the file a print would open.
+    """
+    target = _qualify(file_name)
+    if target.startswith("/") or (len(target) > 1 and target[0].isdigit() and target[1] == ":"):
+        return target
+    return f"{_GCODE_DIR}/{target}"
 
 
 def _parse_rrf_datetime(value: Any) -> int | None:
@@ -268,8 +286,13 @@ class DuetAdapter(PrinterAdapter):
         params: dict[str, Any] | None = None,
         data: Any = None,
         headers: dict[str, str] | None = None,
+        stream: bool = False,
     ) -> requests.Response:
-        """Execute an HTTP request with retry and transparent re-authentication."""
+        """Execute an HTTP request with retry and transparent re-authentication.
+
+        With *stream* the body of a successful answer is left unread for
+        the caller, who closes the response.
+        """
         self._ensure_session()
 
         url = self._url(path)
@@ -289,6 +312,7 @@ class DuetAdapter(PrinterAdapter):
                     data=data,
                     headers=headers,
                     timeout=self._timeout,
+                    stream=stream,
                 )
 
                 if response.ok:
@@ -297,6 +321,7 @@ class DuetAdapter(PrinterAdapter):
                 if response.status_code == 401 and not reauthed:
                     # Session expired -- re-authenticate and replay
                     logger.debug("Duet session expired on %s; reconnecting", path)
+                    response.close()
                     self._connected = False
                     reauthed = True
                     self._connect()
@@ -324,6 +349,7 @@ class DuetAdapter(PrinterAdapter):
                     raise error
 
                 # Retryable HTTP status -- fall through to backoff
+                response.close()
                 last_exc = PrinterError(
                     "The Duet board isn't answering right now; it may be busy or low on memory. Try again in a moment.",
                     detail=f"HTTP {response.status_code} on {method} {path} (try {attempt + 1} of {self._retries})",
@@ -852,6 +878,57 @@ class DuetAdapter(PrinterAdapter):
                 "may be the file currently being printed. Check it with `printer_files`."
             )
         return True
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- reading a print file back
+    # ------------------------------------------------------------------
+
+    def read_print_file(self, file_name: str) -> bytes | None:
+        """The board's own copy of *file_name*, from ``rr_download``.
+
+        Reads the path ``M32`` opens for that name (:func:`_printed_path`)
+        through this adapter's session, so it carries the same password and
+        session key as every other call.  The board sends a stored file as
+        text or bytes; an answer in JSON is its error reply, never the file.
+        """
+        target = _printed_path(file_name)
+        try:
+            response = self._request("GET", "/rr_download", params={"name": target}, stream=True)
+        except PrinterError as exc:
+            if getattr(exc, "status_code", None) == 404:
+                raise read_back.read_failed(file_name, f"the printer has no file at {target}") from exc
+            raise read_back.read_failed(file_name, exc) from exc
+        try:
+            if "json" in response.headers.get("Content-Type", "").lower():
+                raise read_back.read_failed(file_name, "the printer answered with an error instead of the file")
+            cap = read_back.READ_BACK_CAP_BYTES
+            announced = response.headers.get("Content-Length", "")
+            if announced.isdigit() and int(announced) > cap:
+                raise read_back.too_big(file_name, cap)
+            return read_back.collect_capped(response.iter_content(chunk_size=_READ_CHUNK_BYTES), file_name, cap)
+        except RequestException as exc:
+            raise read_back.read_failed(file_name, exc) from exc
+        finally:
+            response.close()
+
+    def print_file_identity(self, file_name: str) -> tuple[int | None, int | None] | None:
+        """``(size, time stamp)`` of *file_name* from ``rr_fileinfo``, the
+        board's one-file information call, for the path ``M32`` opens;
+        either part ``None`` when the board leaves it out, ``None`` when it
+        reports neither or does not answer."""
+        try:
+            info = self._get_json("/rr_fileinfo", params={"name": _printed_path(file_name)})
+        except Exception as exc:  # noqa: BLE001 -- an unread identity is no identity
+            logger.debug("rr_fileinfo for %s not read: %s", file_name, type(exc).__name__)
+            return None
+        if info.get("err") != 0:
+            return None
+        raw_size = info.get("size")
+        size = raw_size if isinstance(raw_size, int) and not isinstance(raw_size, bool) and raw_size >= 0 else None
+        stamp = read_back.unix_time(info.get("lastModified"))
+        if size is None and stamp is None:
+            return None
+        return size, stamp
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- print control
