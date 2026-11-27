@@ -527,6 +527,11 @@ class PrintConsent:
     #: through the relay: ``kiln.bridge_client``); never a window, a
     #: delegation or an agent's word, and it lives as long as the call.
     unchecked_bed: bool = False
+    #: The sha256 of the bytes this yes was asked about (the file the
+    #: dialog, the screen's code or the account's card described), or
+    #: ``""`` when the yes named no bytes (a window).  The start is checked
+    #: against it (:mod:`kiln.approved_bytes`).
+    file_sha256: str = ""
 
     def scope_covers(self, printer_name: str | None) -> bool:
         if self.scope is None:
@@ -561,6 +566,7 @@ class PrintConsent:
             "door": self.door,
             "window_id": self.window_id,
             "unchecked_bed": self.unchecked_bed,
+            "file_sha256": self.file_sha256,
         }
 
 

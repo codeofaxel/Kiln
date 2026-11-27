@@ -43,6 +43,7 @@ SHORT_FILES = (
     "printers/print_gate.py",
     "printers/progress_motion.py",
     "printers/prusalink.py",
+    "printers/read_back.py",
     "printers/qoi.py",
     "printers/routine_ledger.py",
     "printers/safe_motion.py",

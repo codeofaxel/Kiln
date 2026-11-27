@@ -50,6 +50,16 @@ def _person_is_present() -> bool:
     return person_at_terminal()
 
 
+def _sha256_of_local(path: str) -> str:
+    """The sha256 of the local file a terminal yes is given for, or ``""``."""
+    try:
+        from kiln.resume_provenance import file_sha256
+
+        return file_sha256(path) or ""
+    except Exception:  # noqa: BLE001 -- unreadable bytes are named by no yes
+        return ""
+
+
 def _audit(tool: str, action: str, details: dict[str, Any]) -> None:
     """Same audit table the tools write to, so the trail reads as one."""
     try:
@@ -177,6 +187,7 @@ def confirm_print_at_terminal(
         PrintConsent(
             tool=tool, file_name=file_path, printer_name=printer_name,
             source=SOURCE_TERMINAL, door=door, identity=local_identity(),
+            file_sha256=_sha256_of_local(file_path),
         )
     )
     from kiln.server import _preview_gate_error

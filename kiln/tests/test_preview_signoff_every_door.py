@@ -666,6 +666,8 @@ class TestQueueDoors:
         printer = _Printer()
         registry = PrinterRegistry()
         registry.register("garage", printer)
+        # The queued name holds the file the person was shown: Kiln sent it.
+        assert printer.upload_file(path).success
         taken: list[object] = []
         take = print_signoff.take
         monkeypatch.setattr(print_signoff, "take", lambda *a, **k: taken.append(c := take(*a, **k)) or c)

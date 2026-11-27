@@ -246,6 +246,11 @@ class Clearance:
     window_id: str = ""
     #: Who said yes, as the consent recorded it (``os_user:…``, an account, or "").
     identity: str = ""
+    #: The bytes the yes was given about, and the bytes the preview showed
+    #: (sha256, or ``""`` when that fact named no bytes).  The start is
+    #: held to both by :mod:`kiln.approved_bytes`.
+    yes_sha256: str = ""
+    preview_sha256: str = ""
 
     def covers_printer(self, printer_name: str | None) -> bool:
         return _scope_covers(self.scope, self.printer_name, printer_name)
@@ -416,11 +421,14 @@ def grant(
     scope: tuple[str, ...] | str | None = None,
     window_id: str = "",
     identity: str = "",
+    yes_sha256: str = "",
+    preview_sha256: str = "",
 ) -> Clearance:
     """Record that this call may start *file_name* on *printer_name*."""
     clearance = Clearance(
         tool=tool, file_name=str(file_name or ""), printer_name=printer_name, source=source, door=door,
         scope=scope, window_id=window_id or "", identity=identity or "",
+        yes_sha256=str(yes_sha256 or ""), preview_sha256=str(preview_sha256 or ""),
     )
     _current.set(clearance)
     return clearance
@@ -457,6 +465,8 @@ def record_for(clearance: Clearance | None) -> dict[str, Any] | None:
         "scope": list(clearance.scope) if isinstance(clearance.scope, tuple) else clearance.scope,
         "window_id": clearance.window_id,
         "identity": clearance.identity,
+        "yes_sha256": clearance.yes_sha256,
+        "preview_sha256": clearance.preview_sha256,
     }
 
 
@@ -614,6 +624,8 @@ def grant_from_record(
         scope=_scope_from_record(record.get("scope")),
         window_id=str(record.get("window_id") or ""),
         identity=str(record.get("identity") or ""),
+        yes_sha256=str(record.get("yes_sha256") or ""),
+        preview_sha256=str(record.get("preview_sha256") or ""),
     )
 
 
@@ -647,6 +659,8 @@ class Verdict:
     source: str = ""
     door: str = ""
     audit: str = ""
+    #: The bytes the token was issued for (its hash), when it names any.
+    file_hash: str = ""
 
 
 def not_confirmed_message(tool: str) -> str:
@@ -726,6 +740,7 @@ def token_verdict(
     if not preview_token:
         return Verdict(ok=False, code=CODE_NOT_CONFIRMED, message=not_confirmed_message(tool))
     door = ""
+    shown = ""
     try:
         from kiln.preview_gate import get_preview_gate
 
@@ -735,10 +750,13 @@ def token_verdict(
         if not ok:
             return Verdict(ok=False, code=CODE_TOKEN_INVALID, message=token_rejected_message(reason))
         door = getattr(token, "door", "") or ""
+        shown = getattr(token, "file_hash", "") or ""
     except Exception as exc:  # noqa: BLE001 — a broken gate must not brick printing
         logger.warning("Preview gate validation failed: %s", exc)
-    grant(tool, file_name, printer_name, source=SOURCE_PREVIEW_TOKEN, door=door)
-    return Verdict(ok=True, source=SOURCE_PREVIEW_TOKEN, door=door, audit="preview_gate_satisfied")
+    grant(tool, file_name, printer_name, source=SOURCE_PREVIEW_TOKEN, door=door, preview_sha256=shown)
+    return Verdict(
+        ok=True, source=SOURCE_PREVIEW_TOKEN, door=door, audit="preview_gate_satisfied", file_hash=shown,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -746,15 +764,21 @@ def token_verdict(
 # ---------------------------------------------------------------------------
 
 
-def adapter_verdict(adapter: Any, file_name: str, kwargs: dict[str, Any] | None = None) -> dict[str, str] | None:
+def adapter_verdict(
+    adapter: Any, file_name: str, kwargs: dict[str, Any] | None = None, *, printed: str | None = None,
+) -> dict[str, str] | None:
     """Called from ``PrinterAdapter.start_print``.  ``None`` to allow.
 
     Refuses only an adapter marked as requiring sign-off, for a file no
     clearance covers, that is not a resume continuation
     (:func:`verified_resume`), when the CI bypass is off.  A clearance
     whose source is a resume covers nothing on its own: only the check
-    does.  Everything unreadable allows: a backstop that could
-    strand a legitimate print over its own bookkeeping is worse than none.
+    does.  A clearance that names the bytes its yes or preview was about
+    also has to cover the bytes this start would print
+    (:func:`kiln.approved_bytes.refusal`; *printed* is the printer's copy
+    the gate read back for this start).  Everything unreadable about the
+    bookkeeping allows, so a legitimate print is never stranded on Kiln's
+    own records.
     """
     try:
         if not signoff_required(adapter):
@@ -763,13 +787,19 @@ def adapter_verdict(adapter: Any, file_name: str, kwargs: dict[str, Any] | None 
             return None
         printer_name = getattr(adapter, "_kiln_registered_name", None) or None
         cleared = take(file_name, printer_name)
-        # A clearance that says "resume" is only ever as good as the check
-        # above, which has just said no: it clears nothing here.
-        if cleared is not None and cleared.source != SOURCE_RESUME:
-            return None
     except Exception:  # noqa: BLE001
         logger.debug("sign-off backstop could not decide; allowing", exc_info=True)
         return None
+    # A clearance that says "resume" is only ever as good as the check
+    # above, which has just said no: it clears nothing here.
+    if cleared is not None and cleared.source != SOURCE_RESUME:
+        try:
+            from kiln.approved_bytes import refusal
+
+            return refusal(adapter, file_name, kwargs, cleared, printed=printed)
+        except Exception:  # noqa: BLE001
+            logger.debug("approved-bytes check could not decide; allowing", exc_info=True)
+            return None
     name = os.path.basename(str(file_name or "")) or "this file"
     return {
         "reason": (

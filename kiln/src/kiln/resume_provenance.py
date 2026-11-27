@@ -693,7 +693,9 @@ def _printer_still_holds(adapter: Any, file_name: str, sent: str) -> bool:
             data = adapter.read_print_file(file_name)
         except Exception:  # noqa: BLE001 -- not read back is not held
             logger.debug("resume record: read-back of %s failed", file_name, exc_info=True)
-            data = None
+            data = b""
+        if data is None:
+            return True  # this printer cannot hand this file back: Kiln's record stands
         held = bool(data) and hashlib.sha256(data).hexdigest() == sent
         with _lock:
             _read_back[key] = (now, held)

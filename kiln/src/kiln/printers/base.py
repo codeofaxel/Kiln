@@ -2421,7 +2421,7 @@ class PrinterAdapter(ABC):
         try:
             from kiln.print_signoff import adapter_verdict
 
-            unsigned = adapter_verdict(self, file_name, kwargs)
+            unsigned = adapter_verdict(self, file_name, kwargs, printed=kept[0] if kept else None)
         except Exception:  # noqa: BLE001 — bookkeeping must not strand a legitimate print
             import logging as _logging
 
@@ -2431,6 +2431,10 @@ class PrinterAdapter(ABC):
             unsigned = None
         if unsigned is not None:
             _discard_copies(kept)
+            if unsigned.get("code"):
+                return CodedPrintResult(
+                    success=False, message=unsigned["reason"], refused_before_send=True, code=unsigned["code"],
+                )
             return PrintResult(success=False, message=unsigned["reason"], refused_before_send=True)
         # How this print is kept: decided once, before anything is sent.  A
         # print that carries on the one held for this printer keeps its way.

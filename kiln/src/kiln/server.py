@@ -3915,7 +3915,7 @@ async def _consent_from_account(
         PrintConsent(
             tool=tool_name, file_name=file_value, printer_name=printer_name, source=source,
             identity=identity, window_id=answer.id if window else "",
-            expires_at=answer.expires_at if window else None,
+            expires_at=answer.expires_at if window else None, file_sha256=file_sha256,
         )
     )
 
@@ -3989,7 +3989,7 @@ async def _consent_from_account_always(
     return set_consent(
         PrintConsent(
             tool=tool_name, file_name=file_value, printer_name=printer_name, source=SOURCE_ALWAYS,
-            identity=entry.set_by, window_id=entry.id, granted_at=entry.set_at,
+            identity=entry.set_by, window_id=entry.id, granted_at=entry.set_at, file_sha256=file_sha256,
         )
     )
 
@@ -4022,7 +4022,10 @@ def _consent_from_code_answer(
     # ``door`` stays empty: a code says yes, it shows nothing, so the
     # preview gate still asks for the token that proves the print was seen.
     return set_consent(
-        PrintConsent(tool=tool_name, file_name=file_value, printer_name=printer_name, source=SOURCE_CODE, identity=identity)
+        PrintConsent(
+            tool=tool_name, file_name=file_value, printer_name=printer_name, source=SOURCE_CODE, identity=identity,
+            file_sha256=issued.file_sha256,
+        )
     )
 
 
@@ -4122,6 +4125,7 @@ def consent_from_dialog_answer(
             printer_name=printer_name,
             source=SOURCE_ELICITED,
             identity=identity,
+            file_sha256=_sha256_if_local(file_value),
         )
     )
 
@@ -4203,6 +4207,7 @@ def _covered_by_approval(
             scope=outer.scope,
             identity=outer.identity,
             window_id=outer.window_id,
+            file_sha256=_sha256_if_local(derived_file),
         )
     )
     try:
@@ -4677,9 +4682,11 @@ def _preview_gate_error(
             return _look_first_error(tool_name, aimed, bed_look, window=granted.source == SOURCE_WINDOW)
 
     # SAW.  The token half lives in kiln.print_signoff so every door asks
-    # the same question of the same code.  We can't hash a file on the
-    # printer, so the token is matched against the name it was issued for.
+    # the same question of the same code.  The token is FOUND by the name it
+    # was issued for; the bytes it was issued for ride the clearance, and the
+    # start is held to them where every door ends (kiln.approved_bytes).
     saw = ""
+    shown = ""
     if preview_token:
         verdict = print_signoff.token_verdict(
             tool_name,
@@ -4695,6 +4702,7 @@ def _preview_gate_error(
             code = "PREVIEW_TOKEN_INVALID" if verdict.code == print_signoff.CODE_TOKEN_INVALID else "PREVIEW_NOT_CONFIRMED"
             return _error_dict(verdict.message, code=code)
         saw = verdict.door or "token"
+        shown = verdict.file_hash
     elif granted.door:
         # The door that took the yes also judged the preview (the terminal
         # path issues its token through the same judge, or records
@@ -4723,6 +4731,7 @@ def _preview_gate_error(
         tool_name, file_name, printer_name,
         source=granted.source, door=saw,
         scope=granted.scope, window_id=granted.window_id, identity=granted.identity,
+        yes_sha256=getattr(granted, "file_sha256", "") or "", preview_sha256=shown,
     )
     # The door the person saw the print through rides the audit line — a
     # PNG-only sign-off is distinguishable from a stage sign-off after

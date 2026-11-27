@@ -1,23 +1,9 @@
-"""Reading a file back from a printer: one ceiling and one set of words.
+"""Reading a print file back from a printer: one contract, ceiling and wording.
 
-Every backend that can hand a print file back implements two methods of
-:class:`kiln.printers.base.PrinterAdapter`:
-
-* ``read_print_file(file_name)`` -- the bytes the printer would print
-  under *file_name*: the same storage and the same path ``start_print``
-  resolves for that name.  ``None`` means this printer cannot hand this
-  file back at all (the backend has no download, or the file sits where
-  the printer serves no downloads from); a failure this time (no answer,
-  a refused request, the file is missing) raises :class:`PrinterError`.
-  Reading changes nothing on the printer.
-* ``print_file_identity(file_name)`` -- ``(size in bytes, Unix time
-  stamp)`` the printer reports for the file without sending it, either
-  part ``None`` when it reports only one; ``None`` when it reports
-  neither.  Never raises for a missing answer.
-
-A backend with no way to hand a file back is named in :data:`NO_READ_BACK`
-with why the bytes that print are known without one.
-"""
+``read_print_file(name)`` gives the bytes ``start_print`` would print under
+*name*, ``None`` when this printer cannot hand that file back, and raises
+:func:`read_failed` when it failed this time; ``print_file_identity(name)``
+gives ``(size, Unix time)`` without sending it, either part ``None``."""
 
 from __future__ import annotations
 
@@ -32,11 +18,17 @@ READ_BACK_CAP_BYTES: int = 256 * 1024 * 1024
 
 #: Backends that never read a file back, by adapter class name, with why
 #: the bytes that print are known without reading them.
-NO_READ_BACK: dict[str, str] = {}
+NO_READ_BACK: dict[str, str] = {
+    "SerialPrinterAdapter": (
+        "a USB printer prints from its own SD card and has no command that sends a stored file back; "
+        "Kiln knows the bytes only of a file it sent there itself"
+    ),
+}
 
 
-def too_big(file_name: str, cap: int = READ_BACK_CAP_BYTES) -> PrinterError:
+def too_big(file_name: str, cap: int | None = None) -> PrinterError:
     """The failure for a file past the read-back ceiling."""
+    cap = READ_BACK_CAP_BYTES if cap is None else cap
     return PrinterError(
         f"{file_name} is larger than the {cap // (1024 * 1024)} MB Kiln reads back from a printer, "
         "so Kiln could not check it. Start it from the file on this computer, or from the "
@@ -49,7 +41,7 @@ def read_failed(file_name: str, exc: BaseException | str) -> PrinterError:
     """The failure for a read-back that did not come through this time."""
     from kiln import plain_words
 
-    why = plain_words.said(exc) if isinstance(exc, BaseException) else str(exc)
+    why = (plain_words.said(exc) if isinstance(exc, BaseException) else str(exc)).strip().rstrip(".")
     return PrinterError(
         f"Kiln couldn't read {file_name} back from the printer: {why}. "
         "Use `printer_files` to check the file is there.",
@@ -58,8 +50,10 @@ def read_failed(file_name: str, exc: BaseException | str) -> PrinterError:
     )
 
 
-def collect_capped(chunks: Iterable[bytes], file_name: str, cap: int = READ_BACK_CAP_BYTES) -> bytes:
-    """Join *chunks*, refusing (:func:`too_big`) once they pass *cap*."""
+def collect_capped(chunks: Iterable[bytes], file_name: str, cap: int | None = None) -> bytes:
+    """Join *chunks*, refusing (:func:`too_big`) once they pass *cap*
+    (the module's ceiling, read when called, unless one is given)."""
+    cap = READ_BACK_CAP_BYTES if cap is None else cap
     parts: list[bytes] = []
     size = 0
     for chunk in chunks:

@@ -97,9 +97,10 @@ class PreviewGate:
     at issue time from the local bytes) and a filename key (basename
     of the file as the agent/user named it).  ``validate`` accepts
     either a local path (hash-compared) or a bare filename (key-
-    compared) — the path is the stronger check, but start_print can
-    only see the printer-side filename, so the key exists as the only
-    feasible match for that call site.
+    compared).  A start by the printer-side name finds its token by the
+    key; the token's hash then rides the clearance, and the bytes the
+    printer would print are held to it before the start
+    (:mod:`kiln.approved_bytes`).
     """
 
     def __init__(self) -> None:

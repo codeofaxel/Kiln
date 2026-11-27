@@ -51,18 +51,21 @@ _EARLIEST_CLOCK = 946_684_800
 @dataclass(frozen=True)
 class PrinterCopy:
     """A local file holding the printer's bytes (``path``), or ``None`` with
-    the reason in ``how``."""
+    the reason in ``how`` and, for a read that failed, what went wrong in
+    words (``why``)."""
 
     path: str | None
     how: str
+    why: str = ""
 
 
 def can_read_back(adapter: Any) -> bool:
-    """Whether *adapter*'s printer can hand a file back at all."""
+    """Whether *adapter*'s printer can hand a file back at all: it has a
+    reader of its own, not the base class's, which hands nothing back."""
     from kiln.printers.base import PrinterAdapter
 
-    reader = getattr(type(adapter), "read_print_file", None)
-    return callable(reader) and reader is not PrinterAdapter.read_print_file
+    reader = getattr(adapter, "read_print_file", None)
+    return callable(reader) and getattr(reader, "__func__", None) is not PrinterAdapter.read_print_file
 
 
 def _suffix(file_name: str) -> str:
@@ -95,7 +98,9 @@ def _key(adapter: Any, file_name: str, identity: tuple[int, int]) -> str:
     from kiln.registry import machine_fingerprint
 
     machine = machine_fingerprint(adapter)
-    name = os.path.basename(str(file_name).replace("\\", "/"))
+    # The whole name, folders included: two folders can hold files of one
+    # name, size and time.
+    name = str(file_name).replace("\\", "/").lstrip("/")
     size, stamp = identity
     return hashlib.sha256(f"{machine}\0{name}\0{size}\0{stamp}".encode()).hexdigest()
 
@@ -185,13 +190,15 @@ def copy_from_printer(adapter: Any, file_name: str) -> PrinterCopy:
         started = time.monotonic()
         try:
             data = adapter.read_print_file(file_name)
-        except Exception:  # noqa: BLE001 -- a read that failed is no copy
+        except Exception as exc:  # noqa: BLE001 -- a read that failed is no copy
+            from kiln import plain_words
+
             logger.debug("printer copy: %s not read back", file_name, exc_info=True)
-            return PrinterCopy(None, READ_FAILED)
+            return PrinterCopy(None, READ_FAILED, plain_words.said(exc))
         if data is None:
             return PrinterCopy(None, CANNOT_READ_BACK)
         if not data:
-            return PrinterCopy(None, READ_FAILED)
+            return PrinterCopy(None, READ_FAILED, "the printer returned an empty file")
         # A file that changed while it was read is used for this start only.
         if identity and len(data) != identity[0]:
             key = None

@@ -17,11 +17,6 @@ from kiln.untrusted_zip import UntrustedZipFile
 _logger = logging.getLogger(__name__)
 
 
-def _base_read_print_file() -> Any:
-    from kiln.printers.base import PrinterAdapter
-
-    return PrinterAdapter.read_print_file
-
 # bed_fit error codes that mean "we couldn't be sure" — these SOFT-PASS.
 _SOFT_FIT_CODES = frozenset({"BBOX_UNKNOWN", "VOLUME_UNKNOWN", "UNKNOWN_FILE"})
 
@@ -467,40 +462,40 @@ _READ_BACK_ATTEMPTS = 2
 
 
 def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
-    """Read *file_name* back from the printer into a temp file."""
-    reader = getattr(adapter, "read_print_file", None)
-    if not callable(reader):
-        return None
-    if getattr(reader, "__func__", None) is _base_read_print_file():
+    """Read *file_name* back from the printer into a temp file this start
+    owns, through the one reader every check shares
+    (:func:`kiln.printer_copy.copy_from_printer`), so a file the printer
+    reports unchanged since an earlier read this session is not sent twice.
+    ``None`` when the printer cannot hand it back; :class:`_ReadBackFailed`
+    when it can and did not, after one retry."""
+    from kiln.printer_copy import CANNOT_READ_BACK, can_read_back, copy_from_printer
+
+    if not can_read_back(adapter):
         return None  # the base default: this backend has no read-back at all
-    last: str = ""
-    data: bytes | None = None
+    last = ""
+    copy = None
     for attempt in range(_READ_BACK_ATTEMPTS):
-        try:
-            data = reader(file_name)
-        except Exception as exc:  # noqa: BLE001 -- the cause goes in the refusal
-            last = str(exc)
-            _logger.debug(
-                "print_gate: read-back of %s failed (attempt %d/%d): %s",
-                file_name, attempt + 1, _READ_BACK_ATTEMPTS, exc,
-            )
-            continue
-        if data is None:
+        copy = copy_from_printer(adapter, file_name)
+        if copy.how == CANNOT_READ_BACK:
             return None  # the backend says it cannot read this one back
-        if data:
+        if copy.path:
             break
-        last = "the printer returned an empty file"
-    else:
+        last = copy.why or last
+        _logger.debug(
+            "print_gate: read-back of %s failed (attempt %d/%d): %s",
+            file_name, attempt + 1, _READ_BACK_ATTEMPTS, last,
+        )
+    if copy is None or not copy.path:
         raise _ReadBackFailed(last or "the printer returned an empty file")
-    if not data:
-        raise _ReadBackFailed(last or "the printer returned an empty file")
+    import shutil
     import tempfile
 
     low = str(file_name).lower()
     suffix = ".gcode.3mf" if low.endswith(".gcode.3mf") else os.path.splitext(low)[1] or ".gcode"
     try:
         with tempfile.NamedTemporaryFile(prefix="kiln-printer-copy-", suffix=suffix, delete=False) as fh:
-            fh.write(data)
+            with open(copy.path, "rb") as src:
+                shutil.copyfileobj(src, fh)
             return fh.name
     except OSError as exc:
         raise _ReadBackFailed(f"Kiln couldn't make a copy of the printer's file on this computer: {_plain_words.said(exc)}.") from exc

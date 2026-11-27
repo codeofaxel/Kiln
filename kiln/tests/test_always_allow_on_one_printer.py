@@ -368,8 +368,20 @@ def _start(tmp_path: pathlib.Path, *, printer_name: str | None = "garage", previ
     if printer_name is not None:
         arguments["printer_name"] = printer_name
     if previewed:
-        arguments["preview_token"] = _previewed(_gcode(tmp_path))
+        path = _gcode(tmp_path)
+        arguments["preview_token"] = _previewed(path)
+        _sent(path, printer_name)
     return _call("start_print", **arguments)
+
+
+def _sent(path: str, printer_name: str | None) -> None:
+    """The file on the printer is the one that was shown: Kiln sent it there
+    under that name, the way a door does before it starts a file by name."""
+    registry = server._get_registry()
+    for name in (printer_name, "garage"):
+        if name and name in registry.list_names():
+            registry.get(name).upload_file(path)
+            return
 
 
 def _always_entries() -> list[consent_windows.Window]:
