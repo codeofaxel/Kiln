@@ -116,13 +116,10 @@ def _qualify(file_name: str) -> str:
 
 
 def _printed_path(file_name: str) -> str:
-    """The absolute path ``M32`` opens for *file_name*.
-
-    The firmware takes a name that is not absolute (no leading ``/`` and no
-    single-digit volume such as ``0:``) inside the G-code folder, while
-    ``rr_download`` would take it from the volume root, so a read names the
-    absolute path to land on the file a print would open.
-    """
+    """The absolute path ``M32`` opens for *file_name*: a name with no
+    leading ``/`` and no volume such as ``0:`` is inside the G-code folder,
+    while ``rr_download`` would take it from the volume root, so a read
+    names the absolute path to land on the file a print would open."""
     target = _qualify(file_name)
     if target.startswith("/") or (len(target) > 1 and target[0].isdigit() and target[1] == ":"):
         return target
@@ -884,13 +881,10 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def read_print_file(self, file_name: str) -> bytes | None:
-        """The board's own copy of *file_name*, from ``rr_download``.
-
-        Reads the path ``M32`` opens for that name (:func:`_printed_path`)
-        through this adapter's session, so it carries the same password and
-        session key as every other call.  The board sends a stored file as
-        text or bytes; an answer in JSON is its error reply, never the file.
-        """
+        """The board's own copy of *file_name*, from ``rr_download`` at the
+        path ``M32`` opens (:func:`_printed_path`), through this adapter's
+        session and its password and key.  An answer in JSON is the board's
+        error reply, never the file."""
         target = _printed_path(file_name)
         try:
             response = self._request("GET", "/rr_download", params={"name": target}, stream=True)

@@ -126,13 +126,10 @@ _DOWNLOAD_CHUNK_BYTES = 64 * 1024
 
 
 def _uploads_name(file_name: str) -> str:
-    """*file_name* as the one URL segment every by-name call sends.
-
-    A leading slash is dropped: OctoPrint's storage reads ``/a.gcode`` as
-    ``a.gcode``, and its download route would look for it outside the
-    uploads folder.  Folder separators are escaped with the rest; OctoPrint
-    decodes them back into the path.
-    """
+    """*file_name* as the one URL segment every by-name call sends: a
+    leading slash dropped (storage reads ``/a.gcode`` as ``a.gcode``, and
+    the download route would look outside the uploads folder), and folder
+    separators escaped with the rest, which OctoPrint decodes back."""
     return quote(str(file_name).lstrip("/"), safe="")
 
 
@@ -1160,14 +1157,10 @@ class OctoPrintAdapter(PrinterAdapter):
 
     def read_print_file(self, file_name: str) -> bytes | None:
         """The bytes of *file_name* in OctoPrint's uploads folder, the file
-        ``start_print`` selects under that name.
-
-        ``None`` when OctoPrint's record of the file carries no download
-        link, which OctoPrint leaves out for a storage it cannot read files
-        from.  The download address is built from this adapter's own host,
-        never taken from the reply, so the API key only goes where every
-        other call sends it.
-        """
+        ``start_print`` selects under that name; ``None`` when OctoPrint's
+        record of it has no download link (a storage it cannot read from).
+        The address is built from this adapter's own host, never the reply,
+        so the API key only goes where every other call sends it."""
         entry = self._file_entry(file_name)
         if entry.get("type") == "folder":
             raise read_back.read_failed(file_name, "OctoPrint holds a folder under that name, not a print file")

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json as _json
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -95,6 +97,9 @@ _KLIPPER_PRINT_EXTS: frozenset[str] = frozenset({"gcode", "g", "gco"})
 
 #: Bytes taken from a download at a time when a file is read back.
 _READ_BACK_CHUNK_BYTES: int = 1024 * 1024
+
+#: A name Klipper's quoted start command could not hold as one name.
+_UNSAFE_START_NAME = re.compile(r'["\\\x00-\x1f\x7f]')
 
 
 # ---------------------------------------------------------------------------
@@ -1067,10 +1072,27 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
-        """Begin printing a file that already exists on the Klipper host."""
+        """Begin printing a file that already exists on the Klipper host.
+
+        The name is sent inside a quoted G-code command, so a name a quote,
+        backslash or control character could break out of is refused, and the
+        file started is the one :meth:`_printed_entry` finds, read back."""
+        if _UNSAFE_START_NAME.search(str(file_name or "")):
+            return PrintResult(
+                success=False,
+                message=(
+                    f"{fence(file_name)} was not started: its name has a quotation mark, a backslash or a "
+                    "line break, which Klipper would read as part of the start command. Nothing was sent. "
+                    "Rename the file on the printer, then start it again."
+                ),
+                refused_before_send=True,
+            )
+        started = file_name
+        with contextlib.suppress(PrinterError):
+            started = self._printed_entry(file_name)["path"]
         self._post(
             "/printer/print/start",
-            params={"filename": file_name},
+            params={"filename": started},
         )
         return PrintResult(
             success=True,
@@ -1474,14 +1496,11 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _printed_entry(self, file_name: str) -> dict[str, Any]:
-        """The ``gcodes`` listing entry a start of *file_name* prints.
-
-        Resolved as the start resolves it: Moonraker drops one leading slash
-        and Klipper's ``SDCARD_PRINT_FILE`` one more, then Klipper opens the
-        print file at exactly that path, else the one whose path matches it
-        apart from capital letters.  Raises :class:`PrinterError` when the
-        listing does not come through, or no single file matches.
-        """
+        """The ``gcodes`` listing entry a start of *file_name* prints, found
+        as Klipper finds it: two leading slashes dropped, then the exact
+        path, else the one match apart from capital letters.  Raises
+        :class:`PrinterError` when the listing fails or no single file
+        matches."""
         wanted = str(file_name or "")
         for _ in range(2):
             if wanted.startswith("/"):

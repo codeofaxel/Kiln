@@ -1146,6 +1146,29 @@ def _isolate_upload_memory():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_printer_copies(tmp_path, monkeypatch):
+    """Each test reads printer files back into its own folder, with no record
+    of bytes Kiln sent before it.
+
+    Copies read back from a printer are kept in the machine's temp folder and
+    used again while the printer reports the same name, size and time, and
+    what Kiln sent under each name is kept for the process.  A test's fake
+    printer at the same address with a file of the same name would otherwise
+    be answered from another test's copy, or another run's.
+    """
+    from kiln import printer_copy, resume_provenance
+
+    folder = tmp_path / "printer-copies"
+    folder.mkdir(exist_ok=True)
+    monkeypatch.setattr(printer_copy, "_folder", lambda: str(folder))
+    with resume_provenance._lock:
+        resume_provenance._sent.clear()
+    yield
+    with resume_provenance._lock:
+        resume_provenance._sent.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_kiln_db(tmp_path, monkeypatch):
     """Keep the suite out of the developer's real ``~/.kiln/kiln.db``.
 

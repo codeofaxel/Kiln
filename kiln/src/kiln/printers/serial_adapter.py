@@ -658,13 +658,9 @@ class SerialPrinterAdapter(PrinterAdapter):
         self._send_command(f"M30 {file_path}")
         return True
 
-    # A print here starts from the printer's SD card (M23 then M24), and
-    # Marlin has no G-code that sends a stored file back over the serial
-    # line, so this adapter keeps the base read_print_file and
-    # print_file_identity: it cannot hand a file back.  The size M20 lists
-    # is not offered as the file's identity either: upload_file sends only
-    # the command lines, trimmed, so the card's copy is not byte for byte
-    # the file on this computer, and its size would read as another file.
+    # Prints start from the SD card and Marlin cannot send a stored file
+    # back, so read-back stays the base one (read_back.NO_READ_BACK); the
+    # M20 size is no identity, since uploads send trimmed command lines.
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- print control
