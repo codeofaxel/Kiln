@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-25T22:06:12.775701+00:00",
+  "generated": "2026-11-27T18:07:35.207391+00:00",
   "tool_count": 418,
   "categories": {
     "product_generators": {
@@ -3537,7 +3537,7 @@
             ],
             "default": null,
             "title": "Channels",
-            "description": "Channel names to run. Defaults to ``[\"rgb\"]``. Call with an unknown channel to get the available list."
+            "description": "Channel names to run, any of: ``drawing`` (Dimensioned production drawing); ``measurements`` (Raw geometry numbers); ``printability`` (Print-readiness verdict); ``rgb`` (Shaded viewport renders from the right views); ``section`` (Interior cross-section slices through the mid-planes). Defaults to ``[\"rgb\"]``."
           },
           "bundle_dir": {
             "default": "",
