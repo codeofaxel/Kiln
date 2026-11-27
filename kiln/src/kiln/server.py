@@ -2958,6 +2958,7 @@ async def _obtain_print_consent(tool_name: str, arguments: dict[str, Any], ctx: 
     ):
         return None  # already running, already approved
     await _learn_the_local_copy(file_value, arguments)
+    await _offer_to_finish_the_file(tool_name, file_value, arguments)
     note_window_outcome(None)  # nothing from an earlier call rides this result
     note_alerted_devices(None)
     printer_name = arguments.get("printer_name")
@@ -5432,6 +5433,78 @@ async def _learn_the_local_copy(file_name: str | None, arguments: dict[str, Any]
         logger.debug("consent: no copy decided for %s", file_name, exc_info=True)
     _START_COPY.set((file_name, bound))
     _PREVIEW_IS_NOT_THE_PRINTERS.set(differs)
+
+
+#: Tools that take ``finish_file``: a start of a file already on the printer.
+_FINISHES_FILES = frozenset({"start_print"})
+
+
+def _finish_and_send(adapter: Any, local: str, file_name: str) -> str:
+    """Add what the printer's screen reads to *local* and put it on the
+    printer as *file_name*; the finished copy's path.  Raises in words."""
+    from kiln.printers.print_gate import finished_copy
+
+    finished = finished_copy(adapter, local, file_name)
+    if not finished:
+        raise RuntimeError(f"Kiln could not add what the printer's screen needs to {file_name}, so it changed nothing")
+    sent = adapter.upload_file(finished)
+    if not getattr(sent, "success", False):
+        raise RuntimeError(f"Kiln could not put the fixed {file_name} on the printer: {getattr(sent, 'message', '')}")
+    return finished
+
+
+async def _offer_to_finish_the_file(tool_name: str, file_value: str | None, arguments: dict[str, Any]) -> None:
+    """Before a file already on the printer is put to the person, ask whether
+    Kiln should first add what it lacks for the printer's own screen.
+
+    With no ``finish_file`` the question is raised, before anyone is asked to
+    approve; ``True`` adds it and sends the fixed file, so the approval is
+    for that file; ``False`` prints it as it is.  A name inside a folder is
+    not offered, since a fixed file would land beside it."""
+    if tool_name not in _FINISHES_FILES or not file_value or _hosted_now():
+        return
+    held = _START_COPY.get()
+    if held is None or held[0] != file_value or not held[1] or os.path.basename(file_value) != file_value:
+        return
+    choice = arguments.get("finish_file")
+    from kiln.printers import print_gate
+
+    if choice is False:
+        print_gate.print_as_it_is()
+        return
+    adapter = None
+    with contextlib.suppress(Exception):
+        adapter = _resolve_adapter(arguments.get("printer_name"))
+    if adapter is None:
+        return
+    try:
+        missing, refused = await asyncio.to_thread(print_gate.screen_gaps, adapter, held[1], file_value)
+    except Exception:  # noqa: BLE001 -- a check that cannot run asks nothing
+        return
+    if not missing:
+        return
+    lacks = " or ".join(missing)
+    if choice is None:
+        printer = _printer_label_for_a_person(arguments.get("printer_name") or _resolve_effective_printer_name(None))
+        either = (
+            "The printer's screen will not start it without its preview picture, so call start_print again "
+            "with finish_file=true to add it."
+            if refused
+            else "Then call start_print again with finish_file=true to add them, or finish_file=false to print it "
+            "as it is."
+        )
+        raise RuntimeError(
+            f"{file_value} is ready to print on {printer}, and nothing has started. It has no {lacks} for the "
+            f"printer's own screen; the print itself is not affected. Ask the person whether Kiln should add "
+            f"{'it' if len(missing) == 1 else 'them'} first: only comment lines change, every move stays the "
+            f"same, and the fixed file replaces {file_value} on the printer. {either}"
+        )
+    from kiln import print_signoff
+
+    finished = await asyncio.to_thread(_finish_and_send, adapter, held[1], file_value)
+    print_signoff.note_copy(held[1], finished, how=print_signoff.COPY_FINISHED)
+    _remember_upload(file_value, finished)
+    _START_COPY.set((file_value, finished))
 
 
 # Rate limits: {tool_name: (min_interval_ms, max_per_minute)}.
@@ -10473,6 +10546,7 @@ def start_print(
     branch_id: str | None = None,
     keep_record: bool | None = None,
     printer_name: str | None = None,
+    finish_file: bool | None = None,
 ) -> dict:
     """Start printing a file already uploaded to the printer (file must exist on printer).
 
@@ -10585,6 +10659,12 @@ def start_print(
             ``True`` keeps the print, for a start a team's rule held
             (``TEAM_KEEPS_PRINTS``) after the person agreed.  Omit otherwise:
             the print is kept the way the person's account says.
+        finish_file: The person's answer when Kiln asked whether to add what
+            the file on the printer lacks for the printer's own screen (a
+            preview picture, the filament amount) before printing: ``True``
+            adds them (comment lines only, every move unchanged) and puts the
+            fixed file on the printer under the same name, ``False`` prints it
+            as it is.  Omit until Kiln asks.
 
     Branch on ``print_start`` — one field, three values:
 

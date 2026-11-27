@@ -321,10 +321,13 @@ COPY_RESCALED = "rescaled"
 #: The part was turned into another file format and nothing else: a yes for
 #: the part covers the copy.
 COPY_CONVERTED = "converted"
+#: Comment lines the printer's screen reads were added and every move is
+#: unchanged: a yes for the file covers the copy.
+COPY_FINISHED = "finished"
 
-_COPY_KINDS = frozenset({COPY_MOVED, COPY_REPAIRED, COPY_RESCALED, COPY_CONVERTED})
+_COPY_KINDS = frozenset({COPY_MOVED, COPY_REPAIRED, COPY_RESCALED, COPY_CONVERTED, COPY_FINISHED})
 #: The copies that are still the part the person was shown.
-_SAME_PART = frozenset({COPY_MOVED, COPY_CONVERTED})
+_SAME_PART = frozenset({COPY_MOVED, COPY_CONVERTED, COPY_FINISHED})
 
 #: How far a chain of copies is followed back (a copy of a copy of ...).
 _MAX_COPY_HOPS = 4
@@ -363,6 +366,18 @@ def note_copy(part_path: str, copy_path: str, *, how: str) -> None:
         _copies.set((*kept, entry)[-64:])
     except Exception:  # noqa: BLE001 -- bookkeeping never blocks a copy
         logger.debug("copy not recorded", exc_info=True)
+
+
+def parts_of(digest: str) -> list[str]:
+    """The hashes of the files a copy this call made, still the same part,
+    was made from, for a copy whose bytes hash to *digest*."""
+    text = str(digest or "").lower()
+    found: list[str] = []
+    for _copy, _part, part_hash, copy_hash, how in _copies.get():
+        n = min(len(text), len(copy_hash))
+        if how in _SAME_PART and n >= 32 and text[:n] == copy_hash.lower()[:n]:
+            found.append(part_hash)
+    return found
 
 
 def _copy_record(path: str) -> tuple[str, str] | None:

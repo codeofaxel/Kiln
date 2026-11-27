@@ -740,3 +740,85 @@ class TestTheWeightAScreenReads:
         )
         assert declared_mm(text) == pytest.approx(11624.56)
         assert declared_grams(text) == pytest.approx(34.67)
+
+
+# ---------------------------------------------------------------------------
+# Before the approval: a file on the printer that lacks what its screen reads
+# ---------------------------------------------------------------------------
+
+
+class TestTheOfferBeforeTheApproval:
+    """A start of a file already on the printer that lacks only what the
+    printer's screen shows asks the person, before anyone approves it,
+    whether Kiln should add it first."""
+
+    @pytest.fixture
+    def asked(self, tmp_path, monkeypatch, preview):
+        import asyncio
+
+        from kiln import server
+        from kiln.approved_bytes import covers
+        from kiln.resume_provenance import file_sha256
+
+        raw = Path(raw_gcode(tmp_path)).read_bytes()
+        printer = _Fake("moonraker", printer_copy=raw)
+        local = tmp_path / "copy" / "part.gcode"
+        local.parent.mkdir()
+        local.write_bytes(raw)
+        monkeypatch.setattr(server, "_resolve_adapter", lambda _name=None: printer)
+        monkeypatch.setattr(server, "_printer_label_for_a_person", lambda _name: "Garage")
+        monkeypatch.setattr(gcode_complete, "_render_preview", lambda *_a, **_k: preview)
+
+        def ask(**arguments):
+            from kiln.printers import print_gate
+
+            async def _the_call():
+                # One call's context, as the server's dispatch keeps it.
+                server._START_COPY.set(("part.gcode", str(local)))
+                args = {"file_name": "part.gcode", "printer_name": "garage", **arguments}
+                await server._offer_to_finish_the_file("start_print", "part.gcode", args)
+                held = server._START_COPY.get()
+                # Whether a yes or preview given for the file as it was covers
+                # what is now on the printer, asked inside the same call.
+                covered = covers(file_sha256(str(local)), file_sha256(held[1]), "part.gcode")
+                return held, print_gate._AS_IT_IS.get(), covered
+
+            return asyncio.run(_the_call())
+
+        return ask, printer, str(local)
+
+    def test_with_no_answer_the_person_is_asked_before_anything_starts(self, asked):
+        ask, printer, _local = asked
+        with pytest.raises(RuntimeError) as question:
+            ask()
+        said = str(question.value)
+        assert "nothing has started" in said and "preview picture" in said
+        assert "finish_file=true" in said and "finish_file=false" in said
+        assert printer.uploaded == [] and printer.started == []
+
+    def test_yes_puts_the_finished_file_on_the_printer_before_the_approval(self, asked):
+        ask, printer, local = asked
+        held, _as_it_is, covered = ask(finish_file=True)
+        finished = held[1]
+        assert printer.uploaded == [finished] and Path(finished).name == "part.gcode"
+        assert gcode_complete.gcode_problems(finished, "moonraker") == []
+
+        def moves(path: str) -> list[str]:
+            text = Path(path).read_text()
+            return [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith(";")]
+
+        assert moves(finished) == moves(local)
+        # A yes or preview given for the file as it was covers the fixed one.
+        assert covered is True
+
+    def test_no_prints_it_as_it_is_and_says_nothing_more(self, asked):
+        ask, printer, local = asked
+        held, as_it_is, _covered = ask(finish_file=False)
+        assert held == ("part.gcode", local) and printer.uploaded == []
+        assert as_it_is is True
+
+    def test_a_file_that_lacks_nothing_is_not_asked_about(self, asked, preview):
+        ask, printer, local = asked
+        complete(local, "moonraker", preview_png=preview)
+        held, _as_it_is, _covered = ask()
+        assert held == ("part.gcode", local) and printer.uploaded == []

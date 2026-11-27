@@ -1703,6 +1703,8 @@ def _same_bed_or_original(
 #: What a start of a printer's own file lacked for the printer's screen, said
 #: on the start's result (:func:`unfinished_note`).  Lives as long as the call.
 _UNFINISHED: ContextVar[str] = ContextVar("kiln_print_gate_unfinished", default="")
+#: Set for a call whose person chose to print the file as it is.
+_AS_IT_IS: ContextVar[bool] = ContextVar("kiln_print_gate_as_it_is", default=False)
 
 #: The one gcode_problems finding the printer itself acts on: a screen that
 #: refuses a file without its preview.  The rest only fill the screen.
@@ -1715,45 +1717,64 @@ def unfinished_note() -> str:
     return _UNFINISHED.get()
 
 
-def _note_unfinished(adapter: Any, fetched: str, file_name: str, problems: list[str]) -> None:
-    """Say what the printer's own file lacks for its screen, and make a copy
-    with it added (comment lines only) for the person to send back."""
-    from kiln.printers.gcode_complete import (
-        complete_gcode_for_printer,
-        declared_model_for_adapter,
-        family_for_adapter,
-        gcode_problems,
-        printer_model_for_adapter,
-    )
+def print_as_it_is() -> None:
+    """The person chose to print this call's file without what its screen
+    lacks, so the start says nothing more about it."""
+    _AS_IT_IS.set(True)
 
-    name = os.path.basename(str(file_name)) or "the file"
+
+def screen_gaps(adapter: Any, path: str, file_name: str) -> tuple[list[str], bool]:
+    """``(what the file lacks for the printer's screen, in words; whether the
+    printer refuses the file without it)``.  Empty when it lacks nothing."""
+    from kiln.printers.gcode_complete import declared_model_for_adapter, family_for_adapter, gcode_problems
+
+    problems = gcode_problems(
+        path, family_for_adapter(adapter), name=str(file_name or ""), printer_model=declared_model_for_adapter(adapter),
+    )
     missing = []
-    if any(p.startswith("no preview") for p in problems):
+    if any(p.startswith(("no preview", _PRINTER_REFUSES)) for p in problems):
         missing.append("preview picture")
     if any(p.startswith(("no weight", "no length")) for p in problems):
         missing.append("filament amount")
-    if not missing:
-        return
-    lacks = " or ".join(missing)
-    said = f"{name} on the printer has no {lacks} for the printer's own screen; the print itself is not affected."
-    copy = ""
-    with contextlib.suppress(Exception):
-        import hashlib
+    return missing, any(p.startswith(_PRINTER_REFUSES) for p in problems)
 
-        from kiln.output_paths import kiln_output_dir
 
-        with open(fetched, "rb") as fh:
+def finished_copy(adapter: Any, path: str, file_name: str) -> str | None:
+    """A copy of *path* named like *file_name*, with what the printer's screen
+    reads added and every move unchanged, or ``None`` when it cannot be made
+    whole.  Kept in Kiln's own folder, apart for each file."""
+    import hashlib
+
+    from kiln.output_paths import kiln_output_dir
+    from kiln.printers.gcode_complete import complete_gcode_for_printer, family_for_adapter, printer_model_for_adapter
+
+    try:
+        with open(path, "rb") as fh:
             digest = hashlib.sha256(fh.read()).hexdigest()[:16]
         folder = os.path.join(kiln_output_dir("kiln-finished-files"), digest)
         os.makedirs(folder, mode=0o700, exist_ok=True)
-        target = os.path.join(folder, name)
-        family = family_for_adapter(adapter)
+        target = os.path.join(folder, os.path.basename(str(file_name)) or "print.gcode")
         complete_gcode_for_printer(
-            fetched, family, printer_model=printer_model_for_adapter(adapter), output_path=target,
+            path, family_for_adapter(adapter), printer_model=printer_model_for_adapter(adapter), output_path=target,
         )
-        if not gcode_problems(target, family, name=name, printer_model=declared_model_for_adapter(adapter)):
-            copy = target
-    if copy:
+    except Exception:  # noqa: BLE001 -- a copy that could not be made is no copy
+        _logger.debug("print_gate: no finished copy of %s", file_name, exc_info=True)
+        return None
+    return None if screen_gaps(adapter, target, file_name)[0] else target
+
+
+def _note_unfinished(adapter: Any, fetched: str, file_name: str) -> None:
+    """Say what the printer's own file lacks for its screen, with a finished
+    copy to send back, unless the person chose to print it as it is."""
+    missing, _refused = screen_gaps(adapter, fetched, file_name)
+    if not missing or _AS_IT_IS.get():
+        return
+    name = os.path.basename(str(file_name)) or "the file"
+    said = (
+        f"{name} on the printer has no {' or '.join(missing)} for the printer's own screen; "
+        "the print itself is not affected."
+    )
+    if copy := finished_copy(adapter, fetched, file_name):
         said += (
             f" Kiln made a copy with the {' and '.join(missing)} added and every move unchanged: {copy}. "
             f"To fix it on the printer, send that copy with `upload_file` once this print has finished; "
@@ -1841,7 +1862,7 @@ def run_adapter_gate(
             # shows; a screen that refuses such a file still refuses it here.
             if problems and not any(p.startswith(_PRINTER_REFUSES) for p in problems):
                 with contextlib.suppress(Exception):
-                    _note_unfinished(adapter, fetched, file_name, problems)
+                    _note_unfinished(adapter, fetched, file_name)
                 problems = []
             if problems:
                 verdict = {

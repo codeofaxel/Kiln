@@ -143,7 +143,10 @@ def covers(fact_sha: str, printed_sha: str, file_name: str, kwargs: dict[str, An
     start that would print the bytes *printed_sha*."""
     if same(fact_sha, printed_sha):
         return True
-    from kiln.print_signoff import approved_part
+    from kiln.print_signoff import approved_part, parts_of
+
+    if any(same(fact_sha, part) for part in parts_of(printed_sha)):
+        return True
 
     for source in _made_from(file_name, printed_sha, kwargs):
         if same(fact_sha, _sha(source)):
