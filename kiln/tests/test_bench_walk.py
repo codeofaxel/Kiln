@@ -30,8 +30,8 @@ from kiln.printers.command_verdict import CommandVerdict
 
 MODEL = "bambu_p1s"
 TOTAL = 3
-OFFER = ("Printing is not affected. Kiln can learn this park on your {name} with you, one small step at a time, "
-         "while you watch.")
+OFFER = ("Your {name} moves to its resting spot by itself during every print. Kiln can learn to do it for you, "
+         "too: a few small moves, and you watch each one. Printing is not affected.")
 
 
 class _Printer:
