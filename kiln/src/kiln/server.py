@@ -22003,17 +22003,17 @@ def _anonymous_api_call(tool_name: str, /, **kwargs) -> dict:
     payload.pop("contact_ok", None)
 
     try:
+        from kiln.api_device import client_headers
+        from kiln.served_answer import tool_answer_in_words
+
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}{route}",
             data=json.dumps(payload).encode(),
-            headers={
-                "Content-Type": "application/json",
-                "X-Kiln-Client-Version": _current_version(),
-            },
+            headers=client_headers({"Content-Type": "application/json"}),
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
+            return tool_answer_in_words(tool_name, json.loads(resp.read()))
     except urllib.error.HTTPError as exc:
         try:
             body = json.loads(exc.read().decode("utf-8"))
@@ -22056,7 +22056,9 @@ def _terms_agreement_handed_over(status: int, body: object, bearer: str) -> bool
     agreement of its own answers ``False``: the refusal, with its accept link,
     goes to the person, who is the only one who can agree.
     """
-    if status != 403 or not isinstance(body, dict) or body.get("error") != "terms_required":
+    from kiln.served_answer import read_refusal
+
+    if status != 403 or not isinstance(body, dict) or read_refusal(body).code.lower() != "terms_required":
         return False
     version = body.get("version")
     try:
@@ -22298,10 +22300,12 @@ def _pro_api_call(
     import urllib.error
     import urllib.request
 
-    from kiln.api_device import device_fingerprint_headers
-    from kiln.version_check import _current_version
+    from kiln.api_device import client_headers, device_fingerprint_headers
+    from kiln.served_answer import tool_answer_in_words
     try:
-        headers = {"Content-Type": "application/json"}
+        # Name this Kiln's version, so the servers answer in the shape this
+        # release reads and can hold a minimum-version floor.
+        headers = client_headers({"Content-Type": "application/json"})
         headers["Authorization"] = f"Bearer {bearer}"
         # Name this device so the hosted activation cap can count it: a
         # license-key bearer on a metered tool is metered per-device, and
@@ -22312,10 +22316,6 @@ def _pro_api_call(
         # served answer bound to a machine this install has reported (a
         # motion plan for a paired printer) can find the heartbeat row.
         headers.update(_heartbeat_device_header())
-        # Announce our version so the hosted server can apply a minimum-version
-        # floor (e.g. force an upgrade for a release with new terms / fixes).
-        # A client that never sends this is treated as below the floor.
-        headers["X-Kiln-Client-Version"] = _current_version()
         # A heavy make (a texture over a whole model) runs for minutes, longer
         # than one request stays open.  The servers accept such a tool as a
         # job when asked this way and answer every other tool as usual.
@@ -22349,7 +22349,7 @@ def _pro_api_call(
                     return _await_served_job(tool_name, api_url, headers, answer, _http=_http)
                 if _http is not None:
                     _http["status"] = status
-                return answer
+                return tool_answer_in_words(tool_name, answer, kind=_PRO_TOOL_OFFLINE_KIND.get(tool_name))
             except urllib.error.HTTPError as exc:
                 if _http is not None:
                     _http["status"] = exc.code
@@ -22423,7 +22423,8 @@ def _await_served_job(
     import urllib.error
     import urllib.request
 
-    from kiln.served_answer import envelope_for_http
+    from kiln.api_device import client_headers
+    from kiln.served_answer import envelope_for_http, tool_answer_in_words
 
     kind = _PRO_TOOL_OFFLINE_KIND.get(tool_name)
     poll = str(accepted.get("poll") or f"/api/tools/jobs/{accepted.get('job_id')}")
@@ -22455,7 +22456,7 @@ def _await_served_job(
         except Exception:
             pass
         req = urllib.request.Request(
-            f"{api_url.rstrip('/')}{poll}", headers=poll_headers, method="GET",
+            f"{api_url.rstrip('/')}{poll}", headers=client_headers(poll_headers), method="GET",
         )
         try:
             with urllib.request.urlopen(req, timeout=_SERVED_WAIT_S) as resp:
@@ -22479,7 +22480,7 @@ def _await_served_job(
         if not (isinstance(answer, dict) and answer.get("status") == "running"):
             if _http is not None:
                 _http["status"] = status
-            return answer
+            return tool_answer_in_words(tool_name, answer, kind=kind)
     # The whole wait passed with no answer.  Whatever the last poll did, what
     # the person needs to hear is that the make ran out of time, not that a
     # minute's wait will fix it.

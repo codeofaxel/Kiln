@@ -71,13 +71,17 @@ def send(reports: list[dict[str, Any]], supabase_url: str, anon_key: str) -> int
     """Post each report to the service's door; how many landed."""
     import urllib.request
 
+    from kiln.api_device import client_headers
+
     landed = 0
     for report in reports:
         try:
             req = urllib.request.Request(
                 f"{supabase_url.rstrip('/')}/rest/v1/rpc/{_RPC}",
                 data=json.dumps(report).encode("utf-8"),
-                headers={"Content-Type": "application/json", "apikey": anon_key, "Authorization": f"Bearer {anon_key}"},
+                headers=client_headers(
+                    {"Content-Type": "application/json", "apikey": anon_key, "Authorization": f"Bearer {anon_key}"}
+                ),
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:

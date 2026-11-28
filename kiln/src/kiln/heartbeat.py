@@ -35,6 +35,8 @@ import time
 from datetime import date
 from pathlib import Path
 
+from kiln.api_device import client_headers
+
 _logger = logging.getLogger(__name__)
 
 _SUPABASE_URL = "https://nomzokpscfshjjzezplr.supabase.co"
@@ -808,11 +810,11 @@ def _send_heartbeat(also_model: str = "") -> bool:
         req = urllib.request.Request(
             rpc_url,
             data=payload,
-            headers={
+            headers=client_headers({
                 "Content-Type": "application/json",
                 "apikey": _SUPABASE_ANON_KEY,
                 "Authorization": f"Bearer {_SUPABASE_ANON_KEY}",
-            },
+            }),
             method="POST",
         )
 

@@ -70,6 +70,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from kiln.api_device import client_headers
 from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
@@ -329,6 +330,7 @@ def _post_refresh(refresh_token: str) -> tuple[int, dict]:
         resp = requests.post(
             f"{_api_base()}{_REFRESH_ROUTE}",
             json={"refresh_token": refresh_token},
+            headers=client_headers(),
             timeout=_HTTP_TIMEOUT_S,
         )
     except requests.RequestException:
@@ -415,7 +417,7 @@ def _post_json(path: str, body: dict, *, bearer: str = "") -> tuple[int, dict]:
         import requests
     except ImportError:
         return 0, {}
-    headers = {"Authorization": f"Bearer {bearer}"} if bearer else None
+    headers = client_headers({"Authorization": f"Bearer {bearer}"} if bearer else None)
     try:
         resp = requests.post(f"{_api_base()}{path}", json=body, headers=headers, timeout=_HTTP_TIMEOUT_S)
     except requests.RequestException:

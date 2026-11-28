@@ -196,13 +196,9 @@ def send_contribution(kind: str, record: dict[str, Any], send_id: str | None = N
     envelope: dict[str, Any] = {"kind": kind, "record": record}
     if send_id:
         envelope["send_id"] = send_id
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    try:
-        from kiln.version_check import _current_version
+    from kiln.api_device import client_headers
 
-        headers["X-Kiln-Client-Version"] = _current_version()
-    except Exception:
-        pass
+    headers = client_headers({"Content-Type": "application/json", "Accept": "application/json"})
     req = urllib.request.Request(
         f"{_api_base()}{_CONTRIBUTE_ROUTE}",
         data=json.dumps(envelope).encode(),
@@ -355,17 +351,13 @@ def _ask_community_api(route: str, payload: dict[str, Any]) -> dict[str, Any] | 
     try:
         import urllib.request
 
-        headers = {
+        from kiln.api_device import client_headers
+
+        headers = client_headers({
             "Content-Type": "application/json",
             "Authorization": f"Bearer {bearer}",
             "Accept": "application/json",
-        }
-        try:
-            from kiln.version_check import _current_version
-
-            headers["X-Kiln-Client-Version"] = _current_version()
-        except Exception:
-            pass
+        })
 
         req = urllib.request.Request(
             f"{_api_base()}{route}",

@@ -256,8 +256,9 @@ def _served(request: dict[str, Any]) -> tuple[dict[str, Any] | None, served_answ
     doc = answer.get("verdict") if "verdict" in answer else answer
     if is_verdict(doc):
         return doc, None
-    if answer.get("error") or answer.get("status") == "error":
-        logger.info("placement_plan not served: %s", answer.get("error") or answer.get("message"))
+    refused = served_answer.read_refusal(answer)
+    if refused.given or answer.get("status") == "error":
+        logger.info("placement_plan not served: %s", refused.said or refused.code)
     return None, served_answer.classify_answer(answer) or served_answer.Miss(UNANSWERED, detail="no verdict in the answer")
 
 

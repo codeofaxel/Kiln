@@ -79,8 +79,8 @@ def _require_signin_bearer() -> str:
 
 def _http_post_authed(path: str, body: dict[str, Any]) -> dict[str, Any]:
     """POST authed; never throws on 4xx — returns the JSON envelope so
-    we can pattern-match on ``error`` (OPT_IN_REQUIRED / RATE_LIMITED /
-    below_floor / etc.)."""
+    its refusal's code (OPT_IN_REQUIRED / RATE_LIMITED / below_floor / etc.)
+    can be read (:func:`kiln.served_answer.read_refusal`)."""
     bearer = _require_signin_bearer()
     return _http_post(path, body, bearer=bearer)
 
@@ -102,10 +102,13 @@ def _surface_envelope_error(resp: dict[str, Any], default: str) -> click.ClickEx
     """Map a non-success REST envelope to a click.ClickException with
     a human-friendly message that calls out OPT_IN_REQUIRED /
     RATE_LIMITED specially."""
-    code = str(resp.get("error") or "ERROR").upper()
-    # The server's ``error`` is a code word; a person reads its ``message``,
-    # or the command's own sentence.
-    msg = said_to_a_person(resp.get("message")) if resp.get("message") else default
+    from kiln.served_answer import read_refusal
+
+    # The refusal's code word decides; a person reads its sentence, or the
+    # command's own.
+    refusal = read_refusal(resp)
+    code = (refusal.code or "ERROR").upper()
+    msg = said_to_a_person(refusal.words(default))
     if code == "OPT_IN_REQUIRED":
         url = resp.get("enable_url") or _ENABLE_URL
         return click.ClickException(

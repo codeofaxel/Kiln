@@ -45,6 +45,7 @@ import threading
 import time
 from typing import Any
 
+from kiln.api_device import client_headers
 from kiln.plan_proof import (
     PROOF_FIELD,
     plan_is_proven,
@@ -204,10 +205,10 @@ def _ask_account() -> dict | None:
 
         resp = requests.get(
             f"{_api_base()}{_WHOAMI_ROUTE}",
-            headers={
+            headers=client_headers({
                 "Authorization": f"Bearer {session.token}",
                 "User-Agent": f"kiln/{__version__}",
-            },
+            }),
             timeout=_HTTP_TIMEOUT_S,
         )
         if resp.status_code != 200:

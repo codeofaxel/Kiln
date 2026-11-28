@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import plain_words as _plain_words
+from kiln.api_device import client_headers
 from kiln.cli_command import kiln_command
 from kiln.served_makes import MAX_MODEL_BYTES
 
@@ -838,10 +839,10 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{_default_api_url()}/api/print-twin",
             data=body,
-            headers={
+            headers=client_headers({
                 "Authorization": f"Bearer {bearer.token}",
                 "Content-Type": content_type,
-            },
+            }),
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=120) as resp:  # noqa: S310
@@ -856,10 +857,12 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
         }
 
     if answer.get("status") != "success":
+        from kiln.served_answer import read_refusal
+
         return {
             "success": False,
             "code": str(answer.get("code") or "PUBLISH_FAILED"),
-            "message": str(answer.get("error") or "The server refused the twin."),
+            "message": read_refusal(answer).words("The server refused the twin."),
         }
     return {
         "success": True,

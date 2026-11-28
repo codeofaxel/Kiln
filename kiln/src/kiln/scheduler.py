@@ -288,8 +288,9 @@ def _miss_words(answer: Any) -> str:
     """What a served answer that is not a decision says, in one sentence."""
     if not isinstance(answer, dict):
         return "Kiln could not ask its servers where these copies should go."
-    error = answer.get("error")
-    text = error.get("message") if isinstance(error, dict) else error
+    from kiln.served_answer import read_refusal
+
+    text = read_refusal(answer).said
     if not text and answer.get("required_tier"):
         text = f"Moving a failed plate's copies to another printer is part of Kiln {str(answer['required_tier']).title()}."
     return str(text or answer.get("message") or "Kiln's servers gave no answer about where these copies should go.").strip()

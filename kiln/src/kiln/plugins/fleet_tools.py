@@ -223,11 +223,9 @@ _PLATES_NOT_SERVED_YET = (
 
 def _servers_sentence(answer: Any) -> str:
     """The sentence a refusal from Kiln's servers carries, or ``""``."""
-    if not isinstance(answer, dict):
-        return ""
-    error = answer.get("error")
-    text = error.get("message") or error.get("error") if isinstance(error, dict) else error
-    return str(text or answer.get("message") or "").strip()
+    from kiln.served_answer import read_refusal
+
+    return read_refusal(answer).said
 
 
 def _plates_miss(miss: Any) -> str:

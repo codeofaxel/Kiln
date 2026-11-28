@@ -51,6 +51,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln.api_device import client_headers
+
 _logger = logging.getLogger(__name__)
 
 
@@ -643,8 +645,8 @@ def send_pending(supabase_url: str, anon_key: str) -> int:
                     req = urllib.request.Request(
                         f"{supabase_url.rstrip('/')}/rest/v1/rpc/{RPC}",
                         data=json.dumps(_payload(data, block, routine, installation_id)).encode("utf-8"),
-                        headers={"Content-Type": "application/json", "apikey": anon_key,
-                                 "Authorization": f"Bearer {anon_key}"},
+                        headers=client_headers({"Content-Type": "application/json", "apikey": anon_key,
+                                                "Authorization": f"Bearer {anon_key}"}),
                         method="POST",
                     )
                     with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:

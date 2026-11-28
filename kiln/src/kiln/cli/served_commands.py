@@ -23,7 +23,9 @@ from typing import Any
 import click
 
 from kiln import plain_words as _plain_words
+from kiln.api_device import client_headers
 from kiln.cli.history_commands import _finish, _shown
+from kiln.served_answer import read_refusal
 
 _ARTIFACT_TYPES = click.Choice(["design", "preset", "feature"])
 
@@ -682,7 +684,7 @@ def _verify_file(path: str, *, release_id: str | None = None, design_id: str | N
     try:
         with open(path, "rb") as handle:
             resp = httpx.post(f"{_api_base()}/api/public/verify", files={"file": (Path(path).name, handle)},
-                              data=fields, timeout=120.0)
+                              data=fields, headers=client_headers(), timeout=120.0)
     except OSError as exc:
         return {"status": "error", "success": False, "code": "PDF_UNREADABLE",
                 "error": f"Kiln couldn't read {path}: {_plain_words.said(exc)}.",
@@ -746,7 +748,7 @@ def manual_verify_batch(paths: tuple[str, ...], release_id: str | None, json_mod
         verdict = _verdict(answer)
         failed = answer.get("status") == "error" or answer.get("success") is False
         results.append({"path": path, "authentic": bool(verdict.get("authentic")) and not failed,
-                        "error": answer.get("error") if failed else None,
+                        "error": read_refusal(answer).words("Kiln couldn't check this file.") if failed else None,
                         "reason": None if failed else verdict.get("reason")})
     authentic = sum(1 for r in results if r["authentic"])
     if json_mode:

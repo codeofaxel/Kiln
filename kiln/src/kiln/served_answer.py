@@ -286,6 +286,161 @@ def story_for_tool(name: str, kind: str | None = None, category: str | None = No
 
 
 # ---------------------------------------------------------------------------
+# reading a refusal: the words a person is shown, and the code
+# ---------------------------------------------------------------------------
+
+#: Where an answer keeps its code word once ``error`` holds the sentence.
+ERROR_WORD_KEY = "error_word"
+
+#: A code word: runs of letters and digits joined by underscores, no longer
+#: than a code is.  An ``error`` that is one is a code, never words.
+_CODE_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)*")
+_CODE_WORD_LIMIT = 64
+
+_SIGN_IN_AGAIN = "Kiln's servers didn't accept this computer's sign-in. Sign in to Kiln again, then try again."
+_SIGN_IN_UNCONFIRMED = (
+    "Kiln couldn't confirm your sign-in just now. That's on Kiln's side, so try again in a moment."
+)
+
+#: Words for a refusal that carries no sentence of its own, by its code word
+#: (looked up in lower case).
+WORDS_FOR_CODE: dict[str, str] = {
+    "invalid_bearer": _SIGN_IN_AGAIN,
+    "unauthorized": _SIGN_IN_AGAIN,
+    "mfa_required": (
+        "This needs your two-factor code. Sign in to Kiln again and enter the "
+        "code when it asks, then try again."
+    ),
+    "reauth_required": "Your Kiln sign-in was idle for too long. Sign in again to keep going.",
+    "session_expired": "Your Kiln sign-in has ended. Sign in again to keep going.",
+    "session_check_unavailable": _SIGN_IN_UNCONFIRMED,
+    "sign_in_unavailable": _SIGN_IN_UNCONFIRMED,
+    "auth_upstream_unavailable": _SIGN_IN_UNCONFIRMED,
+    "plan_unavailable": (
+        "Kiln couldn't confirm your plan just now. That's on Kiln's side, so try again in a moment."
+    ),
+    "terms_required": (
+        "Before Kiln can help, please agree to Kiln's Terms of Use: sign in to "
+        "your Kiln account on the web and accept them there."
+    ),
+    "upgrade_required": (
+        "This Kiln needs an update to continue. Ask your AI app to update Kiln, "
+        "which takes a few seconds and one quick restart."
+    ),
+}
+
+#: Said for a refusal with no words of its own and no code Kiln has words for.
+NO_REASON_GIVEN = (
+    "Kiln's servers couldn't do this and didn't say why. Try again in a moment, "
+    "and if it happens again, ask your AI app to update Kiln."
+)
+
+
+def code_word(value: Any) -> str:
+    """*value* when it is a code word (``"mfa_required"``), else ``""``."""
+    if isinstance(value, str) and len(value) <= _CODE_WORD_LIMIT and _CODE_WORD.fullmatch(value):
+        return value
+    return ""
+
+
+def _sentence(value: Any) -> str:
+    """*value* stripped when it is words for a person (text with a space in
+    it), else ``""``."""
+    if isinstance(value, str) and any(ch.isspace() for ch in value.strip()):
+        return value.strip()
+    return ""
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """What an answer from Kiln's servers says when it says no, read one way.
+
+    ``code`` is the refusal's code word, ``""`` when it names none.  ``said``
+    is the answer's own sentence, ``""`` when it has none.  ``given`` is
+    whether the answer carried an error at all.  A door that acts on a
+    refusal compares ``code``; a door that shows one shows :meth:`words`.
+    Neither reads ``error``, which may hold either.
+    """
+
+    code: str = ""
+    said: str = ""
+    given: bool = False
+    #: Every code the answer names, in the order :attr:`code` was chosen.
+    codes: tuple[str, ...] = ()
+
+    def words(self, default: str = "") -> str:
+        """The sentence a person is shown: :attr:`said`, else Kiln's words
+        for the first code it has words for (:data:`WORDS_FOR_CODE`), else
+        *default* (the door's own sentence), else :data:`NO_REASON_GIVEN`."""
+        known = next((WORDS_FOR_CODE[c.lower()] for c in self.codes if c.lower() in WORDS_FOR_CODE), "")
+        return self.said or known or str(default or "").strip() or NO_REASON_GIVEN
+
+
+def read_refusal(answer: Any) -> Refusal:
+    """The :class:`Refusal` in *answer*, the one reader of what Kiln's
+    servers said no with.
+
+    The code is read from ``code``, then :data:`ERROR_WORD_KEY`, then an
+    ``error`` object's ``code``, then ``error`` itself when it is a code word
+    (and the same inside a ``detail`` object).  Its own words are the first
+    sentence among ``error``, an ``error`` object's ``message``, an upgrade
+    block's ``headline``, ``message`` and ``detail``.  Anything that is not
+    an answer reads as no refusal.
+    """
+    if not isinstance(answer, dict):
+        return Refusal()
+    error = answer.get("error")
+    inner = error if isinstance(error, dict) else {}
+    detail = answer.get("detail")
+    nested = detail if isinstance(detail, dict) else {}
+    upgrade = answer.get("upgrade") if isinstance(answer.get("upgrade"), dict) else {}
+    codes = [
+        str(answer.get("code") or "").strip(),
+        str(answer.get(ERROR_WORD_KEY) or "").strip(),
+        str(inner.get("code") or "").strip(),
+        code_word(error),
+        str(nested.get("code") or "").strip(),
+        code_word(nested.get("error")),
+    ]
+    codes = [c for c in codes if c]
+    said = next(
+        (s for s in (
+            _sentence(error), _sentence(inner.get("message")), _sentence(inner.get("error")),
+            _sentence(upgrade.get("headline")), _sentence(answer.get("message")), _sentence(detail),
+            _sentence(nested.get("message")), _sentence(nested.get("error")),
+        ) if s),
+        "",
+    )
+    return Refusal(
+        code=codes[0] if codes else "",
+        said=said,
+        given=bool(error) or bool(answer.get(ERROR_WORD_KEY)),
+        codes=tuple(codes),
+    )
+
+
+def in_words(answer: Any, *, default: str = "") -> Any:
+    """*answer* as a person may be shown it.
+
+    A refusal whose ``error`` is a code word gets its sentence there
+    (:func:`read_refusal`, else *default*, else :data:`NO_REASON_GIVEN`),
+    and the word is kept under :data:`ERROR_WORD_KEY` unless ``code``
+    already says it, so a door that acts on it still reads it through
+    :func:`read_refusal`.  Every other answer comes back as it is.  A copy,
+    never a change to *answer*.
+    """
+    if not isinstance(answer, dict) or answer.get("success") is True:
+        return answer
+    word = code_word(answer.get("error"))
+    if not word:
+        return answer
+    out = {**answer, "error": read_refusal(answer).words(default)}
+    if str(answer.get("code") or "").strip().lower() != word.lower():
+        out.setdefault(ERROR_WORD_KEY, word)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # deciding why
 # ---------------------------------------------------------------------------
 
@@ -325,27 +480,21 @@ def classify_answer(answer: Any) -> Miss | None:
         return Miss("unanswered", detail="not an answer")
     error = answer.get("error")
     code = str(answer.get("code") or "")
-    text = ""
     if isinstance(error, dict):
         code = code or str(error.get("code") or "")
-        text = str(error.get("message") or error.get("error") or "")
-    elif error:
-        text = str(error)
-    if not text:
-        text = str(answer.get("message") or answer.get("detail") or "")
     bare_detail = "detail" in answer and not any(k in answer for k in ("status", "success", "error", "code", "plan"))
     is_error = answer.get("status") == "error" or answer.get("success") is False or bool(error) or bare_detail
     if not is_error:
         return None
-    text = text.strip()[:_DETAIL_LIMIT]
     why = answer.get("why")
     if why in CAUSES and "why_detail" in answer:
         # An envelope that already decided why carries the server's own words
         # in ``why_detail``; its ``error`` is that envelope's whole sentence,
         # which would read as a second sentence inside the door's own.
         raw = answer.get("why_detail")
-        text = str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else ""
-    text = _in_words(text, answer)
+        text = _in_words(str(raw).strip()[:_DETAIL_LIMIT] if isinstance(raw, str) else "", answer)
+    else:
+        text = read_refusal(answer).said[:_DETAIL_LIMIT]
     held = _plan_held_here(answer, code)
     if held:
         # A wall for a plan this computer counts the caller as holding, in
@@ -387,8 +536,8 @@ def _in_words(text: str, answer: dict[str, Any]) -> str:
         answer.get("message"),
         answer.get("detail"),
     ):
-        if isinstance(said, str) and any(ch.isspace() for ch in said.strip()):
-            return said.strip()[:_DETAIL_LIMIT]
+        if _sentence(said):
+            return _sentence(said)[:_DETAIL_LIMIT]
     return ""
 
 
@@ -649,15 +798,16 @@ def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | Non
     """The envelope for an HTTP error answer.
 
     A body that already is an error envelope (a code and a sentence of the
-    server's own) comes back untouched: the server built it for this call
-    and this side has no better words.  FastAPI's bare ``{"detail": ...}``
-    -- which used to come back as-is, with no field that marked it an
-    error -- and a body that is not JSON at all are worded here.  A 404 for
-    a tool the servers do not have is no answer, never a ruling, and its
-    words (the tool's name) are not repeated.
+    server's own) comes back as the server built it, except that an
+    ``error`` holding a code word gets the person's sentence there and the
+    word is kept (:func:`in_words`; with no words of its own, the door's
+    sentence for the miss).  FastAPI's bare ``{"detail": ...}`` and a body
+    that is not JSON at all are worded here.  A 404 for a tool the servers
+    do not have is no answer, never a ruling, and its words (the tool's
+    name) are not repeated.
     """
     if isinstance(body, dict) and any(k in body for k in ("status", "success", "error", "code")):
-        return body
+        return tool_answer_in_words(tool_name, body, kind=kind)
     detail = ""
     if isinstance(body, dict):
         raw = body.get("detail")
@@ -689,6 +839,16 @@ def envelope_for_http(tool_name: str, status: int, body: Any, *, kind: str | Non
 
         out.update(signin_hint_fields())
     return out
+
+
+def tool_answer_in_words(tool_name: str, answer: Any, *, kind: str | None = None) -> Any:
+    """A served tool's *answer* as a person may be shown it (:func:`in_words`):
+    a refusal whose ``error`` is a code word and that has no words of its own
+    gets the tool's sentence for its miss.  Every other answer as it is."""
+    if not isinstance(answer, dict) or answer.get("success") is True or not code_word(answer.get("error")):
+        return answer
+    miss = classify_answer(answer) or Miss("refused")
+    return in_words(answer, default=_tool_sentence(tool_name, miss, kind))
 
 
 def _tool_sentence(tool_name: str, miss: Miss, kind: str | None = None) -> str:
@@ -803,25 +963,33 @@ def _sentence_of(text: str) -> str:
 __all__ = [
     "CAUSES",
     "CONSULT_TIMEOUT_S",
+    "ERROR_WORD_KEY",
     "FREE_ACCOUNT_NOTE",
     "HOSTED_DOORS",
     "KINDS",
     "LOCAL_FAULT_CODE",
     "Miss",
+    "NO_REASON_GIVEN",
+    "Refusal",
     "SESSION_EXPIRED_CODE",
     "SIGNED_OUT_CODES",
     "SERVICE_BACKOFF_S",
     "UNANSWERED_CODES",
+    "WORDS_FOR_CODE",
     "ask_briefly",
     "classify_answer",
     "classify_transport_error",
     "clause",
+    "code_word",
     "envelope_for_http",
     "envelope_for_transport",
     "fields",
     "free_account_note",
+    "in_words",
     "kind_of_tool",
     "local_fault",
+    "read_refusal",
     "sentence",
     "story_for_tool",
+    "tool_answer_in_words",
 ]

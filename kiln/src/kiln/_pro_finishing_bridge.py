@@ -42,6 +42,7 @@ from kiln.served_answer import (
     classify_transport_error,
     fields,
     local_fault,
+    read_refusal,
     sentence,
 )
 
@@ -215,8 +216,9 @@ def _read_guide(answer: Any) -> Asked:
         if answer.get("success") is True and _is_guide(answer):
             return Asked(answer=answer)
         # The servers' own answer that there is nothing to show.
-        if answer.get("success") is False and answer.get("code") in DOOR_CODES and isinstance(answer.get("error"), str):
-            return Asked(error=answer["error"])
+        refused = read_refusal(answer)
+        if answer.get("success") is False and answer.get("code") in DOOR_CODES and refused.given:
+            return Asked(error=refused.words("Kiln has no finishing guide to show for that."))
     return Asked(miss=classify_answer(answer) or Miss("unanswered", detail="no finishing guide in the answer"))
 
 

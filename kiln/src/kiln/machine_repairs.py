@@ -42,6 +42,8 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln.served_answer import read_refusal
+
 logger = logging.getLogger(__name__)
 
 #: What a person may say about a printer.
@@ -451,7 +453,7 @@ def answer_identity(adapter_or_name: Any, question_id: str, *, same: bool, db: A
     _fingerprint(adapter, name)
     answer = answer_question(question_id, same=same, db=db)
     if answer.get("success") is False or answer.get("status") == "error":
-        raise RepairRefused(str(answer.get("code") or "ACCOUNT_NOT_ANSWERED"), str(answer.get("error") or ""))
+        raise RepairRefused(str(answer.get("code") or "ACCOUNT_NOT_ANSWERED"), read_refusal(answer).words())
     out = {"recorded": True, "printer": name, "question_id": answer.get("question_id"),
            "answer": answer.get("answer"), "linked": answer.get("linked"), "account": answer.get("account")}
     out["condition"] = condition(adapter, db=db)

@@ -50,6 +50,8 @@ import threading
 import time
 from typing import Any
 
+from kiln.served_answer import read_refusal
+
 logger = logging.getLogger(__name__)
 
 TOOL = "machine_repair_courier"
@@ -332,7 +334,7 @@ def sync(*, db: Any = None, registry: Any = None, limit: int = MAX_ROWS,
     answer = _request(TOOL, "POST", SYNC_PATH, scrub(body), timeout=timeout or _WAIT_S)
     if answer.get("success") is False or answer.get("status") == "error":
         return {"synced": False, "why": "not_taken", "code": answer.get("code"),
-                "error": answer.get("error"), "owed": len(marks)}
+                "error": read_refusal(answer).words(), "owed": len(marks)}
     # Taken and refused (a mark the account cannot keep) both mean the
     # account has seen it; nothing is owed twice.
     for row_id in sent_ids.values():

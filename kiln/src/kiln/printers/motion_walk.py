@@ -14,6 +14,7 @@ from typing import Any
 
 from kiln.printers.base import PrinterError, PrinterStatus
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.served_answer import read_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ def _refusal_of(answer: Any) -> tuple[str, str] | None:
     if isinstance(answer, dict) and isinstance(answer.get("walk"), dict):
         return None
     if isinstance(answer, dict):
-        return str(answer.get("code") or "NO_ANSWER"), str(answer.get("error") or "Kiln's servers gave no walk step.")
+        return str(answer.get("code") or "NO_ANSWER"), read_refusal(answer).words("Kiln's servers gave no walk step.")
     return "NO_ANSWER", "Kiln's servers gave no walk step."
 
 

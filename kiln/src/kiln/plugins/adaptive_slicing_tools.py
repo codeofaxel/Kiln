@@ -21,6 +21,7 @@ import logging
 from typing import Any
 
 from kiln import plain_words as _plain_words
+from kiln.served_answer import read_refusal
 from kiln.tool_annotations import read_only
 
 _logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ _logger = logging.getLogger(__name__)
 def _relay_plan(answer: dict[str, Any], nozzle: Any, *, model_name: str, printer: str | None) -> dict:
     """A plan Kiln answered, with the caller's own model name and printer."""
     if answer.get("success") is not True:
-        return {"success": False, "error": answer.get("error")}
+        return {"success": False, "error": read_refusal(answer).words()}
     plan = dict(answer["plan"])
     plan["model_name"] = model_name
     plan["printer"] = printer
@@ -121,7 +122,7 @@ def get_material_slicing_profile(
         answer, miss = bridge.ask("profile", material=material, nozzle_diameter_mm=nozzle.diameter_mm)
         if answer is not None:
             if answer.get("success") is not True:
-                return {"success": False, "error": answer.get("error")}
+                return {"success": False, "error": read_refusal(answer).words()}
             return {
                 "success": True,
                 "profile": answer["profile"],
@@ -466,7 +467,7 @@ def list_supported_materials() -> dict:
         answer, miss = bridge.ask("materials")
         if answer is not None:
             if answer.get("success") is not True:
-                return {"success": False, "error": answer.get("error")}
+                return {"success": False, "error": read_refusal(answer).words()}
             return {
                 "success": True,
                 "materials": answer["materials"],

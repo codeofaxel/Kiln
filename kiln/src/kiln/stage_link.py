@@ -53,6 +53,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln.api_device import client_headers
 from kiln.served_makes import MAX_MODEL_BYTES
 
 logger = logging.getLogger(__name__)
@@ -706,7 +707,7 @@ def _upload(
                 files["mechanism"] = ("mechanism.json", mechanism, "application/json")
             resp = httpx.post(
                 f"{_api_base()}/api/view/mesh",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=client_headers({"Authorization": f"Bearer {token}"}),
                 files=files,
                 # The server canonicalises the claim and bakes it into the
                 # signed link, so the /view page draws THIS machine's bed.

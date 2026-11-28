@@ -365,10 +365,12 @@ def _refused(code: str, said: str, **extra: Any) -> dict[str, Any]:
 
 def _said(answer: dict[str, Any]) -> str:
     """The sentence a refusal from the account carries."""
+    from kiln.served_answer import read_refusal
+
     detail = answer.get("detail")
     if isinstance(detail, str) and detail.strip():
         return detail.strip()
-    return str(answer.get("error") or "").strip()
+    return read_refusal(answer).said
 
 
 def _pick_team(rules: list[dict[str, Any]], team: str | None) -> dict[str, Any] | dict[str, str]:

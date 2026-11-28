@@ -253,9 +253,9 @@ def verifier(monkeypatch, tmp_path):
     sent: list[dict[str, Any]] = []
     answers: dict[str, Any] = {}
 
-    def post(url, *, files, data, timeout):
+    def post(url, *, files, data, timeout, headers=None):
         name, handle = files["file"]
-        sent.append({"url": url, "name": name, "bytes": handle.read(), "data": data})
+        sent.append({"url": url, "name": name, "bytes": handle.read(), "data": data, "headers": headers})
         reply = answers.get(name, answers.get("*"))
         if isinstance(reply, Exception):
             raise reply

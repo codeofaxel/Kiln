@@ -37,6 +37,7 @@ from kiln.served_answer import (
     fields,
     free_account_note,
     local_fault,
+    read_refusal,
     sentence,
 )
 
@@ -145,12 +146,11 @@ def _read(answer: Any) -> Asked:
         if answer.get("success") is True and isinstance(answer.get("substitutes"), list):
             return Asked(substitutes=[dict(s) for s in answer["substitutes"] if isinstance(s, dict)])
         # The servers' own ruling on a request they could not read.
-        if (
-            answer.get("success") is False
-            and answer.get("code") == "VALIDATION_ERROR"
-            and isinstance(answer.get("error"), str)
-        ):
-            return Asked(refusal={"code": "VALIDATION_ERROR", "error": answer["error"]})
+        refused = read_refusal(answer)
+        if answer.get("success") is False and answer.get("code") == "VALIDATION_ERROR" and refused.given:
+            return Asked(refusal={
+                "code": "VALIDATION_ERROR", "error": refused.words("Kiln's servers could not read that request."),
+            })
     return Asked(miss=classify_answer(answer) or Miss("unanswered", detail="no substitutes in the answer"))
 
 

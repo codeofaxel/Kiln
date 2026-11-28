@@ -18,15 +18,15 @@ import urllib.error
 
 import pytest
 
-from tests._signed_in import sign_in
-
 from kiln import terms
 from kiln.persistence import KilnDB
+from kiln.served_answer import read_refusal
 from kiln.terms import _CURRENT_TERMS_VERSION
 
 # Bound at import, before the suite-wide fixture swaps ``terms.is_current`` for
 # an always-true stand-in: the import-from-another-device case needs the real one.
 from kiln.terms import is_current as _real_is_current
+from tests._signed_in import sign_in
 
 
 @pytest.fixture()
@@ -238,7 +238,8 @@ class TestTheHostedCallHandsItOver:
 
         answer = server._pro_api_call("generate_coaster", size_mm=80)
 
-        assert answer["error"] == "terms_required"
+        assert answer["error"].startswith("Before Kiln can help")
+        assert read_refusal(answer).code == "terms_required"
         assert answer["accept_url"] == "https://kiln3d.com/accept/t"
         assert calls == [url]
         assert account.sent == []
@@ -257,7 +258,8 @@ class TestTheHostedCallHandsItOver:
 
         answer = server._pro_api_call("generate_coaster", size_mm=80)
 
-        assert answer["error"] == "terms_required"
+        assert answer["error"].startswith("Before Kiln can help")
+        assert read_refusal(answer).code == "terms_required"
         assert calls == [url]
         assert account.sent == []
 
@@ -272,7 +274,8 @@ class TestTheHostedCallHandsItOver:
 
         answer = server._pro_api_call("generate_coaster", size_mm=80)
 
-        assert answer["error"] == "terms_required"
+        assert answer["error"].startswith("Before Kiln can help")
+        assert read_refusal(answer).code == "terms_required"
         assert calls == [url, url]
 
 

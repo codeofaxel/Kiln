@@ -38,6 +38,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from kiln.api_device import client_headers
+from kiln.served_answer import read_refusal
+
 logger = logging.getLogger(__name__)
 
 #: The version of the manifest block this build reads.
@@ -202,7 +205,7 @@ def ask(
         if http.get("status") != 200:
             return None, classify_answer(answer) or Miss("unanswered", "KILN_API_HTTP_ERROR")
         if isinstance(answer, dict) and answer.get("code") == _FILE_GONE_CODE:
-            return None, Miss("unanswered", _FILE_GONE_CODE, str(answer.get("error") or ""))
+            return None, Miss("unanswered", _FILE_GONE_CODE, read_refusal(answer).said)
         answer, whole = _bring_home(answer, trip)
         if trip.get("packed_from") and isinstance(answer, dict) and answer.get("success") is True:
             # A file that travelled packed is told about as the one given.
@@ -554,7 +557,7 @@ def _fetch(token: str) -> bytes | None:
     try:
         resp = httpx.get(
             f"{served_makes._api_base()}/api/artifact/{token}",
-            headers={"Authorization": f"Bearer {bearer}"},
+            headers=client_headers({"Authorization": f"Bearer {bearer}"}),
             timeout=_FETCH_TIMEOUT_S,
         )
     except Exception:  # noqa: BLE001 -- the answer stands without the file

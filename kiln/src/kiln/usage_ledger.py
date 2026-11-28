@@ -38,6 +38,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from kiln.api_device import client_headers
+
 logger = logging.getLogger(__name__)
 
 # Matches the CHECK on the cloud tables — a too-long name is dropped
@@ -268,7 +270,7 @@ def flush() -> int:
 
         resp = requests.post(
             f"{base}/api/me/stats/record",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=client_headers({"Authorization": f"Bearer {token}"}),
             json={"device_id": device_id(), "entries": entries},
             timeout=10.0,
         )

@@ -78,6 +78,7 @@ from kiln.served_answer import (
     classify_answer,
     classify_transport_error,
     fields,
+    read_refusal,
     sentence,
 )
 
@@ -219,18 +220,14 @@ def _headers(bearer: str) -> dict[str, str]:
     """The headers every served call carries: the sign-in, this device's
     name (the activation cap counts devices), this client's version (the
     servers may hold a floor)."""
-    headers = {"Authorization": f"Bearer {bearer}"}
+    from kiln.api_device import client_headers
+
+    headers = client_headers({"Authorization": f"Bearer {bearer}"})
     try:
         from kiln.api_device import device_fingerprint_headers
 
         headers.update(device_fingerprint_headers())
     except Exception:  # noqa: BLE001 -- the call stands without the device name
-        pass
-    try:
-        from kiln.version_check import _current_version
-
-        headers["X-Kiln-Client-Version"] = _current_version()
-    except Exception:  # noqa: BLE001
         pass
     return headers
 
@@ -241,8 +238,7 @@ def _miss_for_http(status: int, body: Any) -> tuple[Miss, dict[str, Any] | None]
     details = None
     if isinstance(body, dict):
         code = str(body.get("code") or "")
-        error = body.get("error")
-        text = str((error.get("message") if isinstance(error, dict) else error) or body.get("detail") or "")
+        text = read_refusal(body).said
         if isinstance(body.get("details"), dict):
             details = dict(body["details"])
     if status == 401:
@@ -310,8 +306,7 @@ def _refusal(miss: Miss, details: dict[str, Any] | None, body: Any) -> Answer:
     yes and the servers' whole sentence when they named the step first."""
     if not isinstance(body, dict) or miss.cause != "refused":
         return Answer(miss=miss, details=details)
-    error = body.get("error")
-    said = str((error.get("message") if isinstance(error, dict) else error) or "").strip()
+    said = read_refusal(body).said
     if miss.code == APPROVAL_REQUIRED_CODE:
         inner = details or {}
         waiting = {

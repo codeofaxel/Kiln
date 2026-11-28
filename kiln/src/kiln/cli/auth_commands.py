@@ -60,7 +60,9 @@ from typing import Any
 import click
 
 from kiln import run_program
+from kiln.api_device import client_headers
 from kiln.plan_proof import proof_fields as _plan_proof_fields
+from kiln.served_answer import read_refusal
 
 
 # Default API base — override with ``KILN_API_URL`` for local dev.
@@ -254,7 +256,7 @@ def _http_post(
             "Install with `pip install requests`."
         ) from exc
 
-    headers = {"User-Agent": f"kiln-cli/{_cli_version()}"}
+    headers = client_headers({"User-Agent": f"kiln-cli/{_cli_version()}"})
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
 
@@ -311,7 +313,7 @@ def _http_get(path: str, *, bearer: str | None = None, timeout: float = 10.0) ->
     except ImportError as exc:  # pragma: no cover
         raise click.ClickException("The `requests` package is required.") from exc
 
-    headers = {"User-Agent": f"kiln-cli/{_cli_version()}"}
+    headers = client_headers({"User-Agent": f"kiln-cli/{_cli_version()}"})
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
     try:
@@ -441,7 +443,7 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None, offer: bool
     if not start.get("success"):
         _record_signin_stage("start_failed")
         raise click.ClickException(
-            start.get("error") or "Could not start the sign-in flow."
+            read_refusal(start).words("Could not start the sign-in flow.")
         )
     _record_signin_stage("started_cli")
 
@@ -728,7 +730,7 @@ def auth_whoami(as_json: bool) -> None:
         )
     if code >= 400 or not body.get("success"):
         raise click.ClickException(
-            body.get("error") or f"whoami failed (HTTP {code})"
+            read_refusal(body).words(f"whoami failed (HTTP {code})")
         )
 
     email = str(body.get("email") or "")
@@ -1124,7 +1126,7 @@ def auth_pair(code: str, client: str | None) -> None:
         # human ``error`` so we can print tailored next-step guidance
         # without string-sniffing the error message.
         reason = str(resp.get("code") or "").lower()
-        msg = resp.get("error") or "Pairing failed."
+        msg = read_refusal(resp).words("Pairing failed.")
         if reason in ("not_found", "expired"):
             raise click.ClickException(
                 f"{msg}\n\n  Get a fresh code at app.kiln3d.com/connect."
@@ -1303,7 +1305,7 @@ def auth_link(as_json: bool, client: str | None) -> None:
     )
 
     if not body.get("success"):
-        raise click.ClickException(body.get("error") or "Could not mint a link code.")
+        raise click.ClickException(read_refusal(body).words("Could not mint a link code."))
 
     code = str(body.get("code") or "")
     expires_at = str(body.get("expires_at") or "")

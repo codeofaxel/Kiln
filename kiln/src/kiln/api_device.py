@@ -17,12 +17,16 @@ Distinct from two neighbours that look similar:
   * ``kiln.usage_ledger.device_id`` — a separate id at ``~/.kiln/device_id``
     for the JWT-only stats endpoint.
 Neither is the activation-cap fingerprint; do not substitute them here.
+
+:func:`client_headers` is the one place every request to Kiln's servers
+names this Kiln's version.
 """
 
 from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 #: Header every license-bearer API client must send.
@@ -68,3 +72,22 @@ def device_fingerprint() -> str:
 def device_fingerprint_headers() -> dict[str, str]:
     """The one header every license-bearer API client merges into its request."""
     return {DEVICE_FINGERPRINT_HEADER: device_fingerprint()}
+
+
+#: The header every request to Kiln's servers carries: the Kiln version
+#: this process runs, so the servers answer in the shape this release reads.
+CLIENT_VERSION_HEADER = "X-Kiln-Client-Version"
+
+
+def client_headers(headers: Mapping[str, str] | None = None) -> dict[str, str]:
+    """*headers* (a new dict) with :data:`CLIENT_VERSION_HEADER` set to this
+    Kiln's version.  Every request to Kiln's servers builds its headers
+    here.  Never raises."""
+    from kiln.version_check import _current_version
+
+    out = dict(headers or {})
+    try:
+        out[CLIENT_VERSION_HEADER] = str(_current_version() or "unknown")
+    except Exception:  # noqa: BLE001 -- a header is never worth failing a request over
+        out[CLIENT_VERSION_HEADER] = "unknown"
+    return out

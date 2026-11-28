@@ -23,6 +23,8 @@ from typing import Any
 
 import click
 
+from kiln.served_answer import read_refusal
+
 
 def _vault():
     from kiln.history_vault import HistoryVault
@@ -51,7 +53,7 @@ def _finish(answer: dict[str, Any], json_mode: bool, say: Callable[[dict[str, An
     failed = not isinstance(answer, dict) or answer.get("status") == "error" or answer.get("success") is False
     if failed:
         if not json_mode:
-            click.echo(f"{_shown(answer.get('error') or 'Kiln could not do that.', lines=True)}", err=True)
+            click.echo(f"{_shown(read_refusal(answer).words('Kiln could not do that.'), lines=True)}", err=True)
         sys.exit(1)
     if not json_mode:
         click.echo(say(answer))
@@ -297,7 +299,7 @@ def cloud_push(design_id: str, branch_id: str | None, make_room: str | None, jso
     branch = _branch_id(design_id, branch_id) if branch_id else None
     answer = push("cloud_push_branch", design_id, branch, make_room_for=make_room)
     if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
-        click.echo(_shown(answer.get("error", ""), lines=True), err=True)
+        click.echo(_shown(read_refusal(answer).said, lines=True), err=True)
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
@@ -755,7 +757,7 @@ def fork_command(address: str, to_propose: bool, make_room: str | None, json_mod
     extra = {"make_room_for": make_room} if make_room else {}
     answer = _account_call("fork_public_design", address=address, to_propose=to_propose, **extra)
     if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
-        click.echo(_shown(answer.get("error", ""), lines=True), err=True)
+        click.echo(_shown(read_refusal(answer).said, lines=True), err=True)
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
@@ -826,7 +828,7 @@ def design_keep(design_id: str, make_room: str | None, json_mode: bool) -> None:
     extra = {"make_room_for": make_room} if make_room else {}
     answer = _account_call("keep_proposal_copy", design_id=design_id, **extra)
     if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
-        click.echo(_shown(answer.get("error", ""), lines=True), err=True)
+        click.echo(_shown(read_refusal(answer).said, lines=True), err=True)
         offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
         if offered:
             click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)

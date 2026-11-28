@@ -31,7 +31,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from kiln import plain_words as _plain_words
-from kiln.served_answer import Miss, classify_answer, classify_transport_error, local_fault
+from kiln.served_answer import Miss, classify_answer, classify_transport_error, local_fault, read_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -212,8 +212,9 @@ def _read(answer: Any) -> tuple[dict[str, Any] | None, Miss | None]:
         if isinstance(plans, list) and plans and isinstance(plans[0], dict):
             return answer, None
         return None, Miss("unanswered", detail="an answer with no plan in it")
-    if isinstance(answer, dict) and answer.get("success") is False and answer.get("error"):
-        return None, classify_answer(answer) or Miss("refused", str(answer.get("code") or ""), str(answer["error"]))
+    refused = read_refusal(answer)
+    if isinstance(answer, dict) and answer.get("success") is False and refused.given:
+        return None, classify_answer(answer) or Miss("refused", str(answer.get("code") or ""), refused.words())
     return None, classify_answer(answer) or Miss("unanswered", detail="an answer that did not say it succeeded")
 
 

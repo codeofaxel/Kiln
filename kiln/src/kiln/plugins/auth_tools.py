@@ -32,6 +32,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln.plan_proof import proof_fields as _plan_proof_fields
+from kiln.served_answer import read_refusal
 from kiln.tool_annotations import creates, destructive
 
 
@@ -110,10 +111,11 @@ class _AuthToolsPlugin:
                     code="SIGNIN_START_FAILED",
                 )
 
-            if not resp.get("success", True) and resp.get("error"):
+            refused = read_refusal(resp)
+            if not resp.get("success", True) and refused.given:
                 _record_signin_stage("start_failed")
                 return _srv._error_dict(
-                    resp.get("error") or "Could not start the sign-in flow.",
+                    refused.words("Could not start the sign-in flow."),
                     code="SIGNIN_START_FAILED",
                 )
 

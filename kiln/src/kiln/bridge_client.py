@@ -46,8 +46,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from kiln.api_device import CLIENT_VERSION_HEADER, client_headers
 from kiln.cli_command import kiln_command
 from kiln.outbound_guard import scrub_relayed
+from kiln.served_answer import read_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -455,7 +457,7 @@ def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
     def fetch(token: str) -> str:
         url = f"{api}/api/artifact/{urllib.parse.quote(str(token), safe='')}"
         request = urllib.request.Request(
-            url, headers={"Authorization": f"Bearer {get_bearer()}"}
+            url, headers=client_headers({"Authorization": f"Bearer {get_bearer()}"})
         )
         # A folder of its own, so nothing else on this computer can name the
         # copy or the notes beside it.
@@ -942,11 +944,12 @@ class BridgeClient:
                 bearer = lapsed_session_token()
             except Exception:  # never let auth resolution break the bridge
                 logger.debug("lapsed session token unreadable", exc_info=True)
-        headers = {
+        headers = client_headers({
             "Authorization": f"Bearer {bearer}",
             "X-Kiln-Device-Fingerprint": _device_fingerprint(),
-            "X-Kiln-Client-Version": _running_version(),
-        }
+        })
+        # The version this process runs, the one the state file reports.
+        headers[CLIENT_VERSION_HEADER] = _running_version()
         # Who this computer is, in words a person recognises: the relay files
         # one presence row per fingerprint, and the web page shows each row
         # by this name with its own connected/offline state, so the reader
@@ -1883,7 +1886,7 @@ def _account_call(method: str, path: str, bearer: str, **kwargs: Any) -> tuple[i
     machine's id (:data:`_MACHINE_HEADER`).  Never raises."""
     import requests
 
-    headers = {"Authorization": f"Bearer {bearer}"}
+    headers = client_headers({"Authorization": f"Bearer {bearer}"})
     machine = _machine_id()
     if machine:
         headers[_MACHINE_HEADER] = machine
@@ -2021,7 +2024,7 @@ def ask_the_account(
     status, data = answered
     held = data.get("pending") if isinstance(data.get("pending"), dict) else {}
     if not (200 <= status < 300) or not str(held.get("id") or ""):
-        code = str(data.get("error") or f"http_{status}")
+        code = read_refusal(data).code or f"http_{status}"
         logger.debug("account: ask not held (%s)", code)
         return AccountAsk(picture_sent=picture is not None, refused=code, card_sent=tuple(sorted(extra)))
     expires_at = _epoch(held.get("expires_at"))
@@ -2068,7 +2071,7 @@ def withdraw_ask(file_sha256: str, printer_name: str) -> tuple[str, bool] | None
         return ask.id, False
     status, data = answered
     if not (200 <= status < 300):
-        logger.debug("account: withdraw answered %s (%s)", status, data.get("error"))
+        logger.debug("account: withdraw answered %s (%s)", status, read_refusal(data).code)
         return ask.id, False
     return ask.id, True
 
@@ -2093,7 +2096,7 @@ def read_the_account(*, file_sha256: str, printer_name: str) -> AccountAnswer | 
         return None
     status, data = answered
     if not (200 <= status < 300):
-        logger.debug("account: may-i-print answered %s (%s)", status, data.get("error"))
+        logger.debug("account: may-i-print answered %s (%s)", status, read_refusal(data).code)
         return None
     authority = data.get("authority") if isinstance(data.get("authority"), dict) else {}
     pending = data.get("pending") if isinstance(data.get("pending"), dict) else {}
@@ -2226,7 +2229,7 @@ def rename_on_account(old_name: str, new_name: str) -> tuple[bool, str] | None:
     try:
         resp = requests.post(
             f"{_api_base()}/api/printers/rename",
-            headers={"Authorization": f"Bearer {bearer}"},
+            headers=client_headers({"Authorization": f"Bearer {bearer}"}),
             json={"old_name": old_name, "new_name": new_name},
             timeout=_ACCOUNT_TIMEOUT_S,
         )
@@ -2242,7 +2245,7 @@ def rename_on_account(old_name: str, new_name: str) -> tuple[bool, str] | None:
         return True, ""
     if resp.status_code >= 500:
         return None
-    return False, str(body.get("error") or body.get("message") or f"the account answered {resp.status_code}")
+    return False, read_refusal(body).words(f"the account answered {resp.status_code}")
 
 
 def revoke_on_account(grant_id: str, *, reason: str = "") -> bool:
@@ -2264,7 +2267,7 @@ def revoke_on_account(grant_id: str, *, reason: str = "") -> bool:
     if answered is None:
         return False
     status, data = answered
-    return 200 <= status < 300 or data.get("error") in ("delegation_revoked", "delegation_unknown")
+    return 200 <= status < 300 or read_refusal(data).code in ("delegation_revoked", "delegation_unknown")
 
 
 def record_start(*, authority_id: str, kind: str, file_sha256: str, printer_name: str) -> bool:
@@ -2288,7 +2291,7 @@ def record_start(*, authority_id: str, kind: str, file_sha256: str, printer_name
         return False
     status, data = answered
     if not (200 <= status < 300) or not isinstance(data.get("event"), dict):
-        logger.debug("account: record-start answered %s (%s)", status, data.get("error"))
+        logger.debug("account: record-start answered %s (%s)", status, read_refusal(data).code)
         return False
     return True
 
@@ -2311,7 +2314,8 @@ def confirm_on_screen(challenge_id: str) -> tuple[bool, str, str]:
     status, data = answered
     if 200 <= status < 300 and isinstance(data.get("approval"), dict):
         return True, "", ""
-    return False, str(data.get("error") or f"http_{status}"), str(data.get("message") or "")
+    refusal = read_refusal(data)
+    return False, refusal.code or f"http_{status}", refusal.said
 
 
 def alert_hardware(
@@ -2355,7 +2359,7 @@ def alert_hardware(
         return "unanswered", None
     status, data = answered
     if not (200 <= status < 300):
-        logger.debug("account: hardware-alert answered %s (%s)", status, data.get("error"))
+        logger.debug("account: hardware-alert answered %s (%s)", status, read_refusal(data).code)
         return ("refused" if 400 <= status < 500 else "unanswered"), None
     return "sent", _device_count(data.get("alert_devices"))
 

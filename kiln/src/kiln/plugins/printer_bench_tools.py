@@ -55,6 +55,7 @@ from typing import Any
 
 from kiln import bench
 from kiln import plain_words as _plain_words
+from kiln.served_answer import read_refusal
 from kiln.tool_annotations import destructive
 
 _logger = logging.getLogger(__name__)
@@ -1382,7 +1383,7 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
         if miss is not None:
             return _limits_missed(session, miss, "make the test print")
         if made.get("status") != "ok":
-            code, said = str(made.get("code") or ""), str(made.get("error") or "")
+            code, said = str(made.get("code") or ""), read_refusal(made).said
             if code in ("UNKNOWN_MATERIAL", "INVALID_INPUT"):
                 session["step"] = "limits_material"
                 return _reply(session, f"{said} Which plastic will you print it in?", options=_MATERIAL_OPTIONS)
@@ -1420,7 +1421,7 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
             if miss is not None:
                 return _limits_missed(session, miss, "read the sliced files")
             if read.get("status") != "ok":
-                return _reply(session, f"{read.get('error') or 'Kiln could not read those files.'} "
+                return _reply(session, f"{read_refusal(read).words('Kiln could not read those files.')} "
                               "Slice each plate as it was made, and send the files again.",
                               options=["skip"], print_files=[p["stl_path"] for p in plates])
             session["questions"] = list(read.get("questions") or session["questions"])
@@ -1536,7 +1537,7 @@ def _advance_limits(session: dict[str, Any], adapter: Any, answer: Any,  # noqa:
             session["questions"] = list(said.get("questions") or session["questions"])
             _start_questions(session, every=True)
             first = _questions_now(session)[0]
-            return _reply(session, f"{said.get('error') or 'Kiln could not keep those readings.'} "
+            return _reply(session, f"{read_refusal(said).words('Kiln could not keep those readings.')} "
                           + _question_ask(session, first),
                           options=[f"{float(s):g}" for s in first.get("steps") or []] + ["none", "all"])
         session["learned"] = list(session.get("learned") or []) + [str(h) for h in said.get("heard") or []]

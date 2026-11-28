@@ -81,6 +81,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
+from kiln.served_answer import read_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -775,27 +776,23 @@ def _request(
             }
         from kiln.signin_offer import FIELD, history_offer
 
-        answer = {
+        said = signed_out_message()
+        block = history_offer(tool)
+        refusal = {
             "status": "error",
             "success": False,
-            "error": signed_out_message(),
+            "error": f"{block['message']} {said}" if block is not None else said,
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool,
             "why": "signed_out",
             **signin_hint_fields(),
         }
-        block = history_offer(tool)
         if block is not None:
-            answer["error"] = f"{block['message']} {answer['error']}"
-            answer[FIELD] = block
-        return answer
-    try:
-        from kiln.version_check import _current_version
+            refusal[FIELD] = block
+        return refusal
+    from kiln.api_device import client_headers
 
-        version = _current_version()
-    except Exception:  # noqa: BLE001 — a header is never worth failing over
-        version = ""
-    headers = {"Authorization": f"Bearer {bearer}", "X-Kiln-Client-Version": version}
+    headers = client_headers({"Authorization": f"Bearer {bearer}"})
     sent: dict[str, Any] = {"json": body}
     if content is not None:
         sent = {"content": content}
@@ -1013,7 +1010,7 @@ def _send_recipes(tool: str, design_id: str, rows: list[dict[str, Any]]) -> dict
     if answer.get("status") == "error":
         return {
             "sent": 0,
-            "error": answer.get("error") or "Kiln's servers did not keep them.",
+            "error": read_refusal(answer).words("Kiln's servers did not keep them."),
             "code": answer.get("code"),
             "note": "The branch is in your Kiln account; its proven recipes are not, so run the push again later.",
         }
@@ -1028,7 +1025,7 @@ def _bring_recipes(tool: str, design_id: str, vault: Any) -> dict[str, Any]:
     answer = _request(tool, "GET", f"/api/cloud/designs/{_quote(design_id)}/proven")
     if answer.get("status") == "error":
         return {
-            "error": answer.get("error") or "Kiln's servers did not answer.",
+            "error": read_refusal(answer).words("Kiln's servers did not answer."),
             "code": answer.get("code"),
             "note": "The design is here; its proven recipes are not, so pull again later.",
         }
@@ -1343,7 +1340,7 @@ def _keep_as_this_computers(
     if answer.get("status") == "error":
         if _plan_refusal(answer):
             return refused
-        return {**refused, "kept_as_refused": {"code": answer.get("code"), "error": answer.get("error")}}
+        return {**refused, "kept_as_refused": {"code": answer.get("code"), "error": read_refusal(answer).words()}}
     kept_id = answer.get("branch_id")
     if isinstance(kept_id, str) and kept_id and kept_id != own_id:
         # The account keeps this computer's copy under an id of its own.
@@ -1498,7 +1495,7 @@ def _send_models(
                 "version_id": version_id,
                 "error": (
                     f"The model of version {version_id} was not kept in your Kiln account, so "
-                    f"nothing was pushed: {answer.get('error') or 'Kiln did not say why.'}"
+                    f"nothing was pushed: {read_refusal(answer).words('Kiln did not say why.')}"
                 ),
             }, None, {}
         kept.add(sha)
@@ -1948,7 +1945,7 @@ def _bring_notes(
         if batch is None:
             if said.get("status") == "error" and said.get("http_status") not in (404, 405):
                 logger.warning("history: the notes beside the pulled models were not asked for: %s",
-                               said.get("error") or said.get("code"))
+                               read_refusal(said).said or read_refusal(said).code)
             return None
         listed.update(batch)
     fetched, left = 0, 0
@@ -1966,7 +1963,7 @@ def _bring_notes(
             ):
                 left += 1
                 logger.warning("history: the %s note of model %s stays in the account: %s",
-                               suffix, sha[:12], got.get("error") or got.get("code") or "it does not name the model")
+                               suffix, sha[:12], read_refusal(got).words("it does not name the model"))
                 continue
             fetched += 1
     return {"fetched": fetched, "left_in_account": left}
@@ -2020,7 +2017,7 @@ def _fetch_models(tool: str, answer: dict[str, Any], vault: Any) -> dict[str, An
                 "version_id": version_id,
                 "error": (
                     f"The model of version {version_id} could not be brought from your Kiln "
-                    f"account, so nothing was pulled: {got.get('error') or 'Kiln did not say why.'}"
+                    f"account, so nothing was pulled: {read_refusal(got).words('Kiln did not say why.')}"
                 ),
             }
         data = got["content"]
@@ -2242,10 +2239,10 @@ def _auto_push(changed: dict[str, list[str]], vault: Any) -> dict[str, Any]:
                 row["said"] = f"Saved {name} of {design_id} to your Kiln account."
             elif answer.get("code") == LOCKED_CODE:
                 row["code"] = LOCKED_CODE
-                row["said"] = answer["error"]
+                row["said"] = read_refusal(answer).words()
             else:
                 row["code"] = answer.get("code")
-                why = str(answer.get("error") or "Kiln's servers did not keep it.").rstrip(".")
+                why = read_refusal(answer).words("Kiln's servers did not keep it.").rstrip(".")
                 if _diverged(answer):
                     why = "the branch in your Kiln account moved on another computer"
                 row["said"] = (

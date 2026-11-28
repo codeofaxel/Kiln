@@ -15,6 +15,7 @@ import os
 import time
 
 from kiln import plain_words as _plain_words
+from kiln.api_device import client_headers
 from kiln.cli_command import kiln_command
 
 # The header of the document at kiln3d.com/terms carries its own page
@@ -178,7 +179,7 @@ def _server_request(path: str, method: str, bearer: str, payload: dict | None = 
     from kiln.api_device import device_fingerprint_headers
 
     try:
-        headers = {"Authorization": f"Bearer {bearer}"}
+        headers = client_headers({"Authorization": f"Bearer {bearer}"})
         # The /api/terms/* routes are gated by _require_authed_tenant; the
         # device fingerprint names this machine to them.
         headers.update(device_fingerprint_headers())

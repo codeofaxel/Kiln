@@ -89,7 +89,7 @@ def ask(op: str, deco_dir: Path, *, asked_by_user: bool = True, **args: Any) -> 
     :raises MemoryUnavailable: no answer (offline, signed out, silent, or a
         plan that does not include decoration memory).
     """
-    from kiln.served_answer import classify_answer
+    from kiln.served_answer import classify_answer, read_refusal
     from kiln.server import _pro_api_call
 
     records = _records(deco_dir)
@@ -105,7 +105,7 @@ def ask(op: str, deco_dir: Path, *, asked_by_user: bool = True, **args: Any) -> 
     if isinstance(answer, dict) and classify_answer(answer) is None and answer.get("op") == op:
         return answer
     if isinstance(answer, dict) and answer.get("code") == "INVALID_ARGUMENT":
-        raise ValueError(str(answer.get("error") or "Kiln's servers could not use this request."))
+        raise ValueError(read_refusal(answer).words("Kiln's servers could not use this request."))
     raise MemoryUnavailable(answer if isinstance(answer, dict) else {"error": "Kiln's servers gave no answer."})
 
 

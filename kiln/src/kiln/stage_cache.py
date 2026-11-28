@@ -42,6 +42,8 @@ import os
 import threading
 from pathlib import Path
 
+from kiln.api_device import client_headers
+
 logger = logging.getLogger(__name__)
 
 #: Opt out of the network fetch entirely (air-gapped installs, tests).  A
@@ -157,7 +159,7 @@ def _fetch(doc: str, etag: str | None) -> tuple[str, str | None] | None:
     except ImportError:
         return None
 
-    headers = {"If-None-Match": etag} if etag else {}
+    headers = client_headers({"If-None-Match": etag} if etag else {})
     try:
         resp = httpx.get(
             f"{_api_base()}{_DOCS[doc]['endpoint']}",

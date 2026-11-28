@@ -29,6 +29,7 @@ from typing import Any
 
 from kiln import plain_words as _plain_words
 from kiln.cli_command import kiln_command
+from kiln.served_answer import ERROR_WORD_KEY, read_refusal
 from kiln.tool_annotations import creates, destructive, read_only
 
 #: Where the account owner turns chat-driven cap changes on.
@@ -38,7 +39,7 @@ _TIMEOUT_S = 15.0
 
 #: Keys of a refusal that are the envelope's own and are not repeated as
 #: detail.
-_ENVELOPE_KEYS = frozenset({"success", "error", "message"})
+_ENVELOPE_KEYS = frozenset({"success", "error", "message", ERROR_WORD_KEY})
 
 
 def _ok(payload: dict[str, Any]) -> dict[str, Any]:
@@ -83,15 +84,16 @@ def _call(
     """
     import httpx
 
+    from kiln.api_device import client_headers
     from kiln.auth_session import _api_base
 
     resp = httpx.request(
         method,
         f"{_api_base()}{path}",
-        headers={
+        headers=client_headers({
             "Authorization": f"Bearer {token}",
             "User-Agent": "kiln-mcp-spend-caps/1.0",
-        },
+        }),
         json=body if method != "GET" else None,
         timeout=_TIMEOUT_S,
     )
@@ -125,10 +127,12 @@ def _refusal(resp: dict[str, Any], *, default: str) -> dict[str, Any]:
 
     ``enable_url``, ``retry_after_seconds`` and the like are folded into the
     message as ``key=value`` so they reach the person even through a client
-    that shows only the message.
+    that shows only the message.  The code is the refusal's code word and the
+    message its sentence (:func:`kiln.served_answer.read_refusal`).
     """
-    code = str(resp.get("error") or "ERROR").upper()
-    message = resp.get("message") or resp.get("error") or default
+    refusal = read_refusal(resp)
+    code = (refusal.code or "ERROR").upper()
+    message = refusal.words(default)
     extras = [f"{k}={v}" for k, v in resp.items() if k not in _ENVELOPE_KEYS]
     if extras:
         message = f"{message}  ({'; '.join(extras)})"
@@ -179,10 +183,8 @@ class _SpendCapToolsPlugin:
             if refusal:
                 return refusal
             if not resp.get("success"):
-                return _err(
-                    resp.get("error") or "Could not load spend caps.",
-                    code=str(resp.get("error") or "UNKNOWN").upper(),
-                )
+                refusal = read_refusal(resp)
+                return _err(refusal.words("Could not load spend caps."), code=(refusal.code or "UNKNOWN").upper())
             caps = resp.get("caps") or {}
             enabled = bool(resp.get("agent_flow_enabled"))
             payload: dict[str, Any] = {

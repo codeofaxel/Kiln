@@ -50,6 +50,8 @@ from pathlib import Path
 from typing import Any
 
 from kiln import plain_words as _plain_words
+from kiln.api_device import client_headers
+from kiln.served_answer import read_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +314,7 @@ def lay_notes_beside(
     try:
         resp = httpx.get(
             f"{(api or _api_base()).rstrip('/')}/api/artifact/{token}/notes",
-            headers={"Authorization": f"Bearer {bearer}"},
+            headers=client_headers({"Authorization": f"Bearer {bearer}"}),
             timeout=_NOTES_FETCH_TIMEOUT_S,
         )
         notes = resp.json().get("notes") if resp.status_code == 200 else None
@@ -356,7 +358,7 @@ def _fetch_look(token: str, kind: str) -> str | None:
     try:
         resp = httpx.get(
             f"{_api_base()}/api/artifact/{token}",
-            headers={"Authorization": f"Bearer {bearer}"},
+            headers=client_headers({"Authorization": f"Bearer {bearer}"}),
             timeout=_FETCH_TIMEOUT_S,
         )
     except Exception:  # noqa: BLE001 — a look is furniture, never a failed make
@@ -453,7 +455,7 @@ def _bring_documents(answer: dict) -> None:
         try:
             resp = httpx.get(
                 f"{_api_base()}/api/artifact/{token}",
-                headers={"Authorization": f"Bearer {bearer}"},
+                headers=client_headers({"Authorization": f"Bearer {bearer}"}),
                 timeout=_FETCH_TIMEOUT_S,
             )
             if resp.status_code != 200 or not resp.content:
@@ -573,7 +575,7 @@ def _bring_files(answer: dict, trip: dict | None) -> None:
         try:
             resp = httpx.get(
                 f"{_api_base()}/api/artifact/{token}",
-                headers={"Authorization": f"Bearer {bearer}"},
+                headers=client_headers({"Authorization": f"Bearer {bearer}"}),
                 timeout=_FILE_FETCH_TIMEOUT_S,
             )
             if resp.status_code != 200 or not resp.content:
@@ -890,7 +892,7 @@ def keep(artifact_token: str) -> dict[str, Any]:
     try:
         resp = httpx.post(
             f"{_api_base()}/api/artifact/{token}/keep",
-            headers={"Authorization": f"Bearer {bearer}"},
+            headers=client_headers({"Authorization": f"Bearer {bearer}"}),
             timeout=_UPLOAD_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001
@@ -1036,7 +1038,7 @@ def _upload(
         with path.open("rb") as fh:
             resp = httpx.post(
                 f"{_api_base()}{route}",
-                headers={"Authorization": f"Bearer {bearer}"},
+                headers=client_headers({"Authorization": f"Bearer {bearer}"}),
                 files={"file": (path.name, fh, "application/octet-stream")},
                 data=field_data or None,
                 timeout=_UPLOAD_TIMEOUT_S,
@@ -1053,8 +1055,7 @@ def _upload(
     if resp.status_code == 200 and token:
         return token, ""
     _upload_miss(on_miss, status=resp.status_code)
-    said = str((body or {}).get("error") or "").strip()
-    return None, said or f"Kiln's servers did not accept the file (HTTP {resp.status_code})."
+    return None, read_refusal(body).words(f"Kiln's servers did not accept the file (HTTP {resp.status_code}).")
 
 
 def _as_local_file(value: Any, suffixes: frozenset[str]) -> Path | None:
@@ -1107,7 +1108,7 @@ def _upload_file(local: Path, *, on_miss: Any = None) -> tuple[str | None, str]:
             body = payload if payload is not None else stack.enter_context(local.open("rb"))
             resp = httpx.post(
                 f"{_api_base()}/api/tool-inputs",
-                headers={"Authorization": f"Bearer {bearer}"},
+                headers=client_headers({"Authorization": f"Bearer {bearer}"}),
                 files={"file": (local.name, body, "application/octet-stream")},
                 timeout=_FILE_UPLOAD_TIMEOUT_S,
             )
@@ -1123,8 +1124,7 @@ def _upload_file(local: Path, *, on_miss: Any = None) -> tuple[str | None, str]:
     if resp.status_code == 200 and token:
         return token, ""
     _upload_miss(on_miss, status=resp.status_code)
-    said = str((answer or {}).get("error") or "").strip()
-    return None, said or f"Kiln's servers did not accept the file (HTTP {resp.status_code})."
+    return None, read_refusal(answer).words(f"Kiln's servers did not accept the file (HTTP {resp.status_code}).")
 
 
 def _names_a_path(text: str) -> bool:

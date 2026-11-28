@@ -48,6 +48,7 @@ from kiln.printer_setup import CLI_REMEDY
 from kiln.printers.base import PrinterError
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.proc_alive import pid_alive
+from kiln.served_answer import read_refusal
 
 # Exception types for typed catch handlers (prefer specific over blanket Exception)
 #: What an ordering command catches: the installed order service's error
@@ -1100,9 +1101,7 @@ def _route_without_the_router(
     chosen = (routing or {}).get("recommended_printer") or {}
     if routing and chosen.get("printer_id"):
         return str(chosen["printer_id"]), routing, None
-    error = answer.get("error")
-    message = error.get("message") if isinstance(error, dict) else error
-    return None, None, str(message or "Kiln's servers did not plan a route; nothing was routed.")
+    return None, None, read_refusal(answer).words("Kiln's servers did not plan a route; nothing was routed.")
 
 
 def _scan_ingest_directory(watch_dir: Path, seen: dict[str, float]) -> list[Path]:
@@ -2170,7 +2169,7 @@ def sharing_history(where: str | None) -> None:
         return
     answer = print_keeping.set_account_choice(where)
     if answer.get("status") == "error":
-        click.echo(f"Nothing was changed: {answer.get('error')}", err=True)
+        click.echo(f"Nothing was changed: {read_refusal(answer).words()}", err=True)
         raise SystemExit(1)
     click.echo(said[where])
 
@@ -2181,7 +2180,7 @@ def sharing_team_printers() -> None:
 
 
 def _team_printer_refusal(answer: dict[str, Any]) -> None:
-    said = answer.get("detail") if isinstance(answer.get("detail"), str) else answer.get("error")
+    said = answer.get("detail") if isinstance(answer.get("detail"), str) else read_refusal(answer).words()
     click.echo(f"Nothing was changed: {said}", err=True)
     raise SystemExit(1)
 

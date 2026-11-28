@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.served_answer import Miss
+from kiln.served_answer import Miss, read_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -148,4 +148,4 @@ def _is_answer(answer: Any, question: str) -> bool:
     if answer.get("success") is True and answer.get("status") == "ok":
         key = _ANSWER_KEY.get(question)
         return key is not None and key in answer
-    return answer.get("success") is False and answer.get("code") == "INVALID_INPUT" and bool(answer.get("error"))
+    return answer.get("success") is False and answer.get("code") == "INVALID_INPUT" and read_refusal(answer).given
