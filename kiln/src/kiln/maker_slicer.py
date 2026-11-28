@@ -622,9 +622,8 @@ PLATE_SAID: dict[str, str] = {
     "textured_cool_plate": "Textured Cool Plate",
 }
 
-#: What each slicer calls a plate in its ``curr_bed_type`` setting.  A slicer
-#: reads a name it does not know as the Cool Plate, so a plate is listed only
-#: under a name that slicer reads back as the same plate.
+#: What each slicer calls a plate in its ``curr_bed_type`` setting; a plate is
+#: listed only under a name that slicer reads back as the same plate.
 PLATE_SETTING_NAMES: dict[str, dict[str, str]] = {
     "bambu_studio": {
         "cool_plate": "Cool Plate",
