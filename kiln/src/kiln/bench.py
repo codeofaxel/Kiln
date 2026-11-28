@@ -538,6 +538,9 @@ def has_pro() -> bool:
 
 #: Each move a walk is offered for, as its offer names it.
 WALK_MOVE_WORDS = {"home": "homing", "park": "park"}
+#: What the printer does by itself during every print, by walk move, as the
+#: end of "Your <printer> ...".
+WALK_ITSELF = {"home": "finds its home position", "park": "moves to its resting spot"}
 
 
 def gain_sentence(lesson: str, gaps: Any, model_name: str, *, pro: bool | None = None) -> str:
@@ -550,8 +553,8 @@ def gain_sentence(lesson: str, gaps: Any, model_name: str, *, pro: bool | None =
                 "prints, so it judges your designs by what your printer can do.")
     if lesson == WALK:
         move = next((g for g in (gaps or []) if g in WALK_MOVE_WORDS), "park")
-        return (f"Printing is not affected. Kiln can learn this {WALK_MOVE_WORDS[move]} on your {model_name} with "
-                "you, one small step at a time, while you watch.")
+        return (f"Your {model_name} {WALK_ITSELF[move]} by itself during every print. Kiln can learn to do it "
+                "for you, too: a few small moves, and you watch each one. Printing is not affected.")
     words = [g for g in (gaps or []) if isinstance(g, str)]
     verbs = [_OFFER_VERBS[b] for b in ("pause", "cancel", "end") if b in words]
     fits = _FITS_PRO if (has_pro() if pro is None else pro) else _FITS_FREE
