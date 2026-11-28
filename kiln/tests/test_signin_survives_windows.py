@@ -13,7 +13,10 @@ shows the behaviour on any platform:
   token a second time;
 * the account's plan is saved onto the file as it is under the renewal lock,
   so a pair renewed meanwhile is kept, and the plan is still answered when the
-  save cannot be made.
+  save cannot be made;
+* ``kiln whoami``, a new sign-in and ``kiln signout`` wait for a renewal
+  running in another process, so none is undone by it, and a renewal that
+  waited through a sign-out does not sign the computer back in.
 """
 
 from __future__ import annotations
@@ -259,3 +262,116 @@ class TestThePlanIsSavedUnderTheRenewalLock:
         assert answers == [LicenseTier.PRO]
         saved = _stored(auth_home)
         assert (saved["refresh_token"], saved["tier"]) == ("rt-renewed", "pro")
+
+
+@contextlib.contextmanager
+def _a_renewal_running_elsewhere(home: Path, renewed: str, *, for_s: float = 0.3):
+    """Another process mid-renewal: it holds the real renewal lock, has read
+    the sign-in, and writes its renewed pair over what it read just before it
+    lets go."""
+    holding = threading.Event()
+
+    def renew():
+        with auth_session._refresh_lock():
+            stored = _stored(home)
+            holding.set()
+            time.sleep(for_s)
+            stored.update(access_token=renewed, refresh_token="rt-rival")
+            _tokens_file(home).write_text(json.dumps(stored))
+
+    rival = threading.Thread(target=renew, daemon=True)
+    rival.start()
+    assert holding.wait(5)
+    try:
+        yield
+    finally:
+        rival.join(10)
+
+
+def _cli(*args: str):
+    import click
+    from click.testing import CliRunner
+
+    from kiln.cli.auth_commands import register_auth_cli
+
+    group = click.Group("kiln")
+    register_auth_cli(group)
+    return CliRunner().invoke(group, list(args))
+
+
+class TestEveryWriterWaitsForARenewalRunningElsewhere:
+    @pytest.fixture(autouse=True)
+    def _no_server(self, monkeypatch):
+        monkeypatch.setenv("KILN_API_URL", "http://127.0.0.1:9")
+        monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: None)
+        monkeypatch.setattr("kiln.terms.is_current", lambda **k: True)
+        monkeypatch.setattr("kiln.printers.motion_plan_cache.forget_all", lambda: 0)
+
+    def test_whoami_saves_the_tier_onto_the_renewed_pair(self, auth_home, monkeypatch):
+        from kiln.cli import auth_commands
+
+        _write_session(auth_home)
+        renewed = _jwt(time.time() + 7200)
+        monkeypatch.setattr(
+            auth_commands, "_http_get",
+            lambda *a, **k: (200, {"success": True, "email": "user@example.com", "tier": "pro"}),
+        )
+
+        with _a_renewal_running_elsewhere(auth_home, renewed):
+            result = _cli("whoami")
+
+        assert result.exit_code == 0, result.output
+        saved = _stored(auth_home)
+        assert (saved["access_token"], saved["refresh_token"]) == (renewed, "rt-rival")
+        assert saved["tier"] == "pro"
+
+    def test_a_new_sign_in_is_not_overwritten_by_the_old_one_renewed(self, auth_home, monkeypatch):
+        from kiln.cli import auth_commands
+
+        _write_session(auth_home, email="old@example.com")
+        monkeypatch.setattr(auth_commands, "_record_signin_stage", lambda stage: None)
+        new_sign_in = {"access_token": _jwt(time.time() + 3600), "refresh_token": "rt-new",
+                       "email": "new@example.com", "tier": "free", "signed_in_at": int(time.time())}
+
+        with _a_renewal_running_elsewhere(auth_home, _jwt(time.time() + 7200)):
+            auth_commands._complete_signin(dict(new_sign_in), door="cli")
+
+        assert _stored(auth_home) == new_sign_in
+
+    def test_signout_is_not_undone_by_a_renewal(self, auth_home):
+        _write_session(auth_home)
+
+        with _a_renewal_running_elsewhere(auth_home, _jwt(time.time() + 7200)):
+            result = _cli("signout")
+
+        assert result.exit_code == 0, result.output
+        assert not _tokens_file(auth_home).exists()
+
+    def test_a_renewal_that_waited_through_a_signout_stays_signed_out(self, auth_home, monkeypatch):
+        _write_session(auth_home, access_token=_jwt(time.time() + 60))
+        sent = _exchanges(monkeypatch)
+
+        @contextlib.contextmanager
+        def signed_out_while_this_waited():
+            _tokens_file(auth_home).unlink()
+            yield False
+
+        monkeypatch.setattr(auth_session, "_refresh_lock", signed_out_while_this_waited)
+
+        result = resolve_session_bearer()
+
+        assert sent == []
+        assert (result.token, result.state) == ("", "signed_out")
+        assert not _tokens_file(auth_home).exists()
+
+    def test_signout_refused_while_a_renewal_runs_says_so_plainly(self, auth_home, monkeypatch, short_wait):
+        _write_session(auth_home)
+        _lock_not_taken(monkeypatch, after_the_whole_wait=True)
+
+        result = _cli("signout")
+
+        assert result.exit_code != 0
+        assert "still signed in" in result.output
+        assert "another Kiln on this computer is renewing the sign-in" in result.output
+        assert "Traceback" not in result.output
+        assert _tokens_file(auth_home).exists()

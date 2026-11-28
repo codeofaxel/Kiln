@@ -52,7 +52,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import stat
 import sys
 import time
 from pathlib import Path
@@ -93,15 +92,14 @@ def _tokens_path() -> Path:
 
 
 def _write_tokens(data: dict[str, Any]) -> None:
-    """Atomic + 0600.  Create the directory with 0700 perms first so
-    we never leave an intermediate mode-wide-open file on disk."""
-    path = _tokens_path()
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    with contextlib.suppress(OSError):
-        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 0600
-    tmp.replace(path)
+    """Save *data* as this computer's whole sign-in, replacing what is on
+    file: atomic, 0600, and under the renewal lock
+    (:func:`kiln.auth_session.update_tokens`), so a renewal running in
+    another Kiln process finishes first instead of writing the old sign-in
+    back over this one.  Raises :class:`OSError` when it cannot be saved."""
+    from kiln.auth_session import update_tokens
+
+    update_tokens(lambda _on_file: dict(data))
 
 
 def _record_signin_stage(stage: str) -> None:
@@ -201,10 +199,12 @@ def _read_tokens() -> dict[str, Any]:
 
 
 def _delete_tokens() -> bool:
-    path = _tokens_path()
-    if not path.exists():
+    """Remove this computer's sign-in under the renewal lock; ``True`` when
+    there was one.  Raises :class:`OSError` when it cannot be removed."""
+    from kiln.auth_session import remove_tokens
+
+    if not remove_tokens():
         return False
-    path.unlink()
     # Served motion plans are kept for the signed-in account; they leave
     # with it, so the next account on this machine starts with none.
     try:
@@ -658,7 +658,15 @@ def auth_logout() -> None:
     removed = False
     if holds_machine_credential(tokens):
         removed = revoke_machine_credential()
-    if _delete_tokens():
+    try:
+        deleted = _delete_tokens()
+    except OSError as exc:
+        from kiln.plain_words import said
+
+        raise click.ClickException(
+            f"This computer is still signed in: {said(exc)}. Run `kiln signout` again in a moment."
+        ) from exc
+    if deleted:
         if removed:
             click.echo("Signed out. This computer was removed from your Kiln account.")
         elif holds_machine_credential(tokens):
@@ -733,25 +741,37 @@ def auth_whoami(as_json: bool) -> None:
     # immediately after ``kiln whoami`` instead of waiting for its own
     # 24h auto-refresh.  Useful right after a Stripe upgrade: run
     # ``kiln whoami``, then every local tool sees the new tier.
-    # Read only now: another Kiln process may have renewed the sign-in while
-    # the server answered, and writing back a copy read before the call would
-    # put the superseded secret on disk.  The next renewal would present it,
-    # which the server reads as this computer's sign-in in use in two places.
-    tokens = _read_tokens()
+    # Applied to the file as it is under the renewal lock: another Kiln
+    # process may renew the sign-in at any moment, and writing back a copy
+    # read outside the lock would put the superseded secret on disk.  The
+    # next renewal would present it, which the server reads as this
+    # computer's sign-in in use in two places.
     proof = _plan_proof_fields(body)
-    stale_proof = proof and tokens.get("plan_proof") != proof["plan_proof"]
-    if (
-        str(tokens.get("tier") or "").lower() != tier
-        or not tokens.get("signed_in_at")
-        or stale_proof
-    ):
+
+    def _with_the_tier(tokens: dict[str, Any]) -> dict[str, Any] | None:
+        if not str(tokens.get("access_token") or "").strip():
+            return None
+        stale_proof = proof and tokens.get("plan_proof") != proof["plan_proof"]
+        if (
+            str(tokens.get("tier") or "").lower() == tier
+            and tokens.get("signed_in_at")
+            and not stale_proof
+        ):
+            return None
         tokens["tier"] = tier
         tokens["signed_in_at"] = int(time.time())
         tokens.pop("plan_proof", None)
         tokens.update(proof)
         if email:
             tokens["email"] = email
-        _write_tokens(tokens)
+        return tokens
+
+    from kiln.auth_session import update_tokens
+
+    # The answer below stands whether or not the copy on this computer could
+    # be brought up to date; the next plan check saves it.
+    with contextlib.suppress(OSError):
+        update_tokens(_with_the_tier)
 
     if as_json:
         click.echo(json.dumps(body, indent=2, sort_keys=True))

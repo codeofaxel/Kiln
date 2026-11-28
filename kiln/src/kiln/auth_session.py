@@ -166,11 +166,27 @@ def _read_tokens() -> dict:
         return {}
 
 
-#: Windows refuses to replace a file another process has open, and every Kiln
-#: process reads this one; the replace is tried again for up to half a second
-#: before the write is said to have failed.
+#: Windows refuses to replace or remove a file another process has open, and
+#: every Kiln process reads this one; the step is tried again for up to half a
+#: second before it is said to have failed.
 _REPLACE_TRIES = 10
 _REPLACE_RETRY_S = 0.05
+
+#: Said inside a sentence (``kiln.plain_words.said``), so it starts in lower
+#: case and has no full stop.
+_RIVAL_RENEWING = "another Kiln on this computer is renewing the sign-in"
+
+
+def _while_busy(step: Callable[[], object]) -> None:
+    """Run *step*, trying again while the file it touches is busy."""
+    for attempt in range(_REPLACE_TRIES):
+        try:
+            step()
+            return
+        except PermissionError:
+            if attempt == _REPLACE_TRIES - 1:
+                raise
+            time.sleep(_REPLACE_RETRY_S)
 
 
 def _write_tokens(data: dict) -> None:
@@ -184,14 +200,7 @@ def _write_tokens(data: dict) -> None:
         tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
         with contextlib.suppress(OSError):
             os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
-        for attempt in range(_REPLACE_TRIES):
-            try:
-                tmp.replace(path)
-                return
-            except PermissionError:
-                if attempt == _REPLACE_TRIES - 1:
-                    raise
-                time.sleep(_REPLACE_RETRY_S)
+        _while_busy(lambda: tmp.replace(path))
     except BaseException:
         with contextlib.suppress(OSError):
             tmp.unlink()
@@ -202,23 +211,43 @@ def update_tokens(change: Callable[[dict], dict | None]) -> dict:
     """Apply *change* to the saved sign-in as it is on disk now, under the
     renewal lock, and save what it returns (``None`` saves nothing).
 
-    A change to part of the saved sign-in goes through here, so it cannot put
-    back a sign-in another process renewed meanwhile.  Returns what is on
-    file afterwards.  Raises :class:`OSError` when it cannot be saved, and
-    :class:`TimeoutError` without saving while another process still holds
-    the lock after the whole wait: that process is renewing, and a write now
-    could put back the pair it is replacing."""
+    Every save of the sign-in other than the renewal goes through here, a new
+    sign-in included, so none can put back a sign-in another process renewed
+    meanwhile, and a renewal running elsewhere finishes before a new sign-in
+    replaces it.  Returns what is on file afterwards.  Raises
+    :class:`OSError` when it cannot be saved, and :class:`TimeoutError`
+    without saving while another process still holds the lock after the
+    whole wait: that process is renewing, and a write now could put back the
+    pair it is replacing."""
     with _refresh_lock() as rival_renewing:
         stored = _read_tokens()
         changed = change(dict(stored))
         if changed is None:
             return stored
         if rival_renewing:
-            raise TimeoutError(
-                "Another Kiln on this computer is renewing the sign-in, so this change was not saved."
-            )
+            raise TimeoutError(f"{_RIVAL_RENEWING}, so this change was not saved")
         _write_tokens(changed)
         return changed
+
+
+def remove_tokens() -> bool:
+    """Remove the saved sign-in under the renewal lock, so a renewal running
+    in another process finishes first instead of writing it back afterwards.
+
+    ``True`` when there was a sign-in to remove.  Raises :class:`OSError`
+    when it cannot be removed, and :class:`TimeoutError` without removing it
+    while another process still holds the lock after the whole wait."""
+    path = _tokens_path()
+    with _refresh_lock() as rival_renewing:
+        if not path.exists():
+            return False
+        if rival_renewing:
+            raise TimeoutError(f"{_RIVAL_RENEWING}, so it was not removed")
+        try:
+            _while_busy(path.unlink)
+        except FileNotFoundError:
+            return False
+        return True
 
 
 def _jwt_exp(token: str) -> float | None:
@@ -607,6 +636,12 @@ def resolve_session_bearer(
             # server nothing it has not already said.
             return rejected
         current = str(stored.get("access_token") or "").strip()
+        if not current:
+            # Signed out while this call waited on the lock: the refresh
+            # token read before it is not renewed back onto this computer.
+            from kiln.tiers_and_terms import signed_out_message
+
+            return SessionBearer(token="", state="signed_out", detail=signed_out_message())
         if verify:
             if current and current != token:
                 # A rival verified (or refreshed) first and the file
