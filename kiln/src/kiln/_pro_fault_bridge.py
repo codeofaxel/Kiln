@@ -20,7 +20,13 @@ With kiln-pro installed here the reading is read locally.  Otherwise this
 asks Kiln's servers (https://kiln3d.com) for the one code, through the door
 every served tool uses (``kiln.server._pro_api_call``), and keeps the answer
 for the session: a code's reading does not change, and a printer that keeps
-raising one code is asked about it once.  The servers apply the per-row rule
+raising one code is asked about it once.  A printer's status read tells this
+bridge which codes stand on it (:func:`standing`): a standing code's answer is
+kept for as long as the code stands, and dropped once no printer shows it, so
+the code coming back is asked about again.  An ask that got no answer is not
+repeated on every read either: the same code is asked again after
+:data:`MISS_RETRY_S`, doubling up to :data:`SERVICE_BACKOFF_S`, and at once
+when the code clears and comes back.  The servers apply the per-row rule
 from the account asking, so a reading that comes back here is one the caller
 is entitled to; nothing in this file decides a tier.
 
@@ -53,6 +59,10 @@ READING_TTL_S: float = 3600.0
 SERVICE_BACKOFF_S: float = 300.0
 #: A status read must not wait long on the network for a fault's reading.
 CONSULT_TIMEOUT_S: float = 4.0
+#: After an ask for one code got no answer, how long before that code is
+#: asked again; each further miss doubles it, up to :data:`SERVICE_BACKOFF_S`.
+#: A refusal the computer gave itself (signed out) is free and not held.
+MISS_RETRY_S: float = 30.0
 
 _HEX = frozenset("0123456789ABCDEF")
 _lock = threading.Lock()
@@ -65,6 +75,12 @@ _misses: dict[tuple[str, str], Any] = {}
 #: a second door reading the same code joins that ask rather than sending
 #: its own.
 _inflight: dict[tuple[str, str], threading.Event] = {}
+#: ``(hex digits, kind) -> (ask again at, the wait after the next miss)``.
+_retry_at: dict[tuple[str, str], tuple[float, float]] = {}
+#: ``(hex digits, kind) -> the printers showing that code now``.
+_standing_on: dict[tuple[str, str], set[str]] = {}
+#: ``printer -> the codes it showed at its last status read``.
+_printer_codes: dict[str, set[tuple[str, str]]] = {}
 _service_down_until: float = 0.0
 _service_down_miss: Any = None
 
@@ -212,10 +228,14 @@ def served_reading(code: str, *, kind: str = "print_error", wait: bool = True) -
     key = _key(code, kind)
     if not key[0]:
         return None
+    now = time.monotonic()
     with _lock:
         held = _answers.get(key)
-        if held is not None and held[0] > time.monotonic():
+        if held is not None and (held[0] > now or key in _standing_on):
             return held[1]
+        retry = _retry_at.get(key)
+        if retry is not None and now < retry[0] and key in _misses:
+            return None
         pending = _inflight.get(key)
         mine = pending is None
         if mine:
@@ -279,13 +299,53 @@ def _fetch(key: tuple[str, str], code: str, kind: str) -> dict[str, Any] | None:
         with _lock:
             _answers[key] = (time.monotonic() + READING_TTL_S, answer)
             _misses.pop(key, None)
+            _retry_at.pop(key, None)
         return answer
     miss = classify_answer(answer) or Miss("unanswered", detail="no reading in the answer")
     if isinstance(answer, dict) and answer.get("code") == "SERVER_UNREACHABLE":
         _service_down_until, _service_down_miss = time.monotonic() + SERVICE_BACKOFF_S, miss
     with _lock:
         _misses[key] = miss
+        if miss.cause != "signed_out":
+            _hold_miss(key)
     return None
+
+
+def _hold_miss(key: tuple[str, str]) -> None:
+    """Wait before asking about *key* again (call with :data:`_lock` held)."""
+    wait = _retry_at.get(key, (0.0, MISS_RETRY_S))[1]
+    _retry_at[key] = (time.monotonic() + wait, min(wait * 2.0, SERVICE_BACKOFF_S))
+
+
+def standing(printer: str, codes: Any) -> None:
+    """Record which fault codes *printer* shows right now.
+
+    *codes* is every ``(code, kind)`` its latest status read carries, empty
+    when it shows none.  A code that stands on some printer keeps its answer
+    for as long as it stands; a code no printer shows any more is forgotten,
+    so its next appearance is asked about again, at once.  Where kiln-pro is
+    installed the reading is local and nothing is kept, so nothing is noted.
+    """
+    if available():
+        return
+    now_codes = {key for key in (_key(c, k) for c, k in codes or ()) if key[0]}
+    with _lock:
+        before = _printer_codes.get(printer, set())
+        for key in now_codes - before:
+            _standing_on.setdefault(key, set()).add(printer)
+        for key in before - now_codes:
+            on = _standing_on.get(key)
+            if on is not None:
+                on.discard(printer)
+                if not on:
+                    del _standing_on[key]
+                    _answers.pop(key, None)
+                    _misses.pop(key, None)
+                    _retry_at.pop(key, None)
+        if now_codes:
+            _printer_codes[printer] = now_codes
+        else:
+            _printer_codes.pop(printer, None)
 
 
 def forget() -> None:
@@ -296,6 +356,9 @@ def forget() -> None:
         _answers.clear()
         _misses.clear()
         _inflight.clear()
+        _retry_at.clear()
+        _standing_on.clear()
+        _printer_codes.clear()
     _service_down_until, _service_down_miss = 0.0, None
 
 
@@ -321,6 +384,7 @@ def _shown(code: str) -> str:
 
 __all__ = [
     "CONSULT_TIMEOUT_S",
+    "MISS_RETRY_S",
     "READING_TTL_S",
     "SERVICE_BACKOFF_S",
     "WIRE_TOOL",
@@ -332,4 +396,5 @@ __all__ = [
     "safety_alert",
     "served_guide_for_code",
     "served_reading",
+    "standing",
 ]

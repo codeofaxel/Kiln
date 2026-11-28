@@ -104,6 +104,7 @@ class _Servers:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.offline = False
         self.signed_out = False
+        self.busy = False
 
     def __call__(self, tool_name: str, _timeout: float | None = None, _asked_by_user: bool = True, **kw: Any):
         self.calls.append((tool_name, dict(kw)))
@@ -112,6 +113,8 @@ class _Servers:
                     "why": "offline", "tool": tool_name}
         if self.signed_out:
             return {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "sign in", "why": "signed_out"}
+        if self.busy:
+            return {"status": "error", "success": False, "code": "SERVICE_BUSY", "error": "Kiln's servers are busy."}
         if tool_name == "fault_reading":
             return self._fault(kw)
         if tool_name == "maintenance_guide":
@@ -309,6 +312,88 @@ class TestThePrintersOwnThreadNeverWaits:
             if t.name == "kiln-fault-reading":
                 t.join(5)
         assert read_bambu_fault(CUTTER, kind="print_error", wait=False).reading == CUTTER_ROW["cause"]
+
+
+class _Clock:
+    """The bridge's clock, moved by hand."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    fake = _Clock()
+    monkeypatch.setattr(fault_bridge, "time", fake)
+    return fake
+
+
+RUNAWAY_HMS = {"attr": 0x07009600, "code": 0x00010001}
+
+
+class TestAStandingFaultIsAskedOnce:
+    """A printer sitting on one fault is asked about it once, however often
+    its status is read and however long the fault stands."""
+
+    def test_a_fault_that_stands_past_the_hour_is_not_asked_again(self, servers, adapter, clock):
+        _push(adapter, gcode_state="failed", print_error=CUTTER_DECIMAL)
+        adapter.get_state()
+        for _ in range(5):
+            clock.now += fault_bridge.READING_TTL_S
+            state = adapter.get_state()
+            assert CUTTER_ROW["cause"] in state.fault_note
+        assert len(_fault_calls(servers)) == 1
+
+    def test_a_fault_that_clears_and_comes_back_is_asked_again(self, servers, adapter, clock):
+        _push(adapter, gcode_state="failed", print_error=CUTTER_DECIMAL)
+        adapter.get_state()
+        _push(adapter, gcode_state="idle", print_error=0)
+        adapter.get_state()
+        clock.now += 1.0
+        _push(adapter, gcode_state="failed", print_error=CUTTER_DECIMAL)
+        state = adapter.get_state()
+        assert CUTTER_ROW["cause"] in state.fault_note
+        assert len(_fault_calls(servers)) == 2
+
+    def test_a_new_fault_is_asked_for_beside_one_already_standing(self, servers, adapter, clock):
+        _push(adapter, gcode_state="failed", print_error=CUTTER_DECIMAL)
+        adapter.get_state()
+        _push(adapter, gcode_state="failed", print_error=CUTTER_DECIMAL, hms=[RUNAWAY_HMS])
+        adapter.get_state()
+        adapter.get_state()
+        asked = [(_hex(kw["code"]), kw["kind"]) for kw in _fault_calls(servers)]
+        assert asked == [("12008001", "print_error"), ("0700960000010001", "hms")]
+
+    def test_a_refusal_is_not_asked_again_on_every_read(self, servers, adapter, clock):
+        servers.busy = True
+        _push(adapter, gcode_state="failed", print_error=CUTTER_DECIMAL)
+        for _ in range(10):
+            clock.now += 2.0
+            state = adapter.get_state()
+            assert "filament-cut fault" in state.fault_note
+        assert len(_fault_calls(servers)) == 1, "one refusal costs one ask, not two per status read"
+
+    def test_after_a_refusal_the_safety_line_arrives_when_the_servers_answer(self, servers, adapter, clock):
+        servers.busy = True
+        _push(adapter, gcode_state="idle", hms=[RUNAWAY_HMS])
+        state = adapter.get_state()
+        assert "safety" not in state.faults[0]
+        servers.busy = False
+        clock.now += fault_bridge.MISS_RETRY_S
+        state = adapter.get_state()
+        assert state.faults[0]["safety"] == RUNAWAY["means"]
+        assert len(_fault_calls(servers)) == 2
+
+    def test_the_safety_line_is_said_on_every_read_of_a_standing_fault(self, servers, adapter, clock):
+        _push(adapter, gcode_state="idle", hms=[RUNAWAY_HMS])
+        for _ in range(4):
+            clock.now += fault_bridge.READING_TTL_S
+            state = adapter.get_state()
+            assert state.faults[0]["safety"] == RUNAWAY["means"]
+        assert len(_fault_calls(servers)) == 1
 
 
 class TestTheSafetyAlertRides:

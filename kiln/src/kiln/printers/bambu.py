@@ -725,6 +725,20 @@ def compose_bambu_faults(
     return faults
 
 
+def _note_standing_faults(printer: str, faults: list[dict[str, Any]] | None) -> None:
+    """Tell the fault reader which codes stand on *printer* now, so a code
+    that stands is asked about once and a code that clears is asked about
+    again when it comes back."""
+    from kiln import _pro_fault_bridge
+
+    try:
+        _pro_fault_bridge.standing(
+            printer, [(entry["code"], entry["kind"]) for entry in faults or ()]
+        )
+    except Exception:  # noqa: BLE001 -- bookkeeping never costs a status read
+        logger.debug("standing fault codes not recorded", exc_info=True)
+
+
 def _attach_reading(entry: dict[str, Any]) -> None:
     """Put Kiln's reading of *entry*'s code on the entry, in the entry's own namespace."""
     fault = read_bambu_fault(entry["code"], kind=entry["kind"])
@@ -2743,6 +2757,7 @@ class BambuAdapter(PrinterAdapter):
         device_type = device_type_from_serial(getattr(self, "_serial", ""))
         kick_background_refresh(device_type)
         faults = compose_bambu_faults(status, device_type=device_type) or None
+        _note_standing_faults(self.name, faults)
 
         fault_note: str | None = None
         fault_remedy: str | None = None
