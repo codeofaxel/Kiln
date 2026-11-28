@@ -329,7 +329,7 @@ class TestOnlyTheLinesAWalkCarries:
     def test_a_comment(self, printer, servers, line):
         self._sent(printer, servers, line)
 
-    @pytest.mark.parametrize("line", ["G150", "G150.1", "G150.3", "M620 S0A", "M621 S0A", "M620.1 E F299 T240",
+    @pytest.mark.parametrize("line", ["G150", "G150.1", "G150.2", "G150.3 F8000", "G28 X T250", "G28 T300", "G28 X R1", "M620 S0A", "M621 S0A", "M620.1 E F299 T240",
                                       "PRINT_START", "CLEAN_NOZZLE", "M1002 gcode_claim_action : 14", "M98 P1"])
     def test_a_makers_macro_or_routine(self, printer, servers, line):
         self._sent(printer, servers, line)
@@ -360,7 +360,7 @@ class TestOnlyTheLinesAWalkCarries:
 
     @pytest.mark.parametrize("line", [
         "G91", "G90", "G0 Z7 F900", "G1 Z3 F100", "G1 X11 F9000", "G1 Y12", "G1 Y13 F2000", "G1 Z-2.5 F100",
-        "G28 X", "G28 X Y", "G380 S2 Z7 F100", "G380 S3 Z-6 F100", "M17 Z0.3", "M17 X1 Y1 Z0.5",
+        "G28 X", "G28 X Y", "G28 X T300", "G28 X T300 R", "G150.3", "G380 S2 Z7 F100", "G380 S3 Z-6 F100", "M17 Z0.3", "M17 X1 Y1 Z0.5",
         "M221 S", "M221 X0 Y0 Z0", "M221 R",
     ])
     def test_the_words_a_walk_does_carry_pass(self, line):
