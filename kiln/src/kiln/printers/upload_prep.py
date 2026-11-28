@@ -76,11 +76,12 @@ def prepare_upload_for_adapter(
         kwargs["quiet_start"] = quiet_start
     if lift_floor_mm is not None:
         kwargs["lift_floor_mm"] = float(lift_floor_mm)
+    from kiln.maker_slicer import PlateRefused
     from kiln.printers.bambu_3mf import MultiNozzlePackageError
 
     try:
         wrapped = adapter.wrap_gcode_as_3mf(gcode_path, **kwargs)
-    except MultiNozzlePackageError:
+    except (MultiNozzlePackageError, PlateRefused):
         # A file sliced for more than one nozzle has no raw form the
         # printer can start either.
         raise

@@ -444,11 +444,20 @@ class TestEveryDoorAgrees:
 
 class TestOrcaGetsTheSameSettings:
     def test_the_filament_preset_carries_the_materials_settings(self):
+        from kiln.maker_slicer import MakerFilament
+
         path, _ = ensure_profile_filament(resolve_slicer_profile("bambu_a1"), material="TPU")
         ini = ini_to_settings(path)
-        filament = settings_to_orca_presets(ini, name="t").filament
+        ruled_out = MakerFilament(
+            slicer="bambu_studio", vendor="BBL", preset="Generic TPU", version=None, filament_type="TPU",
+            plates={"eng_plate": (0.0, 0.0), "textured_plate": (35.0, 35.0)},
+        )
+        filament = settings_to_orca_presets(ini, name="t", makers=[ruled_out]).filament
         assert filament["nozzle_temperature"] == [ini["temperature"]]
         assert filament["textured_plate_temp"] == [ini["bed_temperature"]]
+        # A plate the maker rules out for this filament keeps the maker's 0.
+        assert filament["eng_plate_temp"] == ["0"]
+        assert filament["eng_plate_temp_initial_layer"] == ["0"]
         assert filament["fan_max_speed"] == [ini["max_fan_speed"]]
         limits = [float(v) for k in ("filament_max_volumetric_speed", "max_volumetric_speed") if (v := ini.get(k))]
         assert float(filament["filament_max_volumetric_speed"][0]) == pytest.approx(min(limits))

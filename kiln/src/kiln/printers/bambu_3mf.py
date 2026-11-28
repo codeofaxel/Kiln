@@ -2254,6 +2254,7 @@ def build_bambu_3mf(
         from kiln.plate_state import PRINT_AROUND_SENTENCE
 
         raise ValueError(PRINT_AROUND_SENTENCE)
+    typed = bool(settings.filament_type or settings.filament_types or slicer_filament_types(gcode_body))
     settings = resolve_settings_from_gcode(settings, gcode_body)
 
     if settings.num_filaments <= 1:
@@ -2270,6 +2271,11 @@ def build_bambu_3mf(
                 "Gcode declares %d filaments (%s) — wrapping as multicolor.",
                 count, ", ".join(colors) if colors else "no colors declared",
             )
+
+    if typed:
+        from kiln.maker_slicer import refuse_package_plate
+
+        refuse_package_plate(printer_model, settings.get_filament_types(), settings.bed_type)
 
     # Analyze the gcode body.
     total_layers = _count_layers(gcode_body)

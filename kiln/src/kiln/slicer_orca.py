@@ -383,9 +383,7 @@ def in_prusaslicer_spelling(settings: Mapping[str, str]) -> dict[str, str]:
 
 
 # Orca types its build plates and keeps a temperature per plate, where
-# PrusaSlicer has one bed.  Every plate gets the profile's bed temperature, so
-# the print is correct whichever plate the user has selected rather than
-# correct only on the one Kiln happened to guess.
+# PrusaSlicer has one bed (:func:`plate_temperatures`).
 _PLATE_TYPES = ORCA_PLATE_TYPES
 
 # The only two infill patterns the slicers spell differently.  Everything else
@@ -717,6 +715,32 @@ def _routines(routines: Mapping[str, str] | None, machine: Mapping[str, Any]) ->
     return out
 
 
+def plate_temperatures(settings: Mapping[str, Any], maker: Any = None) -> dict[str, list[str]]:
+    """The filament preset's bed temperature for each build plate, by setting
+    name (``cool_plate_temp``, ``cool_plate_temp_initial_layer``, ...).
+
+    The one place Kiln decides them.  Every plate of :data:`ORCA_PLATE_TYPES`
+    gets the settings' ``bed_temperature`` and ``first_layer_bed_temperature``.
+    *maker* is the maker's own facts for this filament on this printer
+    (:class:`kiln.maker_slicer.MakerFilament`): a plate it says the filament
+    must not be printed on keeps the maker's 0 on both of its settings,
+    whichever plate it is, so no usable temperature is written there and the
+    slicer's own check of the chosen plate still has the maker's mark.
+    """
+    out: dict[str, list[str]] = {}
+    bed = settings.get("bed_temperature")
+    bed_first = settings.get("first_layer_bed_temperature", bed)
+    for plate in _PLATE_TYPES:
+        if bed is not None:
+            out[f"{plate}_temp"] = _as_list(str(bed))
+        if bed_first is not None:
+            out[f"{plate}_temp_initial_layer"] = _as_list(str(bed_first))
+    for plate in getattr(maker, "unsupported", ()) or ():
+        out[f"{plate}_temp"] = ["0"]
+        out[f"{plate}_temp_initial_layer"] = ["0"]
+    return out
+
+
 def settings_to_orca_presets(
     settings: dict[str, str],
     *,
@@ -726,6 +750,8 @@ def settings_to_orca_presets(
     wipe_tower_width_mm: float | None = None,
     nozzles: Mapping[str, Any] | None = None,
     routines: Mapping[str, str] | None = None,
+    makers: Sequence[Any] | None = None,
+    bed_type_name: str | None = None,
 ) -> OrcaPresets:
     """Translate Kiln's flat PrusaSlicer settings into Orca presets.
 
@@ -759,6 +785,14 @@ def settings_to_orca_presets(
             last word on the machine preset's routines, except that a
             per-layer routine runs after Kiln's own per-layer step.  Each
             name is held to the rule every setting name is.
+        makers: The maker's own facts for each filament slot's filament
+            (:class:`kiln.maker_slicer.MakerFilament` or ``None``), in slot
+            order; the first is the single filament's.  Each slot's plate
+            temperatures follow them (:func:`plate_temperatures`).
+        bed_type_name: The plate the print is for, as this slicer is told it
+            (:data:`kiln.maker_slicer.PLATE_SETTING_NAMES`); written as the
+            process preset's ``curr_bed_type``.  ``None`` leaves the
+            slicer's own default plate.
 
     Returns:
         An :class:`OrcaPresets` with the preset bodies filled in.
@@ -970,13 +1004,10 @@ def settings_to_orca_presets(
     ]
     filament[_FILAMENT_MAX_VOLUMETRIC_SPEED] = [f"{min(limits):g}" if limits else "0"]
 
-    bed = settings.get("bed_temperature")
-    bed_first = settings.get("first_layer_bed_temperature", bed)
-    for plate in _PLATE_TYPES:
-        if bed is not None:
-            filament[f"{plate}_temp"] = _as_list(bed)
-        if bed_first is not None:
-            filament[f"{plate}_temp_initial_layer"] = _as_list(bed_first)
+    slot_makers = list(makers or ())
+    filament.update(plate_temperatures(settings, slot_makers[0] if slot_makers else None))
+    if bed_type_name:
+        process["curr_bed_type"] = bed_type_name
 
     # --- keys stated in Orca's own spelling (_NATIVE_HOME) --------------
     # Last, so a caller's native spelling wins over the translated one.  A
@@ -1023,6 +1054,9 @@ def settings_to_orca_presets(
     for i, color in enumerate(filament_colors, start=1):
         slot = dict(filament)
         slot.update(own[i - 1])
+        if len(slot_makers) >= 2:
+            maker = slot_makers[i - 1] if i <= len(slot_makers) else None
+            slot.update({k: v for k, v in plate_temperatures(settings, maker).items() if k not in served_filament})
         slot["name"] = f"{name}_filament_{i}"
         slot["filament_colour"] = [str(color)]
         slot["filament_is_support"] = ["0"]
@@ -1065,6 +1099,8 @@ def write_orca_presets(
     wipe_tower_width_mm: float | None = None,
     nozzles: Mapping[str, Any] | None = None,
     routines: Mapping[str, str] | None = None,
+    makers: Sequence[Any] | None = None,
+    bed_type_name: str | None = None,
 ) -> OrcaPresets:
     """Serialize *settings* to preset files in *out_dir*.
 
@@ -1081,6 +1117,8 @@ def write_orca_presets(
         wipe_tower_width_mm=wipe_tower_width_mm,
         nozzles=nozzles,
         routines=routines,
+        makers=makers,
+        bed_type_name=bed_type_name,
     )
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
 

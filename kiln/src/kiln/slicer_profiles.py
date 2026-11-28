@@ -134,8 +134,8 @@ _PROGRAM_SETTING_SHAPE = re.compile(r"(?:^|_)(?:scripts?|commands?)$")
 ORCA_PLATE_TYPES: tuple[str, ...] = ("cool_plate", "eng_plate", "hot_plate", "textured_plate")
 
 #: Build plates OrcaSlicer and Bambu Studio also carry a temperature for,
-#: which Kiln judges but does not write (:mod:`kiln.slicer_orca` writes the
-#: four above from ``bed_temperature``).
+#: which Kiln judges and writes only as the maker's 0 for a filament the
+#: maker rules off them (:func:`kiln.slicer_orca.plate_temperatures`).
 _JUDGED_ONLY_PLATE_TYPES: tuple[str, ...] = ("supertack_plate", "textured_cool_plate")
 
 #: Every setting that commands a heater, by the heater, in the spelling

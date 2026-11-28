@@ -170,6 +170,13 @@ class MaterialNotPrintableError(SlicerError):
         self.verdict = verdict or {}
 
 
+class FilamentNotForPlateError(MaterialNotPrintableError):
+    """The plate the print is for is one its filament's maker says that
+    filament must not be printed on (:func:`kiln.maker_slicer.plate_for_print`),
+    or a plate Kiln does not know, raised before the slicer runs.  ``code``
+    is ``FILAMENT_NOT_FOR_PLATE`` or ``UNKNOWN_BED_TYPE``."""
+
+
 class ProjectPlateError(SlicerError):
     """A project of several plates was handed over with no plate named, or
     the plate named cannot be had (:mod:`kiln.project_plates`).
@@ -193,6 +200,8 @@ REFUSED_PATHS_COLLIDE = "paths_collide"
 REFUSED_NOZZLE_REACH = "nozzle_cannot_reach"
 #: The layer asked for is as tall as the line the nozzle lays, or taller.
 REFUSED_LAYER_TOO_TALL = "layer_too_tall"
+#: The plate the print is for is one its filament's settings rule out.
+REFUSED_FILAMENT_PLATE = "filament_not_for_plate"
 
 
 #: How long, in seconds, a slicer may run before it is stopped, unless a
@@ -719,6 +728,9 @@ _ORCA_REFUSAL_WORDS = (
     (REFUSED_LAYER_TOO_TALL, re.compile(
         r"layer height (?:cannot exceed|can't be greater than) nozzle diameter|too small line width", re.IGNORECASE,
     )),
+    (REFUSED_FILAMENT_PLATE, re.compile(
+        r"does not support filament|filaments are not compatible with the plate type", re.IGNORECASE,
+    )),
 )
 #: Return codes read as a refusal, by kind.
 _ORCA_REFUSAL_STATUSES = {
@@ -777,6 +789,12 @@ def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal
         )
     if kind == REFUSED_LAYER_TOO_TALL:
         return _layer_too_tall(slicer_name)
+    if kind == REFUSED_FILAMENT_PLATE:
+        return SlicerRefusal(
+            f"{slicer_name} refused to slice: its settings for this filament rule out the plate the print is "
+            f"for. Slice for a plate the filament may be printed on, or choose a filament made for this plate.",
+            kind=kind, code="FILAMENT_NOT_FOR_PLATE", slicer=slicer_name,
+        )
     return None
 
 
@@ -1208,6 +1226,46 @@ def _printer_name_of(profile: str | None) -> str | None:
     printer_id = origin.printer_id or origin.standing_in_for
     name = (raw_profile(printer_id) or {}).get("display_name") if printer_id else None
     return str(name) if name else None
+
+
+def _plate_for_slice(
+    slicer: SlicerInfo,
+    profile: str | None,
+    input_abs: str,
+    filament: SliceFilament,
+    bed_type: str | None,
+    *,
+    slots: int,
+    nozzle_mm: Any = None,
+) -> Any:
+    """The plate this slice is for and its filaments' makers' facts
+    (:func:`kiln.maker_slicer.plate_for_print`): one filament per slot, each
+    the type the file states for it, else the slice's own.  ``None`` when no
+    maker's facts were read and no plate was named.
+
+    :raises FilamentNotForPlateError: a plate Kiln does not know, or one a
+        filament's maker says it must not be printed on.
+    """
+    from kiln.maker_slicer import PlateRefused, plate_for_print
+    from kiln.slicer_filament import slicer_type_name
+    from kiln.slicer_profiles import profile_origin, roster_display_name
+
+    own = filament.filament_type or "PLA"
+    kinds = [slicer_type_name(word) or own if word else own for word in _file_slot_types(input_abs, slots)]
+    # The printer the slice is for, also when the generic profile stands in for it.
+    origin = profile_origin(profile)
+    printer_id = origin.standing_in_for or origin.printer_id
+    try:
+        choice = plate_for_print(
+            kinds or [own],
+            roster_display_name(printer_id) if printer_id else None,
+            plate=bed_type,
+            nozzle=nozzle_mm,
+            slicer=slicer,
+        )
+    except PlateRefused as exc:
+        raise FilamentNotForPlateError(str(exc), code=exc.code) from exc
+    return choice if choice.plate is not None else None
 
 
 def _signal_of(returncode: int) -> int:
@@ -1736,8 +1794,14 @@ def _slice_with_orca(
     filament_map: list[int] | None = None,
     routines: Mapping[str, str] | None = None,
     part_path: str | None = None,
+    plate: Any = None,
 ) -> SliceResult:
     """Slice through the BambuStudio/OrcaSlicer command line.
+
+    *plate* is the plate the print is for and its filaments' makers' facts
+    (:class:`kiln.maker_slicer.PlateChoice`): the slicer is told the plate,
+    and each filament preset's plate temperatures follow those facts
+    (:func:`kiln.slicer_orca.plate_temperatures`).
 
     *part_path* is the part the slice is of when *input_abs* is a copy of
     it made for the slicer: the slice's record and message name the part.
@@ -1840,6 +1904,8 @@ def _slice_with_orca(
                 "(prime tower at %s)", slots, tower,
             )
 
+        from kiln.maker_slicer import is_slicer
+
         presets = write_orca_presets(
             settings,
             work_dir,
@@ -1849,13 +1915,16 @@ def _slice_with_orca(
             wipe_tower_width_mm=None if tower is None else tower[2],
             nozzles=nozzles,
             routines=routines,
+            makers=getattr(plate, "makers", None),
+            bed_type_name=(
+                plate.setting_name("bambu_studio" if is_slicer("bambu_studio", slicer) else "orcaslicer")
+                if plate is not None else None
+            ),
         )
         cmd += ["--load-settings", f"{presets.machine_path};{presets.process_path}"]
         cmd += ["--load-filaments", ";".join(presets.filament_paths)]
         if filament_map:
             cmd += ["--filament-map-mode", "Manual", "--filament-map", ",".join(str(n) for n in filament_map)]
-        from kiln.maker_slicer import is_slicer
-
         if nozzles and is_slicer("bambu_studio", slicer):
             # The slicer writes the print package for this slice beside it.
             cmd += ["--export-3mf", _SLICER_PACKAGE_NAME]
@@ -2337,10 +2406,19 @@ def _slice_file(
     soft_nozzle_confirmed: bool = False,
     mixed_nozzle_experiment: bool = False,
     speed_by_height: Any = None,
+    bed_type: str | None = None,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
 
     Args:
+        bed_type: The build plate the print is for
+            (:data:`kiln.maker_slicer.PLATES`: ``"textured_plate"``,
+            ``"cool_plate"``, ...).  Left out, the print is for the plate the
+            printer's maker's slicer picks for it, else the first plate every
+            filament may be printed on.  A plate the filament's maker says it
+            must not be printed on is refused before slicing
+            (:class:`FilamentNotForPlateError`), whichever slicer makes the
+            slice; OrcaSlicer and Bambu Studio are told the plate.
         speed_by_height: The person's own speeds for height ranges of the
             part (:func:`kiln.speed_by_height.checked` reads and refuses
             them).  The slicer applies them, the sliced file is read back,
@@ -2640,6 +2718,10 @@ def _slice_file(
     )
     if soft_run is not None and soft_nozzle_confirmed is not True:
         raise NozzleMapError(soft_run.parts.message(), code=SOFT_NOZZLE_CODE, parts=soft_run.parts)
+    plate = _plate_for_slice(
+        slicer, slicer_profile, input_abs, filament, bed_type,
+        slots=max(slots_needed, 1), nozzle_mm=(nozzle or {}).get("diameter_mm"),
+    )
     # The layer height the part was designed in, decided here for the same
     # reason: a relief made in whole 0.2 mm layers printed at the profile's
     # 0.3 by every door and lost its levels.  A stated layer height is the
@@ -2774,6 +2856,7 @@ def _slice_file(
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
             nozzles=nozzles, filament_map=asked_map, several=several, maker=maker, prepare=prepare,
+            plate=plate,
         )
 
     def _with_ranges() -> SliceResult:
@@ -3275,9 +3358,11 @@ def _slice_decided(
     several: Any = None,
     maker: Any = None,
     prepare: Any = None,
+    plate: Any = None,
 ) -> SliceResult:
     """Run the slicer on *sliced_input* with everything :func:`_slice_file`
-    decided; *input_abs* is the part as the caller named it.  *prepare*,
+    decided; *input_abs* is the part as the caller named it.  *plate* is the
+    plate the print is for (:class:`kiln.maker_slicer.PlateChoice`).  *prepare*,
     when given, is called with the file about to be handed to the slicer
     and a scratch folder, and returns the file to hand over in its place
     (:func:`kiln.speed_by_height.sliced`).  *several* is
@@ -3309,6 +3394,7 @@ def _slice_decided(
                 **({"nozzles": nozzles, "filament_map": filament_map} if nozzles else {}),
                 **({"routines": chosen.routines} if chosen is not None else {}),
                 **({"part_path": sliced_input} if prepare is not None else {}),
+                **({"plate": plate} if plate is not None else {}),
             )
         finally:
             if prepared_dir is not None:

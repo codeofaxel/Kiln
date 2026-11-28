@@ -5592,8 +5592,9 @@ def slice(
                 if not json_mode:
                     click.echo(f"Bambu 3MF: {upload_path}")
             except Exception as exc:
-                if getattr(exc, "code", None) == "MULTI_NOZZLE_NOT_PACKAGED":
-                    # Sliced for more than one nozzle: no raw form of it starts.
+                if getattr(exc, "code", None) in ("MULTI_NOZZLE_NOT_PACKAGED", "FILAMENT_NOT_FOR_PLATE"):
+                    # Sliced for more than one nozzle, or for a plate the
+                    # filament's maker rules out: no raw form of it starts.
                     click.echo(format_error(str(exc), code=exc.code, json_mode=json_mode))
                     sys.exit(1)
                 if wrap_kwargs.get("quiet_start") is not None or wrap_kwargs.get("lift_floor_mm") is not None:

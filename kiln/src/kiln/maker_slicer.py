@@ -33,7 +33,7 @@ import shutil
 import sys
 import zipfile
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -422,20 +422,20 @@ def slicer_for_layer_routines(
 # ---------------------------------------------------------------------------
 
 
-def _vendor_files(slicer_path: str, vendor: str, slicer_id: str) -> list[Path]:
-    """Where the slicer *slicer_id* keeps the settings of *vendor*: beside
-    the program, and in the person's own settings folder, where the slicer
-    keeps the newer copies it fetches between releases."""
+def _profile_dirs(slicer_path: str, slicer_id: str) -> list[Path]:
+    """Every folder the slicer *slicer_id* may keep its makers' settings in:
+    beside the program, and in the person's own settings folder, where the
+    slicer keeps the newer copies it fetches between releases.  Folders that
+    do not exist are listed too; a caller looks inside each."""
     known = _KNOWN[slicer_id]
-    name = f"{vendor}.{known.bundle}"
     real = Path(os.path.realpath(slicer_path))
     places: list[Path] = []
     at = str(real).find(".app/Contents/MacOS/")
     if at >= 0:
-        places.append(Path(str(real)[: at + len(".app")]) / "Contents" / "Resources" / "profiles" / name)
-    places.extend([real.parent / "resources" / "profiles" / name, real.parent.parent / "resources" / "profiles" / name])
+        places.append(Path(str(real)[: at + len(".app")]) / "Contents" / "Resources" / "profiles")
+    places.extend([real.parent / "resources" / "profiles", real.parent.parent / "resources" / "profiles"])
     application, folder = known.own_copies
-    places.append(Path("/usr/share") / application / "profiles" / name)
+    places.append(Path("/usr/share") / application / "profiles")
     home = Path.home()
     if sys.platform == "darwin":
         own = home / "Library" / "Application Support"
@@ -443,8 +443,15 @@ def _vendor_files(slicer_path: str, vendor: str, slicer_id: str) -> list[Path]:
         own = Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming")
     else:
         own = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
-    places.append(own / application / folder / name)
-    return [place for place in places if place.is_file()]
+    places.append(own / application / folder)
+    return places
+
+
+def _vendor_files(slicer_path: str, vendor: str, slicer_id: str) -> list[Path]:
+    """Where the slicer *slicer_id* keeps the settings of *vendor*
+    (:func:`_profile_dirs`), the ones that exist."""
+    name = f"{vendor}.{_KNOWN[slicer_id].bundle}"
+    return [place / name for place in _profile_dirs(slicer_path, slicer_id) if (place / name).is_file()]
 
 
 @dataclass(frozen=True)
@@ -592,6 +599,477 @@ def _maker_routines(
     if len(routines) != len(keys):
         raise _Unready(f"the {said} installed does not state every routine this printer needs")
     return routines, vendor, shown
+
+
+# ---------------------------------------------------------------------------
+# A filament on a printer, as its maker's slicer states it
+# ---------------------------------------------------------------------------
+
+#: The build plates the makers' slicers keep a bed temperature for, each by
+#: the start of its temperature settings' names (``cool_plate_temp``,
+#: ``cool_plate_temp_initial_layer``).
+PLATES: tuple[str, ...] = (
+    "cool_plate", "eng_plate", "hot_plate", "textured_plate", "supertack_plate", "textured_cool_plate",
+)
+
+#: Each plate as people call it.
+PLATE_SAID: dict[str, str] = {
+    "cool_plate": "Cool Plate",
+    "eng_plate": "Engineering Plate",
+    "hot_plate": "High Temp Plate",
+    "textured_plate": "Textured PEI Plate",
+    "supertack_plate": "Supertack Plate",
+    "textured_cool_plate": "Textured Cool Plate",
+}
+
+#: What each slicer calls a plate in its ``curr_bed_type`` setting.  A slicer
+#: reads a name it does not know as the Cool Plate, so a plate is listed only
+#: under a name that slicer reads back as the same plate.
+PLATE_SETTING_NAMES: dict[str, dict[str, str]] = {
+    "bambu_studio": {
+        "cool_plate": "Cool Plate",
+        "eng_plate": "Engineering Plate",
+        "hot_plate": "High Temp Plate",
+        "textured_plate": "Textured PEI Plate",
+        "supertack_plate": "Supertack Plate",
+    },
+    "orcaslicer": {
+        "cool_plate": "Cool Plate",
+        "eng_plate": "Engineering Plate",
+        "hot_plate": "High Temp Plate",
+        "textured_plate": "Textured PEI Plate",
+        "textured_cool_plate": "Textured Cool Plate",
+    },
+}
+
+#: A plate a print names for no plate of its own: the first of these every
+#: filament of the print may be printed on.  Each is a plate both slicers
+#: can be told.
+_PLATE_ORDER: tuple[str, ...] = ("textured_plate", "hot_plate", "cool_plate", "eng_plate")
+
+#: The code a print refused for its plate carries at every door.
+FILAMENT_NOT_FOR_PLATE = "FILAMENT_NOT_FOR_PLATE"
+#: The code of a plate Kiln does not know.
+UNKNOWN_PLATE = "UNKNOWN_BED_TYPE"
+
+#: The library of filament presets OrcaSlicer's makers' presets may build on.
+_SHARED_FILAMENTS = "OrcaFilamentLibrary"
+
+
+@dataclass(frozen=True)
+class MakerFilament:
+    """One filament on one printer, as its maker's slicer states it.
+
+    ``plates`` maps each plate of :data:`PLATES` the maker's preset states to
+    its ``(bed, first_layer_bed)`` temperatures in degrees C, either ``None``
+    when that one is not stated; a 0 marks a plate the maker says the
+    filament must not be printed on (:meth:`supports`).
+    ``required_nozzle_hrc`` is the nozzle hardness the preset asks for and
+    ``default_plate`` the plate the maker's slicer picks for the printer,
+    each ``None`` when not stated.  ``slicer``, ``vendor``, ``preset`` and
+    ``version`` say where it was read.
+    """
+
+    slicer: str
+    vendor: str
+    preset: str
+    version: str | None
+    filament_type: str
+    plates: Mapping[str, tuple[float | None, float | None]]
+    required_nozzle_hrc: float | None = None
+    default_plate: str | None = None
+
+    def supports(self, plate: str) -> bool:
+        """Whether the maker lets this filament be printed on *plate*:
+        ``False`` only when a temperature it states for that plate is 0."""
+        return 0.0 not in self.plates.get(plate, (None, None))
+
+    @property
+    def unsupported(self) -> tuple[str, ...]:
+        """The plates the maker says this filament must not be printed on."""
+        return tuple(plate for plate in PLATES if not self.supports(plate))
+
+    @property
+    def said(self) -> str:
+        """The slicer the facts were read from, as people call it."""
+        return _KNOWN[self.slicer].said
+
+
+def _first(value: Any) -> Any:
+    """A preset value's first entry: presets write one value or a list."""
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
+def _number(value: Any) -> float | None:
+    """A preset value as a number, ``None`` when it is not one."""
+    try:
+        return float(str(_first(value)).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _squashed(name: Any) -> str:
+    """*name* with case, spaces and hyphens taken out, for comparing printer
+    names written differently (``Ender 3 S1`` and ``Ender-3 S1``)."""
+    return re.sub(r"[\s\-_]+", "", str(name or "")).casefold()
+
+
+@dataclass
+class _Presets:
+    """One copy of a maker's settings kept as an index and a folder of
+    presets: its version, and the names of its printer models, printer
+    presets and filament presets, each read from inside the folder when it is
+    asked for and kept once read."""
+
+    vendor: str
+    version: tuple[int, ...]
+    folder: Path
+    models: dict[str, str]
+    machines: dict[str, str]
+    filaments: dict[str, str]
+    _read: dict[str, Mapping[str, Any]] = field(default_factory=dict)
+    _by_type: dict[str, list[tuple[str, dict[str, Any]]]] | None = None
+    _printers: dict[tuple[str, str | None], tuple[set[str], str | None]] = field(default_factory=dict)
+
+    def body(self, sub_path: str) -> Mapping[str, Any]:
+        """The preset at *sub_path*; ``KeyError`` for one outside the folder
+        or that is not a settings object."""
+        if sub_path not in self._read:
+            file = (self.folder / sub_path).resolve()
+            if not file.is_relative_to(self.folder):
+                raise KeyError(sub_path)
+            body = json.loads(file.read_text(encoding="utf-8"))
+            if not isinstance(body, Mapping):
+                raise KeyError(sub_path)
+            self._read[sub_path] = body
+        return self._read[sub_path]
+
+
+def _presets_index(path: Path) -> _Presets:
+    """A maker's settings index file *path* and the folder beside it."""
+    index = json.loads(path.read_text(encoding="utf-8"))
+
+    def listed(key: str) -> dict[str, str]:
+        return {
+            entry["name"]: entry["sub_path"]
+            for entry in index.get(key) or ()
+            if isinstance(entry, Mapping) and isinstance(entry.get("name"), str)
+            and isinstance(entry.get("sub_path"), str)
+        }
+
+    return _Presets(
+        vendor=path.stem,
+        version=_numbers(index.get("version")) or (),
+        folder=(path.parent / path.stem).resolve(),
+        models=listed("machine_model_list"),
+        machines=listed("machine_list"),
+        filaments=listed("filament_list"),
+    )
+
+
+#: Each slicer's makers' settings, newest copy of each maker, once per
+#: process and slicer.
+_BUNDLES: dict[tuple[str, str], dict[str, _Presets]] = {}
+
+
+def _maker_bundles(slicer_path: str, slicer_id: str) -> dict[str, _Presets]:
+    """Every maker's settings the slicer at *slicer_path* holds, by maker,
+    each the newest copy found (:func:`_profile_dirs`).  Empty for a slicer
+    that keeps its makers' settings some other way."""
+    key = (os.path.realpath(slicer_path), slicer_id)
+    if key in _BUNDLES:
+        return _BUNDLES[key]
+    found: dict[str, _Presets] = {}
+    if _KNOWN[slicer_id].bundle == "json":
+        for place in _profile_dirs(slicer_path, slicer_id):
+            if not place.is_dir():
+                continue
+            for index in sorted(place.glob("*.json")):
+                if not (place / index.stem).is_dir():
+                    continue
+                with contextlib.suppress(OSError, ValueError, AttributeError):
+                    bundle = _presets_index(index)
+                    held = found.get(bundle.vendor)
+                    if held is None or bundle.version > held.version:
+                        found[bundle.vendor] = bundle
+    _BUNDLES[key] = found
+    return found
+
+
+def _resolve_in(bundles: list[_Presets], kind: str, name: str) -> dict[str, Any]:
+    """The preset *name* of *kind* (``machines``, ``filaments``) with what it
+    inherits, looked for in *bundles* in order (:func:`_resolved`)."""
+
+    def preset(wanted: str) -> Mapping[str, Any]:
+        for bundle in bundles:
+            sub_path = getattr(bundle, kind).get(wanted)
+            if sub_path is not None:
+                return bundle.body(sub_path)
+        raise KeyError(wanted)
+
+    return _resolved(_Bundle(version=(), preset=preset), name)
+
+
+def _printer_presets(bundle: _Presets, model: str, nozzle: str | None) -> tuple[set[str], str | None]:
+    """The names of *bundle*'s printer presets for the printer model *model*
+    (for nozzle size *nozzle* when one is known and the maker has presets for
+    it), and the plate the maker's slicer picks for that printer."""
+    if (model, nozzle) not in bundle._printers:
+        bundle._printers[(model, nozzle)] = _read_printer_presets(bundle, model, nozzle)
+    return bundle._printers[(model, nozzle)]
+
+
+def _read_printer_presets(bundle: _Presets, model: str, nozzle: str | None) -> tuple[set[str], str | None]:
+    """:func:`_printer_presets`, read from the files."""
+    wanted = _squashed(model)
+    names: dict[str, str] = {}
+    default = None
+    for name in bundle.machines:
+        if not _squashed(name).startswith(wanted):
+            continue
+        with contextlib.suppress(KeyError, OSError, ValueError):
+            machine = _resolve_in([bundle], "machines", name)
+            if _squashed(machine.get("printer_model")) != wanted or str(machine.get("instantiation")) != "true":
+                continue
+            names[name] = str(machine.get("printer_variant") or "")
+            default = default or machine.get("default_bed_type")
+    for name, sub_path in bundle.models.items():
+        if _squashed(name) == wanted:
+            with contextlib.suppress(KeyError, OSError, ValueError):
+                default = default or bundle.body(sub_path).get("default_bed_type")
+    sized = {name for name, variant in names.items() if nozzle and _number(variant) == _number(nozzle)}
+    plate = next((key for key, said in PLATE_SAID.items() if str(default or "").strip() == said), None)
+    return (sized or set(names)), plate
+
+
+def _filaments_by_type(bundle: _Presets, shared: _Presets | None) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+    """*bundle*'s filament presets that can be chosen (``instantiation``),
+    each with what it inherits, by filament type: read once per copy of the
+    maker's settings."""
+    if bundle._by_type is None:
+        chain = [bundle] + ([shared] if shared is not None else [])
+        found: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for name in bundle.filaments:
+            with contextlib.suppress(KeyError, OSError, ValueError):
+                preset = _resolve_in(chain, "filaments", name)
+                if str(preset.get("instantiation")) != "true":
+                    continue
+                kind = str(_first(preset.get("filament_type")) or "").strip().casefold()
+                found.setdefault(kind, []).append((name, preset))
+        bundle._by_type = found
+    return bundle._by_type
+
+
+def _filament_facts(
+    slicer_id: str, bundle: _Presets, shared: _Presets | None, printers: set[str], filament_type: str,
+) -> MakerFilament | None:
+    """*bundle*'s preset for *filament_type* on one of the printer presets
+    *printers*: its maker's generic preset for the type first, then the
+    maker's own named for the type alone (``Snapmaker PLA @U1``), then any
+    named for the type alone, then the others, by name."""
+    wanted = filament_type.strip().casefold()
+    maker = bundle.vendor.casefold()
+
+    def rank(name: str) -> tuple[int, str]:
+        plain = name.split("@", 1)[0].strip().casefold()
+        if "generic" in plain:
+            return 0, name
+        if plain == f"{maker} {wanted}":
+            return 1, name
+        return (2 if len(plain.split()) == 2 and plain.endswith(f" {wanted}") else 3), name
+
+    for name, preset in sorted(_filaments_by_type(bundle, shared).get(wanted, ()), key=lambda item: rank(item[0])):
+        if printers.intersection(preset.get("compatible_printers") or ()):
+            plates = {
+                plate: (_number(preset.get(f"{plate}_temp")), _number(preset.get(f"{plate}_temp_initial_layer")))
+                for plate in PLATES
+                if f"{plate}_temp" in preset or f"{plate}_temp_initial_layer" in preset
+            }
+            return MakerFilament(
+                slicer=slicer_id,
+                vendor=bundle.vendor,
+                preset=name,
+                version=".".join(str(part) for part in bundle.version) or None,
+                filament_type=filament_type,
+                plates=plates,
+                required_nozzle_hrc=_number(preset.get("required_nozzle_HRC")),
+            )
+    return None
+
+
+def _model_names(printer_name: str) -> list[str]:
+    """The printer model names a Kiln printer name may be written as by its
+    maker: the whole name, and its first part when it names several
+    (``Creality Ender 3 / Ender 3 Pro``)."""
+    whole = str(printer_name or "").strip()
+    first = whole.split(" / ", 1)[0].strip()
+    return [name for name in dict.fromkeys((whole, first)) if name]
+
+
+def maker_filament(
+    filament_type: str, printer_name: str | None, *, nozzle: str | float | None = None, slicer: Any = None,
+) -> MakerFilament | None:
+    """The maker's own facts about *filament_type* on the printer called
+    *printer_name*, read from the settings the maker's slicer installed on
+    this computer holds (Bambu Studio's and OrcaSlicer's), following each
+    preset's ``inherits``.
+
+    *slicer*, the installed slicer a slice is made with, is read first when
+    it is one of those; *nozzle* picks the maker's presets for that nozzle
+    size when it has them.  ``None`` when no installed slicer holds this
+    printer and filament.  Never raises.
+    """
+    if not filament_type or not printer_name:
+        return None
+    try:
+        tried: list[tuple[str, str]] = []
+        for slicer_id in ("bambu_studio", "orcaslicer"):
+            if slicer is not None and is_slicer(slicer_id, slicer):
+                tried.insert(0, (slicer_id, slicer.path))
+        for slicer_id in ("bambu_studio", "orcaslicer"):
+            info = _find(slicer_id)
+            if info is not None and (slicer_id, info.path) not in tried:
+                tried.append((slicer_id, info.path))
+        size = f"{_number(nozzle):g}" if _number(nozzle) is not None else None
+        for slicer_id, path in tried:
+            bundles = _maker_bundles(path, slicer_id)
+            shared = bundles.get(_SHARED_FILAMENTS)
+            for bundle in bundles.values():
+                for model in _model_names(printer_name):
+                    printers, default = _printer_presets(bundle, model, size)
+                    if not printers:
+                        continue
+                    facts = _filament_facts(slicer_id, bundle, shared, printers, filament_type)
+                    if facts is not None:
+                        return replace(facts, default_plate=default)
+    except Exception:  # noqa: BLE001 -- facts that cannot be read are facts not known
+        logger.debug("maker's filament settings not read", exc_info=True)
+    return None
+
+
+class PlateRefused(ValueError):
+    """A print for a plate its filament's maker says it must not be printed
+    on, or for a plate Kiln does not know.  ``code`` is
+    :data:`FILAMENT_NOT_FOR_PLATE` or :data:`UNKNOWN_PLATE`."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class PlateChoice:
+    """The plate a print is for, and its filaments' makers' facts.
+
+    ``plate`` is a plate of :data:`PLATES`, ``None`` when no maker's facts
+    were read and none was named; ``stated`` says the caller named it;
+    ``makers`` holds one :class:`MakerFilament` (or ``None``) per filament,
+    in filament order.
+    """
+
+    plate: str | None
+    stated: bool = False
+    makers: tuple[MakerFilament | None, ...] = ()
+
+    def setting_name(self, slicer_id: str) -> str | None:
+        """The plate as the slicer *slicer_id* is told it (``curr_bed_type``).
+        A plate that slicer has no name for is told as the first plate of
+        :data:`_PLATE_ORDER` every filament here may be printed on."""
+        if self.plate is None:
+            return None
+        names = PLATE_SETTING_NAMES.get(slicer_id, {})
+        if self.plate in names:
+            return names[self.plate]
+        stand_in = next((p for p in _PLATE_ORDER if all(m is None or m.supports(p) for m in self.makers)), None)
+        return names.get(stand_in) if stand_in else None
+
+
+def _plates_said(plates: list[str]) -> str:
+    """Plates as a phrase people read: ``the Cool Plate or the Textured PEI Plate``."""
+    said = [f"the {PLATE_SAID[plate]}" for plate in plates]
+    return said[0] if len(said) == 1 else ", ".join(said[:-1]) + f" or {said[-1]}"
+
+
+def plate_for_print(
+    filament_types: list[str],
+    printer_name: str | None,
+    *,
+    plate: str | None = None,
+    nozzle: str | float | None = None,
+    slicer: Any = None,
+    refused: str = "nothing was sliced",
+) -> PlateChoice:
+    """The plate a print of *filament_types* (one per filament, in order) on
+    the printer *printer_name* is for: *plate* when the caller names it,
+    else the plate the maker's slicer picks for this printer, else the first
+    of :data:`_PLATE_ORDER`, each only when every filament's maker lets it be
+    printed there (:func:`maker_filament`).
+
+    Raises :class:`PlateRefused` when a named plate is one Kiln does not know
+    or one a filament's maker says that filament must not be printed on, and
+    when no plate here is one every filament may be printed on.  *refused*
+    is the clause the refusal says happened.  With no maker's facts readable
+    a named plate is kept as named and none is chosen.
+    """
+    stated = plate is not None and str(plate).strip() != ""
+    asked = str(plate or "").strip().lower()
+    if stated and asked not in PLATES:
+        known = ", ".join(PLATES)
+        raise PlateRefused(
+            f"Kiln doesn't know the plate {plate!r}, so {refused}. Name one of: {known}.", code=UNKNOWN_PLATE,
+        )
+    makers = tuple(maker_filament(kind, printer_name, nozzle=nozzle, slicer=slicer) for kind in filament_types)
+    read = [maker for maker in makers if maker is not None]
+    if not read:
+        return PlateChoice(plate=asked if stated else None, stated=stated, makers=makers)
+
+    def allowed(where: str) -> bool:
+        return all(maker.supports(where) for maker in read)
+
+    if stated:
+        refusing = [maker for maker in read if not maker.supports(asked)]
+        if refusing:
+            maker = refusing[0]
+            others = [p for p in _PLATE_ORDER if allowed(p)]
+            then = (
+                f"Print it on {_plates_said(others)}, which it may be printed on, and say so, or choose a "
+                f"filament made for the {PLATE_SAID[asked]}."
+                if others else f"Choose a filament made for the {PLATE_SAID[asked]}."
+            )
+            raise PlateRefused(
+                f"{maker.said}'s settings for this printer say {maker.filament_type} must not be printed on the "
+                f"{PLATE_SAID[asked]}, so {refused}. {then}",
+                code=FILAMENT_NOT_FOR_PLATE,
+            )
+        return PlateChoice(plate=asked, stated=True, makers=makers)
+    default = next((maker.default_plate for maker in read if maker.default_plate), None)
+    for candidate in ((default,) if default else ()) + _PLATE_ORDER:
+        if allowed(candidate):
+            return PlateChoice(plate=candidate, stated=False, makers=makers)
+    kinds = ", ".join(dict.fromkeys(maker.filament_type for maker in read))
+    raise PlateRefused(
+        f"{read[0].said}'s settings for this printer allow {kinds} on none of the plates Kiln can name, so "
+        f"{refused}. Choose a filament made for this printer's plates.",
+        code=FILAMENT_NOT_FOR_PLATE,
+    )
+
+
+def refuse_package_plate(printer_model: str | None, filament_types: list[str], bed_type: str | None) -> None:
+    """Refuse a print file for the plate *bed_type* when a filament of
+    *filament_types* is one its maker says must not be printed on it
+    (:func:`plate_for_print`).  *printer_model* is Kiln's id for the printer.
+
+    :raises PlateRefused: as :func:`plate_for_print` does.
+    """
+    if not (printer_model and filament_types and bed_type):
+        return
+    from kiln.slicer_profiles import roster_display_name
+
+    name = roster_display_name(printer_model)
+    if name:
+        plate_for_print(list(filament_types), name, plate=bed_type, refused="the print file was not made")
 
 
 # ---------------------------------------------------------------------------
