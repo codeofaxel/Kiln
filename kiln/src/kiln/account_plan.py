@@ -261,7 +261,7 @@ def refresh_plan(*, min_interval_s: float = 0.0) -> LicenseTier:
     """
     global _last_ask_at, _last_ask_answered
 
-    from kiln.auth_session import _read_tokens, _write_tokens
+    from kiln.auth_session import _read_tokens, update_tokens
 
     now = time.time()
     with _lock:
@@ -278,35 +278,42 @@ def refresh_plan(*, min_interval_s: float = 0.0) -> LicenseTier:
         _last_ask_answered = answer is not None
         if answer is None:
             return _saved_plan(_read_tokens(), now)
-        stored: dict = {}
+        answered: dict = {}
+
+        def _with_the_plan(stored: dict) -> dict | None:
+            # Applied to the file as it is on disk under the renewal lock, so
+            # a pair the session resolver renewed meanwhile is kept.
+            if not str(stored.get("access_token") or "").strip():
+                return None
+            stamp = int(time.time())
+            stored["tier"] = _as_tier(answer.get("tier")).value
+            stored["has_entitlement"] = bool(answer.get("has_entitlement"))
+            # The proof travels with the plan it proves; an answer with
+            # none leaves none behind.
+            stored.pop(PROOF_FIELD, None)
+            stored.update(proof_fields(answer))
+            if not str(stored.get("auth_uid") or "").strip() and answer.get("auth_uid"):
+                stored["auth_uid"] = str(answer["auth_uid"])
+            # The paid plan this account had and no longer does, as the
+            # account says it: a refusal tells its owner the thing was
+            # part of that plan, never sells it to them again.
+            ended = _ended_plan(answer)
+            if ended:
+                stored["lapsed_tier"] = ended
+            else:
+                stored.pop("lapsed_tier", None)
+            stored["plan_checked_at"] = stamp
+            # The stamp other readers of this file treat as "the plan
+            # was current as of".
+            stored["signed_in_at"] = stamp
+            answered.update(stored)
+            return stored
+
         try:
-            # Re-read: the session resolver may have rotated the tokens.
-            stored = _read_tokens()
-            if str(stored.get("access_token") or "").strip():
-                stamp = int(time.time())
-                stored["tier"] = _as_tier(answer.get("tier")).value
-                stored["has_entitlement"] = bool(answer.get("has_entitlement"))
-                # The proof travels with the plan it proves; an answer with
-                # none leaves none behind.
-                stored.pop(PROOF_FIELD, None)
-                stored.update(proof_fields(answer))
-                if not str(stored.get("auth_uid") or "").strip() and answer.get("auth_uid"):
-                    stored["auth_uid"] = str(answer["auth_uid"])
-                # The paid plan this account had and no longer does, as the
-                # account says it: a refusal tells its owner the thing was
-                # part of that plan, never sells it to them again.
-                ended = _ended_plan(answer)
-                if ended:
-                    stored["lapsed_tier"] = ended
-                else:
-                    stored.pop("lapsed_tier", None)
-                stored["plan_checked_at"] = stamp
-                # The stamp other readers of this file treat as "the plan
-                # was current as of".
-                stored["signed_in_at"] = stamp
-                _write_tokens(stored)
+            stored = update_tokens(_with_the_plan)
         except Exception:  # noqa: BLE001 — unsaved is still answered
             logger.debug("account plan: could not save the answer", exc_info=True)
+            stored = answered
         # The plan is what the answer proves, read the way every later ask
         # reads it: an answer that proves nothing raises nothing.
         return _saved_plan(stored, time.time())

@@ -66,6 +66,7 @@ import os
 import stat
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -165,16 +166,59 @@ def _read_tokens() -> dict:
         return {}
 
 
+#: Windows refuses to replace a file another process has open, and every Kiln
+#: process reads this one; the replace is tried again for up to half a second
+#: before the write is said to have failed.
+_REPLACE_TRIES = 10
+_REPLACE_RETRY_S = 0.05
+
+
 def _write_tokens(data: dict) -> None:
     """Atomic + 0600, per-process temp name so concurrent writers never
-    collide on the intermediate file."""
+    collide on the intermediate file.  Raises :class:`OSError` when the file
+    cannot be written or replaced, leaving no temp file behind."""
     path = _tokens_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = path.with_suffix(f".tmp{os.getpid()}")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    with contextlib.suppress(OSError):
-        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
-    tmp.replace(path)
+    try:
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        with contextlib.suppress(OSError):
+            os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        for attempt in range(_REPLACE_TRIES):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:
+                if attempt == _REPLACE_TRIES - 1:
+                    raise
+                time.sleep(_REPLACE_RETRY_S)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def update_tokens(change: Callable[[dict], dict | None]) -> dict:
+    """Apply *change* to the saved sign-in as it is on disk now, under the
+    renewal lock, and save what it returns (``None`` saves nothing).
+
+    A change to part of the saved sign-in goes through here, so it cannot put
+    back a sign-in another process renewed meanwhile.  Returns what is on
+    file afterwards.  Raises :class:`OSError` when it cannot be saved, and
+    :class:`TimeoutError` without saving while another process still holds
+    the lock after the whole wait: that process is renewing, and a write now
+    could put back the pair it is replacing."""
+    with _refresh_lock() as rival_renewing:
+        stored = _read_tokens()
+        changed = change(dict(stored))
+        if changed is None:
+            return stored
+        if rival_renewing:
+            raise TimeoutError(
+                "Another Kiln on this computer is renewing the sign-in, so this change was not saved."
+            )
+        _write_tokens(changed)
+        return changed
 
 
 def _jwt_exp(token: str) -> float | None:
@@ -213,6 +257,9 @@ def _refresh_lock():
     which is the reuse Supabase answers by ending the whole session.  On
     filesystems where no lock can be taken this degrades to a no-op --
     Supabase's refresh reuse-grace window still absorbs the rare race.
+
+    The block receives ``True`` when another process still held the lock
+    after the whole wait, so is renewing now; ``False`` otherwise.
     """
     from kiln.file_lock import DEFAULT_WINDOWS_WAIT_S, exclusive_file_lock
 
@@ -221,14 +268,17 @@ def _refresh_lock():
         lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     except OSError:
-        yield
+        yield False
         return
     try:
         # The bound is comfortably past one refresh exchange
         # (``_HTTP_TIMEOUT_S``), so a Windows waiter normally finds the
         # winner's pair on its re-read rather than going ahead without it.
-        with exclusive_file_lock(fd, timeout=DEFAULT_WINDOWS_WAIT_S):
-            yield
+        started = time.monotonic()
+        with exclusive_file_lock(fd, timeout=DEFAULT_WINDOWS_WAIT_S) as held:
+            # Not taken after the whole wait: another process holds it, and
+            # is renewing.  A lock this filesystem cannot take fails at once.
+            yield (not held) and time.monotonic() - started >= DEFAULT_WINDOWS_WAIT_S * 0.9
     finally:
         os.close(fd)
 
@@ -547,7 +597,7 @@ def resolve_session_bearer(
     if _backoff_active():
         return SessionBearer(token=token, state="degraded")
 
-    with _refresh_lock():
+    with _refresh_lock() as rival_renewing:
         # Another process may have acted while we waited on the lock —
         # re-read, and honour what it found before exchanging anything.
         stored = _read_tokens()
@@ -566,6 +616,10 @@ def resolve_session_bearer(
         elif current and _seconds_to_expiry(current) > refresh_margin_s:
             return SessionBearer(token=current, state="live")
         refresh_token = str(stored.get("refresh_token") or "").strip() or refresh_token
+        if rival_renewing:
+            # The holder is exchanging this same refresh token; a second use
+            # ends the session.  The stored token stays in play until its pair lands.
+            return SessionBearer(token=current or token, state="degraded")
 
         status, body = _post_refresh(refresh_token)
 
